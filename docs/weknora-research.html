@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WeKnora 调研笔记</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #172033;
+      --muted: #5d6b82;
+      --line: #dfe5ef;
+      --accent: #2563eb;
+      --accent-soft: #eaf1ff;
+      --code-bg: #101828;
+      --code-text: #e6edf7;
+      --ok: #15803d;
+      --warn: #b45309;
+      --bad: #b91c1c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      width: min(1120px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 48px 0 64px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 28px;
+      padding-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 34px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 34px 0 14px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code {
+      background: #edf2f7;
+      border-radius: 5px;
+      padding: 2px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 12px 0 18px;
+      overflow-x: auto;
+      background: var(--code-bg);
+      color: var(--code-text);
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      display: table;
+      margin: 12px 0 18px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f0f4fa;
+      font-weight: 650;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    ul {
+      margin: 8px 0 18px;
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 22px 0 8px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 650;
+      padding: 3px 9px;
+      margin-right: 6px;
+      white-space: nowrap;
+    }
+
+    .status {
+      font-weight: 650;
+    }
+
+    .status.ok {
+      color: var(--ok);
+    }
+
+    .status.warn {
+      color: var(--warn);
+    }
+
+    .status.bad {
+      color: var(--bad);
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 18px;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px 16px;
+      padding: 16px 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 20px 0 26px;
+    }
+
+    .toc a {
+      display: block;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        width: min(100vw - 24px, 1120px);
+        padding: 28px 0 44px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      .summary,
+      .toc {
+        grid-template-columns: 1fr;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="pill">调研笔记</span>
+      <span class="pill">WeKnora CLI</span>
+      <span class="pill">Wiki API</span>
+      <h1>WeKnora 功能与项目结构调研</h1>
+      <p class="muted">
+        本文档记录对本机 <code>weknora</code> 命令以及
+        <code>/Users/kyynor/Code/tech-demo/weknora</code> 项目的阅读结论，
+        用于指导当前 Python <code>wiki</code> CLI 的后续设计。
+      </p>
+    </header>
+
+    <nav class="toc" aria-label="目录">
+      <a href="#command">1. 命令运行结果</a>
+      <a href="#capabilities">2. CLI 能力总览</a>
+      <a href="#repository">3. 项目结构</a>
+      <a href="#wiki">4. Wiki 相关能力</a>
+      <a href="#patterns">5. 值得复用的设计</a>
+      <a href="#suggestions">6. 对当前项目的建议</a>
+    </nav>
+
+    <section id="command" class="section">
+      <h2>1. 命令运行结果</h2>
+      <p>本机安装的 <code>weknora</code> 位于：</p>
+      <pre><code>/usr/local/bin/weknora</code></pre>
+
+      <h3>版本信息</h3>
+      <pre><code>$ weknora version --format json
+{"ok":true,"data":{"commit":"none","date":"unknown","version":"dev"}}</code></pre>
+
+      <h3>doctor 自检结果</h3>
+      <p>
+        当前没有配置 active profile 的 host，因此服务连通性失败；凭据存储可用。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>检查项</th>
+            <th>状态</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>base_url_reachable</code></td>
+            <td class="status bad">fail</td>
+            <td>未配置 active profile 的 host，需要先运行 <code>weknora auth login --host=...</code></td>
+          </tr>
+          <tr>
+            <td><code>auth_credential</code></td>
+            <td class="status warn">skip</td>
+            <td>依赖 base URL 连通性，前置失败后跳过</td>
+          </tr>
+          <tr>
+            <td><code>server_version</code></td>
+            <td class="status warn">skip</td>
+            <td>依赖认证检查，前置失败后跳过</td>
+          </tr>
+          <tr>
+            <td><code>credential_storage</code></td>
+            <td class="status ok">ok</td>
+            <td>本机 keyring 或文件凭据存储可用</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="capabilities" class="section">
+      <h2>2. CLI 能力总览</h2>
+      <p>
+        <code>weknora</code> 是面向 WeKnora RAG 知识库服务的 Go CLI。它覆盖认证、知识库、
+        文档入库、检索、问答、Agent、MCP 和原始 API 调用等工作流。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>命令</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>auth</code></td>
+            <td>登录、登出、刷新 token、查看认证状态、打印凭据。</td>
+          </tr>
+          <tr>
+            <td><code>profile</code></td>
+            <td>管理多个连接目标，支持不同服务或租户之间切换。</td>
+          </tr>
+          <tr>
+            <td><code>kb</code></td>
+            <td>知识库创建、列表、查看、编辑、删除、置顶，以及 status/check。</td>
+          </tr>
+          <tr>
+            <td><code>doc</code></td>
+            <td>上传本地文件、从 URL 拉取、用 inline text 创建条目、列表、查看、下载、删除、等待解析。</td>
+          </tr>
+          <tr>
+            <td><code>search</code></td>
+            <td>按 chunks、知识库、文档或会话进行搜索。</td>
+          </tr>
+          <tr>
+            <td><code>chat</code></td>
+            <td>向知识库发起 RAG 问答，text 模式流式输出，json/ndjson 模式输出事件流。</td>
+          </tr>
+          <tr>
+            <td><code>session</code></td>
+            <td>管理会话并支持基于 Agent 的持续问答。</td>
+          </tr>
+          <tr>
+            <td><code>agent</code></td>
+            <td>自定义 Agent 的 CRUD、状态检查和调用。</td>
+          </tr>
+          <tr>
+            <td><code>chunk</code></td>
+            <td>查看和调试文档 chunk，用于 RAG 召回排查。</td>
+          </tr>
+          <tr>
+            <td><code>link</code> / <code>unlink</code></td>
+            <td>把当前目录绑定到某个知识库，后续命令可自动解析 <code>--kb</code>。</td>
+          </tr>
+          <tr>
+            <td><code>api</code></td>
+            <td>原始 HTTP passthrough，用于覆盖 CLI 未封装的深层 API。</td>
+          </tr>
+          <tr>
+            <td><code>mcp serve</code></td>
+            <td>通过 stdio 暴露只读 MCP 工具，供 AI agent 调用。</td>
+          </tr>
+          <tr>
+            <td><code>doctor</code></td>
+            <td>检查 base URL、认证、服务端版本和凭据存储。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="repository" class="section">
+      <h2>3. 项目结构</h2>
+      <p>WeKnora 是一个组合项目：Go 后端、Go CLI、Go SDK、Web 前端、Python 文档解析服务并存。</p>
+
+      <div class="summary">
+        <div class="card">
+          <strong>后端服务</strong>
+          <span class="muted">Gin + GORM + 多种向量库/存储/模型集成，入口在 <code>cmd/server</code>。</span>
+        </div>
+        <div class="card">
+          <strong>CLI</strong>
+          <span class="muted">独立 Go module，使用 Cobra 构建命令树。</span>
+        </div>
+        <div class="card">
+          <strong>SDK</strong>
+          <span class="muted"><code>client/</code> 暴露 typed API，CLI 通过 replace 使用本地 SDK。</span>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>路径</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/go.mod</code></td>
+            <td>主服务 Go module，目标 Go 版本是 1.26.0。</td>
+          </tr>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/cli/go.mod</code></td>
+            <td>CLI 独立 module，依赖 Cobra、gojq、keyring、MCP SDK 等。</td>
+          </tr>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/client/client.go</code></td>
+            <td>HTTP client 核心，支持 API Key、Bearer Token、Tenant ID 和 raw request。</td>
+          </tr>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/cli/cmd/root.go</code></td>
+            <td>CLI 根命令，统一注册全局参数、输出格式、profile、错误映射和子命令。</td>
+          </tr>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/cli/internal/cmdutil/factory.go</code></td>
+            <td>CLI 依赖容器，延迟加载配置、client、prompt、secrets，并实现 KB 解析链。</td>
+          </tr>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/cli/cmd/doc/upload.go</code></td>
+            <td>文档上传命令，支持递归上传、glob、metadata、dry-run、KB 自动解析。</td>
+          </tr>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/frontend</code></td>
+            <td>Web UI，Vite 前端项目。</td>
+          </tr>
+          <tr>
+            <td><code>/Users/kyynor/Code/tech-demo/weknora/docreader</code></td>
+            <td>Python 文档解析服务，使用 uv 管理。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="wiki" class="section">
+      <h2>4. Wiki 相关能力</h2>
+      <p>
+        WeKnora 已有完整的 Wiki 模式：文档入库后由 Agent 自动生成结构化 Markdown 页面，
+        并维护页面之间的链接、索引、图谱、lint issue 和自动修复。
+      </p>
+
+      <h3>核心数据模型</h3>
+      <p>
+        Wiki 页面定义在 <code>internal/types/wiki_page.go</code>。主要字段包括：
+        <code>slug</code>、<code>title</code>、<code>page_type</code>、<code>content</code>、
+        <code>summary</code>、<code>aliases</code>、<code>source_refs</code>、
+        <code>chunk_refs</code>、<code>in_links</code>、<code>out_links</code> 和 <code>version</code>。
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>页面类型</th>
+            <th>含义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>summary</code></td>
+            <td>文档摘要页。</td>
+          </tr>
+          <tr>
+            <td><code>entity</code></td>
+            <td>实体页，例如人物、组织、地点。</td>
+          </tr>
+          <tr>
+            <td><code>concept</code></td>
+            <td>概念或主题页。</td>
+          </tr>
+          <tr>
+            <td><code>index</code></td>
+            <td>Wiki 索引页。</td>
+          </tr>
+          <tr>
+            <td><code>log</code></td>
+            <td>操作日志页。</td>
+          </tr>
+          <tr>
+            <td><code>synthesis</code></td>
+            <td>跨文档综合分析页，由 Agent 在对话中生成。</td>
+          </tr>
+          <tr>
+            <td><code>comparison</code></td>
+            <td>比较分析页，由 Agent 在用户请求比较时生成。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>HTTP API</h3>
+      <p>Wiki 路由注册在 <code>internal/router/router.go</code> 的 <code>RegisterWikiPageRoutes</code>。</p>
+      <pre><code>GET    /api/v1/knowledgebase/:kb_id/wiki/pages
+POST   /api/v1/knowledgebase/:kb_id/wiki/pages
+GET    /api/v1/knowledgebase/:kb_id/wiki/pages/*slug
+PUT    /api/v1/knowledgebase/:kb_id/wiki/pages/*slug
+DELETE /api/v1/knowledgebase/:kb_id/wiki/pages/*slug
+GET    /api/v1/knowledgebase/:kb_id/wiki/index
+GET    /api/v1/knowledgebase/:kb_id/wiki/log
+GET    /api/v1/knowledgebase/:kb_id/wiki/graph
+GET    /api/v1/knowledgebase/:kb_id/wiki/stats
+GET    /api/v1/knowledgebase/:kb_id/wiki/search
+POST   /api/v1/knowledgebase/:kb_id/wiki/rebuild-links
+GET    /api/v1/knowledgebase/:kb_id/wiki/lint
+POST   /api/v1/knowledgebase/:kb_id/wiki/auto-fix
+GET    /api/v1/knowledgebase/:kb_id/wiki/issues
+PUT    /api/v1/knowledgebase/:kb_id/wiki/issues/:issue_id/status</code></pre>
+
+      <h3>访问控制</h3>
+      <p>
+        Wiki 读取要求 Viewer+；页面创建、更新、删除、rebuild-links、auto-fix、issue 状态变更
+        要求知识库 owner contributor 或 admin。相关逻辑位于 <code>internal/router/rbac.go</code>。
+      </p>
+
+      <h3>Agent 工具</h3>
+      <p>
+        Wiki Agent 工具集中在 <code>internal/agent/tools/wiki_*.go</code>，包括读取页面、写页面、
+        重命名、替换文本、删除页面、读取源文档、创建/读取/更新 issue 等。
+      </p>
+    </section>
+
+    <section id="patterns" class="section">
+      <h2>5. 值得复用的设计</h2>
+      <ul>
+        <li><strong>默认 JSON 输出。</strong> 面向自动化和 Agent 使用时，默认机器可读，比默认 text 更稳定。</li>
+        <li><strong>stdout/stderr 分离。</strong> stdout 只承载数据，stderr 承载日志、进度、错误，便于管道处理。</li>
+        <li><strong>typed error + exit code。</strong> 认证、资源不存在、输入错误、服务端错误、确认要求等都映射到稳定退出码。</li>
+        <li><strong>profile 模型。</strong> 支持多服务、多租户配置，并允许单次命令用 <code>--profile</code> 覆盖。</li>
+        <li><strong>目录绑定 KB。</strong> <code>.weknora/project.yaml</code> 让当前目录天然关联知识库，减少重复传参。</li>
+        <li><strong>dry-run。</strong> 写操作可先输出计划，方便自动化工具或 Agent 在执行前展示影响范围。</li>
+        <li><strong>破坏性操作确认。</strong> 删除等高风险操作默认需要确认；headless 场景下通过明确的 <code>-y</code> 放行。</li>
+        <li><strong>MCP 只读优先。</strong> <code>mcp serve</code> 只暴露 curated read-only surface，避免 Agent 意外改写数据。</li>
+        <li><strong>raw API passthrough。</strong> <code>api</code> 命令保留逃生口，CLI 不必一开始覆盖全部服务端接口。</li>
+      </ul>
+    </section>
+
+    <section id="suggestions" class="section">
+      <h2>6. 对当前 Python <code>wiki</code> CLI 的建议</h2>
+      <p>
+        当前项目已经初始化为 Typer CLI。后续如果目标是管理 WeKnora Wiki，建议按低风险、可验证的顺序推进：
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>建议命令</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>基础连接</td>
+            <td><code>wiki profile</code>、<code>wiki auth</code>、<code>wiki doctor</code></td>
+            <td>先解决 host、token、profile、连通性和诊断。</td>
+          </tr>
+          <tr>
+            <td>只读 Wiki</td>
+            <td><code>wiki page list</code>、<code>wiki page get</code>、<code>wiki search</code>、<code>wiki graph</code></td>
+            <td>优先实现读取能力，便于验证 API contract 和输出格式。</td>
+          </tr>
+          <tr>
+            <td>目录绑定</td>
+            <td><code>wiki link</code>、<code>wiki unlink</code></td>
+            <td>复用 WeKnora 的 KB 解析链：flag &gt; env &gt; project file &gt; error。</td>
+          </tr>
+          <tr>
+            <td>写操作</td>
+            <td><code>wiki page create</code>、<code>wiki page edit</code>、<code>wiki page delete</code></td>
+            <td>增加 dry-run 和确认保护后再开放。</td>
+          </tr>
+          <tr>
+            <td>维护能力</td>
+            <td><code>wiki lint</code>、<code>wiki fix</code>、<code>wiki rebuild-links</code></td>
+            <td>封装服务端已有 lint、auto-fix、rebuild-links API。</td>
+          </tr>
+          <tr>
+            <td>Agent 集成</td>
+            <td><code>wiki mcp serve</code></td>
+            <td>先暴露只读工具，写入能力后续按显式确认引入。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>推荐的首批命令形态</h3>
+      <pre><code>wiki doctor
+wiki profile add local --host http://localhost:8080
+wiki profile use local
+wiki link --kb &lt;kb_id_or_name&gt;
+wiki page list
+wiki page get index
+wiki page get concept/rag
+wiki search "GraphRAG"
+wiki graph --mode overview
+wiki lint</code></pre>
+    </section>
+  </main>
+</body>
+</html>
