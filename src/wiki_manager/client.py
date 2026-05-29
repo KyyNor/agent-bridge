@@ -59,27 +59,33 @@ class WikiManagerClient:
 
     def add_document(self, source: Path, kb_slugs: list[str], later: bool) -> dict[str, Any]:
         data = [("kb", kb) for kb in kb_slugs] + [("later", str(later).lower())]
-        with source.open("rb") as handle:
-            response = httpx.post(
-                f"{self.base_url}/docs",
-                data=data,
-                files={"file": (source.name, handle)},
-                headers=self._headers(),
-                timeout=60.0,
-            )
+        try:
+            with source.open("rb") as handle:
+                response = httpx.post(
+                    f"{self.base_url}/docs",
+                    data=data,
+                    files={"file": (source.name, handle)},
+                    headers=self._headers(),
+                    timeout=60.0,
+                )
+        except OSError as exc:
+            raise RuntimeError(f"cannot read source file: {exc}") from exc
         self._raise(response)
         return response.json()
 
     def update_document(self, doc_slug: str, source: Path, later: bool) -> dict[str, Any]:
         data = [("later", str(later).lower())]
-        with source.open("rb") as handle:
-            response = httpx.post(
-                f"{self.base_url}/docs/{doc_slug}/versions",
-                data=data,
-                files={"file": (source.name, handle)},
-                headers=self._headers(),
-                timeout=60.0,
-            )
+        try:
+            with source.open("rb") as handle:
+                response = httpx.post(
+                    f"{self.base_url}/docs/{doc_slug}/versions",
+                    data=data,
+                    files={"file": (source.name, handle)},
+                    headers=self._headers(),
+                    timeout=60.0,
+                )
+        except OSError as exc:
+            raise RuntimeError(f"cannot read source file: {exc}") from exc
         self._raise(response)
         return response.json()
 

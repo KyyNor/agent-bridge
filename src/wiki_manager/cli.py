@@ -4,6 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Any, Callable, TypeVar
 
+import httpx
 import typer
 
 from wiki_manager.client import WikiManagerClient
@@ -37,9 +38,12 @@ def _version_callback(value: bool) -> None:
 def _run_client(call: Callable[[WikiManagerClient], T]) -> T:
     try:
         return call(WikiManagerClient.from_config())
+    except httpx.HTTPError as exc:
+        typer.echo(f"service unavailable: {exc}", err=True)
+        raise typer.Exit(1) from None
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from exc
+        raise typer.Exit(1) from None
 
 
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
@@ -95,7 +99,16 @@ def grant_member(
 
 @app.command()
 def add(
-    source: Annotated[Path, typer.Argument(help="Document file to add.")],
+    source: Annotated[
+        Path,
+        typer.Argument(
+            help="Document file to add.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
     kb_slugs: Annotated[list[str], typer.Option("--kb", help="Knowledge base slug.")],
     later: Annotated[bool, typer.Option("--later", help="Queue sync for later.")] = False,
 ) -> None:
@@ -107,7 +120,16 @@ def add(
 @app.command()
 def update(
     doc_slug: Annotated[str, typer.Argument(help="Document slug.")],
-    source: Annotated[Path, typer.Argument(help="Replacement document file.")],
+    source: Annotated[
+        Path,
+        typer.Argument(
+            help="Replacement document file.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
     later: Annotated[bool, typer.Option("--later", help="Queue sync for later.")] = False,
 ) -> None:
     """Add a new document version."""
