@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +60,21 @@ def start_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
             start_new_session=True,
         )
     resolved.server_pid_path.write_text(str(process.pid), encoding="utf-8")
-    return {"running": True, "pid": process.pid}
+    health_url = f"http://{config.host}:{config.port}/health"
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            resolved.server_pid_path.unlink(missing_ok=True)
+            raise RuntimeError(f"server exited before health check passed; see log: {resolved.server_log_path}")
+        try:
+            response = httpx.get(health_url, timeout=0.5)
+        except httpx.HTTPError:
+            time.sleep(0.1)
+            continue
+        if response.status_code == 200:
+            return {"running": True, "pid": process.pid}
+        time.sleep(0.1)
+    raise RuntimeError(f"server did not become healthy within 5 seconds; see log: {resolved.server_log_path}")
 
 
 def stop_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:

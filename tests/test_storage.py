@@ -77,3 +77,28 @@ def test_sqlite_store_list_document_slugs_includes_soft_deleted(wm_paths: WikiMa
     store.soft_delete_document(doc["id"])
 
     assert "guide" in store.list_document_slugs()
+
+
+def test_purge_document_only_returns_archive_paths_no_longer_referenced(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb(slug="frontend-docs", name="Frontend Docs", description="", created_by="root")
+    first = store.create_document(slug="guide-a", title="Guide A", owner_user="alice")
+    second = store.create_document(slug="guide-b", title="Guide B", owner_user="alice")
+    store.attach_document_to_kb(first["id"], kb["id"], added_by="alice")
+    store.attach_document_to_kb(second["id"], kb["id"], added_by="alice")
+    archive_path = str(wm_paths.archive_dir / "shared.pdf")
+    for doc in (first, second):
+        store.create_document_version(
+            doc_id=doc["id"],
+            original_filename="Guide.pdf",
+            content_hash="abc123",
+            file_size=12,
+            mime_type="application/pdf",
+            archive_path=archive_path,
+            created_by="alice",
+        )
+
+    assert store.purge_document(first["id"]) == []
+    assert store.list_versions(second["id"])[0]["archive_path"] == archive_path
+    assert store.purge_document(second["id"]) == [archive_path]

@@ -75,6 +75,27 @@ def test_client_init_system_posts_admin_init(monkeypatch) -> None:
     }
 
 
+def test_client_purge_document_sends_confirmation(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return httpx.Response(200, json={"slug": "guide", "status": "purged"})
+
+    monkeypatch.setattr("wiki_manager.client.httpx.post", fake_post)
+    result = WikiManagerClient("http://example.test/", "root").purge_document("guide", confirm=True)
+    assert result == {"slug": "guide", "status": "purged"}
+    assert captured == {
+        "url": "http://example.test/docs/guide/purge",
+        "json": {"confirm": True},
+        "headers": {"X-Wiki-User": "root"},
+        "timeout": 10.0,
+    }
+
+
 def test_server_init_calls_client(monkeypatch) -> None:
     calls = []
 
@@ -128,3 +149,35 @@ def test_server_start_reports_errors_cleanly(monkeypatch) -> None:
     assert "server error" in result.stderr
     assert "permission denied" in result.stderr
     assert "Traceback" not in output
+
+
+def test_purge_without_yes_exits_without_calling_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def purge_document(self, doc_slug, confirm):
+            calls.append((doc_slug, confirm))
+            return {"slug": doc_slug, "status": "purged"}
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["purge", "guide"])
+    output = f"{result.stdout}{result.stderr}"
+    assert result.exit_code == 1
+    assert "requires --yes" in output
+    assert "Traceback" not in output
+    assert calls == []
+
+
+def test_purge_with_yes_calls_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def purge_document(self, doc_slug, confirm):
+            calls.append((doc_slug, confirm))
+            return {"slug": doc_slug, "status": "purged"}
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["purge", "guide", "--yes"])
+    assert result.exit_code == 0
+    assert "purged" in result.stdout
+    assert calls == [("guide", True)]

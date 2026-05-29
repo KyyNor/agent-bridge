@@ -183,9 +183,13 @@ def delete_document(
 @app.command("purge")
 def purge_document(
     doc_slug: Annotated[str, typer.Argument(help="Document slug.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm permanent purge.")] = False,
 ) -> None:
     """Permanently purge a document."""
-    result = _run_client(lambda client: client.purge_document(doc_slug))
+    if not yes:
+        typer.echo("purge requires --yes", err=True)
+        raise typer.Exit(1)
+    result = _run_client(lambda client: client.purge_document(doc_slug, confirm=True))
     _echo_mapping(result, ("slug", "status"))
 
 

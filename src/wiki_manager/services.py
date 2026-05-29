@@ -161,6 +161,8 @@ class WikiManagerService:
         doc = self._require_doc_visible(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"])
         versions = self.store.list_versions(doc["id"])
+        for version in versions:
+            version.pop("archive_path", None)
         doc["kbs"] = kbs
         doc["versions"] = versions
         doc["kb_slugs"] = [kb["slug"] for kb in kbs]
@@ -218,10 +220,22 @@ class WikiManagerService:
                 )
             self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
         except Exception as exc:
+            failed_status = (
+                SyncStateStatus.delete_failed if job["operation"] == "delete" else SyncStateStatus.sync_failed
+            )
+            self.store.upsert_sync_state(
+                job["doc_id"],
+                job["kb_id"],
+                job["backend_slug"],
+                None,
+                failed_status,
+            )
             self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
 
-    def purge_document(self, actor: str, doc_slug: str) -> dict[str, str]:
+    def purge_document(self, actor: str, doc_slug: str, confirm: bool = False) -> dict[str, str]:
         doc = self._require_doc_edit(actor, doc_slug, include_deleted=True)
+        if not confirm:
+            raise ValidationError("purge requires confirmation")
         archive_paths = self.store.purge_document(doc["id"])
         for archive_path in archive_paths:
             self.archive.remove(Path(archive_path))
@@ -273,9 +287,8 @@ class WikiManagerService:
         return any(self.store.get_member_role(kb["id"], actor) is not None for kb in self.store.get_document_kbs(doc["id"]))
 
     def _actor_admin_for_document(self, actor: str, doc: dict[str, Any]) -> bool:
-        return any(
-            can_manage_kb(self.store.get_member_role(kb["id"], actor)) for kb in self.store.get_document_kbs(doc["id"])
-        )
+        kbs = self.store.get_document_kbs(doc["id"])
+        return bool(kbs) and all(can_manage_kb(self.store.get_member_role(kb["id"], actor)) for kb in kbs)
 
     @staticmethod
     def _mime_type(filename: str) -> str:

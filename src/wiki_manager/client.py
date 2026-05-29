@@ -108,8 +108,13 @@ class WikiManagerClient:
         self._raise(response)
         return response.json()
 
-    def purge_document(self, doc_slug: str) -> dict[str, Any]:
-        response = httpx.post(f"{self.base_url}/docs/{doc_slug}/purge", headers=self._headers(), timeout=10.0)
+    def purge_document(self, doc_slug: str, confirm: bool) -> dict[str, Any]:
+        response = httpx.post(
+            f"{self.base_url}/docs/{doc_slug}/purge",
+            json={"confirm": confirm},
+            headers=self._headers(),
+            timeout=10.0,
+        )
         self._raise(response)
         return response.json()
 

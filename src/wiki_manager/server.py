@@ -28,17 +28,23 @@ class SyncRequest(BaseModel):
     all_users: bool = False
 
 
+class PurgeRequest(BaseModel):
+    confirm: bool = False
+
+
 def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
     resolved_paths = paths or WikiManagerPaths.from_root(DEFAULT_ROOT)
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = WikiManagerService.create(resolved_paths, resolved_admins)
-    app = FastAPI(title="wiki-manager", docs_url=None)
+    app = FastAPI(title="wiki-manager", docs_url=None, openapi_url=None, redoc_url=None)
 
     def actor(x_wiki_user: str = Header(alias="X-Wiki-User")) -> str:
         return x_wiki_user
 
     def call_safely(call: Callable[[], Any]) -> Any:
         try:
+            if admins is None:
+                service.admins = load_server_config(resolved_paths).admins
             return call()
         except WikiManagerError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -143,8 +149,12 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         return call_safely(lambda: service.delete_document(current_actor, doc_slug))
 
     @app.post("/docs/{doc_slug}/purge")
-    def purge_document(doc_slug: str, current_actor: str = Depends(actor)) -> dict[str, str]:
-        return call_safely(lambda: service.purge_document(current_actor, doc_slug))
+    def purge_document(
+        doc_slug: str,
+        payload: PurgeRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, str]:
+        return call_safely(lambda: service.purge_document(current_actor, doc_slug, confirm=payload.confirm))
 
     @app.get("/status")
     def status(current_actor: str = Depends(actor)) -> dict[str, list[dict[str, Any]]]:

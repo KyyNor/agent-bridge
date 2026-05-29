@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from wiki_manager.config import ensure_directories
-from wiki_manager.domain import AccessDenied, KbRole, NotFound
+from wiki_manager.domain import AccessDenied, KbRole, NotFound, SyncStateStatus, ValidationError
 from wiki_manager.services import WikiManagerService
 
 
@@ -84,7 +84,88 @@ def test_invisible_document_edits_return_not_found(wm_paths, tmp_path: Path) -> 
     with pytest.raises(NotFound, match="document not found"):
         service.delete_document("bob", doc["slug"])
     with pytest.raises(NotFound, match="document not found"):
-        service.purge_document("bob", doc["slug"])
+        service.purge_document("bob", doc["slug"], confirm=True)
+
+
+def test_shared_document_requires_admin_for_all_associated_kbs(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    service.grant_kb_member("root", "kb-a", "alice", KbRole.contributor)
+    service.grant_kb_member("root", "kb-b", "alice", KbRole.contributor)
+    service.grant_kb_member("root", "kb-a", "carol", KbRole.admin)
+    service.grant_kb_member("root", "kb-b", "carol", KbRole.viewer)
+    v1 = tmp_path / "Guide.pdf"
+    v2 = tmp_path / "Guide-v2.pdf"
+    v1.write_bytes(b"one")
+    v2.write_bytes(b"two")
+    doc = service.add_document("alice", v1, ["kb-a", "kb-b"], later=True)
+
+    with pytest.raises(AccessDenied):
+        service.update_document("carol", doc["slug"], v2, later=True)
+    with pytest.raises(AccessDenied):
+        service.delete_document("carol", doc["slug"])
+    with pytest.raises(AccessDenied):
+        service.purge_document("carol", doc["slug"], confirm=True)
+
+    service.grant_kb_member("root", "kb-b", "carol", KbRole.admin)
+    updated = service.update_document("carol", doc["slug"], v2, later=True)
+    assert updated["current_version_no"] == 2
+
+
+def test_purge_requires_confirmation(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("alice", source, ["frontend-docs"], later=True)
+
+    with pytest.raises(ValidationError, match="purge requires confirmation"):
+        service.purge_document("alice", doc["slug"])
+
+
+def test_purge_keeps_shared_archive_until_last_reference_is_removed(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    first = tmp_path / "Guide-A.pdf"
+    second = tmp_path / "Guide-B.pdf"
+    first.write_bytes(b"same bytes")
+    second.write_bytes(b"same bytes")
+    doc_a = service.add_document("alice", first, ["frontend-docs"], later=True)
+    doc_b = service.add_document("alice", second, ["frontend-docs"], later=True)
+    version_b = service.store.list_versions(doc_b["id"])[0]
+    archive_path = Path(version_b["archive_path"])
+
+    assert archive_path.exists()
+    service.purge_document("alice", doc_a["slug"], confirm=True)
+
+    assert archive_path.exists()
+    assert archive_path.read_bytes() == b"same bytes"
+    assert service.store.list_versions(doc_b["id"])[0]["archive_path"] == str(archive_path)
+
+    service.purge_document("alice", doc_b["slug"], confirm=True)
+    assert not archive_path.exists()
+
+
+def test_get_doc_does_not_expose_archive_paths_to_viewer(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    service.grant_kb_member("root", "frontend-docs", "bob", KbRole.viewer)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("alice", source, ["frontend-docs"], later=True)
+
+    visible = service.get_doc("bob", doc["slug"])
+
+    assert visible["versions"]
+    assert "archive_path" not in visible["versions"][0]
 
 
 def test_invisible_kb_returns_not_found(wm_paths) -> None:
@@ -162,3 +243,48 @@ def test_delete_with_later_false_syncs_immediately(wm_paths, tmp_path: Path) -> 
     status = service.status(actor="alice")
     assert status["jobs"][-1]["operation"] == "delete"
     assert status["jobs"][-1]["status"] == "succeeded"
+
+
+def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("alice", source, ["frontend-docs"], later=True)
+
+    def fail_upsert(*args, **kwargs):
+        raise RuntimeError("backend down")
+
+    monkeypatch.setattr(service.mock_backend, "upsert_document", fail_upsert)
+    service.sync("alice", all_users=False)
+
+    status = service.status("alice")
+    assert status["jobs"][0]["status"] == "failed"
+    sync_state = service.store.get_sync_state(doc["id"], kb["id"])
+    assert sync_state is not None
+    assert sync_state["status"] == SyncStateStatus.sync_failed.value
+
+
+def test_delete_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
+    service.delete_document("alice", doc["slug"])
+
+    def fail_delete(*args, **kwargs):
+        raise RuntimeError("backend down")
+
+    monkeypatch.setattr(service.mock_backend, "delete_document", fail_delete)
+    service.sync("alice", all_users=False)
+
+    status = service.status("alice")
+    assert status["jobs"][-1]["status"] == "failed"
+    sync_state = service.store.get_sync_state(doc["id"], kb["id"])
+    assert sync_state is not None
+    assert sync_state["status"] == SyncStateStatus.delete_failed.value

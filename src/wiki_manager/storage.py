@@ -565,6 +565,14 @@ class SQLiteStore:
                 "SELECT archive_path FROM document_versions WHERE doc_id = ? ORDER BY version_no",
                 (doc_id,),
             ).fetchall()
-            archive_paths = [row["archive_path"] for row in rows]
+            archive_paths = list(dict.fromkeys(row["archive_path"] for row in rows))
             conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-            return archive_paths
+            if not archive_paths:
+                return []
+            placeholders = ", ".join("?" for _ in archive_paths)
+            remaining_rows = conn.execute(
+                f"SELECT DISTINCT archive_path FROM document_versions WHERE archive_path IN ({placeholders})",
+                archive_paths,
+            ).fetchall()
+            remaining_paths = {row["archive_path"] for row in remaining_rows}
+            return [archive_path for archive_path in archive_paths if archive_path not in remaining_paths]
