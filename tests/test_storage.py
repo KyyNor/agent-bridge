@@ -4,6 +4,8 @@ from pathlib import Path
 
 from wiki_manager.archive import ArchiveStorage
 from wiki_manager.config import ServerConfig, WikiManagerPaths, ensure_directories, load_server_config
+from wiki_manager.domain import KbRole, Operation
+from wiki_manager.storage import SQLiteStore
 
 
 def test_ensure_directories_creates_default_tree(tmp_path: Path) -> None:
@@ -34,3 +36,34 @@ def test_archive_store_file_by_hash(tmp_path: Path) -> None:
     assert result.file_size == 10
     assert result.archive_path.exists()
     assert result.archive_path.read_bytes() == b"hello wiki"
+
+
+def test_sqlite_store_creates_kb_and_members(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb(slug="frontend-docs", name="Frontend Docs", description="", created_by="root")
+    store.grant_member(kb_id=kb["id"], linux_user="alice", role=KbRole.contributor)
+    visible = store.list_kbs_for_user("alice")
+    assert [item["slug"] for item in visible] == ["frontend-docs"]
+    assert store.get_member_role(kb["id"], "alice") == KbRole.contributor
+
+
+def test_sqlite_store_document_version_and_jobs(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb(slug="frontend-docs", name="Frontend Docs", description="", created_by="root")
+    doc = store.create_document(slug="guide", title="Guide", owner_user="alice")
+    store.attach_document_to_kb(doc_id=doc["id"], kb_id=kb["id"], added_by="alice")
+    version = store.create_document_version(
+        doc_id=doc["id"],
+        original_filename="Guide.pdf",
+        content_hash="abc123",
+        file_size=12,
+        mime_type="application/pdf",
+        archive_path="/archive/abc123.pdf",
+        created_by="alice",
+    )
+    job = store.create_sync_job(doc_id=doc["id"], kb_id=kb["id"], operation=Operation.create, version_id=version["id"])
+    assert version["version_no"] == 1
+    assert job["status"] == "pending"
+    assert store.list_docs_for_kb(kb_id=kb["id"])[0]["slug"] == "guide"
