@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
-from typing import Annotated
+from pathlib import Path
+from typing import Annotated, Any, Callable, TypeVar
 
 import typer
+
+from wiki_manager.client import WikiManagerClient
 
 
 app = typer.Typer(
     help="Manage wiki content from the command line.",
     no_args_is_help=True,
 )
+kb_app = typer.Typer(help="Manage knowledge bases.", no_args_is_help=True)
+server_app = typer.Typer(help="Manage the local wiki-manager server.", no_args_is_help=True)
+app.add_typer(kb_app, name="kb")
+app.add_typer(server_app, name="server")
+
+T = TypeVar("T")
 
 
 def _package_version() -> str:
@@ -23,6 +32,19 @@ def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"wiki-manager {_package_version()}")
         raise typer.Exit()
+
+
+def _run_client(call: Callable[[WikiManagerClient], T]) -> T:
+    try:
+        return call(WikiManagerClient.from_config())
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
+    parts = [f"{key}: {data[key]}" for key in keys if key in data]
+    typer.echo(", ".join(parts) if parts else data)
 
 
 @app.callback()
@@ -40,12 +62,122 @@ def root(
     """Wiki Manager command line interface."""
 
 
-@app.command()
-def hello(
-    name: Annotated[str, typer.Argument(help="Name to greet.")] = "world",
+@kb_app.command("list")
+def list_kbs() -> None:
+    """List visible knowledge bases."""
+    kbs = _run_client(lambda client: client.list_kbs())
+    for kb in kbs:
+        role = f" ({kb['role']})" if kb.get("role") else ""
+        typer.echo(f"{kb['slug']}{role}")
+
+
+@kb_app.command("create")
+def create_kb(
+    slug: Annotated[str, typer.Argument(help="Knowledge base slug.")],
+    name: Annotated[str, typer.Option("--name", help="Display name.")],
+    description: Annotated[str, typer.Option("--description", help="Description.")] = "",
 ) -> None:
-    """Print a greeting to verify the CLI wiring."""
-    typer.echo(f"Hello, {name}!")
+    """Create a knowledge base."""
+    kb = _run_client(lambda client: client.create_kb(slug, name, description))
+    _echo_mapping(kb, ("slug", "name"))
+
+
+@kb_app.command("grant")
+def grant_member(
+    kb_slug: Annotated[str, typer.Argument(help="Knowledge base slug.")],
+    linux_user: Annotated[str, typer.Argument(help="Linux user to grant.")],
+    role: Annotated[str, typer.Argument(help="Role to grant.")],
+) -> None:
+    """Grant a user access to a knowledge base."""
+    member = _run_client(lambda client: client.grant_member(kb_slug, linux_user, role))
+    _echo_mapping(member, ("kb_slug", "linux_user", "role"))
+
+
+@app.command()
+def add(
+    source: Annotated[Path, typer.Argument(help="Document file to add.")],
+    kb_slugs: Annotated[list[str], typer.Option("--kb", help="Knowledge base slug.")],
+    later: Annotated[bool, typer.Option("--later", help="Queue sync for later.")] = False,
+) -> None:
+    """Add a document."""
+    doc = _run_client(lambda client: client.add_document(source, kb_slugs, later))
+    _echo_mapping(doc, ("slug", "current_version_no"))
+
+
+@app.command()
+def update(
+    doc_slug: Annotated[str, typer.Argument(help="Document slug.")],
+    source: Annotated[Path, typer.Argument(help="Replacement document file.")],
+    later: Annotated[bool, typer.Option("--later", help="Queue sync for later.")] = False,
+) -> None:
+    """Add a new document version."""
+    doc = _run_client(lambda client: client.update_document(doc_slug, source, later))
+    _echo_mapping(doc, ("slug", "current_version_no"))
+
+
+@app.command("delete")
+def delete_document(
+    doc_slug: Annotated[str, typer.Argument(help="Document slug.")],
+) -> None:
+    """Soft delete a document."""
+    result = _run_client(lambda client: client.delete_document(doc_slug))
+    _echo_mapping(result, ("slug", "status"))
+
+
+@app.command("purge")
+def purge_document(
+    doc_slug: Annotated[str, typer.Argument(help="Document slug.")],
+) -> None:
+    """Permanently purge a document."""
+    result = _run_client(lambda client: client.purge_document(doc_slug))
+    _echo_mapping(result, ("slug", "status"))
+
+
+@app.command("docs")
+def list_docs(
+    kb_slug: Annotated[str, typer.Option("--kb", help="Knowledge base slug.")],
+) -> None:
+    """List documents in a knowledge base."""
+    docs = _run_client(lambda client: client.list_docs(kb_slug))
+    for doc in docs:
+        title = f" - {doc['title']}" if doc.get("title") else ""
+        typer.echo(f"{doc['slug']}{title}")
+
+
+@app.command("doc")
+def get_doc(
+    doc_slug: Annotated[str, typer.Argument(help="Document slug.")],
+) -> None:
+    """Show document details."""
+    doc = _run_client(lambda client: client.get_doc(doc_slug))
+    _echo_mapping(doc, ("slug", "title", "current_version_no", "status"))
+    if doc.get("kb_slugs"):
+        typer.echo(f"kbs: {', '.join(doc['kb_slugs'])}")
+
+
+@app.command()
+def status() -> None:
+    """Show sync status."""
+    result = _run_client(lambda client: client.status())
+    jobs = result.get("jobs", [])
+    typer.echo(f"jobs: {len(jobs)}")
+    for job in jobs:
+        parts = [
+            str(job.get("status", "")),
+            str(job.get("operation", "")),
+            str(job.get("kb_slug", "")),
+            str(job.get("doc_slug", "")),
+        ]
+        typer.echo(" ".join(part for part in parts if part))
+
+
+@app.command()
+def sync(
+    all_users: Annotated[bool, typer.Option("--all", help="Sync jobs for all users.")] = False,
+) -> None:
+    """Run pending sync jobs."""
+    result = _run_client(lambda client: client.sync(all_users))
+    typer.echo(f"processed: {result.get('processed', 0)}")
 
 
 def main() -> None:
