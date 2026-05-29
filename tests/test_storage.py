@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from wiki_manager.archive import ArchiveStorage
+from wiki_manager.config import ServerConfig, WikiManagerPaths, ensure_directories, load_server_config
+
+
+def test_ensure_directories_creates_default_tree(tmp_path: Path) -> None:
+    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+    ensure_directories(paths)
+    assert paths.config_dir.is_dir()
+    assert paths.data_dir.is_dir()
+    assert paths.archive_dir.is_dir()
+    assert paths.mock_backend_dir.is_dir()
+    assert paths.logs_dir.is_dir()
+    assert paths.run_dir.is_dir()
+
+
+def test_load_server_config_writes_default_admin(tmp_path: Path) -> None:
+    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+    config = load_server_config(paths)
+    assert config == ServerConfig(host="127.0.0.1", port=8765, admins={"root"})
+    assert "admins = [\"root\"]" in paths.server_config_path.read_text()
+
+
+def test_archive_store_file_by_hash(tmp_path: Path) -> None:
+    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+    ensure_directories(paths)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"hello wiki")
+    result = ArchiveStorage(paths.archive_dir).store(source)
+    assert result.content_hash == "4dc8be6383516954f9fdec2f11adc5aa0e33b04bb77b790de2a03a1e64ab75e8"
+    assert result.file_size == 10
+    assert result.archive_path.exists()
+    assert result.archive_path.read_bytes() == b"hello wiki"

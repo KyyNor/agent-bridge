@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,3 +37,38 @@ class WikiManagerPaths:
             server_log_path=root / "logs" / "server.log",
             server_pid_path=root / "run" / "server.pid",
         )
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    host: str
+    port: int
+    admins: set[str]
+
+
+def ensure_directories(paths: WikiManagerPaths) -> None:
+    for directory in (
+        paths.config_dir,
+        paths.data_dir,
+        paths.archive_dir,
+        paths.mock_backend_dir,
+        paths.logs_dir,
+        paths.run_dir,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def load_server_config(paths: WikiManagerPaths) -> ServerConfig:
+    ensure_directories(paths)
+    if not paths.server_config_path.exists():
+        paths.server_config_path.write_text(
+            'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n',
+            encoding="utf-8",
+        )
+    raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
+    admins = {str(item) for item in raw.get("admins", ["root"])}
+    return ServerConfig(
+        host=str(raw.get("host", "127.0.0.1")),
+        port=int(raw.get("port", 8765)),
+        admins=admins,
+    )
