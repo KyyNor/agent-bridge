@@ -124,6 +124,13 @@ def server_status_cmd() -> None:
     typer.echo(f"running: {status['running']} pid: {status['pid']}")
 
 
+@server_app.command("init")
+def server_init() -> None:
+    """Initialize the running wiki-manager service schema."""
+    _run_client(lambda client: client.init_system())
+    typer.echo("initialized")
+
+
 @app.command()
 def add(
     source: Annotated[

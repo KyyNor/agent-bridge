@@ -27,6 +27,7 @@ uv run pytest -v
 
 ```bash
 uv run wiki server start
+uv run wiki server init
 uv run wiki kb create frontend-docs --name "Frontend Docs"
 uv run wiki kb grant frontend-docs alice contributor
 uv run wiki add ./Guide.pdf --kb frontend-docs --later
@@ -36,4 +37,6 @@ uv run wiki status
 ```
 
 By default the service stores configuration, data, logs, and pid files under `/root/wiki-manager`.
+The user running `wiki server start` must be able to create and write `/root/wiki-manager/config`,
+`/root/wiki-manager/data`, `/root/wiki-manager/logs`, and `/root/wiki-manager/run`; in the target deployment this is usually started by `root`.
 The first phase trusts the Linux username sent by the CLI in `X-Wiki-User` and is intended for an internal trusted VM.

@@ -5,6 +5,7 @@ from pathlib import Path
 import httpx
 from typer.testing import CliRunner
 
+from wiki_manager.client import WikiManagerClient
 from wiki_manager.cli import app
 
 
@@ -54,6 +55,38 @@ def test_sync_command_prints_processed_count(monkeypatch) -> None:
     result = runner.invoke(app, ["sync"])
     assert result.exit_code == 0
     assert "processed: 2" in result.stdout
+
+
+def test_client_init_system_posts_admin_init(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, headers, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return httpx.Response(200, json=None)
+
+    monkeypatch.setattr("wiki_manager.client.httpx.post", fake_post)
+    WikiManagerClient("http://example.test/", "root").init_system()
+    assert captured == {
+        "url": "http://example.test/admin/init",
+        "headers": {"X-Wiki-User": "root"},
+        "timeout": 10.0,
+    }
+
+
+def test_server_init_calls_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def init_system(self):
+            calls.append("init_system")
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["server", "init"])
+    assert result.exit_code == 0
+    assert "initialized" in result.stdout
+    assert calls == ["init_system"]
 
 
 def test_status_reports_service_unavailable_cleanly(monkeypatch) -> None:

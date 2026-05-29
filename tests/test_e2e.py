@@ -7,6 +7,16 @@ from fastapi.testclient import TestClient
 from wiki_manager.server import create_app
 
 
+def _jobs_by_operation(client: TestClient) -> dict[str, list[dict]]:
+    response = client.get("/status", headers={"X-Wiki-User": "alice"})
+    assert response.status_code == 200
+    jobs = response.json()["jobs"]
+    grouped: dict[str, list[dict]] = {}
+    for job in jobs:
+        grouped.setdefault(job["operation"], []).append(job)
+    return grouped
+
+
 def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
     client = TestClient(create_app(paths=wm_paths, admins={"root"}))
     assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
@@ -35,10 +45,14 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
         )
     assert added.status_code == 200
     assert added.json()["current_version_no"] == 1
+    jobs = _jobs_by_operation(client)
+    assert jobs["create"][-1]["status"] == "pending"
 
     synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
+    jobs = _jobs_by_operation(client)
+    assert jobs["create"][-1]["status"] == "succeeded"
 
     with v2.open("rb") as handle:
         updated = client.post(
@@ -49,9 +63,29 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
         )
     assert updated.status_code == 200
     assert updated.json()["current_version_no"] == 2
+    jobs = _jobs_by_operation(client)
+    assert jobs["update"][-1]["status"] == "pending"
+
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    assert synced.status_code == 200
+    assert synced.json()["processed"] == 1
+    jobs = _jobs_by_operation(client)
+    assert jobs["update"][-1]["status"] == "succeeded"
 
     deleted = client.post("/docs/guide/delete", headers={"X-Wiki-User": "alice"})
     assert deleted.status_code == 200
-    status = client.get("/status", headers={"X-Wiki-User": "alice"})
-    assert status.status_code == 200
-    assert len(status.json()["jobs"]) >= 3
+    jobs = _jobs_by_operation(client)
+    assert jobs["delete"][-1]["status"] == "pending"
+
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    assert synced.status_code == 200
+    assert synced.json()["processed"] == 1
+    jobs = _jobs_by_operation(client)
+    operations = [job["operation"] for job_list in jobs.values() for job in job_list]
+    assert operations == ["create", "update", "delete"]
+    assert jobs["delete"][-1]["status"] == "succeeded"
+    assert [jobs[operation][-1]["status"] for operation in ("create", "update", "delete")] == [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+    ]

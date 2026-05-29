@@ -32,6 +32,10 @@ class WikiManagerClient:
             detail = payload.get("detail", payload) if isinstance(payload, dict) else payload
         raise RuntimeError(str(detail))
 
+    def init_system(self) -> None:
+        response = httpx.post(f"{self.base_url}/admin/init", headers=self._headers(), timeout=10.0)
+        self._raise(response)
+
     def list_kbs(self) -> list[dict[str, Any]]:
         response = httpx.get(f"{self.base_url}/kbs", headers=self._headers(), timeout=10.0)
         self._raise(response)
