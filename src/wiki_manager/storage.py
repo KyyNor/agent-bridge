@@ -149,6 +149,24 @@ class SQLiteStore:
             row = conn.execute("SELECT * FROM knowledge_bases WHERE slug = ?", (slug,)).fetchone()
             return _row_to_dict(row)
 
+    def ensure_backend_target(self, kb_id: int, slug: str, backend_type: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO backend_targets (kb_id, slug, backend_type)
+                VALUES (?, ?, ?)
+                ON CONFLICT(kb_id, slug) DO NOTHING
+                """,
+                (kb_id, slug, backend_type),
+            )
+
+    def list_kbs(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM knowledge_bases WHERE status = 'active' ORDER BY slug",
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def list_kbs_for_user(self, linux_user: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -161,6 +179,33 @@ class SQLiteStore:
                 """,
                 (linux_user,),
             ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_kbs_for_user_or_admin(self, linux_user: str, admins: set[str]) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            if linux_user in admins:
+                rows = conn.execute(
+                    """
+                    SELECT kb.*, member.role AS role
+                    FROM knowledge_bases kb
+                    LEFT JOIN knowledge_base_members member
+                      ON member.kb_id = kb.id AND member.linux_user = ?
+                    WHERE kb.status = 'active'
+                    ORDER BY kb.slug
+                    """,
+                    (linux_user,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT kb.*, member.role AS role
+                    FROM knowledge_bases kb
+                    JOIN knowledge_base_members member ON member.kb_id = kb.id
+                    WHERE member.linux_user = ? AND kb.status = 'active'
+                    ORDER BY kb.slug
+                    """,
+                    (linux_user,),
+                ).fetchall()
             return [dict(row) for row in rows]
 
     def grant_member(self, kb_id: int, linux_user: str, role: KbRole) -> None:
@@ -226,6 +271,43 @@ class SQLiteStore:
                   deleted_at = NULL
                 """,
                 (doc_id, kb_id, added_by),
+            )
+
+    def get_document_kbs(self, doc_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT kb.*, dk.status AS document_kb_status
+                FROM document_kbs dk
+                JOIN knowledge_bases kb ON kb.id = dk.kb_id
+                WHERE dk.doc_id = ?
+                ORDER BY kb.slug
+                """,
+                (doc_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_versions(self, doc_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM document_versions WHERE doc_id = ? ORDER BY version_no",
+                (doc_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def next_version_no(self, doc_id: int) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version_no), 0) + 1 AS version_no FROM document_versions WHERE doc_id = ?",
+                (doc_id,),
+            ).fetchone()
+            return int(row["version_no"])
+
+    def set_current_version(self, doc_id: int, version_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE documents SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (version_id, doc_id),
             )
 
     def create_document_version(

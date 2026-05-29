@@ -1,1 +1,198 @@
 """Application services for wiki-manager."""
+
+from __future__ import annotations
+
+import mimetypes
+from pathlib import Path
+from typing import Any
+
+from wiki_manager.archive import ArchiveStorage
+from wiki_manager.config import WikiManagerPaths, ensure_directories
+from wiki_manager.domain import (
+    AccessDenied,
+    KbRole,
+    NotFound,
+    Operation,
+    ValidationError,
+    can_manage_kb,
+    can_write_own_doc,
+    require_admin_user,
+)
+from wiki_manager.slug import make_slug, unique_slug
+from wiki_manager.storage import SQLiteStore
+
+
+ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md"}
+
+
+class WikiManagerService:
+    def __init__(self, paths: WikiManagerPaths, store: SQLiteStore, archive: ArchiveStorage, admins: set[str]) -> None:
+        self.paths = paths
+        self.store = store
+        self.archive = archive
+        self.admins = admins
+
+    @classmethod
+    def create(cls, paths: WikiManagerPaths, admins: set[str]) -> "WikiManagerService":
+        return cls(
+            paths=paths,
+            store=SQLiteStore(paths.db_path),
+            archive=ArchiveStorage(paths.archive_dir),
+            admins=admins,
+        )
+
+    def init_system(self) -> None:
+        ensure_directories(self.paths)
+        self.store.init_schema()
+
+    def create_kb(self, actor: str, slug: str, name: str, description: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        kb = self.store.create_kb(slug=slug, name=name, description=description, created_by=actor)
+        self.store.grant_member(kb["id"], actor, KbRole.admin)
+        self.store.ensure_backend_target(kb["id"], slug="mock", backend_type="mock")
+        return kb
+
+    def grant_kb_member(self, actor: str, kb_slug: str, linux_user: str, role: KbRole) -> dict[str, str]:
+        kb = self.store.get_kb_by_slug(kb_slug)
+        if kb is None:
+            raise NotFound("knowledge base not found")
+        if actor not in self.admins and not can_manage_kb(self.store.get_member_role(kb["id"], actor)):
+            raise AccessDenied("knowledge base admin permission required")
+        self.store.grant_member(kb["id"], linux_user, role)
+        return {"kb_slug": kb_slug, "linux_user": linux_user, "role": role.value}
+
+    def list_kbs(self, actor: str) -> list[dict[str, Any]]:
+        kbs = self.store.list_kbs_for_user_or_admin(actor, self.admins)
+        if actor in self.admins:
+            for kb in kbs:
+                kb["role"] = kb["role"] or KbRole.admin.value
+        return kbs
+
+    def add_document(self, actor: str, source: Path, kb_slugs: list[str], later: bool) -> dict[str, Any]:
+        del later
+        if not kb_slugs:
+            raise ValidationError("at least one knowledge base is required")
+        self._validate_source(source)
+        kbs = [self._require_kb_visible(actor, kb_slug) for kb_slug in kb_slugs]
+        for kb in kbs:
+            self._require_kb_write(actor, kb)
+
+        slug = unique_slug(make_slug(source.name), self.store.list_document_slugs())
+        archived = self.archive.store(source)
+        doc = self.store.create_document(slug=slug, title=source.stem, owner_user=actor)
+        version = self.store.create_document_version(
+            doc_id=doc["id"],
+            original_filename=source.name,
+            content_hash=archived.content_hash,
+            file_size=archived.file_size,
+            mime_type=self._mime_type(source),
+            archive_path=str(archived.archive_path),
+            created_by=actor,
+        )
+        for kb in kbs:
+            self.store.attach_document_to_kb(doc["id"], kb["id"], actor)
+            self.store.create_sync_job(doc["id"], kb["id"], Operation.create, version["id"])
+
+        doc["current_version_no"] = version["version_no"]
+        doc["kb_slugs"] = [kb["slug"] for kb in kbs]
+        return doc
+
+    def update_document(self, actor: str, doc_slug: str, source: Path, later: bool) -> dict[str, Any]:
+        del later
+        doc = self._require_doc_edit(actor, doc_slug)
+        self._validate_source(source)
+        kbs = self.store.get_document_kbs(doc["id"])
+        archived = self.archive.store(source)
+        version = self.store.create_document_version(
+            doc_id=doc["id"],
+            original_filename=source.name,
+            content_hash=archived.content_hash,
+            file_size=archived.file_size,
+            mime_type=self._mime_type(source),
+            archive_path=str(archived.archive_path),
+            created_by=actor,
+        )
+        for kb in kbs:
+            self.store.create_sync_job(doc["id"], kb["id"], Operation.update, version["id"])
+        doc["current_version_no"] = version["version_no"]
+        return doc
+
+    def list_docs(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
+        kb = self._require_kb_visible(actor, kb_slug)
+        return self.store.list_docs_for_kb(kb["id"])
+
+    def get_doc(self, actor: str, doc_slug: str) -> dict[str, Any]:
+        doc = self._require_doc_visible(actor, doc_slug)
+        kbs = self.store.get_document_kbs(doc["id"])
+        versions = self.store.list_versions(doc["id"])
+        doc["kbs"] = kbs
+        doc["versions"] = versions
+        doc["kb_slugs"] = [kb["slug"] for kb in kbs]
+        return doc
+
+    def delete_document(self, actor: str, doc_slug: str) -> dict[str, str]:
+        doc = self._require_doc_edit(actor, doc_slug)
+        kbs = self.store.get_document_kbs(doc["id"])
+        for kb in kbs:
+            self.store.create_sync_job(doc["id"], kb["id"], Operation.delete, doc["current_version_id"])
+        self.store.soft_delete_document(doc["id"])
+        return {"slug": doc_slug, "status": "deleted"}
+
+    def purge_document(self, actor: str, doc_slug: str) -> dict[str, str]:
+        doc = self._require_doc_edit(actor, doc_slug, include_deleted=True)
+        archive_paths = self.store.purge_document(doc["id"])
+        for archive_path in archive_paths:
+            self.archive.remove(Path(archive_path))
+        return {"slug": doc_slug, "status": "purged"}
+
+    def _require_kb_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
+        kb = self.store.get_kb_by_slug(kb_slug)
+        if kb is None:
+            raise NotFound("knowledge base not found")
+        if actor in self.admins:
+            return kb
+        if self.store.get_member_role(kb["id"], actor) is None:
+            raise NotFound("knowledge base not found")
+        return kb
+
+    def _require_kb_write(self, actor: str, kb: dict[str, Any]) -> KbRole:
+        if actor in self.admins:
+            return KbRole.admin
+        role = self.store.get_member_role(kb["id"], actor)
+        if not can_write_own_doc(role):
+            raise AccessDenied("contributor permission required")
+        return role
+
+    def _validate_source(self, source: Path) -> None:
+        if not source.is_file():
+            raise ValidationError("source file does not exist")
+        if source.suffix.lower() not in ALLOWED_EXTENSIONS:
+            raise ValidationError("unsupported file type")
+
+    def _require_doc_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:
+        doc = self.store.get_document_by_slug(doc_slug)
+        if doc is None:
+            raise NotFound("document not found")
+        if actor in self.admins or self._actor_can_access_doc(actor, doc):
+            return doc
+        raise NotFound("document not found")
+
+    def _require_doc_edit(self, actor: str, doc_slug: str, include_deleted: bool = False) -> dict[str, Any]:
+        doc = self.store.get_document_by_slug(doc_slug, include_deleted=include_deleted)
+        if doc is None:
+            raise NotFound("document not found")
+        if actor in self.admins or doc["owner_user"] == actor or self._actor_admin_for_document(actor, doc):
+            return doc
+        raise AccessDenied("document owner or knowledge base admin permission required")
+
+    def _actor_can_access_doc(self, actor: str, doc: dict[str, Any]) -> bool:
+        return any(self.store.get_member_role(kb["id"], actor) is not None for kb in self.store.get_document_kbs(doc["id"]))
+
+    def _actor_admin_for_document(self, actor: str, doc: dict[str, Any]) -> bool:
+        return any(
+            can_manage_kb(self.store.get_member_role(kb["id"], actor)) for kb in self.store.get_document_kbs(doc["id"])
+        )
+
+    @staticmethod
+    def _mime_type(source: Path) -> str:
+        return mimetypes.guess_type(source.name)[0] or "application/octet-stream"
