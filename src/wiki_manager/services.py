@@ -144,13 +144,14 @@ class WikiManagerService:
         doc["kb_slugs"] = [kb["slug"] for kb in kbs]
         return doc
 
-    def delete_document(self, actor: str, doc_slug: str) -> dict[str, str]:
+    def delete_document(self, actor: str, doc_slug: str, later: bool = True) -> dict[str, str]:
         doc = self._require_doc_edit(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"])
         for kb in kbs:
             self.store.create_sync_job(doc["id"], kb["id"], Operation.delete, doc["current_version_id"])
         self.store.soft_delete_document(doc["id"])
-        self.sync(actor=actor, all_users=False)
+        if not later:
+            self.sync(actor=actor, all_users=False)
         return {"slug": doc_slug, "status": "deleted"}
 
     def sync(self, actor: str, all_users: bool) -> dict[str, int]:

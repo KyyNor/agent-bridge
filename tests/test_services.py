@@ -128,13 +128,37 @@ def test_sync_processes_later_job(wm_paths, tmp_path: Path) -> None:
 def test_delete_creates_delete_job_and_sync_marks_deleted(wm_paths, tmp_path: Path) -> None:
     service = WikiManagerService.create(wm_paths, admins={"root"})
     service.init_system()
-    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
     doc = service.add_document("alice", source, ["frontend-docs"], later=False)
     service.delete_document("alice", doc["slug"])
+
+    before = service.status(actor="alice")
+    assert before["jobs"][-1]["operation"] == "delete"
+    assert before["jobs"][-1]["status"] == "pending"
+
     service.sync(actor="alice", all_users=False)
+
+    after = service.status(actor="alice")
+    assert after["jobs"][-1]["status"] == "succeeded"
+    sync_state = service.store.get_sync_state(doc["id"], kb["id"], backend_slug="mock")
+    assert sync_state is not None
+    assert sync_state["status"] == "deleted"
+
+
+def test_delete_with_later_false_syncs_immediately(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
+
+    service.delete_document("alice", doc["slug"], later=False)
+
     status = service.status(actor="alice")
     assert status["jobs"][-1]["operation"] == "delete"
     assert status["jobs"][-1]["status"] == "succeeded"

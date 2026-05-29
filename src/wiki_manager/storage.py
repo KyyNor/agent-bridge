@@ -466,6 +466,18 @@ class SQLiteStore:
                 (doc_id, kb_id, backend_slug, backend_doc_id, status.value),
             )
 
+    def get_sync_state(self, doc_id: int, kb_id: int, backend_slug: str = "mock") -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM sync_states
+                WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                """,
+                (doc_id, kb_id, backend_slug),
+            ).fetchone()
+            return _row_to_dict(row)
+
     def list_docs_for_kb(self, kb_id: int) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
