@@ -86,7 +86,14 @@ class WikiManagerService:
             raise AccessDenied("knowledge base admin permission required")
         return self.store.list_members(kb["id"])
 
-    def add_document(self, actor: str, source: Path, kb_slugs: list[str], later: bool) -> dict[str, Any]:
+    def add_document(
+        self,
+        actor: str,
+        source: Path,
+        kb_slugs: list[str],
+        later: bool,
+        original_filename: str | None = None,
+    ) -> dict[str, Any]:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
         self._validate_source(source)
@@ -94,15 +101,16 @@ class WikiManagerService:
         for kb in kbs:
             self._require_kb_write(actor, kb)
 
-        slug = unique_slug(make_slug(source.name), self.store.list_document_slugs())
+        display_name = original_filename or source.name
+        slug = unique_slug(make_slug(display_name), self.store.list_document_slugs())
         archived = self.archive.store(source)
-        doc = self.store.create_document(slug=slug, title=source.stem, owner_user=actor)
+        doc = self.store.create_document(slug=slug, title=Path(display_name).stem, owner_user=actor)
         version = self.store.create_document_version(
             doc_id=doc["id"],
-            original_filename=source.name,
+            original_filename=display_name,
             content_hash=archived.content_hash,
             file_size=archived.file_size,
-            mime_type=self._mime_type(source),
+            mime_type=self._mime_type(display_name),
             archive_path=str(archived.archive_path),
             created_by=actor,
         )
@@ -116,17 +124,25 @@ class WikiManagerService:
             self.sync(actor=actor, all_users=False)
         return doc
 
-    def update_document(self, actor: str, doc_slug: str, source: Path, later: bool) -> dict[str, Any]:
+    def update_document(
+        self,
+        actor: str,
+        doc_slug: str,
+        source: Path,
+        later: bool,
+        original_filename: str | None = None,
+    ) -> dict[str, Any]:
         doc = self._require_doc_edit(actor, doc_slug)
         self._validate_source(source)
         kbs = self.store.get_document_kbs(doc["id"])
+        display_name = original_filename or source.name
         archived = self.archive.store(source)
         version = self.store.create_document_version(
             doc_id=doc["id"],
-            original_filename=source.name,
+            original_filename=display_name,
             content_hash=archived.content_hash,
             file_size=archived.file_size,
-            mime_type=self._mime_type(source),
+            mime_type=self._mime_type(display_name),
             archive_path=str(archived.archive_path),
             created_by=actor,
         )
@@ -262,5 +278,5 @@ class WikiManagerService:
         )
 
     @staticmethod
-    def _mime_type(source: Path) -> str:
-        return mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    def _mime_type(filename: str) -> str:
+        return mimetypes.guess_type(filename)[0] or "application/octet-stream"

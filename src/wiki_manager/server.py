@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
+from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -41,6 +43,23 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         except WikiManagerError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
+    def save_upload(file: UploadFile) -> Path:
+        resolved_paths.run_dir.mkdir(parents=True, exist_ok=True)
+        suffix = Path(upload_filename(file)).suffix
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, dir=resolved_paths.run_dir, suffix=suffix) as output:
+                tmp_path = Path(output.name)
+                shutil.copyfileobj(file.file, output)
+            return tmp_path
+        except Exception:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+            raise
+
+    def upload_filename(file: UploadFile) -> str:
+        return Path((file.filename or "upload").replace("\\", "/")).name or "upload"
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -76,18 +95,19 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         kb: list[str] = Form(),
         later: bool = Form(False),
     ) -> dict[str, Any]:
-        filename = file.filename or "upload"
-        resolved_paths.run_dir.mkdir(parents=True, exist_ok=True)
-        upload_dir = resolved_paths.run_dir / f"upload-{current_actor}-{filename}"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        upload_path = upload_dir / filename
+        upload_path = save_upload(file)
         try:
-            with upload_path.open("wb") as output:
-                shutil.copyfileobj(file.file, output)
-            return call_safely(lambda: service.add_document(current_actor, upload_path, kb, later))
+            return call_safely(
+                lambda: service.add_document(
+                    current_actor,
+                    upload_path,
+                    kb,
+                    later,
+                    original_filename=upload_filename(file),
+                )
+            )
         finally:
             upload_path.unlink(missing_ok=True)
-            upload_dir.rmdir()
 
     @app.get("/docs")
     def list_docs(kb: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
@@ -104,18 +124,19 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         file: UploadFile = File(),
         later: bool = Form(False),
     ) -> dict[str, Any]:
-        filename = file.filename or "upload"
-        resolved_paths.run_dir.mkdir(parents=True, exist_ok=True)
-        upload_dir = resolved_paths.run_dir / f"upload-{current_actor}-{filename}"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        upload_path = upload_dir / filename
+        upload_path = save_upload(file)
         try:
-            with upload_path.open("wb") as output:
-                shutil.copyfileobj(file.file, output)
-            return call_safely(lambda: service.update_document(current_actor, doc_slug, upload_path, later))
+            return call_safely(
+                lambda: service.update_document(
+                    current_actor,
+                    doc_slug,
+                    upload_path,
+                    later,
+                    original_filename=upload_filename(file),
+                )
+            )
         finally:
             upload_path.unlink(missing_ok=True)
-            upload_dir.rmdir()
 
     @app.post("/docs/{doc_slug}/delete")
     def delete_document(doc_slug: str, current_actor: str = Depends(actor)) -> dict[str, str]:
