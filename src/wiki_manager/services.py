@@ -183,6 +183,8 @@ class WikiManagerService:
             raise NotFound("document not found")
         if actor in self.admins or doc["owner_user"] == actor or self._actor_admin_for_document(actor, doc):
             return doc
+        if not self._actor_can_access_doc(actor, doc):
+            raise NotFound("document not found")
         raise AccessDenied("document owner or knowledge base admin permission required")
 
     def _actor_can_access_doc(self, actor: str, doc: dict[str, Any]) -> bool:

@@ -68,6 +68,25 @@ def test_viewer_cannot_add_document(wm_paths, tmp_path: Path) -> None:
         service.add_document("bob", source, ["frontend-docs"], later=True)
 
 
+def test_invisible_document_edits_return_not_found(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    v1 = tmp_path / "Guide.pdf"
+    v2 = tmp_path / "Guide-v2.pdf"
+    v1.write_bytes(b"one")
+    v2.write_bytes(b"two")
+    doc = service.add_document("alice", v1, ["frontend-docs"], later=True)
+
+    with pytest.raises(NotFound, match="document not found"):
+        service.update_document("bob", doc["slug"], v2, later=True)
+    with pytest.raises(NotFound, match="document not found"):
+        service.delete_document("bob", doc["slug"])
+    with pytest.raises(NotFound, match="document not found"):
+        service.purge_document("bob", doc["slug"])
+
+
 def test_invisible_kb_returns_not_found(wm_paths) -> None:
     service = WikiManagerService.create(wm_paths, admins={"root"})
     service.init_system()
