@@ -47,6 +47,14 @@ def _run_client(call: Callable[[WikiManagerClient], T]) -> T:
         raise typer.Exit(1) from None
 
 
+def _run_server_action(call: Callable[[], T]) -> T:
+    try:
+        return call()
+    except (OSError, ValueError, RuntimeError) as exc:
+        typer.echo(f"server error: {exc}", err=True)
+        raise typer.Exit(1) from None
+
+
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
     parts = [f"{key}: {data[key]}" for key in keys if key in data]
     typer.echo(", ".join(parts) if parts else data)
@@ -100,19 +108,19 @@ def grant_member(
 
 @server_app.command("start")
 def server_start() -> None:
-    status = start_server()
+    status = _run_server_action(start_server)
     typer.echo(f"running: {status['running']} pid: {status['pid']}")
 
 
 @server_app.command("stop")
 def server_stop() -> None:
-    result = stop_server()
+    result = _run_server_action(stop_server)
     typer.echo(f"stopped: {result['stopped']} pid: {result['pid']}")
 
 
 @server_app.command("status")
 def server_status_cmd() -> None:
-    status = server_status()
+    status = _run_server_action(server_status)
     typer.echo(f"running: {status['running']} pid: {status['pid']}")
 
 

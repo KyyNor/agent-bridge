@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -11,11 +12,21 @@ import httpx
 from wiki_manager.config import WikiManagerPaths, load_server_config
 
 
+def _read_pid(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    raw_pid = path.read_text(encoding="utf-8").strip()
+    try:
+        return int(raw_pid)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid pid file: {path}") from exc
+
+
 def server_status(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
     resolved = paths or WikiManagerPaths.from_root()
-    if not resolved.server_pid_path.exists():
+    pid = _read_pid(resolved.server_pid_path)
+    if pid is None:
         return {"running": False, "pid": None}
-    pid = int(resolved.server_pid_path.read_text(encoding="utf-8").strip())
     config = load_server_config(resolved)
     try:
         response = httpx.get(f"http://{config.host}:{config.port}/health", timeout=2)
@@ -30,32 +41,32 @@ def start_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
     if status["running"]:
         return status
     config = load_server_config(resolved)
-    log = resolved.server_log_path.open("ab")
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "wiki_manager.server:create_app",
-            "--factory",
-            "--host",
-            config.host,
-            "--port",
-            str(config.port),
-        ],
-        stdout=log,
-        stderr=log,
-        start_new_session=True,
-    )
+    with resolved.server_log_path.open("ab") as log:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "wiki_manager.server:create_app",
+                "--factory",
+                "--host",
+                config.host,
+                "--port",
+                str(config.port),
+            ],
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
     resolved.server_pid_path.write_text(str(process.pid), encoding="utf-8")
     return {"running": True, "pid": process.pid}
 
 
 def stop_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
     resolved = paths or WikiManagerPaths.from_root()
-    if not resolved.server_pid_path.exists():
+    pid = _read_pid(resolved.server_pid_path)
+    if pid is None:
         return {"stopped": True, "pid": None}
-    pid = int(resolved.server_pid_path.read_text(encoding="utf-8").strip())
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:

@@ -82,3 +82,16 @@ def test_server_status_command(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "running" in result.stdout
     assert "123" in result.stdout
+
+
+def test_server_start_reports_errors_cleanly(monkeypatch) -> None:
+    def fail_start():
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("wiki_manager.cli.start_server", fail_start)
+    result = runner.invoke(app, ["server", "start"])
+    output = f"{result.stdout}{result.stderr}"
+    assert result.exit_code == 1
+    assert "server error" in result.stderr
+    assert "permission denied" in result.stderr
+    assert "Traceback" not in output
