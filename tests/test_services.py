@@ -93,3 +93,48 @@ def test_invisible_kb_returns_not_found(wm_paths) -> None:
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     with pytest.raises(NotFound):
         service.list_docs(actor="alice", kb_slug="frontend-docs")
+
+
+def test_immediate_add_syncs_to_mock_backend(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    service.add_document("alice", source, ["frontend-docs"], later=False)
+    status = service.status(actor="alice")
+    assert status["jobs"][0]["status"] == "succeeded"
+    docs = service.list_docs(actor="alice", kb_slug="frontend-docs")
+    assert docs[0]["sync_status"] == "synced"
+
+
+def test_sync_processes_later_job(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    service.add_document("alice", source, ["frontend-docs"], later=True)
+    before = service.status(actor="alice")
+    assert before["jobs"][0]["status"] == "pending"
+    result = service.sync(actor="alice", all_users=False)
+    assert result["processed"] == 1
+    after = service.status(actor="alice")
+    assert after["jobs"][0]["status"] == "succeeded"
+
+
+def test_delete_creates_delete_job_and_sync_marks_deleted(wm_paths, tmp_path: Path) -> None:
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
+    service.delete_document("alice", doc["slug"])
+    service.sync(actor="alice", all_users=False)
+    status = service.status(actor="alice")
+    assert status["jobs"][-1]["operation"] == "delete"
+    assert status["jobs"][-1]["status"] == "succeeded"

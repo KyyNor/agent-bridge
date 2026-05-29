@@ -374,6 +374,66 @@ class SQLiteStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def list_runnable_jobs(self, actor: str | None) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT
+                  job.id,
+                  job.doc_id,
+                  job.kb_id,
+                  job.backend_slug,
+                  job.operation,
+                  d.slug AS doc_slug,
+                  kb.slug AS kb_slug,
+                  v.version_no AS version_no,
+                  v.archive_path AS archive_path
+                FROM sync_jobs job
+                JOIN documents d ON d.id = job.doc_id
+                JOIN knowledge_bases kb ON kb.id = job.kb_id
+                LEFT JOIN document_versions v ON v.id = job.version_id
+                LEFT JOIN knowledge_base_members member
+                  ON member.kb_id = kb.id AND member.linux_user = ?
+                WHERE job.status IN (?, ?)
+                  AND (
+                    ? IS NULL
+                    OR d.owner_user = ?
+                    OR member.role IN (?, ?)
+                  )
+                ORDER BY job.created_at, job.id
+                """,
+                (
+                    actor,
+                    SyncJobStatus.pending.value,
+                    SyncJobStatus.failed.value,
+                    actor,
+                    actor,
+                    KbRole.contributor.value,
+                    KbRole.admin.value,
+                ),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_all_jobs(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  job.*,
+                  d.slug AS doc_slug,
+                  d.title AS doc_title,
+                  kb.slug AS kb_slug,
+                  kb.name AS kb_name,
+                  v.version_no AS version_no
+                FROM sync_jobs job
+                JOIN documents d ON d.id = job.doc_id
+                JOIN knowledge_bases kb ON kb.id = job.kb_id
+                LEFT JOIN document_versions v ON v.id = job.version_id
+                ORDER BY job.created_at, job.id
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def update_job_status(self, job_id: int, status: SyncJobStatus, error: str | None = None) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -449,7 +509,7 @@ class SQLiteStore:
                 LEFT JOIN document_versions v ON v.id = job.version_id
                 WHERE member.linux_user = ? OR d.owner_user = ?
                 GROUP BY job.id
-                ORDER BY job.created_at DESC, job.id DESC
+                ORDER BY job.created_at, job.id
                 """,
                 (linux_user, linux_user),
             ).fetchall()

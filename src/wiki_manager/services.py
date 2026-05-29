@@ -13,11 +13,14 @@ from wiki_manager.domain import (
     KbRole,
     NotFound,
     Operation,
+    SyncJobStatus,
+    SyncStateStatus,
     ValidationError,
     can_manage_kb,
     can_write_own_doc,
     require_admin_user,
 )
+from wiki_manager.mock_backend import MockBackend
 from wiki_manager.slug import make_slug, unique_slug
 from wiki_manager.storage import SQLiteStore
 
@@ -26,10 +29,18 @@ ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
 
 
 class WikiManagerService:
-    def __init__(self, paths: WikiManagerPaths, store: SQLiteStore, archive: ArchiveStorage, admins: set[str]) -> None:
+    def __init__(
+        self,
+        paths: WikiManagerPaths,
+        store: SQLiteStore,
+        archive: ArchiveStorage,
+        mock_backend: MockBackend,
+        admins: set[str],
+    ) -> None:
         self.paths = paths
         self.store = store
         self.archive = archive
+        self.mock_backend = mock_backend
         self.admins = admins
 
     @classmethod
@@ -38,6 +49,7 @@ class WikiManagerService:
             paths=paths,
             store=SQLiteStore(paths.db_path),
             archive=ArchiveStorage(paths.archive_dir),
+            mock_backend=MockBackend(paths.mock_backend_dir),
             admins=admins,
         )
 
@@ -69,7 +81,6 @@ class WikiManagerService:
         return kbs
 
     def add_document(self, actor: str, source: Path, kb_slugs: list[str], later: bool) -> dict[str, Any]:
-        del later
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
         self._validate_source(source)
@@ -95,10 +106,11 @@ class WikiManagerService:
 
         doc["current_version_no"] = version["version_no"]
         doc["kb_slugs"] = [kb["slug"] for kb in kbs]
+        if not later:
+            self.sync(actor=actor, all_users=False)
         return doc
 
     def update_document(self, actor: str, doc_slug: str, source: Path, later: bool) -> dict[str, Any]:
-        del later
         doc = self._require_doc_edit(actor, doc_slug)
         self._validate_source(source)
         kbs = self.store.get_document_kbs(doc["id"])
@@ -115,6 +127,8 @@ class WikiManagerService:
         for kb in kbs:
             self.store.create_sync_job(doc["id"], kb["id"], Operation.update, version["id"])
         doc["current_version_no"] = version["version_no"]
+        if not later:
+            self.sync(actor=actor, all_users=False)
         return doc
 
     def list_docs(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
@@ -136,7 +150,52 @@ class WikiManagerService:
         for kb in kbs:
             self.store.create_sync_job(doc["id"], kb["id"], Operation.delete, doc["current_version_id"])
         self.store.soft_delete_document(doc["id"])
+        self.sync(actor=actor, all_users=False)
         return {"slug": doc_slug, "status": "deleted"}
+
+    def sync(self, actor: str, all_users: bool) -> dict[str, int]:
+        if all_users:
+            require_admin_user(actor, self.admins)
+        jobs = self.store.list_runnable_jobs(actor=None if all_users or actor in self.admins else actor)
+        processed = 0
+        for job in jobs:
+            self._run_job(job)
+            processed += 1
+        return {"processed": processed}
+
+    def status(self, actor: str) -> dict[str, list[dict[str, Any]]]:
+        jobs = self.store.list_all_jobs() if actor in self.admins else self.store.list_jobs_for_user(actor)
+        return {"jobs": jobs}
+
+    def _run_job(self, job: dict[str, Any]) -> None:
+        self.store.update_job_status(job["id"], SyncJobStatus.running)
+        try:
+            if job["operation"] == "delete":
+                self.mock_backend.delete_document(job["kb_slug"], job["doc_slug"])
+                self.store.upsert_sync_state(
+                    job["doc_id"],
+                    job["kb_id"],
+                    job["backend_slug"],
+                    None,
+                    SyncStateStatus.deleted,
+                )
+            else:
+                backend_doc_id = self.mock_backend.upsert_document(
+                    kb_slug=job["kb_slug"],
+                    doc_slug=job["doc_slug"],
+                    version_no=job["version_no"],
+                    archive_path=job["archive_path"],
+                )
+                self.store.upsert_sync_state(
+                    job["doc_id"],
+                    job["kb_id"],
+                    job["backend_slug"],
+                    backend_doc_id,
+                    SyncStateStatus.synced,
+                )
+            self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
+        except Exception as exc:
+            self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
 
     def purge_document(self, actor: str, doc_slug: str) -> dict[str, str]:
         doc = self._require_doc_edit(actor, doc_slug, include_deleted=True)
