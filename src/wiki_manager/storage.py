@@ -188,7 +188,7 @@ class SQLiteStore:
 
     def list_document_slugs(self) -> set[str]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT slug FROM documents WHERE status != ?", (DocumentStatus.deleted.value,)).fetchall()
+            rows = conn.execute("SELECT slug FROM documents").fetchall()
             return {row["slug"] for row in rows}
 
     def create_document(self, slug: str, title: str, owner_user: str) -> dict[str, Any]:

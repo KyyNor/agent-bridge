@@ -67,3 +67,13 @@ def test_sqlite_store_document_version_and_jobs(wm_paths: WikiManagerPaths) -> N
     assert version["version_no"] == 1
     assert job["status"] == "pending"
     assert store.list_docs_for_kb(kb_id=kb["id"])[0]["slug"] == "guide"
+
+
+def test_sqlite_store_list_document_slugs_includes_soft_deleted(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    doc = store.create_document(slug="guide", title="Guide", owner_user="alice")
+
+    store.soft_delete_document(doc["id"])
+
+    assert "guide" in store.list_document_slugs()
