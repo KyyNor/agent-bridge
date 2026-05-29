@@ -231,6 +231,19 @@ class SQLiteStore:
                 return None
             return KbRole(row["role"])
 
+    def list_members(self, kb_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT linux_user, role, created_at, updated_at
+                FROM knowledge_base_members
+                WHERE kb_id = ?
+                ORDER BY linux_user
+                """,
+                (kb_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def list_document_slugs(self) -> set[str]:
         with self.connect() as conn:
             rows = conn.execute("SELECT slug FROM documents").fetchall()

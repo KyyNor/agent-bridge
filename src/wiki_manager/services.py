@@ -80,6 +80,12 @@ class WikiManagerService:
                 kb["role"] = kb["role"] or KbRole.admin.value
         return kbs
 
+    def list_kb_members(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
+        kb = self._require_kb_visible(actor, kb_slug)
+        if actor not in self.admins and not can_manage_kb(self.store.get_member_role(kb["id"], actor)):
+            raise AccessDenied("knowledge base admin permission required")
+        return self.store.list_members(kb["id"])
+
     def add_document(self, actor: str, source: Path, kb_slugs: list[str], later: bool) -> dict[str, Any]:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
