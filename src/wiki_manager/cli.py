@@ -8,6 +8,7 @@ import httpx
 import typer
 
 from wiki_manager.client import WikiManagerClient
+from wiki_manager.server_process import server_status, start_server, stop_server
 
 
 app = typer.Typer(
@@ -95,6 +96,24 @@ def grant_member(
     """Grant a user access to a knowledge base."""
     member = _run_client(lambda client: client.grant_member(kb_slug, linux_user, role))
     _echo_mapping(member, ("kb_slug", "linux_user", "role"))
+
+
+@server_app.command("start")
+def server_start() -> None:
+    status = start_server()
+    typer.echo(f"running: {status['running']} pid: {status['pid']}")
+
+
+@server_app.command("stop")
+def server_stop() -> None:
+    result = stop_server()
+    typer.echo(f"stopped: {result['stopped']} pid: {result['pid']}")
+
+
+@server_app.command("status")
+def server_status_cmd() -> None:
+    status = server_status()
+    typer.echo(f"running: {status['running']} pid: {status['pid']}")
 
 
 @app.command()

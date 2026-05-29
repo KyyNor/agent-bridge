@@ -74,3 +74,11 @@ def test_add_missing_file_reports_clean_cli_error() -> None:
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code != 0
     assert "Traceback" not in output
+
+
+def test_server_status_command(monkeypatch) -> None:
+    monkeypatch.setattr("wiki_manager.cli.server_status", lambda: {"running": True, "pid": 123})
+    result = runner.invoke(app, ["server", "status"])
+    assert result.exit_code == 0
+    assert "running" in result.stdout
+    assert "123" in result.stdout
