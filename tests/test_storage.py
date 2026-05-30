@@ -4,7 +4,7 @@ from pathlib import Path
 
 from wiki_manager.archive import ArchiveStorage
 from wiki_manager.config import ServerConfig, WikiManagerPaths, ensure_directories, load_server_config
-from wiki_manager.domain import KbRole, Operation
+from wiki_manager.domain import KbRole, Operation, SyncStateStatus
 from wiki_manager.storage import SQLiteStore
 
 
@@ -133,3 +133,50 @@ def test_migration_is_idempotent(tmp_path: Path) -> None:
     store.init_schema()
     store.migrate_phase2()
     store.migrate_phase2()
+
+
+def test_list_backend_targets_for_kb(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    kb = store.create_kb("test-kb", "Test", "", "root")
+    store.ensure_backend_target(kb["id"], slug="mock", backend_type="mock")
+    store.ensure_backend_target(kb["id"], slug="ragflow", backend_type="ragflow")
+    targets = store.list_backend_targets(kb["id"])
+    assert len(targets) == 2
+    slugs = {t["slug"] for t in targets}
+    assert slugs == {"mock", "ragflow"}
+
+
+def test_set_backend_target_inactive(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    kb = store.create_kb("test-kb", "Test", "", "root")
+    store.ensure_backend_target(kb["id"], slug="mock", backend_type="mock")
+    store.set_backend_target_status(kb["id"], "mock", "inactive")
+    targets = store.list_backend_targets(kb["id"])
+    mock_target = next(t for t in targets if t["slug"] == "mock")
+    assert mock_target["status"] == "inactive"
+
+
+def test_list_sync_states_for_doc(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    kb = store.create_kb("test-kb", "Test", "", "root")
+    doc = store.create_document("test-doc", "Test Doc", "root")
+    store.attach_document_to_kb(doc["id"], kb["id"], "root")
+    store.upsert_sync_state(doc["id"], kb["id"], "mock", "mock:doc", SyncStateStatus.synced)
+    store.upsert_sync_state(doc["id"], kb["id"], "ragflow", "rf:doc", SyncStateStatus.synced)
+    states = store.list_sync_states_for_doc(doc["id"])
+    assert len(states) == 2
+    assert {s["backend_slug"] for s in states} == {"mock", "ragflow"}
+
+
+def test_update_backend_target_kb_id(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    kb = store.create_kb("test-kb", "Test", "", "root")
+    store.ensure_backend_target(kb["id"], slug="ragflow", backend_type="ragflow")
+    store.update_backend_target_kb_id(kb["id"], "ragflow", "rf-dataset-123")
+    targets = store.list_backend_targets(kb["id"])
+    ragflow_target = next(t for t in targets if t["slug"] == "ragflow")
+    assert ragflow_target["backend_kb_id"] == "rf-dataset-123"

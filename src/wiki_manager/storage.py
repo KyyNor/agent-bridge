@@ -182,6 +182,49 @@ class SQLiteStore:
                 (kb_id, slug, backend_type),
             )
 
+    def list_backend_targets(self, kb_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM backend_targets WHERE kb_id = ? ORDER BY slug",
+                (kb_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def set_backend_target_status(self, kb_id: int, slug: str, status: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE backend_targets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
+                (status, kb_id, slug),
+            )
+
+    def update_backend_target_kb_id(self, kb_id: int, slug: str, backend_kb_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE backend_targets SET backend_kb_id = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
+                (backend_kb_id, kb_id, slug),
+            )
+
+    def list_sync_states_for_doc(self, doc_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sync_states WHERE doc_id = ?",
+                (doc_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_synced_docs_for_target(self, kb_id: int, backend_slug: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT s.doc_id
+                FROM sync_states s
+                JOIN document_kbs dk ON dk.doc_id = s.doc_id AND dk.kb_id = s.kb_id
+                WHERE s.kb_id = ? AND s.backend_slug = ? AND s.status = ?
+                """,
+                (kb_id, backend_slug, SyncStateStatus.synced.value),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def list_kbs(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -386,14 +429,15 @@ class SQLiteStore:
         kb_id: int,
         operation: Operation,
         version_id: int | None,
+        backend_slug: str = "mock",
     ) -> dict[str, Any]:
         with self.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO sync_jobs (doc_id, kb_id, operation, version_id, status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sync_jobs (doc_id, kb_id, backend_slug, operation, version_id, status)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (doc_id, kb_id, operation.value, version_id, SyncJobStatus.pending.value),
+                (doc_id, kb_id, backend_slug, operation.value, version_id, SyncJobStatus.pending.value),
             )
             row = conn.execute("SELECT * FROM sync_jobs WHERE id = ?", (cursor.lastrowid,)).fetchone()
             job = _row_to_dict(row)
@@ -409,7 +453,7 @@ class SQLiteStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_runnable_jobs(self, actor: str | None) -> list[dict[str, Any]]:
+    def list_runnable_jobs(self, actor: str | None, backend_slug: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -435,6 +479,7 @@ class SQLiteStore:
                     OR d.owner_user = ?
                     OR member.role IN (?, ?)
                   )
+                  AND (job.backend_slug = ? OR ? IS NULL)
                 ORDER BY job.created_at, job.id
                 """,
                 (
@@ -445,11 +490,13 @@ class SQLiteStore:
                     actor,
                     KbRole.contributor.value,
                     KbRole.admin.value,
+                    backend_slug,
+                    backend_slug,
                 ),
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_all_jobs(self) -> list[dict[str, Any]]:
+    def list_all_jobs(self, backend_slug: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -464,8 +511,10 @@ class SQLiteStore:
                 JOIN documents d ON d.id = job.doc_id
                 JOIN knowledge_bases kb ON kb.id = job.kb_id
                 LEFT JOIN document_versions v ON v.id = job.version_id
+                WHERE (job.backend_slug = ? OR ? IS NULL)
                 ORDER BY job.created_at, job.id
-                """
+                """,
+                (backend_slug, backend_slug),
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -546,7 +595,7 @@ class SQLiteStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_jobs_for_user(self, linux_user: str) -> list[dict[str, Any]]:
+    def list_jobs_for_user(self, linux_user: str, backend_slug: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -562,11 +611,12 @@ class SQLiteStore:
                 JOIN knowledge_bases kb ON kb.id = job.kb_id
                 JOIN knowledge_base_members member ON member.kb_id = kb.id
                 LEFT JOIN document_versions v ON v.id = job.version_id
-                WHERE member.linux_user = ? OR d.owner_user = ?
+                WHERE (member.linux_user = ? OR d.owner_user = ?)
+                  AND (job.backend_slug = ? OR ? IS NULL)
                 GROUP BY job.id
                 ORDER BY job.created_at, job.id
                 """,
-                (linux_user, linux_user),
+                (linux_user, linux_user, backend_slug, backend_slug),
             ).fetchall()
             return [dict(row) for row in rows]
 
