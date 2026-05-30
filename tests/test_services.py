@@ -257,7 +257,7 @@ def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) 
     def fail_upsert(*args, **kwargs):
         raise RuntimeError("backend down")
 
-    monkeypatch.setattr(service.mock_backend, "upsert_document", fail_upsert)
+    monkeypatch.setattr(service.mock_backend, "upload", fail_upsert)
     service.sync("alice", all_users=False)
 
     status = service.status("alice")
@@ -280,7 +280,7 @@ def test_delete_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch
     def fail_delete(*args, **kwargs):
         raise RuntimeError("backend down")
 
-    monkeypatch.setattr(service.mock_backend, "delete_document", fail_delete)
+    monkeypatch.setattr(service.mock_backend, "delete", fail_delete)
     service.sync("alice", all_users=False)
 
     status = service.status("alice")

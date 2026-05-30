@@ -196,7 +196,10 @@ class WikiManagerService:
         self.store.update_job_status(job["id"], SyncJobStatus.running)
         try:
             if job["operation"] == "delete":
-                self.mock_backend.delete_document(job["kb_slug"], job["doc_slug"])
+                sync_state = self.store.get_sync_state(job["doc_id"], job["kb_id"], job["backend_slug"])
+                backend_doc_id = sync_state["backend_doc_id"] if sync_state else None
+                if backend_doc_id:
+                    self.mock_backend.delete(job["kb_slug"], backend_doc_id)
                 self.store.upsert_sync_state(
                     job["doc_id"],
                     job["kb_id"],
@@ -205,11 +208,11 @@ class WikiManagerService:
                     SyncStateStatus.deleted,
                 )
             else:
-                backend_doc_id = self.mock_backend.upsert_document(
-                    kb_slug=job["kb_slug"],
+                backend_doc_id = self.mock_backend.upload(
+                    backend_kb_id=job["kb_slug"],
                     doc_slug=job["doc_slug"],
-                    version_no=job["version_no"],
-                    archive_path=job["archive_path"],
+                    file_path=Path(job["archive_path"]),
+                    filename=job["doc_slug"],
                 )
                 self.store.upsert_sync_state(
                     job["doc_id"],

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from wiki_manager.domain import (
@@ -15,6 +18,7 @@ from wiki_manager.domain import (
     can_write_own_doc,
     require_admin_user,
 )
+from wiki_manager.mock_backend import MockBackend
 from wiki_manager.slug import make_slug, unique_slug
 
 
@@ -72,3 +76,40 @@ def test_backend_doc_status_defaults():
     status = BackendDocStatus(status="completed", chunk_count=5, progress=1.0, error_message=None)
     assert status.status == "completed"
     assert status.chunk_count == 5
+
+
+def test_mock_backend_create_kb_returns_slug():
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = MockBackend(Path(tmp))
+        kb_id = backend.create_kb("test-kb", "Test KB")
+        assert kb_id == "test-kb"
+
+
+def test_mock_backend_upload_returns_doc_id():
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = MockBackend(Path(tmp))
+        file_path = Path(tmp) / "test.pdf"
+        file_path.write_bytes(b"content")
+        doc_id = backend.upload("test-kb", "test-doc", file_path, "test.pdf")
+        assert doc_id == "test-kb:test-doc"
+
+
+def test_mock_backend_get_status_returns_completed():
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = MockBackend(Path(tmp))
+        file_path = Path(tmp) / "test.pdf"
+        file_path.write_bytes(b"content")
+        backend.upload("test-kb", "test-doc", file_path, "test.pdf")
+        status = backend.get_status("test-kb", "test-kb:test-doc")
+        assert status.status == "completed"
+        assert status.chunk_count == 1
+
+
+def test_mock_backend_delete_removes_document():
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = MockBackend(Path(tmp))
+        file_path = Path(tmp) / "test.pdf"
+        file_path.write_bytes(b"content")
+        doc_id = backend.upload("test-kb", "test-doc", file_path, "test.pdf")
+        backend.delete("test-kb", doc_id)
+        assert backend.get_status("test-kb", doc_id).status == "not_found"
