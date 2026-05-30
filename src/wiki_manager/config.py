@@ -46,6 +46,15 @@ class ServerConfig:
     admins: set[str]
 
 
+@dataclass(frozen=True)
+class BackendConfig:
+    slug: str
+    backend_type: str
+    base_url: str | None = None
+    api_key: str | None = None
+    timeout: int = 120
+
+
 def ensure_directories(paths: WikiManagerPaths) -> None:
     for directory in (
         paths.config_dir,
@@ -72,3 +81,24 @@ def load_server_config(paths: WikiManagerPaths) -> ServerConfig:
         port=int(raw.get("port", 8765)),
         admins=admins,
     )
+
+
+def load_backend_configs(paths: WikiManagerPaths) -> list[BackendConfig]:
+    if not paths.server_config_path.exists():
+        return []
+    raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
+    backends_raw = raw.get("backends", {})
+    if not backends_raw:
+        return []
+    result = []
+    for slug, section in backends_raw.items():
+        if "backend_type" not in section:
+            raise ValueError(f"backend '{slug}' missing required field: backend_type")
+        result.append(BackendConfig(
+            slug=slug,
+            backend_type=section["backend_type"],
+            base_url=section.get("base_url"),
+            api_key=section.get("api_key"),
+            timeout=int(section.get("timeout", 120)),
+        ))
+    return result
