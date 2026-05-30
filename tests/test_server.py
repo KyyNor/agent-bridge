@@ -207,3 +207,43 @@ def test_sync_with_backend_filter(wm_paths) -> None:
     client.post("/admin/init", headers={"X-Wiki-User": "root"})
     response = client.post("/sync", json={"all_users": False}, params={"backend": "mock"}, headers={"X-Wiki-User": "root"})
     assert response.status_code == 200
+
+
+def test_search_endpoint(wm_paths) -> None:
+    wm_paths.server_config_path.parent.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n[backends.mock]\nbackend_type = "mock"\n',
+        encoding="utf-8",
+    )
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post("/admin/init", headers={"X-Wiki-User": "root"})
+    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Wiki-User": "root"})
+    response = client.get("/search", params={"kb": "test-kb", "q": "hello"}, headers={"X-Wiki-User": "root"})
+    assert response.status_code == 200
+    data = response.json()
+    assert "results" in data
+
+
+def test_ask_endpoint(wm_paths) -> None:
+    wm_paths.server_config_path.parent.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n[backends.mock]\nbackend_type = "mock"\n',
+        encoding="utf-8",
+    )
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post("/admin/init", headers={"X-Wiki-User": "root"})
+    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Wiki-User": "root"})
+    response = client.post("/ask", json={"kb": "test-kb", "question": "what is X?"}, headers={"X-Wiki-User": "root"})
+    assert response.status_code == 200
+    data = response.json()
+    assert "answer" in data
+
+
+def test_search_missing_kb(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post("/admin/init", headers={"X-Wiki-User": "root"})
+    response = client.get("/search", params={"kb": "nonexistent", "q": "hello"}, headers={"X-Wiki-User": "root"})
+    assert response.status_code == 404

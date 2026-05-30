@@ -29,6 +29,13 @@ class SyncRequest(BaseModel):
     all_users: bool = False
 
 
+class AskRequest(BaseModel):
+    kb: str
+    question: str
+    backend: str | None = None
+    session_id: str | None = None
+
+
 class PurgeRequest(BaseModel):
     confirm: bool = False
 
@@ -182,5 +189,23 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
     @app.post("/sync")
     def sync(payload: SyncRequest, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, int]:
         return call_safely(lambda: service.sync(current_actor, all_users=payload.all_users, backend=backend))
+
+    @app.get("/search")
+    def search(q: str, kb: str, backend: str | None = None, top_k: int = 6, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        results = call_safely(
+            lambda: service.search(current_actor, kb, q, backend_slug=backend, top_k=top_k)
+        )
+        return {"results": [{"chunk_id": r.chunk_id, "content": r.content, "document_name": r.document_name, "similarity": r.similarity, "dataset_id": r.dataset_id} for r in results]}
+
+    @app.post("/ask")
+    def ask(payload: AskRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        result = call_safely(
+            lambda: service.ask(current_actor, payload.kb, payload.question, backend_slug=payload.backend, session_id=payload.session_id)
+        )
+        return {
+            "answer": result.answer,
+            "chunks": [{"chunk_id": c.chunk_id, "content": c.content, "document_name": c.document_name, "similarity": c.similarity, "dataset_id": c.dataset_id} for c in result.chunks],
+            "session_id": result.session_id,
+        }
 
     return app
