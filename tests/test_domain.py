@@ -4,6 +4,7 @@ import pytest
 
 from wiki_manager.domain import (
     AccessDenied,
+    BackendDocStatus,
     DocumentStatus,
     KbRole,
     Operation,
@@ -59,3 +60,15 @@ def test_operation_values_are_stable() -> None:
     assert Operation.create.value == "create"
     assert Operation.update.value == "update"
     assert Operation.delete.value == "delete"
+
+
+def test_backend_adapter_protocol_is_defined():
+    from wiki_manager.domain import BackendAdapter
+
+    assert BackendAdapter is not None
+
+
+def test_backend_doc_status_defaults():
+    status = BackendDocStatus(status="completed", chunk_count=5, progress=1.0, error_message=None)
+    assert status.status == "completed"
+    assert status.chunk_count == 5

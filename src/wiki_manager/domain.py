@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Protocol
 
 
 class WikiManagerError(Exception):
@@ -83,3 +85,19 @@ def can_manage_kb(role: KbRole | None) -> bool:
 def require_admin_user(linux_user: str, admins: set[str]) -> None:
     if linux_user not in admins:
         raise AccessDenied("global admin permission required")
+
+
+@dataclass(frozen=True)
+class BackendDocStatus:
+    status: str
+    chunk_count: int | None = None
+    progress: float | None = None
+    error_message: str | None = None
+
+
+class BackendAdapter(Protocol):
+    def create_kb(self, slug: str, name: str) -> str: ...
+    def delete_kb(self, backend_kb_id: str) -> None: ...
+    def upload(self, backend_kb_id: str, doc_slug: str, file_path: Path, filename: str) -> str: ...
+    def delete(self, backend_kb_id: str, backend_doc_id: str) -> None: ...
+    def get_status(self, backend_kb_id: str, backend_doc_id: str) -> BackendDocStatus: ...
