@@ -9,6 +9,7 @@ from wiki_manager.mock_backend import MockBackend
 
 ADAPTER_CLASSES: dict[str, type] = {
     "mock": MockBackend,
+    "ragflow": type("RagFlowBackend", (), {}),  # placeholder; real class used via lazy import
 }
 
 
@@ -21,12 +22,16 @@ class BackendRegistry:
                 raise ValueError(f"unknown backend type: {config.backend_type}")
             if config.backend_type == "mock":
                 self._adapters[slug] = adapter_cls(paths / "data" / "backend" / "mock")
-            else:
-                self._adapters[slug] = adapter_cls(
+            elif config.backend_type == "ragflow":
+                from wiki_manager.ragflow_backend import RagFlowBackend
+
+                self._adapters[slug] = RagFlowBackend(
                     base_url=config.base_url or "",
                     api_key=config.api_key or "",
                     timeout=config.timeout,
                 )
+            else:
+                self._adapters[slug] = adapter_cls()
 
     def get(self, slug: str) -> BackendAdapter | None:
         return self._adapters.get(slug)

@@ -5,6 +5,7 @@ description = "A Python CLI for managing wiki content."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "cryptography>=48.0.0",
     "fastapi>=0.124.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.20",
@@ -15,10 +16,16 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.0",
+    "respx>=0.23.1",
 ]
 
 [project.scripts]
 wiki = "wiki_manager.cli:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "ragflow: integration tests requiring a live RagFlow server",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12.0"]

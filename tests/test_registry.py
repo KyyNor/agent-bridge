@@ -6,6 +6,7 @@ import pytest
 
 from wiki_manager.config import BackendConfig, WikiManagerPaths
 from wiki_manager.mock_backend import MockBackend
+from wiki_manager.ragflow_backend import RagFlowBackend
 from wiki_manager.registry import BackendRegistry, create_registry
 
 
@@ -41,3 +42,17 @@ def test_registry_list_slugs(tmp_path: Path):
     }
     registry = BackendRegistry(configs, paths=tmp_path)
     assert registry.list_slugs() == ["mock"]
+
+
+def test_registry_with_ragflow_config(tmp_path: Path):
+    config = BackendConfig(
+        slug="ragflow",
+        backend_type="ragflow",
+        base_url="http://localhost:9380",
+        api_key="test-key",
+        timeout=30,
+    )
+    registry = BackendRegistry({"ragflow": config}, paths=tmp_path)
+    adapter = registry.get("ragflow")
+    assert adapter is not None
+    assert isinstance(adapter, RagFlowBackend)
