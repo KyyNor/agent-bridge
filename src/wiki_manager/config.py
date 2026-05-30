@@ -44,6 +44,7 @@ class ServerConfig:
     host: str
     port: int
     admins: set[str]
+    default_backend: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,24 @@ def load_server_config(paths: WikiManagerPaths) -> ServerConfig:
         host=str(raw.get("host", "127.0.0.1")),
         port=int(raw.get("port", 8765)),
         admins=admins,
+        default_backend=raw.get("default_backend"),
+    )
+
+
+@dataclass(frozen=True)
+class McpConfig:
+    enabled: bool = False
+    transport: str = "stdio"
+
+
+def load_mcp_config(paths: WikiManagerPaths) -> McpConfig:
+    if not paths.server_config_path.exists():
+        return McpConfig()
+    raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
+    mcp_section = raw.get("mcp", {})
+    return McpConfig(
+        enabled=bool(mcp_section.get("enabled", False)),
+        transport=str(mcp_section.get("transport", "stdio")),
     )
 
 

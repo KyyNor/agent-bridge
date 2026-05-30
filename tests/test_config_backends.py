@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.config import BackendConfig, WikiManagerPaths, load_backend_configs
+from wiki_manager.config import BackendConfig, WikiManagerPaths, load_backend_configs, load_server_config, load_mcp_config
 
 
 def _write_config(config_dir: Path, content: str) -> None:
@@ -56,3 +56,49 @@ def test_backend_config_missing_required_field(tmp_path: Path):
     ))
     with pytest.raises(ValueError, match="backend_type"):
         load_backend_configs(paths)
+
+
+def test_load_server_config_reads_default_backend(tmp_path):
+    config_path = tmp_path / "server.toml"
+    config_path.write_text(
+        'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\ndefault_backend = "ragflow"\n',
+        encoding="utf-8",
+    )
+    paths = WikiManagerPaths.from_root(tmp_path)
+    paths.config_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copy2(config_path, paths.server_config_path)
+
+    config = load_server_config(paths)
+    assert config.default_backend == "ragflow"
+
+
+def test_load_server_config_default_backend_none_when_missing(tmp_path):
+    paths = WikiManagerPaths.from_root(tmp_path)
+    config = load_server_config(paths)
+    assert config.default_backend is None
+
+
+def test_load_mcp_config_returns_defaults(tmp_path):
+    paths = WikiManagerPaths.from_root(tmp_path)
+    paths.config_dir.mkdir(parents=True, exist_ok=True)
+    # No [mcp] section in config
+    config = load_mcp_config(paths)
+    assert config.enabled is False
+    assert config.transport == "stdio"
+
+
+def test_load_mcp_config_reads_values(tmp_path):
+    config_path = tmp_path / "server.toml"
+    config_path.write_text(
+        'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n[mcp]\nenabled = true\ntransport = "sse"\n',
+        encoding="utf-8",
+    )
+    paths = WikiManagerPaths.from_root(tmp_path)
+    paths.config_dir.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copy2(config_path, paths.server_config_path)
+
+    config = load_mcp_config(paths)
+    assert config.enabled is True
+    assert config.transport == "sse"
