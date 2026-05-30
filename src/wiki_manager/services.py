@@ -21,6 +21,7 @@ from wiki_manager.domain import (
     require_admin_user,
 )
 from wiki_manager.mock_backend import MockBackend
+from wiki_manager.registry import BackendRegistry, create_registry
 from wiki_manager.slug import make_slug, unique_slug
 from wiki_manager.storage import SQLiteStore
 
@@ -42,16 +43,19 @@ class WikiManagerService:
         self.archive = archive
         self.mock_backend = mock_backend
         self.admins = admins
+        self.registry: BackendRegistry | None = None
 
     @classmethod
     def create(cls, paths: WikiManagerPaths, admins: set[str]) -> "WikiManagerService":
-        return cls(
+        service = cls(
             paths=paths,
             store=SQLiteStore(paths.db_path),
             archive=ArchiveStorage(paths.archive_dir),
             mock_backend=MockBackend(paths.mock_backend_dir),
             admins=admins,
         )
+        service.registry = create_registry(paths)
+        return service
 
     def init_system(self) -> None:
         ensure_directories(self.paths)
@@ -61,7 +65,16 @@ class WikiManagerService:
         require_admin_user(actor, self.admins)
         kb = self.store.create_kb(slug=slug, name=name, description=description, created_by=actor)
         self.store.grant_member(kb["id"], actor, KbRole.admin)
-        self.store.ensure_backend_target(kb["id"], slug="mock", backend_type="mock")
+        if self.registry:
+            for backend_slug in self.registry.list_slugs():
+                adapter = self.registry.get(backend_slug)
+                if adapter is not None:
+                    try:
+                        backend_kb_id = adapter.create_kb(slug, name)
+                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
+                        self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
+                    except Exception:
+                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
         return kb
 
     def grant_kb_member(self, actor: str, kb_slug: str, linux_user: str, role: KbRole) -> dict[str, str]:
@@ -116,7 +129,13 @@ class WikiManagerService:
         )
         for kb in kbs:
             self.store.attach_document_to_kb(doc["id"], kb["id"], actor)
-            self.store.create_sync_job(doc["id"], kb["id"], Operation.create, version["id"])
+            targets = self.store.list_backend_targets(kb["id"])
+            for target in targets:
+                if target["status"] == "active":
+                    self.store.create_sync_job(
+                        doc["id"], kb["id"], Operation.create, version["id"],
+                        backend_slug=target["slug"],
+                    )
 
         doc["current_version_no"] = version["version_no"]
         doc["kb_slugs"] = [kb["slug"] for kb in kbs]
@@ -147,17 +166,23 @@ class WikiManagerService:
             created_by=actor,
         )
         for kb in kbs:
-            self.store.create_sync_job(doc["id"], kb["id"], Operation.update, version["id"])
+            targets = self.store.list_backend_targets(kb["id"])
+            for target in targets:
+                if target["status"] == "active":
+                    self.store.create_sync_job(
+                        doc["id"], kb["id"], Operation.update, version["id"],
+                        backend_slug=target["slug"],
+                    )
         doc["current_version_no"] = version["version_no"]
         if not later:
             self.sync(actor=actor, all_users=False)
         return doc
 
-    def list_docs(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
+    def list_docs(self, actor: str, kb_slug: str, backend: str | None = None) -> list[dict[str, Any]]:
         kb = self._require_kb_visible(actor, kb_slug)
         return self.store.list_docs_for_kb(kb["id"])
 
-    def get_doc(self, actor: str, doc_slug: str) -> dict[str, Any]:
+    def get_doc(self, actor: str, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
         doc = self._require_doc_visible(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"])
         versions = self.store.list_versions(doc["id"])
@@ -166,40 +191,59 @@ class WikiManagerService:
         doc["kbs"] = kbs
         doc["versions"] = versions
         doc["kb_slugs"] = [kb["slug"] for kb in kbs]
+        sync_states = self.store.list_sync_states_for_doc(doc["id"])
+        if backend:
+            sync_states = [s for s in sync_states if s["backend_slug"] == backend]
+        doc["sync_states"] = sync_states
         return doc
 
     def delete_document(self, actor: str, doc_slug: str, later: bool = True) -> dict[str, str]:
         doc = self._require_doc_edit(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"])
         for kb in kbs:
-            self.store.create_sync_job(doc["id"], kb["id"], Operation.delete, doc["current_version_id"])
+            targets = self.store.list_backend_targets(kb["id"])
+            for target in targets:
+                if target["status"] == "active":
+                    self.store.create_sync_job(
+                        doc["id"], kb["id"], Operation.delete, doc["current_version_id"],
+                        backend_slug=target["slug"],
+                    )
         self.store.soft_delete_document(doc["id"])
         if not later:
             self.sync(actor=actor, all_users=False)
         return {"slug": doc_slug, "status": "deleted"}
 
-    def sync(self, actor: str, all_users: bool) -> dict[str, int]:
+    def sync(self, actor: str, all_users: bool, backend: str | None = None) -> dict[str, int]:
         if all_users:
             require_admin_user(actor, self.admins)
-        jobs = self.store.list_runnable_jobs(actor=None if all_users or actor in self.admins else actor)
+        jobs = self.store.list_runnable_jobs(
+            actor=None if all_users or actor in self.admins else actor,
+            backend_slug=backend,
+        )
         processed = 0
         for job in jobs:
             self._run_job(job)
             processed += 1
         return {"processed": processed}
 
-    def status(self, actor: str) -> dict[str, list[dict[str, Any]]]:
-        jobs = self.store.list_all_jobs() if actor in self.admins else self.store.list_jobs_for_user(actor)
+    def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
+        if actor in self.admins:
+            jobs = self.store.list_all_jobs(backend_slug=backend)
+        else:
+            jobs = self.store.list_jobs_for_user(actor, backend_slug=backend)
         return {"jobs": jobs}
 
     def _run_job(self, job: dict[str, Any]) -> None:
         self.store.update_job_status(job["id"], SyncJobStatus.running)
+        adapter = self.registry.get(job["backend_slug"]) if self.registry else None
+        if adapter is None:
+            adapter = self.mock_backend
         try:
             if job["operation"] == "delete":
                 sync_state = self.store.get_sync_state(job["doc_id"], job["kb_id"], job["backend_slug"])
                 backend_doc_id = sync_state["backend_doc_id"] if sync_state else None
                 if backend_doc_id:
-                    self.mock_backend.delete(job["kb_slug"], backend_doc_id)
+                    adapter.delete(job["kb_slug"], backend_doc_id)
                 self.store.upsert_sync_state(
                     job["doc_id"],
                     job["kb_id"],
@@ -208,7 +252,7 @@ class WikiManagerService:
                     SyncStateStatus.deleted,
                 )
             else:
-                backend_doc_id = self.mock_backend.upload(
+                backend_doc_id = adapter.upload(
                     backend_kb_id=job["kb_slug"],
                     doc_slug=job["doc_slug"],
                     file_path=Path(job["archive_path"]),
@@ -232,6 +276,7 @@ class WikiManagerService:
                 job["backend_slug"],
                 None,
                 failed_status,
+                backend_error=str(exc),
             )
             self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
 

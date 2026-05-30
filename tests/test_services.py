@@ -4,32 +4,41 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.config import ensure_directories
+from wiki_manager.config import BackendConfig, WikiManagerPaths, ensure_directories
 from wiki_manager.domain import AccessDenied, KbRole, NotFound, SyncStateStatus, ValidationError
+from wiki_manager.registry import BackendRegistry
 from wiki_manager.services import WikiManagerService
 
 
-def test_admin_creates_kb_and_grants_member(wm_paths) -> None:
+def _service_with_mock_backend(
+    wm_paths: WikiManagerPaths, tmp_path: Path | None = None
+) -> WikiManagerService:
     ensure_directories(wm_paths)
     service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.registry = BackendRegistry(
+        {"mock": BackendConfig(slug="mock", backend_type="mock")},
+        paths=tmp_path or wm_paths.root,
+    )
     service.init_system()
+    return service
+
+
+def test_admin_creates_kb_and_grants_member(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb(actor="root", slug="frontend-docs", name="Frontend Docs", description="")
     service.grant_kb_member(actor="root", kb_slug="frontend-docs", linux_user="alice", role=KbRole.contributor)
     assert kb["slug"] == "frontend-docs"
     assert service.list_kbs(actor="alice")[0]["slug"] == "frontend-docs"
 
 
-def test_non_admin_cannot_create_kb(wm_paths) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+def test_non_admin_cannot_create_kb(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     with pytest.raises(AccessDenied):
         service.create_kb(actor="alice", slug="frontend-docs", name="Frontend Docs", description="")
 
 
 def test_contributor_adds_doc_to_multiple_kbs(wm_paths, tmp_path: Path) -> None:
-    ensure_directories(wm_paths)
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.create_kb("root", "backend-docs", "Backend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
@@ -44,8 +53,7 @@ def test_contributor_adds_doc_to_multiple_kbs(wm_paths, tmp_path: Path) -> None:
 
 
 def test_update_document_creates_new_version(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     v1 = tmp_path / "Guide.pdf"
@@ -58,8 +66,7 @@ def test_update_document_creates_new_version(wm_paths, tmp_path: Path) -> None:
 
 
 def test_viewer_cannot_add_document(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "bob", KbRole.viewer)
     source = tmp_path / "Guide.pdf"
@@ -69,8 +76,7 @@ def test_viewer_cannot_add_document(wm_paths, tmp_path: Path) -> None:
 
 
 def test_invisible_document_edits_return_not_found(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     v1 = tmp_path / "Guide.pdf"
@@ -88,8 +94,7 @@ def test_invisible_document_edits_return_not_found(wm_paths, tmp_path: Path) -> 
 
 
 def test_shared_document_requires_admin_for_all_associated_kbs(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "kb-a", "KB A", "")
     service.create_kb("root", "kb-b", "KB B", "")
     service.grant_kb_member("root", "kb-a", "alice", KbRole.contributor)
@@ -115,8 +120,7 @@ def test_shared_document_requires_admin_for_all_associated_kbs(wm_paths, tmp_pat
 
 
 def test_purge_requires_confirmation(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
@@ -128,8 +132,7 @@ def test_purge_requires_confirmation(wm_paths, tmp_path: Path) -> None:
 
 
 def test_purge_keeps_shared_archive_until_last_reference_is_removed(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     first = tmp_path / "Guide-A.pdf"
@@ -153,8 +156,7 @@ def test_purge_keeps_shared_archive_until_last_reference_is_removed(wm_paths, tm
 
 
 def test_get_doc_does_not_expose_archive_paths_to_viewer(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     service.grant_kb_member("root", "frontend-docs", "bob", KbRole.viewer)
@@ -168,17 +170,15 @@ def test_get_doc_does_not_expose_archive_paths_to_viewer(wm_paths, tmp_path: Pat
     assert "archive_path" not in visible["versions"][0]
 
 
-def test_invisible_kb_returns_not_found(wm_paths) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+def test_invisible_kb_returns_not_found(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     with pytest.raises(NotFound):
         service.list_docs(actor="alice", kb_slug="frontend-docs")
 
 
 def test_immediate_add_syncs_to_mock_backend(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
@@ -191,8 +191,7 @@ def test_immediate_add_syncs_to_mock_backend(wm_paths, tmp_path: Path) -> None:
 
 
 def test_sync_processes_later_job(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
@@ -207,8 +206,7 @@ def test_sync_processes_later_job(wm_paths, tmp_path: Path) -> None:
 
 
 def test_delete_creates_delete_job_and_sync_marks_deleted(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
@@ -230,8 +228,7 @@ def test_delete_creates_delete_job_and_sync_marks_deleted(wm_paths, tmp_path: Pa
 
 
 def test_delete_with_later_false_syncs_immediately(wm_paths, tmp_path: Path) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
@@ -246,8 +243,7 @@ def test_delete_with_later_false_syncs_immediately(wm_paths, tmp_path: Path) -> 
 
 
 def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
@@ -257,7 +253,9 @@ def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) 
     def fail_upsert(*args, **kwargs):
         raise RuntimeError("backend down")
 
-    monkeypatch.setattr(service.mock_backend, "upload", fail_upsert)
+    # Monkeypatch the registry adapter, not mock_backend directly
+    mock_adapter = service.registry.get("mock")
+    monkeypatch.setattr(mock_adapter, "upload", fail_upsert)
     service.sync("alice", all_users=False)
 
     status = service.status("alice")
@@ -268,8 +266,7 @@ def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) 
 
 
 def test_delete_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) -> None:
-    service = WikiManagerService.create(wm_paths, admins={"root"})
-    service.init_system()
+    service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
@@ -280,7 +277,8 @@ def test_delete_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch
     def fail_delete(*args, **kwargs):
         raise RuntimeError("backend down")
 
-    monkeypatch.setattr(service.mock_backend, "delete", fail_delete)
+    mock_adapter = service.registry.get("mock")
+    monkeypatch.setattr(mock_adapter, "delete", fail_delete)
     service.sync("alice", all_users=False)
 
     status = service.status("alice")

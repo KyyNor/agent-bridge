@@ -11,3 +11,4 @@ wheels/
 
 # Local implementation worktrees
 .worktrees/
+.superpowers/

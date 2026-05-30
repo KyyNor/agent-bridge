@@ -7,6 +7,14 @@ from fastapi.testclient import TestClient
 from wiki_manager.server import create_app
 
 
+def _write_mock_backend_config(wm_paths) -> None:
+    wm_paths.config_dir.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        '[backends.mock]\nbackend_type = "mock"\n',
+        encoding="utf-8",
+    )
+
+
 def _jobs_by_operation(client: TestClient) -> dict[str, list[dict]]:
     response = client.get("/status", headers={"X-Wiki-User": "alice"})
     assert response.status_code == 200
@@ -18,6 +26,7 @@ def _jobs_by_operation(client: TestClient) -> dict[str, list[dict]]:
 
 
 def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
+    _write_mock_backend_config(wm_paths)
     client = TestClient(create_app(paths=wm_paths, admins={"root"}))
     assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
     assert client.post(
