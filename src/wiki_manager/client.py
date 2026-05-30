@@ -93,13 +93,24 @@ class WikiManagerClient:
         self._raise(response)
         return response.json()
 
-    def list_docs(self, kb_slug: str) -> list[dict[str, Any]]:
-        response = httpx.get(f"{self.base_url}/docs", params={"kb": kb_slug}, headers=self._headers(), timeout=10.0)
+    def list_backends(self) -> list[dict[str, Any]]:
+        response = httpx.get(f"{self.base_url}/backends", headers=self._headers(), timeout=10.0)
         self._raise(response)
         return response.json()
 
-    def get_doc(self, doc_slug: str) -> dict[str, Any]:
-        response = httpx.get(f"{self.base_url}/docs/{doc_slug}", headers=self._headers(), timeout=10.0)
+    def list_docs(self, kb_slug: str, backend: str | None = None) -> list[dict[str, Any]]:
+        params: dict[str, str] = {"kb": kb_slug}
+        if backend:
+            params["backend"] = backend
+        response = httpx.get(f"{self.base_url}/docs", params=params, headers=self._headers(), timeout=10.0)
+        self._raise(response)
+        return response.json()
+
+    def get_doc(self, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
+        params: dict[str, str] = {}
+        if backend:
+            params["backend"] = backend
+        response = httpx.get(f"{self.base_url}/docs/{doc_slug}", params=params, headers=self._headers(), timeout=10.0)
         self._raise(response)
         return response.json()
 
@@ -118,15 +129,22 @@ class WikiManagerClient:
         self._raise(response)
         return response.json()
 
-    def status(self) -> dict[str, Any]:
-        response = httpx.get(f"{self.base_url}/status", headers=self._headers(), timeout=10.0)
+    def status(self, backend: str | None = None) -> dict[str, Any]:
+        params: dict[str, str] = {}
+        if backend:
+            params["backend"] = backend
+        response = httpx.get(f"{self.base_url}/status", params=params, headers=self._headers(), timeout=10.0)
         self._raise(response)
         return response.json()
 
-    def sync(self, all_users: bool = False) -> dict[str, Any]:
+    def sync(self, all_users: bool = False, backend: str | None = None) -> dict[str, Any]:
+        params: dict[str, str] = {}
+        if backend:
+            params["backend"] = backend
         response = httpx.post(
             f"{self.base_url}/sync",
             json={"all_users": all_users},
+            params=params,
             headers=self._headers(),
             timeout=60.0,
         )

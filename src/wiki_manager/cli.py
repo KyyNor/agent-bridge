@@ -193,12 +193,21 @@ def purge_document(
     _echo_mapping(result, ("slug", "status"))
 
 
+@app.command("backends")
+def list_backends() -> None:
+    """List configured backends."""
+    backends = _run_client(lambda client: client.list_backends())
+    for backend in backends:
+        typer.echo(f"{backend['slug']} ({backend['type']})")
+
+
 @app.command("docs")
 def list_docs(
     kb_slug: Annotated[str, typer.Option("--kb", help="Knowledge base slug.")],
+    backend: Annotated[str | None, typer.Option("--backend", help="Backend slug filter.")] = None,
 ) -> None:
     """List documents in a knowledge base."""
-    docs = _run_client(lambda client: client.list_docs(kb_slug))
+    docs = _run_client(lambda client: client.list_docs(kb_slug, backend=backend))
     for doc in docs:
         title = f" - {doc['title']}" if doc.get("title") else ""
         typer.echo(f"{doc['slug']}{title}")
@@ -207,24 +216,36 @@ def list_docs(
 @app.command("doc")
 def get_doc(
     doc_slug: Annotated[str, typer.Argument(help="Document slug.")],
+    backend: Annotated[str | None, typer.Option("--backend", help="Backend slug filter.")] = None,
 ) -> None:
     """Show document details."""
-    doc = _run_client(lambda client: client.get_doc(doc_slug))
+    doc = _run_client(lambda client: client.get_doc(doc_slug, backend=backend))
     _echo_mapping(doc, ("slug", "title", "current_version_no", "status"))
     if doc.get("kb_slugs"):
         typer.echo(f"kbs: {', '.join(doc['kb_slugs'])}")
+    if doc.get("sync_states"):
+        for state in doc["sync_states"]:
+            info = f"  {state.get('backend_slug', '')}: {state.get('status', '')}"
+            if state.get("chunk_count") is not None:
+                info += f" | chunks: {state['chunk_count']}"
+            if state.get("backend_status"):
+                info += f" | {state['backend_status']}"
+            typer.echo(info)
 
 
 @app.command()
-def status() -> None:
+def status(
+    backend: Annotated[str | None, typer.Option("--backend", help="Backend slug filter.")] = None,
+) -> None:
     """Show sync status."""
-    result = _run_client(lambda client: client.status())
+    result = _run_client(lambda client: client.status(backend=backend))
     jobs = result.get("jobs", [])
     typer.echo(f"jobs: {len(jobs)}")
     for job in jobs:
         parts = [
             str(job.get("status", "")),
             str(job.get("operation", "")),
+            str(job.get("backend_slug", "")),
             str(job.get("kb_slug", "")),
             str(job.get("doc_slug", "")),
         ]
@@ -234,9 +255,10 @@ def status() -> None:
 @app.command()
 def sync(
     all_users: Annotated[bool, typer.Option("--all", help="Sync jobs for all users.")] = False,
+    backend: Annotated[str | None, typer.Option("--backend", help="Backend slug filter.")] = None,
 ) -> None:
     """Run pending sync jobs."""
-    result = _run_client(lambda client: client.sync(all_users))
+    result = _run_client(lambda client: client.sync(all_users, backend=backend))
     typer.echo(f"processed: {result.get('processed', 0)}")
 
 

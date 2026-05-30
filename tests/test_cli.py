@@ -48,7 +48,7 @@ def test_add_command_sends_file_and_kbs(monkeypatch, tmp_path: Path) -> None:
 
 def test_sync_command_prints_processed_count(monkeypatch) -> None:
     class FakeClient:
-        def sync(self, all_users):
+        def sync(self, all_users, backend=None):
             return {"processed": 2}
 
     monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
@@ -112,7 +112,7 @@ def test_server_init_calls_client(monkeypatch) -> None:
 
 def test_status_reports_service_unavailable_cleanly(monkeypatch) -> None:
     class FakeClient:
-        def status(self):
+        def status(self, backend=None):
             raise httpx.ConnectError("boom")
 
     monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
@@ -181,3 +181,15 @@ def test_purge_with_yes_calls_client(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "purged" in result.stdout
     assert calls == [("guide", True)]
+
+
+def test_list_backends(monkeypatch) -> None:
+    class FakeClient:
+        def list_backends(self):
+            return [{"slug": "local-gpt", "type": "openai"}]
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["backends"])
+    assert result.exit_code == 0
+    assert "local-gpt" in result.stdout
+    assert "openai" in result.stdout
