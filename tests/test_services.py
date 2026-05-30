@@ -316,3 +316,77 @@ def test_align_backends_no_registry_is_noop(wm_paths):
     service.init_system()
     # Should not raise
     service.align_backends()
+
+
+def test_search_with_default_backend(wm_paths, tmp_path: Path, monkeypatch) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+
+    from wiki_manager.domain import RetrievalResult
+    mock_results = [RetrievalResult(
+        chunk_id="c1", content="hello", document_name="a.md",
+        similarity=0.9, dataset_id=kb["id"],
+    )]
+    adapter = service.registry.get("mock")
+    monkeypatch.setattr(adapter, "retrieve", lambda *a, **kw: mock_results)
+
+    results = service.search("root", "frontend-docs", "hello")
+    assert len(results) == 1
+    assert results[0].chunk_id == "c1"
+
+
+def test_search_with_explicit_backend(wm_paths, tmp_path: Path, monkeypatch) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+
+    from wiki_manager.domain import RetrievalResult
+    adapter = service.registry.get("mock")
+    monkeypatch.setattr(adapter, "retrieve", lambda *a, **kw: [])
+
+    results = service.search("root", "frontend-docs", "hello", backend_slug="mock")
+    assert results == []
+
+
+def test_search_kb_not_found(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    with pytest.raises(NotFound):
+        service.search("root", "nonexistent", "hello")
+
+
+def test_search_no_retrieval_backend(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.registry = None
+    with pytest.raises(NotFound, match="no.*backend"):
+        service.search("root", "frontend-docs", "hello")
+
+
+def test_ask_with_default_backend(wm_paths, tmp_path: Path, monkeypatch) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+
+    from wiki_manager.domain import AskResult
+    mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
+    adapter = service.registry.get("mock")
+    monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, ""))
+
+    result = service.ask("root", "frontend-docs", "what is X?")
+    assert result.answer == "yes"
+
+
+def test_ask_persists_chat_id(wm_paths, tmp_path: Path, monkeypatch) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+
+    from wiki_manager.domain import AskResult
+    mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
+    adapter = service.registry.get("mock")
+    monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, "chat-new"))
+
+    service.ask("root", "frontend-docs", "what is X?", backend_slug="mock")
+
+    targets = service.store.list_backend_targets(kb["id"])
+    import json
+    mock_target = next(t for t in targets if t["slug"] == "mock")
+    config = json.loads(mock_target["config_json"])
+    assert config["chat_id"] == "chat-new"

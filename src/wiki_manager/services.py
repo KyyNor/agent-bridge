@@ -10,9 +10,11 @@ from wiki_manager.archive import ArchiveStorage
 from wiki_manager.config import WikiManagerPaths, ensure_directories
 from wiki_manager.domain import (
     AccessDenied,
+    AskResult,
     KbRole,
     NotFound,
     Operation,
+    RetrievalResult,
     SyncJobStatus,
     SyncStateStatus,
     ValidationError,
@@ -232,6 +234,66 @@ class WikiManagerService:
         else:
             jobs = self.store.list_jobs_for_user(actor, backend_slug=backend)
         return {"jobs": jobs}
+
+    def search(self, actor: str, kb_slug: str, question: str, *,
+               backend_slug: str | None = None,
+               top_k: int = 6) -> list[RetrievalResult]:
+        kb = self._require_kb_visible(actor, kb_slug)
+        target = self._resolve_retrieval_target(kb, backend_slug)
+        adapter = self._get_adapter(target["slug"])
+        return adapter.retrieve(target["backend_kb_id"], question, top_k)
+
+    def ask(self, actor: str, kb_slug: str, question: str, *,
+            backend_slug: str | None = None,
+            session_id: str | None = None) -> AskResult:
+        kb = self._require_kb_visible(actor, kb_slug)
+        target = self._resolve_retrieval_target(kb, backend_slug)
+        adapter = self._get_adapter(target["slug"])
+        config_json = target.get("config_json")
+        existing_chat_id = None
+        if config_json:
+            import json
+            config = json.loads(config_json) if isinstance(config_json, str) else config_json
+            existing_chat_id = config.get("chat_id")
+        result, new_chat_id = adapter.ask(
+            target["backend_kb_id"], question,
+            chat_id=existing_chat_id, session_id=session_id,
+        )
+        if new_chat_id and new_chat_id != existing_chat_id:
+            self.store.update_backend_target_config(
+                target["kb_id"], target["slug"], {"chat_id": new_chat_id},
+            )
+        return result
+
+    def _resolve_retrieval_target(self, kb: dict[str, Any], backend_slug: str | None) -> dict[str, Any]:
+        targets = self.store.list_backend_targets(kb["id"])
+        active = [t for t in targets if t["status"] == "active"]
+
+        if backend_slug:
+            target = next((t for t in active if t["slug"] == backend_slug), None)
+            if target is None:
+                raise NotFound(f"backend '{backend_slug}' not found for knowledge base '{kb['slug']}'")
+            return target
+
+        if self.registry:
+            from wiki_manager.config import load_server_config
+            config = load_server_config(self.paths)
+            if config.default_backend:
+                target = next((t for t in active if t["slug"] == config.default_backend), None)
+                if target:
+                    return target
+
+        if active and self.registry:
+            return active[0]
+
+        raise NotFound(f"no retrieval backend available for knowledge base '{kb['slug']}'")
+
+    def _get_adapter(self, slug: str):
+        if self.registry:
+            adapter = self.registry.get(slug)
+            if adapter is not None:
+                return adapter
+        return self.mock_backend
 
     def _run_job(self, job: dict[str, Any]) -> None:
         self.store.update_job_status(job["id"], SyncJobStatus.running)
