@@ -95,9 +95,27 @@ class BackendDocStatus:
     error_message: str | None = None
 
 
+@dataclass(frozen=True)
+class RetrievalResult:
+    chunk_id: str
+    content: str
+    document_name: str
+    similarity: float
+    dataset_id: str
+
+
+@dataclass(frozen=True)
+class AskResult:
+    answer: str
+    chunks: list[RetrievalResult]
+    session_id: str | None
+
+
 class BackendAdapter(Protocol):
     def create_kb(self, slug: str, name: str) -> str: ...
     def delete_kb(self, backend_kb_id: str) -> None: ...
     def upload(self, backend_kb_id: str, doc_slug: str, file_path: Path, filename: str) -> str: ...
     def delete(self, backend_kb_id: str, backend_doc_id: str) -> None: ...
     def get_status(self, backend_kb_id: str, backend_doc_id: str) -> BackendDocStatus: ...
+    def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6) -> list[RetrievalResult]: ...
+    def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None) -> tuple[AskResult, str]: ...

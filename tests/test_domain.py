@@ -113,3 +113,39 @@ def test_mock_backend_delete_removes_document():
         doc_id = backend.upload("test-kb", "test-doc", file_path, "test.pdf")
         backend.delete("test-kb", doc_id)
         assert backend.get_status("test-kb", doc_id).status == "not_found"
+
+
+def test_retrieval_result_dataclass():
+    from wiki_manager.domain import RetrievalResult
+
+    r = RetrievalResult(
+        chunk_id="c1",
+        content="some text",
+        document_name="guide.md",
+        similarity=0.92,
+        dataset_id="ds1",
+    )
+    assert r.chunk_id == "c1"
+    assert r.similarity == 0.92
+
+
+def test_ask_result_dataclass():
+    from wiki_manager.domain import AskResult
+
+    result = AskResult(answer="yes", chunks=[], session_id="s1")
+    assert result.answer == "yes"
+    assert result.session_id == "s1"
+    assert result.chunks == []
+
+
+def test_backend_adapter_protocol_has_retrieve_and_ask():
+    from wiki_manager.domain import BackendAdapter
+    import inspect
+
+    sig = inspect.signature(BackendAdapter.retrieve)
+    assert "question" in sig.parameters
+    assert "backend_kb_id" in sig.parameters
+
+    sig = inspect.signature(BackendAdapter.ask)
+    assert "question" in sig.parameters
+    assert "backend_kb_id" in sig.parameters
