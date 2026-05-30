@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from wiki_manager.domain import BackendDocStatus
+from wiki_manager.domain import AskResult, BackendDocStatus, RetrievalResult
 
 
 class MockBackend:
@@ -49,3 +49,13 @@ class MockBackend:
         if data.get("status") == "active":
             return BackendDocStatus(status="completed", chunk_count=1, progress=1.0)
         return BackendDocStatus(status=data.get("status", "unknown"))
+
+    def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6) -> list[RetrievalResult]:
+        return []
+
+    def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None) -> tuple[AskResult, str]:
+        return AskResult(
+            answer="mock backend does not support Q&A",
+            chunks=[],
+            session_id=None,
+        ), ""

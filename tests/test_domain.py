@@ -149,3 +149,19 @@ def test_backend_adapter_protocol_has_retrieve_and_ask():
     sig = inspect.signature(BackendAdapter.ask)
     assert "question" in sig.parameters
     assert "backend_kb_id" in sig.parameters
+
+
+def test_mock_backend_retrieve_returns_empty():
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = MockBackend(Path(tmp))
+        results = backend.retrieve("test-kb", "what is X?")
+        assert results == []
+
+
+def test_mock_backend_ask_returns_fallback():
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = MockBackend(Path(tmp))
+        result, chat_id = backend.ask("test-kb", "what is X?")
+        assert "does not support" in result.answer
+        assert result.chunks == []
+        assert chat_id == ""
