@@ -262,5 +262,39 @@ def sync(
     typer.echo(f"processed: {result.get('processed', 0)}")
 
 
+@app.command()
+def search(
+    question: Annotated[str, typer.Argument(help="Search query.")],
+    kb_slug: Annotated[str, typer.Option("--kb", help="Knowledge base slug.")],
+    backend: Annotated[str | None, typer.Option("--backend", help="Backend slug filter.")] = None,
+    top_k: Annotated[int, typer.Option("--top-k", help="Number of results.")] = 6,
+) -> None:
+    """Search knowledge base chunks."""
+    result = _run_client(lambda client: client.search(kb_slug, question, backend=backend, top_k=top_k))
+    results = result.get("results", [])
+    if not results:
+        typer.echo("no results")
+        return
+    for i, chunk in enumerate(results, 1):
+        typer.echo(f"[{i}] {chunk.get('document_name', '')} (sim: {chunk.get('similarity', 0):.2f})")
+        content = chunk.get("content", "")
+        preview = content[:200] + "..." if len(content) > 200 else content
+        typer.echo(f"    {preview}")
+
+
+@app.command()
+def ask(
+    question: Annotated[str, typer.Argument(help="Question to ask.")],
+    kb_slug: Annotated[str, typer.Option("--kb", help="Knowledge base slug.")],
+    backend: Annotated[str | None, typer.Option("--backend", help="Backend slug filter.")] = None,
+    session: Annotated[str | None, typer.Option("--session", help="Session ID for multi-turn.")] = None,
+) -> None:
+    """Ask a question against a knowledge base."""
+    result = _run_client(lambda client: client.ask(kb_slug, question, backend=backend, session_id=session))
+    typer.echo(result.get("answer", ""))
+    if result.get("session_id"):
+        typer.echo(f"session: {result['session_id']}")
+
+
 def main() -> None:
     app()

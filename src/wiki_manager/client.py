@@ -150,3 +150,31 @@ class WikiManagerClient:
         )
         self._raise(response)
         return response.json()
+
+    def search(self, kb_slug: str, question: str, backend: str | None = None, top_k: int = 6) -> dict[str, Any]:
+        params: dict[str, str] = {"kb": kb_slug, "q": question, "top_k": str(top_k)}
+        if backend:
+            params["backend"] = backend
+        response = httpx.get(
+            f"{self.base_url}/search",
+            params=params,
+            headers=self._headers(),
+            timeout=30.0,
+        )
+        self._raise(response)
+        return response.json()
+
+    def ask(self, kb_slug: str, question: str, backend: str | None = None, session_id: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"kb": kb_slug, "question": question}
+        if backend:
+            payload["backend"] = backend
+        if session_id:
+            payload["session_id"] = session_id
+        response = httpx.post(
+            f"{self.base_url}/ask",
+            json=payload,
+            headers=self._headers(),
+            timeout=60.0,
+        )
+        self._raise(response)
+        return response.json()

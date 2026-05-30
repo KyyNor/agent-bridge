@@ -193,3 +193,95 @@ def test_list_backends(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "local-gpt" in result.stdout
     assert "openai" in result.stdout
+
+
+def test_search_command_calls_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def search(self, kb_slug, question, backend=None, top_k=6):
+            calls.append({"kb": kb_slug, "q": question, "backend": backend, "top_k": top_k})
+            return {
+                "results": [
+                    {
+                        "document_name": "auth.md",
+                        "similarity": 0.93,
+                        "content": "OAuth2 flow description",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["search", "how does auth work", "--kb", "frontend-docs"])
+    assert result.exit_code == 0
+    assert "auth.md" in result.stdout
+    assert calls == [{"kb": "frontend-docs", "q": "how does auth work", "backend": None, "top_k": 6}]
+
+
+def test_search_command_no_results(monkeypatch) -> None:
+    class FakeClient:
+        def search(self, kb_slug, question, backend=None, top_k=6):
+            return {"results": []}
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["search", "nonexistent", "--kb", "test-kb"])
+    assert result.exit_code == 0
+    assert "no results" in result.stdout
+
+
+def test_ask_command_calls_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def ask(self, kb_slug, question, backend=None, session_id=None):
+            calls.append({"kb": kb_slug, "q": question, "backend": backend, "session_id": session_id})
+            return {"answer": "OAuth2 uses tokens.", "session_id": "abc123"}
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["ask", "how does auth work", "--kb", "frontend-docs"])
+    assert result.exit_code == 0
+    assert "OAuth2 uses tokens." in result.stdout
+    assert "session: abc123" in result.stdout
+    assert calls == [{"kb": "frontend-docs", "q": "how does auth work", "backend": None, "session_id": None}]
+
+
+def test_client_search_sends_get(monkeypatch) -> None:
+    captured = {}
+
+    def fake_get(url, params, headers, timeout):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return httpx.Response(200, json={"results": []})
+
+    monkeypatch.setattr("wiki_manager.client.httpx.get", fake_get)
+    result = WikiManagerClient("http://example.test/", "root").search("my-kb", "what?", backend="openai", top_k=3)
+    assert result == {"results": []}
+    assert captured == {
+        "url": "http://example.test/search",
+        "params": {"kb": "my-kb", "q": "what?", "backend": "openai", "top_k": "3"},
+        "headers": {"X-Wiki-User": "root"},
+        "timeout": 30.0,
+    }
+
+
+def test_client_ask_sends_post(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return httpx.Response(200, json={"answer": "yes", "session_id": "s1"})
+
+    monkeypatch.setattr("wiki_manager.client.httpx.post", fake_post)
+    result = WikiManagerClient("http://example.test/", "root").ask("my-kb", "is it?", backend="openai", session_id="s1")
+    assert result == {"answer": "yes", "session_id": "s1"}
+    assert captured == {
+        "url": "http://example.test/ask",
+        "json": {"kb": "my-kb", "question": "is it?", "backend": "openai", "session_id": "s1"},
+        "headers": {"X-Wiki-User": "root"},
+        "timeout": 60.0,
+    }
