@@ -289,6 +289,54 @@ class WikiManagerService:
             self.archive.remove(Path(archive_path))
         return {"slug": doc_slug, "status": "purged"}
 
+    def align_backends(self) -> None:
+        if not self.registry:
+            return
+        configured_slugs = set(self.registry.list_slugs())
+        kbs = self.store.list_kbs()
+        for kb in kbs:
+            existing_targets = self.store.list_backend_targets(kb["id"])
+            existing_slugs = {t["slug"] for t in existing_targets}
+
+            # Mark removed backends as inactive
+            for target in existing_targets:
+                if target["slug"] not in configured_slugs and target["status"] == "active":
+                    self.store.set_backend_target_status(kb["id"], target["slug"], "inactive")
+
+            # Add new backends and create pending sync jobs for existing docs
+            for backend_slug in configured_slugs:
+                if backend_slug not in existing_slugs:
+                    adapter = self.registry.get(backend_slug)
+                    try:
+                        backend_kb_id = adapter.create_kb(kb["slug"], kb["name"]) if adapter else None
+                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
+                        if backend_kb_id:
+                            self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
+                    except Exception:
+                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
+
+                    # Create pending sync jobs for existing synced docs
+                    synced = self.store.list_synced_docs_for_target(kb["id"], backend_slug)
+                    for row in synced:
+                        versions = self.store.list_versions(row["doc_id"])
+                        version_id = versions[-1]["id"] if versions else None
+                        self.store.create_sync_job(
+                            row["doc_id"], kb["id"], Operation.create, version_id,
+                            backend_slug=backend_slug,
+                        )
+
+                # Reactivate previously inactive targets
+                for target in existing_targets:
+                    if target["slug"] == backend_slug and target["status"] == "inactive":
+                        adapter = self.registry.get(backend_slug)
+                        if adapter and not target.get("backend_kb_id"):
+                            try:
+                                backend_kb_id = adapter.create_kb(kb["slug"], kb["name"])
+                                self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
+                            except Exception:
+                                pass
+                        self.store.set_backend_target_status(kb["id"], backend_slug, "active")
+
     def _require_kb_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
         kb = self.store.get_kb_by_slug(kb_slug)
         if kb is None:

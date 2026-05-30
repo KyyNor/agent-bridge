@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -36,7 +37,13 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
     resolved_paths = paths or WikiManagerPaths.from_root(DEFAULT_ROOT)
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = WikiManagerService.create(resolved_paths, resolved_admins)
-    app = FastAPI(title="wiki-manager", docs_url=None, openapi_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        service.align_backends()
+        yield
+
+    app = FastAPI(title="wiki-manager", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
 
     def actor(x_wiki_user: str = Header(alias="X-Wiki-User")) -> str:
         return x_wiki_user

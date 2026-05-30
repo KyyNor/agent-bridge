@@ -286,3 +286,33 @@ def test_delete_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch
     sync_state = service.store.get_sync_state(doc["id"], kb["id"])
     assert sync_state is not None
     assert sync_state["status"] == SyncStateStatus.delete_failed.value
+
+
+def test_align_backends_reactivates_inactive_target(wm_paths, tmp_path):
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "test-kb", "Test KB", "")
+    service.store.set_backend_target_status(kb["id"], "mock", "inactive")
+    service.align_backends()
+    targets = service.store.list_backend_targets(kb["id"])
+    mock_target = next(t for t in targets if t["slug"] == "mock")
+    assert mock_target["status"] == "active"
+
+
+def test_align_backends_marks_removed_backend_inactive(wm_paths, tmp_path):
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "test-kb", "Test KB", "")
+    # Manually add a backend target that doesn't exist in registry
+    service.store.ensure_backend_target(kb["id"], slug="nonexistent", backend_type="nonexistent")
+    service.align_backends()
+    targets = service.store.list_backend_targets(kb["id"])
+    nonexistent = next(t for t in targets if t["slug"] == "nonexistent")
+    assert nonexistent["status"] == "inactive"
+
+
+def test_align_backends_no_registry_is_noop(wm_paths):
+    ensure_directories(wm_paths)
+    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service.registry = None
+    service.init_system()
+    # Should not raise
+    service.align_backends()
