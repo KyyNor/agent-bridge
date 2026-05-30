@@ -7,7 +7,7 @@ import httpx
 from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-from wiki_manager.domain import BackendDocStatus
+from wiki_manager.domain import AskResult, BackendDocStatus, RetrievalResult
 
 # Default RagFlow RSA public key (from /ragflow/conf/public.pem inside the
 # Docker container).  Kept as a module constant so callers do not need to
@@ -213,6 +213,101 @@ class RagFlowBackend:
             progress=data.get("progress"),
             error_message=data.get("error_message"),
         )
+
+    def retrieve(
+        self, backend_kb_id: str, question: str, top_k: int = 6
+    ) -> list[RetrievalResult]:
+        response = self._request(
+            "POST",
+            f"{self.base_url}/api/v1/retrieval",
+            json={
+                "question": question,
+                "dataset_ids": [backend_kb_id],
+                "top_k": top_k,
+            },
+        )
+        self._raise(response)
+        chunks = response.json()["data"]["chunks"]
+        return [
+            RetrievalResult(
+                chunk_id=c["id"],
+                content=c["content"],
+                document_name=c.get("document_keyword", ""),
+                similarity=c.get("similarity", 0.0),
+                dataset_id=c.get("dataset_id", ""),
+            )
+            for c in chunks
+        ]
+
+    def ask(
+        self,
+        backend_kb_id: str,
+        question: str,
+        chat_id: str | None = None,
+        session_id: str | None = None,
+    ) -> tuple[AskResult, str]:
+        if chat_id is None:
+            chat_id = self._create_chat_assistant(backend_kb_id)
+
+        if session_id is None:
+            session_id = self._create_session(chat_id)
+
+        response = self._request(
+            "POST",
+            f"{self.base_url}/api/v1/chat/completions",
+            json={
+                "chat_id": chat_id,
+                "session_id": session_id,
+                "question": question,
+                "stream": False,
+            },
+        )
+        self._raise(response)
+        data = response.json()["data"]
+        chunks = self._extract_chunks(data)
+        result = AskResult(
+            answer=data["answer"],
+            chunks=chunks,
+            session_id=session_id,
+        )
+        return result, chat_id
+
+    def _create_chat_assistant(self, backend_kb_id: str) -> str:
+        response = self._request(
+            "POST",
+            f"{self.base_url}/api/v1/chats",
+            json={
+                "name": f"wiki-mgr-{backend_kb_id[:8]}",
+                "dataset_ids": [backend_kb_id],
+                "llm": {"model_name": "default"},
+            },
+        )
+        self._raise(response)
+        return response.json()["data"]["id"]
+
+    def _create_session(self, chat_id: str) -> str:
+        response = self._request(
+            "POST",
+            f"{self.base_url}/api/v1/chats/{chat_id}/sessions",
+            json={"name": "wiki-session"},
+        )
+        self._raise(response)
+        return response.json()["data"]["id"]
+
+    @staticmethod
+    def _extract_chunks(data: dict) -> list[RetrievalResult]:
+        chunks = []
+        for ref in data.get("reference", {}).get("chunks", []):
+            chunks.append(
+                RetrievalResult(
+                    chunk_id=ref.get("id", ""),
+                    content=ref.get("content", ""),
+                    document_name=ref.get("document_keyword", ""),
+                    similarity=ref.get("similarity", 0.0),
+                    dataset_id=ref.get("dataset_id", ""),
+                )
+            )
+        return chunks
 
     # ------------------------------------------------------------------
     # Cleanup

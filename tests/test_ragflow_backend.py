@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from wiki_manager.domain import BackendDocStatus
+from wiki_manager.domain import AskResult, BackendDocStatus, RetrievalResult
 from wiki_manager.ragflow_backend import RagFlowBackend
 
 
@@ -72,3 +72,92 @@ def test_create_kb_failure(respx_mock):
     backend = RagFlowBackend(base_url=base_url, api_key="bad-key", timeout=30)
     with pytest.raises(RuntimeError, match="401"):
         backend.create_kb("test-kb", "Test KB")
+
+
+def test_ragflow_retrieve_returns_chunks(respx_mock):
+    backend = RagFlowBackend(base_url="http://localhost:9380", api_key="test-key")
+
+    respx_mock.post("http://localhost:9380/api/v1/retrieval").mock(
+        return_value=httpx.Response(200, json={
+            "code": 0,
+            "data": {"chunks": [
+                {
+                    "id": "chunk-1",
+                    "content": "RagFlow is a RAG engine.",
+                    "document_keyword": "intro.md",
+                    "similarity": 0.95,
+                    "dataset_id": "ds-abc",
+                },
+                {
+                    "id": "chunk-2",
+                    "content": "It supports knowledge bases.",
+                    "document_keyword": "guide.md",
+                    "similarity": 0.80,
+                    "dataset_id": "ds-abc",
+                },
+            ]},
+        })
+    )
+
+    results = backend.retrieve("ds-abc", "what is RagFlow?")
+    assert len(results) == 2
+    assert results[0].chunk_id == "chunk-1"
+    assert results[0].similarity == 0.95
+    assert results[0].document_name == "intro.md"
+    assert results[1].content == "It supports knowledge bases."
+
+
+def test_ragflow_retrieve_empty_results(respx_mock):
+    backend = RagFlowBackend(base_url="http://localhost:9380", api_key="test-key")
+
+    respx_mock.post("http://localhost:9380/api/v1/retrieval").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"chunks": []}})
+    )
+
+    results = backend.retrieve("ds-abc", "nonexistent topic")
+    assert results == []
+
+
+def test_ragflow_ask_creates_chat_and_session(respx_mock):
+    backend = RagFlowBackend(base_url="http://localhost:9380", api_key="test-key")
+
+    # Mock chat assistant creation
+    respx_mock.post("http://localhost:9380/api/v1/chats").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"id": "chat-123"}})
+    )
+    # Mock session creation
+    respx_mock.post("http://localhost:9380/api/v1/chats/chat-123/sessions").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"id": "sess-456"}})
+    )
+    # Mock chat completions
+    respx_mock.post("http://localhost:9380/api/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={
+            "code": 0,
+            "data": {"answer": "RagFlow is a RAG engine.", "reference": {}},
+        })
+    )
+
+    result, chat_id = backend.ask("ds-abc", "what is RagFlow?")
+    assert isinstance(result, AskResult)
+    assert result.answer == "RagFlow is a RAG engine."
+    assert result.session_id == "sess-456"
+    assert chat_id == "chat-123"
+
+
+def test_ragflow_ask_reuses_chat_id(respx_mock):
+    backend = RagFlowBackend(base_url="http://localhost:9380", api_key="test-key")
+
+    # Only mock session creation and completions (no chat creation)
+    respx_mock.post("http://localhost:9380/api/v1/chats/chat-existing/sessions").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"id": "sess-789"}})
+    )
+    respx_mock.post("http://localhost:9380/api/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={
+            "code": 0,
+            "data": {"answer": "It works.", "reference": {}},
+        })
+    )
+
+    result, chat_id = backend.ask("ds-abc", "test?", chat_id="chat-existing")
+    assert chat_id == "chat-existing"
+    assert result.answer == "It works."
