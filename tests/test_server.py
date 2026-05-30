@@ -175,3 +175,35 @@ def test_create_app_refreshes_admins_from_config_per_request(wm_paths) -> None:
 
     assert response.status_code == 200
     assert response.json()["slug"] == "frontend-docs"
+
+
+def test_backends_endpoint(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    response = client.get("/backends")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_doc_with_backend_filter(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post("/admin/init", headers={"X-Wiki-User": "root"})
+    response = client.get("/docs/nonexistent?backend=mock", headers={"X-Wiki-User": "root"})
+    assert response.status_code in (200, 404)
+
+
+def test_status_with_backend_filter(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post("/admin/init", headers={"X-Wiki-User": "root"})
+    response = client.get("/status?backend=mock", headers={"X-Wiki-User": "root"})
+    assert response.status_code == 200
+
+
+def test_sync_with_backend_filter(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post("/admin/init", headers={"X-Wiki-User": "root"})
+    response = client.post("/sync", json={"all_users": False}, params={"backend": "mock"}, headers={"X-Wiki-User": "root"})
+    assert response.status_code == 200

@@ -77,6 +77,18 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/backends")
+    def list_backends() -> list[dict[str, str]]:
+        if service.registry is None:
+            return []
+        result = []
+        for slug in service.registry.list_slugs():
+            adapter = service.registry.get(slug)
+            module = type(adapter).__module__
+            backend_type = "ragflow" if "ragflow" in module else "mock"
+            result.append({"slug": slug, "type": backend_type, "status": "active"})
+        return result
+
     @app.post("/admin/init")
     def init_system(current_actor: str = Depends(actor)) -> None:
         return call_safely(lambda: service.init_system())
@@ -123,12 +135,12 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
             upload_path.unlink(missing_ok=True)
 
     @app.get("/docs")
-    def list_docs(kb: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return call_safely(lambda: service.list_docs(current_actor, kb))
+    def list_docs(kb: str, backend: str | None = None, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return call_safely(lambda: service.list_docs(current_actor, kb, backend=backend))
 
     @app.get("/docs/{doc_slug}")
-    def get_doc(doc_slug: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return call_safely(lambda: service.get_doc(current_actor, doc_slug))
+    def get_doc(doc_slug: str, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return call_safely(lambda: service.get_doc(current_actor, doc_slug, backend=backend))
 
     @app.post("/docs/{doc_slug}/versions")
     def update_document(
@@ -164,11 +176,11 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         return call_safely(lambda: service.purge_document(current_actor, doc_slug, confirm=payload.confirm))
 
     @app.get("/status")
-    def status(current_actor: str = Depends(actor)) -> dict[str, list[dict[str, Any]]]:
-        return call_safely(lambda: service.status(current_actor))
+    def status(backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, list[dict[str, Any]]]:
+        return call_safely(lambda: service.status(current_actor, backend=backend))
 
     @app.post("/sync")
-    def sync(payload: SyncRequest, current_actor: str = Depends(actor)) -> dict[str, int]:
-        return call_safely(lambda: service.sync(current_actor, all_users=payload.all_users))
+    def sync(payload: SyncRequest, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, int]:
+        return call_safely(lambda: service.sync(current_actor, all_users=payload.all_users, backend=backend))
 
     return app
