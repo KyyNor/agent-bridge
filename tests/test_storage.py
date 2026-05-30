@@ -180,3 +180,33 @@ def test_update_backend_target_kb_id(tmp_path: Path) -> None:
     targets = store.list_backend_targets(kb["id"])
     ragflow_target = next(t for t in targets if t["slug"] == "ragflow")
     assert ragflow_target["backend_kb_id"] == "rf-dataset-123"
+
+
+def test_update_backend_target_config(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    kb = store.create_kb(slug="test-kb", name="Test", description="", created_by="root")
+    store.ensure_backend_target(kb["id"], slug="ragflow", backend_type="ragflow")
+
+    store.update_backend_target_config(kb["id"], "ragflow", {"chat_id": "chat-123"})
+
+    targets = store.list_backend_targets(kb["id"])
+    ragflow_target = next(t for t in targets if t["slug"] == "ragflow")
+    assert ragflow_target["config_json"] == '{"chat_id": "chat-123"}'
+
+
+def test_update_backend_target_config_merges_existing(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    kb = store.create_kb(slug="test-kb", name="Test", description="", created_by="root")
+    store.ensure_backend_target(kb["id"], slug="ragflow", backend_type="ragflow")
+    store.update_backend_target_config(kb["id"], "ragflow", {"chat_id": "chat-123"})
+
+    store.update_backend_target_config(kb["id"], "ragflow", {"extra": "value"})
+
+    targets = store.list_backend_targets(kb["id"])
+    ragflow_target = next(t for t in targets if t["slug"] == "ragflow")
+    import json
+    config = json.loads(ragflow_target["config_json"])
+    assert config["chat_id"] == "chat-123"
+    assert config["extra"] == "value"

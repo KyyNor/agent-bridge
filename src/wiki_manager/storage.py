@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -202,6 +203,19 @@ class SQLiteStore:
             conn.execute(
                 "UPDATE backend_targets SET backend_kb_id = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
                 (backend_kb_id, kb_id, slug),
+            )
+
+    def update_backend_target_config(self, kb_id: int, slug: str, config_updates: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT config_json FROM backend_targets WHERE kb_id = ? AND slug = ?",
+                (kb_id, slug),
+            ).fetchone()
+            existing = json.loads(row["config_json"]) if row and row["config_json"] else {}
+            existing.update(config_updates)
+            conn.execute(
+                "UPDATE backend_targets SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
+                (json.dumps(existing, ensure_ascii=False), kb_id, slug),
             )
 
     def list_sync_states_for_doc(self, doc_id: int) -> list[dict[str, Any]]:
