@@ -102,3 +102,34 @@ def test_purge_document_only_returns_archive_paths_no_longer_referenced(wm_paths
     assert store.purge_document(first["id"]) == []
     assert store.list_versions(second["id"])[0]["archive_path"] == archive_path
     assert store.purge_document(second["id"]) == [archive_path]
+
+
+def test_schema_migration_adds_phase2_columns(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    kb = store.create_kb(slug="test-kb", name="Test KB", description="", created_by="root")
+    doc = store.create_document(slug="test-doc", title="Test Doc", owner_user="root")
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO sync_states (doc_id, kb_id, backend_slug, backend_doc_id, status) VALUES (?, ?, 'mock', 'doc1', 'synced')",
+            (doc["id"], kb["id"]),
+        )
+    store.migrate_phase2()
+    with store.connect() as conn:
+        row = conn.execute("SELECT * FROM sync_states WHERE backend_slug = 'mock'").fetchone()
+        assert row is not None
+        assert row["status"] == "synced"
+        assert row["backend_status"] is None
+        assert row["chunk_count"] is None
+        assert row["progress"] is None
+        assert row["backend_error"] is None
+    with store.connect() as conn:
+        col_names = {desc[1] for desc in conn.execute("PRAGMA table_info(backend_targets)").fetchall()}
+        assert "backend_kb_id" in col_names
+
+
+def test_migration_is_idempotent(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    store.migrate_phase2()
+    store.migrate_phase2()

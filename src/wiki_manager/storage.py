@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS backend_targets (
   kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
   slug TEXT NOT NULL DEFAULT 'mock',
   backend_type TEXT NOT NULL DEFAULT 'mock',
+  backend_kb_id TEXT,
   config_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -91,6 +92,10 @@ CREATE TABLE IF NOT EXISTS sync_states (
   backend_slug TEXT NOT NULL DEFAULT 'mock',
   backend_doc_id TEXT,
   status TEXT NOT NULL,
+  backend_status TEXT,
+  chunk_count INTEGER,
+  progress REAL,
+  backend_error TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (doc_id, kb_id, backend_slug)
 );
@@ -125,6 +130,23 @@ class SQLiteStore:
     def init_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+        self.migrate_phase2()
+
+    def migrate_phase2(self) -> None:
+        with self.connect() as conn:
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(backend_targets)").fetchall()}
+            if "backend_kb_id" not in existing:
+                conn.execute("ALTER TABLE backend_targets ADD COLUMN backend_kb_id TEXT")
+
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(sync_states)").fetchall()}
+            for col, col_type in [
+                ("backend_status", "TEXT"),
+                ("chunk_count", "INTEGER"),
+                ("progress", "REAL"),
+                ("backend_error", "TEXT"),
+            ]:
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE sync_states ADD COLUMN {col} {col_type}")
 
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         with self.connect() as conn:
@@ -465,18 +487,26 @@ class SQLiteStore:
         backend_slug: str,
         backend_doc_id: str | None,
         status: SyncStateStatus,
+        backend_status: str | None = None,
+        chunk_count: int | None = None,
+        progress: float | None = None,
+        backend_error: str | None = None,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sync_states (doc_id, kb_id, backend_slug, backend_doc_id, status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sync_states (doc_id, kb_id, backend_slug, backend_doc_id, status, backend_status, chunk_count, progress, backend_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(doc_id, kb_id, backend_slug) DO UPDATE SET
                   backend_doc_id = excluded.backend_doc_id,
                   status = excluded.status,
+                  backend_status = excluded.backend_status,
+                  chunk_count = excluded.chunk_count,
+                  progress = excluded.progress,
+                  backend_error = excluded.backend_error,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (doc_id, kb_id, backend_slug, backend_doc_id, status.value),
+                (doc_id, kb_id, backend_slug, backend_doc_id, status.value, backend_status, chunk_count, progress, backend_error),
             )
 
     def get_sync_state(self, doc_id: int, kb_id: int, backend_slug: str = "mock") -> dict[str, Any] | None:
