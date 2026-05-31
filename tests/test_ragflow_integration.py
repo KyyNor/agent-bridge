@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from wiki_manager.ragflow_backend import RagFlowBackend
+from wiki_manager.domain import RetrievalResult, AskResult
 
 # ---------------------------------------------------------------------------
 # RagFlow connection details
@@ -23,6 +24,7 @@ from wiki_manager.ragflow_backend import RagFlowBackend
 RAGFLOW_URL = "http://localhost:9380"
 RAGFLOW_EMAIL = "admin@wiki.local"
 RAGFLOW_PASSWORD = "admin123"
+RAGFLOW_API_KEY = "ragflow-wP5FuWWM0ihndQLfVyZnq3HeoUI9WI9GaFJcTHhc7Aw"
 
 
 # ---------------------------------------------------------------------------
@@ -173,3 +175,42 @@ def test_close_is_idempotent() -> None:
     backend._get_client()  # force login
     backend.close()
     backend.close()  # second call should be a no-op
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: retrieval and Q&A e2e tests (require data in RagFlow)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.ragflow
+def test_ragflow_retrieve_returns_results() -> None:
+    """Verify retrieve() returns RetrievalResult objects with data."""
+    backend = RagFlowBackend(base_url=RAGFLOW_URL, api_key=RAGFLOW_API_KEY)
+    datasets_resp = backend._request("GET", f"{RAGFLOW_URL}/api/v1/datasets")
+    datasets = datasets_resp.json()["data"]
+    if not datasets:
+        pytest.skip("no datasets available in RagFlow")
+
+    dataset_id = datasets[0]["id"]
+    results = backend.retrieve(dataset_id, "test query", top_k=3)
+    assert isinstance(results, list)
+    for r in results:
+        assert isinstance(r, RetrievalResult)
+        assert r.chunk_id
+        assert r.content
+
+
+@pytest.mark.ragflow
+def test_ragflow_ask_returns_answer() -> None:
+    """Verify ask() returns an AskResult and a chat_id."""
+    backend = RagFlowBackend(base_url=RAGFLOW_URL, api_key=RAGFLOW_API_KEY)
+
+    datasets_resp = backend._request("GET", f"{RAGFLOW_URL}/api/v1/datasets")
+    datasets = datasets_resp.json()["data"]
+    if not datasets:
+        pytest.skip("no datasets available in RagFlow")
+
+    dataset_id = datasets[0]["id"]
+    result, chat_id = backend.ask(dataset_id, "what is this about?")
+    assert isinstance(result, AskResult)
+    assert chat_id
+    assert isinstance(result.answer, str)
