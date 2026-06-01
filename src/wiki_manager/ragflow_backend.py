@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import uuid
 from pathlib import Path
 
 import httpx
@@ -138,6 +139,13 @@ class RagFlowBackend:
             raise RuntimeError(
                 f"RagFlow API error {response.status_code}: {response.text}"
             )
+        try:
+            payload = response.json()
+        except ValueError:
+            return
+        if isinstance(payload, dict) and payload.get("code") not in (None, 0):
+            message = payload.get("message") or payload.get("error") or response.text
+            raise RuntimeError(f"RagFlow API error {payload.get('code')}: {message}")
 
     # ------------------------------------------------------------------
     # Public API (BackendAdapter protocol)
@@ -155,7 +163,8 @@ class RagFlowBackend:
     def delete_kb(self, backend_kb_id: str) -> None:
         response = self._request(
             "DELETE",
-            f"{self.base_url}/api/v1/datasets/{backend_kb_id}",
+            f"{self.base_url}/api/v1/datasets",
+            json={"ids": [backend_kb_id]},
         )
         self._raise(response)
 
@@ -277,7 +286,7 @@ class RagFlowBackend:
             "POST",
             f"{self.base_url}/api/v1/chats",
             json={
-                "name": f"wiki-mgr-{backend_kb_id[:8]}",
+                "name": f"wiki-mgr-{backend_kb_id[:8]}-{uuid.uuid4().hex[:8]}",
                 "dataset_ids": [backend_kb_id],
                 "llm": {"model_name": "default"},
             },

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -39,6 +40,29 @@ def test_delete(respx_mock):
     )
     backend = RagFlowBackend(base_url=base_url, api_key="test-key", timeout=30)
     backend.delete("ds-123", "doc-456")
+
+
+def test_delete_kb_uses_bulk_dataset_delete(respx_mock):
+    base_url = "http://localhost:9380"
+    route = respx_mock.delete(f"{base_url}/api/v1/datasets").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": True})
+    )
+    backend = RagFlowBackend(base_url=base_url, api_key="test-key", timeout=30)
+    backend.delete_kb("ds-123")
+    assert route.calls.last.request.read() == b'{"ids":["ds-123"]}'
+
+
+def test_ragflow_business_error_raises(respx_mock):
+    base_url = "http://localhost:9380"
+    respx_mock.post(f"{base_url}/api/v1/retrieval").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": 100, "data": None, "message": "Model Name is required"},
+        )
+    )
+    backend = RagFlowBackend(base_url=base_url, api_key="test-key", timeout=30)
+    with pytest.raises(RuntimeError, match="Model Name is required"):
+        backend.retrieve("ds-123", "test")
 
 
 def test_get_status_completed(respx_mock):
@@ -161,3 +185,28 @@ def test_ragflow_ask_reuses_chat_id(respx_mock):
     result, chat_id = backend.ask("ds-abc", "test?", chat_id="chat-existing")
     assert chat_id == "chat-existing"
     assert result.answer == "It works."
+
+
+def test_ragflow_ask_creates_unique_chat_names(respx_mock):
+    backend = RagFlowBackend(base_url="http://localhost:9380", api_key="test-key")
+    chat_requests = []
+
+    def create_chat(request):
+        chat_requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"code": 0, "data": {"id": f"chat-{len(chat_requests)}"}})
+
+    respx_mock.post("http://localhost:9380/api/v1/chats").mock(side_effect=create_chat)
+    respx_mock.post(url__regex=r"http://localhost:9380/api/v1/chats/chat-.*/sessions").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": {"id": "sess-1"}})
+    )
+    respx_mock.post("http://localhost:9380/api/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={
+            "code": 0,
+            "data": {"answer": "It works.", "reference": {}},
+        })
+    )
+
+    backend.ask("ds-abc", "first?")
+    backend.ask("ds-abc", "second?")
+
+    assert chat_requests[0]["name"] != chat_requests[1]["name"]
