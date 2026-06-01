@@ -38,6 +38,8 @@ backend_type = "weknora"
 base_url = "http://localhost"
 api_key = "sk-..."
 timeout = 120
+embedding_model_id = "..."
+summary_model_id = "..."
 ```
 
 `api_key` 是 Weknora tenant API key，用于请求头 `X-API-Key`。LLM/Embedding 上游 key 不写入 wiki-manager 配置；它们只在 Weknora 模型配置中保存。

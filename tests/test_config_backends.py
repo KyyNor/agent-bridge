@@ -48,6 +48,25 @@ def test_multiple_backend_configs(tmp_path: Path):
     assert ragflow.timeout == 120
 
 
+def test_weknora_backend_config_reads_model_ids(tmp_path: Path):
+    paths = WikiManagerPaths.from_root(tmp_path)
+    _write_config(paths.config_dir, (
+        'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
+        '[backends.weknora]\n'
+        'backend_type = "weknora"\n'
+        'base_url = "http://localhost"\n'
+        'api_key = "wek-test"\n'
+        'timeout = 120\n'
+        'embedding_model_id = "emb-1"\n'
+        'summary_model_id = "chat-1"\n'
+    ))
+    backends = load_backend_configs(paths)
+    weknora = backends[0]
+    assert weknora.slug == "weknora"
+    assert weknora.embedding_model_id == "emb-1"
+    assert weknora.summary_model_id == "chat-1"
+
+
 def test_backend_config_missing_required_field(tmp_path: Path):
     paths = WikiManagerPaths.from_root(tmp_path)
     _write_config(paths.config_dir, (

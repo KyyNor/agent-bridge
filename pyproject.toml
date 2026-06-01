@@ -26,6 +26,7 @@ wiki = "wiki_manager.cli:main"
 [tool.pytest.ini_options]
 markers = [
     "ragflow: integration tests requiring a live RagFlow server",
+    "weknora: integration tests requiring a live Weknora server",
 ]
 
 [build-system]

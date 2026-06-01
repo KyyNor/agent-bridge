@@ -54,6 +54,8 @@ class BackendConfig:
     base_url: str | None = None
     api_key: str | None = None
     timeout: int = 120
+    embedding_model_id: str | None = None
+    summary_model_id: str | None = None
 
 
 def ensure_directories(paths: WikiManagerPaths) -> None:
@@ -119,5 +121,7 @@ def load_backend_configs(paths: WikiManagerPaths) -> list[BackendConfig]:
             base_url=section.get("base_url"),
             api_key=section.get("api_key"),
             timeout=int(section.get("timeout", 120)),
+            embedding_model_id=section.get("embedding_model_id"),
+            summary_model_id=section.get("summary_model_id"),
         ))
     return result

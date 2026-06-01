@@ -10,6 +10,7 @@ from wiki_manager.mock_backend import MockBackend
 ADAPTER_CLASSES: dict[str, type] = {
     "mock": MockBackend,
     "ragflow": type("RagFlowBackend", (), {}),  # placeholder; real class used via lazy import
+    "weknora": type("WeknoraBackend", (), {}),  # placeholder; real class used via lazy import
 }
 
 
@@ -29,6 +30,16 @@ class BackendRegistry:
                     base_url=config.base_url or "",
                     api_key=config.api_key or "",
                     timeout=config.timeout,
+                )
+            elif config.backend_type == "weknora":
+                from wiki_manager.weknora_backend import WeknoraBackend
+
+                self._adapters[slug] = WeknoraBackend(
+                    base_url=config.base_url or "",
+                    api_key=config.api_key or "",
+                    timeout=config.timeout,
+                    embedding_model_id=config.embedding_model_id,
+                    summary_model_id=config.summary_model_id,
                 )
             else:
                 self._adapters[slug] = adapter_cls()
