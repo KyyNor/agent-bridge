@@ -14,6 +14,9 @@
 
 - Product design: `docs/agent-capability-hub-phase1-structured-design.html`
 - Page definition: `docs/agent-capability-hub-page-definition.html`
+- Visual reference: `docs/design/`
+  - Use the design system, page structure, colors, spacing, density, badges, side navigation, tables, forms, and interaction patterns.
+  - Do not copy the fictional functions, counts, links, or workflows from the design drafts unless they are part of the Phase 1 spec.
 
 ## File Structure
 
@@ -25,8 +28,12 @@
   - Async client wrapper for Streamable HTTP MCP service `list_tools` and `call_tool`.
 - Create `src/wiki_manager/capability_service.py`
   - Business logic for service registration, tool sync, `search`, and `execute`.
+- Create `src/wiki_manager/static/capabilities/app.css`
+  - Phase 1 frontend stylesheet derived from the visual language in `docs/design/css/shared.css`.
+- Create `src/wiki_manager/static/capabilities/app.js`
+  - Small vanilla JavaScript app for listing, registering, syncing, and browsing MCP services/tools.
 - Create `src/wiki_manager/web_pages.py`
-  - Minimal HTML admin page for Phase 1 MCP registration and tool browsing.
+  - HTML shell for the Phase 1 admin page. Keep most styling and behavior in static CSS/JS files instead of embedding a large UI in Python.
 - Modify `src/wiki_manager/server.py`
   - Add REST endpoints for MCP service registration, sync, listing, tool listing, and the HTML page route.
 - Modify `src/wiki_manager/mcp_server.py`
@@ -1025,11 +1032,13 @@ git add src/wiki_manager/capability_service.py src/wiki_manager/services.py test
 git commit -m "feat: add capability service"
 ```
 
-## Task 4: Web API and Minimal Admin Page
+## Task 4: Web API and Phase 1 Admin Page
 
 **Files:**
 - Modify: `src/wiki_manager/server.py`
 - Create: `src/wiki_manager/web_pages.py`
+- Create: `src/wiki_manager/static/capabilities/app.css`
+- Create: `src/wiki_manager/static/capabilities/app.js`
 - Test: `tests/test_capability_api.py`
 
 - [ ] **Step 1: Write failing API tests**
@@ -1101,6 +1110,21 @@ def test_capability_admin_page_serves_html(wm_paths) -> None:
     assert response.status_code == 200
     assert "Agent Capability Hub" in response.text
     assert "MCP Services" in response.text
+    assert "/static/capabilities/app.css" in response.text
+    assert "/static/capabilities/app.js" in response.text
+
+
+def test_capability_static_assets_are_served(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    css = client.get("/static/capabilities/app.css")
+    js = client.get("/static/capabilities/app.js")
+
+    assert css.status_code == 200
+    assert "sidebar" in css.text
+    assert js.status_code == 200
+    assert "loadServices" in js.text
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1113,7 +1137,225 @@ uv run pytest tests/test_capability_api.py -v
 
 Expected: FAIL with route 404 responses and missing `web_pages.py`.
 
-- [ ] **Step 3: Add HTML page helper**
+- [ ] **Step 3: Add static frontend assets**
+
+Create `src/wiki_manager/static/capabilities/app.css`.
+
+Use `docs/design/css/shared.css` as the visual reference, but keep only the CSS needed for Phase 1:
+
+```css
+:root {
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --fg: #17202a;
+  --fg-secondary: #475467;
+  --muted: #647086;
+  --border: #e2e6ed;
+  --border-light: #f0f2f5;
+  --primary: #2456d6;
+  --primary-hover: #1d47b8;
+  --primary-soft: #e9efff;
+  --primary-text: #1a3fa0;
+  --success: #0f8a5f;
+  --success-soft: #e7f6ef;
+  --warning: #b86412;
+  --warning-soft: #fff4e5;
+  --danger: #b42318;
+  --danger-soft: #ffe8e5;
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-400: #9ca3af;
+  --radius-sm: 8px;
+  --radius-md: 8px;
+  --sidebar-width: 240px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+code, pre { font-family: var(--font-mono); }
+
+.layout { display: flex; min-height: 100vh; }
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--sidebar-width);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+.sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid var(--border-light); }
+.sidebar-logo { display: flex; align-items: center; gap: 12px; }
+.sidebar-logo-icon { width: 32px; height: 32px; border-radius: var(--radius-md); background: var(--primary); color: white; display: grid; place-items: center; font-weight: 700; }
+.sidebar-logo-text { font-size: 15px; font-weight: 650; line-height: 1.3; }
+.sidebar-logo-text span { display: block; color: var(--muted); font-size: 12px; font-weight: 500; }
+.sidebar-nav { padding: 12px; flex: 1; }
+.nav-group { margin-bottom: 10px; }
+.nav-group-label { color: var(--gray-400); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; padding: 8px 12px; text-transform: uppercase; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--radius-sm); color: var(--fg-secondary); text-decoration: none; font-size: 13px; font-weight: 500; }
+.nav-item.active { background: var(--primary-soft); color: var(--primary-text); font-weight: 600; }
+.nav-item.disabled { color: var(--gray-400); }
+.sidebar-footer { padding: 12px 20px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border-light); }
+
+.main-content { margin-left: var(--sidebar-width); min-height: 100vh; width: calc(100% - var(--sidebar-width)); }
+.page-header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 24px 32px; }
+.page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.page-title { font-size: 24px; font-weight: 700; }
+.page-subtitle { margin-top: 4px; color: var(--muted); font-size: 13px; }
+.page-body { padding: 24px 32px 48px; }
+
+.grid { display: grid; gap: 16px; }
+.grid.two { grid-template-columns: minmax(0, 1fr) minmax(360px, 420px); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.card-header { padding: 16px 18px; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-title { font-weight: 650; }
+.card-body { padding: 18px; }
+
+.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.search-input, input, textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  padding: 9px 11px;
+}
+textarea { min-height: 82px; resize: vertical; }
+.field { margin-bottom: 12px; }
+.field label { display: block; margin-bottom: 6px; color: var(--fg-secondary); font-size: 13px; font-weight: 600; }
+
+.btn { border: 1px solid transparent; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; font-weight: 600; font-size: 13px; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-secondary { background: white; border-color: var(--border); color: var(--fg-secondary); }
+.btn-danger { background: var(--danger-soft); color: var(--danger); }
+.btn-ghost { background: transparent; color: var(--fg-secondary); }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { border-bottom: 1px solid var(--border-light); padding: 11px 12px; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-size: 12px; font-weight: 650; background: var(--gray-50); }
+.table-name { font-weight: 600; }
+.table-desc { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.table-url { color: var(--muted); font-family: var(--font-mono); font-size: 12px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; font-size: 12px; font-weight: 600; }
+.badge-success { background: var(--success-soft); color: var(--success); }
+.badge-warning { background: var(--warning-soft); color: var(--warning); }
+.badge-danger { background: var(--danger-soft); color: var(--danger); }
+.badge-soft { background: var(--primary-soft); color: var(--primary-text); }
+
+.code-block { background: #111827; color: #e5e7eb; border-radius: 8px; padding: 14px; overflow: auto; font-size: 12px; }
+.message { margin-top: 12px; border-radius: 8px; padding: 10px 12px; background: var(--gray-50); color: var(--fg-secondary); white-space: pre-wrap; }
+
+@media (max-width: 900px) {
+  .sidebar { position: static; width: 100%; }
+  .layout { display: block; }
+  .main-content { margin-left: 0; width: 100%; }
+  .grid.two { grid-template-columns: 1fr; }
+  .page-header, .page-body { padding-left: 18px; padding-right: 18px; }
+}
+```
+
+Create `src/wiki_manager/static/capabilities/app.js`:
+
+```javascript
+const actorHeaders = { "X-Wiki-User": "root" };
+
+function json(value) {
+  return JSON.stringify(value, null, 2);
+}
+
+function statusBadge(status) {
+  if (status === "enabled") return '<span class="badge badge-success">已启用</span>';
+  if (status === "error") return '<span class="badge badge-danger">异常</span>';
+  return '<span class="badge badge-warning">已停用</span>';
+}
+
+async function request(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...actorHeaders,
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+  return data;
+}
+
+async function loadServices() {
+  const services = await request("/capabilities/mcp-services");
+  const rows = services.map((item) => `
+    <tr>
+      <td>
+        <div class="table-name">${item.service_key}</div>
+        <div class="table-desc">${item.description || item.name}</div>
+      </td>
+      <td><div class="table-url">${item.endpoint_url}</div></td>
+      <td>${statusBadge(item.status)}</td>
+      <td>${(item.tags || []).map((tag) => `<span class="badge badge-soft">${tag}</span>`).join(" ")}</td>
+      <td>
+        <button class="btn btn-secondary" onclick="syncTools('${item.service_key}')">同步工具</button>
+        <button class="btn btn-ghost" onclick="loadTools('${item.service_key}')">查看工具</button>
+      </td>
+    </tr>
+  `).join("");
+  document.getElementById("servicesBody").innerHTML = rows || '<tr><td colspan="5">暂无 MCP 服务，请先登记一个 HTTP MCP 服务。</td></tr>';
+}
+
+async function saveService(event) {
+  event.preventDefault();
+  const payload = {
+    service_key: document.getElementById("service_key").value.trim(),
+    name: document.getElementById("name").value.trim(),
+    endpoint_url: document.getElementById("endpoint_url").value.trim(),
+    description: document.getElementById("description").value.trim(),
+    tags: document.getElementById("tags").value.split(",").map((item) => item.trim()).filter(Boolean),
+    headers: JSON.parse(document.getElementById("headers").value || "{}"),
+  };
+  const result = await request("/capabilities/mcp-services", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  document.getElementById("formResult").textContent = json(result);
+  await loadServices();
+}
+
+async function syncTools(serviceKey) {
+  const result = await request(`/capabilities/mcp-services/${serviceKey}/sync`, { method: "POST" });
+  document.getElementById("formResult").textContent = json(result);
+  await loadTools(serviceKey);
+}
+
+async function loadTools(serviceKey) {
+  const tools = await request(`/capabilities/mcp-services/${serviceKey}/tools`);
+  const rows = tools.map((tool) => `
+    <tr>
+      <td>
+        <div class="table-name">${tool.tool_name}</div>
+        <div class="table-desc">${tool.description || ""}</div>
+      </td>
+      <td><span class="badge badge-soft">${tool.tool_type}</span></td>
+      <td><pre class="code-block">${json(tool.input_schema)}</pre></td>
+    </tr>
+  `).join("");
+  document.getElementById("toolsTitle").textContent = `${serviceKey} 工具`;
+  document.getElementById("toolsBody").innerHTML = rows || '<tr><td colspan="3">该服务尚未同步工具。</td></tr>';
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("serviceForm").addEventListener("submit", saveService);
+  loadServices().catch((error) => {
+    document.getElementById("servicesBody").innerHTML = `<tr><td colspan="5">${error.message}</td></tr>`;
+  });
+});
+```
+
+- [ ] **Step 4: Add HTML page helper**
 
 Create `src/wiki_manager/web_pages.py`:
 
@@ -1128,94 +1370,106 @@ def capability_admin_page() -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agent Capability Hub</title>
-  <style>
-    body { margin: 0; background: #f6f8fb; color: #17202a; font-family: Arial, "PingFang SC", sans-serif; }
-    main { width: min(1120px, calc(100vw - 40px)); margin: 0 auto; padding: 28px 0 60px; }
-    header, section { border: 1px solid #dce3ec; border-radius: 8px; background: #fff; padding: 22px; margin-top: 14px; }
-    h1, h2 { margin: 0; }
-    p { color: #647086; }
-    label { display: block; margin-top: 12px; font-weight: 700; }
-    input, textarea { width: 100%; border: 1px solid #b9c5d6; border-radius: 6px; padding: 9px; font: inherit; }
-    button { margin-top: 14px; border: 0; border-radius: 6px; background: #2456d6; color: white; padding: 10px 14px; font-weight: 700; cursor: pointer; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    th, td { border-bottom: 1px solid #dce3ec; padding: 10px; text-align: left; vertical-align: top; }
-    code, pre { background: #f4f7fb; border: 1px solid #dce3ec; border-radius: 6px; padding: 2px 6px; }
-    pre { overflow: auto; padding: 12px; }
-  </style>
+  <link rel="stylesheet" href="/static/capabilities/app.css">
 </head>
 <body>
-  <main>
-    <header>
-      <h1>Agent Capability Hub</h1>
-      <p>Phase 1 MCP Services registry and MetaMCP gateway.</p>
-    </header>
-    <section>
-      <h2>MCP Services</h2>
-      <div id="services">Loading services...</div>
-    </section>
-    <section>
-      <h2>Register HTTP MCP Service</h2>
-      <label>Service Key</label>
-      <input id="service_key" value="mysql">
-      <label>Name</label>
-      <input id="name" value="MySQL">
-      <label>Endpoint URL</label>
-      <input id="endpoint_url" value="http://localhost:9001/mcp">
-      <label>Description</label>
-      <textarea id="description">Reporting database MCP.</textarea>
-      <label>Tags, comma separated</label>
-      <input id="tags" value="database,report">
-      <label>Headers JSON</label>
-      <textarea id="headers">{}</textarea>
-      <button onclick="saveService()">Save Service</button>
-      <pre id="result"></pre>
-    </section>
-    <section>
-      <h2>MetaMCP Search Examples</h2>
-      <pre>{}</pre>
-      <pre>{"query":"mysql"}</pre>
-      <pre>{"path":"mysql"}</pre>
-      <pre>{"path":"mysql","query":"sql"}</pre>
-    </section>
-  </main>
-  <script>
-    async function loadServices() {
-      const response = await fetch('/capabilities/mcp-services', { headers: { 'X-Wiki-User': 'root' } });
-      const services = await response.json();
-      document.getElementById('services').innerHTML = '<table><thead><tr><th>Key</th><th>Name</th><th>Status</th><th>Tags</th></tr></thead><tbody>' +
-        services.map(item => '<tr><td><code>' + item.service_key + '</code></td><td>' + item.name + '</td><td>' + item.status + '</td><td>' + item.tags.join(', ') + '</td></tr>').join('') +
-        '</tbody></table>';
-    }
-    async function saveService() {
-      const payload = {
-        service_key: document.getElementById('service_key').value,
-        name: document.getElementById('name').value,
-        endpoint_url: document.getElementById('endpoint_url').value,
-        description: document.getElementById('description').value,
-        tags: document.getElementById('tags').value.split(',').map(item => item.trim()).filter(Boolean),
-        headers: JSON.parse(document.getElementById('headers').value || '{}')
-      };
-      const response = await fetch('/capabilities/mcp-services', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Wiki-User': 'root' },
-        body: JSON.stringify(payload)
-      });
-      document.getElementById('result').textContent = JSON.stringify(await response.json(), null, 2);
-      await loadServices();
-    }
-    loadServices();
-  </script>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <div class="sidebar-logo-icon">A</div>
+          <div class="sidebar-logo-text">Agent 能力管理中心<span>Capability Hub</span></div>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-group">
+          <div class="nav-group-label">MCP 服务</div>
+          <a class="nav-item active">服务登记</a>
+          <a class="nav-item disabled">调用记录</a>
+          <a class="nav-item disabled">访问策略</a>
+        </div>
+      </nav>
+      <div class="sidebar-footer">v0.1.0 · 阶段一</div>
+    </aside>
+    <div class="main-content">
+      <header class="page-header">
+        <div class="page-header-row">
+          <div>
+            <h1 class="page-title">MCP 服务登记</h1>
+            <div class="page-subtitle">登记 HTTP MCP 服务，同步工具清单，并通过 MetaMCP search/execute 统一暴露。</div>
+          </div>
+        </div>
+      </header>
+      <main class="page-body">
+        <div class="grid two">
+          <section class="card">
+            <div class="card-header"><h2 class="card-title">MCP Services</h2></div>
+            <div class="card-body">
+              <div class="toolbar"><input class="search-input" placeholder="搜索服务名称、地址或描述"></div>
+              <table>
+                <thead><tr><th>服务</th><th>Endpoint</th><th>状态</th><th>标签</th><th>操作</th></tr></thead>
+                <tbody id="servicesBody"><tr><td colspan="5">Loading services...</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-header"><h2 class="card-title">Register HTTP MCP Service</h2></div>
+            <div class="card-body">
+              <form id="serviceForm">
+                <div class="field"><label>Service Key</label><input id="service_key" value="mysql"></div>
+                <div class="field"><label>Name</label><input id="name" value="MySQL"></div>
+                <div class="field"><label>Endpoint URL</label><input id="endpoint_url" value="http://localhost:9001/mcp"></div>
+                <div class="field"><label>Description</label><textarea id="description">Reporting database MCP.</textarea></div>
+                <div class="field"><label>Tags, comma separated</label><input id="tags" value="database,report"></div>
+                <div class="field"><label>Headers JSON</label><textarea id="headers">{}</textarea></div>
+                <button class="btn btn-primary" type="submit">保存服务</button>
+              </form>
+              <pre class="message" id="formResult"></pre>
+            </div>
+          </section>
+        </div>
+        <section class="card" style="margin-top:16px;">
+          <div class="card-header"><h2 class="card-title" id="toolsTitle">工具清单</h2></div>
+          <div class="card-body">
+            <table>
+              <thead><tr><th>工具</th><th>类型</th><th>Input Schema</th></tr></thead>
+              <tbody id="toolsBody"><tr><td colspan="3">选择一个服务查看工具。</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="card" style="margin-top:16px;">
+          <div class="card-header"><h2 class="card-title">MetaMCP Search Examples</h2></div>
+          <div class="card-body">
+            <pre class="code-block">{}</pre>
+            <pre class="code-block">{"query":"mysql"}</pre>
+            <pre class="code-block">{"path":"mysql"}</pre>
+            <pre class="code-block">{"path":"mysql","query":"sql"}</pre>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script src="/static/capabilities/app.js"></script>
 </body>
 </html>"""
 ```
 
-- [ ] **Step 4: Add API request models and routes**
+- [ ] **Step 5: Add API request models, static mount, and routes**
 
 Modify `src/wiki_manager/server.py` imports:
 
 ```python
+from pathlib import Path
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from wiki_manager.web_pages import capability_admin_page
+```
+
+Add a static mount after `app = FastAPI(...)`:
+
+```python
+    static_dir = Path(__file__).parent / "static"
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 ```
 
 Add Pydantic models near the existing request models:
@@ -1286,7 +1540,7 @@ Add routes inside `create_app`:
         return call_safely(lambda: service.capabilities.list_tools(actor=current_actor, service_key=service_key))
 ```
 
-- [ ] **Step 5: Run API tests**
+- [ ] **Step 6: Run API tests**
 
 Run:
 
@@ -1296,7 +1550,7 @@ uv run pytest tests/test_capability_api.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Run existing server regression tests**
+- [ ] **Step 7: Run existing server regression tests**
 
 Run:
 
@@ -1306,10 +1560,10 @@ uv run pytest tests/test_server.py -v
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 4**
+- [ ] **Step 8: Commit Task 4**
 
 ```bash
-git add src/wiki_manager/server.py src/wiki_manager/web_pages.py tests/test_capability_api.py
+git add src/wiki_manager/server.py src/wiki_manager/web_pages.py src/wiki_manager/static/capabilities/app.css src/wiki_manager/static/capabilities/app.js tests/test_capability_api.py
 git commit -m "feat: add capability registry web API"
 ```
 
