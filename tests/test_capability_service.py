@@ -222,6 +222,38 @@ def test_execute_rejects_annotation_destructive_action_tool(wm_paths: WikiManage
         asyncio.run(service.execute("alice", "docs-api", "delete_doc", {"doc_id": "1"}))
 
 
+def test_readonly_annotation_overrides_action_name_heuristic(wm_paths: WikiManagerPaths) -> None:
+    class ConflictingMcpClient(FakeMcpClient):
+        async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
+            return [
+                {
+                    "name": "delete_archive",
+                    "description": "Delete archive metadata",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"archive_id": {"type": "string"}},
+                    },
+                    "annotations": {"readOnlyHint": True},
+                }
+            ]
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    client = ConflictingMcpClient()
+    service = CapabilityService(store=store, mcp_client=client, admins={"root"})
+    service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
+
+    asyncio.run(service.sync_tools("root", "docs-api"))
+
+    tools = service.list_tools("alice", "docs-api")
+    assert tools[0]["tool"] == "delete_archive"
+    assert tools[0]["tool_type"] == ToolType.search.value
+
+    result = asyncio.run(service.execute("alice", "docs-api", "delete_archive", {"archive_id": "archive-1"}))
+    assert result["success"] is True
+    assert client.call_tool_calls[0]["tool_name"] == "delete_archive"
+
+
 def test_execute_rejects_unexpected_tool_type(wm_paths: WikiManagerPaths) -> None:
     service, _client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
