@@ -379,6 +379,33 @@ class SQLiteStore:
             ).fetchone()
             return _row_to_dict(row)
 
+    def deactivate_missing_mcp_tools(self, service_key: str, active_tool_names: set[str]) -> None:
+        with self.connect() as conn:
+            if active_tool_names:
+                placeholders = ", ".join("?" for _ in active_tool_names)
+                conn.execute(
+                    f"""
+                    UPDATE mcp_tools
+                    SET status = 'inactive',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE service_key = ?
+                      AND tool_name NOT IN ({placeholders})
+                      AND status = 'active'
+                    """,
+                    (service_key, *sorted(active_tool_names)),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE mcp_tools
+                    SET status = 'inactive',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE service_key = ?
+                      AND status = 'active'
+                    """,
+                    (service_key,),
+                )
+
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         with self.connect() as conn:
             cursor = conn.execute(

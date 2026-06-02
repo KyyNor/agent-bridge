@@ -197,3 +197,47 @@ def test_mcp_tool_upsert_reactivates_inactive_tool(wm_paths: WikiManagerPaths) -
     tool = store.get_mcp_tool("mysql", "query_sql")
     assert tool is not None
     assert tool["status"] == "active"
+
+
+def test_deactivate_missing_mcp_tools_marks_only_removed_tools_inactive(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="http://localhost:9001/mcp",
+        headers={},
+        description="SQL database MCP service",
+        tags=["database"],
+        created_by="root",
+    )
+    store.create_mcp_service(
+        service_key="analytics",
+        name="Analytics",
+        endpoint_url="http://localhost:9002/mcp",
+        headers={},
+        description="Analytics MCP service",
+        tags=["analytics"],
+        created_by="root",
+    )
+    for service_key, tool_name in [
+        ("mysql", "query_sql"),
+        ("mysql", "describe_table"),
+        ("analytics", "query_report"),
+    ]:
+        store.upsert_mcp_tool(
+            service_key=service_key,
+            tool_name=tool_name,
+            display_name=tool_name,
+            description="",
+            input_schema={"type": "object"},
+            tool_type=ToolType.search,
+            tags=[],
+            examples=[],
+        )
+
+    store.deactivate_missing_mcp_tools("mysql", {"query_sql"})
+
+    assert store.get_mcp_tool("mysql", "query_sql")["status"] == "active"
+    assert store.get_mcp_tool("mysql", "describe_table")["status"] == "inactive"
+    assert store.get_mcp_tool("analytics", "query_report")["status"] == "active"

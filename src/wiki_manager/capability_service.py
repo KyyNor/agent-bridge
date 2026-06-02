@@ -104,7 +104,7 @@ class CapabilityService:
         return self._service_payload(service)
 
     def list_services(self, actor: str) -> list[dict[str, Any]]:
-        return [self._service_payload(service) for service in self.store.list_mcp_services()]
+        return [self._service_payload(service, redact_headers=True) for service in self.store.list_mcp_services()]
 
     def set_service_status(self, actor: str, service_key: str, status: McpServiceStatus | str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -129,8 +129,10 @@ class CapabilityService:
         headers = _json_loads(service.get("headers_json"), {})
         try:
             tools = await self.mcp_client.list_tools(service["endpoint_url"], headers)
+            active_tool_names: set[str] = set()
             for tool in tools:
                 normalized = self._normalize_synced_tool(tool)
+                active_tool_names.add(normalized["tool_name"])
                 self.store.upsert_mcp_tool(
                     service_key=service_key,
                     tool_name=normalized["tool_name"],
@@ -141,6 +143,7 @@ class CapabilityService:
                     tags=normalized["tags"],
                     examples=normalized["examples"],
                 )
+            self.store.deactivate_missing_mcp_tools(service_key, active_tool_names)
             self.store.mark_mcp_service_sync(service_key, success=True)
             return {"service_key": service_key, "tool_count": len(tools)}
         except Exception as exc:
@@ -148,9 +151,8 @@ class CapabilityService:
             raise ValidationError(f"MCP tool sync failed: {exc}") from exc
 
     def list_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
-        if self.store.get_mcp_service(service_key) is None:
-            raise NotFound("service not found")
-        return [self._tool_payload(tool) for tool in self.store.list_mcp_tools(service_key)]
+        self._require_enabled_service(service_key)
+        return [self._tool_payload(tool) for tool in self._active_tools(service_key)]
 
     def search(self, actor: str, path: str | None, query: str | None, limit: int = 20) -> dict[str, Any]:
         normalized_path = (path or "").strip("/")
@@ -158,9 +160,8 @@ class CapabilityService:
             items = self._root_search_items()
             response_path = "/"
         else:
-            if self.store.get_mcp_service(normalized_path) is None:
-                raise NotFound("service not found")
-            items = [self._tool_search_item(tool) for tool in self.store.list_mcp_tools(normalized_path)]
+            self._require_enabled_service(normalized_path)
+            items = [self._tool_search_item(tool) for tool in self._active_tools(normalized_path)]
             response_path = normalized_path
 
         if query:
@@ -175,28 +176,37 @@ class CapabilityService:
         tool: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        service_payload = self.store.get_mcp_service(service)
-        if service_payload is None:
-            raise NotFound("service not found")
+        service_payload = self._require_enabled_service(service)
         tool_payload = self.store.get_mcp_tool(service, tool)
-        if tool_payload is None:
+        if tool_payload is None or tool_payload.get("status") != "active":
             raise NotFound("tool not found")
         if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
             raise ValidationError("action tools are not executable in phase 1")
 
         headers = _json_loads(service_payload.get("headers_json"), {})
-        result = await self.mcp_client.call_tool(
-            service_payload["endpoint_url"],
-            headers,
-            tool,
-            arguments,
-        )
+        try:
+            result = await self.mcp_client.call_tool(
+                service_payload["endpoint_url"],
+                headers,
+                tool,
+                arguments,
+            )
+        except Exception as exc:
+            raise ValidationError(f"MCP tool execution failed: {exc}") from exc
         return {
             "service": service,
             "tool": tool,
             "success": not bool(result.get("is_error")) if isinstance(result, dict) else True,
             "result": result,
         }
+
+    def _require_enabled_service(self, service_key: str) -> dict[str, Any]:
+        service = self.store.get_mcp_service(service_key)
+        if service is None:
+            raise NotFound("service not found")
+        if service["status"] != McpServiceStatus.enabled.value:
+            raise ValidationError("MCP service is not enabled")
+        return service
 
     def _root_search_items(self) -> list[dict[str, Any]]:
         enabled_services = [
@@ -221,9 +231,15 @@ class CapabilityService:
             for service in enabled_services
         ]
 
-    def _service_payload(self, service: dict[str, Any]) -> dict[str, Any]:
+    def _active_tools(self, service_key: str) -> list[dict[str, Any]]:
+        return [tool for tool in self.store.list_mcp_tools(service_key) if tool.get("status") == "active"]
+
+    def _service_payload(self, service: dict[str, Any], *, redact_headers: bool = False) -> dict[str, Any]:
         payload = dict(service)
-        payload["headers"] = _json_loads(payload.pop("headers_json", None), {})
+        headers = _json_loads(payload.pop("headers_json", None), {})
+        if redact_headers:
+            headers = {key: "***" if value else value for key, value in headers.items()}
+        payload["headers"] = headers
         payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
         return payload
 
@@ -293,16 +309,19 @@ class CapabilityService:
         return []
 
     def _infer_tool_type(self, tool: dict[str, Any]) -> ToolType:
+        haystack = f"{tool.get('name', '')} {tool.get('description', '')}".lower()
         annotations = tool.get("annotations")
         if isinstance(annotations, dict):
             if annotations.get("destructiveHint") is True or annotations.get("readOnlyHint") is False:
                 return ToolType.action
             if annotations.get("readOnlyHint") is True:
-                return ToolType.search
+                return self._infer_readonly_tool_type(haystack)
 
-        haystack = f"{tool.get('name', '')} {tool.get('description', '')}".lower()
         if any(token in haystack for token in ("delete", "remove", "update", "create", "write", "insert", "execute")):
             return ToolType.action
+        return self._infer_readonly_tool_type(haystack)
+
+    def _infer_readonly_tool_type(self, haystack: str) -> ToolType:
         if any(token in haystack for token in ("list", "overview", "summary")):
             return ToolType.overview
         if any(token in haystack for token in ("get", "detail", "fetch", "read")):
