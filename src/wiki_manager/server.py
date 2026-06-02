@@ -4,14 +4,17 @@ import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from wiki_manager.config import DEFAULT_ROOT, WikiManagerPaths, load_server_config
 from wiki_manager.domain import KbRole, WikiManagerError
 from wiki_manager.services import WikiManagerService
+from wiki_manager.web_pages import capability_admin_page
 
 
 class CreateKbRequest(BaseModel):
@@ -40,10 +43,24 @@ class PurgeRequest(BaseModel):
     confirm: bool = False
 
 
+class RegisterMcpServiceRequest(BaseModel):
+    service_key: str
+    name: str
+    endpoint_url: str
+    headers: dict[str, Any] = Field(default_factory=dict)
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class UpdateMcpServiceStatusRequest(BaseModel):
+    status: str
+
+
 def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
     resolved_paths = paths or WikiManagerPaths.from_root(DEFAULT_ROOT)
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = WikiManagerService.create(resolved_paths, resolved_admins)
+    capability_schema_ready = False
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -51,6 +68,8 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         yield
 
     app = FastAPI(title="wiki-manager", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
+    static_dir = Path(__file__).parent / "static" / "capabilities"
+    app.mount("/static/capabilities", StaticFiles(directory=static_dir), name="capabilities-static")
 
     def actor(x_wiki_user: str = Header(alias="X-Wiki-User")) -> str:
         return x_wiki_user
@@ -59,7 +78,17 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         try:
             if admins is None:
                 service.admins = load_server_config(resolved_paths).admins
+                service.capabilities.admins = service.admins
             return call()
+        except WikiManagerError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    async def call_safely_async(call: Callable[[], Awaitable[Any]]) -> Any:
+        try:
+            if admins is None:
+                service.admins = load_server_config(resolved_paths).admins
+                service.capabilities.admins = service.admins
+            return await call()
         except WikiManagerError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
@@ -79,6 +108,12 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
 
     def upload_filename(file: UploadFile) -> str:
         return Path((file.filename or "upload").replace("\\", "/")).name or "upload"
+
+    def ensure_capability_schema() -> None:
+        nonlocal capability_schema_ready
+        if not capability_schema_ready:
+            service.store.init_schema()
+            capability_schema_ready = True
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -207,5 +242,51 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
             "chunks": [{"chunk_id": c.chunk_id, "content": c.content, "document_name": c.document_name, "similarity": c.similarity, "dataset_id": c.dataset_id} for c in result.chunks],
             "session_id": result.session_id,
         }
+
+    @app.post("/capabilities/mcp-services")
+    def register_mcp_service(
+        payload: RegisterMcpServiceRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.capabilities.register_service(
+                current_actor,
+                payload.service_key,
+                payload.name,
+                payload.endpoint_url,
+                payload.headers,
+                payload.description,
+                payload.tags,
+            )
+        )
+
+    @app.get("/capabilities/mcp-services")
+    def list_mcp_services(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.list_services(current_actor))
+
+    @app.post("/capabilities/mcp-services/{service_key}/status")
+    def update_mcp_service_status(
+        service_key: str,
+        payload: UpdateMcpServiceStatusRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.set_service_status(current_actor, service_key, payload.status))
+
+    @app.post("/capabilities/mcp-services/{service_key}/sync")
+    async def sync_mcp_service_tools(service_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return await call_safely_async(lambda: service.capabilities.sync_tools(current_actor, service_key))
+
+    @app.get("/capabilities/mcp-services/{service_key}/tools")
+    def list_mcp_service_tools(service_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.list_tools(current_actor, service_key))
+
+    @app.get("/admin/capabilities", response_class=HTMLResponse)
+    def capability_admin() -> HTMLResponse:
+        return HTMLResponse(content=capability_admin_page(), media_type="text/html")
 
     return app
