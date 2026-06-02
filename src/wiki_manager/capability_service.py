@@ -13,6 +13,7 @@ from wiki_manager.storage import SQLiteStore
 
 
 SERVICE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+READONLY_TOOL_TYPES = {ToolType.overview.value, ToolType.search.value, ToolType.detail.value}
 
 
 def _json_loads(value: Any, default: Any) -> Any:
@@ -144,26 +145,28 @@ class CapabilityService:
             return {"service_key": service_key, "tool_count": len(tools)}
         except Exception as exc:
             self.store.mark_mcp_service_sync(service_key, success=False, error=str(exc))
-            raise
+            raise ValidationError(f"MCP tool sync failed: {exc}") from exc
 
     def list_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
         if self.store.get_mcp_service(service_key) is None:
             raise NotFound("service not found")
         return [self._tool_payload(tool) for tool in self.store.list_mcp_tools(service_key)]
 
-    def search(self, actor: str, path: str | None, query: str | None, limit: int = 20) -> list[dict[str, Any]]:
+    def search(self, actor: str, path: str | None, query: str | None, limit: int = 20) -> dict[str, Any]:
         normalized_path = (path or "").strip("/")
         if normalized_path == "":
             items = self._root_search_items()
+            response_path = "/"
         else:
             if self.store.get_mcp_service(normalized_path) is None:
                 raise NotFound("service not found")
             items = [self._tool_search_item(tool) for tool in self.store.list_mcp_tools(normalized_path)]
+            response_path = normalized_path
 
         if query:
             needle = query.lower()
             items = [item for item in items if needle in _json_text(item)]
-        return items[:limit]
+        return {"path": response_path, "items": items[:limit]}
 
     async def execute(
         self,
@@ -178,7 +181,7 @@ class CapabilityService:
         tool_payload = self.store.get_mcp_tool(service, tool)
         if tool_payload is None:
             raise NotFound("tool not found")
-        if tool_payload["tool_type"] == ToolType.action.value:
+        if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
             raise ValidationError("action tools are not executable in phase 1")
 
         headers = _json_loads(service_payload.get("headers_json"), {})
@@ -241,7 +244,7 @@ class CapabilityService:
             "tags": _json_loads(tool.get("tags_json"), []),
             "examples": examples,
             "execute_example": examples[0] if examples else _schema_example(input_schema),
-            "executable": tool["tool_type"] != ToolType.action.value,
+            "executable": tool["tool_type"] in READONLY_TOOL_TYPES,
         }
 
     def _tool_search_item(self, tool: dict[str, Any]) -> dict[str, Any]:

@@ -174,7 +174,7 @@ def test_sync_tools_marks_failure(wm_paths: WikiManagerPaths) -> None:
     service = CapabilityService(store=store, mcp_client=FailingMcpClient(), admins={"root"})
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "", [])
 
-    with pytest.raises(RuntimeError, match="mcp unavailable"):
+    with pytest.raises(ValidationError, match="MCP tool sync failed: mcp unavailable"):
         asyncio.run(service.sync_tools("root", "docs-api"))
 
     listed = service.list_services("root")
@@ -189,10 +189,11 @@ def test_search_root_and_service_path_filters_by_query(wm_paths: WikiManagerPath
     service.set_service_status("root", "admin-api", McpServiceStatus.disabled.value)
     asyncio.run(service.sync_tools("root", "docs-api"))
 
-    root_items = service.search(actor="alice", path="/", query=None)
-    tool_items = service.search(actor="alice", path="docs-api", query="Search")
+    root = service.search(actor="alice", path="/", query=None)
+    tools = service.search(actor="alice", path="docs-api", query="Search")
 
-    assert root_items == [
+    assert root["path"] == "/"
+    assert root["items"] == [
         {
             "kind": "service",
             "service": "docs-api",
@@ -203,12 +204,13 @@ def test_search_root_and_service_path_filters_by_query(wm_paths: WikiManagerPath
             "status": McpServiceStatus.enabled.value,
         }
     ]
-    assert len(tool_items) == 1
-    assert tool_items[0]["kind"] == "tool"
-    assert tool_items[0]["service"] == "docs-api"
-    assert tool_items[0]["tool"] == "search_docs"
-    assert tool_items[0]["execute_example"] == {"query": "<string>"}
-    assert tool_items[0]["executable"] is True
+    assert tools["path"] == "docs-api"
+    assert len(tools["items"]) == 1
+    assert tools["items"][0]["kind"] == "tool"
+    assert tools["items"][0]["service"] == "docs-api"
+    assert tools["items"][0]["tool"] == "search_docs"
+    assert tools["items"][0]["execute_example"] == {"query": "<string>"}
+    assert tools["items"][0]["executable"] is True
 
 
 def test_execute_rejects_annotation_destructive_action_tool(wm_paths: WikiManagerPaths) -> None:
@@ -218,6 +220,24 @@ def test_execute_rejects_annotation_destructive_action_tool(wm_paths: WikiManage
 
     with pytest.raises(ValidationError, match="action tools are not executable in phase 1"):
         asyncio.run(service.execute("alice", "docs-api", "delete_doc", {"doc_id": "1"}))
+
+
+def test_execute_rejects_unexpected_tool_type(wm_paths: WikiManagerPaths) -> None:
+    service, _client = _service(wm_paths)
+    service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
+    service.store.upsert_mcp_tool(
+        service_key="docs-api",
+        tool_name="experimental_tool",
+        display_name="Experimental Tool",
+        description="Experimental capability",
+        input_schema={"type": "object"},
+        tool_type="experimental",
+        tags=[],
+        examples=[],
+    )
+
+    with pytest.raises(ValidationError, match="action tools are not executable in phase 1"):
+        asyncio.run(service.execute("alice", "docs-api", "experimental_tool", {}))
 
 
 def test_execute_calls_readonly_tool(wm_paths: WikiManagerPaths) -> None:
