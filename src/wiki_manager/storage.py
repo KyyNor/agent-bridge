@@ -283,19 +283,19 @@ class SQLiteStore:
                 conn.execute(
                     """
                     UPDATE mcp_services
-                    SET status = ?,
-                        last_synced_at = CURRENT_TIMESTAMP,
-                        last_error = NULL,
+                    SET last_synced_at = CURRENT_TIMESTAMP,
+                        last_error = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE service_key = ?
                     """,
-                    (McpServiceStatus.enabled.value, service_key),
+                    (error, service_key),
                 )
             else:
                 conn.execute(
                     """
                     UPDATE mcp_services
                     SET status = ?,
+                        last_synced_at = CURRENT_TIMESTAMP,
                         last_error = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE service_key = ?
@@ -336,6 +336,7 @@ class SQLiteStore:
                   tool_type = excluded.tool_type,
                   tags_json = excluded.tags_json,
                   examples_json = excluded.examples_json,
+                  status = 'active',
                   synced_at = CURRENT_TIMESTAMP,
                   updated_at = CURRENT_TIMESTAMP
                 """,

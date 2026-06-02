@@ -47,6 +47,66 @@ def test_mcp_service_crud_round_trip(wm_paths: WikiManagerPaths) -> None:
     assert disabled["status"] == McpServiceStatus.disabled.value
 
 
+def test_update_mcp_service_replaces_editable_fields(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="http://localhost:9001/mcp",
+        headers={"Authorization": "Bearer secret"},
+        description="SQL database MCP service",
+        tags=["database", "report"],
+        created_by="root",
+    )
+
+    updated = store.update_mcp_service(
+        "mysql",
+        name="MySQL Reporting",
+        endpoint_url="http://localhost:9101/mcp",
+        headers={"Authorization": "Bearer rotated", "X-Tenant": "finance"},
+        description="Updated SQL database MCP service",
+        tags=["database", "finance"],
+    )
+
+    assert updated["name"] == "MySQL Reporting"
+    assert updated["endpoint_url"] == "http://localhost:9101/mcp"
+    assert json.loads(updated["headers_json"]) == {"Authorization": "Bearer rotated", "X-Tenant": "finance"}
+    assert updated["description"] == "Updated SQL database MCP service"
+    assert json.loads(updated["tags_json"]) == ["database", "finance"]
+
+
+def test_mark_mcp_service_sync_preserves_status_and_tracks_errors(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="http://localhost:9001/mcp",
+        headers={},
+        description="SQL database MCP service",
+        tags=["database"],
+        created_by="root",
+    )
+    store.update_mcp_service_status("mysql", McpServiceStatus.disabled)
+
+    store.mark_mcp_service_sync("mysql", success=True)
+
+    synced = store.get_mcp_service("mysql")
+    assert synced is not None
+    assert synced["status"] == McpServiceStatus.disabled.value
+    assert synced["last_synced_at"] is not None
+    assert synced["last_error"] is None
+
+    store.mark_mcp_service_sync("mysql", success=False, error="sync failed")
+
+    failed = store.get_mcp_service("mysql")
+    assert failed is not None
+    assert failed["status"] == McpServiceStatus.error.value
+    assert failed["last_synced_at"] is not None
+    assert failed["last_error"] == "sync failed"
+
+
 def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: WikiManagerPaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -93,3 +153,47 @@ def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: WikiManagerPaths) -> N
     assert json.loads(tools[0]["tags_json"]) == ["database", "report"]
     assert json.loads(tools[0]["examples_json"]) == [{"query": "select * from users", "limit": 10}]
     assert store.get_mcp_tool("mysql", "query_sql")["id"] == tool["id"]
+
+
+def test_mcp_tool_upsert_reactivates_inactive_tool(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="http://localhost:9001/mcp",
+        headers={},
+        description="SQL database MCP service",
+        tags=["database"],
+        created_by="root",
+    )
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_sql",
+        display_name="Query SQL",
+        description="Run a SQL query",
+        input_schema={"type": "object"},
+        tool_type=ToolType.search,
+        tags=["database"],
+        examples=[],
+    )
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE mcp_tools SET status = 'inactive' WHERE service_key = ? AND tool_name = ?",
+            ("mysql", "query_sql"),
+        )
+
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_sql",
+        display_name="Query SQL",
+        description="Run a SQL query again",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        tool_type=ToolType.search,
+        tags=["database", "report"],
+        examples=[],
+    )
+
+    tool = store.get_mcp_tool("mysql", "query_sql")
+    assert tool is not None
+    assert tool["status"] == "active"
