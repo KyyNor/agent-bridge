@@ -409,7 +409,7 @@
           </tr>
           <tr>
             <td>MetaMCP</td>
-            <td>MetaMCP 接入说明、search/execute 契约</td>
+            <td>MetaMCP 接入说明、search/execute 契约、search 路径浏览示例</td>
             <td><span class="status p1">一期</span></td>
             <td>告诉使用者如何接入统一网关，以及如何构造 search/execute。</td>
           </tr>
@@ -486,9 +486,9 @@
           </tr>
           <tr>
             <td>MetaMCP 接入说明</td>
-            <td>服务地址、工具列表、search 参数、execute 参数、示例、错误码。</td>
-            <td>复制配置、复制调用示例。</td>
-            <td>这是给 Agent 使用者看的说明页，应避免过度后台化。</td>
+            <td>服务地址、search 路径浏览规则、execute 参数、示例、错误码。</td>
+            <td>复制配置、复制 search/execute 调用示例。</td>
+            <td>这是给 Agent 使用者看的说明页，应突出 <code>search</code> 像 <code>ls</code> 一样浏览能力目录。</td>
           </tr>
         </tbody>
       </table>
@@ -584,7 +584,7 @@
           <tr>
             <td>Example Block</td>
             <td>展示 search/execute 示例。</td>
-            <td>代码块、复制按钮、服务和工具上下文。</td>
+            <td>代码块、复制按钮、服务和工具上下文；search 示例必须覆盖空参数、query、path、path + query 四种场景。</td>
           </tr>
         </tbody>
       </table>
@@ -630,7 +630,7 @@
         <li>一期页面必须出高保真：平台概览、MCP 服务列表、新增/编辑服务、服务详情、工具详情、MetaMCP 接入说明。</li>
         <li>预留页面可以出中保真：调用日志、Project Profile、操作类治理、能力评测。</li>
         <li>所有表单需要给出默认、加载、错误、成功、禁用状态。</li>
-        <li>工具 schema 和 execute 示例是核心设计对象，不能只用普通文本块糊过去。</li>
+        <li>工具 schema、search 路径浏览示例和 execute 示例是核心设计对象，不能只用普通文本块糊过去。</li>
       </ol>
     </section>
   </main>

@@ -519,8 +519,8 @@
           <span>平台通过 HTTP MCP Client 拉取远端 tools 清单并写入 Registry。</span>
         </div>
         <div class="step">
-          <strong>3. search 发现</strong>
-          <span>Agent 调用 MetaMCP <code>search</code>，按关键词、标签、服务、类型检索工具。</span>
+          <strong>3. search 浏览</strong>
+          <span>Agent 调用 MetaMCP <code>search</code>，像 <code>ls</code> 一样按路径浏览服务和工具，也可以用 query 做匹配过滤。</span>
         </div>
         <div class="step">
           <strong>4. execute 调用</strong>
@@ -592,11 +592,10 @@
       <div class="grid two">
         <div class="card">
           <h3><code>search</code></h3>
-          <p>查询 MCP 服务和工具清单，返回匹配到的服务、工具说明、参数 schema 和调用示例。</p>
+          <p>像 Linux <code>ls</code> 一样浏览能力目录。<code>path</code> 决定浏览层级，<code>query</code> 决定是否用全文和向量匹配过滤结果。</p>
           <pre><code>{
-  "query": "mysql 报表查询",
-  "service": "mysql",
-  "tool_type": "search",
+  "path": "mysql",
+  "query": "报表查询",
   "limit": 10
 }</code></pre>
         </div>
@@ -627,9 +626,9 @@
         <tbody>
           <tr>
             <td><code>search</code></td>
-            <td><code>query</code>, <code>service</code>, <code>tags</code>, <code>tool_type</code>, <code>limit</code></td>
-            <td>匹配工具列表、描述、schema、示例、是否可执行。</td>
-            <td>先使用关键词、标签、描述匹配；语义检索可后续增强。</td>
+            <td><code>path</code>, <code>query</code>, <code>limit</code></td>
+            <td>根据路径返回服务列表或工具列表，并附带描述、schema、标签、调用示例、是否可执行。</td>
+            <td>一期先支持根路径和服务路径；匹配策略可先全文，向量匹配预留接口后逐步启用。</td>
           </tr>
           <tr>
             <td><code>execute</code></td>
@@ -645,6 +644,38 @@
         execute 的第三个参数建议叫 <code>arguments</code>，因为 MCP tool call 本身通常也有 arguments 概念。
         <code>params</code> 容易和 HTTP 请求参数、MCP 协议参数、内部转发参数混在一起。
       </div>
+
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>search 输入</th>
+            <th>语义</th>
+            <th>返回内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>不传 <code>path</code>，不传 <code>query</code></td>
+            <td>浏览根目录。</td>
+            <td>返回所有已启用或可见 MCP 服务，包括服务标识、名称、描述、标签、工具数量和状态。</td>
+          </tr>
+          <tr>
+            <td>只传 <code>query</code></td>
+            <td>在根目录按自然语言查找相关服务。</td>
+            <td>返回匹配服务；匹配依据包括服务名称、描述、标签、工具摘要，后续可加入向量匹配。</td>
+          </tr>
+          <tr>
+            <td>只传 <code>path = service_key</code></td>
+            <td>进入某个服务目录。</td>
+            <td>返回该服务下所有工具，包括工具定义、工具标签、input schema、工具类型、execute 调用示例和可执行状态。</td>
+          </tr>
+          <tr>
+            <td>同时传 <code>path = service_key</code> 和 <code>query</code></td>
+            <td>在某个服务目录内查找工具。</td>
+            <td>返回该服务下符合 query 的工具；匹配依据包括工具名、描述、标签、参数名和调用示例。</td>
+          </tr>
+        </tbody>
+      </table>
     </section>
 
     <section id="web">
@@ -737,7 +768,10 @@
         <li>管理员可以测试 MCP 服务连接，并同步远端 tools 清单。</li>
         <li>页面可以展示服务详情、工具列表、工具 schema、工具类型和调用示例。</li>
         <li>MetaMCP 对外只暴露 <code>search</code> 和 <code>execute</code> 两个工具。</li>
-        <li>调用 <code>search</code> 可以通过关键词找到相关 MCP 服务和工具，并返回描述、schema 和示例。</li>
+        <li>调用 <code>search</code> 不传参数时可以列出所有可见 MCP 服务，并返回服务描述和工具数量。</li>
+        <li>调用 <code>search</code> 只传 <code>query</code> 时可以通过全文匹配和预留向量匹配找到相关 MCP 服务。</li>
+        <li>调用 <code>search</code> 传 <code>path = service_key</code> 时可以列出该服务下的工具定义、标签、schema 和 execute 示例。</li>
+        <li>调用 <code>search</code> 同时传 <code>path</code> 和 <code>query</code> 时可以在指定服务下过滤相关工具。</li>
         <li>调用 <code>execute</code> 可以执行已登记的查询类 MCP 工具，并返回实际结果。</li>
         <li>调用 <code>execute</code> 执行 <code>action</code> 类型工具时，返回明确拒绝原因。</li>
         <li>当远端 MCP 连接失败、工具不存在、参数不合法时，返回可读的标准化错误。</li>
