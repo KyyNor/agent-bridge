@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Capability Hub - 阶段一结构化设计</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #647086;
+      --line: #dce3ec;
+      --line-strong: #b9c5d6;
+      --primary: #2456d6;
+      --primary-soft: #e9efff;
+      --green: #0f8a5f;
+      --green-soft: #e7f6ef;
+      --orange: #b86412;
+      --orange-soft: #fff1df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --slate: #243044;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 46px rgba(36, 48, 68, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(36, 86, 214, 0.08), transparent 270px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    header,
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(36, 48, 68, 0.07);
+    }
+
+    header {
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(233, 239, 255, 0.84)),
+        var(--paper);
+      box-shadow: var(--shadow);
+      padding: 34px;
+    }
+
+    section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin-top: 12px;
+      max-width: 900px;
+      font-size: clamp(32px, 5vw, 54px);
+      font-weight: 900;
+    }
+
+    h2 {
+      font-size: 25px;
+      font-weight: 880;
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 840;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    li,
+    td,
+    .card p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f4f7fb;
+      color: #13284f;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e5edf9;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--slate-soft);
+      color: var(--slate);
+      font-weight: 860;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--slate);
+      padding: 11px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 820;
+    }
+
+    nav a:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .eyebrow {
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 920px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      max-width: 700px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 840;
+    }
+
+    .tag.blue {
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .tag.green {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .tag.orange {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .tag.red {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 16px;
+    }
+
+    .card h3 {
+      margin-bottom: 8px;
+    }
+
+    .callout {
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--primary-soft);
+      color: var(--slate);
+      padding: 16px;
+      font-size: 14px;
+    }
+
+    .warning {
+      background: var(--orange-soft);
+      border-color: #f0c58e;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 14px;
+      min-height: 124px;
+    }
+
+    .step strong {
+      display: block;
+      color: var(--primary);
+      margin-bottom: 7px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        width: min(100vw - 24px, 1180px);
+      }
+
+      header,
+      section {
+        padding: 20px;
+      }
+
+      nav,
+      .grid,
+      .grid.two,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .tag {
+        display: inline-block;
+        margin-top: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Structured Design / Phase 1</div>
+      <h1>Agent Capability Hub</h1>
+      <p class="lead">
+        Agent Capability Hub 是部门级 Agent 外围能力登记、发现和统一调用平台。阶段一聚焦 HTTP MCP 服务的页面登记，以及只暴露
+        <code>search</code> 和 <code>execute</code> 两个工具的基础 MetaMCP 网关。
+      </p>
+      <div class="meta">
+        <span class="pill">日期：2026-06-02</span>
+        <span class="pill">项目新名称：Agent Capability Hub</span>
+        <span class="pill">阶段一：MCP Registry + MetaMCP Gateway</span>
+        <span class="pill">连接方式：HTTP MCP 优先</span>
+      </div>
+    </header>
+
+    <nav>
+      <a href="#summary">结论</a>
+      <a href="#positioning">定位</a>
+      <a href="#scope">范围</a>
+      <a href="#architecture">架构</a>
+      <a href="#model">模型</a>
+      <a href="#metamcp">MetaMCP</a>
+      <a href="#web">Web 登记</a>
+      <a href="#migration">迁移关系</a>
+      <a href="#acceptance">验收</a>
+      <a href="#next">后续</a>
+    </nav>
+
+    <section id="summary">
+      <div class="section-head">
+        <div>
+          <h2>1. 设计结论</h2>
+          <p>阶段一不追求完整治理平台，先跑通“登记 MCP 服务 -> 发现工具 -> 统一执行”的最小闭环。</p>
+        </div>
+        <span class="tag green">Decision</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>一期核心</h3>
+          <p>
+            管理员通过 Web 页面登记 HTTP MCP 服务，平台同步服务下的工具清单和参数 schema，并通过统一 MetaMCP 对外暴露能力发现与执行入口。
+          </p>
+        </div>
+        <div class="card">
+          <h3>固定工具</h3>
+          <p>
+            对 Agent 暴露的 MetaMCP 工具固定为 <code>search</code> 和 <code>execute</code>。后台 MCP 工具数量变化不影响 Agent 侧配置。
+          </p>
+        </div>
+        <div class="card">
+          <h3>执行边界</h3>
+          <p>
+            一期允许执行查询类工具，操作类工具可以登记和搜索，但执行时明确拒绝，为后续审批、确认、审计和权限治理留出口。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="positioning">
+      <div class="section-head">
+        <div>
+          <h2>2. 产品定位</h2>
+          <p>项目从知识库管理器升级为面向 Agent 的能力管理和调用入口。</p>
+        </div>
+        <span class="tag blue">Platform</span>
+      </div>
+
+      <div class="callout">
+        <strong>一句话定义：</strong>
+        Agent Capability Hub 是部门级 Agent 能力中心，用于登记、管理、发现和调用 HTTP MCP 服务中的工具，并把分散的 MCP 能力收敛为一个稳定 MetaMCP 网关。
+      </div>
+
+      <div class="grid" style="margin-top: 14px;">
+        <div class="card">
+          <h3>为什么改名</h3>
+          <ul>
+            <li><code>wiki-manager</code> 暗示项目只服务知识库，已经不能覆盖 MCP、工具、API、Skill 等能力来源。</li>
+            <li><code>Agent Capability Hub</code> 更准确表达“Agent 可使用的外围能力中心”。</li>
+            <li>保留知识库作为一种能力来源，而不是唯一核心。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>面向用户</h3>
+          <ul>
+            <li>管理员：登记 MCP 服务、维护工具元数据、控制启停状态。</li>
+            <li>Agent 使用者：通过 MetaMCP 搜索并执行可用能力。</li>
+            <li>前端设计工程师：基于页面定义先输出完整平台设计稿。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>平台价值</h3>
+          <ul>
+            <li>Agent 只接一个 MCP，而不是接很多 MCP。</li>
+            <li>后台 MCP 服务可以动态新增、下线、改描述。</li>
+            <li>后续权限、日志、Profile 和操作治理都在服务端统一收敛。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="scope">
+      <div class="section-head">
+        <div>
+          <h2>3. 阶段一范围</h2>
+          <p>本期只做平台骨架和核心网关闭环，明确推迟审计、复杂试运行和操作类治理。</p>
+        </div>
+        <span class="tag green">Phase 1</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>本期要做</th>
+            <th>本期不做</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>MCP 服务登记</td>
+            <td>支持页面登记 HTTP MCP 服务，包括服务标识、URL、headers、描述、标签、启停状态。</td>
+            <td>不支持 stdio MCP；不做服务托管；不管理远端服务生命周期。</td>
+          </tr>
+          <tr>
+            <td>工具清单同步</td>
+            <td>连接已登记服务，读取 tools 清单，保存工具名称、描述、input schema、同步时间和状态。</td>
+            <td>不做复杂 schema 可视化编辑器；不做自动质量评测。</td>
+          </tr>
+          <tr>
+            <td>工具元数据</td>
+            <td>允许维护服务级和工具级展示信息，包括别名、标签、能力类型、调用示例。</td>
+            <td>不做多版本元数据审批；不做多人协同审核。</td>
+          </tr>
+          <tr>
+            <td>MetaMCP 网关</td>
+            <td>对外暴露 <code>search</code> 和 <code>execute</code> 两个工具。<code>search</code> 查询能力目录；<code>execute</code> 执行查询类工具。</td>
+            <td>不直接暴露所有后台工具；不执行操作类工具。</td>
+          </tr>
+          <tr>
+            <td>Web 页面</td>
+            <td>提供 MCP 服务列表、新增/编辑、服务详情、工具清单、基础 MetaMCP 说明页。</td>
+            <td>日志、Profile、审计、试运行工作台可先出设计稿，不进入一期实现验收。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="architecture">
+      <div class="section-head">
+        <div>
+          <h2>4. 一期架构</h2>
+          <p>系统由 Web 管理端、平台 API、MCP Registry、MetaMCP Gateway 和 HTTP MCP Client 组成。</p>
+        </div>
+        <span class="tag blue">Architecture</span>
+      </div>
+
+      <div class="flow">
+        <div class="step">
+          <strong>1. 页面登记</strong>
+          <span>管理员在 Web 页面登记 HTTP MCP 服务，保存连接信息和元数据。</span>
+        </div>
+        <div class="step">
+          <strong>2. 同步 tools</strong>
+          <span>平台通过 HTTP MCP Client 拉取远端 tools 清单并写入 Registry。</span>
+        </div>
+        <div class="step">
+          <strong>3. search 发现</strong>
+          <span>Agent 调用 MetaMCP <code>search</code>，按关键词、标签、服务、类型检索工具。</span>
+        </div>
+        <div class="step">
+          <strong>4. execute 调用</strong>
+          <span>Agent 提供 service、tool、arguments，平台校验后转发给对应 MCP 服务。</span>
+        </div>
+        <div class="step">
+          <strong>5. 结果返回</strong>
+          <span>平台返回标准化结果，包含服务、工具、原始结果和错误信息。</span>
+        </div>
+      </div>
+
+      <div class="callout warning" style="margin-top: 14px;">
+        一期的核心风险不是页面复杂度，而是 MCP 协议连接、工具 schema 同步和 execute 转发的可靠性。
+        因此页面以登记和可见性为主，日志和审计先保留数据结构方向，不作为第一批硬功能。
+      </div>
+    </section>
+
+    <section id="model">
+      <div class="section-head">
+        <div>
+          <h2>5. 核心数据模型</h2>
+          <p>模型要支持未来扩展，但一期字段保持可落地。</p>
+        </div>
+        <span class="tag blue">Model</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>对象</th>
+            <th>关键字段</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>mcp_service</code></td>
+            <td><code>service_key</code>, <code>name</code>, <code>endpoint_url</code>, <code>headers</code>, <code>description</code>, <code>tags</code>, <code>status</code></td>
+            <td>代表一个可连接的 HTTP MCP 服务。<code>service_key</code> 是 execute 调用时使用的稳定标识。</td>
+          </tr>
+          <tr>
+            <td><code>mcp_tool</code></td>
+            <td><code>service_key</code>, <code>tool_name</code>, <code>display_name</code>, <code>description</code>, <code>input_schema</code>, <code>tool_type</code>, <code>examples</code></td>
+            <td>代表某个 MCP 服务下的一个工具。工具真实名称来自远端 MCP，展示信息可在平台覆盖。</td>
+          </tr>
+          <tr>
+            <td><code>tool_type</code></td>
+            <td><code>overview</code>, <code>search</code>, <code>detail</code>, <code>action</code></td>
+            <td>一期允许前三类执行；<code>action</code> 可登记、可搜索、不可执行。</td>
+          </tr>
+          <tr>
+            <td><code>sync_state</code></td>
+            <td><code>last_synced_at</code>, <code>last_success_at</code>, <code>last_error</code>, <code>tool_count</code></td>
+            <td>用于页面展示 MCP 服务是否成功同步 tools。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="metamcp">
+      <div class="section-head">
+        <div>
+          <h2>6. MetaMCP 工具契约</h2>
+          <p>MetaMCP 只暴露两个稳定工具，后台工具由参数选择。</p>
+        </div>
+        <span class="tag green">MCP Contract</span>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3><code>search</code></h3>
+          <p>查询 MCP 服务和工具清单，返回匹配到的服务、工具说明、参数 schema 和调用示例。</p>
+          <pre><code>{
+  "query": "mysql 报表查询",
+  "service": "mysql",
+  "tool_type": "search",
+  "limit": 10
+}</code></pre>
+        </div>
+        <div class="card">
+          <h3><code>execute</code></h3>
+          <p>执行指定服务下的指定工具。参数名建议使用 <code>arguments</code>，避免和协议层 <code>params</code> 混淆。</p>
+          <pre><code>{
+  "service": "mysql",
+  "tool": "query_sql",
+  "arguments": {
+    "db": "whjcbb",
+    "sql": "select abc from aaa",
+    "limit": 10
+  }
+}</code></pre>
+        </div>
+      </div>
+
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>工具</th>
+            <th>输入</th>
+            <th>输出</th>
+            <th>一期限制</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>search</code></td>
+            <td><code>query</code>, <code>service</code>, <code>tags</code>, <code>tool_type</code>, <code>limit</code></td>
+            <td>匹配工具列表、描述、schema、示例、是否可执行。</td>
+            <td>先使用关键词、标签、描述匹配；语义检索可后续增强。</td>
+          </tr>
+          <tr>
+            <td><code>execute</code></td>
+            <td><code>service</code>, <code>tool</code>, <code>arguments</code></td>
+            <td>标准化执行结果、原始 MCP 返回、错误信息。</td>
+            <td>只执行 <code>overview/search/detail</code>；拒绝 <code>action</code>。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout" style="margin-top: 14px;">
+        <strong>命名建议：</strong>
+        execute 的第三个参数建议叫 <code>arguments</code>，因为 MCP tool call 本身通常也有 arguments 概念。
+        <code>params</code> 容易和 HTTP 请求参数、MCP 协议参数、内部转发参数混在一起。
+      </div>
+    </section>
+
+    <section id="web">
+      <div class="section-head">
+        <div>
+          <h2>7. Web 登记流程</h2>
+          <p>页面一期要服务“把 MCP 服务接入平台”这件事，而不是一次做完整后台。</p>
+        </div>
+        <span class="tag green">Web</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>步骤</th>
+            <th>页面动作</th>
+            <th>后端动作</th>
+            <th>成功结果</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>新增服务</td>
+            <td>填写服务标识、名称、URL、headers、描述、标签。</td>
+            <td>保存服务配置，状态为 <code>configured</code>。</td>
+            <td>服务出现在列表中。</td>
+          </tr>
+          <tr>
+            <td>测试连接</td>
+            <td>点击测试连接。</td>
+            <td>尝试访问 MCP endpoint 并读取基础能力。</td>
+            <td>返回连接成功或错误原因。</td>
+          </tr>
+          <tr>
+            <td>同步工具</td>
+            <td>点击同步 tools。</td>
+            <td>调用远端 MCP list tools，写入工具清单。</td>
+            <td>展示工具数量、同步时间、失败信息。</td>
+          </tr>
+          <tr>
+            <td>维护元数据</td>
+            <td>编辑工具类型、标签、调用示例和展示描述。</td>
+            <td>保存平台侧覆盖信息，不改远端 MCP。</td>
+            <td>search 返回更适合 Agent 使用的说明。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="migration">
+      <div class="section-head">
+        <div>
+          <h2>8. 与现有代码的关系</h2>
+          <p>现有 wiki-manager 能力不需要废弃，但要降级为平台中的一种能力来源。</p>
+        </div>
+        <span class="tag orange">Migration</span>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3>保留</h3>
+          <ul>
+            <li>现有 FastAPI 服务结构可以继续作为平台 API 基础。</li>
+            <li>现有 MCP server 中的 <code>search</code> / <code>ask</code> 思路可迁移为知识库能力。</li>
+            <li>现有存储、服务层和后端适配代码可作为知识库来源模块保留。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>调整</h3>
+          <ul>
+            <li>服务名称从 <code>wiki-manager</code> 逐步迁移到 <code>agent-capability-hub</code>。</li>
+            <li>现有 MCP server 需要从“知识库工具”改为“MetaMCP 网关工具”。</li>
+            <li>数据模型需要新增 MCP 服务和 MCP 工具注册表。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="acceptance">
+      <div class="section-head">
+        <div>
+          <h2>9. 阶段一验收标准</h2>
+          <p>验收围绕最小闭环，不把未来治理能力纳入硬标准。</p>
+        </div>
+        <span class="tag green">Acceptance</span>
+      </div>
+
+      <ol>
+        <li>管理员可以在 Web 页面新增、编辑、启停一个 HTTP MCP 服务。</li>
+        <li>管理员可以测试 MCP 服务连接，并同步远端 tools 清单。</li>
+        <li>页面可以展示服务详情、工具列表、工具 schema、工具类型和调用示例。</li>
+        <li>MetaMCP 对外只暴露 <code>search</code> 和 <code>execute</code> 两个工具。</li>
+        <li>调用 <code>search</code> 可以通过关键词找到相关 MCP 服务和工具，并返回描述、schema 和示例。</li>
+        <li>调用 <code>execute</code> 可以执行已登记的查询类 MCP 工具，并返回实际结果。</li>
+        <li>调用 <code>execute</code> 执行 <code>action</code> 类型工具时，返回明确拒绝原因。</li>
+        <li>当远端 MCP 连接失败、工具不存在、参数不合法时，返回可读的标准化错误。</li>
+      </ol>
+    </section>
+
+    <section id="next">
+      <div class="section-head">
+        <div>
+          <h2>10. 二期和预留方向</h2>
+          <p>以下能力应在页面设计中预留，但不进入一期工程验收。</p>
+        </div>
+        <span class="tag orange">Future</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>审计与日志</h3>
+          <p>记录 search、execute 的请求、命中、耗时、成功状态、错误和响应样例，用于排查和运营。</p>
+        </div>
+        <div class="card">
+          <h3>Profile 与权限</h3>
+          <p>按项目、团队或场景控制哪些 MCP 服务和工具可见、可执行。</p>
+        </div>
+        <div class="card">
+          <h3>操作类工具治理</h3>
+          <p>对 action 工具增加风险等级、二次确认、dry-run、审批和强审计。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

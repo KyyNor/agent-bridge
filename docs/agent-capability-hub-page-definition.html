@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Capability Hub - 页面定义</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #647086;
+      --line: #dce3ec;
+      --primary: #2456d6;
+      --primary-soft: #e9efff;
+      --green: #0f8a5f;
+      --green-soft: #e7f6ef;
+      --orange: #b86412;
+      --orange-soft: #fff1df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --slate: #243044;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 46px rgba(36, 48, 68, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(36, 86, 214, 0.08), transparent 270px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    header,
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(36, 48, 68, 0.07);
+    }
+
+    header {
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(233, 239, 255, 0.84)),
+        var(--paper);
+      box-shadow: var(--shadow);
+      padding: 34px;
+    }
+
+    section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin-top: 12px;
+      max-width: 900px;
+      font-size: clamp(32px, 5vw, 54px);
+      font-weight: 900;
+    }
+
+    h2 {
+      font-size: 25px;
+      font-weight: 880;
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 840;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    li,
+    td,
+    .card p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f4f7fb;
+      color: #13284f;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--slate-soft);
+      color: var(--slate);
+      font-weight: 860;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--slate);
+      padding: 11px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 820;
+    }
+
+    nav a:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .eyebrow {
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 920px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      max-width: 700px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 840;
+    }
+
+    .tag.p1 {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .tag.future {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .tag.core {
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 16px;
+    }
+
+    .card h3 {
+      margin-bottom: 8px;
+    }
+
+    .callout {
+      border: 1px solid #b9c5d6;
+      border-radius: 8px;
+      background: var(--primary-soft);
+      color: var(--slate);
+      padding: 16px;
+      font-size: 14px;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .status.p1 {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .status.future {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .status.deferred {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    @media (max-width: 900px) {
+      main {
+        width: min(100vw - 24px, 1180px);
+      }
+
+      header,
+      section {
+        padding: 20px;
+      }
+
+      nav,
+      .grid,
+      .grid.two {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .tag {
+        display: inline-block;
+        margin-top: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Page Definition / Product UI</div>
+      <h1>Agent Capability Hub 页面定义</h1>
+      <p class="lead">
+        本文档用于同步前端设计稿。页面体系按完整平台规划，但明确标记阶段一实现范围；
+        本期不做的页面也先定义信息架构、核心区块和预留能力，后续按实际工程范围微调。
+      </p>
+      <div class="meta">
+        <span class="pill">日期：2026-06-02</span>
+        <span class="pill">一期实现：MCP 登记 + 工具清单 + MetaMCP 基础说明</span>
+        <span class="pill">未来预留：日志、Profile、操作治理、评测</span>
+      </div>
+    </header>
+
+    <nav>
+      <a href="#principles">设计原则</a>
+      <a href="#nav">信息架构</a>
+      <a href="#pages-p1">一期页面</a>
+      <a href="#pages-future">预留页面</a>
+      <a href="#components">组件</a>
+      <a href="#states">状态</a>
+      <a href="#handoff">交付要求</a>
+    </nav>
+
+    <section id="principles">
+      <div class="section-head">
+        <div>
+          <h2>1. 页面设计原则</h2>
+          <p>这是一个偏运维和治理的内部平台，界面应该克制、清晰、密度适中。</p>
+        </div>
+        <span class="tag core">Principles</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>先展示可用能力</h3>
+          <p>首页和列表页要让用户马上看到已接入多少 MCP 服务、多少工具、哪些服务异常，而不是营销式介绍。</p>
+        </div>
+        <div class="card">
+          <h3>登记流程要确定</h3>
+          <p>新增 MCP 服务的表单需要清楚区分必填配置、认证 headers、连接测试和工具同步结果。</p>
+        </div>
+        <div class="card">
+          <h3>为 Agent 使用而写</h3>
+          <p>工具详情页不仅给人看，也要帮助管理员写出适合 Agent 检索和调用的描述、标签、示例。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="nav">
+      <div class="section-head">
+        <div>
+          <h2>2. 信息架构</h2>
+          <p>侧边导航建议先按“概览、MCP 管理、MetaMCP、治理预留、系统设置”组织。</p>
+        </div>
+        <span class="tag core">Navigation</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>导航</th>
+            <th>页面</th>
+            <th>阶段</th>
+            <th>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>概览</td>
+            <td>平台概览</td>
+            <td><span class="status p1">一期</span></td>
+            <td>查看服务数量、工具数量、异常服务、最近同步状态。</td>
+          </tr>
+          <tr>
+            <td>MCP 管理</td>
+            <td>MCP 服务列表、服务详情、新增/编辑服务、工具详情</td>
+            <td><span class="status p1">一期</span></td>
+            <td>登记 HTTP MCP 服务、同步工具、维护工具元数据。</td>
+          </tr>
+          <tr>
+            <td>MetaMCP</td>
+            <td>MetaMCP 接入说明、search/execute 契约</td>
+            <td><span class="status p1">一期</span></td>
+            <td>告诉使用者如何接入统一网关，以及如何构造 search/execute。</td>
+          </tr>
+          <tr>
+            <td>调用记录</td>
+            <td>调用日志、日志详情</td>
+            <td><span class="status future">预留</span></td>
+            <td>后续查看 search 和 execute 的调用、耗时、错误和响应样例。</td>
+          </tr>
+          <tr>
+            <td>访问策略</td>
+            <td>Project Profile、服务白名单/黑名单</td>
+            <td><span class="status future">预留</span></td>
+            <td>后续按项目或场景控制服务和工具可见性。</td>
+          </tr>
+          <tr>
+            <td>操作治理</td>
+            <td>Action 工具治理、风险等级、审批配置</td>
+            <td><span class="status future">预留</span></td>
+            <td>后续让有副作用工具可控进入平台。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="pages-p1">
+      <div class="section-head">
+        <div>
+          <h2>3. 一期页面定义</h2>
+          <p>以下页面建议进入第一版设计稿，并作为一期实现优先级。</p>
+        </div>
+        <span class="tag p1">Phase 1</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>页面</th>
+            <th>核心区块</th>
+            <th>关键交互</th>
+            <th>设计注意</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>平台概览</td>
+            <td>服务数、工具数、启用服务数、同步失败数；最近同步列表；快速新增服务按钮。</td>
+            <td>点击异常服务进入详情；点击新增服务打开登记页。</td>
+            <td>首页要像运维控制台，突出状态和待处理项。</td>
+          </tr>
+          <tr>
+            <td>MCP 服务列表</td>
+            <td>搜索框、标签筛选、状态筛选、服务表格、工具数量、最近同步时间。</td>
+            <td>新增、编辑、启停、测试连接、同步 tools、进入详情。</td>
+            <td>表格密度适中；状态要明显区分 enabled、disabled、error、syncing。</td>
+          </tr>
+          <tr>
+            <td>新增/编辑 MCP 服务</td>
+            <td>基础信息、连接配置、认证 headers、标签、描述、启用状态。</td>
+            <td>测试连接、保存、保存并同步 tools。</td>
+            <td>headers 可用键值对编辑器；敏感值支持遮罩展示。</td>
+          </tr>
+          <tr>
+            <td>MCP 服务详情</td>
+            <td>服务信息、连接状态、同步状态、工具列表、错误信息、操作区。</td>
+            <td>同步 tools、编辑服务、启停服务、进入工具详情。</td>
+            <td>详情页上半部分展示服务健康和同步信息，下半部分展示工具清单。</td>
+          </tr>
+          <tr>
+            <td>工具详情</td>
+            <td>工具名称、描述、input schema、工具类型、标签、调用示例、是否可执行。</td>
+            <td>编辑展示描述、标签、工具类型、示例；保存平台侧覆盖信息。</td>
+            <td>schema 展示要清晰，示例要可直接复制给 execute 使用。</td>
+          </tr>
+          <tr>
+            <td>MetaMCP 接入说明</td>
+            <td>服务地址、工具列表、search 参数、execute 参数、示例、错误码。</td>
+            <td>复制配置、复制调用示例。</td>
+            <td>这是给 Agent 使用者看的说明页，应避免过度后台化。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="pages-future">
+      <div class="section-head">
+        <div>
+          <h2>4. 未来预留页面</h2>
+          <p>这些页面可以先出设计稿，但不作为一期开发验收。</p>
+        </div>
+        <span class="tag future">Future</span>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3>调用日志</h3>
+          <p>展示 search/execute 的调用入口、服务、工具、参数校验、耗时、成功状态、错误信息和响应样例。</p>
+          <ul>
+            <li>列表筛选：时间、服务、工具、成功状态、调用入口。</li>
+            <li>详情区块：请求参数、匹配结果、远端响应、标准化错误。</li>
+            <li>设计稿可先保留，不进入一期功能。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Project Profile</h3>
+          <p>按项目或场景定义可见 MCP 服务和工具范围，用于 Claude Code 或其他 Agent 接入时携带 profile。</p>
+          <ul>
+            <li>列表：profile 名称、描述、允许服务、屏蔽服务。</li>
+            <li>详情：白名单、黑名单、默认策略、绑定项目。</li>
+            <li>一期只在信息架构中预留。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>操作类工具治理</h3>
+          <p>用于二期开启 action 工具执行，包括风险等级、二次确认、dry-run、审批和强审计。</p>
+          <ul>
+            <li>工具风险分级：低、中、高、禁止。</li>
+            <li>执行策略：不可执行、需确认、需审批、允许 dry-run。</li>
+            <li>一期 action 只允许登记和搜索。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>能力评测</h3>
+          <p>后续对工具描述、参数示例、调用成功率、检索命中率做运营评估。</p>
+          <ul>
+            <li>测试问题集、命中率、失败率、平均耗时。</li>
+            <li>工具说明缺失、schema 不清晰、示例不可用的提示。</li>
+            <li>适合三期以后建设。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="components">
+      <div class="section-head">
+        <div>
+          <h2>5. 关键组件定义</h2>
+          <p>组件应该支持未来页面复用，避免每个页面重新设计同类信息。</p>
+        </div>
+        <span class="tag core">Components</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>组件</th>
+            <th>用途</th>
+            <th>内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Service Status Badge</td>
+            <td>展示 MCP 服务状态。</td>
+            <td><code>enabled</code>, <code>disabled</code>, <code>error</code>, <code>syncing</code>, <code>unknown</code>。</td>
+          </tr>
+          <tr>
+            <td>Tool Type Badge</td>
+            <td>展示工具类型。</td>
+            <td><code>overview</code>, <code>search</code>, <code>detail</code>, <code>action</code>；action 使用警示色。</td>
+          </tr>
+          <tr>
+            <td>Schema Viewer</td>
+            <td>展示 input schema。</td>
+            <td>字段名、类型、是否必填、描述、默认值；支持 JSON 原文折叠。</td>
+          </tr>
+          <tr>
+            <td>Header Editor</td>
+            <td>编辑 HTTP MCP 认证 headers。</td>
+            <td>键值对表格、敏感值遮罩、新增/删除行。</td>
+          </tr>
+          <tr>
+            <td>Example Block</td>
+            <td>展示 search/execute 示例。</td>
+            <td>代码块、复制按钮、服务和工具上下文。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="states">
+      <div class="section-head">
+        <div>
+          <h2>6. 页面状态</h2>
+          <p>设计稿需要覆盖空状态、错误状态和同步中状态，避免页面只适合演示数据。</p>
+        </div>
+        <span class="tag core">States</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>空状态</h3>
+          <p>没有 MCP 服务时，首页和列表页展示“新增第一个 MCP 服务”的主按钮，并提示当前仅支持 HTTP MCP。</p>
+        </div>
+        <div class="card">
+          <h3>连接失败</h3>
+          <p>服务详情页展示失败原因、最近测试时间、重试按钮和编辑连接配置入口。</p>
+        </div>
+        <div class="card">
+          <h3>同步中</h3>
+          <p>同步 tools 时列表行和详情页显示进度状态，避免重复触发同步。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="handoff">
+      <div class="section-head">
+        <div>
+          <h2>7. 给前端设计的交付要求</h2>
+          <p>设计稿可以先完整，但实现范围按阶段一裁剪。</p>
+        </div>
+        <span class="tag core">Handoff</span>
+      </div>
+
+      <ol>
+        <li>优先设计桌面端，移动端只需保证基础可用，不追求复杂管理操作的移动体验。</li>
+        <li>页面风格应偏内部控制台：清楚、克制、可扫描，不做营销页。</li>
+        <li>一期页面必须出高保真：平台概览、MCP 服务列表、新增/编辑服务、服务详情、工具详情、MetaMCP 接入说明。</li>
+        <li>预留页面可以出中保真：调用日志、Project Profile、操作类治理、能力评测。</li>
+        <li>所有表单需要给出默认、加载、错误、成功、禁用状态。</li>
+        <li>工具 schema 和 execute 示例是核心设计对象，不能只用普通文本块糊过去。</li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>
