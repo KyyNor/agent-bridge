@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from wiki_manager.capabilities import McpServiceStatus, ToolType
 from wiki_manager.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
 
 
@@ -100,6 +101,36 @@ CREATE TABLE IF NOT EXISTS sync_states (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (doc_id, kb_id, backend_slug)
 );
+CREATE TABLE IF NOT EXISTS mcp_services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  endpoint_url TEXT NOT NULL,
+  headers_json TEXT NOT NULL DEFAULT '{}',
+  description TEXT NOT NULL DEFAULT '',
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'enabled',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_synced_at TEXT,
+  last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS mcp_tools (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_key TEXT NOT NULL REFERENCES mcp_services(service_key) ON DELETE CASCADE,
+  tool_name TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  input_schema_json TEXT NOT NULL DEFAULT '{}',
+  tool_type TEXT NOT NULL DEFAULT 'search',
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  examples_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',
+  synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (service_key, tool_name)
+);
 """
 
 
@@ -107,6 +138,10 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(row)
+
+
+def _enum_value(value: Any) -> Any:
+    return value.value if hasattr(value, "value") else value
 
 
 class SQLiteStore:
@@ -148,6 +183,200 @@ class SQLiteStore:
             ]:
                 if col not in existing:
                     conn.execute(f"ALTER TABLE sync_states ADD COLUMN {col} {col_type}")
+
+    def create_mcp_service(
+        self,
+        *,
+        service_key: str,
+        name: str,
+        endpoint_url: str,
+        headers: dict[str, Any],
+        description: str,
+        tags: list[str],
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO mcp_services (
+                  service_key, name, endpoint_url, headers_json, description, tags_json, created_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    service_key,
+                    name,
+                    endpoint_url,
+                    json.dumps(headers, ensure_ascii=False),
+                    description,
+                    json.dumps(tags, ensure_ascii=False),
+                    created_by,
+                ),
+            )
+            row = conn.execute("SELECT * FROM mcp_services WHERE service_key = ?", (service_key,)).fetchone()
+            service = _row_to_dict(row)
+            if service is None:
+                raise KeyError(f"mcp service not found: {service_key}")
+            return service
+
+    def update_mcp_service(
+        self,
+        service_key: str,
+        *,
+        name: str,
+        endpoint_url: str,
+        headers: dict[str, Any],
+        description: str,
+        tags: list[str],
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE mcp_services
+                SET name = ?,
+                    endpoint_url = ?,
+                    headers_json = ?,
+                    description = ?,
+                    tags_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                """,
+                (
+                    name,
+                    endpoint_url,
+                    json.dumps(headers, ensure_ascii=False),
+                    description,
+                    json.dumps(tags, ensure_ascii=False),
+                    service_key,
+                ),
+            )
+            row = conn.execute("SELECT * FROM mcp_services WHERE service_key = ?", (service_key,)).fetchone()
+            service = _row_to_dict(row)
+            if service is None:
+                raise KeyError(f"mcp service not found: {service_key}")
+            return service
+
+    def get_mcp_service(self, service_key: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM mcp_services WHERE service_key = ?", (service_key,)).fetchone()
+            return _row_to_dict(row)
+
+    def list_mcp_services(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM mcp_services ORDER BY service_key").fetchall()
+            return [dict(row) for row in rows]
+
+    def update_mcp_service_status(self, service_key: str, status: McpServiceStatus | str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE mcp_services
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                """,
+                (_enum_value(status), service_key),
+            )
+
+    def mark_mcp_service_sync(self, service_key: str, *, success: bool, error: str | None = None) -> None:
+        with self.connect() as conn:
+            if success:
+                conn.execute(
+                    """
+                    UPDATE mcp_services
+                    SET status = ?,
+                        last_synced_at = CURRENT_TIMESTAMP,
+                        last_error = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE service_key = ?
+                    """,
+                    (McpServiceStatus.enabled.value, service_key),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE mcp_services
+                    SET status = ?,
+                        last_error = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE service_key = ?
+                    """,
+                    (McpServiceStatus.error.value, error, service_key),
+                )
+
+    def upsert_mcp_tool(
+        self,
+        *,
+        service_key: str,
+        tool_name: str,
+        display_name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        tool_type: ToolType | str,
+        tags: list[str],
+        examples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO mcp_tools (
+                  service_key,
+                  tool_name,
+                  display_name,
+                  description,
+                  input_schema_json,
+                  tool_type,
+                  tags_json,
+                  examples_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(service_key, tool_name) DO UPDATE SET
+                  display_name = excluded.display_name,
+                  description = excluded.description,
+                  input_schema_json = excluded.input_schema_json,
+                  tool_type = excluded.tool_type,
+                  tags_json = excluded.tags_json,
+                  examples_json = excluded.examples_json,
+                  synced_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    service_key,
+                    tool_name,
+                    display_name,
+                    description,
+                    json.dumps(input_schema, ensure_ascii=False),
+                    _enum_value(tool_type),
+                    json.dumps(tags, ensure_ascii=False),
+                    json.dumps(examples, ensure_ascii=False),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM mcp_tools WHERE service_key = ? AND tool_name = ?",
+                (service_key, tool_name),
+            ).fetchone()
+            tool = _row_to_dict(row)
+            if tool is None:
+                raise KeyError(f"mcp tool not found: {service_key}/{tool_name}")
+            return tool
+
+    def list_mcp_tools(self, service_key: str | None = None) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            if service_key is None:
+                rows = conn.execute("SELECT * FROM mcp_tools ORDER BY service_key, tool_name").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM mcp_tools WHERE service_key = ? ORDER BY tool_name",
+                    (service_key,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_mcp_tool(self, service_key: str, tool_name: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM mcp_tools WHERE service_key = ? AND tool_name = ?",
+                (service_key, tool_name),
+            ).fetchone()
+            return _row_to_dict(row)
 
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         with self.connect() as conn:
