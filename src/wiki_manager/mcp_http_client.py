@@ -26,6 +26,8 @@ def normalize_tool(tool: Tool) -> dict[str, Any]:
         "name": tool.name,
         "description": tool.description or "",
         "input_schema": tool.inputSchema or {"type": "object", "properties": {}},
+        "annotations": _plain(getattr(tool, "annotations", None)),
+        "output_schema": _plain(getattr(tool, "outputSchema", None)),
     }
 
 
@@ -55,8 +57,14 @@ class McpHttpClient:
                 read_timeout_seconds=timedelta(seconds=timeout),
             ) as session:
                 await session.initialize()
-                result = await session.list_tools()
-                return [normalize_tool(tool) for tool in result.tools]
+                tools: list[dict[str, Any]] = []
+                cursor: str | None = None
+                while True:
+                    result = await session.list_tools(cursor=cursor)
+                    tools.extend(normalize_tool(tool) for tool in result.tools)
+                    cursor = getattr(result, "nextCursor", None)
+                    if cursor is None:
+                        return tools
 
     async def call_tool(
         self,
