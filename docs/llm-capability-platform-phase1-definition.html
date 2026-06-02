@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>大模型外围能力管理平台 - 阶段一产品定义</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #657083;
+      --line: #dce3ec;
+      --line-strong: #b8c4d4;
+      --blue: #2456d6;
+      --blue-soft: #e9efff;
+      --green: #0f8a5f;
+      --green-soft: #e7f6ef;
+      --orange: #b86412;
+      --orange-soft: #fff1df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --slate: #243044;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 48px rgba(36, 48, 68, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(36, 86, 214, 0.08), transparent 260px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    header {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(233, 239, 255, 0.82)),
+        var(--paper);
+      box-shadow: var(--shadow);
+      padding: 34px;
+    }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin-top: 12px;
+      max-width: 880px;
+      font-size: clamp(32px, 5vw, 56px);
+      font-weight: 900;
+    }
+
+    h2 {
+      font-size: 25px;
+      font-weight: 880;
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 840;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      max-width: 900px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--slate);
+      padding: 11px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 820;
+    }
+
+    nav a:hover {
+      border-color: var(--blue);
+      color: var(--blue);
+    }
+
+    section {
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(36, 48, 68, 0.07);
+      padding: 26px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      max-width: 700px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 840;
+    }
+
+    .tag.blue {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .tag.green {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .tag.orange {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 16px;
+    }
+
+    .card h3 {
+      margin-bottom: 8px;
+    }
+
+    .card p,
+    li {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--slate-soft);
+      color: var(--slate);
+      font-weight: 860;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    .step {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 14px;
+      min-height: 118px;
+    }
+
+    .step strong {
+      display: block;
+      color: var(--blue);
+      margin-bottom: 7px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .callout {
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--blue-soft);
+      color: var(--slate);
+      padding: 16px;
+      font-size: 14px;
+    }
+
+    .warning {
+      background: var(--orange-soft);
+      border-color: #f0c58e;
+    }
+
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f4f7fb;
+      color: #13284f;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        width: min(100vw - 24px, 1180px);
+      }
+
+      header,
+      section {
+        padding: 20px;
+      }
+
+      nav,
+      .grid,
+      .grid.two,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .tag {
+        display: inline-block;
+        margin-top: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Product Definition / Phase 1</div>
+      <h1>大模型外围能力管理平台</h1>
+      <p class="lead">
+        本项目从单一的知识库管理系统，调整为面向部门通用大模型应用的外围能力管理平台。
+        平台不维护模型本身，也不代理模型推理，而是统一维护知识库、MCP API 等可被大模型调用的能力，并通过 MetaMCP 对外提供发现、检索和试运行入口。
+      </p>
+      <div class="meta">
+        <span class="pill">日期：2026-06-02</span>
+        <span class="pill">阶段一：知识库 + MCP API</span>
+        <span class="pill">Web 管理优先</span>
+        <span class="pill">查询类能力优先</span>
+      </div>
+    </header>
+
+    <nav>
+      <a href="#positioning">定位</a>
+      <a href="#scope">阶段范围</a>
+      <a href="#concepts">核心对象</a>
+      <a href="#web">Web 界面</a>
+      <a href="#metamcp">MetaMCP</a>
+      <a href="#cli-config">CLI 配置</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#future">未来能力</a>
+      <a href="#appendix">参考项目</a>
+    </nav>
+
+    <section id="positioning">
+      <div class="section-head">
+        <div>
+          <h2>1. 新产品定位</h2>
+          <p>新的项目重点不是管理模型，而是管理模型可以使用的外围能力。</p>
+        </div>
+        <span class="tag blue">Platform</span>
+      </div>
+
+      <div class="callout">
+        <strong>一句话定义：</strong>
+        本项目是部门级大模型外围能力管理平台，用于注册、管理、检索、试运行和审计知识库能力与 MCP API 能力，并将这些能力通过统一的 MetaMCP 入口暴露给大模型应用。
+      </div>
+
+      <div class="grid" style="margin-top: 14px;">
+        <div class="card">
+          <h3>不做什么</h3>
+          <ul>
+            <li>不维护模型本身。</li>
+            <li>不实现模型推理代理。</li>
+            <li>阶段一不做有副作用操作类工具。</li>
+            <li>阶段一不做完整企业级权限体系。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>做什么</h3>
+          <ul>
+            <li>管理知识库对接与检索能力。</li>
+            <li>管理外部 MCP API 服务。</li>
+            <li>提供 Web 管理、查看和试运行入口。</li>
+            <li>记录所有调用日志和执行结果。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>平台价值</h3>
+          <ul>
+            <li>让大模型先发现能力，再调用能力。</li>
+            <li>把分散工具统一成可治理资产。</li>
+            <li>为后续操作类工具、权限、审批打基础。</li>
+            <li>降低部门内 MCP 工具接入和复用成本。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="scope">
+      <div class="section-head">
+        <div>
+          <h2>2. 阶段一范围</h2>
+          <p>阶段一先把平台底座跑通：知识库能力、MCP API 管理、Web 界面、MetaMCP 查询入口和调用日志。</p>
+        </div>
+        <span class="tag green">Phase 1</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>阶段一要做</th>
+            <th>阶段一不做</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>知识库能力</td>
+            <td>保留并继续支持现有知识库管理、文档入库、后端对接、检索和问答能力。</td>
+            <td>不把知识库做成唯一核心；它是平台中的一种能力来源。</td>
+          </tr>
+          <tr>
+            <td>MCP API 管理</td>
+            <td>服务端维护 MCP 服务配置，读取工具清单，管理工具元数据，支持原始 MCP 工具试运行。</td>
+            <td>不接入操作类 MCP 工具执行，不做复杂工作流编排。</td>
+          </tr>
+          <tr>
+            <td>MetaMCP</td>
+            <td>提供能力检索和查询类能力运行入口，让模型通过少量稳定工具发现和调用后台能力。</td>
+            <td>不直接把所有后台工具无差别暴露给模型。</td>
+          </tr>
+          <tr>
+            <td>Web 界面</td>
+            <td>提供管理员和访客两类视图。管理员可编辑 MCP 配置，访客只读查看能力目录和试运行结果。</td>
+            <td>不做完整登录、组织架构、细粒度权限和审批流。</td>
+          </tr>
+          <tr>
+            <td>调用日志</td>
+            <td>所有 MetaMCP 和原始 MCP 调用都记录匹配、参数校验、耗时、成功状态和响应样例。</td>
+            <td>不保存无限量完整响应；敏感字段脱敏策略先预留，后续增强。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="concepts">
+      <div class="section-head">
+        <div>
+          <h2>3. 核心对象模型</h2>
+          <p>阶段一需要从“知识库账本”扩展为“能力注册表 + 能力执行网关”。</p>
+        </div>
+        <span class="tag blue">Model</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>能力来源</h3>
+          <p>
+            能力来源表示平台连接到的后台系统。阶段一包括 <code>knowledge_base</code> 和 <code>mcp_api</code>。
+            后续可以扩展到 OpenAPI、CLI、数据库工具和内部业务系统。
+          </p>
+        </div>
+        <div class="card">
+          <h3>能力条目</h3>
+          <p>
+            能力条目是一个可被发现或调用的最小单元，例如某个知识库的检索能力，或某个 MCP 服务里的一个 tool。
+            每个能力条目需要名称、描述、标签、参数 schema、返回样例和来源信息。
+          </p>
+        </div>
+        <div class="card">
+          <h3>能力类型</h3>
+          <p>
+            所有能力按 <code>overview</code>、<code>search</code>、<code>detail</code>、<code>action</code> 分类。
+            阶段一只支持前三类查询能力；<code>action</code> 作为第二阶段能力。
+          </p>
+        </div>
+      </div>
+
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>类型</th>
+            <th>定义</th>
+            <th>是否有副作用</th>
+            <th>阶段一状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>overview</code></td>
+            <td>列出资源、目录、状态、可用范围。</td>
+            <td>否</td>
+            <td>支持</td>
+          </tr>
+          <tr>
+            <td><code>search</code></td>
+            <td>根据关键词、语义或条件寻找候选结果。</td>
+            <td>否</td>
+            <td>支持</td>
+          </tr>
+          <tr>
+            <td><code>detail</code></td>
+            <td>读取某个明确对象的详细信息。</td>
+            <td>否</td>
+            <td>支持</td>
+          </tr>
+          <tr>
+            <td><code>action</code></td>
+            <td>创建、修改、删除、触发执行、变更状态。</td>
+            <td>是</td>
+            <td>阶段一登记但不执行，第二阶段启用</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="web">
+      <div class="section-head">
+        <div>
+          <h2>4. Web 管理界面</h2>
+          <p>部门通用配置放在服务端，日常管理不再依赖 CLI。CLI 可以保留为安装、启动、初始化和运维入口。</p>
+        </div>
+        <span class="tag green">UI</span>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3>管理员视图</h3>
+          <ul>
+            <li>查看平台概览：能力来源数量、MCP 服务数量、工具数量、最近调用状态。</li>
+            <li>管理 MCP API：新增、编辑、启停、刷新工具清单、查看连接状态。</li>
+            <li>维护工具元数据：名称、描述、标签、类型、参数 schema、响应样例。</li>
+            <li>管理知识库能力：查看 KB、同步状态、检索/问答能力是否可用。</li>
+            <li>试运行 MetaMCP 和原始 MCP 工具。</li>
+            <li>查看调用日志和失败详情。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>访客视图</h3>
+          <ul>
+            <li>只读查看能力目录。</li>
+            <li>查看 MCP 服务和工具的基础说明。</li>
+            <li>按关键词检索可用能力。</li>
+            <li>试运行查询类工具。</li>
+            <li>查看自己的或公开的试运行结果。</li>
+            <li>不能新增、编辑、删除或启停 MCP 配置。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout warning" style="margin-top: 14px;">
+        阶段一的“管理员/访客”主要是界面角色和操作边界，不等同于完整安全权限体系。
+        可以先用简单配置、固定入口或开发期身份标识区分角色；后续再接入正式登录、组织权限和审计策略。
+      </div>
+    </section>
+
+    <section id="metamcp">
+      <div class="section-head">
+        <div>
+          <h2>5. MetaMCP 与试运行</h2>
+          <p>MetaMCP 是平台对大模型暴露的稳定入口；原始 MCP 仍可在 Web 后台被查看和试运行。</p>
+        </div>
+        <span class="tag blue">MCP</span>
+      </div>
+
+      <div class="flow">
+        <div class="step">
+          <strong>1. 注册来源</strong>
+          <span>管理员在 Web 端登记知识库或 MCP API 服务，服务端保存连接配置。</span>
+        </div>
+        <div class="step">
+          <strong>2. 同步工具</strong>
+          <span>平台读取 MCP tools 或知识库能力，生成统一能力条目。</span>
+        </div>
+        <div class="step">
+          <strong>3. 检索能力</strong>
+          <span>MetaMCP 根据用户问题检索候选能力，返回说明、类型和参数要求。</span>
+        </div>
+        <div class="step">
+          <strong>4. 执行查询</strong>
+          <span>MetaMCP 或 Web 试运行调用查询类工具，记录完整调用日志。</span>
+        </div>
+      </div>
+
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>试运行对象</th>
+            <th>用途</th>
+            <th>输入</th>
+            <th>输出</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>MetaMCP 检索</td>
+            <td>验证模型是否能通过平台找到正确能力。</td>
+            <td>自然语言问题、类型过滤、来源过滤。</td>
+            <td>候选能力列表、匹配原因、参数摘要。</td>
+          </tr>
+          <tr>
+            <td>MetaMCP 运行</td>
+            <td>验证平台能否用统一入口执行查询类能力。</td>
+            <td>能力 ID、参数 JSON。</td>
+            <td>标准化结果、原始结果样例、耗时和日志 ID。</td>
+          </tr>
+          <tr>
+            <td>原始 MCP 工具</td>
+            <td>验证某个后台 MCP tool 本身是否可用。</td>
+            <td>MCP 服务、tool 名称、参数 JSON。</td>
+            <td>原始 MCP 响应、错误信息、耗时和日志 ID。</td>
+          </tr>
+          <tr>
+            <td>知识库能力</td>
+            <td>验证知识库检索和问答能力是否可用。</td>
+            <td>知识库、问题、top_k、后端选择。</td>
+            <td>检索片段、回答、来源和耗时。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="logs">
+      <div class="section-head">
+        <div>
+          <h2>6. 调用日志</h2>
+          <p>日志是阶段一的基础能力之一，用于排查工具匹配、参数格式、后端调用和响应质量。</p>
+        </div>
+        <span class="tag orange">Audit</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>call_id</code></td>
+            <td>单次调用唯一 ID，用于 Web 展示和问题排查。</td>
+          </tr>
+          <tr>
+            <td><code>entrypoint</code></td>
+            <td>调用入口，例如 <code>metamcp_search</code>、<code>metamcp_run</code>、<code>raw_mcp_run</code>、<code>kb_search</code>。</td>
+          </tr>
+          <tr>
+            <td><code>source_id</code> / <code>tool_id</code></td>
+            <td>实际命中的能力来源和能力条目；未命中时为空并记录失败原因。</td>
+          </tr>
+          <tr>
+            <td><code>tool_type</code></td>
+            <td>能力类型：<code>overview</code>、<code>search</code>、<code>detail</code>、<code>action</code>。</td>
+          </tr>
+          <tr>
+            <td><code>matched</code></td>
+            <td>是否匹配到正确 MCP 或能力条目。</td>
+          </tr>
+          <tr>
+            <td><code>params_valid</code></td>
+            <td>请求参数是否符合工具参数 schema。</td>
+          </tr>
+          <tr>
+            <td><code>request_params</code></td>
+            <td>请求参数快照。阶段一可先完整记录，结构上预留脱敏策略。</td>
+          </tr>
+          <tr>
+            <td><code>started_at</code> / <code>finished_at</code> / <code>duration_ms</code></td>
+            <td>调用开始时间、返回时间和耗时。</td>
+          </tr>
+          <tr>
+            <td><code>success</code> / <code>error_message</code></td>
+            <td>是否调用成功，以及标准化错误信息。</td>
+          </tr>
+          <tr>
+            <td><code>response_sample</code></td>
+            <td>响应样例。建议限制长度，避免保存大响应或敏感内容。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="features">
+      <div class="section-head">
+        <div>
+          <h2>7. 阶段一功能点清单</h2>
+          <p>这是一版初始清单，后续可以继续拆成开发任务。</p>
+        </div>
+        <span class="tag green">Feature List</span>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3>平台与数据模型</h3>
+          <ul>
+            <li>能力来源表：知识库、MCP API。</li>
+            <li>能力条目表：工具名称、描述、类型、标签、schema、状态。</li>
+            <li>MCP 服务配置表：连接地址、协议参数、启停状态、最近同步时间。</li>
+            <li>调用日志表：记录匹配、校验、耗时、成功状态和响应样例。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Web 管理端</h3>
+          <ul>
+            <li>管理员首页和访客首页。</li>
+            <li>MCP 服务列表、新增、编辑、启停。</li>
+            <li>MCP tools 同步和工具元数据查看。</li>
+            <li>能力目录、能力详情、调用日志页面。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>试运行</h3>
+          <ul>
+            <li>MetaMCP 能力检索试运行。</li>
+            <li>MetaMCP 查询类能力运行试运行。</li>
+            <li>原始 MCP tool 参数 JSON 试运行。</li>
+            <li>知识库 search/ask 试运行。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>MCP 对外暴露</h3>
+          <ul>
+            <li>提供 MetaMCP 检索工具。</li>
+            <li>提供 MetaMCP 查询类运行工具。</li>
+            <li>返回候选能力、参数 schema、调用结果和日志 ID。</li>
+            <li>拒绝阶段一不支持的操作类执行。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Claude Code 接入 CLI</h3>
+          <ul>
+            <li>将平台 MetaMCP 写入 Claude Code 项目级或用户级配置。</li>
+            <li>支持创建和绑定 Project Profile，例如 <code>frontend-project</code>、<code>data-project</code>、<code>safe-readonly</code>。</li>
+            <li>Profile 内部维护已登记 MCP 服务的白名单或黑名单。</li>
+            <li>访问 MetaMCP 时携带 profile 请求头，让服务端统一裁剪可检索和可调用能力。</li>
+            <li>服务端对 profile 屏蔽的能力同时禁止检索结果返回和运行调用。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="cli-config">
+      <div class="section-head">
+        <div>
+          <h2>8. Claude Code 接入 CLI</h2>
+          <p>平台需要提供 CLI，帮助用户把 MetaMCP 接入 Claude Code，并通过 Project Profile 控制不同项目可见的 MCP 服务。</p>
+        </div>
+        <span class="tag blue">CLI</span>
+      </div>
+
+      <div class="callout">
+        <strong>目标：</strong>
+        用户可以通过 CLI 将平台的 MetaMCP 配置写入 Claude Code 配置文件，并绑定一个服务端维护的 Project Profile。
+        例如平台已连接 <code>mysql</code> 和 <code>hive</code> 两个查询 MCP，某项目绑定 <code>safe-readonly</code> profile，profile 中将 <code>hive</code> 加入黑名单后，该项目访问 MetaMCP 时会携带 profile 请求头，服务端不会返回 <code>hive</code> 下的任何工具，也不允许通过运行接口调用这些工具。
+      </div>
+
+      <div class="grid two" style="margin-top: 14px;">
+        <div class="card">
+          <h3>配置范围</h3>
+          <ul>
+            <li>项目级配置：写入当前项目的 Claude Code 配置，并绑定某个 Project Profile，适合项目团队共享同一套能力限制。</li>
+            <li>用户级配置：写入用户全局 Claude Code 配置，适合个人默认接入平台 MetaMCP。</li>
+            <li>项目级和用户级同时存在时，建议服务端按最终请求头执行过滤；CLI 负责生成清晰、可检查的配置。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Project Profile</h3>
+          <ul>
+            <li>Profile 是服务端维护的能力访问策略，例如 <code>frontend-project</code>、<code>data-project</code>、<code>safe-readonly</code>。</li>
+            <li>Profile 内部可以包含黑名单或白名单，名单以 MCP 服务级别为主。</li>
+            <li>黑名单表示不可见、不可调用；白名单表示唯一允许访问。</li>
+            <li>黑名单和白名单不建议同时配置；如果同时出现，服务端应采用更保守策略，以白名单限定范围后再应用黑名单。</li>
+          </ul>
+        </div>
+      </div>
+
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>能力</th>
+            <th>说明</th>
+            <th>示例</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>添加项目级 MetaMCP</td>
+            <td>把平台 MCP 服务写入当前项目配置，并绑定指定 profile。</td>
+            <td><code>wiki metamcp add --scope project --url http://wiki.local/mcp --profile safe-readonly</code></td>
+          </tr>
+          <tr>
+            <td>添加用户级 MetaMCP</td>
+            <td>把平台 MCP 服务写入用户全局配置，作为个人默认 MCP 入口。</td>
+            <td><code>wiki metamcp add --scope user --url http://wiki.local/mcp --profile data-project</code></td>
+          </tr>
+          <tr>
+            <td>创建 Profile</td>
+            <td>在服务端创建或更新能力访问策略。</td>
+            <td><code>wiki metamcp profile create safe-readonly --deny hive</code></td>
+          </tr>
+          <tr>
+            <td>更新 Profile</td>
+            <td>调整 profile 内的黑名单或白名单。</td>
+            <td><code>wiki metamcp profile update frontend-project --allow mysql --allow wiki</code></td>
+          </tr>
+          <tr>
+            <td>查看有效配置</td>
+            <td>展示当前项目或用户级 MetaMCP 配置、请求头和绑定 profile。</td>
+            <td><code>wiki metamcp config --scope project</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="grid two" style="margin-top: 14px;">
+        <div class="card">
+          <h3>请求头约定</h3>
+          <p>
+            Claude Code 调用 MetaMCP 时优先携带 <code>X-Wiki-MetaMCP-Profile</code>，服务端根据 profile 解析能力访问范围。
+            如需调试或兼容，也可以保留 <code>X-Wiki-MetaMCP-Allow</code> 和 <code>X-Wiki-MetaMCP-Deny</code> 作为显式名单请求头。
+          </p>
+        </div>
+        <div class="card">
+          <h3>服务端强制执行</h3>
+          <p>
+            Profile 策略不能只停留在客户端。MetaMCP 检索接口必须过滤候选能力；MetaMCP 运行接口也必须再次校验工具所属来源。
+            这样即使模型知道某个被屏蔽 tool_id，也无法绕过检索直接调用。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div>
+          <h2>9. 初始 Roadmap</h2>
+          <p>Roadmap 暂按产品能力成熟度拆分，后续可以再映射到实际开发里程碑。</p>
+        </div>
+        <span class="tag orange">Roadmap</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>目标</th>
+            <th>主要能力</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>阶段一：查询类能力平台</td>
+            <td>完成知识库 + MCP API 的注册、管理、检索、试运行和日志闭环。</td>
+            <td>Web 管理端、访客视图、MCP 服务配置、工具同步、MetaMCP 查询入口、原始 MCP 试运行、调用日志、Claude Code 接入 CLI、Project Profile、服务级白名单和黑名单。</td>
+          </tr>
+          <tr>
+            <td>阶段二：操作类能力治理</td>
+            <td>允许有副作用的 action 类工具进入平台，但必须可控。</td>
+            <td>操作类工具注册、风险等级、二次确认、审批预留、dry-run、幂等性声明、操作审计。</td>
+          </tr>
+          <tr>
+            <td>阶段三：多来源能力扩展</td>
+            <td>从 MCP 和知识库扩展到更多外围工具来源，并建立查询类能力质量评测。</td>
+            <td>OpenAPI 导入、CLI 工具封装、数据库查询工具、内部系统能力接入、能力检索增强、知识库检索和 MCP 查询工具测试问题集、命中率、失败率、平均耗时和答案样例统计。</td>
+          </tr>
+          <tr>
+            <td>阶段四：企业级治理</td>
+            <td>把平台从部门工具升级为可长期运营的企业基础设施。</td>
+            <td>正式权限、组织空间、密钥管理、脱敏策略、调用配额、质量评测、可观测性报表。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="future">
+      <div class="section-head">
+        <div>
+          <h2>10. 未来可选能力</h2>
+          <p>以下能力不进入当前阶段一重点，仅作为平台长期演进方向保留。</p>
+        </div>
+        <span class="tag blue">Optional</span>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3>Skill Registry</h3>
+          <ul>
+            <li>将 skill 作为一种复合能力资产登记，记录名称、适用场景、触发说明、版本、标签和资源清单。</li>
+            <li>通过检索式 MetaMCP 按需发现 skill，减少启动时全量加载所有 skill 的上下文成本。</li>
+            <li>用 MCP prompt 暴露 skill 的工作流说明和提示模板。</li>
+            <li>用 MCP resource 暴露模板文件、参考文档、示例和 schema。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Skill Materialization</h3>
+          <ul>
+            <li>按需获取 skill bundle manifest、资源文件和任务上下文。</li>
+            <li>脚本文件可以作为资源被查看，但不应让模型自由下载后直接执行。</li>
+            <li>未来如需执行 shell、Python 或 Node 脚本，应通过受控 runner，纳入权限、审计、沙箱和依赖检查。</li>
+            <li>该能力适合放在操作类能力治理成熟之后再推进。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>代码图谱 / CodeGraph</h3>
+          <p>
+            未来可选能力。暂定使用 codegraph 方向补充代码仓库结构分析、依赖关系、代码语义检索和研发辅助能力。
+            具体范围后续补充。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="appendix">
+      <div class="section-head">
+        <div>
+          <h2>11. 参考项目附录</h2>
+          <p>以下项目可作为后续设计和实现参考。它们覆盖 MCP 聚合、企业网关、注册表、市场和代理基础设施等不同方向。</p>
+        </div>
+        <span class="tag orange">References</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>项目</th>
+            <th>功能和特色</th>
+            <th>可参考点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/metatool-ai/metamcp">metatool-ai/metamcp</a></td>
+            <td>MCP aggregator、orchestrator、middleware 和 gateway；支持命名空间、endpoint、tool override、inspector、SSE 和 Streamable HTTP。</td>
+            <td>MetaMCP 聚合、命名空间、endpoint 管理、原始 MCP 调试体验。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/IBM/mcp-context-forge">IBM/mcp-context-forge</a></td>
+            <td>MCP、A2A、REST/gRPC 的 AI Gateway、registry 和 proxy，提供统一发现、guardrails、管理和插件扩展。</td>
+            <td>企业级网关、管理端、协议适配、插件体系和审计观测。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/obot-platform/obot">obot-platform/obot</a></td>
+            <td>完整 MCP 平台，覆盖 hosting、registry、gateway 和 chat client。</td>
+            <td>MCP 服务托管、注册、共享和终端用户使用路径。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/microsoft/mcp-gateway">microsoft/mcp-gateway</a></td>
+            <td>Kubernetes 环境下的 MCP reverse proxy 和 management layer，支持 session-aware routing 和 MCP 服务生命周期管理。</td>
+            <td>规模化部署、动态路由、会话保持和服务生命周期管理。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/modelcontextprotocol/registry">modelcontextprotocol/registry</a></td>
+            <td>社区驱动的 MCP server registry 服务。</td>
+            <td>MCP server 元数据、注册表模型、命名空间和发布规范。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/toolsdk-ai/toolsdk-mcp-registry">toolsdk-ai/toolsdk-mcp-registry</a></td>
+            <td>企业 MCP registry 和 gateway，支持 MCP 工具发现、安全执行、STDIO/Streamable HTTP 统一访问、sandbox、OAuth 和 OpenAPI 文档。</td>
+            <td>工具检索、远程执行、sandbox、安全接入和结构化 registry 数据。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/agentgateway/agentgateway">agentgateway/agentgateway</a></td>
+            <td>面向 AI agents 和 MCP servers 的代理基础设施，覆盖 LLM gateway、MCP gateway、A2A gateway 和 OpenAPI 集成。</td>
+            <td>代理基础设施、OpenAPI 集成、统一入口和治理思路。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/agentic-community/mcp-gateway-registry">agentic-community/mcp-gateway-registry</a></td>
+            <td>企业级 MCP Gateway & Registry，强调 OAuth、动态工具发现、统一访问、审计和 coding assistant 接入。</td>
+            <td>企业工具治理、编码助手接入、审计、访问控制和动态发现。</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/xpack-ai/XPack-MCP-Marketplace">xpack-ai/XPack-MCP-Marketplace</a></td>
+            <td>开源 MCP monetization / marketplace 平台，用于创建和销售 MCP 服务。</td>
+            <td>能力市场、服务详情页、商业化包装和 MCP 服务目录展示。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="open-questions">
+      <div class="section-head">
+        <div>
+          <h2>12. 待继续确认的问题</h2>
+          <p>以下问题会影响阶段一的具体实现方案，但不阻塞当前产品定义成型。</p>
+        </div>
+        <span class="tag blue">Next</span>
+      </div>
+
+      <ul>
+        <li>阶段一 Web 角色区分采用什么方式：固定配置、URL 模式、简单口令，还是先仅做 UI 角色切换。</li>
+        <li>MCP API 的连接形态优先支持哪一种：stdio、SSE、streamable HTTP，或先支持其中一种。</li>
+        <li>MetaMCP 的能力检索是先用关键词/标签检索，还是第一阶段就接入向量检索。</li>
+        <li>原始 MCP 工具参数 schema 是否完全信任 MCP 服务返回，还是允许管理员在平台内覆盖和补充。</li>
+        <li>调用日志中的请求参数和响应样例，阶段一是否需要立即做字段级脱敏。</li>
+        <li>Claude Code 配置文件的项目级和用户级写入路径、格式和合并规则，需要结合当前 Claude Code 实际配置规范确认。</li>
+        <li>Project Profile 过滤规则是否只支持服务级名单，还是也要支持标签级、能力类型级或单 tool 级名单。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
