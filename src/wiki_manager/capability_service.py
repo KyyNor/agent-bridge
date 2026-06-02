@@ -1,0 +1,311 @@
+"""Capability service composed from MCP registry storage and HTTP client."""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+from wiki_manager.capabilities import McpServiceStatus, ToolType
+from wiki_manager.domain import NotFound, ValidationError, require_admin_user
+from wiki_manager.mcp_http_client import McpHttpClient
+from wiki_manager.storage import SQLiteStore
+
+
+SERVICE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _json_loads(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return json.loads(value) if value else default
+    return value
+
+
+def _json_text(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).lower()
+
+
+def _schema_example(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return {}
+    return {name: _example_value(definition) for name, definition in properties.items()}
+
+
+def _example_value(definition: Any) -> Any:
+    if not isinstance(definition, dict):
+        return None
+    if "default" in definition:
+        return definition["default"]
+    if "example" in definition:
+        return definition["example"]
+
+    value_type = definition.get("type")
+    if value_type == "string":
+        return "<string>"
+    if value_type in {"integer", "number"}:
+        return 0
+    if value_type == "boolean":
+        return False
+    if value_type == "array":
+        return []
+    if value_type == "object":
+        return {}
+    return None
+
+
+class CapabilityService:
+    def __init__(
+        self,
+        *,
+        store: SQLiteStore,
+        admins: set[str],
+        mcp_client: McpHttpClient | None = None,
+    ) -> None:
+        self.store = store
+        self.admins = admins
+        self.mcp_client = mcp_client or McpHttpClient()
+
+    def register_service(
+        self,
+        actor: str,
+        service_key: str,
+        name: str,
+        endpoint_url: str,
+        headers: dict[str, Any],
+        description: str,
+        tags: list[str],
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._validate_service_key(service_key)
+        existing = self.store.get_mcp_service(service_key)
+        if existing is None:
+            service = self.store.create_mcp_service(
+                service_key=service_key,
+                name=name,
+                endpoint_url=endpoint_url,
+                headers=headers,
+                description=description,
+                tags=tags,
+                created_by=actor,
+            )
+        else:
+            service = self.store.update_mcp_service(
+                service_key,
+                name=name,
+                endpoint_url=endpoint_url,
+                headers=headers,
+                description=description,
+                tags=tags,
+            )
+        return self._service_payload(service)
+
+    def list_services(self, actor: str) -> list[dict[str, Any]]:
+        return [self._service_payload(service) for service in self.store.list_mcp_services()]
+
+    def set_service_status(self, actor: str, service_key: str, status: McpServiceStatus | str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        try:
+            next_status = McpServiceStatus(status)
+        except ValueError as exc:
+            raise ValidationError("invalid service status") from exc
+        service = self.store.get_mcp_service(service_key)
+        if service is None:
+            raise NotFound("service not found")
+        self.store.update_mcp_service_status(service_key, next_status)
+        updated = self.store.get_mcp_service(service_key)
+        if updated is None:
+            raise NotFound("service not found")
+        return self._service_payload(updated)
+
+    async def sync_tools(self, actor: str, service_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        service = self.store.get_mcp_service(service_key)
+        if service is None:
+            raise NotFound("service not found")
+        headers = _json_loads(service.get("headers_json"), {})
+        try:
+            tools = await self.mcp_client.list_tools(service["endpoint_url"], headers)
+            for tool in tools:
+                normalized = self._normalize_synced_tool(tool)
+                self.store.upsert_mcp_tool(
+                    service_key=service_key,
+                    tool_name=normalized["tool_name"],
+                    display_name=normalized["display_name"],
+                    description=normalized["description"],
+                    input_schema=normalized["input_schema"],
+                    tool_type=normalized["tool_type"],
+                    tags=normalized["tags"],
+                    examples=normalized["examples"],
+                )
+            self.store.mark_mcp_service_sync(service_key, success=True)
+            return {"service_key": service_key, "tool_count": len(tools)}
+        except Exception as exc:
+            self.store.mark_mcp_service_sync(service_key, success=False, error=str(exc))
+            raise
+
+    def list_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
+        if self.store.get_mcp_service(service_key) is None:
+            raise NotFound("service not found")
+        return [self._tool_payload(tool) for tool in self.store.list_mcp_tools(service_key)]
+
+    def search(self, actor: str, path: str | None, query: str | None, limit: int = 20) -> list[dict[str, Any]]:
+        normalized_path = (path or "").strip("/")
+        if normalized_path == "":
+            items = self._root_search_items()
+        else:
+            if self.store.get_mcp_service(normalized_path) is None:
+                raise NotFound("service not found")
+            items = [self._tool_search_item(tool) for tool in self.store.list_mcp_tools(normalized_path)]
+
+        if query:
+            needle = query.lower()
+            items = [item for item in items if needle in _json_text(item)]
+        return items[:limit]
+
+    async def execute(
+        self,
+        actor: str,
+        service: str,
+        tool: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        service_payload = self.store.get_mcp_service(service)
+        if service_payload is None:
+            raise NotFound("service not found")
+        tool_payload = self.store.get_mcp_tool(service, tool)
+        if tool_payload is None:
+            raise NotFound("tool not found")
+        if tool_payload["tool_type"] == ToolType.action.value:
+            raise ValidationError("action tools are not executable in phase 1")
+
+        headers = _json_loads(service_payload.get("headers_json"), {})
+        result = await self.mcp_client.call_tool(
+            service_payload["endpoint_url"],
+            headers,
+            tool,
+            arguments,
+        )
+        return {
+            "service": service,
+            "tool": tool,
+            "success": not bool(result.get("is_error")) if isinstance(result, dict) else True,
+            "result": result,
+        }
+
+    def _root_search_items(self) -> list[dict[str, Any]]:
+        enabled_services = [
+            service
+            for service in self.store.list_mcp_services()
+            if service["status"] == McpServiceStatus.enabled.value
+        ]
+        tools_by_service: dict[str, int] = {}
+        for tool in self.store.list_mcp_tools():
+            if tool.get("status") == "active":
+                tools_by_service[tool["service_key"]] = tools_by_service.get(tool["service_key"], 0) + 1
+        return [
+            {
+                "kind": "service",
+                "service": service["service_key"],
+                "name": service["name"],
+                "description": service["description"],
+                "tags": _json_loads(service.get("tags_json"), []),
+                "tool_count": tools_by_service.get(service["service_key"], 0),
+                "status": service["status"],
+            }
+            for service in enabled_services
+        ]
+
+    def _service_payload(self, service: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(service)
+        payload["headers"] = _json_loads(payload.pop("headers_json", None), {})
+        payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
+        return payload
+
+    def _tool_payload(self, tool: dict[str, Any]) -> dict[str, Any]:
+        input_schema = _json_loads(tool.get("input_schema_json"), {})
+        examples = _json_loads(tool.get("examples_json"), [])
+        payload = dict(tool)
+        payload.pop("input_schema_json", None)
+        payload.pop("tags_json", None)
+        payload.pop("examples_json", None)
+        return {
+            **payload,
+            "service": tool["service_key"],
+            "tool": tool["tool_name"],
+            "name": tool["display_name"],
+            "input_schema": input_schema,
+            "tool_type": tool["tool_type"],
+            "tags": _json_loads(tool.get("tags_json"), []),
+            "examples": examples,
+            "execute_example": examples[0] if examples else _schema_example(input_schema),
+            "executable": tool["tool_type"] != ToolType.action.value,
+        }
+
+    def _tool_search_item(self, tool: dict[str, Any]) -> dict[str, Any]:
+        payload = self._tool_payload(tool)
+        return {
+            "kind": "tool",
+            "service": payload["service"],
+            "tool": payload["tool"],
+            "name": payload["name"],
+            "description": payload["description"],
+            "tags": payload["tags"],
+            "tool_type": payload["tool_type"],
+            "input_schema": payload["input_schema"],
+            "execute_example": payload["execute_example"],
+            "executable": payload["executable"],
+        }
+
+    def _normalize_synced_tool(self, tool: dict[str, Any]) -> dict[str, Any]:
+        tool_name = str(tool.get("name") or "")
+        input_schema = tool.get("input_schema")
+        if not isinstance(input_schema, dict):
+            input_schema = {"type": "object", "properties": {}}
+        examples = tool.get("examples")
+        if not isinstance(examples, list):
+            examples = []
+        return {
+            "tool_name": tool_name,
+            "display_name": self._display_name(tool),
+            "description": str(tool.get("description") or ""),
+            "input_schema": input_schema,
+            "tool_type": self._infer_tool_type(tool),
+            "tags": self._tool_tags(tool),
+            "examples": examples,
+        }
+
+    def _display_name(self, tool: dict[str, Any]) -> str:
+        annotations = tool.get("annotations")
+        if isinstance(annotations, dict) and annotations.get("title"):
+            return str(annotations["title"])
+        return str(tool.get("name") or "")
+
+    def _tool_tags(self, tool: dict[str, Any]) -> list[str]:
+        tags = tool.get("tags")
+        if isinstance(tags, list):
+            return [str(tag) for tag in tags]
+        return []
+
+    def _infer_tool_type(self, tool: dict[str, Any]) -> ToolType:
+        annotations = tool.get("annotations")
+        if isinstance(annotations, dict):
+            if annotations.get("destructiveHint") is True or annotations.get("readOnlyHint") is False:
+                return ToolType.action
+            if annotations.get("readOnlyHint") is True:
+                return ToolType.search
+
+        haystack = f"{tool.get('name', '')} {tool.get('description', '')}".lower()
+        if any(token in haystack for token in ("delete", "remove", "update", "create", "write", "insert", "execute")):
+            return ToolType.action
+        if any(token in haystack for token in ("list", "overview", "summary")):
+            return ToolType.overview
+        if any(token in haystack for token in ("get", "detail", "fetch", "read")):
+            return ToolType.detail
+        return ToolType.search
+
+    def _validate_service_key(self, service_key: str) -> None:
+        if not SERVICE_KEY_RE.fullmatch(service_key):
+            raise ValidationError("service_key may contain only letters, numbers, hyphen, and underscore")

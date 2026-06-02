@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from wiki_manager.archive import ArchiveStorage
+from wiki_manager.capability_service import CapabilityService
 from wiki_manager.config import WikiManagerPaths, ensure_directories
 from wiki_manager.domain import (
     AccessDenied,
@@ -46,6 +47,7 @@ class WikiManagerService:
         self.mock_backend = mock_backend
         self.admins = admins
         self.registry: BackendRegistry | None = None
+        self.capabilities = CapabilityService(store=store, admins=admins)
 
     @classmethod
     def create(cls, paths: WikiManagerPaths, admins: set[str]) -> "WikiManagerService":
