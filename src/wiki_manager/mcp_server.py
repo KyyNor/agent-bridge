@@ -1,7 +1,6 @@
-"""MCP server exposing search and ask tools for wiki-manager."""
+"""MCP server exposing MetaMCP gateway tools for wiki-manager."""
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from mcp.server import Server
@@ -11,14 +10,6 @@ from wiki_manager.config import DEFAULT_ROOT, WikiManagerPaths, load_server_conf
 from wiki_manager.services import WikiManagerService
 
 
-def _to_dict(value: Any) -> Any:
-    if is_dataclass(value):
-        return asdict(value)
-    if isinstance(value, list):
-        return [_to_dict(item) for item in value]
-    return value
-
-
 def create_mcp_server(
     *,
     service: WikiManagerService | None = None,
@@ -26,7 +17,7 @@ def create_mcp_server(
     paths: WikiManagerPaths | None = None,
     admins: set[str] | None = None,
 ) -> Server:
-    """Create an MCP server with search and ask tool definitions."""
+    """Create an MCP server with MetaMCP gateway tool definitions."""
     server = Server("wiki-manager")
 
     def resolve_service() -> WikiManagerService:
@@ -41,54 +32,45 @@ def create_mcp_server(
         return [
             Tool(
                 name="search",
-                description="Search knowledge base chunks by query.",
+                description="browse/search Agent Capability Hub registry.",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "kb_slug": {
+                        "path": {
                             "type": "string",
-                            "description": "Knowledge base slug",
+                            "description": "Registry path, such as a service key",
                         },
-                        "question": {
+                        "query": {
                             "type": "string",
-                            "description": "Search query",
+                            "description": "Filter query",
                         },
-                        "backend": {
-                            "type": "string",
-                            "description": "Backend slug (optional)",
-                        },
-                        "top_k": {
+                        "limit": {
                             "type": "integer",
-                            "description": "Number of results (default 6)",
+                            "description": "Maximum number of results",
                         },
                     },
-                    "required": ["kb_slug", "question"],
                 },
             ),
             Tool(
-                name="ask",
-                description="Ask a question against a knowledge base and get an answer with references.",
+                name="execute",
+                description="execute registered read-only MCP tool through the gateway.",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "kb_slug": {
+                        "service": {
                             "type": "string",
-                            "description": "Knowledge base slug",
+                            "description": "Registered service key",
                         },
-                        "question": {
+                        "tool": {
                             "type": "string",
-                            "description": "Question to ask",
+                            "description": "Registered tool name",
                         },
-                        "backend": {
-                            "type": "string",
-                            "description": "Backend slug (optional)",
-                        },
-                        "session_id": {
-                            "type": "string",
-                            "description": "Session ID for multi-turn (optional)",
+                        "arguments": {
+                            "type": "object",
+                            "description": "Tool arguments",
                         },
                     },
-                    "required": ["kb_slug", "question"],
+                    "required": ["service", "tool", "arguments"],
                 },
             ),
         ]
@@ -96,24 +78,21 @@ def create_mcp_server(
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         svc = resolve_service()
+        arguments = arguments or {}
         if name == "search":
-            results = svc.search(
-                actor,
-                arguments["kb_slug"],
-                arguments["question"],
-                backend_slug=arguments.get("backend"),
-                top_k=int(arguments.get("top_k", 6)),
+            return svc.capabilities.search(
+                actor=actor,
+                path=arguments.get("path"),
+                query=arguments.get("query"),
+                limit=int(arguments.get("limit", 20)),
             )
-            return {"results": _to_dict(results)}
-        if name == "ask":
-            result = svc.ask(
-                actor,
-                arguments["kb_slug"],
-                arguments["question"],
-                backend_slug=arguments.get("backend"),
-                session_id=arguments.get("session_id"),
+        if name == "execute":
+            return await svc.capabilities.execute(
+                actor=actor,
+                service=arguments["service"],
+                tool=arguments["tool"],
+                arguments=arguments.get("arguments") or {},
             )
-            return _to_dict(result)
         raise ValueError(f"unknown tool: {name}")
 
     return server

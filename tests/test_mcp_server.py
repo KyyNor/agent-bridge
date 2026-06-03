@@ -14,17 +14,16 @@ def _get_tools_sync(server):
     return result.root.tools
 
 
-def test_mcp_server_exposes_search_and_ask_tools():
+def test_mcp_server_exposes_search_and_execute_tools():
     from wiki_manager.mcp_server import create_mcp_server
 
     server = create_mcp_server()
     tools = _get_tools_sync(server)
     tool_names = [tool.name for tool in tools]
-    assert "search" in tool_names
-    assert "ask" in tool_names
+    assert tool_names == ["search", "execute"]
 
 
-def test_mcp_search_tool_has_expected_schema():
+def test_mcp_search_tool_has_path_query_schema():
     from wiki_manager.mcp_server import create_mcp_server
 
     server = create_mcp_server()
@@ -32,42 +31,41 @@ def test_mcp_search_tool_has_expected_schema():
     tools_by_name = {t.name: t for t in tools}
     search_tool = tools_by_name["search"]
     schema = search_tool.inputSchema
-    assert "kb_slug" in schema["properties"]
-    assert "question" in schema["properties"]
+    assert "path" in schema["properties"]
+    assert "query" in schema["properties"]
+    assert "limit" in schema["properties"]
+    assert "required" not in schema
 
 
-def test_mcp_ask_tool_has_expected_schema():
+def test_mcp_execute_tool_has_service_tool_arguments_schema():
     from wiki_manager.mcp_server import create_mcp_server
 
     server = create_mcp_server()
     tools = _get_tools_sync(server)
     tools_by_name = {t.name: t for t in tools}
-    ask_tool = tools_by_name["ask"]
-    schema = ask_tool.inputSchema
-    assert "kb_slug" in schema["properties"]
-    assert "question" in schema["properties"]
+    execute_tool = tools_by_name["execute"]
+    schema = execute_tool.inputSchema
+    assert schema["required"] == ["service", "tool", "arguments"]
+    assert "service" in schema["properties"]
+    assert "tool" in schema["properties"]
+    assert "arguments" in schema["properties"]
 
 
-def test_mcp_search_tool_calls_service():
-    from wiki_manager.domain import RetrievalResult
+def test_mcp_search_tool_calls_capability_service():
     from wiki_manager.mcp_server import create_mcp_server
 
-    class FakeService:
-        def search(self, actor, kb_slug, question, *, backend_slug=None, top_k=6):
+    returned = {"items": [{"service": "svc-1", "tool": "read"}]}
+
+    class FakeCapabilities:
+        def search(self, *, actor, path, query, limit=20):
             assert actor == "root"
-            assert kb_slug == "frontend-docs"
-            assert question == "auth"
-            assert backend_slug == "ragflow"
-            assert top_k == 3
-            return [
-                RetrievalResult(
-                    chunk_id="chunk-1",
-                    content="Authentication guide",
-                    document_name="auth.md",
-                    similarity=0.9,
-                    dataset_id="ds-1",
-                )
-            ]
+            assert path == "svc-1"
+            assert query == "read"
+            assert limit == 3
+            return returned
+
+    class FakeService:
+        capabilities = FakeCapabilities()
 
     server = create_mcp_server(service=FakeService(), actor="root")
     handler = server.request_handlers[CallToolRequest]
@@ -75,45 +73,45 @@ def test_mcp_search_tool_calls_service():
         params=CallToolRequestParams(
             name="search",
             arguments={
-                "kb_slug": "frontend-docs",
-                "question": "auth",
-                "backend": "ragflow",
-                "top_k": 3,
+                "path": "svc-1",
+                "query": "read",
+                "limit": 3,
             },
         )
     )))
 
     payload = result.root.structuredContent
-    assert payload["results"][0]["chunk_id"] == "chunk-1"
+    assert payload["items"][0] == returned["items"][0]
 
 
-def test_mcp_ask_tool_calls_service():
-    from wiki_manager.domain import AskResult
+def test_mcp_execute_tool_calls_capability_service():
     from wiki_manager.mcp_server import create_mcp_server
 
-    class FakeService:
-        def ask(self, actor, kb_slug, question, *, backend_slug=None, session_id=None):
+    returned = {"success": True, "content": [{"type": "text", "text": "ok"}]}
+
+    class FakeCapabilities:
+        async def execute(self, *, actor, service, tool, arguments):
             assert actor == "root"
-            assert kb_slug == "frontend-docs"
-            assert question == "how auth works?"
-            assert backend_slug == "ragflow"
-            assert session_id == "sess-1"
-            return AskResult(answer="Use SSO.", chunks=[], session_id="sess-1")
+            assert service == "svc-1"
+            assert tool == "read"
+            assert arguments == {"path": "/docs"}
+            return returned
+
+    class FakeService:
+        capabilities = FakeCapabilities()
 
     server = create_mcp_server(service=FakeService(), actor="root")
     handler = server.request_handlers[CallToolRequest]
     result = asyncio.run(handler(CallToolRequest(
         params=CallToolRequestParams(
-            name="ask",
+            name="execute",
             arguments={
-                "kb_slug": "frontend-docs",
-                "question": "how auth works?",
-                "backend": "ragflow",
-                "session_id": "sess-1",
+                "service": "svc-1",
+                "tool": "read",
+                "arguments": {"path": "/docs"},
             },
         )
     )))
 
     payload = result.root.structuredContent
-    assert payload["answer"] == "Use SSO."
-    assert payload["session_id"] == "sess-1"
+    assert payload["success"] is True
