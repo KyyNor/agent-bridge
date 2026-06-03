@@ -80,6 +80,7 @@ class CapabilityGovernanceService:
         source_type: str,
         source_keys: list[str],
     ) -> list[str]:
+        normalized_source_type = self._validate_source_type(source_type)
         if profile_key is None:
             return source_keys
 
@@ -88,7 +89,7 @@ class CapabilityGovernanceService:
             raise NotFound("profile not found")
 
         rules = self.store.list_profile_source_rules(profile_key)
-        relevant_rules = [rule for rule in rules if rule["source_type"] == source_type]
+        relevant_rules = [rule for rule in rules if rule["source_type"] == normalized_source_type]
         allow = {
             rule["source_key"]
             for rule in relevant_rules
@@ -132,17 +133,19 @@ class CapabilityGovernanceService:
         error_message: str | None,
         duration_ms: int | None,
     ) -> dict[str, Any]:
+        normalized_source_type = self._validate_optional_source_type(source_type)
+        normalized_status = self._validate_call_log_status(status)
         return self.store.create_tool_call_log(
             log_id=make_log_id(),
             actor=actor,
             profile_key=profile_key,
             entrypoint=entrypoint,
-            source_type=source_type,
+            source_type=normalized_source_type,
             source_key=source_key,
             tool_name=tool_name,
             request=request,
             response=response,
-            status=CallLogStatus(status).value,
+            status=normalized_status,
             error_message=error_message,
             duration_ms=duration_ms,
         )
@@ -161,13 +164,15 @@ class CapabilityGovernanceService:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
+        normalized_source_type = self._validate_optional_source_type(source_type)
+        normalized_status = self._validate_optional_call_log_status(status)
         return self.store.list_tool_call_logs(
             entrypoint=entrypoint,
-            source_type=source_type,
+            source_type=normalized_source_type,
             source_key=source_key,
             tool_name=tool_name,
             profile_key=profile_key,
-            status=status,
+            status=normalized_status,
             limit=limit,
             offset=offset,
         )
@@ -180,10 +185,7 @@ class CapabilityGovernanceService:
         return log
 
     def _validate_rule(self, rule: dict[str, str]) -> dict[str, str]:
-        try:
-            source_type = SourceType(rule["source_type"]).value
-        except (KeyError, ValueError) as exc:
-            raise ValidationError("invalid source type") from exc
+        source_type = self._validate_source_type(rule.get("source_type"))
 
         try:
             effect = ProfileRuleEffect(rule["effect"]).value
@@ -195,3 +197,25 @@ class CapabilityGovernanceService:
             raise ValidationError("source_key is required")
 
         return {"source_type": source_type, "source_key": source_key, "effect": effect}
+
+    def _validate_source_type(self, source_type: str | None) -> str:
+        try:
+            return SourceType(source_type).value
+        except ValueError as exc:
+            raise ValidationError("invalid source type") from exc
+
+    def _validate_optional_source_type(self, source_type: str | None) -> str | None:
+        if source_type is None:
+            return None
+        return self._validate_source_type(source_type)
+
+    def _validate_call_log_status(self, status: str) -> str:
+        try:
+            return CallLogStatus(status).value
+        except ValueError as exc:
+            raise ValidationError("invalid call log status") from exc
+
+    def _validate_optional_call_log_status(self, status: str | None) -> str | None:
+        if status is None:
+            return None
+        return self._validate_call_log_status(status)

@@ -137,6 +137,27 @@ def test_policy_rules_match_source_type_and_source_key_pair(wm_paths: WikiManage
     assert visible == ["mysql"]
 
 
+def test_policy_rejects_invalid_source_type_for_checks(wm_paths: WikiManagerPaths) -> None:
+    service, _store = _service(wm_paths)
+    service.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
+    service.replace_profile_rules(
+        "root",
+        "safe-readonly",
+        [{"source_type": "mcp_service", "source_key": "mysql", "effect": "deny"}],
+    )
+
+    with pytest.raises(ValidationError, match="invalid source type"):
+        service.filter_source_keys(
+            actor="root",
+            profile_key="safe-readonly",
+            source_type="typo",
+            source_keys=["mysql"],
+        )
+
+    with pytest.raises(ValidationError, match="invalid source type"):
+        service.is_source_allowed("root", "safe-readonly", "typo", "mysql")
+
+
 def test_unknown_or_disabled_profile_is_not_found(wm_paths: WikiManagerPaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "disabled", "停用", "", "disabled")
@@ -190,6 +211,46 @@ def test_missing_log_is_not_found(wm_paths: WikiManagerPaths) -> None:
 
     with pytest.raises(NotFound, match="tool call log not found"):
         service.get_log(actor="root", log_id="call_missing")
+
+
+def test_log_filters_and_writes_reject_invalid_source_type_and_status(wm_paths: WikiManagerPaths) -> None:
+    service, _store = _service(wm_paths)
+
+    with pytest.raises(ValidationError, match="invalid source type"):
+        service.log_tool_call(
+            actor="root",
+            profile_key=None,
+            entrypoint="metamcp_execute",
+            source_type="typo",
+            source_key="mysql",
+            tool_name="query_sql",
+            request={},
+            response={},
+            status=CallLogStatus.success.value,
+            error_message=None,
+            duration_ms=1,
+        )
+
+    with pytest.raises(ValidationError, match="invalid call log status"):
+        service.log_tool_call(
+            actor="root",
+            profile_key=None,
+            entrypoint="metamcp_execute",
+            source_type=SourceType.mcp_service.value,
+            source_key="mysql",
+            tool_name="query_sql",
+            request={},
+            response={},
+            status="maybe",
+            error_message=None,
+            duration_ms=1,
+        )
+
+    with pytest.raises(ValidationError, match="invalid source type"):
+        service.list_logs(actor="root", source_type="typo")
+
+    with pytest.raises(ValidationError, match="invalid call log status"):
+        service.list_logs(actor="root", status="maybe")
 
 
 def test_rule_validation_rejects_unknown_effect_source_type_and_empty_key(wm_paths: WikiManagerPaths) -> None:
