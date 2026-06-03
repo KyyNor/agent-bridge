@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Capability Hub - Phase 1.5 治理闭环设计</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #647086;
+      --line: #dce3ec;
+      --line-strong: #b9c5d6;
+      --primary: #2456d6;
+      --primary-soft: #e9efff;
+      --green: #0f8a5f;
+      --green-soft: #e7f6ef;
+      --orange: #b86412;
+      --orange-soft: #fff1df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --slate: #243044;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 46px rgba(36, 48, 68, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(36, 86, 214, 0.08), transparent 270px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.65;
+    }
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+    header,
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(36, 48, 68, 0.07);
+    }
+    header {
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(233, 239, 255, 0.84)),
+        var(--paper);
+      box-shadow: var(--shadow);
+      padding: 34px;
+    }
+    section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+    h1 {
+      margin-top: 12px;
+      max-width: 980px;
+      font-size: clamp(32px, 5vw, 52px);
+      font-weight: 900;
+    }
+    h2 { font-size: 25px; font-weight: 880; }
+    h3 { font-size: 18px; font-weight: 840; }
+    p { margin: 0; }
+    ul { margin: 10px 0 0; padding-left: 20px; }
+    li + li { margin-top: 6px; }
+    li, td, .card p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f4f7fb;
+      color: #13284f;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      margin: 12px 0 0;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f172a;
+      color: #e5edf9;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--slate-soft);
+      color: var(--slate);
+      font-weight: 860;
+    }
+    tr:last-child td { border-bottom: 0; }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--slate);
+      padding: 11px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 820;
+    }
+    nav a:hover { border-color: var(--primary); color: var(--primary); }
+    .eyebrow {
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .lead {
+      max-width: 960px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+    .section-head p {
+      max-width: 720px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 8px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 820;
+    }
+    .tag.blue { background: var(--primary-soft); color: var(--primary); }
+    .tag.green { background: var(--green-soft); color: var(--green); }
+    .tag.orange { background: var(--orange-soft); color: var(--orange); }
+    .tag.red { background: var(--red-soft); color: var(--red); }
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 18px;
+    }
+    .card h3 { margin-bottom: 8px; }
+    .callout {
+      border: 1px solid var(--line-strong);
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      background: #fbfdff;
+      color: var(--slate);
+      padding: 14px 16px;
+      font-size: 14px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+      min-height: 110px;
+      position: relative;
+    }
+    .step::after {
+      content: "→";
+      position: absolute;
+      right: -12px;
+      top: 42px;
+      color: var(--line-strong);
+      font-weight: 900;
+    }
+    .step:last-child::after { content: ""; }
+    .step-num {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 880;
+      margin-bottom: 8px;
+    }
+    .step strong {
+      display: block;
+      color: var(--ink);
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .status {
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 780;
+    }
+    .status.done { background: var(--green-soft); color: var(--green); }
+    .status.next { background: var(--orange-soft); color: var(--orange); }
+    .status.no { background: var(--red-soft); color: var(--red); }
+    @media (max-width: 860px) {
+      main { width: min(100vw - 24px, 1180px); padding-top: 18px; }
+      header, section { padding: 20px; }
+      .grid.two, .grid.three, .flow { grid-template-columns: 1fr; }
+      .step::after { content: ""; }
+      .section-head { display: block; }
+      .tag { margin-top: 10px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Agent Capability Hub / Phase 1.5</div>
+    <h1>能力治理与调试闭环设计</h1>
+    <p class="lead">
+      Phase 1 已经完成 MCP 服务登记、工具同步和 MetaMCP <code>search/execute</code>。
+      Phase 1.5 不进入操作类工具治理，而是补齐调用日志、能力目录、详情页面、Project Profile、
+      服务级白名单/黑名单、Profile 强制裁剪和 Claude Code 接入 CLI，让平台从“可登记可调用”升级为“可治理、可追踪、可接入项目”。
+    </p>
+    <div class="meta">
+      <span class="pill">文档日期：2026-06-03</span>
+      <span class="pill">范围：Phase 1.5</span>
+      <span class="pill">前端：中文控制台</span>
+      <span class="pill">策略：服务级 allow / deny</span>
+      <span class="pill">日志：完整记录</span>
+    </div>
+    <nav>
+      <a href="#scope">阶段边界</a>
+      <a href="#architecture">架构</a>
+      <a href="#data-model">数据模型</a>
+      <a href="#policy">策略规则</a>
+      <a href="#api">接口</a>
+      <a href="#metamcp">MetaMCP</a>
+      <a href="#pages">页面</a>
+      <a href="#cli">CLI</a>
+      <a href="#errors">错误处理</a>
+      <a href="#testing">验收</a>
+    </nav>
+  </header>
+
+  <section id="scope">
+    <div class="section-head">
+      <div>
+        <h2>1. 阶段边界</h2>
+        <p>本阶段优先做治理闭环。操作类工具治理、审批、dry-run 和工具级策略不进入 Phase 1.5。</p>
+      </div>
+      <span class="tag blue">Scope</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>本阶段要做</h3>
+        <ul>
+          <li>新增 <code>tool_call_logs</code>，记录 MetaMCP 和原始工具调用日志。</li>
+          <li>MetaMCP <code>search</code> / <code>execute</code> 返回 <code>log_id</code>。</li>
+          <li>新增能力目录、能力详情、完整工具详情页。</li>
+          <li>新增 Project Profile 和服务级白名单/黑名单。</li>
+          <li>Profile 请求头过滤和服务端强制裁剪。</li>
+          <li>新增 Claude Code 接入 CLI。</li>
+          <li>现有管理页面全部中文化，风格继续对齐 <code>docs/design/</code>。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>本阶段不做</h3>
+        <ul>
+          <li>不开放 action 工具执行。</li>
+          <li>不做审批流、二次确认和 dry-run。</li>
+          <li>不做工具级 allow/deny。</li>
+          <li>不引入 React、Vite 或复杂前端构建链。</li>
+          <li>不把日志默认脱敏；完整记录是本阶段内部可信环境策略。</li>
+          <li>不重命名既有 <code>mcp_services</code> / <code>mcp_tools</code> 表。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="section-head">
+      <div>
+        <h2>2. 架构分层</h2>
+        <p>治理能力必须落在服务端，不依赖页面隐藏或 CLI 约束。页面和 CLI 只负责管理与接入，策略执行在服务层和 MetaMCP 网关层完成。</p>
+      </div>
+      <span class="tag green">Architecture</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>治理数据层</h3>
+        <p>新增工具调用日志、Project Profile 和 profile source rules。命名避免绑定 MCP，后续 OpenAPI、CLI、脚本 runner 能复用同一套治理表。</p>
+      </div>
+      <div class="card">
+        <h3>治理服务层</h3>
+        <p>新增治理服务或在能力服务中拆出治理子模块，统一负责 profile 解析、服务可见性判断、执行校验和日志写入。</p>
+      </div>
+      <div class="card">
+        <h3>MetaMCP 网关层</h3>
+        <p>读取 profile 请求头，对 <code>search</code> 和 <code>execute</code> 强制过滤与校验。所有调用都返回或关联 <code>log_id</code>。</p>
+      </div>
+      <div class="card">
+        <h3>管理控制台与 CLI</h3>
+        <p>控制台中文化并扩展能力目录、日志、Profile 和接入配置页面。CLI 负责写入 Claude Code 配置和调用 profile 管理 API。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="data-model">
+    <div class="section-head">
+      <div>
+        <h2>3. 数据模型</h2>
+        <p>新表使用通用能力命名。当前 source 类型主要是 MCP 服务，后续可以接入 OpenAPI 或 CLI 工具。</p>
+      </div>
+      <span class="tag blue">Data</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>表</th>
+          <th>用途</th>
+          <th>核心字段</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>tool_call_logs</code></td>
+          <td>记录所有工具调用日志，不绑定 MCP。</td>
+          <td><code>log_id</code>, <code>actor</code>, <code>profile_key</code>, <code>entrypoint</code>, <code>source_type</code>, <code>source_key</code>, <code>tool_name</code>, <code>request_json</code>, <code>response_json</code>, <code>status</code>, <code>error_message</code>, <code>duration_ms</code>, <code>created_at</code></td>
+        </tr>
+        <tr>
+          <td><code>project_profiles</code></td>
+          <td>Project Profile 主表。</td>
+          <td><code>profile_key</code>, <code>name</code>, <code>description</code>, <code>status</code>, <code>created_by</code>, <code>created_at</code>, <code>updated_at</code></td>
+        </tr>
+        <tr>
+          <td><code>profile_source_rules</code></td>
+          <td>Profile 服务级访问规则。</td>
+          <td><code>profile_key</code>, <code>source_type</code>, <code>source_key</code>, <code>effect</code>, <code>created_at</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout" style="margin-top:14px;">
+      当前 <code>source_type</code> 使用 <code>mcp_service</code>。后续接入 OpenAPI、CLI 或脚本 runner 时，只扩展 source 类型，不换治理表。
+      既有 <code>mcp_services</code> 和 <code>mcp_tools</code> 仍作为 MCP 资产表保留。
+    </div>
+  </section>
+
+  <section id="policy">
+    <div class="section-head">
+      <div>
+        <h2>4. Profile 策略规则</h2>
+        <p>本阶段只做服务级白名单/黑名单。工具级策略留到实际使用数据和日志沉淀后再扩展。</p>
+      </div>
+      <span class="tag orange">Policy</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>规则语义</h3>
+        <ul>
+          <li>没有 profile：默认可见所有 enabled source。</li>
+          <li>有 deny：排除 deny 中的 source。</li>
+          <li>有 allow：只允许 allow 中的 source。</li>
+          <li>allow 和 deny 同时存在：先按 allow 缩小范围，再应用 deny。</li>
+          <li>未知 profile：报错并写调用日志。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>服务端强制</h3>
+        <ul>
+          <li><code>search</code> 必须过滤候选服务和工具。</li>
+          <li><code>execute</code> 必须再次校验目标 service。</li>
+          <li>被阻断的 execute 不调用目标 MCP。</li>
+          <li>页面和 CLI 不能作为唯一策略执行点。</li>
+        </ul>
+      </div>
+    </div>
+    <pre>{
+  "profile_key": "safe-readonly",
+  "rules": [
+    {"source_type": "mcp_service", "source_key": "mysql", "effect": "allow"},
+    {"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}
+  ]
+}</pre>
+  </section>
+
+  <section id="api">
+    <div class="section-head">
+      <div>
+        <h2>5. 服务端接口</h2>
+        <p>接口分为 Project Profile、Tool Call Logs 和能力目录三组，供页面和 CLI 共用。</p>
+      </div>
+      <span class="tag blue">API</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>接口</th>
+          <th>用途</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>POST /capability-profiles</code></td>
+          <td>创建或更新 profile。</td>
+          <td>字段包括 <code>profile_key</code>、<code>name</code>、<code>description</code>、<code>status</code>。</td>
+        </tr>
+        <tr>
+          <td><code>GET /capability-profiles</code></td>
+          <td>列出 profiles。</td>
+          <td>返回规则数量、allow/deny 摘要和最近更新时间。</td>
+        </tr>
+        <tr>
+          <td><code>GET /capability-profiles/{profile_key}</code></td>
+          <td>查看 profile 详情。</td>
+          <td>返回 profile 基本信息和 rules。</td>
+        </tr>
+        <tr>
+          <td><code>PUT /capability-profiles/{profile_key}/rules</code></td>
+          <td>全量替换规则。</td>
+          <td>规则字段为 <code>source_type</code>、<code>source_key</code>、<code>effect</code>。</td>
+        </tr>
+        <tr>
+          <td><code>GET /tool-call-logs</code></td>
+          <td>调用日志列表。</td>
+          <td>支持按 <code>entrypoint</code>、<code>source_key</code>、<code>tool_name</code>、<code>profile_key</code>、<code>status</code> 筛选。</td>
+        </tr>
+        <tr>
+          <td><code>GET /tool-call-logs/{log_id}</code></td>
+          <td>调用日志详情。</td>
+          <td>返回完整 request/response JSON、错误信息和耗时。</td>
+        </tr>
+        <tr>
+          <td><code>GET /capability-catalog</code></td>
+          <td>能力目录。</td>
+          <td>支持 <code>profile_key</code> 预览和 <code>query</code> 搜索。</td>
+        </tr>
+        <tr>
+          <td><code>GET /capability-catalog/sources/{source_type}/{source_key}</code></td>
+          <td>能力来源详情。</td>
+          <td>当前主要返回 MCP 服务、工具数量、同步状态和最近调用情况。</td>
+        </tr>
+        <tr>
+          <td><code>GET /capability-catalog/sources/{source_type}/{source_key}/tools/{tool_name}</code></td>
+          <td>工具详情。</td>
+          <td>返回 schema、示例、可执行状态和最近调用日志。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="metamcp">
+    <div class="section-head">
+      <div>
+        <h2>6. MetaMCP 调用链</h2>
+        <p>MetaMCP 是治理强制执行的关键入口。search 和 execute 都必须写日志，并返回或关联 log_id。</p>
+      </div>
+      <span class="tag green">Gateway</span>
+    </div>
+    <h3>Search</h3>
+    <div class="flow">
+      <div class="step"><div class="step-num">1</div><strong>解析请求头</strong><span>读取 <code>X-Wiki-MetaMCP-Profile</code>。</span></div>
+      <div class="step"><div class="step-num">2</div><strong>构造策略上下文</strong><span>加载 allow/deny source rules。</span></div>
+      <div class="step"><div class="step-num">3</div><strong>过滤候选能力</strong><span>按 profile 裁剪服务和工具。</span></div>
+      <div class="step"><div class="step-num">4</div><strong>执行 path/query</strong><span>完成目录浏览或过滤。</span></div>
+      <div class="step"><div class="step-num">5</div><strong>写日志并返回</strong><span>返回 <code>path/items/log_id</code>。</span></div>
+    </div>
+    <h3 style="margin-top:18px;">Execute</h3>
+    <div class="flow">
+      <div class="step"><div class="step-num">1</div><strong>解析 profile</strong><span>读取请求头或默认策略。</span></div>
+      <div class="step"><div class="step-num">2</div><strong>校验 source</strong><span>阻止被 deny 或未 allow 的服务。</span></div>
+      <div class="step"><div class="step-num">3</div><strong>校验工具</strong><span>必须 active 且非 action。</span></div>
+      <div class="step"><div class="step-num">4</div><strong>调用目标工具</strong><span>执行 HTTP MCP call_tool。</span></div>
+      <div class="step"><div class="step-num">5</div><strong>写日志并返回</strong><span>返回 <code>service/tool/success/result/log_id</code>。</span></div>
+    </div>
+  </section>
+
+  <section id="pages">
+    <div class="section-head">
+      <div>
+        <h2>7. 中文管理控制台</h2>
+        <p>页面风格沿用 <code>docs/design/</code>：白色侧边栏、蓝色主色、紧凑表格、状态徽标和 8px 圆角。现有英文页面必须中文化。</p>
+      </div>
+      <span class="tag blue">UI</span>
+    </div>
+    <div class="grid three">
+      <div class="card">
+        <h3>能力管理</h3>
+        <ul>
+          <li>能力目录</li>
+          <li>MCP 服务</li>
+          <li>工具清单</li>
+          <li>能力详情</li>
+          <li>工具详情</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>治理策略</h3>
+        <ul>
+          <li>Project Profile 列表</li>
+          <li>Profile 编辑</li>
+          <li>服务访问规则</li>
+          <li>Profile 预览能力目录</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>调用观测与接入</h3>
+        <ul>
+          <li>调用日志列表</li>
+          <li>调用日志详情</li>
+          <li>Claude Code 接入</li>
+          <li>配置检查</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:14px;">
+      页面仍使用 FastAPI HTML shell + static CSS/JS，不引入 React/Vite。复杂状态明显增加后再迁移前端构建链。
+    </div>
+  </section>
+
+  <section id="cli">
+    <div class="section-head">
+      <div>
+        <h2>8. Claude Code 接入 CLI</h2>
+        <p>CLI 负责管理 profile 和写入 Claude Code MCP 配置；策略判断仍由服务端执行。</p>
+      </div>
+      <span class="tag orange">CLI</span>
+    </div>
+    <pre> wiki metamcp profile create safe-readonly --name "安全只读"
+ wiki metamcp profile rules safe-readonly --allow mysql --deny hive
+ wiki metamcp profile list
+ wiki metamcp profile show safe-readonly
+
+ wiki metamcp add --scope project --url http://127.0.0.1:8765/mcp --profile safe-readonly
+ wiki metamcp add --scope user --url http://127.0.0.1:8765/mcp --profile data-project
+ wiki metamcp config --scope project</pre>
+    <div class="grid two" style="margin-top:14px;">
+      <div class="card">
+        <h3>CLI 写入内容</h3>
+        <ul>
+          <li>MetaMCP 服务 URL。</li>
+          <li><code>X-Wiki-MetaMCP-Profile</code> 请求头。</li>
+          <li>项目级或用户级 scope。</li>
+          <li>当前有效配置摘要。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>配置安全边界</h3>
+        <ul>
+          <li>CLI 生成配置，但不承担服务端策略判断。</li>
+          <li>服务端必须对 profile 做最终强制裁剪。</li>
+          <li>测试使用临时目录验证配置写入，不污染真实 Claude Code 配置。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="errors">
+    <div class="section-head">
+      <div>
+        <h2>9. 错误处理与日志策略</h2>
+        <p>日志按完整记录设计。后续企业化时可以打开脱敏和截断策略，不改变表结构。</p>
+      </div>
+      <span class="tag red">Errors</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>场景</th>
+          <th>处理方式</th>
+          <th>日志状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Profile 不存在</td>
+          <td>返回 <code>profile not found</code>，不继续调用。</td>
+          <td><span class="status no">error</span></td>
+        </tr>
+        <tr>
+          <td>服务被 profile 阻止</td>
+          <td><code>search</code> 隐藏；<code>execute</code> 拒绝，且不调用目标工具。</td>
+          <td><span class="status next">blocked</span></td>
+        </tr>
+        <tr>
+          <td>service/tool 不存在</td>
+          <td>沿用 NotFound 语义，记录请求参数。</td>
+          <td><span class="status no">error</span></td>
+        </tr>
+        <tr>
+          <td>action 工具执行</td>
+          <td>继续拒绝，作为策略阻断处理。</td>
+          <td><span class="status next">blocked</span></td>
+        </tr>
+        <tr>
+          <td>目标 MCP 调用失败</td>
+          <td>记录完整 request 和错误结构 response，返回错误和 log_id。</td>
+          <td><span class="status no">error</span></td>
+        </tr>
+        <tr>
+          <td>调用成功</td>
+          <td>记录完整 request/response、耗时和 profile。</td>
+          <td><span class="status done">success</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout" style="margin-top:14px;">
+      Phase 1.5 默认 <code>redaction_mode=none</code>。设计预留 <code>max_payload_bytes</code>、
+      <code>request_truncated</code> 和 <code>response_truncated</code>，用于后续限制超大 payload 或开启字段级脱敏。
+    </div>
+  </section>
+
+  <section id="testing">
+    <div class="section-head">
+      <div>
+        <h2>10. 测试与验收</h2>
+        <p>测试重点是服务端强制裁剪、日志闭环、中文页面和 CLI 配置写入。</p>
+      </div>
+      <span class="tag green">Acceptance</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>测试分层</h3>
+        <ul>
+          <li>Storage：日志、profile、rules CRUD。</li>
+          <li>Policy：无 profile、allow、deny、allow+deny、未知 profile。</li>
+          <li>CapabilityService / MetaMCP：search/execute 过滤、阻断、log_id。</li>
+          <li>API：profile、日志、能力目录和详情接口。</li>
+          <li>CLI：profile 管理和 Claude Code 配置写入。</li>
+          <li>页面：中文文案、静态资源、导航入口。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>验收流程</h3>
+        <ul>
+          <li>登记 <code>mysql</code>、<code>hive</code> 两个 MCP 服务。</li>
+          <li>创建 profile <code>safe-readonly</code>，deny <code>hive</code>。</li>
+          <li>携带 profile 调用 <code>search {}</code>，只看到 <code>mysql</code>。</li>
+          <li>直接 <code>execute service=hive</code> 被服务端拒绝。</li>
+          <li>日志页面能看到 search 日志和 execute blocked 日志。</li>
+          <li>CLI 能生成 Claude Code 接入配置并绑定 profile。</li>
+          <li>控制台主要文案全部中文，视觉不偏离设计稿。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>
