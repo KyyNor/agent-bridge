@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from wiki_manager.capabilities import McpServiceStatus, ToolType
+from wiki_manager.capabilities import CallLogStatus, McpServiceStatus, ToolType
 from wiki_manager.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
 
 
@@ -131,6 +131,44 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (service_key, tool_name)
 );
+CREATE TABLE IF NOT EXISTS project_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS profile_source_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+  source_type TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  effect TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (profile_key, source_type, source_key, effect)
+);
+CREATE TABLE IF NOT EXISTS tool_call_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  log_id TEXT NOT NULL UNIQUE,
+  actor TEXT NOT NULL,
+  profile_key TEXT NOT NULL,
+  entrypoint TEXT NOT NULL,
+  source_type TEXT,
+  source_key TEXT,
+  tool_name TEXT,
+  request_json TEXT NOT NULL DEFAULT '{}',
+  response_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL,
+  error_message TEXT,
+  duration_ms INTEGER,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_tool_call_logs_created_at ON tool_call_logs(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_call_logs_profile ON tool_call_logs(profile_key);
+CREATE INDEX IF NOT EXISTS idx_tool_call_logs_source ON tool_call_logs(source_type, source_key);
 """
 
 
@@ -405,6 +443,202 @@ class SQLiteStore:
                     """,
                     (service_key,),
                 )
+
+    def upsert_project_profile(
+        self,
+        *,
+        profile_key: str,
+        name: str,
+        description: str = "",
+        status: str = "active",
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_profiles (profile_key, name, description, status, created_by)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(profile_key) DO UPDATE SET
+                  name = excluded.name,
+                  description = excluded.description,
+                  status = excluded.status,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (profile_key, name, description, status, created_by),
+            )
+            row = conn.execute(
+                "SELECT * FROM project_profiles WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            profile = _row_to_dict(row)
+            if profile is None:
+                raise KeyError(f"project profile not found: {profile_key}")
+            return profile
+
+    def get_project_profile(self, profile_key: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM project_profiles WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            return _row_to_dict(row)
+
+    def list_project_profiles(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  profile.*,
+                  COALESCE(SUM(CASE WHEN rule.effect = 'allow' THEN 1 ELSE 0 END), 0) AS allow_count,
+                  COALESCE(SUM(CASE WHEN rule.effect = 'deny' THEN 1 ELSE 0 END), 0) AS deny_count
+                FROM project_profiles profile
+                LEFT JOIN profile_source_rules rule ON rule.profile_key = profile.profile_key
+                GROUP BY profile.id
+                ORDER BY profile.profile_key
+                """
+            ).fetchall()
+            return [
+                {
+                    **dict(row),
+                    "allow_count": int(row["allow_count"]),
+                    "deny_count": int(row["deny_count"]),
+                }
+                for row in rows
+            ]
+
+    def replace_profile_source_rules(self, profile_key: str, rules: list[dict[str, Any]]) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM profile_source_rules WHERE profile_key = ?", (profile_key,))
+            for rule in rules:
+                conn.execute(
+                    """
+                    INSERT INTO profile_source_rules (profile_key, source_type, source_key, effect)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        profile_key,
+                        _enum_value(rule["source_type"]),
+                        rule["source_key"],
+                        _enum_value(rule["effect"]),
+                    ),
+                )
+
+    def list_profile_source_rules(self, profile_key: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM profile_source_rules
+                WHERE profile_key = ?
+                ORDER BY source_key, effect
+                """,
+                (profile_key,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def create_tool_call_log(
+        self,
+        *,
+        log_id: str,
+        actor: str,
+        profile_key: str,
+        entrypoint: str,
+        source_type: str | None = None,
+        source_key: str | None = None,
+        tool_name: str | None = None,
+        request: Any | None = None,
+        response: Any | None = None,
+        status: CallLogStatus | str,
+        error_message: str | None = None,
+        duration_ms: int | None = None,
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tool_call_logs (
+                  log_id,
+                  actor,
+                  profile_key,
+                  entrypoint,
+                  source_type,
+                  source_key,
+                  tool_name,
+                  request_json,
+                  response_json,
+                  status,
+                  error_message,
+                  duration_ms
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    log_id,
+                    actor,
+                    profile_key,
+                    entrypoint,
+                    _enum_value(source_type),
+                    source_key,
+                    tool_name,
+                    json.dumps({} if request is None else request, ensure_ascii=False, default=str),
+                    json.dumps({} if response is None else response, ensure_ascii=False, default=str),
+                    _enum_value(status),
+                    error_message,
+                    duration_ms,
+                ),
+            )
+            row = conn.execute("SELECT * FROM tool_call_logs WHERE log_id = ?", (log_id,)).fetchone()
+            log = _row_to_dict(row)
+            if log is None:
+                raise KeyError(f"tool call log not found: {log_id}")
+            return log
+
+    def list_tool_call_logs(
+        self,
+        *,
+        entrypoint: str | None = None,
+        source_type: str | None = None,
+        source_key: str | None = None,
+        tool_name: str | None = None,
+        profile_key: str | None = None,
+        status: CallLogStatus | str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        filters: list[str] = []
+        params: list[Any] = []
+        for column, value in [
+            ("entrypoint", entrypoint),
+            ("source_type", _enum_value(source_type)),
+            ("source_key", source_key),
+            ("tool_name", tool_name),
+            ("profile_key", profile_key),
+            ("status", _enum_value(status)),
+        ]:
+            if value is not None:
+                filters.append(f"{column} = ?")
+                params.append(value)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.extend([limit, offset])
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM tool_call_logs
+                {where_clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_tool_call_log(self, log_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM tool_call_logs WHERE log_id = ?",
+                (log_id,),
+            ).fetchone()
+            return _row_to_dict(row)
 
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         with self.connect() as conn:
