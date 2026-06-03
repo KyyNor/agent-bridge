@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from mcp.types import CallToolRequest, CallToolRequestParams, ListToolsRequest
 
 
@@ -35,6 +33,9 @@ def test_mcp_search_tool_has_path_query_schema():
     assert "query" in schema["properties"]
     assert "limit" in schema["properties"]
     assert "required" not in schema
+    assert "no arguments" in search_tool.description
+    assert "path=service_key" in search_tool.description
+    assert "Default 20" in schema["properties"]["limit"]["description"]
 
 
 def test_mcp_execute_tool_has_service_tool_arguments_schema():
@@ -49,6 +50,7 @@ def test_mcp_execute_tool_has_service_tool_arguments_schema():
     assert "service" in schema["properties"]
     assert "tool" in schema["properties"]
     assert "arguments" in schema["properties"]
+    assert "Agent Capability Hub gateway" in execute_tool.description
 
 
 def test_mcp_search_tool_calls_capability_service():
@@ -82,6 +84,21 @@ def test_mcp_search_tool_calls_capability_service():
 
     payload = result.root.structuredContent
     assert payload["items"][0] == returned["items"][0]
+
+
+def test_mcp_search_with_default_service_initializes_schema(wm_paths):
+    from wiki_manager.mcp_server import create_mcp_server
+
+    server = create_mcp_server(paths=wm_paths, admins={"root"})
+    handler = server.request_handlers[CallToolRequest]
+    result = asyncio.run(handler(CallToolRequest(
+        params=CallToolRequestParams(
+            name="search",
+            arguments={},
+        )
+    )))
+
+    assert result.root.structuredContent == {"path": "/", "items": []}
 
 
 def test_mcp_execute_tool_calls_capability_service():

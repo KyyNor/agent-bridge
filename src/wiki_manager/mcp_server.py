@@ -25,35 +25,45 @@ def create_mcp_server(
             return service
         resolved_paths = paths or WikiManagerPaths.from_root(DEFAULT_ROOT)
         resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
-        return WikiManagerService.create(resolved_paths, resolved_admins)
+        resolved_service = WikiManagerService.create(resolved_paths, resolved_admins)
+        resolved_service.store.init_schema()
+        return resolved_service
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         return [
             Tool(
                 name="search",
-                description="browse/search Agent Capability Hub registry.",
+                description=(
+                    "Browse and search the Agent Capability Hub registry. "
+                    "With no arguments, returns visible MCP services. "
+                    "With path=service_key, returns tools under that service. "
+                    "query filters the current path."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Registry path, such as a service key",
+                            "description": (
+                                "Registry path. Empty or '/' lists services; "
+                                "a service key lists tools under that service."
+                            ),
                         },
                         "query": {
                             "type": "string",
-                            "description": "Filter query",
+                            "description": "Optional natural language filter for services or tools under the selected path.",
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of results",
+                            "description": "Maximum number of items to return. Default 20.",
                         },
                     },
                 },
             ),
             Tool(
                 name="execute",
-                description="execute registered read-only MCP tool through the gateway.",
+                description="Execute a registered read-only MCP tool through the Agent Capability Hub gateway.",
                 inputSchema={
                     "type": "object",
                     "properties": {
