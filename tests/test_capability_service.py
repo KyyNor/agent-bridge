@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
-from wiki_manager.capabilities import McpServiceStatus, ToolType
+from wiki_manager.capabilities import CallLogStatus, McpServiceStatus, ToolType
 from wiki_manager.capability_service import CapabilityService
 from wiki_manager.config import WikiManagerPaths
 from wiki_manager.domain import AccessDenied, NotFound, ValidationError
@@ -15,9 +16,17 @@ class FakeMcpClient:
     def __init__(self) -> None:
         self.list_tools_calls: list[dict[str, object]] = []
         self.call_tool_calls: list[dict[str, object]] = []
+        self.tools: list[dict[str, object]] | None = None
+        self.call_result: dict[str, object] = {
+            "is_error": False,
+            "structured": {"rows": [{"id": 1}]},
+            "content": [],
+        }
 
     async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
         self.list_tools_calls.append({"endpoint_url": endpoint_url, "headers": headers})
+        if self.tools is not None:
+            return self.tools
         return [
             {
                 "name": "search_docs",
@@ -58,7 +67,7 @@ class FakeMcpClient:
                 "arguments": arguments,
             }
         )
-        return {"is_error": False, "structured": {"rows": [{"id": 1}]}, "content": []}
+        return self.call_result
 
 
 def _service(wm_paths: WikiManagerPaths) -> tuple[CapabilityService, FakeMcpClient]:
@@ -193,6 +202,7 @@ def test_search_root_and_service_path_filters_by_query(wm_paths: WikiManagerPath
     tools = service.search(actor="alice", path="docs-api", query="Search")
 
     assert root["path"] == "/"
+    assert root["log_id"].startswith("call_")
     assert root["items"] == [
         {
             "kind": "service",
@@ -205,6 +215,7 @@ def test_search_root_and_service_path_filters_by_query(wm_paths: WikiManagerPath
         }
     ]
     assert tools["path"] == "docs-api"
+    assert tools["log_id"].startswith("call_")
     assert len(tools["items"]) == 1
     assert tools["items"][0]["kind"] == "tool"
     assert tools["items"][0]["service"] == "docs-api"
@@ -394,12 +405,11 @@ def test_execute_calls_readonly_tool(wm_paths: WikiManagerPaths) -> None:
 
     result = asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))
 
-    assert result == {
-        "service": "docs-api",
-        "tool": "search_docs",
-        "success": True,
-        "result": {"is_error": False, "structured": {"rows": [{"id": 1}]}, "content": []},
-    }
+    assert result["service"] == "docs-api"
+    assert result["tool"] == "search_docs"
+    assert result["success"] is True
+    assert result["result"] == {"is_error": False, "structured": {"rows": [{"id": 1}]}, "content": []}
+    assert result["log_id"].startswith("call_")
     assert client.call_tool_calls == [
         {
             "endpoint_url": "https://example.test/mcp",
@@ -408,6 +418,111 @@ def test_execute_calls_readonly_tool(wm_paths: WikiManagerPaths) -> None:
             "arguments": {"query": "hello"},
         }
     ]
+
+
+def test_search_root_filters_services_by_profile_and_returns_log_id(wm_paths: WikiManagerPaths) -> None:
+    service, client = _service(wm_paths)
+    service.register_service("root", "mysql", "MySQL", "https://mysql.test/mcp", {}, "SQL service", ["db"])
+    service.register_service("root", "hive", "Hive", "https://hive.test/mcp", {}, "Hive service", ["db"])
+    client.tools = [{"name": "query_sql", "description": "Run SQL", "input_schema": {"type": "object"}}]
+    asyncio.run(service.sync_tools("root", "mysql"))
+    asyncio.run(service.sync_tools("root", "hive"))
+    service.governance.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
+    service.governance.replace_profile_rules(
+        "root",
+        "safe-readonly",
+        [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}],
+    )
+
+    result = service.search("root", None, None, profile_key="safe-readonly")
+
+    assert result["path"] == "/"
+    assert [item["service"] for item in result["items"]] == ["mysql"]
+    assert result["log_id"].startswith("call_")
+    detail = service.governance.get_log(actor="root", log_id=result["log_id"])
+    assert detail["entrypoint"] == "metamcp_search"
+    assert json.loads(detail["request_json"]) == {
+        "path": None,
+        "query": None,
+        "limit": 20,
+        "profile_key": "safe-readonly",
+    }
+    assert [item["service"] for item in json.loads(detail["response_json"])["items"]] == ["mysql"]
+
+
+def test_search_denied_service_returns_empty_items_and_log_id(wm_paths: WikiManagerPaths) -> None:
+    service, client = _service(wm_paths)
+    service.register_service("root", "mysql", "MySQL", "https://mysql.test/mcp", {}, "SQL service", ["db"])
+    service.register_service("root", "hive", "Hive", "https://hive.test/mcp", {}, "Hive service", ["db"])
+    client.tools = [{"name": "query_sql", "description": "Run SQL", "input_schema": {"type": "object"}}]
+    asyncio.run(service.sync_tools("root", "mysql"))
+    asyncio.run(service.sync_tools("root", "hive"))
+    service.governance.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
+    service.governance.replace_profile_rules(
+        "root",
+        "safe-readonly",
+        [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}],
+    )
+
+    result = service.search("root", "hive", None, profile_key="safe-readonly")
+
+    assert result["path"] == "hive"
+    assert result["items"] == []
+    assert result["log_id"].startswith("call_")
+    detail = service.governance.get_log(actor="root", log_id=result["log_id"])
+    assert detail["status"] == CallLogStatus.success.value
+    assert json.loads(detail["response_json"]) == {"path": "hive", "items": []}
+
+
+def test_execute_blocked_by_profile_writes_log_and_does_not_call_client(wm_paths: WikiManagerPaths) -> None:
+    service, client = _service(wm_paths)
+    service.register_service("root", "hive", "Hive", "https://hive.test/mcp", {}, "Hive service", ["db"])
+    client.tools = [{"name": "query_sql", "description": "Run SQL", "input_schema": {"type": "object"}}]
+    asyncio.run(service.sync_tools("root", "hive"))
+    service.governance.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
+    service.governance.replace_profile_rules(
+        "root",
+        "safe-readonly",
+        [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}],
+    )
+
+    with pytest.raises(ValidationError, match="source is blocked by profile policy"):
+        asyncio.run(service.execute("root", "hive", "query_sql", {"sql": "select 1"}, profile_key="safe-readonly"))
+
+    assert client.call_tool_calls == []
+    logs = service.governance.list_logs(actor="root", status=CallLogStatus.blocked.value)
+    assert len(logs) == 1
+    assert logs[0]["source_key"] == "hive"
+    assert logs[0]["tool_name"] == "query_sql"
+    assert json.loads(logs[0]["request_json"]) == {
+        "service": "hive",
+        "tool": "query_sql",
+        "arguments": {"sql": "select 1"},
+        "profile_key": "safe-readonly",
+    }
+
+
+def test_execute_success_returns_log_id_and_metamcp_execute_log(wm_paths: WikiManagerPaths) -> None:
+    service, client = _service(wm_paths)
+    service.register_service("root", "mysql", "MySQL", "https://mysql.test/mcp", {}, "SQL service", ["db"])
+    client.tools = [{"name": "query_sql", "description": "Run SQL", "input_schema": {"type": "object"}}]
+    client.call_result = {"structured": {"rows": [{"id": 1}]}, "is_error": False, "content": []}
+    asyncio.run(service.sync_tools("root", "mysql"))
+
+    result = asyncio.run(service.execute("root", "mysql", "query_sql", {"sql": "select 1"}))
+
+    assert result["success"] is True
+    assert result["log_id"].startswith("call_")
+    detail = service.governance.get_log(actor="root", log_id=result["log_id"])
+    assert detail["entrypoint"] == "metamcp_execute"
+    assert detail["status"] == CallLogStatus.success.value
+    assert json.loads(detail["request_json"]) == {
+        "service": "mysql",
+        "tool": "query_sql",
+        "arguments": {"sql": "select 1"},
+        "profile_key": None,
+    }
+    assert json.loads(detail["response_json"])["result"] == client.call_result
 
 
 def test_execute_wraps_mcp_client_failures(wm_paths: WikiManagerPaths) -> None:

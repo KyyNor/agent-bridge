@@ -6,7 +6,8 @@ import json
 import re
 from typing import Any
 
-from wiki_manager.capabilities import McpServiceStatus, ToolType
+from wiki_manager.capabilities import CallLogStatus, McpServiceStatus, SourceType, ToolType
+from wiki_manager.capability_governance import CapabilityGovernanceService, monotonic_ms
 from wiki_manager.domain import NotFound, ValidationError, require_admin_user
 from wiki_manager.mcp_http_client import McpHttpClient
 from wiki_manager.storage import SQLiteStore
@@ -64,10 +65,12 @@ class CapabilityService:
         store: SQLiteStore,
         admins: set[str],
         mcp_client: McpHttpClient | None = None,
+        governance: CapabilityGovernanceService | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
         self.mcp_client = mcp_client or McpHttpClient()
+        self.governance = governance or CapabilityGovernanceService(store=store, admins=admins)
 
     def register_service(
         self,
@@ -156,12 +159,69 @@ class CapabilityService:
         self._require_enabled_service(service_key)
         return [self._tool_payload(tool) for tool in self._active_tools(service_key)]
 
-    def search(self, actor: str, path: str | None, query: str | None, limit: int = 20) -> dict[str, Any]:
+    def search(
+        self,
+        actor: str,
+        path: str | None,
+        query: str | None,
+        limit: int = 20,
+        profile_key: str | None = None,
+    ) -> dict[str, Any]:
+        started = monotonic_ms()
+        source_key = (path or "").strip("/") or None
+        request = {"path": path, "query": query, "limit": limit, "profile_key": profile_key}
+        try:
+            result = self._search_without_log(actor, path, query, limit, profile_key)
+            log = self.governance.log_tool_call(
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint="metamcp_search",
+                source_type=None,
+                source_key=source_key,
+                tool_name="search",
+                request=request,
+                response=result,
+                status=CallLogStatus.success.value,
+                error_message=None,
+                duration_ms=monotonic_ms() - started,
+            )
+            return {**result, "log_id": log["log_id"]}
+        except Exception as exc:
+            self.governance.log_tool_call(
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint="metamcp_search",
+                source_type=None,
+                source_key=source_key,
+                tool_name="search",
+                request=request,
+                response={"error": str(exc)},
+                status=CallLogStatus.error.value,
+                error_message=str(exc),
+                duration_ms=monotonic_ms() - started,
+            )
+            raise
+
+    def _search_without_log(
+        self,
+        actor: str,
+        path: str | None,
+        query: str | None,
+        limit: int,
+        profile_key: str | None,
+    ) -> dict[str, Any]:
         normalized_path = (path or "").strip("/")
         if normalized_path == "":
-            items = self._root_search_items()
+            items = self._root_search_items(actor=actor, profile_key=profile_key)
             response_path = "/"
         else:
+            if not self.governance.is_source_allowed(
+                actor,
+                profile_key,
+                SourceType.mcp_service.value,
+                normalized_path,
+            ):
+                return {"path": normalized_path, "items": []}
             self._require_enabled_service(normalized_path)
             items = [self._tool_search_item(tool) for tool in self._active_tools(normalized_path)]
             response_path = normalized_path
@@ -172,6 +232,53 @@ class CapabilityService:
         return {"path": response_path, "items": items[:limit]}
 
     async def execute(
+        self,
+        actor: str,
+        service: str,
+        tool: str,
+        arguments: dict[str, Any],
+        profile_key: str | None = None,
+    ) -> dict[str, Any]:
+        started = monotonic_ms()
+        request = {"service": service, "tool": tool, "arguments": arguments, "profile_key": profile_key}
+        try:
+            if not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
+                raise ValidationError("source is blocked by profile policy")
+            result = await self._execute_without_log(actor, service, tool, arguments)
+            log = self.governance.log_tool_call(
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint="metamcp_execute",
+                source_type=SourceType.mcp_service.value,
+                source_key=service,
+                tool_name=tool,
+                request=request,
+                response=result,
+                status=CallLogStatus.success.value,
+                error_message=None,
+                duration_ms=monotonic_ms() - started,
+            )
+            return {**result, "log_id": log["log_id"]}
+        except Exception as exc:
+            status = CallLogStatus.error.value
+            if "blocked by profile policy" in str(exc) or "action tools" in str(exc):
+                status = CallLogStatus.blocked.value
+            self.governance.log_tool_call(
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint="metamcp_execute",
+                source_type=SourceType.mcp_service.value,
+                source_key=service,
+                tool_name=tool,
+                request=request,
+                response={"error": str(exc)},
+                status=status,
+                error_message=str(exc),
+                duration_ms=monotonic_ms() - started,
+            )
+            raise
+
+    async def _execute_without_log(
         self,
         actor: str,
         service: str,
@@ -210,12 +317,21 @@ class CapabilityService:
             raise ValidationError("MCP service is not enabled")
         return service
 
-    def _root_search_items(self) -> list[dict[str, Any]]:
+    def _root_search_items(self, *, actor: str, profile_key: str | None = None) -> list[dict[str, Any]]:
         enabled_services = [
             service
             for service in self.store.list_mcp_services()
             if service["status"] == McpServiceStatus.enabled.value
         ]
+        visible_keys = set(
+            self.governance.filter_source_keys(
+                actor=actor,
+                profile_key=profile_key,
+                source_type=SourceType.mcp_service.value,
+                source_keys=[service["service_key"] for service in enabled_services],
+            )
+        )
+        enabled_services = [service for service in enabled_services if service["service_key"] in visible_keys]
         tools_by_service: dict[str, int] = {}
         for tool in self.store.list_mcp_tools():
             if tool.get("status") == "active":
