@@ -58,6 +58,22 @@ def _example_value(definition: Any) -> Any:
     return None
 
 
+def _attach_log_id(exc: Exception, log_id: str) -> None:
+    message = f"{getattr(exc, 'message', str(exc))} (log_id: {log_id})"
+    if hasattr(exc, "message"):
+        exc.message = message
+    exc.args = (message,)
+
+
+def _mark_call_log_status(exc: Exception, status: str) -> Exception:
+    setattr(exc, "_tool_call_log_status", status)
+    return exc
+
+
+def _call_log_status(exc: Exception) -> str:
+    return str(getattr(exc, "_tool_call_log_status", CallLogStatus.error.value))
+
+
 class CapabilityService:
     def __init__(
         self,
@@ -187,7 +203,7 @@ class CapabilityService:
             )
             return {**result, "log_id": log["log_id"]}
         except Exception as exc:
-            self.governance.log_tool_call(
+            log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
                 entrypoint="metamcp_search",
@@ -200,6 +216,7 @@ class CapabilityService:
                 error_message=str(exc),
                 duration_ms=monotonic_ms() - started,
             )
+            _attach_log_id(exc, log["log_id"])
             raise
 
     def _search_without_log(
@@ -243,7 +260,10 @@ class CapabilityService:
         request = {"service": service, "tool": tool, "arguments": arguments, "profile_key": profile_key}
         try:
             if not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
-                raise ValidationError("source is blocked by profile policy")
+                raise _mark_call_log_status(
+                    ValidationError("source is blocked by profile policy"),
+                    CallLogStatus.blocked.value,
+                )
             result = await self._execute_without_log(actor, service, tool, arguments)
             log = self.governance.log_tool_call(
                 actor=actor,
@@ -260,10 +280,7 @@ class CapabilityService:
             )
             return {**result, "log_id": log["log_id"]}
         except Exception as exc:
-            status = CallLogStatus.error.value
-            if "blocked by profile policy" in str(exc) or "action tools" in str(exc):
-                status = CallLogStatus.blocked.value
-            self.governance.log_tool_call(
+            log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
                 entrypoint="metamcp_execute",
@@ -272,10 +289,11 @@ class CapabilityService:
                 tool_name=tool,
                 request=request,
                 response={"error": str(exc)},
-                status=status,
+                status=_call_log_status(exc),
                 error_message=str(exc),
                 duration_ms=monotonic_ms() - started,
             )
+            _attach_log_id(exc, log["log_id"])
             raise
 
     async def _execute_without_log(
@@ -290,7 +308,10 @@ class CapabilityService:
         if tool_payload is None or tool_payload.get("status") != "active":
             raise NotFound("tool not found")
         if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
-            raise ValidationError("action tools are not executable in phase 1")
+            raise _mark_call_log_status(
+                ValidationError("action tools are not executable in phase 1"),
+                CallLogStatus.blocked.value,
+            )
 
         headers = _json_loads(service_payload.get("headers_json"), {})
         try:

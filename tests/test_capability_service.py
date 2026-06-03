@@ -229,17 +229,43 @@ def test_disabled_or_error_service_blocks_direct_tool_visibility_and_execute(
     wm_paths: WikiManagerPaths,
     status: McpServiceStatus,
 ) -> None:
-    service, _client = _service(wm_paths)
+    service, client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     asyncio.run(service.sync_tools("root", "docs-api"))
     service.set_service_status("root", "docs-api", status)
 
-    with pytest.raises(ValidationError, match="MCP service is not enabled"):
+    with pytest.raises(ValidationError, match=r"MCP service is not enabled .*log_id: call_") as search_exc:
         service.search(actor="alice", path="docs-api", query=None)
     with pytest.raises(ValidationError, match="MCP service is not enabled"):
         service.list_tools(actor="alice", service_key="docs-api")
-    with pytest.raises(ValidationError, match="MCP service is not enabled"):
+    with pytest.raises(ValidationError, match=r"MCP service is not enabled .*log_id: call_") as execute_exc:
         asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))
+
+    assert client.call_tool_calls == []
+    logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
+    search_log = next(log for log in logs if log["entrypoint"] == "metamcp_search")
+    execute_log = next(log for log in logs if log["entrypoint"] == "metamcp_execute")
+    assert search_log["log_id"] in str(search_exc.value)
+    assert search_log["source_key"] == "docs-api"
+    assert json.loads(search_log["request_json"]) == {
+        "path": "docs-api",
+        "query": None,
+        "limit": 20,
+        "profile_key": None,
+    }
+    assert json.loads(search_log["response_json"])["error"] == "MCP service is not enabled"
+    assert search_log["error_message"] == "MCP service is not enabled"
+    assert execute_log["log_id"] in str(execute_exc.value)
+    assert execute_log["source_key"] == "docs-api"
+    assert execute_log["tool_name"] == "search_docs"
+    assert json.loads(execute_log["request_json"]) == {
+        "service": "docs-api",
+        "tool": "search_docs",
+        "arguments": {"query": "hello"},
+        "profile_key": None,
+    }
+    assert json.loads(execute_log["response_json"])["error"] == "MCP service is not enabled"
+    assert execute_log["error_message"] == "MCP service is not enabled"
 
 
 def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: WikiManagerPaths) -> None:
@@ -293,12 +319,26 @@ def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: WikiMana
 
 
 def test_execute_rejects_annotation_destructive_action_tool(wm_paths: WikiManagerPaths) -> None:
-    service, _client = _service(wm_paths)
+    service, client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     asyncio.run(service.sync_tools("root", "docs-api"))
 
-    with pytest.raises(ValidationError, match="action tools are not executable in phase 1"):
+    with pytest.raises(ValidationError, match=r"action tools are not executable in phase 1 .*log_id: call_") as exc_info:
         asyncio.run(service.execute("alice", "docs-api", "delete_doc", {"doc_id": "1"}))
+
+    assert client.call_tool_calls == []
+    logs = service.governance.list_logs(actor="root", status=CallLogStatus.blocked.value)
+    assert logs[0]["log_id"] in str(exc_info.value)
+    assert logs[0]["source_key"] == "docs-api"
+    assert logs[0]["tool_name"] == "delete_doc"
+    assert json.loads(logs[0]["request_json"]) == {
+        "service": "docs-api",
+        "tool": "delete_doc",
+        "arguments": {"doc_id": "1"},
+        "profile_key": None,
+    }
+    assert json.loads(logs[0]["response_json"])["error"] == "action tools are not executable in phase 1"
+    assert logs[0]["error_message"] == "action tools are not executable in phase 1"
 
 
 def test_readonly_annotation_overrides_action_name_heuristic(wm_paths: WikiManagerPaths) -> None:
@@ -486,12 +526,13 @@ def test_execute_blocked_by_profile_writes_log_and_does_not_call_client(wm_paths
         [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}],
     )
 
-    with pytest.raises(ValidationError, match="source is blocked by profile policy"):
+    with pytest.raises(ValidationError, match=r"source is blocked by profile policy .*log_id: call_") as exc_info:
         asyncio.run(service.execute("root", "hive", "query_sql", {"sql": "select 1"}, profile_key="safe-readonly"))
 
     assert client.call_tool_calls == []
     logs = service.governance.list_logs(actor="root", status=CallLogStatus.blocked.value)
     assert len(logs) == 1
+    assert logs[0]["log_id"] in str(exc_info.value)
     assert logs[0]["source_key"] == "hive"
     assert logs[0]["tool_name"] == "query_sql"
     assert json.loads(logs[0]["request_json"]) == {
@@ -525,6 +566,18 @@ def test_execute_success_returns_log_id_and_metamcp_execute_log(wm_paths: WikiMa
     assert json.loads(detail["response_json"])["result"] == client.call_result
 
 
+def test_search_error_message_includes_log_id(wm_paths: WikiManagerPaths) -> None:
+    service, _client = _service(wm_paths)
+
+    with pytest.raises(NotFound, match=r"profile not found .*log_id: call_") as exc_info:
+        service.search("root", None, None, profile_key="missing")
+
+    logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
+    assert len(logs) == 1
+    assert logs[0]["log_id"] in str(exc_info.value)
+    assert logs[0]["entrypoint"] == "metamcp_search"
+
+
 def test_execute_wraps_mcp_client_failures(wm_paths: WikiManagerPaths) -> None:
     class FailingCallMcpClient(FakeMcpClient):
         async def call_tool(
@@ -542,15 +595,55 @@ def test_execute_wraps_mcp_client_failures(wm_paths: WikiManagerPaths) -> None:
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     asyncio.run(service.sync_tools("root", "docs-api"))
 
-    with pytest.raises(ValidationError, match="MCP tool execution failed: transport unavailable"):
+    with pytest.raises(ValidationError, match=r"MCP tool execution failed: transport unavailable .*log_id: call_") as exc_info:
         asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))
+
+    logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
+    assert len(logs) == 1
+    assert logs[0]["log_id"] in str(exc_info.value)
+    assert logs[0]["source_key"] == "docs-api"
+    assert logs[0]["tool_name"] == "search_docs"
+    assert json.loads(logs[0]["request_json"]) == {
+        "service": "docs-api",
+        "tool": "search_docs",
+        "arguments": {"query": "hello"},
+        "profile_key": None,
+    }
+    assert json.loads(logs[0]["response_json"])["error"] == "MCP tool execution failed: transport unavailable"
+    assert logs[0]["error_message"] == "MCP tool execution failed: transport unavailable"
 
 
 def test_execute_requires_existing_service_and_tool(wm_paths: WikiManagerPaths) -> None:
     service, _client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
 
-    with pytest.raises(NotFound, match="service not found"):
+    with pytest.raises(NotFound, match=r"service not found .*log_id: call_") as missing_service_exc:
         asyncio.run(service.execute("alice", "missing", "search_docs", {}))
-    with pytest.raises(NotFound, match="tool not found"):
+    with pytest.raises(NotFound, match=r"tool not found .*log_id: call_") as missing_tool_exc:
         asyncio.run(service.execute("alice", "docs-api", "missing", {}))
+
+    logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
+    missing_service_log = next(log for log in logs if log["source_key"] == "missing")
+    missing_tool_log = next(log for log in logs if log["source_key"] == "docs-api" and log["tool_name"] == "missing")
+    assert missing_service_log["log_id"] in str(missing_service_exc.value)
+    assert missing_service_log["source_key"] == "missing"
+    assert missing_service_log["tool_name"] == "search_docs"
+    assert json.loads(missing_service_log["request_json"]) == {
+        "service": "missing",
+        "tool": "search_docs",
+        "arguments": {},
+        "profile_key": None,
+    }
+    assert json.loads(missing_service_log["response_json"])["error"] == "service not found"
+    assert missing_service_log["error_message"] == "service not found"
+    assert missing_tool_log["log_id"] in str(missing_tool_exc.value)
+    assert missing_tool_log["source_key"] == "docs-api"
+    assert missing_tool_log["tool_name"] == "missing"
+    assert json.loads(missing_tool_log["request_json"]) == {
+        "service": "docs-api",
+        "tool": "missing",
+        "arguments": {},
+        "profile_key": None,
+    }
+    assert json.loads(missing_tool_log["response_json"])["error"] == "tool not found"
+    assert missing_tool_log["error_message"] == "tool not found"

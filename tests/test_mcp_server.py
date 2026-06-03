@@ -98,7 +98,10 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
         )
     )))
 
-    assert result.root.structuredContent == {"path": "/", "items": []}
+    payload = result.root.structuredContent
+    assert payload["path"] == "/"
+    assert payload["items"] == []
+    assert payload["log_id"].startswith("call_")
 
 
 def test_mcp_execute_tool_calls_capability_service():
