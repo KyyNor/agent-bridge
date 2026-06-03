@@ -51,6 +51,41 @@ def test_mcp_service_registration_requires_admin(wm_paths) -> None:
     assert response.status_code == 403
 
 
+def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/capabilities/mcp-services",
+        json={
+            "service_key": "mysql",
+            "name": "MySQL MCP",
+            "endpoint_url": "https://mysql.example.test/mcp",
+            "headers": {"Authorization": "Bearer secret"},
+            "description": "Database tools",
+            "tags": ["database"],
+        },
+        headers={"X-Wiki-User": "root"},
+    )
+
+    updated = client.post(
+        "/capabilities/mcp-services",
+        json={
+            "service_key": "mysql",
+            "name": "MySQL Reporting MCP",
+            "endpoint_url": "https://mysql.example.test/mcp",
+            "description": "Updated description",
+            "tags": ["database", "reporting"],
+        },
+        headers={"X-Wiki-User": "root"},
+    )
+    listed = client.get("/capabilities/mcp-services", headers={"X-Wiki-User": "root"})
+
+    assert updated.status_code == 200
+    assert updated.json()["headers"] == {"Authorization": "Bearer secret"}
+    assert listed.json()[0]["headers"] == {"Authorization": "***"}
+    assert listed.json()[0]["tags"] == ["database", "reporting"]
+
+
 def test_capability_admin_page_serves_html(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

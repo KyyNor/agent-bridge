@@ -98,8 +98,10 @@ function renderServices() {
     .join("");
 }
 
-async function loadServices() {
-  clearMessage();
+async function loadServices(options = {}) {
+  if (!options.preserveMessage) {
+    clearMessage();
+  }
   els.servicesTable.innerHTML = '<tr><td colspan="5" class="empty">Loading services...</td></tr>';
   try {
     services = await apiRequest("/capabilities/mcp-services", { method: "GET" });
@@ -126,17 +128,20 @@ function parseHeaders() {
 }
 
 function servicePayloadFromForm() {
-  return {
+  const payload = {
     service_key: els.serviceKey.value.trim(),
     name: els.serviceName.value.trim(),
     endpoint_url: els.endpointUrl.value.trim(),
-    headers: parseHeaders(),
     description: els.description.value.trim(),
     tags: els.tags.value
       .split(",")
       .map((tag) => tag.trim())
       .filter(Boolean),
   };
+  if (els.headersJson.value.trim()) {
+    payload.headers = parseHeaders();
+  }
+  return payload;
 }
 
 function fillForm(service) {
@@ -144,6 +149,7 @@ function fillForm(service) {
   els.serviceName.value = service.name || "";
   els.endpointUrl.value = service.endpoint_url || "";
   els.headersJson.value = "";
+  els.headersJson.placeholder = "Leave blank to keep existing headers.";
   els.description.value = service.description || "";
   els.tags.value = (service.tags || []).join(", ");
   els.serviceKey.focus();
@@ -158,8 +164,8 @@ async function saveService(event) {
       body: JSON.stringify(payload),
     });
     selectedServiceKey = payload.service_key;
+    await loadServices({ preserveMessage: true });
     showMessage(`Saved ${payload.service_key}.`);
-    await loadServices();
   } catch (error) {
     showMessage(error.message, "error");
   }
@@ -171,8 +177,8 @@ async function setServiceStatus(serviceKey, status) {
       method: "POST",
       body: JSON.stringify({ status }),
     });
+    await loadServices({ preserveMessage: true });
     showMessage(`${serviceKey} is now ${status}.`);
-    await loadServices();
   } catch (error) {
     showMessage(error.message, "error");
   }
@@ -183,13 +189,13 @@ async function syncService(serviceKey) {
     const result = await apiRequest(`/capabilities/mcp-services/${encodeURIComponent(serviceKey)}/sync`, {
       method: "POST",
     });
-    showMessage(`Synced ${result.tool_count} tools from ${serviceKey}.`);
     selectedServiceKey = serviceKey;
-    await loadServices();
+    await loadServices({ preserveMessage: true });
     await loadTools(serviceKey);
+    showMessage(`Synced ${result.tool_count} tools from ${serviceKey}.`);
   } catch (error) {
+    await loadServices({ preserveMessage: true });
     showMessage(error.message, "error");
-    await loadServices();
   }
 }
 

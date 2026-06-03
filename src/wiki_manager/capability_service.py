@@ -75,13 +75,15 @@ class CapabilityService:
         service_key: str,
         name: str,
         endpoint_url: str,
-        headers: dict[str, Any],
+        headers: dict[str, Any] | None,
         description: str,
         tags: list[str],
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         self._validate_service_key(service_key)
         existing = self.store.get_mcp_service(service_key)
+        if headers is None:
+            headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
         if existing is None:
             service = self.store.create_mcp_service(
                 service_key=service_key,

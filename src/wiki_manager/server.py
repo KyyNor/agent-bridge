@@ -47,7 +47,7 @@ class RegisterMcpServiceRequest(BaseModel):
     service_key: str
     name: str
     endpoint_url: str
-    headers: dict[str, Any] = Field(default_factory=dict)
+    headers: dict[str, Any] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
 
