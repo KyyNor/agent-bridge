@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   log_id TEXT NOT NULL UNIQUE,
   actor TEXT NOT NULL,
-  profile_key TEXT NOT NULL,
+  profile_key TEXT,
   entrypoint TEXT NOT NULL,
   source_type TEXT,
   source_key TEXT,
@@ -221,6 +221,76 @@ class SQLiteStore:
             ]:
                 if col not in existing:
                     conn.execute(f"ALTER TABLE sync_states ADD COLUMN {col} {col_type}")
+
+            self._migrate_tool_call_logs_nullable_profile(conn)
+
+    def _migrate_tool_call_logs_nullable_profile(self, conn: sqlite3.Connection) -> None:
+        columns = conn.execute("PRAGMA table_info(tool_call_logs)").fetchall()
+        profile_column = next((column for column in columns if column[1] == "profile_key"), None)
+        if profile_column is None or profile_column[3] == 0:
+            return
+
+        conn.execute("ALTER TABLE tool_call_logs RENAME TO tool_call_logs_old")
+        conn.execute(
+            """
+            CREATE TABLE tool_call_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              log_id TEXT NOT NULL UNIQUE,
+              actor TEXT NOT NULL,
+              profile_key TEXT,
+              entrypoint TEXT NOT NULL,
+              source_type TEXT,
+              source_key TEXT,
+              tool_name TEXT,
+              request_json TEXT NOT NULL DEFAULT '{}',
+              response_json TEXT NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL,
+              error_message TEXT,
+              duration_ms INTEGER,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO tool_call_logs (
+              id,
+              log_id,
+              actor,
+              profile_key,
+              entrypoint,
+              source_type,
+              source_key,
+              tool_name,
+              request_json,
+              response_json,
+              status,
+              error_message,
+              duration_ms,
+              created_at
+            )
+            SELECT
+              id,
+              log_id,
+              actor,
+              profile_key,
+              entrypoint,
+              source_type,
+              source_key,
+              tool_name,
+              request_json,
+              response_json,
+              status,
+              error_message,
+              duration_ms,
+              created_at
+            FROM tool_call_logs_old
+            """
+        )
+        conn.execute("DROP TABLE tool_call_logs_old")
+        conn.execute("CREATE INDEX idx_tool_call_logs_created_at ON tool_call_logs(created_at DESC, id DESC)")
+        conn.execute("CREATE INDEX idx_tool_call_logs_profile ON tool_call_logs(profile_key)")
+        conn.execute("CREATE INDEX idx_tool_call_logs_source ON tool_call_logs(source_type, source_key)")
 
     def create_mcp_service(
         self,
@@ -541,7 +611,7 @@ class SQLiteStore:
         *,
         log_id: str,
         actor: str,
-        profile_key: str,
+        profile_key: str | None,
         entrypoint: str,
         source_type: str | None = None,
         source_key: str | None = None,

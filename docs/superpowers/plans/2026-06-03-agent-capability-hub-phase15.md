@@ -193,11 +193,17 @@ class CallLogStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class SourceRef:
+    source_type: str
+    source_key: str
+
+
+@dataclass(frozen=True)
 class PolicyContext:
     actor: str
     profile_key: str | None = None
-    allow_sources: set[str] | None = None
-    deny_sources: set[str] | None = None
+    allow_sources: set[SourceRef] | None = None
+    deny_sources: set[SourceRef] | None = None
     request_id: str | None = None
     entrypoint: str = "metamcp_search"
 ```
