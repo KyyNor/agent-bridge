@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from wiki_manager.archive import ArchiveStorage
-from wiki_manager.config import ServerConfig, WikiManagerPaths, ensure_directories, load_server_config
+from wiki_manager.config import ServerConfig, WikiManagerPaths, default_root, ensure_directories, load_server_config
 from wiki_manager.domain import KbRole, Operation, SyncStateStatus
 from wiki_manager.storage import SQLiteStore
 
@@ -24,6 +24,24 @@ def test_load_server_config_writes_default_admin(tmp_path: Path) -> None:
     config = load_server_config(paths)
     assert config == ServerConfig(host="127.0.0.1", port=8765, admins={"root"})
     assert "admins = [\"root\"]" in paths.server_config_path.read_text()
+
+
+def test_default_root_uses_environment_override(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "custom-wiki"
+    monkeypatch.setenv("WIKI_MANAGER_ROOT", str(root))
+
+    assert default_root() == root
+    assert WikiManagerPaths.from_root().root == root
+
+
+def test_load_server_config_uses_default_user_for_new_admin(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WIKI_MANAGER_USER", "kyynor")
+    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+
+    config = load_server_config(paths)
+
+    assert config.admins == {"kyynor"}
+    assert "admins = [\"kyynor\"]" in paths.server_config_path.read_text()
 
 
 def test_archive_store_file_by_hash(tmp_path: Path) -> None:

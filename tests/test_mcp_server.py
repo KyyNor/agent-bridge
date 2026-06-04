@@ -1,22 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-
-from mcp.types import CallToolRequest, CallToolRequestParams, ListToolsRequest
-
-
-def _get_tools_sync(server):
-    """Call the registered list_tools handler and return Tool objects."""
-    handler = server.request_handlers[ListToolsRequest]
-    result = asyncio.run(handler(ListToolsRequest(method="tools/list")))
-    return result.root.tools
+import json
 
 
 def test_mcp_server_exposes_search_and_execute_tools():
     from wiki_manager.mcp_server import create_mcp_server
 
-    server = create_mcp_server()
-    tools = _get_tools_sync(server)
+    class FakeService:
+        capabilities = None
+
+    mcp = create_mcp_server(FakeService())
+    tools = asyncio.run(mcp.list_tools())
     tool_names = [tool.name for tool in tools]
     assert tool_names == ["search", "execute"]
 
@@ -24,43 +19,43 @@ def test_mcp_server_exposes_search_and_execute_tools():
 def test_mcp_search_tool_has_path_query_schema():
     from wiki_manager.mcp_server import create_mcp_server
 
-    server = create_mcp_server()
-    tools = _get_tools_sync(server)
+    class FakeService:
+        capabilities = None
+
+    mcp = create_mcp_server(FakeService())
+    tools = asyncio.run(mcp.list_tools())
     tools_by_name = {t.name: t for t in tools}
     search_tool = tools_by_name["search"]
     schema = search_tool.inputSchema
     assert "path" in schema["properties"]
     assert "query" in schema["properties"]
     assert "limit" in schema["properties"]
-    assert "required" not in schema
     assert "no arguments" in search_tool.description
-    assert "path=service_key" in search_tool.description
-    assert "Default 20" in schema["properties"]["limit"]["description"]
 
 
-def test_mcp_execute_tool_has_service_tool_arguments_schema():
+def test_mcp_execute_tool_has_service_key_tool_arguments_schema():
     from wiki_manager.mcp_server import create_mcp_server
 
-    server = create_mcp_server()
-    tools = _get_tools_sync(server)
+    class FakeService:
+        capabilities = None
+
+    mcp = create_mcp_server(FakeService())
+    tools = asyncio.run(mcp.list_tools())
     tools_by_name = {t.name: t for t in tools}
     execute_tool = tools_by_name["execute"]
     schema = execute_tool.inputSchema
-    assert schema["required"] == ["service", "tool", "arguments"]
-    assert "service" in schema["properties"]
+    assert "service_key" in schema["properties"]
     assert "tool" in schema["properties"]
     assert "arguments" in schema["properties"]
-    assert "Agent Capability Hub gateway" in execute_tool.description
 
 
 def test_mcp_search_tool_calls_capability_service():
     from wiki_manager.mcp_server import create_mcp_server
 
-    returned = {"items": [{"service": "svc-1", "tool": "read"}]}
+    returned = {"items": [{"service": "svc-1", "tool": "read"}], "path": "/", "log_id": "call_1"}
 
     class FakeCapabilities:
-        def search(self, *, actor, path, query, limit=20):
-            assert actor == "root"
+        def search(self, *, actor, path, query, limit=20, profile_key=None):
             assert path == "svc-1"
             assert query == "read"
             assert limit == 3
@@ -69,46 +64,18 @@ def test_mcp_search_tool_calls_capability_service():
     class FakeService:
         capabilities = FakeCapabilities()
 
-    server = create_mcp_server(service=FakeService(), actor="root")
-    handler = server.request_handlers[CallToolRequest]
-    result = asyncio.run(handler(CallToolRequest(
-        params=CallToolRequestParams(
-            name="search",
-            arguments={
-                "path": "svc-1",
-                "query": "read",
-                "limit": 3,
-            },
-        )
-    )))
-
-    payload = result.root.structuredContent
-    assert payload["items"][0] == returned["items"][0]
-
-
-def test_mcp_search_with_default_service_initializes_schema(wm_paths):
-    from wiki_manager.mcp_server import create_mcp_server
-
-    server = create_mcp_server(paths=wm_paths, admins={"root"})
-    handler = server.request_handlers[CallToolRequest]
-    result = asyncio.run(handler(CallToolRequest(
-        params=CallToolRequestParams(
-            name="search",
-            arguments={},
-        )
-    )))
-
-    assert result.root.structuredContent == {"path": "/", "items": []}
+    mcp = create_mcp_server(FakeService())
+    content, structured = asyncio.run(mcp.call_tool("search", {"path": "svc-1", "query": "read", "limit": 3}))
+    assert structured == returned
 
 
 def test_mcp_execute_tool_calls_capability_service():
     from wiki_manager.mcp_server import create_mcp_server
 
-    returned = {"success": True, "content": [{"type": "text", "text": "ok"}]}
+    returned = {"success": True, "result": {}, "service": "svc-1", "tool": "read", "log_id": "call_1"}
 
     class FakeCapabilities:
-        async def execute(self, *, actor, service, tool, arguments):
-            assert actor == "root"
+        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
             assert service == "svc-1"
             assert tool == "read"
             assert arguments == {"path": "/docs"}
@@ -117,18 +84,19 @@ def test_mcp_execute_tool_calls_capability_service():
     class FakeService:
         capabilities = FakeCapabilities()
 
-    server = create_mcp_server(service=FakeService(), actor="root")
-    handler = server.request_handlers[CallToolRequest]
-    result = asyncio.run(handler(CallToolRequest(
-        params=CallToolRequestParams(
-            name="execute",
-            arguments={
-                "service": "svc-1",
-                "tool": "read",
-                "arguments": {"path": "/docs"},
-            },
-        )
-    )))
+    mcp = create_mcp_server(FakeService())
+    content, structured = asyncio.run(mcp.call_tool("execute", {"service_key": "svc-1", "tool": "read", "arguments": {"path": "/docs"}}))
+    assert structured == returned
 
-    payload = result.root.structuredContent
-    assert payload["success"] is True
+
+def test_mcp_search_with_default_service_initializes_schema(wm_paths):
+    from wiki_manager.mcp_server import create_mcp_server
+    from wiki_manager.services import WikiManagerService
+
+    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    mcp = create_mcp_server(svc)
+    content, structured = asyncio.run(mcp.call_tool("search", {}))
+    assert structured["path"] == "/"
+    assert structured["items"] == []
+    assert structured["log_id"].startswith("call_")

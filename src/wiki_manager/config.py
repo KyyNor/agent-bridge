@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import json
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 
 DEFAULT_ROOT = Path("/root/wiki-manager")
+ROOT_ENV_VAR = "WIKI_MANAGER_ROOT"
+USER_ENV_VAR = "WIKI_MANAGER_USER"
+
+
+def default_root() -> Path:
+    raw = os.environ.get(ROOT_ENV_VAR)
+    return Path(raw).expanduser() if raw else DEFAULT_ROOT
+
+
+def default_user(fallback: str = "root") -> str:
+    return os.environ.get(USER_ENV_VAR, fallback)
 
 
 @dataclass(frozen=True)
@@ -23,7 +36,8 @@ class WikiManagerPaths:
     server_pid_path: Path
 
     @classmethod
-    def from_root(cls, root: Path = DEFAULT_ROOT) -> "WikiManagerPaths":
+    def from_root(cls, root: Path | None = None) -> "WikiManagerPaths":
+        root = root or default_root()
         return cls(
             root=root,
             config_dir=root / "config",
@@ -73,8 +87,9 @@ def ensure_directories(paths: WikiManagerPaths) -> None:
 def load_server_config(paths: WikiManagerPaths) -> ServerConfig:
     ensure_directories(paths)
     if not paths.server_config_path.exists():
+        admin = default_user()
         paths.server_config_path.write_text(
-            'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n',
+            f"host = \"127.0.0.1\"\nport = 8765\nadmins = [{json.dumps(admin)}]\n",
             encoding="utf-8",
         )
     raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))

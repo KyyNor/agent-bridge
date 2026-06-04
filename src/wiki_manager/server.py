@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from wiki_manager.config import DEFAULT_ROOT, WikiManagerPaths, load_server_config
+from wiki_manager.config import WikiManagerPaths, default_user, load_server_config
 from wiki_manager.domain import KbRole, WikiManagerError
 from wiki_manager.services import WikiManagerService
 from wiki_manager.web_pages import capability_admin_page
@@ -56,8 +56,29 @@ class UpdateMcpServiceStatusRequest(BaseModel):
     status: str
 
 
+class UpdateMcpToolTypeRequest(BaseModel):
+    tool_type: str
+
+
+class ProjectProfileRequest(BaseModel):
+    profile_key: str
+    name: str
+    description: str = ""
+    status: str = "active"
+
+
+class ProfileSourceRuleRequest(BaseModel):
+    source_type: str
+    source_key: str
+    effect: str
+
+
+class ProfileRulesRequest(BaseModel):
+    rules: list[ProfileSourceRuleRequest] = Field(default_factory=list)
+
+
 def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
-    resolved_paths = paths or WikiManagerPaths.from_root(DEFAULT_ROOT)
+    resolved_paths = paths or WikiManagerPaths.from_root()
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = WikiManagerService.create(resolved_paths, resolved_admins)
     capability_schema_ready = False
@@ -79,6 +100,7 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
             if admins is None:
                 service.admins = load_server_config(resolved_paths).admins
                 service.capabilities.admins = service.admins
+                service.governance.admins = service.admins
             return call()
         except WikiManagerError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -88,6 +110,7 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
             if admins is None:
                 service.admins = load_server_config(resolved_paths).admins
                 service.capabilities.admins = service.admins
+                service.governance.admins = service.admins
             return await call()
         except WikiManagerError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -114,6 +137,36 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         if not capability_schema_ready:
             service.store.init_schema()
             capability_schema_ready = True
+
+    def catalog_sources(current_actor: str, profile_key: str | None, query: str | None) -> list[dict[str, Any]]:
+        source_keys = [item["service_key"] for item in service.store.list_mcp_services()]
+        allowed_keys = set(
+            service.governance.filter_source_keys(
+                actor=current_actor,
+                profile_key=profile_key,
+                source_type="mcp_service",
+                source_keys=source_keys,
+            )
+        )
+        sources = []
+        for item in service.capabilities.list_services(current_actor):
+            if item["service_key"] not in allowed_keys:
+                continue
+            tags = item.get("tags", [])
+            text = f"{item['service_key']} {item['name']} {item.get('description', '')} {' '.join(tags)}".lower()
+            if query and query.lower() not in text:
+                continue
+            sources.append(
+                {
+                    "source_type": "mcp_service",
+                    "source_key": item["service_key"],
+                    "name": item["name"],
+                    "description": item["description"],
+                    "status": item["status"],
+                    "tags": tags,
+                }
+            )
+        return sources
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -285,8 +338,140 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         ensure_capability_schema()
         return call_safely(lambda: service.capabilities.list_tools(current_actor, service_key))
 
+    @app.put("/capabilities/mcp-services/{service_key}/tools/{tool_name}/type")
+    def update_mcp_tool_type(
+        service_key: str,
+        tool_name: str,
+        payload: UpdateMcpToolTypeRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.capabilities.set_tool_type(
+                current_actor,
+                service_key,
+                tool_name,
+                payload.tool_type,
+            )
+        )
+
+    @app.post("/capability-profiles")
+    def upsert_capability_profile(
+        payload: ProjectProfileRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.governance.upsert_profile(
+                current_actor,
+                payload.profile_key,
+                payload.name,
+                payload.description,
+                payload.status,
+            )
+        )
+
+    @app.get("/capability-profiles")
+    def list_capability_profiles(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.list_profiles(current_actor))
+
+    @app.get("/capability-profiles/{profile_key}")
+    def get_capability_profile(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.get_profile(current_actor, profile_key))
+
+    @app.put("/capability-profiles/{profile_key}/rules")
+    def replace_capability_profile_rules(
+        profile_key: str,
+        payload: ProfileRulesRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        rules = [rule.model_dump() for rule in payload.rules]
+        return call_safely(lambda: service.governance.replace_profile_rules(current_actor, profile_key, rules))
+
+    @app.get("/tool-call-logs")
+    def list_tool_call_logs(
+        entrypoint: str | None = None,
+        source_type: str | None = None,
+        source_key: str | None = None,
+        tool_name: str | None = None,
+        profile_key: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        current_actor: str = Depends(actor),
+    ) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.governance.list_logs(
+                actor=current_actor,
+                entrypoint=entrypoint,
+                source_type=source_type,
+                source_key=source_key,
+                tool_name=tool_name,
+                profile_key=profile_key,
+                status=status,
+                limit=limit,
+                offset=offset,
+            )
+        )
+
+    @app.get("/tool-call-logs/{log_id}")
+    def get_tool_call_log(log_id: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.get_log(actor=current_actor, log_id=log_id))
+
+    @app.get("/capability-catalog")
+    def capability_catalog(
+        profile_key: str | None = None,
+        query: str | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: {"sources": catalog_sources(current_actor, profile_key, query)})
+
+    @app.get("/capability-catalog/sources/{source_type}/{source_key}")
+    def capability_source_detail(source_type: str, source_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        if source_type != "mcp_service":
+            raise HTTPException(status_code=404, detail="source not found")
+        service_payload = call_safely(lambda: service.capabilities.get_service(current_actor, source_key))
+        tools = call_safely(lambda: service.capabilities.list_tools(current_actor, source_key))
+        return {"source_type": source_type, "source": service_payload, "tools": tools}
+
+    @app.get("/capability-catalog/sources/{source_type}/{source_key}/tools/{tool_name}")
+    def capability_tool_detail(
+        source_type: str,
+        source_key: str,
+        tool_name: str,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        if source_type != "mcp_service":
+            raise HTTPException(status_code=404, detail="tool not found")
+        tools = call_safely(lambda: service.capabilities.list_tools(current_actor, source_key))
+        for tool in tools:
+            if tool["tool"] == tool_name:
+                logs = call_safely(
+                    lambda: service.governance.list_logs(
+                        actor=current_actor,
+                        source_type=source_type,
+                        source_key=source_key,
+                        tool_name=tool_name,
+                        limit=10,
+                    )
+                )
+                return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
+        raise HTTPException(status_code=404, detail="tool not found")
+
+    from wiki_manager.mcp_server import setup_mcp_route
+
+    setup_mcp_route(app, service)
+
     @app.get("/admin/capabilities", response_class=HTMLResponse)
     def capability_admin() -> HTMLResponse:
-        return HTMLResponse(content=capability_admin_page(), media_type="text/html")
+        return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")
 
     return app

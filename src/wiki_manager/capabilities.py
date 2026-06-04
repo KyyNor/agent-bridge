@@ -27,6 +27,7 @@ class CallLogStatus(str, Enum):
 
 
 class ToolType(str, Enum):
+    unconfigured = "unconfigured"
     overview = "overview"
     search = "search"
     detail = "detail"
