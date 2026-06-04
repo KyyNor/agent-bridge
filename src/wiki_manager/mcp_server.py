@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import time
 from contextvars import ContextVar
 from typing import Any
 
@@ -12,6 +15,8 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 
 from wiki_manager.config import default_user
 from wiki_manager.services import WikiManagerService
+
+logger = logging.getLogger("wiki_manager.mcp")
 
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 
@@ -39,13 +44,22 @@ def create_mcp_server(service: WikiManagerService) -> FastMCP:
         query: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        return service.capabilities.search(
-            actor=default_user(),
-            path=path,
-            query=query,
-            limit=limit,
-            profile_key=_request_profile.get(),
-        )
+        profile_key = _request_profile.get()
+        logger.info("search profile=%s path=%s query=%s limit=%s", profile_key, path, query, limit)
+        started = time.monotonic()
+        try:
+            result = service.capabilities.search(
+                actor=default_user(),
+                path=path,
+                query=query,
+                limit=limit,
+                profile_key=profile_key,
+            )
+            logger.info("search ok profile=%s duration=%.0fms items=%d", profile_key, (time.monotonic() - started) * 1000, len(result.get("items", [])))
+            return result
+        except Exception as exc:
+            logger.error("search fail profile=%s duration=%.0fms error=%s", profile_key, (time.monotonic() - started) * 1000, exc)
+            raise
 
     @mcp.tool(
         description="Execute a registered read-only MCP tool through the Agent Capability Hub gateway.",
@@ -55,13 +69,22 @@ def create_mcp_server(service: WikiManagerService) -> FastMCP:
         tool: str,
         arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return await service.capabilities.execute(
-            actor=default_user(),
-            service=service_key,
-            tool=tool,
-            arguments=arguments or {},
-            profile_key=_request_profile.get(),
-        )
+        profile_key = _request_profile.get()
+        logger.info("execute profile=%s service=%s tool=%s args=%s", profile_key, service_key, tool, json.dumps(arguments or {}, ensure_ascii=False))
+        started = time.monotonic()
+        try:
+            result = await service.capabilities.execute(
+                actor=default_user(),
+                service=service_key,
+                tool=tool,
+                arguments=arguments or {},
+                profile_key=profile_key,
+            )
+            logger.info("execute ok profile=%s service=%s tool=%s duration=%.0fms success=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, result.get("success"))
+            return result
+        except Exception as exc:
+            logger.error("execute fail profile=%s service=%s tool=%s duration=%.0fms error=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, exc)
+            raise
 
     return mcp
 
@@ -74,9 +97,15 @@ def setup_mcp_route(app: Any, service: WikiManagerService) -> None:
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
         profile = request.headers.get("x-wiki-metamcp-profile")
+        logger.info("MCP request method=%s profile=%s", request.method, profile)
         token = _request_profile.set(profile)
         try:
-            return await _dispatch_mcp(mcp, request)
+            response = await _dispatch_mcp(mcp, request)
+            logger.info("MCP response status=%d profile=%s", response.status_code, profile)
+            return response
+        except Exception as exc:
+            logger.error("MCP error profile=%s error=%s", profile, exc)
+            raise
         finally:
             _request_profile.reset(token)
 
