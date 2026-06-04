@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from wiki_manager.config import DEFAULT_ROOT, WikiManagerPaths, load_server_config
+from wiki_manager.config import WikiManagerPaths, default_user, load_server_config
 from wiki_manager.domain import KbRole, WikiManagerError
 from wiki_manager.services import WikiManagerService
 from wiki_manager.web_pages import capability_admin_page
@@ -86,7 +86,7 @@ class MetaMcpExecuteRequest(BaseModel):
 
 
 def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
-    resolved_paths = paths or WikiManagerPaths.from_root(DEFAULT_ROOT)
+    resolved_paths = paths or WikiManagerPaths.from_root()
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = WikiManagerService.create(resolved_paths, resolved_admins)
     capability_schema_ready = False
@@ -498,6 +498,6 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
 
     @app.get("/admin/capabilities", response_class=HTMLResponse)
     def capability_admin() -> HTMLResponse:
-        return HTMLResponse(content=capability_admin_page(), media_type="text/html")
+        return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")
 
     return app

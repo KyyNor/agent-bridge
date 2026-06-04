@@ -6,7 +6,7 @@ from typing import Any
 from mcp.server import Server
 from mcp.types import Tool
 
-from wiki_manager.config import DEFAULT_ROOT, WikiManagerPaths, load_server_config
+from wiki_manager.config import WikiManagerPaths, load_server_config
 from wiki_manager.services import WikiManagerService
 
 
@@ -24,7 +24,7 @@ def create_mcp_server(
     def resolve_service() -> WikiManagerService:
         if service is not None:
             return service
-        resolved_paths = paths or WikiManagerPaths.from_root(DEFAULT_ROOT)
+        resolved_paths = paths or WikiManagerPaths.from_root()
         resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
         resolved_service = WikiManagerService.create(resolved_paths, resolved_admins)
         resolved_service.store.init_schema()

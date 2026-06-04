@@ -76,6 +76,14 @@ def test_client_init_system_posts_admin_init(monkeypatch) -> None:
     }
 
 
+def test_client_from_config_uses_environment_user(monkeypatch) -> None:
+    monkeypatch.setenv("WIKI_MANAGER_USER", "kyynor")
+
+    client = WikiManagerClient.from_config()
+
+    assert client.linux_user == "kyynor"
+
+
 def test_client_purge_document_sends_confirmation(monkeypatch) -> None:
     captured = {}
 
@@ -137,6 +145,20 @@ def test_server_status_command(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "running" in result.stdout
     assert "123" in result.stdout
+
+
+def test_server_status_accepts_root_option(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    def fake_status(paths):
+        captured["root"] = paths.root
+        return {"running": True, "pid": 123}
+
+    monkeypatch.setattr("wiki_manager.cli.server_status", fake_status)
+    result = runner.invoke(app, ["server", "status", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert captured == {"root": tmp_path}
 
 
 def test_server_start_reports_errors_cleanly(monkeypatch) -> None:

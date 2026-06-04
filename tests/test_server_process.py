@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from wiki_manager.server_process import server_status
+from wiki_manager.config import ROOT_ENV_VAR
+from wiki_manager.server_process import server_status, start_server
 
 
 def test_server_status_reports_invalid_pid_file(wm_paths) -> None:
@@ -11,3 +12,28 @@ def test_server_status_reports_invalid_pid_file(wm_paths) -> None:
 
     with pytest.raises(RuntimeError, match="invalid pid"):
         server_status(wm_paths)
+
+
+def test_start_server_passes_root_to_child_environment(monkeypatch, wm_paths) -> None:
+    captured = {}
+
+    class FakeProcess:
+        pid = 123
+
+        def poll(self):
+            return None
+
+    def fake_popen(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return FakeProcess()
+
+    class FakeResponse:
+        status_code = 200
+
+    monkeypatch.setattr("wiki_manager.server_process.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("wiki_manager.server_process.httpx.get", lambda *args, **kwargs: FakeResponse())
+
+    status = start_server(wm_paths)
+
+    assert status == {"running": True, "pid": 123}
+    assert captured["env"][ROOT_ENV_VAR] == str(wm_paths.root)

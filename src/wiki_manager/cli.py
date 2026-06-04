@@ -9,6 +9,7 @@ import httpx
 import typer
 
 from wiki_manager.client import WikiManagerClient
+from wiki_manager.config import WikiManagerPaths
 from wiki_manager.server_process import server_status, start_server, stop_server
 
 
@@ -58,6 +59,10 @@ def _run_server_action(call: Callable[[], T]) -> T:
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"server error: {exc}", err=True)
         raise typer.Exit(1) from None
+
+
+def _paths_from_root(root: Path | None) -> WikiManagerPaths | None:
+    return WikiManagerPaths.from_root(root) if root is not None else None
 
 
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
@@ -145,20 +150,29 @@ def grant_member(
 
 
 @server_app.command("start")
-def server_start() -> None:
-    status = _run_server_action(start_server)
+def server_start(
+    root: Annotated[Path | None, typer.Option("--root", help="wiki-manager root directory.")] = None,
+) -> None:
+    paths = _paths_from_root(root)
+    status = _run_server_action(lambda: start_server(paths) if paths is not None else start_server())
     typer.echo(f"running: {status['running']} pid: {status['pid']}")
 
 
 @server_app.command("stop")
-def server_stop() -> None:
-    result = _run_server_action(stop_server)
+def server_stop(
+    root: Annotated[Path | None, typer.Option("--root", help="wiki-manager root directory.")] = None,
+) -> None:
+    paths = _paths_from_root(root)
+    result = _run_server_action(lambda: stop_server(paths) if paths is not None else stop_server())
     typer.echo(f"stopped: {result['stopped']} pid: {result['pid']}")
 
 
 @server_app.command("status")
-def server_status_cmd() -> None:
-    status = _run_server_action(server_status)
+def server_status_cmd(
+    root: Annotated[Path | None, typer.Option("--root", help="wiki-manager root directory.")] = None,
+) -> None:
+    paths = _paths_from_root(root)
+    status = _run_server_action(lambda: server_status(paths) if paths is not None else server_status())
     typer.echo(f"running: {status['running']} pid: {status['pid']}")
 
 

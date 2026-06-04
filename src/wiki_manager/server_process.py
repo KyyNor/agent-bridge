@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from wiki_manager.config import WikiManagerPaths, load_server_config
+from wiki_manager.config import ROOT_ENV_VAR, WikiManagerPaths, load_server_config
 
 
 def _read_pid(path: Path) -> int | None:
@@ -42,6 +42,8 @@ def start_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
     if status["running"]:
         return status
     config = load_server_config(resolved)
+    env = os.environ.copy()
+    env[ROOT_ENV_VAR] = str(resolved.root)
     with resolved.server_log_path.open("ab") as log:
         process = subprocess.Popen(
             [
@@ -57,6 +59,7 @@ def start_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
             ],
             stdout=log,
             stderr=log,
+            env=env,
             start_new_session=True,
         )
     resolved.server_pid_path.write_text(str(process.pid), encoding="utf-8")

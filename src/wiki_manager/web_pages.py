@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 
-def capability_admin_page() -> str:
+
+def capability_admin_page(default_user: str = "root") -> str:
+    default_user_json = json.dumps(default_user, ensure_ascii=False)
     return """<!doctype html>
 <html lang="zh-CN">
   <head>
@@ -227,7 +230,8 @@ def capability_admin_page() -> str:
         </section>
       </main>
     </div>
+    <script>window.WIKI_MANAGER_DEFAULT_USER = __WIKI_MANAGER_DEFAULT_USER__;</script>
     <script src="/static/capabilities/app.js" defer></script>
   </body>
 </html>
-"""
+""".replace("__WIKI_MANAGER_DEFAULT_USER__", default_user_json)

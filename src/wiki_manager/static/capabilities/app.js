@@ -1,6 +1,8 @@
+const DEFAULT_USER = window.WIKI_MANAGER_DEFAULT_USER || "root";
+
 const API_HEADERS = {
   "Content-Type": "application/json",
-  "X-Wiki-User": "root",
+  "X-Wiki-User": DEFAULT_USER,
 };
 
 let selectedServiceKey = "";
