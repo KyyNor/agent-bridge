@@ -145,6 +145,91 @@ def test_capability_static_assets_use_chinese_labels(wm_paths) -> None:
     assert "调用日志" in js.text
 
 
+def test_capability_admin_page_uses_modal_service_form_and_no_refresh_buttons(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+
+    assert response.status_code == 200
+    assert 'id="openServiceDialog"' in response.text
+    assert 'id="serviceDialog"' in response.text
+    assert 'id="closeServiceDialog"' in response.text
+    assert 'id="refreshServices"' not in response.text
+    assert 'id="reloadCatalog"' not in response.text
+    assert 'id="reloadTools"' not in response.text
+    assert "刷新数据" not in response.text
+    assert "刷新目录" not in response.text
+    assert "重新加载工具" not in response.text
+
+
+def test_capability_static_assets_support_query_route_state(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    js = client.get("/static/capabilities/app.js")
+
+    assert js.status_code == 200
+    assert "URLSearchParams" in js.text
+    assert "history.pushState" in js.text
+    assert "popstate" in js.text
+    assert "openServiceDialog" in js.text
+    assert "refreshServices" not in js.text
+    assert "reloadCatalog" not in js.text
+    assert "reloadTools" not in js.text
+
+
+def test_capability_admin_page_has_profile_dialog_and_tool_filters(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+
+    assert response.status_code == 200
+    assert 'id="openProfileDialog"' in response.text
+    assert 'id="profileDialog"' in response.text
+    assert 'id="profileRulesDialog"' in response.text
+    assert 'id="profileRulesTable"' in response.text
+    assert 'id="toolServiceFilter"' in response.text
+    assert 'id="toolTypeFilter"' in response.text
+    assert 'id="toolsTableBody"' in response.text
+    assert 'id="toolTypeDialog"' in response.text
+    assert 'id="toolTypeForm"' in response.text
+    assert 'id="toolTypeValue"' in response.text
+
+
+def test_capability_static_assets_render_filterable_tool_table_and_two_column_modal(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    css = client.get("/static/capabilities/app.css")
+    js = client.get("/static/capabilities/app.js")
+
+    assert css.status_code == 200
+    assert js.status_code == 200
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css.text
+    assert "tool-service-filter" in css.text
+    assert "tools-table" in css.text
+    assert "tool-layer-badge" in css.text
+    assert "tag-chip" in css.text
+    assert "::placeholder" in css.text
+    assert "white-space: nowrap" in css.text
+    assert "loadAllTools" in js.text
+    assert "renderToolFilters" in js.text
+    assert "renderToolsTable" in js.text
+    assert "openToolTypeDialog" in js.text
+    assert "saveToolTypeFromDialog" in js.text
+    assert 'data-action="edit-tool-type"' in js.text
+    assert 'data-action="save-tool-type"' not in js.text
+    assert "saveProfile" in js.text
+    assert "openProfileDialog" in js.text
+    assert "openProfileRulesDialog" in js.text
+    assert "saveProfileRules" in js.text
+    assert 'data-action="profile-rules"' in js.text
+    assert "profile-rules-table" in css.text
+    assert "rule-effect-select" in css.text
+
+
 def test_mcp_service_status_and_tools_api(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
