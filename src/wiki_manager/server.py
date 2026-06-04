@@ -77,18 +77,6 @@ class ProfileRulesRequest(BaseModel):
     rules: list[ProfileSourceRuleRequest] = Field(default_factory=list)
 
 
-class MetaMcpSearchRequest(BaseModel):
-    path: str | None = None
-    query: str | None = None
-    limit: int = 20
-
-
-class MetaMcpExecuteRequest(BaseModel):
-    service: str
-    tool: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
-
-
 def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
     resolved_paths = paths or WikiManagerPaths.from_root()
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
@@ -106,11 +94,6 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
 
     def actor(x_wiki_user: str = Header(alias="X-Wiki-User")) -> str:
         return x_wiki_user
-
-    def metamcp_profile(
-        x_wiki_metamcp_profile: str | None = Header(default=None, alias="X-Wiki-MetaMCP-Profile"),
-    ) -> str | None:
-        return x_wiki_metamcp_profile
 
     def call_safely(call: Callable[[], Any]) -> Any:
         try:
@@ -483,39 +466,9 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
                 return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
         raise HTTPException(status_code=404, detail="tool not found")
 
-    @app.post("/mcp/search")
-    def metamcp_search(
-        payload: MetaMcpSearchRequest,
-        current_actor: str = Depends(actor),
-        profile_key: str | None = Depends(metamcp_profile),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(
-            lambda: service.capabilities.search(
-                current_actor,
-                payload.path,
-                payload.query,
-                payload.limit,
-                profile_key=profile_key,
-            )
-        )
+    from wiki_manager.mcp_server import setup_mcp_route
 
-    @app.post("/mcp/execute")
-    async def metamcp_execute(
-        payload: MetaMcpExecuteRequest,
-        current_actor: str = Depends(actor),
-        profile_key: str | None = Depends(metamcp_profile),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return await call_safely_async(
-            lambda: service.capabilities.execute(
-                current_actor,
-                payload.service,
-                payload.tool,
-                payload.arguments,
-                profile_key=profile_key,
-            )
-        )
+    setup_mcp_route(app, service)
 
     @app.get("/admin/capabilities", response_class=HTMLResponse)
     def capability_admin() -> HTMLResponse:

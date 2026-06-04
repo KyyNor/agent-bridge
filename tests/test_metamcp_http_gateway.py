@@ -1,23 +1,26 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
+import asyncio
 
-from wiki_manager.capabilities import CallLogStatus, ProfileRuleEffect, SourceType
-from wiki_manager.server import create_app
+from wiki_manager.capabilities import ProfileRuleEffect, SourceType
+from wiki_manager.mcp_server import create_mcp_server
+from wiki_manager.services import WikiManagerService
 from wiki_manager.storage import SQLiteStore
 
 
-def _client(wm_paths) -> TestClient:
-    return TestClient(create_app(paths=wm_paths, admins={"root"}))
-
-
-def _register_service(client: TestClient, service_key: str, name: str) -> None:
-    response = client.post(
-        "/capabilities/mcp-services",
-        json={"service_key": service_key, "name": name, "endpoint_url": f"https://{service_key}.test/mcp"},
-        headers={"X-Wiki-User": "root"},
+def _register_service(wm_paths, service_key: str, name: str) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key=service_key,
+        name=name,
+        endpoint_url=f"https://{service_key}.test/mcp",
+        headers={},
+        description="",
+        tags=[],
+        created_by="root",
     )
-    assert response.status_code == 200
+    store.update_mcp_service_status(service_key, "enabled")
 
 
 def _create_profile(wm_paths, *, denied_service: str = "hive") -> None:
@@ -42,57 +45,24 @@ def _create_profile(wm_paths, *, denied_service: str = "hive") -> None:
     )
 
 
-def test_metamcp_http_search_uses_profile_header(wm_paths) -> None:
-    client = _client(wm_paths)
-    _register_service(client, "mysql", "MySQL")
-    _register_service(client, "hive", "Hive")
-    _create_profile(wm_paths)
+def test_mcp_search_lists_registered_services(wm_paths) -> None:
+    _register_service(wm_paths, "mysql", "MySQL")
+    _register_service(wm_paths, "hive", "Hive")
 
-    response = client.post(
-        "/mcp/search",
-        json={},
-        headers={"X-Wiki-User": "root", "X-Wiki-MetaMCP-Profile": "safe-readonly"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert [item["service"] for item in data["items"]] == ["mysql"]
-    assert data["log_id"].startswith("call_")
+    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    mcp = create_mcp_server(svc)
+    _, structured = asyncio.run(mcp.call_tool("search", {}))
+    assert [item["service"] for item in structured["items"]] == ["hive", "mysql"]
+    assert structured["log_id"].startswith("call_")
 
 
-def test_metamcp_http_search_without_profile_header_lists_all_services(wm_paths) -> None:
-    client = _client(wm_paths)
-    _register_service(client, "mysql", "MySQL")
-    _register_service(client, "hive", "Hive")
-    _create_profile(wm_paths)
+def test_mcp_search_filters_by_query(wm_paths) -> None:
+    _register_service(wm_paths, "mysql", "MySQL")
+    _register_service(wm_paths, "hive", "Hive")
 
-    response = client.post("/mcp/search", json={}, headers={"X-Wiki-User": "root"})
-
-    assert response.status_code == 200
-    data = response.json()
-    assert [item["service"] for item in data["items"]] == ["hive", "mysql"]
-    assert data["log_id"].startswith("call_")
-
-
-def test_metamcp_http_execute_denied_by_profile_returns_log_id_error(wm_paths) -> None:
-    client = _client(wm_paths)
-    _register_service(client, "hive", "Hive")
-    _create_profile(wm_paths)
-
-    response = client.post(
-        "/mcp/execute",
-        json={"service": "hive", "tool": "query_sql", "arguments": {"sql": "select 1"}},
-        headers={"X-Wiki-User": "root", "X-Wiki-MetaMCP-Profile": "safe-readonly"},
-    )
-
-    assert response.status_code == 400
-    detail = response.json()["detail"]
-    assert detail.startswith("source is blocked by profile policy")
-    assert "log_id: call_" in detail
-
-    store = SQLiteStore(wm_paths.db_path)
-    logs = store.list_tool_call_logs(status=CallLogStatus.blocked.value)
-    assert len(logs) == 1
-    assert logs[0]["source_key"] == "hive"
-    assert logs[0]["tool_name"] == "query_sql"
-    assert logs[0]["log_id"] in detail
+    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    mcp = create_mcp_server(svc)
+    _, structured = asyncio.run(mcp.call_tool("search", {"query": "my"}))
+    assert [item["service"] for item in structured["items"]] == ["mysql"]

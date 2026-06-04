@@ -96,6 +96,7 @@ def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> di
     if not isinstance(servers, dict):
         servers = {}
     servers["agent-capability-hub"] = {
+        "type": "http",
         "url": url,
         "headers": {"X-Wiki-MetaMCP-Profile": profile},
     }

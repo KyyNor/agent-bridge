@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from wiki_manager.capabilities import SourceType, ToolType
@@ -346,12 +348,14 @@ def test_profile_api_and_catalog_preview(wm_paths) -> None:
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    response = client.post(
-        "/mcp/search",
-        json={"query": "mysql"},
-        headers={"X-Wiki-User": "root"},
-    )
-    log_id = response.json()["log_id"]
+    from wiki_manager.mcp_server import create_mcp_server
+    from wiki_manager.services import WikiManagerService
+
+    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    mcp = create_mcp_server(svc)
+    _, structured = asyncio.run(mcp.call_tool("search", {"query": "mysql"}))
+    log_id = structured["log_id"]
 
     listed = client.get("/tool-call-logs", headers={"X-Wiki-User": "root"})
     detail = client.get(f"/tool-call-logs/{log_id}", headers={"X-Wiki-User": "root"})
