@@ -163,6 +163,13 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
   response_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL,
   error_message TEXT,
+  failure_stage TEXT,
+  failure_owner TEXT,
+  error_type TEXT,
+  resource_type TEXT,
+  resource_key TEXT,
+  request_summary_json TEXT NOT NULL DEFAULT '{}',
+  response_summary_json TEXT NOT NULL DEFAULT '{}',
   duration_ms INTEGER,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -180,6 +187,18 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 def _enum_value(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
+
+
+def _json_bytes(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
+
+
+def _json_summary(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return {"keys": sorted(str(key) for key in value), "bytes": _json_bytes(value)}
+    if isinstance(value, list):
+        return {"items": len(value), "bytes": _json_bytes(value)}
+    return {"type": type(value).__name__, "bytes": _json_bytes(value)}
 
 
 class SQLiteStore:
@@ -223,6 +242,27 @@ class SQLiteStore:
                     conn.execute(f"ALTER TABLE sync_states ADD COLUMN {col} {col_type}")
 
             self._migrate_tool_call_logs_nullable_profile(conn)
+            self._ensure_columns(
+                conn,
+                "tool_call_logs",
+                {
+                    "failure_stage": "TEXT",
+                    "failure_owner": "TEXT",
+                    "error_type": "TEXT",
+                    "resource_type": "TEXT",
+                    "resource_key": "TEXT",
+                    "request_summary_json": "TEXT NOT NULL DEFAULT '{}'",
+                    "response_summary_json": "TEXT NOT NULL DEFAULT '{}'",
+                },
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_failure "
+                "ON tool_call_logs(failure_owner, failure_stage, error_type)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_resource "
+                "ON tool_call_logs(resource_type, resource_key)"
+            )
 
     def _migrate_tool_call_logs_nullable_profile(self, conn: sqlite3.Connection) -> None:
         columns = conn.execute("PRAGMA table_info(tool_call_logs)").fetchall()
@@ -291,6 +331,12 @@ class SQLiteStore:
         conn.execute("CREATE INDEX idx_tool_call_logs_created_at ON tool_call_logs(created_at DESC, id DESC)")
         conn.execute("CREATE INDEX idx_tool_call_logs_profile ON tool_call_logs(profile_key)")
         conn.execute("CREATE INDEX idx_tool_call_logs_source ON tool_call_logs(source_type, source_key)")
+
+    def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     def create_mcp_service(
         self,
@@ -645,8 +691,15 @@ class SQLiteStore:
         response: Any | None = None,
         status: CallLogStatus | str,
         error_message: str | None = None,
+        failure_stage: str | None = None,
+        failure_owner: str | None = None,
+        error_type: str | None = None,
+        resource_type: str | None = None,
+        resource_key: str | None = None,
         duration_ms: int | None = None,
     ) -> dict[str, Any]:
+        request_value = {} if request is None else request
+        response_value = {} if response is None else response
         with self.connect() as conn:
             conn.execute(
                 """
@@ -662,9 +715,16 @@ class SQLiteStore:
                   response_json,
                   status,
                   error_message,
+                  failure_stage,
+                  failure_owner,
+                  error_type,
+                  resource_type,
+                  resource_key,
+                  request_summary_json,
+                  response_summary_json,
                   duration_ms
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     log_id,
@@ -674,10 +734,17 @@ class SQLiteStore:
                     _enum_value(source_type),
                     source_key,
                     tool_name,
-                    json.dumps({} if request is None else request, ensure_ascii=False, default=str),
-                    json.dumps({} if response is None else response, ensure_ascii=False, default=str),
+                    json.dumps(request_value, ensure_ascii=False, default=str),
+                    json.dumps(response_value, ensure_ascii=False, default=str),
                     _enum_value(status),
                     error_message,
+                    _enum_value(failure_stage),
+                    _enum_value(failure_owner),
+                    error_type,
+                    resource_type,
+                    resource_key,
+                    json.dumps(_json_summary(request_value), ensure_ascii=False, default=str),
+                    json.dumps(_json_summary(response_value), ensure_ascii=False, default=str),
                     duration_ms,
                 ),
             )
@@ -696,6 +763,13 @@ class SQLiteStore:
         tool_name: str | None = None,
         profile_key: str | None = None,
         status: CallLogStatus | str | None = None,
+        failure_stage: str | None = None,
+        failure_owner: str | None = None,
+        error_type: str | None = None,
+        resource_type: str | None = None,
+        resource_key: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -708,10 +782,21 @@ class SQLiteStore:
             ("tool_name", tool_name),
             ("profile_key", profile_key),
             ("status", _enum_value(status)),
+            ("failure_stage", _enum_value(failure_stage)),
+            ("failure_owner", _enum_value(failure_owner)),
+            ("error_type", error_type),
+            ("resource_type", resource_type),
+            ("resource_key", resource_key),
         ]:
             if value is not None:
                 filters.append(f"{column} = ?")
                 params.append(value)
+        if created_from is not None:
+            filters.append("created_at >= ?")
+            params.append(created_from)
+        if created_to is not None:
+            filters.append("created_at < ?")
+            params.append(created_to)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         params.extend([limit, offset])
         with self.connect() as conn:

@@ -12,7 +12,26 @@ class McpServiceStatus(str, Enum):
 
 
 class SourceType(str, Enum):
+    builtin = "builtin"
     mcp_service = "mcp_service"
+
+
+class FailureStage(str, Enum):
+    platform_request = "platform_request"
+    profile_policy = "profile_policy"
+    capability_registry = "capability_registry"
+    mcp_transport = "mcp_transport"
+    mcp_protocol = "mcp_protocol"
+    upstream_tool = "upstream_tool"
+    builtin_backend = "builtin_backend"
+    internal = "internal"
+
+
+class FailureOwner(str, Enum):
+    platform = "platform"
+    policy = "policy"
+    upstream_mcp = "upstream_mcp"
+    builtin_backend = "builtin_backend"
 
 
 class ProfileRuleEffect(str, Enum):
