@@ -367,6 +367,37 @@ def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     assert detail.json()["response_json"]
 
 
+def test_tool_call_stats_api_groups_by_dimensions(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_tool_call_log(
+        log_id="call_stats_api",
+        actor="root",
+        profile_key="safe",
+        entrypoint="metamcp_execute",
+        source_type=SourceType.mcp_service.value,
+        source_key="mysql",
+        tool_name="query_sql",
+        request={},
+        response={},
+        status="success",
+        duration_ms=12,
+    )
+
+    response = client.get(
+        "/tool-call-stats",
+        params={"dimensions": "profile_key,source_key,tool_name"},
+        headers={"X-Wiki-User": "root"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["dimensions"] == ["profile_key", "source_key", "tool_name"]
+    assert response.json()["items"][0]["profile_key"] == "safe"
+    assert response.json()["items"][0]["calls"] == 1
+
+
 def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

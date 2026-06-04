@@ -423,6 +423,26 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         ensure_capability_schema()
         return call_safely(lambda: service.governance.get_log(actor=current_actor, log_id=log_id))
 
+    @app.get("/tool-call-stats")
+    def tool_call_stats(
+        dimensions: str = "profile_key,source_key,tool_name",
+        created_from: str | None = None,
+        created_to: str | None = None,
+        bucket: str | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        parsed_dimensions = [part.strip() for part in dimensions.split(",") if part.strip()]
+        return call_safely(
+            lambda: service.governance.stats(
+                actor=current_actor,
+                dimensions=parsed_dimensions,
+                created_from=created_from,
+                created_to=created_to,
+                bucket=bucket,
+            )
+        )
+
     @app.get("/capability-catalog")
     def capability_catalog(
         profile_key: str | None = None,

@@ -212,6 +212,27 @@ class CapabilityGovernanceService:
             raise NotFound("tool call log not found")
         return log
 
+    def stats(
+        self,
+        *,
+        actor: str,
+        dimensions: list[str],
+        created_from: str | None = None,
+        created_to: str | None = None,
+        bucket: str | None = None,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        try:
+            items = self.store.aggregate_tool_call_stats(
+                dimensions=dimensions,
+                created_from=created_from,
+                created_to=created_to,
+                bucket=bucket,
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return {"dimensions": dimensions, "bucket": bucket, "items": items}
+
     def _validate_rule(self, rule: dict[str, str]) -> dict[str, str]:
         source_type = self._validate_source_type(rule.get("source_type"))
 

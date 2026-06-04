@@ -812,6 +812,73 @@ class SQLiteStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def aggregate_tool_call_stats(
+        self,
+        *,
+        dimensions: list[str],
+        created_from: str | None,
+        created_to: str | None,
+        bucket: str | None,
+    ) -> list[dict[str, Any]]:
+        allowed_dimensions = {
+            "profile_key",
+            "entrypoint",
+            "source_type",
+            "source_key",
+            "tool_name",
+            "status",
+            "failure_stage",
+            "failure_owner",
+            "error_type",
+            "resource_type",
+            "resource_key",
+        }
+        invalid = [dimension for dimension in dimensions if dimension not in allowed_dimensions]
+        if invalid:
+            raise ValueError(f"invalid stats dimension: {invalid[0]}")
+
+        selected = list(dimensions)
+        if bucket:
+            if bucket == "hour":
+                selected.insert(0, "strftime('%Y-%m-%d %H:00:00', created_at) AS bucket")
+            elif bucket == "day":
+                selected.insert(0, "date(created_at) AS bucket")
+            else:
+                raise ValueError("invalid stats bucket")
+
+        group_columns = ["bucket"] if bucket else []
+        group_columns.extend(dimensions)
+        select_clause = ", ".join(selected) if selected else "'all' AS scope"
+        group_clause = f"GROUP BY {', '.join(group_columns)}" if group_columns else ""
+        filters: list[str] = []
+        params: list[Any] = []
+        if created_from is not None:
+            filters.append("created_at >= ?")
+            params.append(created_from)
+        if created_to is not None:
+            filters.append("created_at < ?")
+            params.append(created_to)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                  {select_clause},
+                  COUNT(*) AS calls,
+                  SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
+                  SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
+                  SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+                  ROUND(AVG(COALESCE(duration_ms, 0)), 0) AS avg_duration_ms,
+                  MAX(duration_ms) AS max_duration_ms
+                FROM tool_call_logs
+                {where_clause}
+                {group_clause}
+                ORDER BY calls DESC
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_tool_call_log(self, log_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
