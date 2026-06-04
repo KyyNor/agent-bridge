@@ -135,13 +135,17 @@ button:disabled {
 }
 
 .nav-item {
+  background: transparent;
+  border: 0;
   border-radius: 8px;
   color: var(--fg-secondary);
   display: block;
   font-size: 13px;
   font-weight: 600;
   padding: 8px 12px;
+  text-align: left;
   text-decoration: none;
+  width: 100%;
 }
 
 .nav-item.active {
@@ -171,6 +175,14 @@ button:disabled {
   min-width: 0;
   padding: 24px;
   width: calc(100% - var(--sidebar-width));
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
 }
 
 .topbar {
@@ -208,6 +220,25 @@ h2 {
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1.5fr) 360px;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  padding: 16px;
+}
+
+.json-panel {
+  background: #111827;
+  border-radius: 8px;
+  color: #e5e7eb;
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
 }
 
 .panel {
@@ -323,11 +354,18 @@ td {
   color: var(--success);
 }
 
+.badge.active,
+.badge.success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
 .badge.disabled {
   background: var(--warning-soft);
   color: var(--warning);
 }
 
+.badge.blocked,
 .badge.error {
   background: var(--danger-soft);
   color: var(--danger);
@@ -423,6 +461,7 @@ textarea {
   }
 
   .content-grid,
+  .detail-grid,
   .services-panel,
   .form-panel,
   .tools-panel {

@@ -97,7 +97,8 @@ def test_capability_admin_page_serves_html(wm_paths) -> None:
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "Agent Capability Hub" in response.text
-    assert "MCP Services" in response.text
+    assert "能力治理控制台" in response.text
+    assert "能力目录" in response.text
     assert "/static/capabilities/app.css" in response.text
     assert "/static/capabilities/app.js" in response.text
 
@@ -113,6 +114,35 @@ def test_capability_static_assets_are_served(wm_paths) -> None:
     assert "sidebar" in css.text
     assert js.status_code == 200
     assert "loadServices" in js.text
+
+
+def test_capability_admin_page_is_chinese_control_console(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+
+    assert response.status_code == 200
+    assert "能力治理控制台" in response.text
+    assert "能力目录" in response.text
+    assert "调用日志" in response.text
+    assert "Project Profile" in response.text
+    assert "Claude Code 接入" in response.text
+    assert "MCP Services" not in response.text
+    assert "Register Service" not in response.text
+
+
+def test_capability_static_assets_use_chinese_labels(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    js = client.get("/static/capabilities/app.js")
+
+    assert js.status_code == 200
+    assert "加载服务" not in js.text
+    assert "登记服务" in js.text
+    assert "同步工具" in js.text
+    assert "调用日志" in js.text
 
 
 def test_mcp_service_status_and_tools_api(wm_paths) -> None:
