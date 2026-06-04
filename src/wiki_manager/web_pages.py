@@ -198,14 +198,18 @@ def capability_admin_page(default_user: str = "root") -> str:
                   <tr>
                     <th>log_id</th>
                     <th>入口</th>
+                    <th>Profile</th>
                     <th>来源</th>
                     <th>工具</th>
+                    <th>请求</th>
+                    <th>响应</th>
+                    <th>耗时</th>
                     <th>状态</th>
                     <th>时间</th>
                   </tr>
                 </thead>
                 <tbody id="logsTable">
-                  <tr><td colspan="6" class="empty">正在加载调用日志...</td></tr>
+                  <tr><td colspan="10" class="empty">正在加载调用日志...</td></tr>
                 </tbody>
               </table>
             </div>

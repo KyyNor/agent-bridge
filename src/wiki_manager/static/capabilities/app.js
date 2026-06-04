@@ -157,6 +157,18 @@ function statusText(status) {
   return map[status] || status || "未知";
 }
 
+function formatLogJson(value) {
+  if (!value) return "-";
+  try {
+    const obj = typeof value === "string" ? JSON.parse(value) : value;
+    const text = JSON.stringify(obj, null, 2);
+    if (text.length > 300) return '<details><summary>' + escapeHtml(text.slice(0, 100)) + '...</summary><pre>' + escapeHtml(text) + '</pre></details>';
+    return '<pre>' + escapeHtml(text) + '</pre>';
+  } catch {
+    return escapeHtml(String(value));
+  }
+}
+
 function routeFromLocation() {
   const params = new URLSearchParams(window.location.search);
   const view = VALID_VIEWS.has(params.get("view")) ? params.get("view") : "catalog";
@@ -360,11 +372,11 @@ async function loadProfiles() {
 
 async function loadLogs() {
   clearMessage();
-  els.logsTable.innerHTML = '<tr><td colspan="6" class="empty">正在读取调用日志...</td></tr>';
+  els.logsTable.innerHTML = '<tr><td colspan="10" class="empty">正在读取调用日志...</td></tr>';
   try {
     const logs = await apiRequest("/tool-call-logs", { method: "GET" });
     if (logs.length === 0) {
-      els.logsTable.innerHTML = '<tr><td colspan="6" class="empty">暂无调用日志。</td></tr>';
+      els.logsTable.innerHTML = '<tr><td colspan="10" class="empty">暂无调用日志。</td></tr>';
       return;
     }
     els.logsTable.innerHTML = logs
@@ -373,8 +385,12 @@ async function loadLogs() {
           <tr>
             <td><span class="service-key">${escapeHtml(log.log_id)}</span></td>
             <td>${escapeHtml(log.entrypoint)}</td>
+            <td>${escapeHtml(log.profile_key || "-")}</td>
             <td>${escapeHtml(log.source_key || "-")}</td>
             <td>${escapeHtml(log.tool_name || "-")}</td>
+            <td class="log-json">${formatLogJson(log.request_json)}</td>
+            <td class="log-json">${formatLogJson(log.response_json)}</td>
+            <td>${log.duration_ms != null ? log.duration_ms + "ms" : "-"}</td>
             <td><span class="badge ${escapeHtml(log.status)}">${escapeHtml(statusText(log.status))}</span></td>
             <td>${escapeHtml(log.created_at)}</td>
           </tr>
@@ -382,7 +398,7 @@ async function loadLogs() {
       )
       .join("");
   } catch (error) {
-    els.logsTable.innerHTML = '<tr><td colspan="6" class="empty">调用日志读取失败。</td></tr>';
+    els.logsTable.innerHTML = '<tr><td colspan="10" class="empty">调用日志读取失败。</td></tr>';
     showMessage(error.message, "error");
   }
 }
