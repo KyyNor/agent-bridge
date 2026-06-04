@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -285,3 +286,92 @@ def test_client_ask_sends_post(monkeypatch) -> None:
         "headers": {"X-Wiki-User": "root"},
         "timeout": 60.0,
     }
+
+
+def test_metamcp_profile_create_calls_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def upsert_profile(self, profile_key, name, description, status):
+            calls.append((profile_key, name, description, status))
+            return {"profile_key": profile_key, "name": name}
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["metamcp", "profile", "create", "safe-readonly", "--name", "安全只读"])
+
+    assert result.exit_code == 0
+    assert "safe-readonly" in result.stdout
+    assert calls == [("safe-readonly", "安全只读", "", "active")]
+
+
+def test_metamcp_profile_rules_calls_client(monkeypatch) -> None:
+    captured = {}
+
+    class FakeClient:
+        def replace_profile_rules(self, profile_key, rules):
+            captured["profile_key"] = profile_key
+            captured["rules"] = rules
+            return {"profile_key": profile_key, "rules": rules}
+
+    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    result = runner.invoke(
+        app,
+        ["metamcp", "profile", "rules", "safe-readonly", "--allow", "mysql", "--deny", "hive"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["profile_key"] == "safe-readonly"
+    assert captured["rules"] == [
+        {"source_type": "mcp_service", "source_key": "mysql", "effect": "allow"},
+        {"source_type": "mcp_service", "source_key": "hive", "effect": "deny"},
+    ]
+
+
+def test_metamcp_add_writes_project_config(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "metamcp",
+            "add",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+            "--profile",
+            "safe-readonly",
+        ],
+    )
+
+    config = tmp_path / ".mcp.json"
+    assert result.exit_code == 0
+    assert config.exists()
+    assert "safe-readonly" in config.read_text(encoding="utf-8")
+
+
+def test_metamcp_add_preserves_existing_servers(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / ".mcp.json"
+    config.write_text(
+        json.dumps({"mcpServers": {"existing": {"command": "node"}}}),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "metamcp",
+            "add",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+            "--profile",
+            "safe-readonly",
+        ],
+    )
+
+    data = json.loads(config.read_text(encoding="utf-8"))
+    assert result.exit_code == 0
+    assert "existing" in data["mcpServers"]
+    assert "agent-capability-hub" in data["mcpServers"]

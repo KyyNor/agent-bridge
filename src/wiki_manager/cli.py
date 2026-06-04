@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Any, Callable, TypeVar
@@ -17,8 +18,12 @@ app = typer.Typer(
 )
 kb_app = typer.Typer(help="Manage knowledge bases.", no_args_is_help=True)
 server_app = typer.Typer(help="Manage the local wiki-manager server.", no_args_is_help=True)
+metamcp_app = typer.Typer(help="Manage MetaMCP profiles and Claude Code connection.", no_args_is_help=True)
+metamcp_profile_app = typer.Typer(help="Manage Project Profiles.", no_args_is_help=True)
 app.add_typer(kb_app, name="kb")
 app.add_typer(server_app, name="server")
+app.add_typer(metamcp_app, name="metamcp")
+metamcp_app.add_typer(metamcp_profile_app, name="profile")
 
 T = TypeVar("T")
 
@@ -58,6 +63,39 @@ def _run_server_action(call: Callable[[], T]) -> T:
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
     parts = [f"{key}: {data[key]}" for key in keys if key in data]
     typer.echo(", ".join(parts) if parts else data)
+
+
+def _claude_config_path(scope: str) -> Path:
+    if scope == "project":
+        return Path.cwd() / ".mcp.json"
+    if scope == "user":
+        return Path.home() / ".mcp.json"
+    raise ValueError("scope must be project or user")
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"invalid JSON config: {path}") from exc
+    if not isinstance(loaded, dict):
+        raise RuntimeError(f"config must be a JSON object: {path}")
+    return loaded
+
+
+def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> dict[str, Any]:
+    config = dict(existing)
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+    servers["agent-capability-hub"] = {
+        "url": url,
+        "headers": {"X-Wiki-MetaMCP-Profile": profile},
+    }
+    config["mcpServers"] = servers
+    return config
 
 
 @app.callback()
@@ -129,6 +167,83 @@ def server_init() -> None:
     """Initialize the running wiki-manager service schema."""
     _run_client(lambda client: client.init_system())
     typer.echo("initialized")
+
+
+@metamcp_profile_app.command("create")
+def metamcp_profile_create(
+    profile_key: Annotated[str, typer.Argument(help="Project Profile key.")],
+    name: Annotated[str, typer.Option("--name", help="Display name.")],
+    description: Annotated[str, typer.Option("--description", help="Description.")] = "",
+    status: Annotated[str, typer.Option("--status", help="Profile status.")] = "active",
+) -> None:
+    profile = _run_client(lambda client: client.upsert_profile(profile_key, name, description, status))
+    _echo_mapping(profile, ("profile_key", "name", "status"))
+
+
+@metamcp_profile_app.command("list")
+def metamcp_profile_list() -> None:
+    profiles = _run_client(lambda client: client.list_profiles())
+    for profile in profiles:
+        typer.echo(
+            f"{profile['profile_key']} | allow: {profile.get('allow_count', 0)} | deny: {profile.get('deny_count', 0)}"
+        )
+
+
+@metamcp_profile_app.command("show")
+def metamcp_profile_show(profile_key: Annotated[str, typer.Argument(help="Project Profile key.")]) -> None:
+    profile = _run_client(lambda client: client.get_profile(profile_key))
+    _echo_mapping(profile, ("profile_key", "name", "status"))
+    for rule in profile.get("rules", []):
+        typer.echo(f"  {rule['effect']} {rule['source_type']}:{rule['source_key']}")
+
+
+@metamcp_profile_app.command("rules")
+def metamcp_profile_rules(
+    profile_key: Annotated[str, typer.Argument(help="Project Profile key.")],
+    allow: Annotated[list[str], typer.Option("--allow", help="Allowed MCP service key.")] = [],
+    deny: Annotated[list[str], typer.Option("--deny", help="Denied MCP service key.")] = [],
+) -> None:
+    rules = [
+        {"source_type": "mcp_service", "source_key": source_key, "effect": "allow"}
+        for source_key in allow
+    ] + [
+        {"source_type": "mcp_service", "source_key": source_key, "effect": "deny"}
+        for source_key in deny
+    ]
+    profile = _run_client(lambda client: client.replace_profile_rules(profile_key, rules))
+    typer.echo(f"profile: {profile['profile_key']} rules: {len(profile.get('rules', []))}")
+
+
+@metamcp_app.command("add")
+def metamcp_add(
+    scope: Annotated[str, typer.Option("--scope", help="project or user.")],
+    url: Annotated[str, typer.Option("--url", help="MetaMCP HTTP URL.")],
+    profile: Annotated[str, typer.Option("--profile", help="Project Profile key.")],
+) -> None:
+    path = _claude_config_path(scope)
+    try:
+        existing = _load_json_file(path)
+        path.write_text(
+            json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        typer.echo(f"metamcp config error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"written: {path}")
+
+
+@metamcp_app.command("config")
+def metamcp_config(scope: Annotated[str, typer.Option("--scope", help="project or user.")] = "project") -> None:
+    try:
+        path = _claude_config_path(scope)
+    except ValueError as exc:
+        typer.echo(f"metamcp config error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    if not path.exists():
+        typer.echo(f"missing: {path}")
+        return
+    typer.echo(path.read_text(encoding="utf-8"))
 
 
 @app.command()

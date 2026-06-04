@@ -178,3 +178,33 @@ class WikiManagerClient:
         )
         self._raise(response)
         return response.json()
+
+    def upsert_profile(self, profile_key: str, name: str, description: str, status: str) -> dict[str, Any]:
+        response = httpx.post(
+            f"{self.base_url}/capability-profiles",
+            json={"profile_key": profile_key, "name": name, "description": description, "status": status},
+            headers=self._headers(),
+            timeout=10.0,
+        )
+        self._raise(response)
+        return response.json()
+
+    def list_profiles(self) -> list[dict[str, Any]]:
+        response = httpx.get(f"{self.base_url}/capability-profiles", headers=self._headers(), timeout=10.0)
+        self._raise(response)
+        return response.json()
+
+    def get_profile(self, profile_key: str) -> dict[str, Any]:
+        response = httpx.get(f"{self.base_url}/capability-profiles/{profile_key}", headers=self._headers(), timeout=10.0)
+        self._raise(response)
+        return response.json()
+
+    def replace_profile_rules(self, profile_key: str, rules: list[dict[str, str]]) -> dict[str, Any]:
+        response = httpx.put(
+            f"{self.base_url}/capability-profiles/{profile_key}/rules",
+            json={"rules": rules},
+            headers=self._headers(),
+            timeout=10.0,
+        )
+        self._raise(response)
+        return response.json()

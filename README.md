@@ -82,3 +82,12 @@ MetaMCP `execute` example:
   }
 }
 ```
+
+## Phase 1.5 Governance Usage
+
+```bash
+uv run wiki metamcp profile create safe-readonly --name "安全只读"
+uv run wiki metamcp profile rules safe-readonly --allow mysql --deny hive
+uv run wiki metamcp add --scope project --url http://127.0.0.1:8765/mcp --profile safe-readonly
+uv run wiki metamcp config --scope project
+```
