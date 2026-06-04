@@ -127,6 +127,12 @@ class CapabilityService:
     def list_services(self, actor: str) -> list[dict[str, Any]]:
         return [self._service_payload(service, redact_headers=True) for service in self.store.list_mcp_services()]
 
+    def get_service(self, actor: str, service_key: str) -> dict[str, Any]:
+        service = self.store.get_mcp_service(service_key)
+        if service is None:
+            raise NotFound("service not found")
+        return self._service_payload(service, redact_headers=True)
+
     def set_service_status(self, actor: str, service_key: str, status: McpServiceStatus | str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         try:

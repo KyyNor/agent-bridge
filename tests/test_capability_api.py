@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from wiki_manager.capabilities import SourceType, ToolType
 from wiki_manager.server import create_app
+from wiki_manager.storage import SQLiteStore
 
 
 def test_mcp_service_registration_api(wm_paths) -> None:
@@ -137,3 +139,113 @@ def test_mcp_service_status_and_tools_api(wm_paths) -> None:
     assert disabled.json()["status"] == "disabled"
     assert tools.status_code == 400
     assert tools.json()["detail"] == "MCP service is not enabled"
+
+
+def test_profile_api_and_catalog_preview(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/capabilities/mcp-services",
+        json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
+        headers={"X-Wiki-User": "root"},
+    )
+    client.post(
+        "/capabilities/mcp-services",
+        json={"service_key": "hive", "name": "Hive", "endpoint_url": "https://hive.test/mcp"},
+        headers={"X-Wiki-User": "root"},
+    )
+
+    created = client.post(
+        "/capability-profiles",
+        json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
+        headers={"X-Wiki-User": "root"},
+    )
+    rules = client.put(
+        "/capability-profiles/safe-readonly/rules",
+        json={"rules": [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}]},
+        headers={"X-Wiki-User": "root"},
+    )
+    listed = client.get("/capability-profiles", headers={"X-Wiki-User": "root"})
+    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Wiki-User": "root"})
+    catalog = client.get(
+        "/capability-catalog",
+        params={"profile_key": "safe-readonly"},
+        headers={"X-Wiki-User": "root"},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["profile_key"] == "safe-readonly"
+    assert rules.status_code == 200
+    assert rules.json()["rules"][0]["source_key"] == "hive"
+    assert listed.status_code == 200
+    assert listed.json()[0]["deny_count"] == 1
+    assert detail.status_code == 200
+    assert detail.json()["rules"][0]["effect"] == "deny"
+    assert catalog.status_code == 200
+    assert [item["source_key"] for item in catalog.json()["sources"]] == ["mysql"]
+
+
+def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    response = client.post(
+        "/mcp/search",
+        json={"query": "mysql"},
+        headers={"X-Wiki-User": "root"},
+    )
+    log_id = response.json()["log_id"]
+
+    listed = client.get("/tool-call-logs", headers={"X-Wiki-User": "root"})
+    detail = client.get(f"/tool-call-logs/{log_id}", headers={"X-Wiki-User": "root"})
+
+    assert listed.status_code == 200
+    assert listed.json()[0]["log_id"] == log_id
+    assert detail.status_code == 200
+    assert '"query": "mysql"' in detail.json()["request_json"]
+    assert detail.json()["response_json"]
+
+
+def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/capabilities/mcp-services",
+        json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
+        headers={"X-Wiki-User": "root"},
+    )
+    store = SQLiteStore(wm_paths.db_path)
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_sql",
+        display_name="Query SQL",
+        description="Run SQL",
+        input_schema={"type": "object", "properties": {"sql": {"type": "string"}}},
+        tool_type=ToolType.search.value,
+        tags=["sql"],
+        examples=[],
+    )
+    store.create_tool_call_log(
+        log_id="call_catalog_detail",
+        actor="root",
+        profile_key=None,
+        entrypoint="metamcp_execute",
+        source_type=SourceType.mcp_service.value,
+        source_key="mysql",
+        tool_name="query_sql",
+        request={"sql": "select 1"},
+        response={"rows": []},
+        status="success",
+    )
+
+    source = client.get("/capability-catalog/sources/mcp_service/mysql", headers={"X-Wiki-User": "root"})
+    tool = client.get(
+        "/capability-catalog/sources/mcp_service/mysql/tools/query_sql",
+        headers={"X-Wiki-User": "root"},
+    )
+
+    assert source.status_code == 200
+    assert source.json()["source"]["service_key"] == "mysql"
+    assert source.json()["tools"][0]["tool"] == "query_sql"
+    assert tool.status_code == 200
+    assert tool.json()["tool"]["tool"] == "query_sql"
+    assert tool.json()["logs"][0]["log_id"] == "call_catalog_detail"
