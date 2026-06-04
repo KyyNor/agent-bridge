@@ -14,6 +14,7 @@ def create_mcp_server(
     *,
     service: WikiManagerService | None = None,
     actor: str = "root",
+    profile_key: str | None = None,
     paths: WikiManagerPaths | None = None,
     admins: set[str] | None = None,
 ) -> Server:
@@ -95,6 +96,7 @@ def create_mcp_server(
                 path=arguments.get("path"),
                 query=arguments.get("query"),
                 limit=int(arguments.get("limit", 20)),
+                profile_key=profile_key,
             )
         if name == "execute":
             return await svc.capabilities.execute(
@@ -102,6 +104,7 @@ def create_mcp_server(
                 service=arguments["service"],
                 tool=arguments["tool"],
                 arguments=arguments.get("arguments") or {},
+                profile_key=profile_key,
             )
         raise ValueError(f"unknown tool: {name}")
 

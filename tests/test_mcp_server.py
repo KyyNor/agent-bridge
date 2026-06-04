@@ -59,11 +59,12 @@ def test_mcp_search_tool_calls_capability_service():
     returned = {"items": [{"service": "svc-1", "tool": "read"}]}
 
     class FakeCapabilities:
-        def search(self, *, actor, path, query, limit=20):
+        def search(self, *, actor, path, query, limit=20, profile_key=None):
             assert actor == "root"
             assert path == "svc-1"
             assert query == "read"
             assert limit == 3
+            assert profile_key is None
             return returned
 
     class FakeService:
@@ -110,11 +111,12 @@ def test_mcp_execute_tool_calls_capability_service():
     returned = {"success": True, "content": [{"type": "text", "text": "ok"}]}
 
     class FakeCapabilities:
-        async def execute(self, *, actor, service, tool, arguments):
+        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
             assert actor == "root"
             assert service == "svc-1"
             assert tool == "read"
             assert arguments == {"path": "/docs"}
+            assert profile_key is None
             return returned
 
     class FakeService:
@@ -135,3 +137,56 @@ def test_mcp_execute_tool_calls_capability_service():
 
     payload = result.root.structuredContent
     assert payload["success"] is True
+
+
+def test_mcp_search_passes_profile_to_capability_service():
+    from wiki_manager.mcp_server import create_mcp_server
+
+    class FakeCapabilities:
+        def search(self, *, actor, path, query, limit=20, profile_key=None):
+            assert actor == "root"
+            assert path is None
+            assert query is None
+            assert limit == 20
+            assert profile_key == "safe-readonly"
+            return {"path": "/", "items": [], "log_id": "call_1"}
+
+    class FakeService:
+        capabilities = FakeCapabilities()
+
+    server = create_mcp_server(service=FakeService(), actor="root", profile_key="safe-readonly")
+    handler = server.request_handlers[CallToolRequest]
+    result = asyncio.run(handler(CallToolRequest(params=CallToolRequestParams(name="search", arguments={}))))
+
+    assert result.root.structuredContent["log_id"] == "call_1"
+
+
+def test_mcp_execute_passes_profile_to_capability_service():
+    from wiki_manager.mcp_server import create_mcp_server
+
+    class FakeCapabilities:
+        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
+            assert actor == "root"
+            assert service == "mysql"
+            assert tool == "query_sql"
+            assert arguments == {}
+            assert profile_key == "safe-readonly"
+            return {"service": service, "tool": tool, "success": True, "result": {}, "log_id": "call_2"}
+
+    class FakeService:
+        capabilities = FakeCapabilities()
+
+    server = create_mcp_server(service=FakeService(), actor="root", profile_key="safe-readonly")
+    handler = server.request_handlers[CallToolRequest]
+    result = asyncio.run(
+        handler(
+            CallToolRequest(
+                params=CallToolRequestParams(
+                    name="execute",
+                    arguments={"service": "mysql", "tool": "query_sql", "arguments": {}},
+                )
+            )
+        )
+    )
+
+    assert result.root.structuredContent["log_id"] == "call_2"
