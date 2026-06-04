@@ -56,6 +56,10 @@ class UpdateMcpServiceStatusRequest(BaseModel):
     status: str
 
 
+class UpdateMcpToolTypeRequest(BaseModel):
+    tool_type: str
+
+
 class ProjectProfileRequest(BaseModel):
     profile_key: str
     name: str
@@ -350,6 +354,23 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
     def list_mcp_service_tools(service_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         ensure_capability_schema()
         return call_safely(lambda: service.capabilities.list_tools(current_actor, service_key))
+
+    @app.put("/capabilities/mcp-services/{service_key}/tools/{tool_name}/type")
+    def update_mcp_tool_type(
+        service_key: str,
+        tool_name: str,
+        payload: UpdateMcpToolTypeRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.capabilities.set_tool_type(
+                current_actor,
+                service_key,
+                tool_name,
+                payload.tool_type,
+            )
+        )
 
     @app.post("/capability-profiles")
     def upsert_capability_profile(

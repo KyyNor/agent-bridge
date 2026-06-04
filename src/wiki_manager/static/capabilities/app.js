@@ -9,6 +9,14 @@ let selectedServiceKey = "";
 let services = [];
 let currentView = "catalog";
 
+const TOOL_TYPE_LABELS = {
+  unconfigured: "未配置",
+  overview: "目录",
+  search: "检索",
+  detail: "明细",
+  action: "操作",
+};
+
 const els = {
   form: document.getElementById("serviceForm"),
   servicesTable: document.getElementById("servicesTable"),
@@ -72,6 +80,15 @@ function renderTags(tags) {
     return '<span class="empty">未设置</span>';
   }
   return tags.map((tag) => `<span class="badge">${escapeHtml(tag)}</span>`).join("");
+}
+
+function renderToolTypeOptions(selected) {
+  return Object.entries(TOOL_TYPE_LABELS)
+    .map(([value, label]) => {
+      const isSelected = value === selected ? " selected" : "";
+      return `<option value="${escapeHtml(value)}"${isSelected}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
 }
 
 function statusText(status) {
@@ -344,6 +361,22 @@ async function syncService(serviceKey) {
   }
 }
 
+async function saveToolType(serviceKey, toolName, toolType) {
+  try {
+    const tool = await apiRequest(
+      `/capabilities/mcp-services/${encodeURIComponent(serviceKey)}/tools/${encodeURIComponent(toolName)}/type`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ tool_type: toolType }),
+      }
+    );
+    await loadTools(serviceKey);
+    showMessage(`已将 ${tool.tool} 配置为${TOOL_TYPE_LABELS[tool.tool_type] || tool.tool_type}。`);
+  } catch (error) {
+    showMessage(error.message, "error");
+  }
+}
+
 async function loadTools(serviceKey = selectedServiceKey) {
   if (!serviceKey) {
     els.reloadTools.disabled = true;
@@ -375,7 +408,12 @@ async function loadTools(serviceKey = selectedServiceKey) {
           <article class="tool-item">
             <div class="tool-title">
               <strong>${escapeHtml(tool.name || tool.tool)}</strong>
-              <span class="badge">${escapeHtml(tool.tool_type)}</span>
+              <div class="tool-type-control">
+                <select data-tool-type="${escapeHtml(tool.tool)}" aria-label="工具类型">
+                  ${renderToolTypeOptions(tool.tool_type || "unconfigured")}
+                </select>
+                <button type="button" data-action="save-tool-type" data-service="${escapeHtml(serviceKey)}" data-tool="${escapeHtml(tool.tool)}">保存</button>
+              </div>
             </div>
             <p>${escapeHtml(tool.description || "未填写描述。")}</p>
           </article>
@@ -432,6 +470,21 @@ els.servicesTable.addEventListener("click", (event) => {
   } else if (button.dataset.action === "status") {
     setServiceStatus(serviceKey, button.dataset.status);
   }
+});
+
+els.toolsList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action='save-tool-type']");
+  if (!button) {
+    return;
+  }
+  const serviceKey = button.dataset.service;
+  const toolName = button.dataset.tool;
+  const item = button.closest(".tool-item");
+  const selector = item ? item.querySelector("select[data-tool-type]") : null;
+  if (!serviceKey || !toolName || !selector) {
+    return;
+  }
+  saveToolType(serviceKey, toolName, selector.value);
 });
 
 window.loadServices = loadServices;

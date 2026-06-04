@@ -148,6 +148,19 @@ class CapabilityService:
             raise NotFound("service not found")
         return self._service_payload(updated)
 
+    def set_tool_type(self, actor: str, service_key: str, tool_name: str, tool_type: ToolType | str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        try:
+            next_tool_type = ToolType(tool_type)
+        except ValueError as exc:
+            raise ValidationError("invalid tool type") from exc
+        if self.store.get_mcp_service(service_key) is None:
+            raise NotFound("service not found")
+        tool = self.store.get_mcp_tool(service_key, tool_name)
+        if tool is None:
+            raise NotFound("tool not found")
+        return self._tool_payload(self.store.update_mcp_tool_type(service_key, tool_name, next_tool_type))
+
     async def sync_tools(self, actor: str, service_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         service = self.store.get_mcp_service(service_key)
@@ -314,8 +327,13 @@ class CapabilityService:
         if tool_payload is None or tool_payload.get("status") != "active":
             raise NotFound("tool not found")
         if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
+            if tool_payload["tool_type"] == ToolType.unconfigured.value:
+                raise _mark_call_log_status(
+                    ValidationError("tool type is not configured"),
+                    CallLogStatus.blocked.value,
+                )
             raise _mark_call_log_status(
-                ValidationError("action tools are not executable in phase 1"),
+                ValidationError("tool type is not executable"),
                 CallLogStatus.blocked.value,
             )
 
@@ -436,7 +454,7 @@ class CapabilityService:
             "display_name": self._display_name(tool),
             "description": str(tool.get("description") or ""),
             "input_schema": input_schema,
-            "tool_type": self._infer_tool_type(tool),
+            "tool_type": ToolType.unconfigured,
             "tags": self._tool_tags(tool),
             "examples": examples,
         }
@@ -452,26 +470,6 @@ class CapabilityService:
         if isinstance(tags, list):
             return [str(tag) for tag in tags]
         return []
-
-    def _infer_tool_type(self, tool: dict[str, Any]) -> ToolType:
-        haystack = f"{tool.get('name', '')} {tool.get('description', '')}".lower()
-        annotations = tool.get("annotations")
-        if isinstance(annotations, dict):
-            if annotations.get("destructiveHint") is True or annotations.get("readOnlyHint") is False:
-                return ToolType.action
-            if annotations.get("readOnlyHint") is True:
-                return self._infer_readonly_tool_type(haystack)
-
-        if any(token in haystack for token in ("delete", "remove", "update", "create", "write", "insert", "execute")):
-            return ToolType.action
-        return self._infer_readonly_tool_type(haystack)
-
-    def _infer_readonly_tool_type(self, haystack: str) -> ToolType:
-        if any(token in haystack for token in ("list", "overview", "summary")):
-            return ToolType.overview
-        if any(token in haystack for token in ("get", "detail", "fetch", "read")):
-            return ToolType.detail
-        return ToolType.search
 
     def _validate_service_key(self, service_key: str) -> None:
         if not SERVICE_KEY_RE.fullmatch(service_key):

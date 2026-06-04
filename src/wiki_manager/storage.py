@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
   display_name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   input_schema_json TEXT NOT NULL DEFAULT '{}',
-  tool_type TEXT NOT NULL DEFAULT 'search',
+  tool_type TEXT NOT NULL DEFAULT 'unconfigured',
   tags_json TEXT NOT NULL DEFAULT '[]',
   examples_json TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'active',
@@ -441,7 +441,6 @@ class SQLiteStore:
                   display_name = excluded.display_name,
                   description = excluded.description,
                   input_schema_json = excluded.input_schema_json,
-                  tool_type = excluded.tool_type,
                   tags_json = excluded.tags_json,
                   examples_json = excluded.examples_json,
                   status = 'active',
@@ -458,6 +457,32 @@ class SQLiteStore:
                     json.dumps(tags, ensure_ascii=False),
                     json.dumps(examples, ensure_ascii=False),
                 ),
+            )
+            row = conn.execute(
+                "SELECT * FROM mcp_tools WHERE service_key = ? AND tool_name = ?",
+                (service_key, tool_name),
+            ).fetchone()
+            tool = _row_to_dict(row)
+            if tool is None:
+                raise KeyError(f"mcp tool not found: {service_key}/{tool_name}")
+            return tool
+
+    def update_mcp_tool_type(
+        self,
+        service_key: str,
+        tool_name: str,
+        tool_type: ToolType | str,
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE mcp_tools
+                SET tool_type = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                  AND tool_name = ?
+                """,
+                (_enum_value(tool_type), service_key, tool_name),
             )
             row = conn.execute(
                 "SELECT * FROM mcp_tools WHERE service_key = ? AND tool_name = ?",

@@ -171,6 +171,49 @@ def test_mcp_service_status_and_tools_api(wm_paths) -> None:
     assert tools.json()["detail"] == "MCP service is not enabled"
 
 
+def test_mcp_tool_type_api_requires_admin_and_updates_tool(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/capabilities/mcp-services",
+        json={"service_key": "mysql", "name": "MySQL MCP", "endpoint_url": "https://mysql.example.test/mcp"},
+        headers={"X-Wiki-User": "root"},
+    )
+    store = SQLiteStore(wm_paths.db_path)
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_sql",
+        display_name="Query SQL",
+        description="Run SQL",
+        input_schema={"type": "object"},
+        tool_type=ToolType.unconfigured.value,
+        tags=[],
+        examples=[],
+    )
+
+    denied = client.put(
+        "/capabilities/mcp-services/mysql/tools/query_sql/type",
+        json={"tool_type": "search"},
+        headers={"X-Wiki-User": "alice"},
+    )
+    invalid = client.put(
+        "/capabilities/mcp-services/mysql/tools/query_sql/type",
+        json={"tool_type": "other"},
+        headers={"X-Wiki-User": "root"},
+    )
+    updated = client.put(
+        "/capabilities/mcp-services/mysql/tools/query_sql/type",
+        json={"tool_type": "search"},
+        headers={"X-Wiki-User": "root"},
+    )
+
+    assert denied.status_code == 403
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "invalid tool type"
+    assert updated.status_code == 200
+    assert updated.json()["tool_type"] == "search"
+
+
 def test_profile_api_and_catalog_preview(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

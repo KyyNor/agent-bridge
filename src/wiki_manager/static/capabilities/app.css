@@ -33,6 +33,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -397,6 +398,7 @@ label {
 }
 
 input,
+select,
 textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -431,6 +433,24 @@ textarea {
 
 .tool-title strong {
   font-size: 14px;
+}
+
+.tool-type-control {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.tool-type-control select {
+  min-width: 112px;
+  padding: 6px 8px;
+}
+
+.tool-type-control button {
+  font-size: 12px;
+  padding: 6px 9px;
 }
 
 .tool-item p {

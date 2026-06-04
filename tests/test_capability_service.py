@@ -168,8 +168,8 @@ def test_sync_tools_stores_tools_and_passes_headers(wm_paths: WikiManagerPaths) 
     tools = service.list_tools("alice", "docs-api")
     assert [tool["tool"] for tool in tools] == ["delete_doc", "search_docs"]
     assert {tool["tool"]: tool["tool_type"] for tool in tools} == {
-        "delete_doc": ToolType.action.value,
-        "search_docs": ToolType.search.value,
+        "delete_doc": ToolType.unconfigured.value,
+        "search_docs": ToolType.unconfigured.value,
     }
 
 
@@ -221,7 +221,7 @@ def test_search_root_and_service_path_filters_by_query(wm_paths: WikiManagerPath
     assert tools["items"][0]["service"] == "docs-api"
     assert tools["items"][0]["tool"] == "search_docs"
     assert tools["items"][0]["execute_example"] == {"query": "<string>"}
-    assert tools["items"][0]["executable"] is True
+    assert tools["items"][0]["executable"] is False
 
 
 @pytest.mark.parametrize("status", [McpServiceStatus.disabled, McpServiceStatus.error])
@@ -318,12 +318,12 @@ def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: WikiMana
         asyncio.run(service.execute("alice", "docs-api", "get_doc", {"doc_id": "doc-1"}))
 
 
-def test_execute_rejects_annotation_destructive_action_tool(wm_paths: WikiManagerPaths) -> None:
+def test_execute_rejects_unconfigured_tool(wm_paths: WikiManagerPaths) -> None:
     service, client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     asyncio.run(service.sync_tools("root", "docs-api"))
 
-    with pytest.raises(ValidationError, match=r"action tools are not executable in phase 1 .*log_id: call_") as exc_info:
+    with pytest.raises(ValidationError, match=r"tool type is not configured .*log_id: call_") as exc_info:
         asyncio.run(service.execute("alice", "docs-api", "delete_doc", {"doc_id": "1"}))
 
     assert client.call_tool_calls == []
@@ -337,43 +337,11 @@ def test_execute_rejects_annotation_destructive_action_tool(wm_paths: WikiManage
         "arguments": {"doc_id": "1"},
         "profile_key": None,
     }
-    assert json.loads(logs[0]["response_json"])["error"] == "action tools are not executable in phase 1"
-    assert logs[0]["error_message"] == "action tools are not executable in phase 1"
+    assert json.loads(logs[0]["response_json"])["error"] == "tool type is not configured"
+    assert logs[0]["error_message"] == "tool type is not configured"
 
 
-def test_readonly_annotation_overrides_action_name_heuristic(wm_paths: WikiManagerPaths) -> None:
-    class ConflictingMcpClient(FakeMcpClient):
-        async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
-            return [
-                {
-                    "name": "delete_archive",
-                    "description": "Delete archive metadata",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {"archive_id": {"type": "string"}},
-                    },
-                    "annotations": {"readOnlyHint": True},
-                }
-            ]
-
-    store = SQLiteStore(wm_paths.db_path)
-    store.init_schema()
-    client = ConflictingMcpClient()
-    service = CapabilityService(store=store, mcp_client=client, admins={"root"})
-    service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
-
-    asyncio.run(service.sync_tools("root", "docs-api"))
-
-    tools = service.list_tools("alice", "docs-api")
-    assert tools[0]["tool"] == "delete_archive"
-    assert tools[0]["tool_type"] == ToolType.search.value
-
-    result = asyncio.run(service.execute("alice", "docs-api", "delete_archive", {"archive_id": "archive-1"}))
-    assert result["success"] is True
-    assert client.call_tool_calls[0]["tool_name"] == "delete_archive"
-
-
-def test_readonly_annotation_allows_readonly_name_classification_without_action(wm_paths: WikiManagerPaths) -> None:
+def test_admin_configures_tool_type_and_sync_preserves_choice(wm_paths: WikiManagerPaths) -> None:
     class ReadonlyNamingMcpClient(FakeMcpClient):
         async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
             return [
@@ -403,13 +371,26 @@ def test_readonly_annotation_allows_readonly_name_classification_without_action(
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
 
     asyncio.run(service.sync_tools("root", "docs-api"))
+    with pytest.raises(AccessDenied):
+        service.set_tool_type("alice", "docs-api", "list_archives", ToolType.overview.value)
+
+    configured = service.set_tool_type("root", "docs-api", "list_archives", ToolType.overview.value)
+    service.set_tool_type("root", "docs-api", "get_archive_detail", ToolType.detail.value)
 
     tool_types = {tool["tool"]: tool["tool_type"] for tool in service.list_tools("alice", "docs-api")}
+    assert configured["tool_type"] == ToolType.overview.value
     assert tool_types == {
-        "delete_archive": ToolType.search.value,
+        "delete_archive": ToolType.unconfigured.value,
         "get_archive_detail": ToolType.detail.value,
         "list_archives": ToolType.overview.value,
     }
+
+    asyncio.run(service.sync_tools("root", "docs-api"))
+
+    tool_types = {tool["tool"]: tool["tool_type"] for tool in service.list_tools("alice", "docs-api")}
+    assert tool_types["list_archives"] == ToolType.overview.value
+    assert tool_types["get_archive_detail"] == ToolType.detail.value
+    assert tool_types["delete_archive"] == ToolType.unconfigured.value
 
 
 def test_execute_rejects_unexpected_tool_type(wm_paths: WikiManagerPaths) -> None:
@@ -426,7 +407,7 @@ def test_execute_rejects_unexpected_tool_type(wm_paths: WikiManagerPaths) -> Non
         examples=[],
     )
 
-    with pytest.raises(ValidationError, match="action tools are not executable in phase 1"):
+    with pytest.raises(ValidationError, match="tool type is not executable"):
         asyncio.run(service.execute("alice", "docs-api", "experimental_tool", {}))
 
 
@@ -442,6 +423,7 @@ def test_execute_calls_readonly_tool(wm_paths: WikiManagerPaths) -> None:
         ["docs"],
     )
     asyncio.run(service.sync_tools("root", "docs-api"))
+    service.set_tool_type("root", "docs-api", "search_docs", ToolType.search.value)
 
     result = asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))
 
@@ -549,6 +531,7 @@ def test_execute_success_returns_log_id_and_metamcp_execute_log(wm_paths: WikiMa
     client.tools = [{"name": "query_sql", "description": "Run SQL", "input_schema": {"type": "object"}}]
     client.call_result = {"structured": {"rows": [{"id": 1}]}, "is_error": False, "content": []}
     asyncio.run(service.sync_tools("root", "mysql"))
+    service.set_tool_type("root", "mysql", "query_sql", ToolType.search.value)
 
     result = asyncio.run(service.execute("root", "mysql", "query_sql", {"sql": "select 1"}))
 
@@ -594,6 +577,7 @@ def test_execute_wraps_mcp_client_failures(wm_paths: WikiManagerPaths) -> None:
     service = CapabilityService(store=store, mcp_client=FailingCallMcpClient(), admins={"root"})
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     asyncio.run(service.sync_tools("root", "docs-api"))
+    service.set_tool_type("root", "docs-api", "search_docs", ToolType.search.value)
 
     with pytest.raises(ValidationError, match=r"MCP tool execution failed: transport unavailable .*log_id: call_") as exc_info:
         asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))

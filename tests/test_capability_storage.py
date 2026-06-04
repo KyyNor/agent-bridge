@@ -126,7 +126,7 @@ def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: WikiManagerPaths) -> N
         display_name="Query SQL",
         description="Run a SQL query",
         input_schema={"type": "object", "properties": {"sql": {"type": "string"}}},
-        tool_type=ToolType.search,
+        tool_type=ToolType.detail,
         tags=["database"],
         examples=[{"sql": "select 1"}],
     )
@@ -146,6 +146,7 @@ def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: WikiManagerPaths) -> N
     assert tools[0]["id"] == tool["id"]
     assert tools[0]["tool_name"] == "query_sql"
     assert tools[0]["description"] == "Run a SQL query with limit"
+    assert tools[0]["tool_type"] == ToolType.detail.value
     assert json.loads(tools[0]["input_schema_json"]) == {
         "type": "object",
         "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
@@ -153,6 +154,35 @@ def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: WikiManagerPaths) -> N
     assert json.loads(tools[0]["tags_json"]) == ["database", "report"]
     assert json.loads(tools[0]["examples_json"]) == [{"query": "select * from users", "limit": 10}]
     assert store.get_mcp_tool("mysql", "query_sql")["id"] == tool["id"]
+
+
+def test_update_mcp_tool_type_changes_only_admin_configured_type(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="http://localhost:9001/mcp",
+        headers={},
+        description="SQL database MCP service",
+        tags=["database"],
+        created_by="root",
+    )
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_sql",
+        display_name="Query SQL",
+        description="Run a SQL query",
+        input_schema={"type": "object"},
+        tool_type=ToolType.unconfigured,
+        tags=["database"],
+        examples=[],
+    )
+
+    updated = store.update_mcp_tool_type("mysql", "query_sql", ToolType.search)
+
+    assert updated["tool_type"] == ToolType.search.value
+    assert updated["description"] == "Run a SQL query"
 
 
 def test_mcp_tool_upsert_reactivates_inactive_tool(wm_paths: WikiManagerPaths) -> None:
