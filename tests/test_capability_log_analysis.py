@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
-from wiki_manager.capabilities import CallLogStatus, FailureOwner, FailureStage, SourceType
+import pytest
+
+from test_capability_service import FakeMcpClient
+from wiki_manager.capabilities import CallLogStatus, FailureOwner, FailureStage, SourceType, ToolType
+from wiki_manager.capability_service import CapabilityService
 from wiki_manager.config import WikiManagerPaths
+from wiki_manager.domain import ValidationError
 from wiki_manager.storage import SQLiteStore
 
 
@@ -87,3 +93,45 @@ def test_tool_call_log_filters_by_failure_and_time_range(wm_paths: WikiManagerPa
     )
 
     assert [item["log_id"] for item in filtered] == ["call_policy_block"]
+
+
+def test_execute_classifies_profile_block(wm_paths: WikiManagerPaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CapabilityService(store=store, mcp_client=FakeMcpClient(), admins={"root"})
+    service.register_service("root", "hive", "Hive", "https://hive.test/mcp", {}, "Hive service", ["db"])
+    service.governance.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
+    service.governance.replace_profile_rules(
+        "root",
+        "safe-readonly",
+        [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}],
+    )
+
+    with pytest.raises(ValidationError):
+        asyncio.run(service.execute("root", "hive", "query_sql", {}, profile_key="safe-readonly"))
+
+    log = service.governance.list_logs(actor="root", status="blocked")[0]
+    assert log["failure_stage"] == FailureStage.profile_policy.value
+    assert log["failure_owner"] == FailureOwner.policy.value
+    assert log["error_type"] == "profile_policy_blocked"
+
+
+def test_execute_classifies_mcp_transport_error(wm_paths: WikiManagerPaths) -> None:
+    class FailingCallMcpClient(FakeMcpClient):
+        async def call_tool(self, endpoint_url, headers, tool_name, arguments):
+            raise RuntimeError("transport unavailable")
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CapabilityService(store=store, mcp_client=FailingCallMcpClient(), admins={"root"})
+    service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "", [])
+    asyncio.run(service.sync_tools("root", "docs-api"))
+    service.set_tool_type("root", "docs-api", "search_docs", ToolType.search.value)
+
+    with pytest.raises(ValidationError):
+        asyncio.run(service.execute("root", "docs-api", "search_docs", {"query": "hello"}))
+
+    log = service.governance.list_logs(actor="root", status="error")[0]
+    assert log["failure_stage"] == FailureStage.mcp_transport.value
+    assert log["failure_owner"] == FailureOwner.upstream_mcp.value
+    assert log["error_type"] == "mcp_transport_error"

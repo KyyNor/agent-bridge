@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from wiki_manager.capabilities import CallLogStatus, McpServiceStatus, SourceType, ToolType
+from wiki_manager.capabilities import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
 from wiki_manager.capability_governance import CapabilityGovernanceService, monotonic_ms
 from wiki_manager.domain import NotFound, ValidationError, require_admin_user
 from wiki_manager.mcp_http_client import McpHttpClient
@@ -72,6 +72,31 @@ def _mark_call_log_status(exc: Exception, status: str) -> Exception:
 
 def _call_log_status(exc: Exception) -> str:
     return str(getattr(exc, "_tool_call_log_status", CallLogStatus.error.value))
+
+
+def _mark_call_log_failure(
+    exc: Exception,
+    *,
+    stage: str,
+    owner: str,
+    error_type: str,
+) -> Exception:
+    setattr(exc, "_tool_call_failure_stage", stage)
+    setattr(exc, "_tool_call_failure_owner", owner)
+    setattr(exc, "_tool_call_error_type", error_type)
+    return exc
+
+
+def _failure_stage(exc: Exception) -> str:
+    return str(getattr(exc, "_tool_call_failure_stage", FailureStage.internal.value))
+
+
+def _failure_owner(exc: Exception) -> str:
+    return str(getattr(exc, "_tool_call_failure_owner", FailureOwner.platform.value))
+
+
+def _error_type(exc: Exception) -> str:
+    return str(getattr(exc, "_tool_call_error_type", "internal_error"))
 
 
 class CapabilityService:
@@ -233,6 +258,9 @@ class CapabilityService:
                 response={"error": str(exc)},
                 status=CallLogStatus.error.value,
                 error_message=str(exc),
+                failure_stage=_failure_stage(exc),
+                failure_owner=_failure_owner(exc),
+                error_type=_error_type(exc),
                 duration_ms=monotonic_ms() - started,
             )
             _attach_log_id(exc, log["log_id"])
@@ -279,9 +307,14 @@ class CapabilityService:
         request = {"service": service, "tool": tool, "arguments": arguments, "profile_key": profile_key}
         try:
             if not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
-                raise _mark_call_log_status(
-                    ValidationError("source is blocked by profile policy"),
-                    CallLogStatus.blocked.value,
+                raise _mark_call_log_failure(
+                    _mark_call_log_status(
+                        ValidationError("source is blocked by profile policy"),
+                        CallLogStatus.blocked.value,
+                    ),
+                    stage=FailureStage.profile_policy.value,
+                    owner=FailureOwner.policy.value,
+                    error_type="profile_policy_blocked",
                 )
             result = await self._execute_without_log(actor, service, tool, arguments)
             log = self.governance.log_tool_call(
@@ -310,6 +343,9 @@ class CapabilityService:
                 response={"error": str(exc)},
                 status=_call_log_status(exc),
                 error_message=str(exc),
+                failure_stage=_failure_stage(exc),
+                failure_owner=_failure_owner(exc),
+                error_type=_error_type(exc),
                 duration_ms=monotonic_ms() - started,
             )
             _attach_log_id(exc, log["log_id"])
@@ -325,16 +361,31 @@ class CapabilityService:
         service_payload = self._require_enabled_service(service)
         tool_payload = self.store.get_mcp_tool(service, tool)
         if tool_payload is None or tool_payload.get("status") != "active":
-            raise NotFound("tool not found")
+            raise _mark_call_log_failure(
+                NotFound("tool not found"),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
+            )
         if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
             if tool_payload["tool_type"] == ToolType.unconfigured.value:
-                raise _mark_call_log_status(
-                    ValidationError("tool type is not configured"),
-                    CallLogStatus.blocked.value,
+                raise _mark_call_log_failure(
+                    _mark_call_log_status(
+                        ValidationError("tool type is not configured"),
+                        CallLogStatus.blocked.value,
+                    ),
+                    stage=FailureStage.capability_registry.value,
+                    owner=FailureOwner.platform.value,
+                    error_type="capability_registry_error",
                 )
-            raise _mark_call_log_status(
-                ValidationError("tool type is not executable"),
-                CallLogStatus.blocked.value,
+            raise _mark_call_log_failure(
+                _mark_call_log_status(
+                    ValidationError("tool type is not executable"),
+                    CallLogStatus.blocked.value,
+                ),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
             )
 
         headers = _json_loads(service_payload.get("headers_json"), {})
@@ -346,7 +397,12 @@ class CapabilityService:
                 arguments,
             )
         except Exception as exc:
-            raise ValidationError(f"MCP tool execution failed: {exc}") from exc
+            raise _mark_call_log_failure(
+                ValidationError(f"MCP tool execution failed: {exc}"),
+                stage=FailureStage.mcp_transport.value,
+                owner=FailureOwner.upstream_mcp.value,
+                error_type="mcp_transport_error",
+            ) from exc
         return {
             "service": service,
             "tool": tool,
@@ -357,9 +413,19 @@ class CapabilityService:
     def _require_enabled_service(self, service_key: str) -> dict[str, Any]:
         service = self.store.get_mcp_service(service_key)
         if service is None:
-            raise NotFound("service not found")
+            raise _mark_call_log_failure(
+                NotFound("service not found"),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
+            )
         if service["status"] != McpServiceStatus.enabled.value:
-            raise ValidationError("MCP service is not enabled")
+            raise _mark_call_log_failure(
+                ValidationError("MCP service is not enabled"),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
+            )
         return service
 
     def _root_search_items(self, *, actor: str, profile_key: str | None = None) -> list[dict[str, Any]]:

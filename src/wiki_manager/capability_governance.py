@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from wiki_manager.capabilities import CallLogStatus, ProfileRuleEffect, SourceType
+from wiki_manager.capabilities import CallLogStatus, FailureOwner, FailureStage, ProfileRuleEffect, SourceType
 from wiki_manager.domain import NotFound, ValidationError, require_admin_user
 from wiki_manager.storage import SQLiteStore
 
@@ -132,9 +132,16 @@ class CapabilityGovernanceService:
         status: str,
         error_message: str | None,
         duration_ms: int | None,
+        failure_stage: str | None = None,
+        failure_owner: str | None = None,
+        error_type: str | None = None,
+        resource_type: str | None = None,
+        resource_key: str | None = None,
     ) -> dict[str, Any]:
         normalized_source_type = self._validate_optional_source_type(source_type)
         normalized_status = self._validate_call_log_status(status)
+        normalized_failure_stage = self._validate_optional_failure_stage(failure_stage)
+        normalized_failure_owner = self._validate_optional_failure_owner(failure_owner)
         return self.store.create_tool_call_log(
             log_id=make_log_id(),
             actor=actor,
@@ -147,6 +154,11 @@ class CapabilityGovernanceService:
             response=response,
             status=normalized_status,
             error_message=error_message,
+            failure_stage=normalized_failure_stage,
+            failure_owner=normalized_failure_owner,
+            error_type=error_type,
+            resource_type=resource_type,
+            resource_key=resource_key,
             duration_ms=duration_ms,
         )
 
@@ -160,12 +172,21 @@ class CapabilityGovernanceService:
         tool_name: str | None = None,
         profile_key: str | None = None,
         status: str | None = None,
+        failure_stage: str | None = None,
+        failure_owner: str | None = None,
+        error_type: str | None = None,
+        resource_type: str | None = None,
+        resource_key: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         normalized_source_type = self._validate_optional_source_type(source_type)
         normalized_status = self._validate_optional_call_log_status(status)
+        normalized_failure_stage = self._validate_optional_failure_stage(failure_stage)
+        normalized_failure_owner = self._validate_optional_failure_owner(failure_owner)
         return self.store.list_tool_call_logs(
             entrypoint=entrypoint,
             source_type=normalized_source_type,
@@ -173,6 +194,13 @@ class CapabilityGovernanceService:
             tool_name=tool_name,
             profile_key=profile_key,
             status=normalized_status,
+            failure_stage=normalized_failure_stage,
+            failure_owner=normalized_failure_owner,
+            error_type=error_type,
+            resource_type=resource_type,
+            resource_key=resource_key,
+            created_from=created_from,
+            created_to=created_to,
             limit=limit,
             offset=offset,
         )
@@ -219,3 +247,19 @@ class CapabilityGovernanceService:
         if status is None:
             return None
         return self._validate_call_log_status(status)
+
+    def _validate_optional_failure_stage(self, failure_stage: str | None) -> str | None:
+        if failure_stage is None:
+            return None
+        try:
+            return FailureStage(failure_stage).value
+        except ValueError as exc:
+            raise ValidationError("invalid failure stage") from exc
+
+    def _validate_optional_failure_owner(self, failure_owner: str | None) -> str | None:
+        if failure_owner is None:
+            return None
+        try:
+            return FailureOwner(failure_owner).value
+        except ValueError as exc:
+            raise ValidationError("invalid failure owner") from exc

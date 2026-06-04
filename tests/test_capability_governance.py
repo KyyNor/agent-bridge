@@ -253,6 +253,52 @@ def test_log_filters_and_writes_reject_invalid_source_type_and_status(wm_paths: 
         service.list_logs(actor="root", status="maybe")
 
 
+def test_log_filters_validate_failure_fields(wm_paths: WikiManagerPaths) -> None:
+    service, _store = _service(wm_paths)
+
+    with pytest.raises(ValidationError, match="invalid failure stage"):
+        service.list_logs(actor="root", failure_stage="wrong")
+
+    with pytest.raises(ValidationError, match="invalid failure owner"):
+        service.list_logs(actor="root", failure_owner="wrong")
+
+    with pytest.raises(ValidationError, match="invalid failure stage"):
+        service.log_tool_call(
+            actor="root",
+            profile_key=None,
+            entrypoint="metamcp_search",
+            source_type=None,
+            source_key=None,
+            tool_name="search",
+            request={},
+            response={},
+            status=CallLogStatus.error.value,
+            error_message="bad",
+            duration_ms=1,
+            failure_stage="wrong",
+            failure_owner=None,
+            error_type="internal_error",
+        )
+
+    with pytest.raises(ValidationError, match="invalid failure owner"):
+        service.log_tool_call(
+            actor="root",
+            profile_key=None,
+            entrypoint="metamcp_search",
+            source_type=None,
+            source_key=None,
+            tool_name="search",
+            request={},
+            response={},
+            status=CallLogStatus.error.value,
+            error_message="bad",
+            duration_ms=1,
+            failure_stage="internal",
+            failure_owner="wrong",
+            error_type="internal_error",
+        )
+
+
 def test_rule_validation_rejects_unknown_effect_source_type_and_empty_key(wm_paths: WikiManagerPaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
