@@ -55,7 +55,7 @@ def test_mcp_search_tool_calls_capability_service():
     returned = {"items": [{"service": "svc-1", "tool": "read"}], "path": "/", "log_id": "call_1"}
 
     class FakeCapabilities:
-        def search(self, *, actor, path, query, limit=20):
+        def search(self, *, actor, path, query, limit=20, profile_key=None):
             assert path == "svc-1"
             assert query == "read"
             assert limit == 3
@@ -75,7 +75,7 @@ def test_mcp_execute_tool_calls_capability_service():
     returned = {"success": True, "result": {}, "service": "svc-1", "tool": "read", "log_id": "call_1"}
 
     class FakeCapabilities:
-        async def execute(self, *, actor, service, tool, arguments):
+        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
             assert service == "svc-1"
             assert tool == "read"
             assert arguments == {"path": "/docs"}

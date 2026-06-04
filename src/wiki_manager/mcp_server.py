@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import Any
 
 import anyio
@@ -11,6 +12,8 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 
 from wiki_manager.config import default_user
 from wiki_manager.services import WikiManagerService
+
+_request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 
 
 def create_mcp_server(service: WikiManagerService) -> FastMCP:
@@ -41,6 +44,7 @@ def create_mcp_server(service: WikiManagerService) -> FastMCP:
             path=path,
             query=query,
             limit=limit,
+            profile_key=_request_profile.get(),
         )
 
     @mcp.tool(
@@ -56,6 +60,7 @@ def create_mcp_server(service: WikiManagerService) -> FastMCP:
             service=service_key,
             tool=tool,
             arguments=arguments or {},
+            profile_key=_request_profile.get(),
         )
 
     return mcp
@@ -68,49 +73,58 @@ def setup_mcp_route(app: Any, service: WikiManagerService) -> None:
 
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
-        response_started = False
-        response_status = 200
-        response_headers: list[tuple[bytes, bytes]] = []
-        response_body = bytearray()
-
-        async def capture_send(message: dict[str, Any]) -> None:
-            nonlocal response_started, response_status
-            if message["type"] == "http.response.start":
-                response_started = True
-                response_status = message["status"]
-                response_headers.extend(message.get("headers", []))
-            elif message["type"] == "http.response.body":
-                response_body.extend(message.get("body", b""))
-
-        transport = StreamableHTTPServerTransport(
-            mcp_session_id=None,
-            is_json_response_enabled=True,
-        )
-
-        async with anyio.create_task_group() as tg:
-
-            async def run_server(*, task_status=anyio.TASK_STATUS_IGNORED) -> None:
-                async with transport.connect() as (read_stream, write_stream):
-                    task_status.started()
-                    await mcp._mcp_server.run(
-                        read_stream,
-                        write_stream,
-                        mcp._mcp_server.create_initialization_options(),
-                        stateless=True,
-                    )
-
-            await tg.start(run_server)
-            await transport.handle_request(request.scope, request.receive, capture_send)
-            await transport.terminate()
-            tg.cancel_scope.cancel()
-
-        if not response_started:
-            return Response(status_code=500, content=b"Transport did not produce a response")
-
-        return Response(
-            content=bytes(response_body),
-            status_code=response_status,
-            headers={k.decode(): v.decode() for k, v in response_headers},
-        )
+        profile = request.headers.get("x-wiki-metamcp-profile")
+        token = _request_profile.set(profile)
+        try:
+            return await _dispatch_mcp(mcp, request)
+        finally:
+            _request_profile.reset(token)
 
     app.include_router(router)
+
+
+async def _dispatch_mcp(mcp: FastMCP, request: Request) -> Response:
+    response_started = False
+    response_status = 200
+    response_headers: list[tuple[bytes, bytes]] = []
+    response_body = bytearray()
+
+    async def capture_send(message: dict[str, Any]) -> None:
+        nonlocal response_started, response_status
+        if message["type"] == "http.response.start":
+            response_started = True
+            response_status = message["status"]
+            response_headers.extend(message.get("headers", []))
+        elif message["type"] == "http.response.body":
+            response_body.extend(message.get("body", b""))
+
+    transport = StreamableHTTPServerTransport(
+        mcp_session_id=None,
+        is_json_response_enabled=True,
+    )
+
+    async with anyio.create_task_group() as tg:
+
+        async def run_server(*, task_status=anyio.TASK_STATUS_IGNORED) -> None:
+            async with transport.connect() as (read_stream, write_stream):
+                task_status.started()
+                await mcp._mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    mcp._mcp_server.create_initialization_options(),
+                    stateless=True,
+                )
+
+        await tg.start(run_server)
+        await transport.handle_request(request.scope, request.receive, capture_send)
+        await transport.terminate()
+        tg.cancel_scope.cancel()
+
+    if not response_started:
+        return Response(status_code=500, content=b"Transport did not produce a response")
+
+    return Response(
+        content=bytes(response_body),
+        status_code=response_status,
+        headers={k.decode(): v.decode() for k, v in response_headers},
+    )
