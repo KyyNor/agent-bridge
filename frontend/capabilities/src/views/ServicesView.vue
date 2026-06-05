@@ -99,10 +99,6 @@ function timeAgo(dateStr: string | null): string {
   if (hours < 24) return `${hours} 小时前`
   return `${Math.floor(hours / 24)} 天前`
 }
-
-function goto(hash: string) {
-  window.location.hash = hash
-}
 </script>
 
 <template>
@@ -152,7 +148,7 @@ function goto(hash: string) {
           <tbody>
             <tr v-for="s in filtered" :key="s.service_key" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
               <td class="px-4 py-3">
-                <span class="cursor-pointer text-[13px] font-medium text-foreground hover:text-primary" @click="goto(`services&detail=${s.service_key}`)">{{ s.service_key }}</span>
+                <span class="text-[13px] font-medium text-foreground">{{ s.service_key }}</span>
                 <div class="mt-0.5 text-xs text-muted-foreground">{{ s.description || s.name }}</div>
               </td>
               <td class="max-w-[280px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">{{ s.endpoint_url }}</td>
@@ -164,14 +160,14 @@ function goto(hash: string) {
               <td class="px-4 py-3 tabular-nums font-semibold">{{ toolCounts[s.service_key] ?? '...' }}</td>
               <td class="px-4 py-3 text-xs text-muted-foreground">{{ timeAgo(s.last_synced_at) }}</td>
               <td class="px-4 py-3">
-                <div class="flex gap-1">
-                  <button @click="syncTools(s.service_key)" class="rounded-md p-1.5 hover:bg-secondary transition-colors" title="同步工具">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                  </button>
-                  <button @click="toggleStatus(s)" class="rounded-md p-1.5 hover:bg-secondary transition-colors" :title="s.status === 'enabled' ? '停用' : '启用'">
-                    <svg v-if="s.status === 'enabled'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
-                    <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
-                  </button>
+                <div class="flex items-center gap-1.5">
+                  <Button variant="ghost" size="sm" @click="syncTools(s.service_key)" class="h-8 gap-1.5 text-xs">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    同步
+                  </Button>
+                  <Button variant="ghost" size="sm" @click="toggleStatus(s)" class="h-8 text-xs">
+                    {{ s.status === 'enabled' ? '停用' : '启用' }}
+                  </Button>
                 </div>
               </td>
             </tr>

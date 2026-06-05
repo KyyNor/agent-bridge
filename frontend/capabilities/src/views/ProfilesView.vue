@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
-import type { ProjectProfile, ProfileSourceRule } from '../api/types'
+import type { ProjectProfile, ProfileSourceRule, McpService } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -18,16 +18,19 @@ const form = ref({ profile_key: '', name: '', description: '', status: 'active' 
 const saving = ref(false)
 const formError = ref('')
 
-const showDetail = ref(false)
-const detailProfile = ref<ProjectProfile | null>(null)
-const detailLoading = ref(false)
-const detailRules = ref<ProfileSourceRule[]>([])
-const newRule = ref({ source_type: 'mcp_service', source_key: '', effect: 'allow' as 'allow' | 'deny' })
+const showConfig = ref(false)
+const configProfile = ref<ProjectProfile | null>(null)
+const configLoading = ref(false)
+const configRules = ref<ProfileSourceRule[]>([])
+const allServices = ref<McpService[]>([])
 
 const copied = ref('')
 
 onMounted(async () => {
-  try { profiles.value = await api.listProfiles() } catch { /* empty */ }
+  try {
+    profiles.value = await api.listProfiles()
+    allServices.value = await api.listServices()
+  } catch { /* empty */ }
   loading.value = false
 })
 
@@ -95,33 +98,34 @@ async function copyCommand(p: ProjectProfile) {
   setTimeout(() => { copied.value = '' }, 2000)
 }
 
-async function openDetail(p: ProjectProfile) {
-  detailProfile.value = p
-  showDetail.value = true
-  detailLoading.value = true
+async function openConfig(p: ProjectProfile) {
+  configProfile.value = p
+  showConfig.value = true
+  configLoading.value = true
   try {
+    allServices.value = await api.listServices()
     const full = await api.getProfile(p.profile_key)
-    detailRules.value = full.rules || []
+    configRules.value = full.rules || []
   } catch {
-    detailRules.value = []
+    configRules.value = []
   }
-  detailLoading.value = false
+  configLoading.value = false
 }
 
-async function addRule() {
-  if (!detailProfile.value || !newRule.value.source_key) return
-  const rules = [...detailRules.value, { ...newRule.value }]
-  await api.replaceProfileRules(detailProfile.value.profile_key, rules)
-  detailRules.value = rules
-  newRule.value.source_key = ''
-  profiles.value = await api.listProfiles()
+function isServiceAllowed(key: string) {
+  return configRules.value.some(r => r.source_key === key && r.effect === 'allow')
 }
 
-async function removeRule(idx: number) {
-  if (!detailProfile.value) return
-  const rules = detailRules.value.filter((_, i) => i !== idx)
-  await api.replaceProfileRules(detailProfile.value.profile_key, rules)
-  detailRules.value = rules
+async function toggleServiceAllow(key: string) {
+  if (!configProfile.value) return
+  let rules: ProfileSourceRule[]
+  if (isServiceAllowed(key)) {
+    rules = configRules.value.filter(r => !(r.source_key === key && r.effect === 'allow'))
+  } else {
+    rules = [...configRules.value, { source_type: 'mcp_service', source_key: key, effect: 'allow' as const }]
+  }
+  await api.replaceProfileRules(configProfile.value.profile_key, rules)
+  configRules.value = rules
   profiles.value = await api.listProfiles()
 }
 </script>
@@ -165,14 +169,13 @@ async function removeRule(idx: number) {
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Profile</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Allow</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deny</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="p in filtered" :key="p.profile_key" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
               <td class="px-4 py-3">
-                <span class="cursor-pointer text-[13px] font-medium text-foreground hover:text-primary" @click="openDetail(p)">{{ p.profile_key }}</span>
+                <span class="text-[13px] font-medium text-foreground">{{ p.profile_key }}</span>
                 <div class="mt-0.5 text-xs text-muted-foreground">{{ p.name }}</div>
               </td>
               <td class="px-4 py-3">
@@ -180,17 +183,18 @@ async function removeRule(idx: number) {
                 <Badge v-else variant="secondary" class="text-muted-foreground">停用</Badge>
               </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ p.allow_count || 0 }}</td>
-              <td class="px-4 py-3 tabular-nums font-semibold">{{ p.deny_count || 0 }}</td>
               <td class="px-4 py-3">
-                <div class="flex gap-1">
-                  <button @click="copyCommand(p)" class="rounded-md p-1.5 hover:bg-secondary transition-colors" title="复制接入命令">
-                    <svg v-if="copied === p.profile_key" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
-                    <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                  </button>
-                  <button @click="toggleStatus(p)" class="rounded-md p-1.5 hover:bg-secondary transition-colors" :title="p.status === 'active' ? '停用' : '启用'">
-                    <svg v-if="p.status === 'active'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
-                    <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
-                  </button>
+                <div class="flex items-center gap-1.5">
+                  <Button variant="ghost" size="sm" @click="openConfig(p)" class="h-8 gap-1.5 text-xs">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    配置
+                  </Button>
+                  <Button variant="ghost" size="sm" @click="copyCommand(p)" class="h-8 text-xs">
+                    {{ copied === p.profile_key ? '已复制' : '复制命令' }}
+                  </Button>
+                  <Button variant="ghost" size="sm" @click="toggleStatus(p)" class="h-8 text-xs">
+                    {{ p.status === 'active' ? '停用' : '启用' }}
+                  </Button>
                 </div>
               </td>
             </tr>
@@ -231,72 +235,50 @@ async function removeRule(idx: number) {
       </DialogContent>
     </Dialog>
 
-    <!-- Detail Dialog -->
-    <Dialog :open="showDetail" @update:open="showDetail = $event">
+    <!-- Config Dialog -->
+    <Dialog :open="showConfig" @update:open="showConfig = $event">
       <DialogContent class="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>{{ detailProfile?.name || detailProfile?.profile_key }}</DialogTitle>
+          <DialogTitle>{{ configProfile?.name || configProfile?.profile_key }} — 配置</DialogTitle>
         </DialogHeader>
-        <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
+        <div v-if="configLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
         <div v-else class="space-y-5">
           <!-- Copy Command -->
           <div>
             <div class="mb-2 text-sm font-medium">接入命令</div>
             <div class="flex items-center gap-2 rounded-lg bg-secondary px-4 py-2.5">
-              <code class="flex-1 font-mono text-sm text-foreground">{{ detailProfile ? getProfileCommand(detailProfile) : '' }}</code>
-              <Button variant="ghost" size="sm" @click="detailProfile && copyCommand(detailProfile)">
-                <svg v-if="copied === detailProfile?.profile_key" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
-                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <code class="flex-1 font-mono text-sm text-foreground">{{ configProfile ? getProfileCommand(configProfile) : '' }}</code>
+              <Button variant="ghost" size="sm" @click="configProfile && copyCommand(configProfile)">
+                {{ copied === configProfile?.profile_key ? '已复制' : '复制' }}
               </Button>
             </div>
           </div>
 
-          <!-- Allow/Deny Rules -->
+          <!-- Allow List -->
           <div>
-            <div class="mb-2 text-sm font-medium">访问规则 (Allow / Deny)</div>
-            <table v-if="detailRules.length > 0" class="mb-3 w-full">
-              <thead>
-                <tr class="border-b border-border bg-secondary/50">
-                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">来源类型</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">来源标识</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">策略</th>
-                  <th class="px-3 py-2 text-right text-xs font-semibold text-muted-foreground"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(r, idx) in detailRules" :key="idx" class="border-b border-border/60">
-                  <td class="px-3 py-2 text-sm">{{ r.source_type }}</td>
-                  <td class="px-3 py-2 font-mono text-sm">{{ r.source_key }}</td>
-                  <td class="px-3 py-2">
-                    <Badge v-if="r.effect === 'allow'" variant="secondary" class="bg-green-50 text-green-700">Allow</Badge>
-                    <Badge v-else variant="secondary" class="bg-red-50 text-red-700">Deny</Badge>
-                  </td>
-                  <td class="px-3 py-2 text-right">
-                    <button @click="removeRule(idx)" class="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-else class="mb-3 rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-              暂无规则，添加来源以控制访问
+            <div class="mb-2 text-sm font-medium">允许访问的服务</div>
+            <div v-if="allServices.length === 0" class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+              暂无已注册的服务，请先在能力接入中添加服务
             </div>
-
-            <!-- Add Rule Form -->
-            <div class="flex items-end gap-3">
-              <div class="flex-1 space-y-1">
-                <label class="text-xs font-medium text-muted-foreground">来源标识</label>
-                <Input v-model="newRule.source_key" placeholder="如: my-mcp-service" />
-              </div>
-              <div class="w-[130px] space-y-1">
-                <label class="text-xs font-medium text-muted-foreground">策略</label>
-                <select v-model="newRule.effect" class="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm">
-                  <option value="allow">Allow</option>
-                  <option value="deny">Deny</option>
-                </select>
-              </div>
-              <Button @click="addRule" :disabled="!newRule.source_key" size="sm">添加</Button>
+            <div v-else class="max-h-[320px] space-y-1 overflow-y-auto">
+              <label
+                v-for="svc in allServices" :key="svc.service_key"
+                class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isServiceAllowed(svc.service_key)"
+                  @change="toggleServiceAllow(svc.service_key)"
+                  class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div class="flex-1">
+                  <div class="text-sm font-medium">{{ svc.name || svc.service_key }}</div>
+                  <div class="text-xs text-muted-foreground">{{ svc.service_key }}</div>
+                </div>
+                <Badge v-if="svc.status === 'enabled'" variant="secondary" class="bg-green-50 text-green-700 text-[11px]">已启用</Badge>
+                <Badge v-else-if="svc.status === 'error'" variant="destructive" class="text-[11px]">异常</Badge>
+                <Badge v-else variant="secondary" class="text-[11px] text-muted-foreground">已停用</Badge>
+              </label>
             </div>
           </div>
         </div>
