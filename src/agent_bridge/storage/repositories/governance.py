@@ -1,12 +1,410 @@
+"""SQLite governance repository."""
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Callable, Iterator
-
+import json
 import sqlite3
+from typing import Any
+
+from agent_bridge.capabilities.models import CallLogStatus
+from agent_bridge.storage.types import enum_value, json_bytes, json_summary, row_to_dict
 
 
 class GovernanceRepository:
-    def __init__(self, db_path: Path, connect: Callable[[], Iterator[sqlite3.Connection]]) -> None:
+    def __init__(self, db_path, connect):
         self._db_path = db_path
         self._connect = connect
+
+    def _migrate_tool_call_logs_nullable_profile(self, conn: sqlite3.Connection) -> None:
+        columns = conn.execute("PRAGMA table_info(tool_call_logs)").fetchall()
+        profile_column = next((column for column in columns if column[1] == "profile_key"), None)
+        if profile_column is None or profile_column[3] == 0:
+            return
+
+        conn.execute("ALTER TABLE tool_call_logs RENAME TO tool_call_logs_old")
+        conn.execute(
+            """
+            CREATE TABLE tool_call_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              log_id TEXT NOT NULL UNIQUE,
+              actor TEXT NOT NULL,
+              profile_key TEXT,
+              entrypoint TEXT NOT NULL,
+              source_type TEXT,
+              source_key TEXT,
+              tool_name TEXT,
+              request_json TEXT NOT NULL DEFAULT '{}',
+              response_json TEXT NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL,
+              error_message TEXT,
+              duration_ms INTEGER,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO tool_call_logs (
+              id,
+              log_id,
+              actor,
+              profile_key,
+              entrypoint,
+              source_type,
+              source_key,
+              tool_name,
+              request_json,
+              response_json,
+              status,
+              error_message,
+              duration_ms,
+              created_at
+            )
+            SELECT
+              id,
+              log_id,
+              actor,
+              profile_key,
+              entrypoint,
+              source_type,
+              source_key,
+              tool_name,
+              request_json,
+              response_json,
+              status,
+              error_message,
+              duration_ms,
+              created_at
+            FROM tool_call_logs_old
+            """
+        )
+        conn.execute("DROP TABLE tool_call_logs_old")
+        conn.execute("CREATE INDEX idx_tool_call_logs_created_at ON tool_call_logs(created_at DESC, id DESC)")
+        conn.execute("CREATE INDEX idx_tool_call_logs_profile ON tool_call_logs(profile_key)")
+        conn.execute("CREATE INDEX idx_tool_call_logs_source ON tool_call_logs(source_type, source_key)")
+
+    def upsert_project_profile(
+        self,
+        *,
+        profile_key: str,
+        name: str,
+        description: str = "",
+        status: str = "active",
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO project_profiles (profile_key, name, description, status, created_by)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(profile_key) DO UPDATE SET
+                  name = excluded.name,
+                  description = excluded.description,
+                  status = excluded.status,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (profile_key, name, description, status, created_by),
+            )
+            row = conn.execute(
+                "SELECT * FROM project_profiles WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            profile = row_to_dict(row)
+            if profile is None:
+                raise KeyError(f"project profile not found: {profile_key}")
+            return profile
+
+    def get_project_profile(self, profile_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM project_profiles WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def list_project_profiles(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  profile.*,
+                  COALESCE(SUM(CASE WHEN rule.effect = 'allow' THEN 1 ELSE 0 END), 0) AS allow_count,
+                  COALESCE(SUM(CASE WHEN rule.effect = 'deny' THEN 1 ELSE 0 END), 0) AS deny_count
+                FROM project_profiles profile
+                LEFT JOIN profile_source_rules rule ON rule.profile_key = profile.profile_key
+                GROUP BY profile.id
+                ORDER BY profile.profile_key
+                """
+            ).fetchall()
+            return [
+                {
+                    **dict(row),
+                    "allow_count": int(row["allow_count"]),
+                    "deny_count": int(row["deny_count"]),
+                }
+                for row in rows
+            ]
+
+    def replace_profile_source_rules(self, profile_key: str, rules: list[dict[str, Any]]) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM profile_source_rules WHERE profile_key = ?", (profile_key,))
+            for rule in rules:
+                conn.execute(
+                    """
+                    INSERT INTO profile_source_rules (profile_key, source_type, source_key, effect)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        profile_key,
+                        enum_value(rule["source_type"]),
+                        rule["source_key"],
+                        enum_value(rule["effect"]),
+                    ),
+                )
+
+    def list_profile_source_rules(self, profile_key: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM profile_source_rules
+                WHERE profile_key = ?
+                ORDER BY source_key, effect
+                """,
+                (profile_key,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def replace_profile_resource_rules(self, profile_key: str, rules: list[dict[str, Any]]) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM profile_resource_rules WHERE profile_key = ?", (profile_key,))
+            for rule in rules:
+                conn.execute(
+                    """
+                    INSERT INTO profile_resource_rules (profile_key, resource_type, resource_key)
+                    VALUES (?, ?, ?)
+                    """,
+                    (profile_key, rule["resource_type"], rule["resource_key"]),
+                )
+
+    def list_profile_resource_rules(self, profile_key: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM profile_resource_rules
+                WHERE profile_key = ?
+                ORDER BY resource_type, resource_key
+                """,
+                (profile_key,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def create_tool_call_log(
+        self,
+        *,
+        log_id: str,
+        actor: str,
+        profile_key: str | None,
+        entrypoint: str,
+        source_type: str | None = None,
+        source_key: str | None = None,
+        tool_name: str | None = None,
+        request: Any | None = None,
+        response: Any | None = None,
+        status: CallLogStatus | str,
+        error_message: str | None = None,
+        failure_stage: str | None = None,
+        failure_owner: str | None = None,
+        error_type: str | None = None,
+        resource_type: str | None = None,
+        resource_key: str | None = None,
+        duration_ms: int | None = None,
+    ) -> dict[str, Any]:
+        request_value = {} if request is None else request
+        response_value = {} if response is None else response
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tool_call_logs (
+                  log_id,
+                  actor,
+                  profile_key,
+                  entrypoint,
+                  source_type,
+                  source_key,
+                  tool_name,
+                  request_json,
+                  response_json,
+                  status,
+                  error_message,
+                  failure_stage,
+                  failure_owner,
+                  error_type,
+                  resource_type,
+                  resource_key,
+                  request_summary_json,
+                  response_summary_json,
+                  duration_ms
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    log_id,
+                    actor,
+                    profile_key,
+                    entrypoint,
+                    enum_value(source_type),
+                    source_key,
+                    tool_name,
+                    json.dumps(request_value, ensure_ascii=False, default=str),
+                    json.dumps(response_value, ensure_ascii=False, default=str),
+                    enum_value(status),
+                    error_message,
+                    enum_value(failure_stage),
+                    enum_value(failure_owner),
+                    error_type,
+                    resource_type,
+                    resource_key,
+                    json.dumps(json_summary(request_value), ensure_ascii=False, default=str),
+                    json.dumps(json_summary(response_value), ensure_ascii=False, default=str),
+                    duration_ms,
+                ),
+            )
+            row = conn.execute("SELECT * FROM tool_call_logs WHERE log_id = ?", (log_id,)).fetchone()
+            log = row_to_dict(row)
+            if log is None:
+                raise KeyError(f"tool call log not found: {log_id}")
+            return log
+
+    def list_tool_call_logs(
+        self,
+        *,
+        entrypoint: str | None = None,
+        source_type: str | None = None,
+        source_key: str | None = None,
+        tool_name: str | None = None,
+        profile_key: str | None = None,
+        status: CallLogStatus | str | None = None,
+        failure_stage: str | None = None,
+        failure_owner: str | None = None,
+        error_type: str | None = None,
+        resource_type: str | None = None,
+        resource_key: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        filters: list[str] = []
+        params: list[Any] = []
+        for column, value in [
+            ("entrypoint", entrypoint),
+            ("source_type", enum_value(source_type)),
+            ("source_key", source_key),
+            ("tool_name", tool_name),
+            ("profile_key", profile_key),
+            ("status", enum_value(status)),
+            ("failure_stage", enum_value(failure_stage)),
+            ("failure_owner", enum_value(failure_owner)),
+            ("error_type", error_type),
+            ("resource_type", resource_type),
+            ("resource_key", resource_key),
+        ]:
+            if value is not None:
+                filters.append(f"{column} = ?")
+                params.append(value)
+        if created_from is not None:
+            filters.append("created_at >= ?")
+            params.append(created_from)
+        if created_to is not None:
+            filters.append("created_at < ?")
+            params.append(created_to)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.extend([limit, offset])
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM tool_call_logs
+                {where_clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def aggregate_tool_call_stats(
+        self,
+        *,
+        dimensions: list[str],
+        created_from: str | None,
+        created_to: str | None,
+        bucket: str | None,
+    ) -> list[dict[str, Any]]:
+        allowed_dimensions = {
+            "profile_key",
+            "entrypoint",
+            "source_type",
+            "source_key",
+            "tool_name",
+            "status",
+            "failure_stage",
+            "failure_owner",
+            "error_type",
+            "resource_type",
+            "resource_key",
+        }
+        invalid = [dimension for dimension in dimensions if dimension not in allowed_dimensions]
+        if invalid:
+            raise ValueError(f"invalid stats dimension: {invalid[0]}")
+
+        selected = list(dimensions)
+        if bucket:
+            if bucket == "hour":
+                selected.insert(0, "strftime('%Y-%m-%d %H:00:00', created_at) AS bucket")
+            elif bucket == "day":
+                selected.insert(0, "date(created_at) AS bucket")
+            else:
+                raise ValueError("invalid stats bucket")
+
+        group_columns = ["bucket"] if bucket else []
+        group_columns.extend(dimensions)
+        select_clause = ", ".join(selected) if selected else "'all' AS scope"
+        group_clause = f"GROUP BY {', '.join(group_columns)}" if group_columns else ""
+        filters: list[str] = []
+        params: list[Any] = []
+        if created_from is not None:
+            filters.append("created_at >= ?")
+            params.append(created_from)
+        if created_to is not None:
+            filters.append("created_at < ?")
+            params.append(created_to)
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                  {select_clause},
+                  COUNT(*) AS calls,
+                  SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
+                  SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
+                  SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+                  ROUND(AVG(COALESCE(duration_ms, 0)), 0) AS avg_duration_ms,
+                  MAX(duration_ms) AS max_duration_ms
+                FROM tool_call_logs
+                {where_clause}
+                {group_clause}
+                ORDER BY calls DESC
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_tool_call_log(self, log_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM tool_call_logs WHERE log_id = ?",
+                (log_id,),
+            ).fetchone()
+            return row_to_dict(row)
