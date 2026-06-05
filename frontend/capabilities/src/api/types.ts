@@ -72,6 +72,8 @@ export interface ToolCallLog {
   resource_type: string | null
   resource_key: string | null
   duration_ms: number | null
+  request?: Record<string, unknown>
+  response?: Record<string, unknown>
   created_at: string
 }
 
