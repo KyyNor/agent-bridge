@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.config import AgentBridgePaths
+from agent_bridge.core.config import AgentBridgePaths
 
 
 @pytest.fixture

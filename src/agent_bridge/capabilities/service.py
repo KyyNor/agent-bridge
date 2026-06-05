@@ -6,17 +6,17 @@ import json
 import re
 from typing import Any
 
-from agent_bridge.builtin_capabilities import (
+from agent_bridge.capabilities.builtin import (
     BuiltinCapabilityProvider,
     BuiltinResourceRef,
     BuiltinTool,
     mark_builtin_failure,
 )
-from agent_bridge.capabilities import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
-from agent_bridge.capability_governance import CapabilityGovernanceService, monotonic_ms
-from agent_bridge.domain import NotFound, ValidationError, require_admin_user
-from agent_bridge.mcp_http_client import McpHttpClient
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.capabilities.models import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
+from agent_bridge.capabilities.governance import CapabilityGovernanceService, monotonic_ms
+from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.capabilities.mcp_http_client import McpHttpClient
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 SERVICE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")

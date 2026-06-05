@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from agent_bridge.config import ROOT_ENV_VAR, AgentBridgePaths, load_server_config
+from agent_bridge.core.config import ROOT_ENV_VAR, AgentBridgePaths, load_server_config
 
 
 def _read_pid(path: Path) -> int | None:
@@ -50,7 +50,7 @@ def start_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "agent_bridge.server:create_app",
+                "agent_bridge.api.app:create_app",
                 "--factory",
                 "--host",
                 config.host,

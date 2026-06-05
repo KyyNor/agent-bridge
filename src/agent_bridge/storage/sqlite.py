@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from agent_bridge.capabilities import CallLogStatus, McpServiceStatus, ToolType
-from agent_bridge.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
+from agent_bridge.capabilities.models import CallLogStatus, McpServiceStatus, ToolType
+from agent_bridge.core.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
 
 
 SCHEMA = """

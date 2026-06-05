@@ -10,8 +10,8 @@ import httpx
 import typer
 
 from agent_bridge.client import AgentBridgeClient
-from agent_bridge.config import AgentBridgePaths
-from agent_bridge.server_process import server_status, start_server, stop_server
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.runtime.server_process import server_status, start_server, stop_server
 
 
 app = typer.Typer(

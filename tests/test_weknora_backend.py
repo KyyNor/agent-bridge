@@ -6,8 +6,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from agent_bridge.domain import AskResult
-from agent_bridge.weknora_backend import WeknoraBackend
+from agent_bridge.core.domain import AskResult
+from agent_bridge.knowledge.backends.weknora import WeknoraBackend
 
 
 def test_create_kb_posts_document_kb(respx_mock):

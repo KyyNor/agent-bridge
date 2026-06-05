@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from agent_bridge.capabilities import CallLogStatus, PolicyContext, ProfileRuleEffect, SourceRef, SourceType
-from agent_bridge.config import AgentBridgePaths
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.capabilities.models import CallLogStatus, PolicyContext, ProfileRuleEffect, SourceRef, SourceType
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def test_project_profile_and_rules_round_trip(wm_paths: AgentBridgePaths) -> None:

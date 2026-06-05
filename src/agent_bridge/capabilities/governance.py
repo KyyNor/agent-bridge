@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from agent_bridge.capabilities import (
+from agent_bridge.capabilities.models import (
     CallLogStatus,
     FailureOwner,
     FailureStage,
@@ -15,8 +15,8 @@ from agent_bridge.capabilities import (
     ProfileRuleEffect,
     SourceType,
 )
-from agent_bridge.domain import NotFound, ValidationError, require_admin_user
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 VALID_PROFILE_STATUSES = {"active", "disabled"}

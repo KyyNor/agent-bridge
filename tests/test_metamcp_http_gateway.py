@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_bridge.capabilities import ProfileResourceType, ProfileRuleEffect, SourceType
-from agent_bridge.mcp_server import _request_profile, create_mcp_server
-from agent_bridge.services import AgentBridgeService
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.capabilities.models import ProfileResourceType, ProfileRuleEffect, SourceType
+from agent_bridge.capabilities.mcp_server import _request_profile, create_mcp_server
+from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def _register_service(wm_paths, service_key: str, name: str) -> None:

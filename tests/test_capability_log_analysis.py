@@ -6,11 +6,11 @@ import json
 import pytest
 
 from test_capability_service import FakeMcpClient
-from agent_bridge.capabilities import CallLogStatus, FailureOwner, FailureStage, SourceType, ToolType
-from agent_bridge.capability_service import CapabilityService
-from agent_bridge.config import AgentBridgePaths
-from agent_bridge.domain import ValidationError
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.capabilities.models import CallLogStatus, FailureOwner, FailureStage, SourceType, ToolType
+from agent_bridge.capabilities.service import CapabilityService
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.core.domain import ValidationError
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def test_tool_call_log_records_failure_classification_and_resource(wm_paths: AgentBridgePaths) -> None:

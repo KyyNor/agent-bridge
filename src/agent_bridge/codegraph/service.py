@@ -10,9 +10,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.config import AgentBridgePaths
-from agent_bridge.domain import NotFound, ValidationError, require_admin_user
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 MAX_INDEX_CHARS = 20_000

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_bridge.config import BackendConfig, AgentBridgePaths, load_backend_configs
-from agent_bridge.domain import BackendAdapter
-from agent_bridge.mock_backend import MockBackend
+from agent_bridge.core.config import BackendConfig, AgentBridgePaths, load_backend_configs
+from agent_bridge.core.domain import BackendAdapter
+from agent_bridge.knowledge.backends.mock import MockBackend
 
 
 ADAPTER_CLASSES: dict[str, type] = {
@@ -24,7 +24,7 @@ class BackendRegistry:
             if config.backend_type == "mock":
                 self._adapters[slug] = adapter_cls(paths / "data" / "backend" / "mock")
             elif config.backend_type == "ragflow":
-                from agent_bridge.ragflow_backend import RagFlowBackend
+                from agent_bridge.knowledge.backends.ragflow import RagFlowBackend
 
                 self._adapters[slug] = RagFlowBackend(
                     base_url=config.base_url or "",
@@ -32,7 +32,7 @@ class BackendRegistry:
                     timeout=config.timeout,
                 )
             elif config.backend_type == "weknora":
-                from agent_bridge.weknora_backend import WeknoraBackend
+                from agent_bridge.knowledge.backends.weknora import WeknoraBackend
 
                 self._adapters[slug] = WeknoraBackend(
                     base_url=config.base_url or "",

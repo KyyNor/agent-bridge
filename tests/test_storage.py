@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_bridge.archive import ArchiveStorage
-from agent_bridge.config import ServerConfig, AgentBridgePaths, default_root, ensure_directories, load_server_config
-from agent_bridge.domain import KbRole, Operation, SyncStateStatus
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.knowledge.archive import ArchiveStorage
+from agent_bridge.core.config import ServerConfig, AgentBridgePaths, default_root, ensure_directories, load_server_config
+from agent_bridge.core.domain import KbRole, Operation, SyncStateStatus
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def test_ensure_directories_creates_default_tree(tmp_path: Path) -> None:

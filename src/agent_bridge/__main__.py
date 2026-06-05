@@ -1,4 +1,4 @@
-from agent_bridge.cli import main
+from agent_bridge.cli.app import main
 
 
 if __name__ == "__main__":

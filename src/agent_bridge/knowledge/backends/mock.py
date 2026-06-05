@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
 
 
 class MockBackend:

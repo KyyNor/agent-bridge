@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_bridge.builtin_capabilities import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
-from agent_bridge.capabilities import FailureOwner, FailureStage, ProfileResourceType, ToolType
-from agent_bridge.capability_governance import CapabilityGovernanceService
-from agent_bridge.codegraph_service import CodeGraphService
-from agent_bridge.domain import NotFound, ValidationError, AgentBridgeError
+from agent_bridge.capabilities.builtin import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
+from agent_bridge.capabilities.models import FailureOwner, FailureStage, ProfileResourceType, ToolType
+from agent_bridge.capabilities.governance import CapabilityGovernanceService
+from agent_bridge.codegraph.service import CodeGraphService
+from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
 
 
 REPO_TOOLS = {"search_code", "get_file", "find_symbol", "repository_overview"}

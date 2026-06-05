@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from agent_bridge.capability_governance import CapabilityGovernanceService
-from agent_bridge.config import AgentBridgePaths
-from agent_bridge.domain import NotFound, ValidationError
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.capabilities.governance import CapabilityGovernanceService
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.core.domain import NotFound, ValidationError
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def _service(wm_paths: AgentBridgePaths) -> CapabilityGovernanceService:

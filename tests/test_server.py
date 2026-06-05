@@ -4,8 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from agent_bridge.config import load_server_config
-from agent_bridge.server import create_app
+from agent_bridge.core.config import load_server_config
+from agent_bridge.api.app import create_app
 
 
 def test_health(wm_paths) -> None:

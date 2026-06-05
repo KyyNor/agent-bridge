@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.config import BackendConfig, AgentBridgePaths
-from agent_bridge.mock_backend import MockBackend
-from agent_bridge.ragflow_backend import RagFlowBackend
-from agent_bridge.registry import BackendRegistry, create_registry
-from agent_bridge.weknora_backend import WeknoraBackend
+from agent_bridge.core.config import BackendConfig, AgentBridgePaths
+from agent_bridge.knowledge.backends.mock import MockBackend
+from agent_bridge.knowledge.backends.ragflow import RagFlowBackend
+from agent_bridge.knowledge.backends.registry import BackendRegistry, create_registry
+from agent_bridge.knowledge.backends.weknora import WeknoraBackend
 
 
 def test_registry_from_empty_config(tmp_path: Path):

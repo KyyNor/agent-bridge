@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.config import BackendConfig, AgentBridgePaths, load_backend_configs, load_server_config, load_mcp_config
+from agent_bridge.core.config import BackendConfig, AgentBridgePaths, load_backend_configs, load_server_config, load_mcp_config
 
 
 def _write_config(config_dir: Path, content: str) -> None:

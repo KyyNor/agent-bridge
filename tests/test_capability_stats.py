@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from agent_bridge.capabilities import CallLogStatus, SourceType
-from agent_bridge.config import AgentBridgePaths
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.capabilities.models import CallLogStatus, SourceType
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def test_call_log_stats_group_by_profile_service_and_tool(wm_paths: AgentBridgePaths) -> None:

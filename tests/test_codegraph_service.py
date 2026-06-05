@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.codegraph_service import CodeGraphService
-from agent_bridge.config import AgentBridgePaths
-from agent_bridge.domain import ValidationError
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.codegraph.service import CodeGraphService
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.core.domain import ValidationError
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def _git_repo(path: Path) -> Path:

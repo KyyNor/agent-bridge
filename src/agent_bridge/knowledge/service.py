@@ -6,12 +6,12 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.archive import ArchiveStorage
-from agent_bridge.capability_governance import CapabilityGovernanceService
-from agent_bridge.capability_service import CapabilityService
-from agent_bridge.codegraph_service import CodeGraphService
-from agent_bridge.config import AgentBridgePaths, ensure_directories
-from agent_bridge.domain import (
+from agent_bridge.knowledge.archive import ArchiveStorage
+from agent_bridge.capabilities.governance import CapabilityGovernanceService
+from agent_bridge.capabilities.service import CapabilityService
+from agent_bridge.codegraph.service import CodeGraphService
+from agent_bridge.core.config import AgentBridgePaths, ensure_directories
+from agent_bridge.core.domain import (
     AccessDenied,
     AskResult,
     KbRole,
@@ -25,10 +25,10 @@ from agent_bridge.domain import (
     can_write_own_doc,
     require_admin_user,
 )
-from agent_bridge.mock_backend import MockBackend
-from agent_bridge.registry import BackendRegistry, create_registry
-from agent_bridge.slug import make_slug, unique_slug
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.knowledge.backends.mock import MockBackend
+from agent_bridge.knowledge.backends.registry import BackendRegistry, create_registry
+from agent_bridge.core.slug import make_slug, unique_slug
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md"}
@@ -52,8 +52,8 @@ class AgentBridgeService:
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
-        from agent_bridge.builtin_codegraph import CodeGraphBuiltinProvider
-        from agent_bridge.builtin_wiki import WikiBuiltinProvider
+        from agent_bridge.capabilities.builtin_codegraph import CodeGraphBuiltinProvider
+        from agent_bridge.capabilities.builtin_wiki import WikiBuiltinProvider
 
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
         self.capabilities.register_builtin_provider(CodeGraphBuiltinProvider(self.codegraph, self.governance))
@@ -304,7 +304,7 @@ class AgentBridgeService:
             return target
 
         if self.registry:
-            from agent_bridge.config import load_server_config
+            from agent_bridge.core.config import load_server_config
             config = load_server_config(self.paths)
             if config.default_backend:
                 target = next((t for t in active if t["slug"] == config.default_backend), None)

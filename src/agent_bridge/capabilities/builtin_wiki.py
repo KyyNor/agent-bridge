@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agent_bridge.builtin_capabilities import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
-from agent_bridge.capabilities import FailureOwner, FailureStage, ProfileResourceType, ToolType
-from agent_bridge.domain import NotFound, ValidationError, AgentBridgeError
+from agent_bridge.capabilities.builtin import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
+from agent_bridge.capabilities.models import FailureOwner, FailureStage, ProfileResourceType, ToolType
+from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
 
 if TYPE_CHECKING:
-    from agent_bridge.services import AgentBridgeService
+    from agent_bridge.knowledge.service import AgentBridgeService
 
 
 class WikiBuiltinProvider:

@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from agent_bridge.config import default_user
+from agent_bridge.core.config import default_user
 
 
 class AgentBridgeClient:

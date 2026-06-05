@@ -11,10 +11,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from agent_bridge.config import AgentBridgePaths, default_user, load_server_config
-from agent_bridge.domain import KbRole, AgentBridgeError
-from agent_bridge.services import AgentBridgeService
-from agent_bridge.web_pages import capability_admin_page
+from agent_bridge.core.config import AgentBridgePaths, default_user, load_server_config
+from agent_bridge.core.domain import KbRole, AgentBridgeError
+from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.web.pages import capability_admin_page
 
 
 class CreateKbRequest(BaseModel):
@@ -110,7 +110,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         yield
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
-    static_dir = Path(__file__).parent / "static" / "capabilities"
+    static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir), name="capabilities-static")
 
     def actor(x_agent_bridge_user: str = Header(alias="X-Agent-Bridge-User")) -> str:
@@ -552,7 +552,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.sync_repository(current_actor, repo_key))
 
-    from agent_bridge.mcp_server import setup_mcp_route
+    from agent_bridge.capabilities.mcp_server import setup_mcp_route
 
     setup_mcp_route(app, service)
 

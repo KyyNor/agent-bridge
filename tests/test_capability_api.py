@@ -6,9 +6,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from agent_bridge.capabilities import FailureOwner, FailureStage, SourceType, ToolType
-from agent_bridge.server import create_app
-from agent_bridge.storage import SQLiteStore
+from agent_bridge.capabilities.models import FailureOwner, FailureStage, SourceType, ToolType
+from agent_bridge.api.app import create_app
+from agent_bridge.storage.sqlite import SQLiteStore
 
 
 def _git_repo(path: Path) -> Path:
@@ -434,8 +434,8 @@ def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    from agent_bridge.mcp_server import create_mcp_server
-    from agent_bridge.services import AgentBridgeService
+    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.knowledge.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

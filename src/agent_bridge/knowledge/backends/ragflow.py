@@ -8,7 +8,7 @@ import httpx
 from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-from agent_bridge.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
 
 # Default RagFlow RSA public key (from /ragflow/conf/public.pem inside the
 # Docker container).  Kept as a module constant so callers do not need to

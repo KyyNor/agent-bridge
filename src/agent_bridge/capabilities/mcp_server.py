@@ -13,8 +13,8 @@ from fastapi import APIRouter, Request, Response
 from mcp.server.fastmcp import FastMCP
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 
-from agent_bridge.config import default_user
-from agent_bridge.services import AgentBridgeService
+from agent_bridge.core.config import default_user
+from agent_bridge.knowledge.service import AgentBridgeService
 
 logger = logging.getLogger("agent_bridge.mcp")
 

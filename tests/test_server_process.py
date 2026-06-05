@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from agent_bridge.config import ROOT_ENV_VAR
-from agent_bridge.server_process import server_status, start_server
+from agent_bridge.core.config import ROOT_ENV_VAR
+from agent_bridge.runtime.server_process import server_status, start_server
 
 
 def test_server_status_reports_invalid_pid_file(wm_paths) -> None:
@@ -30,8 +30,8 @@ def test_start_server_passes_root_to_child_environment(monkeypatch, wm_paths) ->
     class FakeResponse:
         status_code = 200
 
-    monkeypatch.setattr("agent_bridge.server_process.subprocess.Popen", fake_popen)
-    monkeypatch.setattr("agent_bridge.server_process.httpx.get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr("agent_bridge.runtime.server_process.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("agent_bridge.runtime.server_process.httpx.get", lambda *args, **kwargs: FakeResponse())
 
     status = start_server(wm_paths)
 

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.config import BackendConfig, AgentBridgePaths, ensure_directories
-from agent_bridge.domain import AccessDenied, KbRole, NotFound, SyncStateStatus, ValidationError
-from agent_bridge.registry import BackendRegistry
-from agent_bridge.services import AgentBridgeService
+from agent_bridge.core.config import BackendConfig, AgentBridgePaths, ensure_directories
+from agent_bridge.core.domain import AccessDenied, KbRole, NotFound, SyncStateStatus, ValidationError
+from agent_bridge.knowledge.backends.registry import BackendRegistry
+from agent_bridge.knowledge.service import AgentBridgeService
 
 
 def _service_with_mock_backend(
@@ -322,7 +322,7 @@ def test_search_with_default_backend(wm_paths, tmp_path: Path, monkeypatch) -> N
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from agent_bridge.domain import RetrievalResult
+    from agent_bridge.core.domain import RetrievalResult
     mock_results = [RetrievalResult(
         chunk_id="c1", content="hello", document_name="a.md",
         similarity=0.9, dataset_id=kb["id"],
@@ -339,7 +339,7 @@ def test_search_with_explicit_backend(wm_paths, tmp_path: Path, monkeypatch) -> 
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from agent_bridge.domain import RetrievalResult
+    from agent_bridge.core.domain import RetrievalResult
     adapter = service.registry.get("mock")
     monkeypatch.setattr(adapter, "retrieve", lambda *a, **kw: [])
 
@@ -365,7 +365,7 @@ def test_ask_with_default_backend(wm_paths, tmp_path: Path, monkeypatch) -> None
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from agent_bridge.domain import AskResult
+    from agent_bridge.core.domain import AskResult
     mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
     adapter = service.registry.get("mock")
     monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, ""))
@@ -378,7 +378,7 @@ def test_ask_persists_chat_id(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from agent_bridge.domain import AskResult
+    from agent_bridge.core.domain import AskResult
     mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
     adapter = service.registry.get("mock")
     monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, "chat-new"))

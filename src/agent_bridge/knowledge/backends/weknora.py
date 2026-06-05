@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from agent_bridge.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
 
 
 def _map_parse_status(status: str) -> str:

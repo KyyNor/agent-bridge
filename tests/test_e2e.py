@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from agent_bridge.server import create_app
+from agent_bridge.api.app import create_app
 
 
 def _write_mock_backend_config(wm_paths) -> None:
