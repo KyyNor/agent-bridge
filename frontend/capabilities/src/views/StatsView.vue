@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
-import { Card, CardContent } from '../components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 
 const stats = ref<Record<string, unknown>[]>([])
@@ -50,22 +50,22 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
   <div class="space-y-5">
     <!-- Summary Cards -->
     <div class="grid grid-cols-4 gap-4">
-      <div class="rounded-lg border border-border bg-card p-4">
+      <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">总调用次数</div>
         <div class="text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ totalCount }}</div>
-      </div>
-      <div class="rounded-lg border border-border bg-card p-4">
+      </Card>
+      <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">维度条目</div>
         <div class="text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ stats.length }}</div>
-      </div>
-      <div class="rounded-lg border border-border bg-card p-4">
+      </Card>
+      <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">最高频次</div>
         <div class="text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ maxCount }}</div>
-      </div>
-      <div class="rounded-lg border border-border bg-card p-4">
+      </Card>
+      <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">当前维度</div>
         <div class="text-[24px] font-bold leading-tight text-foreground">{{ dimensions.find(d => d.key === dimension)?.label }}</div>
-      </div>
+      </Card>
     </div>
 
     <!-- Toolbar -->

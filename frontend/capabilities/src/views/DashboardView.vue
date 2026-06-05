@@ -45,38 +45,38 @@ function timeAgo(dateStr: string | null): string {
   <div v-else class="space-y-6">
     <!-- Stat Cards -->
     <div class="grid grid-cols-4 gap-5">
-      <div class="rounded-lg border border-border bg-card p-5 transition-shadow hover:shadow-sm">
+      <Card class="p-5 transition-shadow hover:shadow-sm">
         <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-primary">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
         </div>
         <div class="text-[13px] font-medium text-muted-foreground">MCP 服务</div>
         <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ services.length }}</div>
-      </div>
+      </Card>
 
-      <div class="rounded-lg border border-border bg-card p-5 transition-shadow hover:shadow-sm">
+      <Card class="p-5 transition-shadow hover:shadow-sm">
         <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-600">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </div>
         <div class="text-[13px] font-medium text-muted-foreground">工具总数</div>
         <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ toolCount ?? '...' }}</div>
-      </div>
+      </Card>
 
-      <div class="rounded-lg border border-border bg-card p-5 transition-shadow hover:shadow-sm">
+      <Card class="p-5 transition-shadow hover:shadow-sm">
         <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-primary">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
         </div>
         <div class="text-[13px] font-medium text-muted-foreground">启用服务</div>
         <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ enabledCount }}</div>
-      </div>
+      </Card>
 
-      <div class="rounded-lg border border-border bg-card p-5 transition-shadow hover:shadow-sm">
+      <Card class="p-5 transition-shadow hover:shadow-sm">
         <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-destructive">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
         </div>
         <div class="text-[13px] font-medium text-muted-foreground">同步异常</div>
         <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ errorCount }}</div>
         <div class="mt-3 cursor-pointer text-xs text-destructive hover:underline" @click="goto('services')">查看详情 &rarr;</div>
-      </div>
+      </Card>
     </div>
 
     <!-- Main Content: Two Column -->
@@ -123,7 +123,7 @@ function timeAgo(dateStr: string | null): string {
             <CardTitle>快速操作</CardTitle>
           </CardHeader>
           <CardContent class="flex flex-wrap gap-3">
-            <button @click="goto('services')" class="flex flex-1 items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-all hover:border-primary hover:shadow-sm">
+            <Card class="flex flex-1 cursor-pointer items-center gap-3 p-3 text-left transition-all hover:border-primary hover:shadow-sm" @click="goto('services')">
               <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               </div>
@@ -131,8 +131,8 @@ function timeAgo(dateStr: string | null): string {
                 <div class="text-[13px] font-medium">新增 MCP 服务</div>
                 <div class="text-xs text-muted-foreground">登记新的 HTTP MCP 服务</div>
               </div>
-            </button>
-            <button @click="goto('tools')" class="flex flex-1 items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-all hover:border-primary hover:shadow-sm">
+            </Card>
+            <Card class="flex flex-1 cursor-pointer items-center gap-3 p-3 text-left transition-all hover:border-primary hover:shadow-sm" @click="goto('tools')">
               <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-green-50 text-green-600">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               </div>
@@ -140,7 +140,7 @@ function timeAgo(dateStr: string | null): string {
                 <div class="text-[13px] font-medium">同步所有工具</div>
                 <div class="text-xs text-muted-foreground">刷新已启用服务的工具列表</div>
               </div>
-            </button>
+            </Card>
           </CardContent>
         </Card>
 
@@ -184,7 +184,7 @@ function timeAgo(dateStr: string | null): string {
             <div v-if="errorCount > 0">
               <div class="mb-3 text-sm font-semibold">需要关注</div>
               <div class="space-y-3">
-                <div v-for="s in services.filter(x => x.status === 'error')" :key="s.service_key" class="rounded-lg border-l-[3px] border-l-destructive bg-red-50 px-3 py-2">
+                <div v-for="s in services.filter(x => x.status === 'error')" :key="s.service_key" class="border-l-[3px] border-l-destructive bg-red-50 px-3 py-2">
                   <div class="flex items-center justify-between">
                     <span class="text-sm font-medium">{{ s.service_key }}</span>
                     <Badge variant="destructive" class="text-[11px]">连接失败</Badge>
