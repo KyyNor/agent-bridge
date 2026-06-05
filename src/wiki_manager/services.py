@@ -52,9 +52,11 @@ class WikiManagerService:
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
+        from wiki_manager.builtin_codegraph import CodeGraphBuiltinProvider
         from wiki_manager.builtin_wiki import WikiBuiltinProvider
 
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
+        self.capabilities.register_builtin_provider(CodeGraphBuiltinProvider(self.codegraph, self.governance))
 
     @classmethod
     def create(cls, paths: WikiManagerPaths, admins: set[str]) -> "WikiManagerService":

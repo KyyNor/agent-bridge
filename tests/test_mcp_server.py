@@ -108,6 +108,16 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
             "tool_count": 4,
             "status": "enabled",
             "resources": [],
-        }
+        },
+        {
+            "kind": "builtin",
+            "service": "codegraph",
+            "name": "CodeGraph",
+            "description": "内置代码仓库结构和代码查询能力",
+            "tags": ["builtin", "code"],
+            "tool_count": 5,
+            "status": "enabled",
+            "resources": [],
+        },
     ]
     assert structured["log_id"].startswith("call_")
