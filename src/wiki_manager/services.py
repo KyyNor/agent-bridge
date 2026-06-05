@@ -50,6 +50,9 @@ class WikiManagerService:
         self.registry: BackendRegistry | None = None
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
+        from wiki_manager.builtin_wiki import WikiBuiltinProvider
+
+        self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
 
     @classmethod
     def create(cls, paths: WikiManagerPaths, admins: set[str]) -> "WikiManagerService":

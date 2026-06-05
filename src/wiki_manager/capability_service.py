@@ -6,6 +6,12 @@ import json
 import re
 from typing import Any
 
+from wiki_manager.builtin_capabilities import (
+    BuiltinCapabilityProvider,
+    BuiltinResourceRef,
+    BuiltinTool,
+    mark_builtin_failure,
+)
 from wiki_manager.capabilities import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
 from wiki_manager.capability_governance import CapabilityGovernanceService, monotonic_ms
 from wiki_manager.domain import NotFound, ValidationError, require_admin_user
@@ -112,6 +118,10 @@ class CapabilityService:
         self.admins = admins
         self.mcp_client = mcp_client or McpHttpClient()
         self.governance = governance or CapabilityGovernanceService(store=store, admins=admins)
+        self.builtin_providers: dict[str, BuiltinCapabilityProvider] = {}
+
+    def register_builtin_provider(self, provider: BuiltinCapabilityProvider) -> None:
+        self.builtin_providers[provider.source_key] = provider
 
     def register_service(
         self,
@@ -125,6 +135,8 @@ class CapabilityService:
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         self._validate_service_key(service_key)
+        if service_key in self.builtin_providers:
+            raise ValidationError("service_key is reserved for built-in capability")
         existing = self.store.get_mcp_service(service_key)
         if headers is None:
             headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
@@ -279,16 +291,24 @@ class CapabilityService:
             items = self._root_search_items(actor=actor, profile_key=profile_key)
             response_path = "/"
         else:
-            if not self.governance.is_source_allowed(
-                actor,
-                profile_key,
-                SourceType.mcp_service.value,
-                normalized_path,
-            ):
-                return {"path": normalized_path, "items": []}
-            self._require_enabled_service(normalized_path)
-            items = [self._tool_search_item(tool) for tool in self._active_tools(normalized_path)]
-            response_path = normalized_path
+            if normalized_path in self.builtin_providers:
+                provider = self.builtin_providers[normalized_path]
+                items = [
+                    self._builtin_tool_search_item(provider.source_key, tool)
+                    for tool in provider.list_tools(actor, profile_key)
+                ]
+                response_path = normalized_path
+            else:
+                if not self.governance.is_source_allowed(
+                    actor,
+                    profile_key,
+                    SourceType.mcp_service.value,
+                    normalized_path,
+                ):
+                    return {"path": normalized_path, "items": []}
+                self._require_enabled_service(normalized_path)
+                items = [self._tool_search_item(tool) for tool in self._active_tools(normalized_path)]
+                response_path = normalized_path
 
         if query:
             needle = query.lower()
@@ -305,8 +325,15 @@ class CapabilityService:
     ) -> dict[str, Any]:
         started = monotonic_ms()
         request = {"service": service, "tool": tool, "arguments": arguments, "profile_key": profile_key}
+        source_type = SourceType.builtin.value if service in self.builtin_providers else SourceType.mcp_service.value
+        resource_type = None
+        resource_key = None
         try:
-            if not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
+            if service in self.builtin_providers:
+                resource = self.builtin_providers[service].resource_from_arguments(tool, arguments)
+                resource_type, resource_key = self._builtin_resource_tuple(resource)
+                result = await self._execute_builtin(actor, service, tool, arguments, profile_key)
+            elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
                 raise _mark_call_log_failure(
                     _mark_call_log_status(
                         ValidationError("source is blocked by profile policy"),
@@ -316,27 +343,33 @@ class CapabilityService:
                     owner=FailureOwner.policy.value,
                     error_type="profile_policy_blocked",
                 )
-            result = await self._execute_without_log(actor, service, tool, arguments)
+            else:
+                result = await self._execute_without_log(actor, service, tool, arguments)
             log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
                 entrypoint="metamcp_execute",
-                source_type=SourceType.mcp_service.value,
+                source_type=source_type,
                 source_key=service,
                 tool_name=tool,
                 request=request,
                 response=result,
                 status=CallLogStatus.success.value,
                 error_message=None,
+                resource_type=resource_type,
+                resource_key=resource_key,
                 duration_ms=monotonic_ms() - started,
             )
             return {**result, "log_id": log["log_id"]}
         except Exception as exc:
+            if source_type == SourceType.builtin.value:
+                resource_type = str(getattr(exc, "_tool_call_resource_type", resource_type or "")) or None
+                resource_key = str(getattr(exc, "_tool_call_resource_key", resource_key or "")) or None
             log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
                 entrypoint="metamcp_execute",
-                source_type=SourceType.mcp_service.value,
+                source_type=source_type,
                 source_key=service,
                 tool_name=tool,
                 request=request,
@@ -346,10 +379,47 @@ class CapabilityService:
                 failure_stage=_failure_stage(exc),
                 failure_owner=_failure_owner(exc),
                 error_type=_error_type(exc),
+                resource_type=resource_type,
+                resource_key=resource_key,
                 duration_ms=monotonic_ms() - started,
             )
             _attach_log_id(exc, log["log_id"])
             raise
+
+    async def _execute_builtin(
+        self,
+        actor: str,
+        service: str,
+        tool: str,
+        arguments: dict[str, Any],
+        profile_key: str | None,
+    ) -> dict[str, Any]:
+        provider = self.builtin_providers[service]
+        try:
+            result = await provider.execute(actor, tool, arguments, profile_key)
+        except ValidationError as exc:
+            if str(exc) == "resource is blocked by profile policy":
+                resource = provider.resource_from_arguments(tool, arguments)
+                raise mark_builtin_failure(
+                    _mark_call_log_status(exc, CallLogStatus.blocked.value),
+                    stage=FailureStage.profile_policy.value,
+                    owner=FailureOwner.policy.value,
+                    error_type="profile_policy_blocked",
+                    resource_type=resource.resource_type if resource is not None else None,
+                    resource_key=resource.resource_key if resource is not None else None,
+                ) from exc
+            raise
+        return {
+            "service": service,
+            "tool": tool,
+            "success": True,
+            "result": result,
+        }
+
+    def _builtin_resource_tuple(self, resource: BuiltinResourceRef | None) -> tuple[str | None, str | None]:
+        if resource is None:
+            return None, None
+        return resource.resource_type, resource.resource_key
 
     async def _execute_without_log(
         self,
@@ -433,6 +503,7 @@ class CapabilityService:
             service
             for service in self.store.list_mcp_services()
             if service["status"] == McpServiceStatus.enabled.value
+            and service["service_key"] not in self.builtin_providers
         ]
         visible_keys = set(
             self.governance.filter_source_keys(
@@ -447,7 +518,20 @@ class CapabilityService:
         for tool in self.store.list_mcp_tools():
             if tool.get("status") == "active":
                 tools_by_service[tool["service_key"]] = tools_by_service.get(tool["service_key"], 0) + 1
-        return [
+        builtin_items = [
+            {
+                "kind": "builtin",
+                "service": provider.source_key,
+                "name": provider.name,
+                "description": provider.description,
+                "tags": provider.tags,
+                "tool_count": len(provider.list_tools(actor, profile_key)),
+                "status": "enabled",
+                "resources": provider.list_resources(actor, profile_key),
+            }
+            for provider in self.builtin_providers.values()
+        ]
+        external_items = [
             {
                 "kind": "service",
                 "service": service["service_key"],
@@ -459,6 +543,7 @@ class CapabilityService:
             }
             for service in enabled_services
         ]
+        return builtin_items + external_items
 
     def _active_tools(self, service_key: str) -> list[dict[str, Any]]:
         return [tool for tool in self.store.list_mcp_tools(service_key) if tool.get("status") == "active"]
@@ -490,6 +575,21 @@ class CapabilityService:
             "examples": examples,
             "execute_example": examples[0] if examples else _schema_example(input_schema),
             "executable": tool["tool_type"] in READONLY_TOOL_TYPES,
+        }
+
+    def _builtin_tool_search_item(self, source_key: str, tool: BuiltinTool) -> dict[str, Any]:
+        return {
+            "kind": "tool",
+            "service": source_key,
+            "tool": tool.tool,
+            "display_tool": f"{source_key}.{tool.tool}",
+            "name": tool.name,
+            "description": tool.description,
+            "tags": ["builtin", source_key],
+            "tool_type": tool.tool_type,
+            "input_schema": tool.input_schema,
+            "execute_example": {},
+            "executable": True,
         }
 
     def _tool_search_item(self, tool: dict[str, Any]) -> dict[str, Any]:

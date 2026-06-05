@@ -98,5 +98,16 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
     mcp = create_mcp_server(svc)
     content, structured = asyncio.run(mcp.call_tool("search", {}))
     assert structured["path"] == "/"
-    assert structured["items"] == []
+    assert structured["items"] == [
+        {
+            "kind": "builtin",
+            "service": "wiki",
+            "name": "Wiki",
+            "description": "内置知识库查询能力",
+            "tags": ["builtin", "knowledge"],
+            "tool_count": 4,
+            "status": "enabled",
+            "resources": [],
+        }
+    ]
     assert structured["log_id"].startswith("call_")
