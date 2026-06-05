@@ -27,10 +27,12 @@ def capability_admin_page(default_user: str = "root") -> str:
           <button class="nav-item active" data-view="catalog" type="button">能力目录</button>
           <button class="nav-item" data-view="services" type="button">MCP 服务</button>
           <button class="nav-item" data-view="tools" type="button">工具清单</button>
+          <button class="nav-item" data-view="builtins" type="button">内置能力</button>
           <div class="nav-group-label">治理策略</div>
           <button class="nav-item" data-view="profiles" type="button">Project Profile</button>
           <div class="nav-group-label">调用观测</div>
           <button class="nav-item" data-view="logs" type="button">调用日志</button>
+          <button class="nav-item" data-view="stats" type="button">调用统计</button>
           <div class="nav-group-label">接入配置</div>
           <button class="nav-item" data-view="claude" type="button">Claude Code 接入</button>
         </nav>
@@ -192,6 +194,32 @@ def capability_admin_page(default_user: str = "root") -> str:
                 <p>查看 MetaMCP / 原始工具调用的请求、响应和 log_id。</p>
               </div>
             </div>
+            <div class="filter-bar log-filter-bar">
+              <label class="filter-field">来源<input id="logFilter_source_key" placeholder="wiki / mysql"></label>
+              <label class="filter-field">工具<input id="logFilter_tool_name" placeholder="search_code"></label>
+              <label class="filter-field">Profile<input id="logFilter_profile_key" placeholder="safe-readonly"></label>
+              <label class="filter-field">状态
+                <select id="logFilter_status">
+                  <option value="">全部</option>
+                  <option value="success">成功</option>
+                  <option value="error">失败</option>
+                  <option value="blocked">拦截</option>
+                </select>
+              </label>
+              <label class="filter-field">归因
+                <select id="logFilter_failure_owner">
+                  <option value="">全部</option>
+                  <option value="platform">平台</option>
+                  <option value="policy">策略</option>
+                  <option value="upstream_mcp">上游 MCP</option>
+                  <option value="builtin_backend">内置后端</option>
+                </select>
+              </label>
+              <input id="logFilter_entrypoint" type="hidden">
+              <input id="logFilter_failure_stage" type="hidden">
+              <input id="logFilter_error_type" type="hidden">
+              <button id="applyLogFilters" type="button">筛选</button>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -201,8 +229,8 @@ def capability_admin_page(default_user: str = "root") -> str:
                     <th>Profile</th>
                     <th>来源</th>
                     <th>工具</th>
-                    <th>请求</th>
-                    <th>响应</th>
+                    <th>详情</th>
+                    <th>归因</th>
                     <th>耗时</th>
                     <th>状态</th>
                     <th>时间</th>
@@ -213,6 +241,76 @@ def capability_admin_page(default_user: str = "root") -> str:
                 </tbody>
               </table>
             </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-stats">
+          <div class="panel">
+            <div class="panel-heading">
+              <div>
+                <h2>调用统计</h2>
+                <p>按 Profile、服务和工具查看调用量、失败量和平均耗时。</p>
+              </div>
+            </div>
+            <div class="filter-bar" id="statsControls">
+              <span class="empty-inline">维度：Profile / 来源 / 工具</span>
+            </div>
+            <div class="stats-grid" id="statsSummary"></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Profile</th>
+                    <th>来源</th>
+                    <th>工具</th>
+                    <th>调用</th>
+                    <th>失败</th>
+                    <th>拦截</th>
+                    <th>平均耗时</th>
+                  </tr>
+                </thead>
+                <tbody id="statsTable">
+                  <tr><td colspan="7" class="empty">正在加载调用统计...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="view-builtins">
+          <div class="content-grid builtins-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Wiki KB</h2>
+                  <p>内置 Wiki 能力可查阅的知识库状态。</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>KB</th><th>名称</th><th>状态</th></tr></thead>
+                  <tbody id="builtinKbsTable">
+                    <tr><td colspan="3" class="empty">正在读取 Wiki KB...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>CodeGraph 仓库</h2>
+                  <p>已纳入内置代码查询能力的仓库。</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>仓库</th><th>名称</th><th>状态</th></tr></thead>
+                  <tbody id="codeReposTable">
+                    <tr><td colspan="3" class="empty">正在读取代码仓库...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
         </section>
 
@@ -343,6 +441,66 @@ def capability_admin_page(default_user: str = "root") -> str:
         <div class="modal-actions">
           <button id="cancelProfileRulesDialog" type="button">取消</button>
           <button class="primary" type="submit">保存规则</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog class="modal log-detail-modal" id="logDetailDialog">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h2 id="logDetailTitle">调用详情</h2>
+            <p id="logDetailHint">查看请求、响应和错误归因。</p>
+          </div>
+          <button class="icon-button" id="closeLogDetailDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="json-tabs" id="logDetailTabs"></div>
+          <pre class="json-panel" id="logDetailJson"></pre>
+        </div>
+      </div>
+    </dialog>
+    <dialog class="modal compact-modal" id="profileCommandDialog">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <h2 id="profileCommandTitle">复制接入命令</h2>
+            <p id="profileCommandHint">复制后在目标项目或用户环境执行。</p>
+          </div>
+          <button class="icon-button" id="closeProfileCommandDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <pre class="json-panel" id="profileCommandText"></pre>
+        </div>
+        <div class="modal-actions">
+          <button id="copyProfileCommandButton" class="primary" type="button">复制命令</button>
+        </div>
+      </div>
+    </dialog>
+    <dialog class="modal profile-rules-modal" id="profileResourcesDialog">
+      <form id="profileResourcesForm" class="modal-card" method="dialog">
+        <div class="modal-header">
+          <div>
+            <h2 id="profileResourcesTitle">配置资源范围</h2>
+            <p id="profileResourcesHint">选择此 Profile 可查阅的 Wiki KB 和 CodeGraph 仓库。</p>
+          </div>
+          <button class="icon-button" id="closeProfileResourcesDialog" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <input id="profileResourcesKey" type="hidden">
+          <div class="table-wrap">
+            <table class="profile-rules-table">
+              <thead>
+                <tr><th>资源</th><th>类型</th><th>允许</th></tr>
+              </thead>
+              <tbody id="profileResourcesTable">
+                <tr><td colspan="3" class="empty">正在读取资源。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="cancelProfileResourcesDialog" type="button">取消</button>
+          <button class="primary" type="submit">保存资源范围</button>
         </div>
       </form>
     </dialog>

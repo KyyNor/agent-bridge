@@ -711,6 +711,79 @@ textarea {
   width: 140px;
 }
 
+.builtins-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stats-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 16px;
+}
+
+.stat-card {
+  background: #f8fafc;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  min-height: 78px;
+  padding: 12px;
+}
+
+.stat-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stat-card strong {
+  color: var(--fg);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.log-filter-bar .filter-field {
+  min-width: 170px;
+}
+
+.log-detail-modal {
+  max-width: min(880px, calc(100vw - 32px));
+  width: 880px;
+}
+
+.json-tabs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.json-tabs button {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.json-tabs button.active {
+  background: var(--primary-soft);
+  border-color: #b8c7ff;
+  color: var(--primary);
+}
+
+.inline-check {
+  align-items: center;
+  display: inline-flex;
+  font-weight: 600;
+  gap: 6px;
+}
+
+.inline-check input {
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
 .rule-effect-select {
   min-width: 112px;
   padding: 6px 8px;
@@ -746,9 +819,14 @@ textarea {
 
   .content-grid,
   .detail-grid,
+  .builtins-grid,
   .services-panel,
   .tools-panel {
     display: block;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .service-picker-item {

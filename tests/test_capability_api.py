@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from wiki_manager.capabilities import SourceType, ToolType
+from wiki_manager.capabilities import FailureOwner, FailureStage, SourceType, ToolType
 from wiki_manager.server import create_app
 from wiki_manager.storage import SQLiteStore
 
@@ -176,6 +176,39 @@ def test_capability_admin_page_uses_modal_service_form_and_no_refresh_buttons(wm
     assert "刷新数据" not in response.text
     assert "刷新目录" not in response.text
     assert "重新加载工具" not in response.text
+
+
+def test_capability_admin_page_has_phase2_views_and_modals(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+
+    assert response.status_code == 200
+    assert 'data-view="stats"' in response.text
+    assert 'data-view="builtins"' in response.text
+    assert 'id="logDetailDialog"' in response.text
+    assert 'id="profileCommandDialog"' in response.text
+    assert 'id="profileResourcesDialog"' in response.text
+
+
+def test_capability_static_assets_support_phase2_interactions(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    js = client.get("/static/capabilities/app.js")
+    css = client.get("/static/capabilities/app.css")
+
+    assert js.status_code == 200
+    assert "loadStats" in js.text
+    assert "openLogDetailDialog" in js.text
+    assert "copyProfileCommand" in js.text
+    assert "saveProfileResources" in js.text
+    assert "loadBuiltins" in js.text
+    assert css.status_code == 200
+    assert "stats-grid" in css.text
+    assert "log-detail-modal" in css.text
+    assert "json-tabs" in css.text
 
 
 def test_capability_static_assets_support_query_route_state(wm_paths) -> None:
@@ -399,6 +432,52 @@ def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     assert detail.status_code == 200
     assert '"query": "mysql"' in detail.json()["request_json"]
     assert detail.json()["response_json"]
+
+
+def test_tool_call_log_api_filters_by_failure_classification(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_tool_call_log(
+        log_id="call_failed_upstream",
+        actor="root",
+        profile_key="safe",
+        entrypoint="metamcp_execute",
+        source_type=SourceType.mcp_service.value,
+        source_key="mysql",
+        tool_name="query_sql",
+        request={},
+        response={},
+        status="error",
+        failure_stage=FailureStage.upstream_tool.value,
+        failure_owner=FailureOwner.upstream_mcp.value,
+        error_type="tool_error",
+    )
+    store.create_tool_call_log(
+        log_id="call_failed_policy",
+        actor="root",
+        profile_key="safe",
+        entrypoint="metamcp_execute",
+        source_type=SourceType.mcp_service.value,
+        source_key="mysql",
+        tool_name="query_sql",
+        request={},
+        response={},
+        status="blocked",
+        failure_stage=FailureStage.profile_policy.value,
+        failure_owner=FailureOwner.policy.value,
+        error_type="profile_denied",
+    )
+
+    response = client.get(
+        "/tool-call-logs",
+        params={"failure_owner": FailureOwner.upstream_mcp.value, "failure_stage": FailureStage.upstream_tool.value},
+        headers={"X-Wiki-User": "root"},
+    )
+
+    assert response.status_code == 200
+    assert [item["log_id"] for item in response.json()] == ["call_failed_upstream"]
 
 
 def test_tool_call_stats_api_groups_by_dimensions(wm_paths) -> None:
