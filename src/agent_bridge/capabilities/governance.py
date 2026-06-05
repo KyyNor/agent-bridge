@@ -109,8 +109,10 @@ class CapabilityGovernanceService:
             return source_keys
 
         profile = self.store.get_project_profile(profile_key)
-        if profile is None or profile.get("status") != "active":
+        if profile is None:
             raise NotFound("profile not found")
+        if profile.get("status") != "active":
+            raise ValidationError("profile is disabled")
 
         rules = self.store.list_profile_source_rules(profile_key)
         relevant_rules = [rule for rule in rules if rule["source_type"] == normalized_source_type]
@@ -155,8 +157,10 @@ class CapabilityGovernanceService:
             return resource_keys
 
         profile = self.store.get_project_profile(profile_key)
-        if profile is None or profile.get("status") != "active":
+        if profile is None:
             raise NotFound("profile not found")
+        if profile.get("status") != "active":
+            raise ValidationError("profile is disabled")
 
         rules = self.store.list_profile_resource_rules(profile_key)
         allow = {
