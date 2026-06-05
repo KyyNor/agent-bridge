@@ -334,7 +334,7 @@ async function toggleResource(type: string, key: string) {
                 />
                 <div class="flex-1">
                   <div class="text-sm font-medium">{{ kb.name }}</div>
-                  <div class="text-xs text-muted-foreground">{{ kb.slug }} · {{ kb.doc_count }} 文档</div>
+                  <div class="text-xs text-muted-foreground">{{ kb.slug }} · {{ kb.document_count }} 文档</div>
                 </div>
               </label>
             </div>

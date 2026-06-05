@@ -1,15 +1,22 @@
 import type {
+  BackendInfo,
   CatalogSource,
   CodeGraphStatus,
   CodeGraphNode,
   CodeRepository,
+  Document,
+  DocumentDetail,
+  KnowledgeBase,
   KnowledgeBaseSummary,
+  KbMember,
   McpService,
   McpTool,
   ProjectProfile,
   ProfileSourceRule,
   ProfileResourceRule,
   RepoOverview,
+  SearchResultChunk,
+  SyncJob,
   ToolCallLog,
   ToolCallStats,
 } from './types'
@@ -41,6 +48,16 @@ async function put<T>(url: string, body?: unknown): Promise<T> {
     method: 'PUT',
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  return r.json()
+}
+
+async function postFormData<T>(url: string, formData: FormData): Promise<T> {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: headers(),
+    body: formData,
   })
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
   return r.json()
@@ -112,4 +129,65 @@ export const api = {
     post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/callees`, { query: symbol, limit }),
   analyzeImpact: (repoKey: string, symbol: string) =>
     post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/impact`, { query: symbol }),
+
+  // Knowledge Bases
+  listKbs: () => get<KnowledgeBase[]>('/kbs'),
+  createKb: (data: { slug: string; name: string; description?: string }) =>
+    post<KnowledgeBase>('/kbs', data),
+  listKbMembers: (slug: string) => get<KbMember[]>(`/kbs/${slug}/members`),
+  grantKbMember: (slug: string, data: { linux_user: string; role: string }) =>
+    post(`/kbs/${slug}/members`, data),
+
+  // Documents
+  listDocs: (kb: string, backend?: string) => {
+    const qs = new URLSearchParams({ kb })
+    if (backend) qs.set('backend', backend)
+    return get<Document[]>(`/docs?${qs}`)
+  },
+  getDoc: (slug: string, backend?: string) => {
+    const qs = new URLSearchParams()
+    if (backend) qs.set('backend', backend)
+    return get<DocumentDetail>(`/docs/${slug}${qs.toString() ? '?' + qs : ''}`)
+  },
+  addDocument: (file: File, kbs: string[], later = false) => {
+    const form = new FormData()
+    form.append('file', file)
+    kbs.forEach(kb => form.append('kb', kb))
+    if (later) form.append('later', 'true')
+    return postFormData<DocumentDetail>('/docs', form)
+  },
+  updateDocument: (slug: string, file: File, later = false) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (later) form.append('later', 'true')
+    return postFormData<DocumentDetail>(`/docs/${slug}/versions`, form)
+  },
+  deleteDocument: (slug: string) =>
+    post<{ slug: string; status: string }>(`/docs/${slug}/delete`),
+  purgeDocument: (slug: string) =>
+    post<{ slug: string; status: string }>(`/docs/${slug}/purge`, { confirm: true }),
+
+  // Sync
+  triggerSync: (backend?: string, allUsers = false) => {
+    const qs = new URLSearchParams()
+    if (backend) qs.set('backend', backend)
+    return post<{ processed: number }>(`/sync${qs.toString() ? '?' + qs : ''}`, { all_users: allUsers })
+  },
+  getSyncStatus: (backend?: string) => {
+    const qs = new URLSearchParams()
+    if (backend) qs.set('backend', backend)
+    return get<{ jobs: SyncJob[] }>(`/status${qs.toString() ? '?' + qs : ''}`)
+  },
+
+  // Search & Ask
+  search: (kb: string, q: string, backend?: string, topK = 6) => {
+    const qs = new URLSearchParams({ kb, q, top_k: String(topK) })
+    if (backend) qs.set('backend', backend)
+    return get<{ results: SearchResultChunk[] }>(`/search?${qs}`)
+  },
+  ask: (data: { kb: string; question: string; backend?: string; session_id?: string }) =>
+    post<{ answer: string; chunks: SearchResultChunk[]; session_id: string | null }>('/ask', data),
+
+  // Backends
+  listBackends: () => get<BackendInfo[]>('/backends'),
 }

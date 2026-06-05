@@ -95,11 +95,119 @@ export interface CodeRepository {
 }
 
 export interface KnowledgeBaseSummary {
+  id: number
   slug: string
   name: string
-  doc_count: number
-  member_count: number
-  backend_targets: { slug: string; type: string; status: string }[]
+  description: string
+  status: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  role: string
+  backend_targets: { id: number; kb_id: number; slug: string; backend_type: string; backend_kb_id: string | null; config_json: string; status: string; created_at: string; updated_at: string }[]
+  document_count: number
+  sync_failed_count: number
+}
+
+export interface KnowledgeBase {
+  id: number
+  slug: string
+  name: string
+  description: string
+  status: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  role: string
+}
+
+export interface KbMember {
+  linux_user: string
+  role: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Document {
+  id: number
+  slug: string
+  title: string
+  owner_user: string
+  status: string
+  current_version_no: number | null
+  sync_status: string
+}
+
+export interface DocumentVersion {
+  id: number
+  doc_id: number
+  version_no: number
+  original_filename: string
+  content_hash: string
+  file_size: number
+  mime_type: string
+  created_by: string
+  created_at: string
+}
+
+export interface SyncState {
+  doc_id: number
+  kb_id: number
+  backend_slug: string
+  backend_doc_id: string | null
+  status: string
+  backend_status: string | null
+  chunk_count: number | null
+  progress: number | null
+  backend_error: string | null
+  updated_at: string
+}
+
+export interface DocumentDetail {
+  id: number
+  slug: string
+  title: string
+  owner_user: string
+  current_version_id: number | null
+  status: string
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  kb_slugs: string[]
+  versions: DocumentVersion[]
+  sync_states: SyncState[]
+}
+
+export interface SyncJob {
+  id: number
+  doc_id: number
+  kb_id: number
+  backend_slug: string
+  operation: string
+  version_id: number | null
+  status: string
+  error: string | null
+  created_at: string
+  updated_at: string
+  doc_slug: string
+  doc_title: string
+  kb_slug: string
+  kb_name: string
+  version_no: number | null
+}
+
+export interface SearchResultChunk {
+  chunk_id: string
+  content: string
+  document_name: string
+  similarity: number
+  dataset_id: string
+}
+
+export interface BackendInfo {
+  slug: string
+  type: string
+  status: string
 }
 
 export interface CodeGraphStatus {
