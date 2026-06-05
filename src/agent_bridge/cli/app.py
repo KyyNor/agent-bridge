@@ -133,7 +133,6 @@ def _resolve_metamcp_scope(scope: str | None) -> str:
             {"name": "project  当前项目 (.mcp.json)", "value": "project"},
             {"name": "user  全局 (~/.mcp.json)", "value": "user"},
         ],
-        default="project",
     ).ask()
     if selected is None:
         raise typer.Abort()
