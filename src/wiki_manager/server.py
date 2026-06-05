@@ -77,6 +77,15 @@ class ProfileRulesRequest(BaseModel):
     rules: list[ProfileSourceRuleRequest] = Field(default_factory=list)
 
 
+class ProfileResourceRuleRequest(BaseModel):
+    resource_type: str
+    resource_key: str
+
+
+class ProfileResourcesRequest(BaseModel):
+    resources: list[ProfileResourceRuleRequest] = Field(default_factory=list)
+
+
 def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
     resolved_paths = paths or WikiManagerPaths.from_root()
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
@@ -390,6 +399,16 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         ensure_capability_schema()
         rules = [rule.model_dump() for rule in payload.rules]
         return call_safely(lambda: service.governance.replace_profile_rules(current_actor, profile_key, rules))
+
+    @app.put("/capability-profiles/{profile_key}/resources")
+    def replace_capability_profile_resources(
+        profile_key: str,
+        payload: ProfileResourcesRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        resources = [resource.model_dump() for resource in payload.resources]
+        return call_safely(lambda: service.governance.replace_profile_resource_rules(current_actor, profile_key, resources))
 
     @app.get("/tool-call-logs")
     def list_tool_call_logs(

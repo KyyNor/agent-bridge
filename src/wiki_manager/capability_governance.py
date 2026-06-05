@@ -7,7 +7,14 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from wiki_manager.capabilities import CallLogStatus, FailureOwner, FailureStage, ProfileRuleEffect, SourceType
+from wiki_manager.capabilities import (
+    CallLogStatus,
+    FailureOwner,
+    FailureStage,
+    ProfileResourceType,
+    ProfileRuleEffect,
+    SourceType,
+)
 from wiki_manager.domain import NotFound, ValidationError, require_admin_user
 from wiki_manager.storage import SQLiteStore
 
@@ -57,7 +64,11 @@ class CapabilityGovernanceService:
         profile = self.store.get_project_profile(profile_key)
         if profile is None:
             raise NotFound("profile not found")
-        return {**profile, "rules": self.store.list_profile_source_rules(profile_key)}
+        return {
+            **profile,
+            "rules": self.store.list_profile_source_rules(profile_key),
+            "resource_rules": self.store.list_profile_resource_rules(profile_key),
+        }
 
     def replace_profile_rules(
         self,
@@ -70,6 +81,19 @@ class CapabilityGovernanceService:
             raise NotFound("profile not found")
         normalized = [self._validate_rule(rule) for rule in rules]
         self.store.replace_profile_source_rules(profile_key, normalized)
+        return self.get_profile(actor, profile_key)
+
+    def replace_profile_resource_rules(
+        self,
+        actor: str,
+        profile_key: str,
+        rules: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_project_profile(profile_key) is None:
+            raise NotFound("profile not found")
+        normalized = [self._validate_resource_rule(rule) for rule in rules]
+        self.store.replace_profile_resource_rules(profile_key, normalized)
         return self.get_profile(actor, profile_key)
 
     def filter_source_keys(
@@ -116,6 +140,44 @@ class CapabilityGovernanceService:
             profile_key=profile_key,
             source_type=source_type,
             source_keys=[source_key],
+        )
+
+    def filter_resource_keys(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        resource_type: str,
+        resource_keys: list[str],
+    ) -> list[str]:
+        normalized_resource_type = self._validate_resource_type(resource_type)
+        if profile_key is None:
+            return resource_keys
+
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None or profile.get("status") != "active":
+            raise NotFound("profile not found")
+
+        rules = self.store.list_profile_resource_rules(profile_key)
+        allow = {
+            rule["resource_key"]
+            for rule in rules
+            if rule["resource_type"] == normalized_resource_type
+        }
+        return [resource_key for resource_key in resource_keys if resource_key in allow]
+
+    def is_resource_allowed(
+        self,
+        actor: str,
+        profile_key: str | None,
+        resource_type: str,
+        resource_key: str,
+    ) -> bool:
+        return resource_key in self.filter_resource_keys(
+            actor=actor,
+            profile_key=profile_key,
+            resource_type=resource_type,
+            resource_keys=[resource_key],
         )
 
     def log_tool_call(
@@ -247,11 +309,26 @@ class CapabilityGovernanceService:
 
         return {"source_type": source_type, "source_key": source_key, "effect": effect}
 
+    def _validate_resource_rule(self, rule: dict[str, Any]) -> dict[str, str]:
+        resource_type = self._validate_resource_type(rule.get("resource_type"))
+
+        resource_key = str(rule.get("resource_key") or "").strip()
+        if not resource_key:
+            raise ValidationError("resource_key is required")
+
+        return {"resource_type": resource_type, "resource_key": resource_key}
+
     def _validate_source_type(self, source_type: str | None) -> str:
         try:
             return SourceType(source_type).value
         except ValueError as exc:
             raise ValidationError("invalid source type") from exc
+
+    def _validate_resource_type(self, resource_type: str | None) -> str:
+        try:
+            return ProfileResourceType(resource_type).value
+        except ValueError as exc:
+            raise ValidationError("invalid resource type") from exc
 
     def _validate_optional_source_type(self, source_type: str | None) -> str | None:
         if source_type is None:

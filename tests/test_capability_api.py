@@ -345,6 +345,27 @@ def test_profile_api_and_catalog_preview(wm_paths) -> None:
     assert [item["source_key"] for item in catalog.json()["sources"]] == ["mysql"]
 
 
+def test_profile_resource_rules_api(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/capability-profiles",
+        json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
+        headers={"X-Wiki-User": "root"},
+    )
+
+    saved = client.put(
+        "/capability-profiles/safe-readonly/resources",
+        json={"resources": [{"resource_type": "wiki_kb", "resource_key": "frontend-docs"}]},
+        headers={"X-Wiki-User": "root"},
+    )
+    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Wiki-User": "root"})
+
+    assert saved.status_code == 200
+    assert saved.json()["resource_rules"][0]["resource_key"] == "frontend-docs"
+    assert detail.json()["resource_rules"][0]["resource_type"] == "wiki_kb"
+
+
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

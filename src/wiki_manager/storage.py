@@ -150,6 +150,16 @@ CREATE TABLE IF NOT EXISTS profile_source_rules (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (profile_key, source_type, source_key, effect)
 );
+CREATE TABLE IF NOT EXISTS profile_resource_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+  resource_type TEXT NOT NULL,
+  resource_key TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (profile_key, resource_type, resource_key)
+);
+CREATE INDEX IF NOT EXISTS idx_profile_resource_rules_profile ON profile_resource_rules(profile_key);
+CREATE INDEX IF NOT EXISTS idx_profile_resource_rules_resource ON profile_resource_rules(resource_type, resource_key);
 CREATE TABLE IF NOT EXISTS tool_call_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   log_id TEXT NOT NULL UNIQUE,
@@ -672,6 +682,31 @@ class SQLiteStore:
                 FROM profile_source_rules
                 WHERE profile_key = ?
                 ORDER BY source_key, effect
+                """,
+                (profile_key,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def replace_profile_resource_rules(self, profile_key: str, rules: list[dict[str, Any]]) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM profile_resource_rules WHERE profile_key = ?", (profile_key,))
+            for rule in rules:
+                conn.execute(
+                    """
+                    INSERT INTO profile_resource_rules (profile_key, resource_type, resource_key)
+                    VALUES (?, ?, ?)
+                    """,
+                    (profile_key, rule["resource_type"], rule["resource_key"]),
+                )
+
+    def list_profile_resource_rules(self, profile_key: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM profile_resource_rules
+                WHERE profile_key = ?
+                ORDER BY resource_type, resource_key
                 """,
                 (profile_key,),
             ).fetchall()

@@ -39,6 +39,11 @@ class ProfileRuleEffect(str, Enum):
     deny = "deny"
 
 
+class ProfileResourceType(str, Enum):
+    wiki_kb = "wiki_kb"
+    code_repo = "code_repo"
+
+
 class CallLogStatus(str, Enum):
     success = "success"
     error = "error"
