@@ -177,7 +177,7 @@ class WeknoraBackend:
         response = self._request(
             "POST",
             "/api/v1/sessions",
-            json={"title": "wiki-manager", "description": "agent-bridge API session"},
+            json={"title": "agent-bridge", "description": "agent-bridge API session"},
         )
         self._raise(response)
         return self._data(response)["id"]
