@@ -441,7 +441,7 @@ class CapabilityService:
             if tool_payload["tool_type"] == ToolType.unconfigured.value:
                 raise _mark_call_log_failure(
                     _mark_call_log_status(
-                        ValidationError("tool type is not configured"),
+                        ValidationError("工具类型未配置，请联系管理员在 Agent Bridge 中配置工具类型"),
                         CallLogStatus.blocked.value,
                     ),
                     stage=FailureStage.capability_registry.value,

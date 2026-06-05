@@ -17,18 +17,41 @@ const showDetail = ref(false)
 const detailLog = ref<ToolCallLog | null>(null)
 const detailLoading = ref(false)
 
+function todayRange() {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - 1)
+  return {
+    from: start.toISOString().slice(0, 19).replace('T', ' '),
+    to: end.toISOString().slice(0, 19).replace('T', ' '),
+  }
+}
+
+function formatDate(d: Date) {
+  return d.toISOString().slice(0, 10)
+}
+
+const dateFrom = ref(formatDate(new Date(Date.now() - 86400000)))
+const dateTo = ref(formatDate(new Date()))
+
 onMounted(() => loadLogs())
 
 async function loadLogs() {
   loading.value = true
-  const params: Record<string, string | number> = { limit: 50 }
+  const params: Record<string, string | number> = { limit: 100 }
   if (statusFilter.value) params.status = statusFilter.value
+  if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
+  if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
   try { logs.value = await api.listLogs(params) } catch { logs.value = [] }
   loading.value = false
 }
 
 function applyFilter(status: string) {
   statusFilter.value = status
+  loadLogs()
+}
+
+function applyDateFilter() {
   loadLogs()
 }
 
@@ -61,13 +84,18 @@ const filterTabs = computed(() => [
 </script>
 
 <template>
-  <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
+  <div v-if="loading && logs.length === 0" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
-      <div class="relative flex-1 max-w-[360px]">
+      <div class="relative flex-1 max-w-[280px]">
         <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" />
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <Input v-model="dateFrom" type="date" class="w-[140px]" @change="applyDateFilter" />
+        <span class="text-muted-foreground">至</span>
+        <Input v-model="dateTo" type="date" class="w-[140px]" @change="applyDateFilter" />
       </div>
       <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
         <button
@@ -95,17 +123,18 @@ const filterTabs = computed(() => [
           <thead>
             <tr class="border-b border-border bg-secondary/50">
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">时间</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">调用者</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Profile</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">工具</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">耗时</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">错误</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"></th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="l in displayLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ l.created_at?.slice(0, 19) }}</td>
-              <td class="px-4 py-3 text-sm">{{ l.actor }}</td>
+              <td class="px-4 py-3 text-sm">{{ l.profile_key || '—' }}</td>
               <td class="px-4 py-3 font-mono text-sm">{{ l.tool_name || '—' }}</td>
               <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">{{ l.duration_ms != null ? `${l.duration_ms}ms` : '—' }}</td>
               <td class="px-4 py-3">
@@ -114,6 +143,7 @@ const filterTabs = computed(() => [
                 <Badge v-else-if="l.status === 'blocked'" variant="secondary" class="bg-amber-50 text-amber-700">拦截</Badge>
                 <Badge v-else variant="secondary">{{ l.status }}</Badge>
               </td>
+              <td class="max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ l.error_message || '—' }}</td>
               <td class="px-4 py-3">
                 <Button variant="ghost" size="sm" @click="openDetail(l)" class="h-8 text-xs">详情</Button>
               </td>
@@ -129,12 +159,12 @@ const filterTabs = computed(() => [
 
     <!-- Detail Dialog -->
     <Dialog :open="showDetail" @update:open="showDetail = $event">
-      <DialogContent class="sm:max-w-[640px]">
+      <DialogContent class="sm:max-w-[700px]">
         <DialogHeader>
-          <DialogTitle>调用详情 {{ detailLog?.log_id }}</DialogTitle>
+          <DialogTitle>调用详情</DialogTitle>
         </DialogHeader>
         <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
-        <div v-else-if="detailLog" class="space-y-4">
+        <div v-else-if="detailLog" class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div><span class="text-muted-foreground">调用者</span><div class="font-medium">{{ detailLog.actor }}</div></div>
             <div><span class="text-muted-foreground">入口</span><div class="font-medium">{{ detailLog.entrypoint }}</div></div>
@@ -157,18 +187,18 @@ const filterTabs = computed(() => [
             {{ detailLog.error_message }}
           </div>
 
-          <div v-if="detailLog.failure_stage" class="text-sm">
-            <span class="text-muted-foreground">失败阶段:</span> {{ detailLog.failure_stage }}
-            <span v-if="detailLog.failure_owner"> · {{ detailLog.failure_owner }}</span>
-            <span v-if="detailLog.error_type"> · {{ detailLog.error_type }}</span>
+          <div v-if="detailLog.failure_stage" class="text-sm text-muted-foreground">
+            失败阶段: {{ detailLog.failure_stage }}
+            <span v-if="detailLog.failure_owner"> · 责任方: {{ detailLog.failure_owner }}</span>
+            <span v-if="detailLog.error_type"> · 类型: {{ detailLog.error_type }}</span>
           </div>
 
-          <div v-if="detailLog.request">
+          <div v-if="detailLog.request && Object.keys(detailLog.request).length > 0">
             <div class="mb-1 text-xs font-medium text-muted-foreground">请求</div>
             <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ JSON.stringify(detailLog.request, null, 2) }}</pre>
           </div>
 
-          <div v-if="detailLog.response">
+          <div v-if="detailLog.response && Object.keys(detailLog.response).length > 0">
             <div class="mb-1 text-xs font-medium text-muted-foreground">响应</div>
             <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ JSON.stringify(detailLog.response, null, 2) }}</pre>
           </div>
