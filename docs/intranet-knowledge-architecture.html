@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>内网知识库架构讨论稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f3f0e8;
+      --paper-deep: #e7e0d1;
+      --ink: #17201d;
+      --muted: #68736d;
+      --line: #cfc6b6;
+      --panel: #fffdf7;
+      --panel-2: #f9f5eb;
+      --mcp: #0f6f65;
+      --mcp-soft: #dcefed;
+      --kb: #8a5a12;
+      --kb-soft: #f4ead8;
+      --app: #244a72;
+      --app-soft: #dce8f3;
+      --risk: #9e3128;
+      --risk-soft: #f3dedb;
+      --shadow: 0 18px 48px rgba(45, 35, 18, 0.11);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(23, 32, 29, 0.035) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(23, 32, 29, 0.035) 1px, transparent 1px),
+        var(--paper);
+      background-size: 28px 28px;
+      color: var(--ink);
+      font-family: "Noto Serif SC", "Songti SC", "STSong", "PingFang SC", serif;
+      line-height: 1.68;
+    }
+
+    main {
+      width: min(1200px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 40px 0 72px;
+    }
+
+    header {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      padding: 34px;
+    }
+
+    header::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 10px;
+      background: linear-gradient(180deg, var(--mcp), var(--kb), var(--app));
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      color: var(--mcp);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .kicker::before {
+      content: "";
+      width: 22px;
+      height: 2px;
+      background: var(--mcp);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.24;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      max-width: 880px;
+      font-size: 36px;
+      font-weight: 800;
+    }
+
+    h2 {
+      margin-bottom: 18px;
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    h3 {
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 17px;
+      font-weight: 800;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    a {
+      color: var(--app);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .lead {
+      max-width: 900px;
+      margin-top: 18px;
+      color: #405047;
+      font-size: 18px;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .meta {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 14px;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      min-height: 96px;
+    }
+
+    .meta strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .meta span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .section {
+      margin-top: 28px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 253, 247, 0.92);
+      box-shadow: 0 10px 30px rgba(45, 35, 18, 0.07);
+      padding: 26px;
+    }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 24px;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .toc a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--ink);
+      padding: 12px 14px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .toc a:hover {
+      border-color: var(--mcp);
+      text-decoration: none;
+    }
+
+    .models {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .model-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 18px;
+    }
+
+    .model-card::after {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 5px;
+      background: var(--mcp);
+    }
+
+    .model-card.hub::after {
+      background: var(--kb);
+    }
+
+    .model-title {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 5px 0 16px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: var(--mcp-soft);
+      color: var(--mcp);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .tag.kb {
+      background: var(--kb-soft);
+      color: var(--kb);
+    }
+
+    .diagram {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1.25fr) 26px minmax(0, 1fr);
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    .lane.two-hop {
+      grid-template-columns: 1fr;
+    }
+
+    .node {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 88px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fffaf0;
+      padding: 12px;
+    }
+
+    .node strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .node span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .node.source {
+      background: #f7f1e3;
+    }
+
+    .node.mcp {
+      border-color: rgba(15, 111, 101, 0.35);
+      background: var(--mcp-soft);
+    }
+
+    .node.kb {
+      border-color: rgba(138, 90, 18, 0.35);
+      background: var(--kb-soft);
+    }
+
+    .node.app {
+      border-color: rgba(36, 74, 114, 0.35);
+      background: var(--app-soft);
+    }
+
+    .node.export {
+      border-style: dashed;
+      background: #fbf7ef;
+    }
+
+    .arrow {
+      position: relative;
+      min-height: 88px;
+    }
+
+    .arrow::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 2px;
+      right: 3px;
+      border-top: 2px solid #8e806e;
+    }
+
+    .arrow::after {
+      content: "";
+      position: absolute;
+      top: calc(50% - 5px);
+      right: 0;
+      width: 10px;
+      height: 10px;
+      border-top: 2px solid #8e806e;
+      border-right: 2px solid #8e806e;
+      transform: rotate(45deg);
+    }
+
+    .lane.two-hop .arrow {
+      min-height: 28px;
+    }
+
+    .lane.two-hop .arrow::before {
+      top: 3px;
+      bottom: 3px;
+      left: 50%;
+      right: auto;
+      border-top: 0;
+      border-left: 2px solid #8e806e;
+    }
+
+    .lane.two-hop .arrow::after {
+      top: auto;
+      right: calc(50% - 5px);
+      bottom: 1px;
+      transform: rotate(135deg);
+    }
+
+    .lane-label {
+      margin: 12px 0 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .capability-stack {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .cap {
+      border: 1px solid rgba(15, 111, 101, 0.23);
+      border-radius: 8px;
+      background: rgba(255, 253, 247, 0.76);
+      padding: 9px;
+      color: #294139;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .callout {
+      margin-top: 16px;
+      border-left: 4px solid var(--mcp);
+      border-radius: 8px;
+      background: #f7fbf9;
+      padding: 14px 16px;
+      color: #2a443c;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+    }
+
+    .callout.risk {
+      border-left-color: var(--risk);
+      background: var(--risk-soft);
+      color: #5f241f;
+    }
+
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .compare-table th,
+    .compare-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 13px 14px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    .compare-table th {
+      background: #ece5d6;
+      color: #2c2923;
+      font-weight: 800;
+    }
+
+    .compare-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .compare-table td:first-child {
+      width: 150px;
+      color: var(--ink);
+      font-weight: 800;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 18px;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .panel ul {
+      margin: 12px 0 0;
+      padding-left: 18px;
+    }
+
+    .panel li {
+      margin: 7px 0;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+      counter-reset: step;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .step {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 42px 14px 14px;
+      min-height: 150px;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      top: 13px;
+      left: 14px;
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fffdf7;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 14px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .example-flow {
+      display: grid;
+      grid-template-columns: 1fr 28px 1fr 28px 1fr;
+      gap: 8px;
+      align-items: stretch;
+      margin-top: 16px;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .small-arrow {
+      position: relative;
+      min-height: 72px;
+    }
+
+    .small-arrow::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 3px;
+      right: 4px;
+      border-top: 2px solid #8e806e;
+    }
+
+    .small-arrow::after {
+      content: "";
+      position: absolute;
+      top: calc(50% - 5px);
+      right: 1px;
+      width: 10px;
+      height: 10px;
+      border-top: 2px solid #8e806e;
+      border-right: 2px solid #8e806e;
+      transform: rotate(45deg);
+    }
+
+    .note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+    }
+
+    .decision {
+      border: 1px solid rgba(15, 111, 101, 0.35);
+      border-radius: 8px;
+      background: linear-gradient(135deg, #eef8f5, #fffaf0);
+      padding: 20px;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .decision strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--mcp);
+      font-size: 18px;
+    }
+
+    @media (max-width: 980px) {
+      .meta-grid,
+      .toc,
+      .models,
+      .split,
+      .steps {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .lane,
+      .lane.two-hop,
+      .example-flow {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow,
+      .small-arrow {
+        min-height: 28px;
+      }
+
+      .arrow::before,
+      .small-arrow::before {
+        top: 3px;
+        bottom: 3px;
+        left: 50%;
+        right: auto;
+        border-top: 0;
+        border-left: 2px solid #8e806e;
+      }
+
+      .arrow::after,
+      .small-arrow::after {
+        top: auto;
+        right: calc(50% - 5px);
+        bottom: 1px;
+        transform: rotate(135deg);
+      }
+    }
+
+    @media (max-width: 680px) {
+      main {
+        width: min(100vw - 24px, 1200px);
+        padding: 24px 0 46px;
+      }
+
+      header,
+      .section {
+        padding: 20px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      .lead {
+        font-size: 16px;
+      }
+
+      .meta-grid,
+      .toc,
+      .models,
+      .split,
+      .steps {
+        grid-template-columns: 1fr;
+      }
+
+      .compare-table {
+        display: block;
+        overflow-x: auto;
+        white-space: normal;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fffdf7;
+      }
+
+      main {
+        width: 100%;
+        padding: 0;
+      }
+
+      header,
+      .section,
+      .model-card,
+      .panel {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .toc {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="kicker">领导讨论版 · 内网知识供给架构</div>
+      <h1>MCP 与大模型知识库：平级能力，还是知识库统一汇总？</h1>
+      <p class="lead">
+        当前分歧不是“是否建设大模型知识库”，而是结构化知识是否应被降级为文档后再进入知识库。
+        对数据血缘、SQL 逻辑、公共服务接口这类可查询、可约束、可执行的知识，MCP 更像能力接口；
+        对制度、手册、历史资料等非结构化文档，大模型知识库更适合作为语义检索入口。
+      </p>
+
+      <div class="meta-grid">
+        <div class="meta">
+          <strong>结构化知识</strong>
+          <span>数据加工链路、SQL、接口文档、报表查询路径、服务依赖关系。</span>
+        </div>
+        <div class="meta">
+          <strong>非结构化知识</strong>
+          <span>制度文档、操作手册、Word、Excel、PDF、历史说明材料。</span>
+        </div>
+        <div class="meta">
+          <strong>上层应用</strong>
+          <span>Claude Code、网页问答、智能体、运维查询、开发辅助。</span>
+        </div>
+        <div class="meta">
+          <strong>关键议题</strong>
+          <span>“要访问哪些服务”和“接口怎么调用”是否能被同一个 example 字段完整承载。</span>
+        </div>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="页面目录">
+      <a href="#models">两种模式</a>
+      <a href="#comparison">核心差异</a>
+      <a href="#example-boundary">example 边界</a>
+      <a href="#recommendation">建议口径</a>
+    </nav>
+
+    <section id="models" class="section">
+      <h2>两种架构模式</h2>
+      <div class="models">
+        <article class="model-card">
+          <div class="model-title">
+            <h3>模式 A：MCP 与大模型知识库平级</h3>
+            <span class="tag">双通道编排</span>
+          </div>
+          <div class="diagram" aria-label="模式 A 架构图">
+            <div class="lane-label">结构化数据</div>
+            <div class="lane">
+              <div class="node source">
+                <strong>原始结构化数据</strong>
+                <span>血缘、SQL、接口、报表、服务目录</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node mcp">
+                <strong>MCP 能力层</strong>
+                <span>查询检索、参数化访问、实时结果、example、调用约束</span>
+                <div class="capability-stack">
+                  <div class="cap">查有哪些服务</div>
+                  <div class="cap">查接口如何调用</div>
+                  <div class="cap">查数据链路</div>
+                  <div class="cap">查 SQL 逻辑</div>
+                </div>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node app">
+                <strong>上层应用</strong>
+                <span>Claude Code、网页问答、Agent、开发辅助</span>
+              </div>
+            </div>
+
+            <div class="lane-label">非结构化数据</div>
+            <div class="lane">
+              <div class="node source">
+                <strong>原始文档</strong>
+                <span>Word、Excel、PDF、制度、手册</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node kb">
+                <strong>大模型知识库</strong>
+                <span>切片、向量检索、全文检索、摘要、问答引用</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node app">
+                <strong>上层应用</strong>
+                <span>统一问答界面中按需调用 RAG 或 MCP</span>
+              </div>
+            </div>
+          </div>
+          <div class="callout">
+            重点：上层应用不是直接面对一堆孤立系统，而是通过统一编排层决定“该查 MCP 还是查知识库”。MCP 保留结构化知识的实时性、约束和可执行查询能力。
+          </div>
+        </article>
+
+        <article class="model-card hub">
+          <div class="model-title">
+            <h3>模式 B：所有信息进入大模型知识库汇总</h3>
+            <span class="tag kb">知识库中心</span>
+          </div>
+          <div class="diagram" aria-label="模式 B 架构图">
+            <div class="lane-label">结构化数据</div>
+            <div class="lane two-hop">
+              <div class="node source">
+                <strong>原始结构化数据</strong>
+                <span>血缘、SQL、接口、报表、服务目录</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node mcp">
+                <strong>MCP</strong>
+                <span>先查询，再导出</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node export">
+                <strong>MD / Word 快照</strong>
+                <span>把结构化能力文档化</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node kb">
+                <strong>大模型知识库</strong>
+                <span>统一切片、检索和问答</span>
+              </div>
+            </div>
+
+            <div class="lane-label">非结构化数据</div>
+            <div class="lane">
+              <div class="node source">
+                <strong>原始文档</strong>
+                <span>Word、Excel、PDF、制度、手册</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node kb">
+                <strong>大模型知识库</strong>
+                <span>文档导入后统一问答</span>
+              </div>
+              <div class="arrow" aria-hidden="true"></div>
+              <div class="node app">
+                <strong>上层应用</strong>
+                <span>主要只访问知识库</span>
+              </div>
+            </div>
+          </div>
+          <div class="callout risk">
+            重点：这个模式的入口更简单，但会把“可查询能力”变成“文档快照”。关系、参数、实时状态、服务选择逻辑和接口调用约束都可能在切片与召回中被削弱。
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="comparison" class="section">
+      <h2>核心差异</h2>
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>模式 A：MCP + 大模型知识库平级</th>
+            <th>模式 B：知识库统一汇总</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>本质定位</td>
+            <td>MCP 是结构化知识的能力接口；知识库是非结构化资料的语义检索入口。</td>
+            <td>知识库成为唯一汇总入口；MCP 更像生成文档快照的中间工具。</td>
+          </tr>
+          <tr>
+            <td>准确性</td>
+            <td>结构化问题可以按参数查询，返回精确对象、字段、关系和来源。</td>
+            <td>依赖文档切片和召回，复杂关系容易被拆散，答案更偏摘要。</td>
+          </tr>
+          <tr>
+            <td>实时性</td>
+            <td>MCP 可以直接读取当前数据源或当前服务目录，更新链路短。</td>
+            <td>需要导出、入库、切片、索引刷新，存在文档快照滞后。</td>
+          </tr>
+          <tr>
+            <td>表达能力</td>
+            <td>能表达“查询条件、接口参数、依赖关系、可调用动作、example”。</td>
+            <td>更擅长表达“文字说明、制度解释、操作步骤、历史背景”。</td>
+          </tr>
+          <tr>
+            <td>用户体验</td>
+            <td>上层应用需要一个编排层判断调用 MCP 还是 RAG，但答案可更精确。</td>
+            <td>入口统一，建设初期更容易解释，但上层应用拿到的多是文本答案。</td>
+          </tr>
+          <tr>
+            <td>治理方式</td>
+            <td>对 MCP 做接口契约、权限、审计、版本和字段级治理；对知识库做文档治理。</td>
+            <td>治理集中在知识库，但结构化数据的版本、权限和溯源需要额外补救。</td>
+          </tr>
+          <tr>
+            <td>主要风险</td>
+            <td>需要建设统一路由和权限策略，避免上层应用直接散连多个 MCP。</td>
+            <td>结构化能力被扁平化为文档，复杂场景下可能“看似有知识，实际不可执行”。</td>
+          </tr>
+          <tr>
+            <td>适用场景</td>
+            <td>开发辅助、服务接入、血缘追踪、SQL 解释、报表定位、故障排查。</td>
+            <td>制度问答、手册查询、跨文档摘要、培训材料、低频参考资料。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="example-boundary" class="section">
+      <h2>公共服务接口 example 的边界问题</h2>
+      <div class="split">
+        <div class="panel">
+          <h3>领导设想中的边界</h3>
+          <ul>
+            <li><strong>接口文档：</strong>放在知识库中被检索。</li>
+            <li><strong>example：</strong>只描述“怎么使用接口”，包含说明和代码样例。</li>
+            <li><strong>上层应用：</strong>从知识库召回文档，再生成调用建议。</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>实际项目中的边界</h3>
+          <ul>
+            <li><strong>先要判断访问哪些服务：</strong>这是服务发现、场景匹配、依赖关系问题。</li>
+            <li><strong>再判断接口如何调用：</strong>这是接口契约、参数、鉴权、返回结构问题。</li>
+            <li><strong>最后生成调用样例：</strong>这才是 example 应该承载的核心内容。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="example-flow" aria-label="公共服务接入知识链路">
+        <div class="node source">
+          <strong>业务意图</strong>
+          <span>新项目要查询客户、交易、权限或报表数据</span>
+        </div>
+        <div class="small-arrow" aria-hidden="true"></div>
+        <div class="node mcp">
+          <strong>服务发现</strong>
+          <span>应访问哪些公共服务，为什么需要，依赖什么前置条件</span>
+        </div>
+        <div class="small-arrow" aria-hidden="true"></div>
+        <div class="node mcp">
+          <strong>接口使用</strong>
+          <span>endpoint、参数、鉴权、返回结构、代码 example</span>
+        </div>
+      </div>
+
+      <div class="callout risk">
+        如果“要访问哪些服务”只隐含在 example 里，知识会变得不可治理：RAG 可能只召回某个接口的调用样例，却漏掉服务选择依据、替代服务、前置依赖和项目适配规则。
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <strong>服务目录</strong>
+          <span>记录服务能力、适用场景、业务域、数据范围、替代关系。</span>
+        </div>
+        <div class="step">
+          <strong>服务选择规则</strong>
+          <span>回答“当前项目需要访问哪些服务”，并给出选择理由。</span>
+        </div>
+        <div class="step">
+          <strong>接口契约</strong>
+          <span>回答“接口怎么调”，包含参数、鉴权、响应、错误码和限制。</span>
+        </div>
+        <div class="step">
+          <strong>调用 example</strong>
+          <span>沉淀“在某场景下如何调用”，包含文档说明和代码样例。</span>
+        </div>
+      </div>
+
+      <p class="note">
+        建议把 example 定位为“接口调用样例”，但不要让它独自承载服务发现。服务发现与接口契约应在 MCP 中保持结构化字段，也可以同步导出为知识库文档快照供普通问答使用。
+      </p>
+    </section>
+
+    <section id="recommendation" class="section">
+      <h2>建议口径</h2>
+      <div class="decision">
+        <strong>建议采用“统一入口，双源供给”的折中架构。</strong>
+        大模型知识库负责承接制度、手册、PDF、Word、Excel 等文档型知识；MCP 负责承接结构化、实时、可参数化、可执行的知识能力。
+        上层应用看到的是一个统一知识入口，但入口背后按问题类型路由到 MCP 或知识库。
+      </div>
+
+      <div class="split" style="margin-top: 16px;">
+        <div class="panel">
+          <h3>可以向领导确认的共识</h3>
+          <ul>
+            <li>用户入口可以统一，不需要让用户理解 MCP 和知识库的差别。</li>
+            <li>文档型知识进入大模型知识库是合理的，也是必要的。</li>
+            <li>MCP 也可以定期导出摘要文档，供知识库做背景检索和引用。</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>需要保留的底线</h3>
+          <ul>
+            <li>不要把 MCP 仅定义为“导出 md / Word 的工具”。</li>
+            <li>服务发现、血缘、SQL、接口契约应保留结构化查询入口。</li>
+            <li>example 不能替代“要访问哪些服务”的服务选择知识。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout">
+        讨论时可以这样表述：知识库负责“读懂文档”，MCP 负责“查准结构和执行约束”。如果把 MCP 的能力全部文档化，短期入口更统一，长期会损失实时性、精确性和可执行性。
+      </div>
+    </section>
+  </main>
+</body>
+</html>

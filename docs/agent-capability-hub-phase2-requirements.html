@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Capability Hub - Phase 2 下一阶段需求</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --paper: #ffffff;
+      --ink: #16202e;
+      --muted: #667085;
+      --line: #d9e1ec;
+      --line-strong: #aebacc;
+      --blue: #2456d6;
+      --blue-soft: #e9efff;
+      --green: #0d7f5c;
+      --green-soft: #e7f6ef;
+      --orange: #b65f0d;
+      --orange-soft: #fff1df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --teal: #0f7180;
+      --teal-soft: #e4f5f7;
+      --slate: #263244;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 46px rgba(38, 50, 68, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(36, 86, 214, 0.09), transparent 260px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.68;
+    }
+    main {
+      width: min(1220px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 34px 0 78px;
+    }
+    header,
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(38, 50, 68, 0.07);
+    }
+    header {
+      padding: 36px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(233, 239, 255, 0.86)),
+        var(--paper);
+      box-shadow: var(--shadow);
+    }
+    section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    h1 {
+      margin-top: 10px;
+      max-width: 1000px;
+      font-size: clamp(32px, 4.6vw, 52px);
+      font-weight: 900;
+    }
+    h2 { font-size: 25px; font-weight: 880; }
+    h3 { font-size: 18px; font-weight: 840; }
+    p { margin: 0; }
+    ul { margin: 10px 0 0; padding-left: 20px; }
+    li + li { margin-top: 6px; }
+    li, td, .card p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f4f7fb;
+      color: #13284f;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      margin: 12px 0 0;
+      overflow: auto;
+      border: 1px solid #172033;
+      border-radius: 8px;
+      background: #111827;
+      color: #e5edf9;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--slate-soft);
+      color: var(--slate);
+      font-weight: 860;
+    }
+    tr:last-child td { border-bottom: 0; }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--slate);
+      padding: 11px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 820;
+    }
+    nav a:hover { border-color: var(--blue); color: var(--blue); }
+    .eyebrow {
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .lead {
+      max-width: 980px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+    .section-head p {
+      max-width: 760px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 820;
+    }
+    .tag.blue { background: var(--blue-soft); color: var(--blue); }
+    .tag.green { background: var(--green-soft); color: var(--green); }
+    .tag.orange { background: var(--orange-soft); color: var(--orange); }
+    .tag.red { background: var(--red-soft); color: var(--red); }
+    .tag.teal { background: var(--teal-soft); color: var(--teal); }
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 18px;
+    }
+    .card h3 { margin-bottom: 8px; }
+    .callout {
+      border: 1px solid var(--line-strong);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #fbfdff;
+      color: var(--slate);
+      padding: 14px 16px;
+      font-size: 14px;
+    }
+    .callout.green { border-left-color: var(--green); background: #fbfffd; }
+    .callout.orange { border-left-color: var(--orange); background: #fffaf5; }
+    .callout.red { border-left-color: var(--red); background: #fffafa; }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 46px;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 820;
+    }
+    .status.p0 { background: var(--red-soft); color: var(--red); }
+    .status.p1 { background: var(--orange-soft); color: var(--orange); }
+    .status.p2 { background: var(--blue-soft); color: var(--blue); }
+    .status.done { background: var(--green-soft); color: var(--green); }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+      min-height: 116px;
+      position: relative;
+    }
+    .step::after {
+      content: "→";
+      position: absolute;
+      right: -12px;
+      top: 42px;
+      color: var(--line-strong);
+      font-weight: 900;
+    }
+    .step:last-child::after { content: ""; }
+    .step strong {
+      display: block;
+      color: var(--slate);
+      font-size: 14px;
+    }
+    .step span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 0.95fr 1.05fr;
+      gap: 14px;
+      align-items: start;
+    }
+    .compact td,
+    .compact th { padding: 10px; }
+    @media (max-width: 860px) {
+      main { width: min(100vw - 24px, 1220px); padding-top: 20px; }
+      header, section { padding: 20px; }
+      .section-head, .split { display: block; }
+      .section-head .tag { margin-top: 12px; }
+      .grid.two, .grid.three, .flow { grid-template-columns: 1fr; }
+      .step::after { content: ""; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Product Requirements / Phase 2</div>
+      <h1>Agent Capability Hub 下一阶段需求</h1>
+      <p class="lead">
+        阶段一和 Phase 1.5 已经完成 MCP 服务登记、工具同步、MetaMCP 查询执行、Project Profile、服务级治理和调用日志闭环。
+        下一阶段建议调整为“可观测性与内置能力扩展”：先把真实测试中暴露的日志分析、统计、Profile 接入体验补齐，再把 Wiki 与 CodeGraph 做成平台固有能力。
+      </p>
+      <div class="meta">
+        <span class="pill">日期：2026-06-04</span>
+        <span class="pill">阶段：Phase 2 修订版</span>
+        <span class="pill">主题：日志分析 + 统计 + 内置 Wiki/CodeGraph</span>
+        <span class="pill">不进入：操作类工具审批流</span>
+      </div>
+    </header>
+
+    <nav>
+      <a href="#positioning">阶段定位</a>
+      <a href="#roadmap">路线图取舍</a>
+      <a href="#scope">范围清单</a>
+      <a href="#logs">日志分析</a>
+      <a href="#stats">统计页面</a>
+      <a href="#profile">Project Profile</a>
+      <a href="#builtins">内置能力</a>
+      <a href="#codegraph">CodeGraph</a>
+      <a href="#wiki">Wiki</a>
+      <a href="#model">数据与接口</a>
+      <a href="#acceptance">验收</a>
+    </nav>
+
+    <section id="positioning">
+      <div class="section-head">
+        <div>
+          <h2>1. 阶段定位</h2>
+          <p>阶段二不急着开放有副作用 action 工具，而是先让平台“可诊断、可统计、可管理内置知识/代码能力”。</p>
+        </div>
+        <span class="tag blue">Decision</span>
+      </div>
+      <div class="callout">
+        <strong>一句话目标：</strong>
+        管理员可以从日志和统计中判断调用失败归因、服务质量和 Profile 使用趋势；项目可以通过 Profile 绑定外部 MCP、Wiki KB 和 CodeGraph 仓库；模型通过稳定的 MetaMCP 入口查询代码仓库与知识库，但不能绕过 Profile 访问未授权资源。
+      </div>
+      <div class="grid three" style="margin-top:14px;">
+        <div class="card">
+          <h3>本阶段优先解决</h3>
+          <ul>
+            <li>失败原因不可区分：平台解析失败、策略拦截、MCP 连接失败、上游工具失败需要分开统计。</li>
+            <li>日志请求/响应难读：列表里只放摘要，详情通过浮窗展示完整 JSON。</li>
+            <li>缺少运营视角：按 profile、service、tool、组合维度看调用趋势、失败率和耗时。</li>
+            <li>Wiki 与 CodeGraph 不应作为普通可关闭 MCP 服务，而应成为平台固有能力。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>设计约束</h3>
+          <ul>
+            <li>沿用当前 FastAPI HTML shell + static CSS/JS，不引入前端构建链。</li>
+            <li>延续内部可信环境策略，敏感字段脱敏和企业密钥治理预留接口。</li>
+            <li>Project Profile 继续由服务端强制执行，页面和 CLI 只负责配置与预览。</li>
+            <li>内置工具不可在 Profile 中被直接关闭，只能限制可查阅资源。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>明确不做</h3>
+          <ul>
+            <li>不开放 action 类工具执行、审批、二次确认和 dry-run。</li>
+            <li>不做 OpenAPI 导入、CLI runner、脚本执行市场。</li>
+            <li>不做完整企业权限、组织空间、配额和账单。</li>
+            <li>不做复杂 BI 系统；统计页面先满足排查和趋势判断。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div>
+          <h2>2. 路线图取舍</h2>
+          <p>原始 Roadmap 的 Phase 2 是操作类能力治理；结合测试反馈，建议先插入一个“治理观测与内置能力”阶段。</p>
+        </div>
+        <span class="tag orange">Roadmap</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>路线图条目</th>
+            <th>本阶段处理</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>调用日志、审计、Profile 细化</td>
+            <td><span class="status p0">纳入 P0</span></td>
+            <td>Phase 1.5 已有基础日志和 profile，本阶段补齐失败归因、筛选、详情浮窗和接入体验。</td>
+          </tr>
+          <tr>
+            <td>命中率、失败率、平均耗时和答案样例统计</td>
+            <td><span class="status p0">纳入 P0/P1</span></td>
+            <td>原属 Phase 3 的质量评测基础，但真实测试已经需要统计页面支撑排查和运营。</td>
+          </tr>
+          <tr>
+            <td>知识库作为能力来源</td>
+            <td><span class="status p0">纳入 P0</span></td>
+            <td>现有 wiki-manager 能力已经存在，但需要在 Capability Hub 中按“固有服务 + Profile KB 范围”重新暴露。</td>
+          </tr>
+          <tr>
+            <td>CodeGraph 代码图谱</td>
+            <td><span class="status p1">纳入 P1</span></td>
+            <td>原先是未来可选能力，现在被明确提出；先做仓库管理、同步状态和基础查询工具，深层语义能力后续增强。</td>
+          </tr>
+          <tr>
+            <td>操作类工具治理</td>
+            <td><span class="status p2">延期</span></td>
+            <td>在日志归因、统计和内置资源治理稳定前，开放 action 工具会放大审计和权限风险。</td>
+          </tr>
+          <tr>
+            <td>企业级权限、密钥管理、脱敏策略</td>
+            <td><span class="status p2">预留</span></td>
+            <td>本阶段可以增加字段和配置位，但不把企业化治理作为验收主线。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="scope">
+      <div class="section-head">
+        <div>
+          <h2>3. 范围清单</h2>
+          <p>按必须交付、建议交付和预留能力拆分，便于后续生成实现计划。</p>
+        </div>
+        <span class="tag green">Scope</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>优先级</th>
+            <th>模块</th>
+            <th>需求摘要</th>
+            <th>验收口径</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="status p0">P0</span></td>
+            <td>日志分析增强</td>
+            <td>新增失败阶段、错误分类、服务/工具/profile/状态/时间筛选，列表摘要 + 详情浮窗展示完整 request/response。</td>
+            <td>管理员能从日志页面判断一次失败属于本项目解析、Profile 拦截、MCP 调用失败还是上游工具失败。</td>
+          </tr>
+          <tr>
+            <td><span class="status p0">P0</span></td>
+            <td>统计页面</td>
+            <td>按 profile、service、tool、entrypoint、失败类型等维度和组合维度查看趋势、调用量、失败率、耗时。</td>
+            <td>支持最近 24 小时、7 天、30 天的趋势表/轻量图表，能定位高失败率和高耗时对象。</td>
+          </tr>
+          <tr>
+            <td><span class="status p0">P0</span></td>
+            <td>Project Profile 接入体验</td>
+            <td>Profile 页面增加复制命令按钮；CLI 在未传 scope 时交互式选择项目级或用户级。</td>
+            <td>用户从页面复制命令后执行，可选择写入当前项目或用户级 MCP 配置，并绑定目标 profile。</td>
+          </tr>
+          <tr>
+            <td><span class="status p0">P0</span></td>
+            <td>Wiki 固有能力</td>
+            <td>Wiki 作为内置服务暴露固定工具；Profile 配置可查阅哪些 KB；页面展示管理中的 KB 和同步状态。</td>
+            <td>MetaMCP 中可发现 wiki 工具；未授权 KB 在搜索结果和执行接口中都不可见、不可调用。</td>
+          </tr>
+          <tr>
+            <td><span class="status p1">P1</span></td>
+            <td>CodeGraph 固有能力</td>
+            <td>管理代码仓库、认证信息、同步周期和解析状态；MetaMCP 提供代码仓库查询工具；Profile 限制可查阅项目。</td>
+            <td>至少支持登记仓库、手动同步、周期同步、查看解析状态、按 Profile 查询允许仓库。</td>
+          </tr>
+          <tr>
+            <td><span class="status p1">P1</span></td>
+            <td>能力目录整合</td>
+            <td>目录中同时展示外部 MCP 服务、Wiki 固有能力、CodeGraph 固有能力，并能按 Profile 预览有效资源。</td>
+            <td>同一 Profile 预览结果与 MetaMCP search/execute 的服务端裁剪一致。</td>
+          </tr>
+          <tr>
+            <td><span class="status p2">P2</span></td>
+            <td>统计导出和保留策略</td>
+            <td>导出 CSV、日志保留天数、超大 payload 截断、字段级脱敏配置。</td>
+            <td>作为企业化前置能力预留，不阻塞本阶段主验收。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="logs">
+      <div class="section-head">
+        <div>
+          <h2>4. 日志分析需求</h2>
+          <p>现有日志已经记录 request、response、status、duration；本阶段重点是让失败归因可筛选、可统计、可阅读。</p>
+        </div>
+        <span class="tag orange">Observability</span>
+      </div>
+      <div class="split">
+        <div class="card">
+          <h3>失败归因字段</h3>
+          <ul>
+            <li><code>failure_stage</code>：失败发生阶段，例如平台解析、Profile 策略、注册表校验、MCP 传输、MCP 协议、上游工具、内部异常。</li>
+            <li><code>failure_owner</code>：归因对象，例如 <code>platform</code>、<code>policy</code>、<code>upstream_mcp</code>、<code>builtin_backend</code>。</li>
+            <li><code>error_type</code>：稳定错误类型，供筛选和统计使用。</li>
+            <li><code>error_message</code>：人类可读错误，不作为统计主键。</li>
+            <li><code>upstream_status</code>：目标 MCP 或内置后端返回的协议状态、HTTP 状态或解析状态。</li>
+          </ul>
+        </div>
+        <div>
+          <table class="compact">
+            <thead>
+              <tr>
+                <th>错误类型</th>
+                <th>含义</th>
+                <th>归因</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>platform_request_parse_error</code></td>
+                <td>MetaMCP 入参 JSON、path、schema 或工具参数在本项目内解析失败。</td>
+                <td>platform</td>
+              </tr>
+              <tr>
+                <td><code>profile_policy_blocked</code></td>
+                <td>profile 不存在、已停用、服务或资源被策略拦截。</td>
+                <td>policy</td>
+              </tr>
+              <tr>
+                <td><code>capability_registry_error</code></td>
+                <td>service、tool、KB 或 repository 不存在、禁用或未配置。</td>
+                <td>platform</td>
+              </tr>
+              <tr>
+                <td><code>mcp_transport_error</code></td>
+                <td>目标 MCP 连接失败、超时、握手失败、streamable HTTP 会话失败。</td>
+                <td>upstream_mcp</td>
+              </tr>
+              <tr>
+                <td><code>mcp_protocol_error</code></td>
+                <td>目标 MCP 返回不符合协议、list_tools/call_tool 异常。</td>
+                <td>upstream_mcp</td>
+              </tr>
+              <tr>
+                <td><code>upstream_tool_error</code></td>
+                <td>MCP 工具被成功调用，但工具自身返回失败或异常。</td>
+                <td>upstream_mcp</td>
+              </tr>
+              <tr>
+                <td><code>builtin_backend_error</code></td>
+                <td>Wiki 后端、CodeGraph 同步或查询后端失败。</td>
+                <td>builtin_backend</td>
+              </tr>
+              <tr>
+                <td><code>internal_error</code></td>
+                <td>未被分类的本项目异常。</td>
+                <td>platform</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid two" style="margin-top:14px;">
+        <div class="card">
+          <h3>日志列表筛选</h3>
+          <ul>
+            <li>时间范围：最近 1 小时、24 小时、7 天、30 天、自定义。</li>
+            <li>入口：<code>metamcp_search</code>、<code>metamcp_execute</code>、<code>raw_mcp</code>、<code>wiki</code>、<code>codegraph</code>。</li>
+            <li>Profile、source type、服务/内置能力、工具名、状态。</li>
+            <li>失败阶段、错误类型、归因对象、耗时区间。</li>
+            <li>关键词：log_id、source_key、tool_name、error_message。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>请求/响应浮窗</h3>
+          <ul>
+            <li>列表中请求和响应只展示摘要、大小、是否截断和关键参数。</li>
+            <li>点击“查看”打开浮窗，分 Tab 展示请求、响应、错误、耗时链路。</li>
+            <li>JSON 自动格式化，支持折叠长字段、复制完整 JSON、复制 log_id。</li>
+            <li>超大 payload 后续按 <code>max_payload_bytes</code> 截断，浮窗明确标记截断状态。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="stats">
+      <div class="section-head">
+        <div>
+          <h2>5. 统计页面需求</h2>
+          <p>统计页面用于定位“哪个 profile、服务、工具或组合维度正在失败、变慢或调用量异常”。</p>
+        </div>
+        <span class="tag teal">Analytics</span>
+      </div>
+      <div class="grid three">
+        <div class="card">
+          <h3>核心指标</h3>
+          <ul>
+            <li>调用量、成功数、失败数、拦截数。</li>
+            <li>失败率、拦截率、成功率。</li>
+            <li>平均耗时、P50、P95、最大耗时。</li>
+            <li>错误类型 Top N、慢调用 Top N。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>维度</h3>
+          <ul>
+            <li>Profile、entrypoint、source_type、service/source_key、tool_name。</li>
+            <li>内置资源：<code>repo_key</code>、<code>kb_slug</code>。</li>
+            <li>状态、失败阶段、错误类型、归因对象。</li>
+            <li>组合维度：profile + service、profile + tool、service + tool。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>交互</h3>
+          <ul>
+            <li>时间粒度：小时、天。</li>
+            <li>快捷时间：24 小时、7 天、30 天。</li>
+            <li>点击统计行跳转到日志页，并自动带上对应筛选条件。</li>
+            <li>轻量趋势图可以使用 CSS/SVG，不要求引入图表框架。</li>
+          </ul>
+        </div>
+      </div>
+      <table style="margin-top:14px;">
+        <thead>
+          <tr>
+            <th>视图</th>
+            <th>内容</th>
+            <th>价值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>总览</td>
+            <td>总调用、失败率、P95、Top 失败来源、Top 慢工具。</td>
+            <td>快速判断系统整体健康度。</td>
+          </tr>
+          <tr>
+            <td>Profile 趋势</td>
+            <td>每个 profile 的调用量、失败率、拦截率和耗时趋势。</td>
+            <td>判断项目接入是否配置异常或使用量突增。</td>
+          </tr>
+          <tr>
+            <td>服务/工具趋势</td>
+            <td>按 MCP service、内置能力和 tool 统计成功、失败、耗时。</td>
+            <td>定位具体服务或工具的稳定性问题。</td>
+          </tr>
+          <tr>
+            <td>错误分布</td>
+            <td>按 failure_owner、failure_stage、error_type 聚合。</td>
+            <td>区分平台问题、策略问题、上游 MCP 问题和内置后端问题。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="profile">
+      <div class="section-head">
+        <div>
+          <h2>6. Project Profile 增强</h2>
+          <p>Profile 从“外部 MCP 服务访问规则”扩展为“项目可见能力与资源范围”。</p>
+        </div>
+        <span class="tag blue">Profile</span>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <h3>复制接入命令</h3>
+          <ul>
+            <li>Profile 列表和详情页增加“复制接入命令”按钮。</li>
+            <li>按钮弹出命令预览浮窗，默认使用当前页面 origin 推导 <code>/mcp</code> URL。</li>
+            <li>命令包含 <code>--profile</code>，但可以不包含 <code>--scope</code>，让 CLI 交互式选择项目级或用户级。</li>
+            <li>同时保留高级选项：直接复制项目级命令、直接复制用户级命令。</li>
+          </ul>
+          <pre>wiki metamcp add --url http://127.0.0.1:8765/mcp --profile safe-readonly</pre>
+        </div>
+        <div class="card">
+          <h3>CLI 交互</h3>
+          <ul>
+            <li><code>--scope</code> 缺省时提示选择：当前项目、当前用户。</li>
+            <li>非交互环境下缺少 <code>--scope</code> 应报错并提示可用参数，避免 CI 卡住。</li>
+            <li>写入前展示目标配置路径、profile、URL 和将新增的 MCP server 名称。</li>
+            <li>覆盖已有 <code>agent-capability-hub</code> 配置前提示确认；带 <code>--yes</code> 时跳过确认。</li>
+          </ul>
+        </div>
+      </div>
+
+      <table style="margin-top:14px;">
+        <thead>
+          <tr>
+            <th>Profile 配置面</th>
+            <th>规则对象</th>
+            <th>策略语义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>外部 MCP 服务</td>
+            <td><code>source_type=mcp_service</code> + <code>source_key</code></td>
+            <td>沿用服务级 allow/deny；被拒绝服务不出现在 search，也不能被 execute 绕过。</td>
+          </tr>
+          <tr>
+            <td>Wiki 固有能力</td>
+            <td><code>builtin=wiki</code> + <code>kb_slug</code></td>
+            <td>不能关闭 wiki 工具，只能选择该 profile 可查阅哪些 KB。</td>
+          </tr>
+          <tr>
+            <td>CodeGraph 固有能力</td>
+            <td><code>builtin=codegraph</code> + <code>repo_key</code></td>
+            <td>不能关闭 codegraph 工具，只能选择该 profile 可查阅哪些代码仓库。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout orange" style="margin-top:14px;">
+        建议规则：未携带 profile 的管理/调试入口可见全部 active 资源；携带 profile 时，Wiki KB 和 CodeGraph 仓库默认不可见，需要在 Profile 资源范围中显式勾选。这样更符合项目级隔离预期。
+      </div>
+    </section>
+
+    <section id="builtins">
+      <div class="section-head">
+        <div>
+          <h2>7. 内置能力模型</h2>
+          <p>Wiki 和 CodeGraph 不作为普通 MCP 服务登记，也不能被 Profile 直接关闭工具；它们是平台固定提供的内置服务。</p>
+        </div>
+        <span class="tag green">Built-in</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>能力</th>
+            <th>source 表达</th>
+            <th>工具是否可关闭</th>
+            <th>Profile 控制对象</th>
+            <th>管理页面</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>外部 MCP</td>
+            <td><code>source_type=mcp_service</code>，<code>source_key=mysql</code></td>
+            <td>可按服务启停，可按工具配置类型。</td>
+            <td>服务级 allow/deny。</td>
+            <td>MCP 服务、工具清单。</td>
+          </tr>
+          <tr>
+            <td>Wiki</td>
+            <td><code>source_type=builtin</code>，<code>source_key=wiki</code></td>
+            <td>不可按 profile 关闭固定工具。</td>
+            <td>KB 范围。</td>
+            <td>知识库状态、文档同步状态。</td>
+          </tr>
+          <tr>
+            <td>CodeGraph</td>
+            <td><code>source_type=builtin</code>，<code>source_key=codegraph</code></td>
+            <td>不可按 profile 关闭固定工具。</td>
+            <td>代码仓库范围。</td>
+            <td>代码仓库、同步任务、解析状态。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="flow">
+        <div class="step"><strong>1. 管理资源</strong><span>管理员登记 KB 或代码仓库，维护状态和同步配置。</span></div>
+        <div class="step"><strong>2. 绑定 Profile</strong><span>在 Profile 中选择可查阅的 KB 和代码仓库。</span></div>
+        <div class="step"><strong>3. Search 发现</strong><span>MetaMCP 只返回当前 profile 可见的内置资源和固定工具。</span></div>
+        <div class="step"><strong>4. Execute 校验</strong><span>执行前再次校验参数中的 kb_slug 或 repo_key 是否可见。</span></div>
+        <div class="step"><strong>5. 写入日志</strong><span>记录资源、工具、耗时、失败阶段和响应摘要。</span></div>
+      </div>
+    </section>
+
+    <section id="codegraph">
+      <div class="section-head">
+        <div>
+          <h2>8. CodeGraph 集成需求</h2>
+          <p>CodeGraph 用于管理代码仓库、定期同步并解析，向 MetaMCP 提供代码结构和代码查询能力。</p>
+        </div>
+        <span class="tag teal">CodeGraph</span>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <h3>代码仓库管理</h3>
+          <ul>
+            <li>登记仓库：<code>repo_key</code>、名称、Git URL、本地路径、默认分支、描述、标签。</li>
+            <li>认证信息：支持 token/SSH key 引用，页面只显示掩码和更新时间。</li>
+            <li>同步配置：手动同步、定期同步间隔、启停状态、解析策略。</li>
+            <li>状态展示：clone/fetch、checkout、parse/index、last commit、last sync、错误信息。</li>
+            <li>同步历史：每次同步 run 的阶段、耗时、状态、错误。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>固定工具</h3>
+          <ul>
+            <li><code>codegraph.list_repositories</code>：列出当前 profile 可见仓库和解析状态。</li>
+            <li><code>codegraph.repository_overview</code>：仓库目录、语言、入口文件、最近解析摘要。</li>
+            <li><code>codegraph.search_code</code>：按关键词、路径、语言、符号过滤搜索代码。</li>
+            <li><code>codegraph.get_file</code>：读取指定仓库、ref、路径的文件内容。</li>
+            <li><code>codegraph.find_symbol</code>：按函数、类、变量名查找定义和引用。初期可先做定义，引用分析作为增强。</li>
+          </ul>
+        </div>
+      </div>
+
+      <table style="margin-top:14px;">
+        <thead>
+          <tr>
+            <th>同步状态</th>
+            <th>说明</th>
+            <th>页面表现</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>queued</code></td>
+            <td>等待同步或解析。</td>
+            <td>灰色状态，展示排队时间。</td>
+          </tr>
+          <tr>
+            <td><code>syncing</code></td>
+            <td>正在 clone/fetch/checkout。</td>
+            <td>蓝色状态，展示当前阶段。</td>
+          </tr>
+          <tr>
+            <td><code>parsing</code></td>
+            <td>正在生成代码索引或图谱。</td>
+            <td>蓝色状态，展示文件数和进度。</td>
+          </tr>
+          <tr>
+            <td><code>ready</code></td>
+            <td>可被查询。</td>
+            <td>绿色状态，展示 last commit、文件数、符号数。</td>
+          </tr>
+          <tr>
+            <td><code>error</code></td>
+            <td>同步或解析失败。</td>
+            <td>红色状态，点击查看失败阶段和错误详情。</td>
+          </tr>
+          <tr>
+            <td><code>disabled</code></td>
+            <td>暂停同步和查询。</td>
+            <td>灰色状态，MetaMCP search 不展示。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout green" style="margin-top:14px;">
+        初期 CodeGraph 查询能力以“可管理、可同步、可按仓库授权、可查文件和符号”为验收标准；深度依赖图、跨仓影响分析和语义向量检索可以作为后续增强，不阻塞阶段二主线。
+      </div>
+    </section>
+
+    <section id="wiki">
+      <div class="section-head">
+        <div>
+          <h2>9. Wiki 固有能力需求</h2>
+          <p>现有知识库能力需要在 Capability Hub 中以固定工具暴露，同时增加 Profile 级 KB 范围控制和状态页面。</p>
+        </div>
+        <span class="tag green">Wiki</span>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <h3>知识库管理视图</h3>
+          <ul>
+            <li>列出平台管理的 KB：slug、名称、状态、描述、成员摘要。</li>
+            <li>展示后端目标状态：mock、RagFlow、Weknora 等 backend target。</li>
+            <li>展示文档数量、同步中数量、失败数量、最近同步时间、最近错误。</li>
+            <li>点击 KB 查看文档同步状态和最近 job。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>固定工具</h3>
+          <ul>
+            <li><code>wiki.list_kbs</code>：列出当前 profile 可见 KB 和状态。</li>
+            <li><code>wiki.search</code>：在指定 KB 中检索片段。</li>
+            <li><code>wiki.ask</code>：在指定 KB 上问答。</li>
+            <li><code>wiki.get_document</code>：读取指定文档元信息和同步状态，正文读取可后续开放。</li>
+          </ul>
+        </div>
+      </div>
+      <table style="margin-top:14px;">
+        <thead>
+          <tr>
+            <th>Profile 行为</th>
+            <th>Search 行为</th>
+            <th>Execute 行为</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Profile 允许 KB <code>frontend-docs</code></td>
+            <td>返回 wiki 工具，并在资源摘要中展示 <code>frontend-docs</code>。</td>
+            <td>允许 <code>wiki.search</code> / <code>wiki.ask</code> 查询该 KB。</td>
+          </tr>
+          <tr>
+            <td>Profile 未允许 KB <code>payroll</code></td>
+            <td>不返回该 KB 的资源摘要。</td>
+            <td>即使模型手写参数 <code>kb=payroll</code>，服务端也拒绝并记录 <code>profile_policy_blocked</code>。</td>
+          </tr>
+          <tr>
+            <td>KB 后端同步失败</td>
+            <td>资源仍可展示，但标记为异常。</td>
+            <td>查询失败时记录 <code>builtin_backend_error</code>，统计页可聚合到 wiki 维度。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="model">
+      <div class="section-head">
+        <div>
+          <h2>10. 数据与接口影响</h2>
+          <p>以下是需求级别的模型和 API 方向，具体字段可在实现计划中再细化。</p>
+        </div>
+        <span class="tag blue">API</span>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <h3>建议新增/扩展表</h3>
+          <ul>
+            <li><code>tool_call_logs</code>：增加 <code>failure_stage</code>、<code>failure_owner</code>、<code>error_type</code>、<code>request_summary_json</code>、<code>response_summary_json</code>、<code>resource_type</code>、<code>resource_key</code>。</li>
+            <li><code>profile_resource_rules</code>：记录 profile 对 Wiki KB、CodeGraph repo 的可见范围。</li>
+            <li><code>code_repositories</code>：代码仓库配置、认证引用、同步配置和当前状态。</li>
+            <li><code>codegraph_sync_runs</code>：每次同步/解析任务的阶段、状态、耗时和错误。</li>
+            <li><code>codegraph_index_items</code>：初期可保存文件、符号、语言、路径、ref、摘要等索引信息。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>建议接口</h3>
+          <ul>
+            <li><code>GET /tool-call-logs</code>：增加新的筛选参数。</li>
+            <li><code>GET /tool-call-logs/{log_id}</code>：供浮窗读取完整详情。</li>
+            <li><code>GET /tool-call-stats</code>：按时间范围、粒度、维度聚合统计。</li>
+            <li><code>GET/PUT /capability-profiles/{profile_key}/resources</code>：维护内置资源范围。</li>
+            <li><code>GET /builtin/wiki/kbs</code>：知识库能力状态摘要。</li>
+            <li><code>GET/POST /builtin/codegraph/repositories</code>：代码仓库管理。</li>
+            <li><code>POST /builtin/codegraph/repositories/{repo_key}/sync</code>：手动同步。</li>
+          </ul>
+        </div>
+      </div>
+
+      <pre>{
+  "tool_call_stats": {
+    "range": {"from": "2026-06-03T00:00:00+08:00", "to": "2026-06-04T00:00:00+08:00"},
+    "bucket": "hour",
+    "dimensions": ["profile_key", "source_key", "tool_name"],
+    "metrics": ["calls", "success", "error", "blocked", "avg_duration_ms", "p95_duration_ms"]
+  }
+}</pre>
+    </section>
+
+    <section id="acceptance">
+      <div class="section-head">
+        <div>
+          <h2>11. 验收标准</h2>
+          <p>本阶段验收要覆盖日志、统计、Profile、Wiki、CodeGraph 和 MetaMCP 服务端强制裁剪。</p>
+        </div>
+        <span class="tag green">Acceptance</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>场景</th>
+            <th>验收标准</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>日志失败归因</td>
+            <td>构造平台参数解析失败、profile 拦截、MCP 连接失败、上游工具失败、Wiki 后端失败，各自产生稳定 <code>error_type</code>，日志页可筛选。</td>
+          </tr>
+          <tr>
+            <td>日志详情浮窗</td>
+            <td>日志列表点击请求或响应后打开浮窗，完整 JSON 可读、可复制；列表不再被大 payload 撑开。</td>
+          </tr>
+          <tr>
+            <td>统计页面</td>
+            <td>最近 24 小时、7 天、30 天可按 profile、service、tool、错误类型查看调用量、失败率、P95；点击统计行能跳转到日志筛选。</td>
+          </tr>
+          <tr>
+            <td>Project Profile 复制命令</td>
+            <td>Profile 页面能复制接入命令；执行命令时可交互选择项目级或用户级；写入配置后携带正确 <code>X-Wiki-MetaMCP-Profile</code>。</td>
+          </tr>
+          <tr>
+            <td>Wiki 固有能力</td>
+            <td>MetaMCP search 可发现 wiki 固定工具；profile 未允许的 KB 不可见且不可执行；页面能查看 KB 和后端同步状态。</td>
+          </tr>
+          <tr>
+            <td>CodeGraph 仓库管理</td>
+            <td>能登记代码仓库、配置认证引用、手动同步、查看同步/解析状态；ready 仓库可被固定工具查询。</td>
+          </tr>
+          <tr>
+            <td>CodeGraph Profile 裁剪</td>
+            <td>profile 只允许 repo A 时，search 只展示 repo A；execute 手写 repo B 参数会被拒绝并记录 <code>profile_policy_blocked</code>。</td>
+          </tr>
+          <tr>
+            <td>回归</td>
+            <td>现有 MCP 服务登记、工具同步、工具类型配置、profile 服务级 allow/deny、MetaMCP search/execute 继续通过。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="grid two" style="margin-top:14px;">
+        <div class="card">
+          <h3>测试分层</h3>
+          <ul>
+            <li>Storage：迁移、日志分类字段、统计聚合、资源规则 CRUD。</li>
+            <li>Governance：外部服务规则、Wiki KB 规则、CodeGraph repo 规则。</li>
+            <li>CapabilityService：内置工具 discovery、execute 二次校验、错误分类。</li>
+            <li>API：日志筛选、日志详情、统计、Profile 资源范围、代码仓库管理。</li>
+            <li>CLI：scope 交互、非交互失败、配置覆盖确认。</li>
+            <li>页面：筛选、浮窗、复制命令、统计跳转、资源勾选。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>建议里程碑</h3>
+          <ul>
+            <li>M1：日志分类、筛选、浮窗、Profile 复制命令。</li>
+            <li>M2：统计 API 和统计页面。</li>
+            <li>M3：Wiki 固有能力和 Profile KB 范围。</li>
+            <li>M4：CodeGraph 仓库管理、同步状态和基础查询工具。</li>
+            <li>M5：MetaMCP 目录整合、端到端验收和回归。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

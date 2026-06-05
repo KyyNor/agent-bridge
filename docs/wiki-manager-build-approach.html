@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wiki-manager 构建思路展示</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080a0c;
+      --bg-2: #101316;
+      --panel: #15191d;
+      --panel-2: #0f1215;
+      --ink: #f3f7f4;
+      --muted: #a5b0aa;
+      --line: #2a3036;
+      --line-strong: #44505a;
+      --green: #7dff9b;
+      --green-dim: rgba(125, 255, 155, 0.14);
+      --cyan: #52e2ff;
+      --cyan-dim: rgba(82, 226, 255, 0.14);
+      --yellow: #e9f56a;
+      --red: #ff6d5f;
+      --white-soft: rgba(243, 247, 244, 0.82);
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.42);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(125, 255, 155, 0.18), transparent 28%),
+        radial-gradient(circle at 88% 18%, rgba(82, 226, 255, 0.14), transparent 30%),
+        linear-gradient(135deg, #050607 0%, var(--bg) 50%, #0b0f0f 100%);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.62;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.2;
+      background-image:
+        repeating-linear-gradient(118deg, rgba(125, 255, 155, 0.1) 0 1px, transparent 1px 54px),
+        linear-gradient(180deg, transparent, rgba(8, 10, 12, 0.9));
+      mask-image: linear-gradient(to bottom, black, transparent 78%);
+    }
+
+    main {
+      width: min(1240px, calc(100vw - 42px));
+      margin: 0 auto;
+      padding: 34px 0 76px;
+    }
+
+    header {
+      position: relative;
+      overflow: hidden;
+      min-height: 520px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background:
+        linear-gradient(120deg, rgba(21, 25, 29, 0.96) 0%, rgba(8, 10, 12, 0.78) 55%),
+        var(--panel);
+      box-shadow: var(--shadow);
+      padding: 36px;
+    }
+
+    header::before {
+      content: "";
+      position: absolute;
+      inset: 26px 28px auto auto;
+      width: min(470px, 42vw);
+      height: 340px;
+      border: 1px solid rgba(125, 255, 155, 0.42);
+      border-radius: 8px;
+      background:
+        linear-gradient(145deg, transparent 0 26%, rgba(125, 255, 155, 0.22) 26% 27%, transparent 27% 100%),
+        linear-gradient(145deg, transparent 0 44%, rgba(82, 226, 255, 0.18) 44% 45%, transparent 45% 100%),
+        repeating-linear-gradient(180deg, rgba(243, 247, 244, 0.08) 0 1px, transparent 1px 28px),
+        linear-gradient(135deg, rgba(125, 255, 155, 0.16), rgba(82, 226, 255, 0.08));
+      opacity: 0.82;
+      transform: rotate(-2deg);
+    }
+
+    header::after {
+      content: "ledger / archive / adapter / mcp";
+      position: absolute;
+      right: 54px;
+      bottom: 40px;
+      color: rgba(243, 247, 244, 0.24);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 13px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+      max-width: 760px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 18px;
+      color: var(--green);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 18px var(--green);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      letter-spacing: 0;
+      line-height: 1.16;
+    }
+
+    h1 {
+      max-width: 740px;
+      font-size: clamp(34px, 5vw, 68px);
+      font-weight: 900;
+    }
+
+    h2 {
+      font-size: 26px;
+      font-weight: 880;
+    }
+
+    h3 {
+      font-size: 17px;
+      font-weight: 820;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      margin-top: 22px;
+      max-width: 760px;
+      color: var(--white-soft);
+      font-size: 18px;
+    }
+
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 32px;
+      max-width: 820px;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 10, 12, 0.56);
+      padding: 14px;
+      backdrop-filter: blur(10px);
+    }
+
+    .stat strong {
+      display: block;
+      color: var(--green);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 20px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .nav {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin: 22px 0;
+    }
+
+    .nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(21, 25, 29, 0.7);
+      color: var(--ink);
+      padding: 12px 13px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .nav a:hover {
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .section {
+      margin-top: 24px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(21, 25, 29, 0.95), rgba(15, 18, 21, 0.95));
+      box-shadow: 0 20px 54px rgba(0, 0, 0, 0.25);
+      padding: 28px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+
+    .section-head p {
+      max-width: 620px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .pill {
+      flex: 0 0 auto;
+      border: 1px solid rgba(125, 255, 155, 0.45);
+      border-radius: 999px;
+      background: var(--green-dim);
+      color: var(--green);
+      padding: 6px 11px;
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .positioning {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .statement {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 22px;
+    }
+
+    .statement .label {
+      color: var(--cyan);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .statement strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 28px;
+      line-height: 1.25;
+    }
+
+    .statement p {
+      margin-top: 14px;
+      color: var(--white-soft);
+    }
+
+    .do-not {
+      display: grid;
+      gap: 12px;
+    }
+
+    .mini-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 10, 12, 0.64);
+      padding: 16px;
+    }
+
+    .mini-card strong {
+      color: var(--yellow);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .mini-card span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+    }
+
+    .arch-row {
+      display: grid;
+      grid-template-columns: 1fr 40px 1fr 40px 1fr;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .box {
+      position: relative;
+      min-height: 112px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #0b0f12;
+      padding: 15px;
+      overflow: hidden;
+    }
+
+    .box::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 3px;
+      background: var(--green);
+    }
+
+    .box.api::before {
+      background: var(--cyan);
+    }
+
+    .box.store::before {
+      background: var(--yellow);
+    }
+
+    .box h3 {
+      margin-bottom: 8px;
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .box p {
+      color: var(--muted);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+    }
+
+    .box code {
+      display: inline-block;
+      margin-top: 9px;
+      color: var(--green);
+      font-size: 12px;
+    }
+
+    .arrow {
+      position: relative;
+      min-height: 112px;
+    }
+
+    .arrow::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 2px;
+      right: 4px;
+      border-top: 2px solid rgba(243, 247, 244, 0.45);
+    }
+
+    .arrow::after {
+      content: "";
+      position: absolute;
+      top: calc(50% - 5px);
+      right: 1px;
+      width: 10px;
+      height: 10px;
+      border-top: 2px solid rgba(243, 247, 244, 0.45);
+      border-right: 2px solid rgba(243, 247, 244, 0.45);
+      transform: rotate(45deg);
+    }
+
+    .layer-stack {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .layer {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 10, 12, 0.72);
+      padding: 16px;
+      min-height: 170px;
+    }
+
+    .layer .num {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      margin-bottom: 12px;
+      border: 1px solid var(--green);
+      color: var(--green);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-weight: 900;
+    }
+
+    .layer strong {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .layer span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      counter-reset: flow;
+    }
+
+    .flow-step {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 46px 14px 16px;
+      min-height: 184px;
+    }
+
+    .flow-step::before {
+      counter-increment: flow;
+      content: "0" counter(flow);
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      color: var(--cyan);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .flow-step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .adapter-grid {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 16px;
+    }
+
+    .code-panel {
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #050607;
+      padding: 18px;
+      overflow: auto;
+    }
+
+    pre {
+      margin: 0;
+      color: #d8f7dd;
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 13px;
+      line-height: 1.58;
+      white-space: pre;
+    }
+
+    .adapter-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .adapter-item {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 12px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 10, 12, 0.7);
+      padding: 13px;
+    }
+
+    .adapter-item strong {
+      color: var(--green);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 13px;
+    }
+
+    .adapter-item span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .surface-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .surface {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 10, 12, 0.72);
+      padding: 18px;
+      min-height: 220px;
+    }
+
+    .surface .glyph {
+      color: var(--cyan);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+
+    .surface h3 {
+      margin-bottom: 8px;
+    }
+
+    .surface p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .surface ul {
+      margin: 13px 0 0;
+      padding-left: 18px;
+      color: var(--white-soft);
+      font-size: 13px;
+    }
+
+    .surface li {
+      margin: 6px 0;
+    }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .phase {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 16px;
+      min-height: 245px;
+    }
+
+    .phase::after {
+      content: "";
+      position: absolute;
+      top: 24px;
+      right: -13px;
+      width: 24px;
+      border-top: 2px solid rgba(125, 255, 155, 0.45);
+    }
+
+    .phase:last-child::after {
+      display: none;
+    }
+
+    .phase .phase-id {
+      display: inline-block;
+      margin-bottom: 12px;
+      color: var(--green);
+      font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .phase h3 {
+      margin-bottom: 10px;
+    }
+
+    .phase p {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .phase ul {
+      margin: 12px 0 0;
+      padding-left: 18px;
+      color: var(--white-soft);
+      font-size: 13px;
+    }
+
+    .phase li {
+      margin: 6px 0;
+    }
+
+    .decision-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+
+    .decision {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 10, 12, 0.74);
+      padding: 18px;
+    }
+
+    .decision strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--yellow);
+    }
+
+    .decision p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .closeout {
+      margin-top: 24px;
+      border: 1px solid rgba(125, 255, 155, 0.45);
+      border-radius: 8px;
+      background:
+        linear-gradient(120deg, rgba(125, 255, 155, 0.12), rgba(82, 226, 255, 0.08)),
+        var(--panel-2);
+      padding: 24px;
+    }
+
+    .closeout strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--green);
+      font-size: 20px;
+    }
+
+    .closeout p {
+      color: var(--white-soft);
+    }
+
+    @media (max-width: 1050px) {
+      header::before {
+        opacity: 0.28;
+      }
+
+      .hero-stats,
+      .nav,
+      .layer-stack,
+      .flow,
+      .surface-grid,
+      .roadmap {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .positioning,
+      .adapter-grid,
+      .decision-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .arch-row {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow {
+        min-height: 34px;
+      }
+
+      .arrow::before {
+        top: 3px;
+        bottom: 3px;
+        left: 50%;
+        right: auto;
+        border-top: 0;
+        border-left: 2px solid rgba(243, 247, 244, 0.45);
+      }
+
+      .arrow::after {
+        top: auto;
+        right: calc(50% - 5px);
+        bottom: 2px;
+        transform: rotate(135deg);
+      }
+
+      .phase::after {
+        display: none;
+      }
+    }
+
+    @media (max-width: 680px) {
+      main {
+        width: min(100vw - 24px, 1240px);
+        padding: 20px 0 44px;
+      }
+
+      header,
+      .section {
+        padding: 20px;
+      }
+
+      header {
+        min-height: auto;
+      }
+
+      header::before,
+      header::after {
+        display: none;
+      }
+
+      .hero-stats,
+      .nav,
+      .layer-stack,
+      .flow,
+      .surface-grid,
+      .roadmap {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head {
+        display: block;
+      }
+
+      .pill {
+        display: inline-flex;
+        margin-top: 12px;
+      }
+
+      .adapter-item {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        background: #fff;
+        color: #111;
+      }
+
+      body::before,
+      header::before,
+      header::after {
+        display: none;
+      }
+
+      header,
+      .section,
+      .box,
+      .layer,
+      .flow-step,
+      .surface,
+      .phase,
+      .decision,
+      .statement,
+      .mini-card,
+      .code-panel {
+        background: #fff;
+        color: #111;
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      .nav {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="hero-copy">
+        <div class="eyebrow">wiki-manager build strategy</div>
+        <h1>用一层可控账本，把内网知识库从“后端绑定”变成“可迁移体系”</h1>
+        <p class="lead">
+          本项目不重新实现 RAG 引擎，而是在 RagFlow、WeKnora、未来 MaxKB 等后端之上建设统一管理面：
+          保存原始资料、维护逻辑知识库、记录版本和同步状态，再通过 CLI、HTTP API 和 MCP 把能力交给人和大模型。
+        </p>
+        <div class="hero-stats">
+          <div class="stat">
+            <strong>CLI</strong>
+            <span>面向普通 Linux 用户的日常维护入口</span>
+          </div>
+          <div class="stat">
+            <strong>API</strong>
+            <span>127.0.0.1 本机服务承载共享账本</span>
+          </div>
+          <div class="stat">
+            <strong>Adapter</strong>
+            <span>Mock、RagFlow、WeKnora 后端可替换</span>
+          </div>
+          <div class="stat">
+            <strong>MCP</strong>
+            <span>给大模型暴露只读检索和问答工具</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="页面目录">
+      <a href="#positioning">项目定位</a>
+      <a href="#architecture">架构分层</a>
+      <a href="#lifecycle">文档生命周期</a>
+      <a href="#adapters">后端适配</a>
+      <a href="#roadmap">阶段路线</a>
+    </nav>
+
+    <section id="positioning" class="section">
+      <div class="section-head">
+        <div>
+          <h2>项目定位</h2>
+          <p>先明确它解决的不是“怎么切片、怎么向量化”，而是“企业内部知识体系如何长期可管、可追溯、可迁移”。</p>
+        </div>
+        <span class="pill">CONTROL PLANE</span>
+      </div>
+      <div class="positioning">
+        <div class="statement">
+          <span class="label">one sentence</span>
+          <strong>wiki-manager 是企业知识库的胶水层、账本层和运维控制面。</strong>
+          <p>
+            所有通过本工具维护的知识，都会留下原始文件、逻辑知识库归属、版本、权限、同步任务、后端文档 ID 和状态。
+            即使更换后端，也可以从本地账本重放知识体系。
+          </p>
+        </div>
+        <div class="do-not">
+          <div class="mini-card">
+            <strong>不替代知识库后端</strong>
+            <span>RagFlow、WeKnora 继续负责解析、切片、向量化和问答。</span>
+          </div>
+          <div class="mini-card">
+            <strong>不把业务绑死在单一系统</strong>
+            <span>业务面对的是逻辑知识库和统一命令，后端可按配置增减。</span>
+          </div>
+          <div class="mini-card">
+            <strong>不让大模型直接改资料</strong>
+            <span>MCP 侧优先只读，暴露 search / ask，避免模型误修改知识资产。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" class="section">
+      <div class="section-head">
+        <div>
+          <h2>架构分层</h2>
+          <p>核心思路是把用户入口、服务账本、原始归档、后端适配、大模型工具拆开，每层职责单一。</p>
+        </div>
+        <span class="pill">LAYERS</span>
+      </div>
+
+      <div class="architecture" aria-label="wiki-manager 架构流程图">
+        <div class="arch-row">
+          <div class="box">
+            <h3>用户与大模型入口</h3>
+            <p>普通用户通过 CLI 操作；上层智能体通过 MCP 只读访问 search / ask。</p>
+            <code>wiki add / wiki sync / mcp search</code>
+          </div>
+          <div class="arrow" aria-hidden="true"></div>
+          <div class="box api">
+            <h3>本机 HTTP 服务</h3>
+            <p>服务只监听 127.0.0.1，统一处理权限、上传、队列、查询和后端调用。</p>
+            <code>FastAPI + X-Wiki-User</code>
+          </div>
+          <div class="arrow" aria-hidden="true"></div>
+          <div class="box store">
+            <h3>账本与归档</h3>
+            <p>SQLite 记录知识库、文档、版本、成员、任务和同步状态；archive 保存原始文件。</p>
+            <code>SQLite + immutable versions</code>
+          </div>
+        </div>
+        <div class="arch-row">
+          <div class="box api">
+            <h3>后端注册表</h3>
+            <p>从 server.toml 读取已配置后端，统一创建 Adapter 实例。</p>
+            <code>BackendRegistry</code>
+          </div>
+          <div class="arrow" aria-hidden="true"></div>
+          <div class="box">
+            <h3>适配器协议</h3>
+            <p>所有后端实现同一组 create / upload / status / retrieve / ask 方法。</p>
+            <code>BackendAdapter Protocol</code>
+          </div>
+          <div class="arrow" aria-hidden="true"></div>
+          <div class="box store">
+            <h3>真实知识库后端</h3>
+            <p>Mock 用于验证闭环；RagFlow 和 WeKnora 用于真实入库、检索和问答。</p>
+            <code>mock / ragflow / weknora</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer-stack">
+        <div class="layer">
+          <span class="num">1</span>
+          <strong>逻辑知识库优先</strong>
+          <span>工具内的 KB 是 canonical 组织单位，不等同于某个后端 dataset。</span>
+        </div>
+        <div class="layer">
+          <span class="num">2</span>
+          <strong>原始资料必须留存</strong>
+          <span>迁移、重放、排查和版本回溯都依赖本地 archive。</span>
+        </div>
+        <div class="layer">
+          <span class="num">3</span>
+          <strong>同步状态可审计</strong>
+          <span>每个“文档 × KB × 后端”都有独立状态和后端文档 ID。</span>
+        </div>
+        <div class="layer">
+          <span class="num">4</span>
+          <strong>检索能力受控暴露</strong>
+          <span>MCP 只提供查询工具，让大模型可用但不越权。</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="lifecycle" class="section">
+      <div class="section-head">
+        <div>
+          <h2>文档生命周期</h2>
+          <p>设计重点是把“上传文件”扩展为可追踪的生命周期，而不是一次性的后端调用。</p>
+        </div>
+        <span class="pill">LIFECYCLE</span>
+      </div>
+      <div class="flow">
+        <div class="flow-step">
+          <strong>创建逻辑 KB</strong>
+          <span>管理员创建知识库，并按 Linux 用户授予 viewer、contributor、admin 权限。</span>
+        </div>
+        <div class="flow-step">
+          <strong>添加原始资料</strong>
+          <span>用户通过 CLI 上传 PDF、Word、Excel、Markdown 等文件，可指定一个或多个 KB。</span>
+        </div>
+        <div class="flow-step">
+          <strong>写入账本和归档</strong>
+          <span>生成文档 slug、保存不可变版本、记录 owner、hash、文件大小和归属关系。</span>
+        </div>
+        <div class="flow-step">
+          <strong>生成同步任务</strong>
+          <span>立即同步或使用 --later 进入队列，支持夜间统一同步，避免白天抢资源。</span>
+        </div>
+        <div class="flow-step">
+          <strong>同步到后端</strong>
+          <span>按配置后端逐个上传，记录 backend_doc_id、解析状态、chunk 数和错误信息。</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="adapters" class="section">
+      <div class="section-head">
+        <div>
+          <h2>后端适配器思路</h2>
+          <p>适配器把不同后端 API 差异挡在项目内部，让 CLI、API、MCP 不需要知道底层系统差异。</p>
+        </div>
+        <span class="pill">ADAPTERS</span>
+      </div>
+
+      <div class="adapter-grid">
+        <div class="code-panel" aria-label="BackendAdapter 协议示例">
+<pre>class BackendAdapter(Protocol):
+    def create_kb(slug, name) -> str: ...
+    def upload(kb_id, doc_slug, file, filename) -> str: ...
+    def delete(kb_id, doc_id) -> None: ...
+    def get_status(kb_id, doc_id) -> BackendDocStatus: ...
+    def retrieve(kb_id, question, top_k=6) -> list[RetrievalResult]: ...
+    def ask(kb_id, question, chat_id=None, session_id=None) -> AskResult: ...</pre>
+        </div>
+        <div class="adapter-list">
+          <div class="adapter-item">
+            <strong>Mock</strong>
+            <span>第一阶段用于跑通账本、权限、队列和状态机，不依赖真实后端。</span>
+          </div>
+          <div class="adapter-item">
+            <strong>RagFlow</strong>
+            <span>验证真实 dataset、document 上传、解析状态、检索和 Chat Assistant 问答。</span>
+          </div>
+          <div class="adapter-item">
+            <strong>WeKnora</strong>
+            <span>通过 HTTP API 完成 KB 创建、文件上传、SSE 问答和 references 映射。</span>
+          </div>
+          <div class="adapter-item">
+            <strong>Future</strong>
+            <span>MaxKB 或其他后端只要实现同一协议，就能接入现有账本和入口。</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="surfaces" class="section">
+      <div class="section-head">
+        <div>
+          <h2>三个使用面</h2>
+          <p>同一套服务层对外提供三种入口：人用 CLI，系统用 API，大模型用 MCP。</p>
+        </div>
+        <span class="pill">SURFACES</span>
+      </div>
+      <div class="surface-grid">
+        <div class="surface">
+          <div class="glyph">/usr/bin/wiki</div>
+          <h3>CLI：给内部用户</h3>
+          <p>适合部署在部门 wiki 虚拟机上，普通 Linux 用户用短命令维护资料。</p>
+          <ul>
+            <li>创建 KB、授权成员</li>
+            <li>添加、更新、删除文档</li>
+            <li>查看同步状态、手动 sync</li>
+          </ul>
+        </div>
+        <div class="surface">
+          <div class="glyph">127.0.0.1:8765</div>
+          <h3>HTTP API：给服务编排</h3>
+          <p>FastAPI 只监听本机，所有共享账本和归档操作集中在服务端执行。</p>
+          <ul>
+            <li>统一权限判断</li>
+            <li>统一文件上传和版本记录</li>
+            <li>统一同步任务消费</li>
+          </ul>
+        </div>
+        <div class="surface">
+          <div class="glyph">mcp://wiki-manager</div>
+          <h3>MCP：给大模型</h3>
+          <p>暴露只读 search 和 ask 工具，让智能体能检索知识，但不直接管理资料。</p>
+          <ul>
+            <li>search：返回匹配 chunk</li>
+            <li>ask：返回答案和引用</li>
+            <li>支持指定 KB 和 backend</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap" class="section">
+      <div class="section-head">
+        <div>
+          <h2>阶段路线</h2>
+          <p>项目按风险拆分：先验证账本闭环，再接真实后端，再开放检索和 MCP，最后扩展更多来源和后端。</p>
+        </div>
+        <span class="pill">ROADMAP</span>
+      </div>
+      <div class="roadmap">
+        <div class="phase">
+          <span class="phase-id">phase 1</span>
+          <h3>入库账本闭环</h3>
+          <p>先不碰真实 RAG，证明管理模型成立。</p>
+          <ul>
+            <li>逻辑知识库</li>
+            <li>权限和版本</li>
+            <li>归档和队列</li>
+            <li>Mock 后端</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <span class="phase-id">phase 2</span>
+          <h3>真实后端同步</h3>
+          <p>接入 RagFlow，验证 Adapter 和多后端同步。</p>
+          <ul>
+            <li>BackendAdapter</li>
+            <li>后端自动绑定</li>
+            <li>状态增强</li>
+            <li>迁移重放</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <span class="phase-id">phase 3</span>
+          <h3>检索与 MCP</h3>
+          <p>让知识体系从“可管理”进入“可被大模型使用”。</p>
+          <ul>
+            <li>search / ask</li>
+            <li>默认检索后端</li>
+            <li>CLI/API 查询</li>
+            <li>MCP 只读工具</li>
+          </ul>
+        </div>
+        <div class="phase">
+          <span class="phase-id">phase 4+</span>
+          <h3>WeKnora 与扩展</h3>
+          <p>接入更多真实后端和更多知识来源。</p>
+          <ul>
+            <li>WeKnora HTTP API</li>
+            <li>SSE 问答解析</li>
+            <li>API 文档来源</li>
+            <li>多后端混合</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="decisions" class="section">
+      <div class="section-head">
+        <div>
+          <h2>关键设计取舍</h2>
+          <p>这些取舍能解释为什么项目采用现在的结构，而不是直接让用户去操作 RagFlow 或 WeKnora。</p>
+        </div>
+        <span class="pill">WHY</span>
+      </div>
+      <div class="decision-grid">
+        <div class="decision">
+          <strong>为什么要有本地账本？</strong>
+          <p>因为后端只知道自己的文档 ID 和解析状态，不负责企业内部“谁维护、属于哪个逻辑知识库、原始文件在哪、如何迁移”的完整治理。</p>
+        </div>
+        <div class="decision">
+          <strong>为什么要保存原始文件？</strong>
+          <p>后端迁移、重新解析、版本回退、失败排查都需要原始资料。只保存向量库结果会让知识资产被后端锁定。</p>
+        </div>
+        <div class="decision">
+          <strong>为什么先做 Mock？</strong>
+          <p>先把权限、版本、队列、同步状态机跑通，可以把项目风险从“业务模型不清”和“后端 API 不稳”中拆出来。</p>
+        </div>
+        <div class="decision">
+          <strong>为什么 MCP 只读？</strong>
+          <p>大模型适合查知识、总结知识、引用知识，但不应直接删除或修改企业知识资产。写操作仍由 CLI/API 的人类流程控制。</p>
+        </div>
+      </div>
+
+      <div class="closeout">
+        <strong>领导讨论口径</strong>
+        <p>
+          wiki-manager 的价值不是“多一个上传工具”，而是把内网知识从单个 RAG 后端中抽象出来：
+          资料有账本、版本可追溯、后端可替换、同步可审计、检索可通过 MCP 供大模型使用。
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

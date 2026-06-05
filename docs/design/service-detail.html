@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCP 服务详情 — Agent 能力管理中心</title>
+  <link rel="stylesheet" href="css/shared.css">
+  <style>
+    .detail-header {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-5);
+      padding: var(--space-6);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-lg);
+      background: var(--primary-soft);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .detail-info {
+      flex: 1;
+    }
+    .detail-name {
+      font-size: var(--text-2xl);
+      font-weight: 700;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+    .detail-desc {
+      font-size: var(--text-sm);
+      color: var(--muted);
+      margin-top: var(--space-1);
+    }
+    .detail-meta {
+      display: flex;
+      gap: var(--space-5);
+      margin-top: var(--space-3);
+      flex-wrap: wrap;
+    }
+    .detail-meta-item {
+      font-size: var(--text-xs);
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: var(--space-1);
+    }
+    .detail-meta-item strong {
+      color: var(--fg-secondary);
+      font-weight: 550;
+    }
+    .detail-actions {
+      display: flex;
+      gap: var(--space-2);
+      flex-shrink: 0;
+    }
+    .detail-tabs {
+      padding: 0 var(--space-8);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .info-grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-5);
+    }
+    .tool-name-link {
+      font-weight: 550;
+      color: var(--fg);
+      text-decoration: none;
+    }
+    .tool-name-link:hover {
+      color: var(--primary);
+    }
+    .tool-type-badge {
+      font-size: 11px;
+    }
+    .sync-log-item {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-3);
+      padding: var(--space-3) 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .sync-log-item:last-child {
+      border-bottom: none;
+    }
+    .sync-log-time {
+      font-size: var(--text-xs);
+      color: var(--muted);
+      white-space: nowrap;
+      width: 140px;
+      flex-shrink: 0;
+      padding-top: 2px;
+    }
+    .sync-log-body {
+      flex: 1;
+    }
+    .sync-log-msg {
+      font-size: var(--text-sm);
+      color: var(--fg-secondary);
+    }
+    .sync-log-detail {
+      font-size: var(--text-xs);
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .test-result {
+      padding: var(--space-4);
+      border-radius: var(--radius-md);
+      border: 1px solid;
+      margin-top: var(--space-4);
+    }
+    .test-result.success {
+      background: var(--success-soft);
+      border-color: rgba(15, 138, 95, 0.2);
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-icon">A</div>
+        <div class="sidebar-logo-text">Agent 能力管理中心<span>Capability Hub</span></div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <div class="nav-group-label">总览</div>
+        <a href="index.html" class="nav-item">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span>
+          <span>平台概览</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-label">MCP 服务</div>
+        <a href="service-list.html" class="nav-item active">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
+          <span>服务列表</span><span class="nav-badge">12</span>
+        </a>
+        <a href="service-form.html" class="nav-item">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
+          <span>新增服务</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-label">工具管理</div>
+        <a href="tool-detail.html" class="nav-item">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
+          <span>工具目录</span><span class="nav-badge">86</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-label">MetaMCP</div>
+        <a href="#" class="nav-item">
+          <span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+          <span>接入说明</span>
+        </a>
+      </div>
+      <div class="nav-group" style="margin-top:auto;">
+        <a class="nav-item disabled"><span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span><span>调用记录</span></a>
+        <a class="nav-item disabled"><span class="nav-item-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span>系统设置</span></a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">v0.1.0 · 阶段一</div>
+  </aside>
+
+  <div class="main-content">
+    <!-- 服务详情头部 -->
+    <div class="detail-header">
+      <div class="detail-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      </div>
+      <div class="detail-info">
+        <div class="page-breadcrumb">
+          <a href="service-list.html">MCP 服务</a>
+          <span class="page-breadcrumb-sep">/</span>
+          <span>mysql-query</span>
+        </div>
+        <div class="detail-name">
+          mysql-query
+          <span class="badge badge-success"><span class="badge-dot"></span>已启用</span>
+        </div>
+        <div class="detail-desc">MySQL 数据库查询服务，提供对核心业务数据库的只读查询能力</div>
+        <div class="detail-meta">
+          <div class="detail-meta-item"><strong>地址:</strong> http://mysql-mcp.internal:8080</div>
+          <div class="detail-meta-item"><strong>协议:</strong> Streamable HTTP</div>
+          <div class="detail-meta-item"><strong>工具数:</strong> 8</div>
+          <div class="detail-meta-item"><strong>最近同步:</strong> 2 分钟前</div>
+          <div class="detail-meta-item"><strong>创建时间:</strong> 2026-05-15</div>
+        </div>
+      </div>
+      <div class="detail-actions">
+        <button class="btn btn-secondary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          编辑
+        </button>
+        <button class="btn btn-secondary btn-sm" id="syncBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          同步工具
+        </button>
+        <button class="btn btn-secondary btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+          测试连接
+        </button>
+        <button class="btn btn-danger btn-sm">停用</button>
+      </div>
+    </div>
+
+    <!-- 标签页 -->
+    <div class="detail-tabs">
+      <div class="tabs" id="detailTabs">
+        <button class="tab active" data-tab="overview">概览</button>
+        <button class="tab" data-tab="tools">工具列表 <span style="color:var(--muted);font-weight:400;margin-left:4px;">8</span></button>
+        <button class="tab" data-tab="sync">同步记录</button>
+      </div>
+    </div>
+
+    <div class="page-body">
+      <!-- 概览 Tab -->
+      <div class="tab-content active" id="tab-overview">
+        <div class="info-grid-2">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">服务信息</div>
+            </div>
+            <div class="card-body">
+              <div class="info-grid">
+                <span class="info-label">服务名称</span>
+                <span class="info-value">mysql-query</span>
+                <span class="info-label">描述</span>
+                <span class="info-value">MySQL 数据库查询服务，提供对核心业务数据库的只读查询能力</span>
+                <span class="info-label">连接地址</span>
+                <span class="info-value text-mono" style="font-size:var(--text-xs);">http://mysql-mcp.internal:8080</span>
+                <span class="info-label">协议</span>
+                <span class="info-value">Streamable HTTP</span>
+                <span class="info-label">状态</span>
+                <span class="info-value"><span class="badge badge-success"><span class="badge-dot"></span>已启用</span></span>
+                <span class="info-label">标签</span>
+                <span class="info-value flex gap-1 flex-wrap">
+                  <span class="tag">数据库</span>
+                  <span class="tag">查询</span>
+                  <span class="tag">MySQL</span>
+                  <span class="tag">只读</span>
+                </span>
+                <span class="info-label">创建时间</span>
+                <span class="info-value">2026-05-15 10:30:00</span>
+                <span class="info-label">更新时间</span>
+                <span class="info-value">2026-06-02 09:15:00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">连接配置</div>
+              <button class="btn btn-ghost btn-sm">编辑</button>
+            </div>
+            <div class="card-body">
+              <div class="info-grid">
+                <span class="info-label">连接超时</span>
+                <span class="info-value">30s</span>
+                <span class="info-label">重试次数</span>
+                <span class="info-value">3</span>
+                <span class="info-label">同步间隔</span>
+                <span class="info-value">60 分钟</span>
+                <span class="info-label">认证方式</span>
+                <span class="info-value">Custom Headers</span>
+                <span class="info-label">Headers</span>
+                <span class="info-value text-mono" style="font-size:var(--text-xs);">
+                  X-Auth-Token: ••••••••<br>
+                  X-DB-Instance: prod-read-replica
+                </span>
+              </div>
+              <div class="test-result success">
+                <div class="flex items-center gap-2 mb-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
+                  <span class="font-medium text-sm">连接测试成功</span>
+                </div>
+                <div class="text-xs text-muted">
+                  最近测试于 2026-06-02 09:14:52 · 响应时间 128ms
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 工具列表 Tab -->
+      <div class="tab-content" id="tab-tools">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">已同步工具</div>
+            <div class="flex items-center gap-3">
+              <div class="search-box" style="max-width:240px;">
+                <span class="search-box-icon">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </span>
+                <input type="text" placeholder="搜索工具...">
+              </div>
+              <span class="text-sm text-muted">共 8 个工具</span>
+            </div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>工具名称</th>
+                  <th>类型</th>
+                  <th>描述</th>
+                  <th>标签</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">list_databases</a></td>
+                  <td><span class="badge badge-info tool-type-badge">overview</span></td>
+                  <td class="text-xs text-muted">列出所有可访问的数据库实例</td>
+                  <td><span class="tag">数据库</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">list_tables</a></td>
+                  <td><span class="badge badge-info tool-type-badge">overview</span></td>
+                  <td class="text-xs text-muted">列出指定数据库中的所有表</td>
+                  <td><span class="tag">数据库</span><span class="tag">表结构</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">describe_table</a></td>
+                  <td><span class="badge badge-info tool-type-badge">detail</span></td>
+                  <td class="text-xs text-muted">获取表的详细结构信息，包含字段名、类型、注释</td>
+                  <td><span class="tag">表结构</span><span class="tag">元数据</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">search_tables</a></td>
+                  <td><span class="badge badge-info tool-type-badge">search</span></td>
+                  <td class="text-xs text-muted">根据表名或注释关键词搜索匹配的表</td>
+                  <td><span class="tag">搜索</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">query_data</a></td>
+                  <td><span class="badge badge-info tool-type-badge">search</span></td>
+                  <td class="text-xs text-muted">执行只读 SQL 查询，返回结果集（限制 1000 行）</td>
+                  <td><span class="tag">查询</span><span class="tag">SQL</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">get_table_stats</a></td>
+                  <td><span class="badge badge-info tool-type-badge">detail</span></td>
+                  <td class="text-xs text-muted">获取表的行数、大小和索引统计信息</td>
+                  <td><span class="tag">统计</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">get_query_plan</a></td>
+                  <td><span class="badge badge-info tool-type-badge">detail</span></td>
+                  <td class="text-xs text-muted">获取 SQL 语句的执行计划</td>
+                  <td><span class="tag">执行计划</span><span class="tag">优化</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+                <tr>
+                  <td><a href="tool-detail.html" class="tool-name-link">get_sample_data</a></td>
+                  <td><span class="badge badge-info tool-type-badge">detail</span></td>
+                  <td class="text-xs text-muted">获取指定表的前 N 行样本数据</td>
+                  <td><span class="tag">样本</span><span class="tag">预览</span></td>
+                  <td><a href="tool-detail.html" class="btn btn-ghost btn-sm">详情</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 同步记录 Tab -->
+      <div class="tab-content" id="tab-sync">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">同步历史</div>
+          </div>
+          <div class="card-body">
+            <div class="sync-log-item">
+              <div class="sync-log-time">2026-06-02 09:15:32</div>
+              <div class="sync-log-body">
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-success" style="font-size:11px;"><span class="badge-dot"></span>同步成功</span>
+                  <span class="sync-log-msg">8 个工具已同步</span>
+                </div>
+                <div class="sync-log-detail">耗时 2.3s · 新增 0 个 · 更新 2 个（query_data, search_tables）· 无删除</div>
+              </div>
+            </div>
+            <div class="sync-log-item">
+              <div class="sync-log-time">2026-06-01 15:42:10</div>
+              <div class="sync-log-body">
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-success" style="font-size:11px;"><span class="badge-dot"></span>同步成功</span>
+                  <span class="sync-log-msg">8 个工具已同步</span>
+                </div>
+                <div class="sync-log-detail">耗时 1.8s · 新增 1 个（get_sample_data）· 更新 0 个 · 无删除</div>
+              </div>
+            </div>
+            <div class="sync-log-item">
+              <div class="sync-log-time">2026-06-01 10:00:05</div>
+              <div class="sync-log-body">
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-success" style="font-size:11px;"><span class="badge-dot"></span>同步成功</span>
+                  <span class="sync-log-msg">7 个工具已同步</span>
+                </div>
+                <div class="sync-log-detail">耗时 1.5s · 新增 0 个 · 更新 1 个（describe_table）· 无删除</div>
+              </div>
+            </div>
+            <div class="sync-log-item">
+              <div class="sync-log-time">2026-05-31 14:22:30</div>
+              <div class="sync-log-body">
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-success" style="font-size:11px;"><span class="badge-dot"></span>同步成功</span>
+                  <span class="sync-log-msg">7 个工具已同步</span>
+                </div>
+                <div class="sync-log-detail">耗时 1.6s · 无变更</div>
+              </div>
+            </div>
+            <div class="sync-log-item">
+              <div class="sync-log-time">2026-05-15 10:30:00</div>
+              <div class="sync-log-body">
+                <div class="flex items-center gap-2">
+                  <span class="badge badge-primary" style="font-size:11px;"><span class="badge-dot"></span>首次同步</span>
+                  <span class="sync-log-msg">7 个工具已同步</span>
+                </div>
+                <div class="sync-log-detail">耗时 3.1s · 新增 7 个 · 服务创建并首次同步</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Tab 切换
+  const tabs = document.querySelectorAll('#detailTabs .tab');
+  const tabContents = document.querySelectorAll('.tab-content');
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tabContents.forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  // 同步按钮
+  document.getElementById('syncBtn').addEventListener('click', function() {
+    this.disabled = true;
+    this.innerHTML = '<span class="sync-indicator"><span class="spinner"></span></span> 同步中...';
+    setTimeout(() => {
+      this.disabled = false;
+      this.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> 同步工具';
+    }, 2000);
+  });
+</script>
+</body>
+</html>
