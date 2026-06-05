@@ -6,6 +6,7 @@ import DashboardView from './views/DashboardView.vue'
 import ServicesView from './views/ServicesView.vue'
 import ToolsView from './views/ToolsView.vue'
 import ProfilesView from './views/ProfilesView.vue'
+import BuiltinsView from './views/BuiltinsView.vue'
 import LogsView from './views/LogsView.vue'
 import StatsView from './views/StatsView.vue'
 
@@ -25,6 +26,12 @@ const navGroups: NavGroup[] = [
       { key: 'services', label: '能力接入' },
       { key: 'tools', label: '工具目录' },
       { key: 'profiles', label: '能力平面' },
+    ],
+  },
+  {
+    label: '资源管理',
+    items: [
+      { key: 'builtins', label: '内置资源' },
     ],
   },
   {
@@ -51,6 +58,7 @@ const view = computed(() => hash.value)
       <ServicesView v-else-if="view === 'services'" />
       <ToolsView v-else-if="view === 'tools'" />
       <ProfilesView v-else-if="view === 'profiles'" />
+      <BuiltinsView v-else-if="view === 'builtins'" />
       <LogsView v-else-if="view === 'logs'" />
       <StatsView v-else-if="view === 'stats'" />
     </div>

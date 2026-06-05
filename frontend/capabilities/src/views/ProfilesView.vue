@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
-import type { ProjectProfile, ProfileSourceRule, McpService } from '../api/types'
+import type { ProjectProfile, ProfileSourceRule, ProfileResourceRule, McpService, KnowledgeBaseSummary, CodeRepository } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -22,7 +22,11 @@ const showConfig = ref(false)
 const configProfile = ref<ProjectProfile | null>(null)
 const configLoading = ref(false)
 const configRules = ref<ProfileSourceRule[]>([])
+const configResources = ref<ProfileResourceRule[]>([])
 const allServices = ref<McpService[]>([])
+const allKbs = ref<KnowledgeBaseSummary[]>([])
+const allRepos = ref<CodeRepository[]>([])
+
 
 const copied = ref('')
 
@@ -107,11 +111,20 @@ async function openConfig(p: ProjectProfile) {
   showConfig.value = true
   configLoading.value = true
   try {
-    allServices.value = await api.listServices()
-    const full = await api.getProfile(p.profile_key)
+    const [services, kbs, repos, full] = await Promise.all([
+      api.listServices(),
+      api.listWikiKbs(),
+      api.listCodeRepos(),
+      api.getProfile(p.profile_key),
+    ])
+    allServices.value = services
+    allKbs.value = kbs
+    allRepos.value = repos
     configRules.value = full.rules || []
+    configResources.value = full.resource_rules || []
   } catch {
     configRules.value = []
+    configResources.value = []
   }
   configLoading.value = false
 }
@@ -131,6 +144,22 @@ async function toggleServiceAllow(key: string) {
   await api.replaceProfileRules(configProfile.value.profile_key, rules)
   configRules.value = rules
   profiles.value = await api.listProfiles()
+}
+
+function isResourceAllowed(type: string, key: string) {
+  return configResources.value.some(r => r.resource_type === type && r.resource_key === key)
+}
+
+async function toggleResource(type: string, key: string) {
+  if (!configProfile.value) return
+  let resources: ProfileResourceRule[]
+  if (isResourceAllowed(type, key)) {
+    resources = configResources.value.filter(r => !(r.resource_type === type && r.resource_key === key))
+  } else {
+    resources = [...configResources.value, { resource_type: type, resource_key: key }]
+  }
+  await api.replaceProfileResources(configProfile.value.profile_key, resources)
+  configResources.value = resources
 }
 </script>
 
@@ -264,7 +293,7 @@ async function toggleServiceAllow(key: string) {
             <div v-if="allServices.length === 0" class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
               暂无已注册的服务，请先在能力接入中添加服务
             </div>
-            <div v-else class="max-h-[320px] space-y-1 overflow-y-auto">
+            <div v-else class="max-h-[240px] space-y-1 overflow-y-auto">
               <label
                 v-for="svc in allServices" :key="svc.service_key"
                 class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
@@ -282,6 +311,56 @@ async function toggleServiceAllow(key: string) {
                 <Badge v-if="svc.status === 'enabled'" variant="secondary" class="bg-green-50 text-green-700 text-[11px]">已启用</Badge>
                 <Badge v-else-if="svc.status === 'error'" variant="destructive" class="text-[11px]">异常</Badge>
                 <Badge v-else variant="secondary" class="text-[11px] text-muted-foreground">已停用</Badge>
+              </label>
+            </div>
+          </div>
+
+          <!-- KB Resources -->
+          <div>
+            <div class="mb-2 text-sm font-medium">允许访问的知识库</div>
+            <div v-if="allKbs.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
+              暂无知识库，请先在内置资源中添加
+            </div>
+            <div v-else class="max-h-[200px] space-y-1 overflow-y-auto">
+              <label
+                v-for="kb in allKbs" :key="kb.slug"
+                class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isResourceAllowed('wiki_kb', kb.slug)"
+                  @change="toggleResource('wiki_kb', kb.slug)"
+                  class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div class="flex-1">
+                  <div class="text-sm font-medium">{{ kb.name }}</div>
+                  <div class="text-xs text-muted-foreground">{{ kb.slug }} · {{ kb.doc_count }} 文档</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Code Repo Resources -->
+          <div>
+            <div class="mb-2 text-sm font-medium">允许访问的代码仓库</div>
+            <div v-if="allRepos.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
+              暂无代码仓库，请先在内置资源中添加
+            </div>
+            <div v-else class="max-h-[200px] space-y-1 overflow-y-auto">
+              <label
+                v-for="repo in allRepos" :key="repo.repo_key"
+                class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isResourceAllowed('code_repo', repo.repo_key)"
+                  @change="toggleResource('code_repo', repo.repo_key)"
+                  class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <div class="flex-1">
+                  <div class="text-sm font-medium">{{ repo.name }}</div>
+                  <div class="text-xs text-muted-foreground">{{ repo.repo_key }}</div>
+                </div>
               </label>
             </div>
           </div>
