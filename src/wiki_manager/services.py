@@ -9,6 +9,7 @@ from typing import Any
 from wiki_manager.archive import ArchiveStorage
 from wiki_manager.capability_governance import CapabilityGovernanceService
 from wiki_manager.capability_service import CapabilityService
+from wiki_manager.codegraph_service import CodeGraphService
 from wiki_manager.config import WikiManagerPaths, ensure_directories
 from wiki_manager.domain import (
     AccessDenied,
@@ -50,6 +51,7 @@ class WikiManagerService:
         self.registry: BackendRegistry | None = None
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
+        self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
         from wiki_manager.builtin_wiki import WikiBuiltinProvider
 
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))

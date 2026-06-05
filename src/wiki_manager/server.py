@@ -86,6 +86,18 @@ class ProfileResourcesRequest(BaseModel):
     resources: list[ProfileResourceRuleRequest] = Field(default_factory=list)
 
 
+class CodeRepositoryRequest(BaseModel):
+    repo_key: str
+    name: str
+    git_url: str
+    branch: str = "main"
+    auth_ref: str = ""
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    sync_interval_minutes: int = 60
+    status: str = "active"
+
+
 def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
     resolved_paths = paths or WikiManagerPaths.from_root()
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
@@ -110,6 +122,7 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
                 service.admins = load_server_config(resolved_paths).admins
                 service.capabilities.admins = service.admins
                 service.governance.admins = service.admins
+                service.codegraph.admins = service.admins
             return call()
         except WikiManagerError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -120,6 +133,7 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
                 service.admins = load_server_config(resolved_paths).admins
                 service.capabilities.admins = service.admins
                 service.governance.admins = service.admins
+                service.codegraph.admins = service.admins
             return await call()
         except WikiManagerError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -504,6 +518,24 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
                 )
                 return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
         raise HTTPException(status_code=404, detail="tool not found")
+
+    @app.get("/builtin/codegraph/repositories")
+    def list_code_repositories(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.list_repositories(current_actor))
+
+    @app.post("/builtin/codegraph/repositories")
+    def upsert_code_repository(
+        payload: CodeRepositoryRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.upsert_repository(current_actor, **payload.model_dump()))
+
+    @app.post("/builtin/codegraph/repositories/{repo_key}/sync")
+    def sync_code_repository(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.sync_repository(current_actor, repo_key))
 
     from wiki_manager.mcp_server import setup_mcp_route
 

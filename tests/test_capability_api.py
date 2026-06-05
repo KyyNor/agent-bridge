@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from wiki_manager.capabilities import SourceType, ToolType
 from wiki_manager.server import create_app
 from wiki_manager.storage import SQLiteStore
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir()
+    subprocess.run(["git", "init", "--initial-branch=master"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.test"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=path, check=True)
+    (path / "app.py").write_text("def hello():\n    return 'world'\n", encoding="utf-8")
+    subprocess.run(["git", "add", "app.py"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "initial"], cwd=path, check=True, capture_output=True)
+    return path
 
 
 def test_mcp_service_registration_api(wm_paths) -> None:
@@ -463,3 +476,52 @@ def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
     assert tool.status_code == 200
     assert tool.json()["tool"]["tool"] == "query_sql"
     assert tool.json()["logs"][0]["log_id"] == "call_catalog_detail"
+
+
+def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    created = client.post(
+        "/builtin/codegraph/repositories",
+        json={
+            "repo_key": "web-app",
+            "name": "Web App",
+            "git_url": str(repo),
+            "branch": "master",
+            "description": "Demo app",
+            "tags": ["python"],
+        },
+        headers={"X-Wiki-User": "root"},
+    )
+    listed = client.get("/builtin/codegraph/repositories", headers={"X-Wiki-User": "root"})
+    synced = client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Wiki-User": "root"})
+
+    assert created.status_code == 200
+    assert created.json()["repo_key"] == "web-app"
+    assert created.json()["tags"] == ["python"]
+    assert listed.status_code == 200
+    assert listed.json()[0]["repo_key"] == "web-app"
+    assert synced.status_code == 200
+    assert synced.json()["status"] == "succeeded"
+    assert synced.json()["indexed"] >= 1
+
+
+def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.post(
+        "/builtin/codegraph/repositories",
+        json={
+            "repo_key": "web-app",
+            "name": "Web App",
+            "git_url": str(repo),
+            "branch": "master",
+        },
+        headers={"X-Wiki-User": "alice"},
+    )
+
+    assert response.status_code == 403

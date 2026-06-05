@@ -52,6 +52,10 @@ class WikiManagerPaths:
             server_pid_path=root / "run" / "server.pid",
         )
 
+    @property
+    def codegraph_dir(self) -> Path:
+        return self.root / "codegraph"
+
 
 @dataclass(frozen=True)
 class ServerConfig:
@@ -78,6 +82,7 @@ def ensure_directories(paths: WikiManagerPaths) -> None:
         paths.data_dir,
         paths.archive_dir,
         paths.mock_backend_dir,
+        paths.codegraph_dir,
         paths.logs_dir,
         paths.run_dir,
     ):
