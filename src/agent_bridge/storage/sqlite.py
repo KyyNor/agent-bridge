@@ -10,255 +10,23 @@ from typing import Any, Iterator
 
 from agent_bridge.capabilities.models import CallLogStatus, McpServiceStatus, ToolType
 from agent_bridge.core.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
-
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS knowledge_bases (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  slug TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'active',
-  created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS knowledge_base_members (
-  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-  linux_user TEXT NOT NULL,
-  role TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (kb_id, linux_user)
-);
-CREATE TABLE IF NOT EXISTS documents (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  slug TEXT NOT NULL UNIQUE,
-  title TEXT NOT NULL,
-  owner_user TEXT NOT NULL,
-  current_version_id INTEGER,
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT
-);
-CREATE TABLE IF NOT EXISTS document_versions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-  version_no INTEGER NOT NULL,
-  original_filename TEXT NOT NULL,
-  content_hash TEXT NOT NULL,
-  file_size INTEGER NOT NULL,
-  mime_type TEXT NOT NULL,
-  archive_path TEXT NOT NULL,
-  created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (doc_id, version_no)
-);
-CREATE TABLE IF NOT EXISTS document_kbs (
-  doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-  added_by TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT,
-  PRIMARY KEY (doc_id, kb_id)
-);
-CREATE TABLE IF NOT EXISTS backend_targets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-  slug TEXT NOT NULL DEFAULT 'mock',
-  backend_type TEXT NOT NULL DEFAULT 'mock',
-  backend_kb_id TEXT,
-  config_json TEXT NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (kb_id, slug)
-);
-CREATE TABLE IF NOT EXISTS sync_jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-  backend_slug TEXT NOT NULL DEFAULT 'mock',
-  operation TEXT NOT NULL,
-  version_id INTEGER REFERENCES document_versions(id) ON DELETE SET NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS sync_states (
-  doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
-  backend_slug TEXT NOT NULL DEFAULT 'mock',
-  backend_doc_id TEXT,
-  status TEXT NOT NULL,
-  backend_status TEXT,
-  chunk_count INTEGER,
-  progress REAL,
-  backend_error TEXT,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (doc_id, kb_id, backend_slug)
-);
-CREATE TABLE IF NOT EXISTS mcp_services (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  service_key TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  endpoint_url TEXT NOT NULL,
-  headers_json TEXT NOT NULL DEFAULT '{}',
-  description TEXT NOT NULL DEFAULT '',
-  tags_json TEXT NOT NULL DEFAULT '[]',
-  status TEXT NOT NULL DEFAULT 'enabled',
-  created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  last_synced_at TEXT,
-  last_error TEXT
-);
-CREATE TABLE IF NOT EXISTS mcp_tools (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  service_key TEXT NOT NULL REFERENCES mcp_services(service_key) ON DELETE CASCADE,
-  tool_name TEXT NOT NULL,
-  display_name TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  input_schema_json TEXT NOT NULL DEFAULT '{}',
-  tool_type TEXT NOT NULL DEFAULT 'unconfigured',
-  tags_json TEXT NOT NULL DEFAULT '[]',
-  examples_json TEXT NOT NULL DEFAULT '[]',
-  status TEXT NOT NULL DEFAULT 'active',
-  synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (service_key, tool_name)
-);
-CREATE TABLE IF NOT EXISTS project_profiles (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  profile_key TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'active',
-  created_by TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS profile_source_rules (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
-  source_type TEXT NOT NULL,
-  source_key TEXT NOT NULL,
-  effect TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (profile_key, source_type, source_key, effect)
-);
-CREATE TABLE IF NOT EXISTS profile_resource_rules (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
-  resource_type TEXT NOT NULL,
-  resource_key TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (profile_key, resource_type, resource_key)
-);
-CREATE INDEX IF NOT EXISTS idx_profile_resource_rules_profile ON profile_resource_rules(profile_key);
-CREATE INDEX IF NOT EXISTS idx_profile_resource_rules_resource ON profile_resource_rules(resource_type, resource_key);
-CREATE TABLE IF NOT EXISTS tool_call_logs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  log_id TEXT NOT NULL UNIQUE,
-  actor TEXT NOT NULL,
-  profile_key TEXT,
-  entrypoint TEXT NOT NULL,
-  source_type TEXT,
-  source_key TEXT,
-  tool_name TEXT,
-  request_json TEXT NOT NULL DEFAULT '{}',
-  response_json TEXT NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL,
-  error_message TEXT,
-  failure_stage TEXT,
-  failure_owner TEXT,
-  error_type TEXT,
-  resource_type TEXT,
-  resource_key TEXT,
-  request_summary_json TEXT NOT NULL DEFAULT '{}',
-  response_summary_json TEXT NOT NULL DEFAULT '{}',
-  duration_ms INTEGER,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_tool_call_logs_created_at ON tool_call_logs(created_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_tool_call_logs_profile ON tool_call_logs(profile_key);
-CREATE INDEX IF NOT EXISTS idx_tool_call_logs_source ON tool_call_logs(source_type, source_key);
-"""
-
-CODEGRAPH_SCHEMA = """
-CREATE TABLE IF NOT EXISTS code_repositories (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  repo_key TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  git_url TEXT NOT NULL,
-  branch TEXT NOT NULL DEFAULT 'main',
-  auth_ref TEXT NOT NULL DEFAULT '',
-  description TEXT NOT NULL DEFAULT '',
-  tags_json TEXT NOT NULL DEFAULT '[]',
-  sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
-  status TEXT NOT NULL DEFAULT 'active',
-  local_path TEXT,
-  last_commit TEXT,
-  last_synced_at TEXT,
-  last_error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS codegraph_sync_runs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  repo_key TEXT NOT NULL REFERENCES code_repositories(repo_key) ON DELETE CASCADE,
-  status TEXT NOT NULL,
-  stage TEXT NOT NULL,
-  error TEXT,
-  duration_ms INTEGER,
-  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  finished_at TEXT
-);
-CREATE TABLE IF NOT EXISTS codegraph_index_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  repo_key TEXT NOT NULL REFERENCES code_repositories(repo_key) ON DELETE CASCADE,
-  item_type TEXT NOT NULL,
-  path TEXT NOT NULL,
-  symbol TEXT,
-  language TEXT,
-  line_start INTEGER,
-  line_end INTEGER,
-  content TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_codegraph_index_repo_path ON codegraph_index_items(repo_key, path);
-CREATE INDEX IF NOT EXISTS idx_codegraph_index_symbol ON codegraph_index_items(repo_key, symbol);
-"""
-
-
-def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    return dict(row)
-
-
-def _enum_value(value: Any) -> Any:
-    return value.value if hasattr(value, "value") else value
-
-
-def _json_bytes(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
-
-
-def _json_summary(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return {"keys": sorted(str(key) for key in value), "bytes": _json_bytes(value)}
-    if isinstance(value, list):
-        return {"items": len(value), "bytes": _json_bytes(value)}
-    return {"type": type(value).__name__, "bytes": _json_bytes(value)}
+from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA
+from agent_bridge.storage.types import enum_value, json_bytes, json_summary, row_to_dict
 
 
 class SQLiteStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
+
+        from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
+        from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
+        from agent_bridge.storage.repositories.governance import GovernanceRepository
+        from agent_bridge.storage.repositories.knowledge import KnowledgeRepository
+
+        self.knowledge = KnowledgeRepository(db_path, self.connect)
+        self.capabilities = CapabilitiesRepository(db_path, self.connect)
+        self.governance = GovernanceRepository(db_path, self.connect)
+        self.codegraph = CodeGraphRepository(db_path, self.connect)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -447,7 +215,7 @@ class SQLiteStore:
                 ),
             )
             row = conn.execute("SELECT * FROM code_repositories WHERE repo_key = ?", (repo_key,)).fetchone()
-            repository = _row_to_dict(row)
+            repository = row_to_dict(row)
             if repository is None:
                 raise KeyError(f"code repository not found: {repo_key}")
             return repository
@@ -460,7 +228,7 @@ class SQLiteStore:
     def get_code_repository(self, repo_key: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM code_repositories WHERE repo_key = ?", (repo_key,)).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def mark_code_repository_sync(
         self,
@@ -537,7 +305,7 @@ class SQLiteStore:
                 (repo_key, status, stage),
             )
             row = conn.execute("SELECT * FROM codegraph_sync_runs WHERE id = ?", (cursor.lastrowid,)).fetchone()
-            run = _row_to_dict(row)
+            run = row_to_dict(row)
             if run is None:
                 raise KeyError(f"codegraph sync run not found: {cursor.lastrowid}")
             return run
@@ -565,7 +333,7 @@ class SQLiteStore:
                 (status, stage, error, duration_ms, run_id),
             )
             row = conn.execute("SELECT * FROM codegraph_sync_runs WHERE id = ?", (run_id,)).fetchone()
-            run = _row_to_dict(row)
+            run = row_to_dict(row)
             if run is None:
                 raise KeyError(f"codegraph sync run not found: {run_id}")
             return run
@@ -616,7 +384,7 @@ class SQLiteStore:
                 """,
                 (repo_key, path),
             ).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def count_codegraph_index_items(self, repo_key: str, item_type: str) -> int:
         with self.connect() as conn:
@@ -675,7 +443,7 @@ class SQLiteStore:
                 ),
             )
             row = conn.execute("SELECT * FROM mcp_services WHERE service_key = ?", (service_key,)).fetchone()
-            service = _row_to_dict(row)
+            service = row_to_dict(row)
             if service is None:
                 raise KeyError(f"mcp service not found: {service_key}")
             return service
@@ -712,7 +480,7 @@ class SQLiteStore:
                 ),
             )
             row = conn.execute("SELECT * FROM mcp_services WHERE service_key = ?", (service_key,)).fetchone()
-            service = _row_to_dict(row)
+            service = row_to_dict(row)
             if service is None:
                 raise KeyError(f"mcp service not found: {service_key}")
             return service
@@ -720,7 +488,7 @@ class SQLiteStore:
     def get_mcp_service(self, service_key: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM mcp_services WHERE service_key = ?", (service_key,)).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def list_mcp_services(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -735,7 +503,7 @@ class SQLiteStore:
                 SET status = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE service_key = ?
                 """,
-                (_enum_value(status), service_key),
+                (enum_value(status), service_key),
             )
 
     def mark_mcp_service_sync(self, service_key: str, *, success: bool, error: str | None = None) -> None:
@@ -806,7 +574,7 @@ class SQLiteStore:
                     display_name,
                     description,
                     json.dumps(input_schema, ensure_ascii=False),
-                    _enum_value(tool_type),
+                    enum_value(tool_type),
                     json.dumps(tags, ensure_ascii=False),
                     json.dumps(examples, ensure_ascii=False),
                 ),
@@ -815,7 +583,7 @@ class SQLiteStore:
                 "SELECT * FROM mcp_tools WHERE service_key = ? AND tool_name = ?",
                 (service_key, tool_name),
             ).fetchone()
-            tool = _row_to_dict(row)
+            tool = row_to_dict(row)
             if tool is None:
                 raise KeyError(f"mcp tool not found: {service_key}/{tool_name}")
             return tool
@@ -835,13 +603,13 @@ class SQLiteStore:
                 WHERE service_key = ?
                   AND tool_name = ?
                 """,
-                (_enum_value(tool_type), service_key, tool_name),
+                (enum_value(tool_type), service_key, tool_name),
             )
             row = conn.execute(
                 "SELECT * FROM mcp_tools WHERE service_key = ? AND tool_name = ?",
                 (service_key, tool_name),
             ).fetchone()
-            tool = _row_to_dict(row)
+            tool = row_to_dict(row)
             if tool is None:
                 raise KeyError(f"mcp tool not found: {service_key}/{tool_name}")
             return tool
@@ -863,7 +631,7 @@ class SQLiteStore:
                 "SELECT * FROM mcp_tools WHERE service_key = ? AND tool_name = ?",
                 (service_key, tool_name),
             ).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def deactivate_missing_mcp_tools(self, service_key: str, active_tool_names: set[str]) -> None:
         with self.connect() as conn:
@@ -918,7 +686,7 @@ class SQLiteStore:
                 "SELECT * FROM project_profiles WHERE profile_key = ?",
                 (profile_key,),
             ).fetchone()
-            profile = _row_to_dict(row)
+            profile = row_to_dict(row)
             if profile is None:
                 raise KeyError(f"project profile not found: {profile_key}")
             return profile
@@ -929,7 +697,7 @@ class SQLiteStore:
                 "SELECT * FROM project_profiles WHERE profile_key = ?",
                 (profile_key,),
             ).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def list_project_profiles(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -965,9 +733,9 @@ class SQLiteStore:
                     """,
                     (
                         profile_key,
-                        _enum_value(rule["source_type"]),
+                        enum_value(rule["source_type"]),
                         rule["source_key"],
-                        _enum_value(rule["effect"]),
+                        enum_value(rule["effect"]),
                     ),
                 )
 
@@ -1063,25 +831,25 @@ class SQLiteStore:
                     actor,
                     profile_key,
                     entrypoint,
-                    _enum_value(source_type),
+                    enum_value(source_type),
                     source_key,
                     tool_name,
                     json.dumps(request_value, ensure_ascii=False, default=str),
                     json.dumps(response_value, ensure_ascii=False, default=str),
-                    _enum_value(status),
+                    enum_value(status),
                     error_message,
-                    _enum_value(failure_stage),
-                    _enum_value(failure_owner),
+                    enum_value(failure_stage),
+                    enum_value(failure_owner),
                     error_type,
                     resource_type,
                     resource_key,
-                    json.dumps(_json_summary(request_value), ensure_ascii=False, default=str),
-                    json.dumps(_json_summary(response_value), ensure_ascii=False, default=str),
+                    json.dumps(json_summary(request_value), ensure_ascii=False, default=str),
+                    json.dumps(json_summary(response_value), ensure_ascii=False, default=str),
                     duration_ms,
                 ),
             )
             row = conn.execute("SELECT * FROM tool_call_logs WHERE log_id = ?", (log_id,)).fetchone()
-            log = _row_to_dict(row)
+            log = row_to_dict(row)
             if log is None:
                 raise KeyError(f"tool call log not found: {log_id}")
             return log
@@ -1109,13 +877,13 @@ class SQLiteStore:
         params: list[Any] = []
         for column, value in [
             ("entrypoint", entrypoint),
-            ("source_type", _enum_value(source_type)),
+            ("source_type", enum_value(source_type)),
             ("source_key", source_key),
             ("tool_name", tool_name),
             ("profile_key", profile_key),
-            ("status", _enum_value(status)),
-            ("failure_stage", _enum_value(failure_stage)),
-            ("failure_owner", _enum_value(failure_owner)),
+            ("status", enum_value(status)),
+            ("failure_stage", enum_value(failure_stage)),
+            ("failure_owner", enum_value(failure_owner)),
             ("error_type", error_type),
             ("resource_type", resource_type),
             ("resource_key", resource_key),
@@ -1217,7 +985,7 @@ class SQLiteStore:
                 "SELECT * FROM tool_call_logs WHERE log_id = ?",
                 (log_id,),
             ).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         with self.connect() as conn:
@@ -1240,7 +1008,7 @@ class SQLiteStore:
     def get_kb_by_slug(self, slug: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM knowledge_bases WHERE slug = ?", (slug,)).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def ensure_backend_target(self, kb_id: int, slug: str, backend_type: str) -> None:
         with self.connect() as conn:
@@ -1405,7 +1173,7 @@ class SQLiteStore:
                 (slug, title, owner_user),
             )
             row = conn.execute("SELECT * FROM documents WHERE id = ?", (cursor.lastrowid,)).fetchone()
-            document = _row_to_dict(row)
+            document = row_to_dict(row)
             if document is None:
                 raise KeyError(f"document not found: {cursor.lastrowid}")
             return document
@@ -1419,7 +1187,7 @@ class SQLiteStore:
                     "SELECT * FROM documents WHERE slug = ? AND status != ?",
                     (slug, DocumentStatus.deleted.value),
                 ).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def attach_document_to_kb(self, doc_id: int, kb_id: int, added_by: str) -> None:
         with self.connect() as conn:
@@ -1502,7 +1270,7 @@ class SQLiteStore:
                 (cursor.lastrowid, doc_id),
             )
             version = conn.execute("SELECT * FROM document_versions WHERE id = ?", (cursor.lastrowid,)).fetchone()
-            result = _row_to_dict(version)
+            result = row_to_dict(version)
             if result is None:
                 raise KeyError(f"document version not found: {cursor.lastrowid}")
             return result
@@ -1524,7 +1292,7 @@ class SQLiteStore:
                 (doc_id, kb_id, backend_slug, operation.value, version_id, SyncJobStatus.pending.value),
             )
             row = conn.execute("SELECT * FROM sync_jobs WHERE id = ?", (cursor.lastrowid,)).fetchone()
-            job = _row_to_dict(row)
+            job = row_to_dict(row)
             if job is None:
                 raise KeyError(f"sync job not found: {cursor.lastrowid}")
             return job
@@ -1652,7 +1420,7 @@ class SQLiteStore:
                 """,
                 (doc_id, kb_id, backend_slug),
             ).fetchone()
-            return _row_to_dict(row)
+            return row_to_dict(row)
 
     def list_docs_for_kb(self, kb_id: int) -> list[dict[str, Any]]:
         with self.connect() as conn:
