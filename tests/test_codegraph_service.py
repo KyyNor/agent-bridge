@@ -173,3 +173,67 @@ def test_codegraph_sync_uses_codegraph_cli_when_available(
     run = service.sync_repository("root", "web-app")
     assert run["status"] == "succeeded"
     assert run["indexed"] == 0
+
+
+def test_codegraph_semantic_methods_require_cli(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
+    """Semantic methods return empty when codegraph CLI is not available."""
+    repo = _git_repo(tmp_path / "repo")
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"})
+    service.upsert_repository(
+        actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
+        branch="master", auth_ref="", description="", tags=[], sync_interval_minutes=60, status="active",
+    )
+    assert service.callers("root", "web-app", "hello") == []
+    assert service.callees("root", "web-app", "hello") == []
+    assert service.impact("root", "web-app", "hello") == []
+    assert service.list_files("root", "web-app") == []
+
+
+def test_codegraph_semantic_methods_delegate_to_client(
+    tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_bridge.codegraph.client import CodeGraphClient
+    repo = _git_repo(tmp_path / "repo")
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    client = CodeGraphClient()
+    monkeypatch.setattr(client, "is_available", lambda: True)
+    monkeypatch.setattr(client, "init", lambda p: None)
+    monkeypatch.setattr(client, "index", lambda p: None)
+    monkeypatch.setattr(client, "callers", lambda p, s: [
+        {"name": "caller_fn", "kind": "function", "filePath": "main.py", "startLine": 10}
+    ])
+    monkeypatch.setattr(client, "callees", lambda p, s: [
+        {"name": "callee_fn", "kind": "function", "filePath": "utils.py", "startLine": 5}
+    ])
+    monkeypatch.setattr(client, "impact", lambda p, s: [
+        {"name": "impacted_fn", "kind": "function", "filePath": "handler.py", "startLine": 20}
+    ])
+    monkeypatch.setattr(client, "files", lambda p: [
+        {"path": "app.py", "language": "python"}
+    ])
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
+    service.upsert_repository(
+        actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
+        branch="master", auth_ref="", description="", tags=[], sync_interval_minutes=60, status="active",
+    )
+    service.sync_repository("root", "web-app")
+
+    callers = service.callers("root", "web-app", "hello")
+    assert len(callers) == 1
+    assert callers[0]["symbol"] == "caller_fn"
+    assert callers[0]["path"] == "main.py"
+
+    callees = service.callees("root", "web-app", "hello")
+    assert len(callees) == 1
+    assert callees[0]["symbol"] == "callee_fn"
+
+    impacted = service.impact("root", "web-app", "hello")
+    assert len(impacted) == 1
+    assert impacted[0]["symbol"] == "impacted_fn"
+
+    files = service.list_files("root", "web-app")
+    assert len(files) == 1
+    assert files[0]["path"] == "app.py"

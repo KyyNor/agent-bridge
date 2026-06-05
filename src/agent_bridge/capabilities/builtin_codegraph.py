@@ -9,7 +9,7 @@ from agent_bridge.codegraph.service import CodeGraphService
 from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
 
 
-REPO_TOOLS = {"search_code", "get_file", "find_symbol", "repository_overview"}
+REPO_TOOLS = {"search_code", "get_file", "find_symbol", "repository_overview", "callers", "callees", "impact", "list_files"}
 
 
 class CodeGraphBuiltinProvider:
@@ -108,6 +108,63 @@ class CodeGraphBuiltinProvider:
                 },
                 ToolType.search.value,
             ),
+            BuiltinTool(
+                "callers",
+                "CodeGraph Callers",
+                "Find functions that call the given symbol.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string"},
+                        "symbol": {"type": "string"},
+                        "limit": {"type": "integer", "default": 20},
+                    },
+                    "required": ["repo", "symbol"],
+                },
+                ToolType.search.value,
+            ),
+            BuiltinTool(
+                "callees",
+                "CodeGraph Callees",
+                "Find functions called by the given symbol.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string"},
+                        "symbol": {"type": "string"},
+                        "limit": {"type": "integer", "default": 20},
+                    },
+                    "required": ["repo", "symbol"],
+                },
+                ToolType.search.value,
+            ),
+            BuiltinTool(
+                "impact",
+                "CodeGraph Impact",
+                "Analyze the impact of changes to the given symbol.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string"},
+                        "symbol": {"type": "string"},
+                    },
+                    "required": ["repo", "symbol"],
+                },
+                ToolType.search.value,
+            ),
+            BuiltinTool(
+                "list_files",
+                "CodeGraph Files",
+                "List tracked files in a repository.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string"},
+                    },
+                    "required": ["repo"],
+                },
+                ToolType.overview.value,
+            ),
         ]
 
     def resource_from_arguments(self, tool: str, arguments: dict[str, Any]) -> BuiltinResourceRef | None:
@@ -173,6 +230,35 @@ class CodeGraphBuiltinProvider:
                 }
             if tool == "repository_overview":
                 return self.codegraph.repository_overview(actor, repo_key)
+            if tool == "callers":
+                symbol = str(arguments.get("symbol") or "").strip()
+                if not symbol:
+                    raise ValidationError("symbol is required")
+                return {
+                    "matches": self.codegraph.callers(
+                        actor, repo_key, symbol=symbol, limit=self._limit(arguments),
+                    )
+                }
+            if tool == "callees":
+                symbol = str(arguments.get("symbol") or "").strip()
+                if not symbol:
+                    raise ValidationError("symbol is required")
+                return {
+                    "matches": self.codegraph.callees(
+                        actor, repo_key, symbol=symbol, limit=self._limit(arguments),
+                    )
+                }
+            if tool == "impact":
+                symbol = str(arguments.get("symbol") or "").strip()
+                if not symbol:
+                    raise ValidationError("symbol is required")
+                return {
+                    "matches": self.codegraph.impact(actor, repo_key, symbol=symbol)
+                }
+            if tool == "list_files":
+                return {
+                    "files": self.codegraph.list_files(actor, repo_key)
+                }
         except AgentBridgeError:
             raise
         except Exception as exc:

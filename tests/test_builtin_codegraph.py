@@ -88,6 +88,10 @@ def test_codegraph_builtin_search_and_execute_respect_profile(
         "list_repositories",
         "repository_overview",
         "search_code",
+        "callers",
+        "callees",
+        "impact",
+        "list_files",
     ]
     schemas = {item["tool"]: item["input_schema"] for item in tools["items"]}
     assert schemas["search_code"]["required"] == ["repo", "query"]
@@ -205,3 +209,20 @@ def test_codegraph_builtin_backend_failure_is_classified(
     assert log["error_type"] == "builtin_backend_error"
     assert log["resource_type"] == "code_repo"
     assert log["resource_key"] == "web-app"
+
+
+def test_codegraph_builtin_semantic_tools_are_registered(
+    tmp_path: Path,
+    wm_paths: AgentBridgePaths,
+) -> None:
+    service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"))
+    _allow_repo(service, "web-app")
+
+    tools = service.capabilities.search("root", "codegraph", None, profile_key="safe-readonly")
+    tool_names = [item["tool"] for item in tools["items"]]
+    assert "callers" in tool_names
+    assert "callees" in tool_names
+    assert "impact" in tool_names
+    assert "list_files" in tool_names
+    # total 9 tools
+    assert len(tool_names) == 9

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
-import type { CodeRepository, KnowledgeBaseSummary } from '../api/types'
+import type { CodeRepository, KnowledgeBaseSummary, CodeGraphStatus, CodeGraphNode, RepoOverview } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -19,6 +19,19 @@ const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', desc
 const repoSaving = ref(false)
 const repoError = ref('')
 const syncingKey = ref('')
+
+// Repo detail dialog
+const showDetail = ref(false)
+const detailRepo = ref<CodeRepository | null>(null)
+const detailLoading = ref(false)
+const detailOverview = ref<RepoOverview | null>(null)
+const detailFiles = ref<{ path: string; language: string }[]>([])
+const detailStatus = ref<CodeGraphStatus | null>(null)
+const detailQuery = ref('')
+const detailSymbol = ref('')
+const detailResults = ref<CodeGraphNode[]>([])
+const detailTab = ref<'overview' | 'files' | 'query'>('overview')
+const detailSearching = ref(false)
 
 onMounted(async () => {
   await Promise.all([loadRepos(), loadKbs()])
@@ -69,6 +82,43 @@ async function syncRepo(key: string) {
     await loadRepos()
   } catch { /* ignore */ }
   syncingKey.value = ''
+}
+
+async function openDetail(r: CodeRepository) {
+  detailRepo.value = r
+  showDetail.value = true
+  detailLoading.value = true
+  detailTab.value = 'overview'
+  detailResults.value = []
+  detailQuery.value = ''
+  detailSymbol.value = ''
+  try {
+    const [status, overview, files] = await Promise.allSettled([
+      api.getCodeGraphStatus(),
+      api.getRepoOverview(r.repo_key),
+      api.listRepoFiles(r.repo_key),
+    ])
+    detailStatus.value = status.status === 'fulfilled' ? status.value : null
+    detailOverview.value = overview.status === 'fulfilled' ? overview.value : null
+    detailFiles.value = files.status === 'fulfilled' ? files.value.files : []
+  } catch { /* ignore */ }
+  detailLoading.value = false
+}
+
+async function searchInRepo(mode: 'query' | 'callers' | 'callees' | 'impact') {
+  const term = detailQuery.value.trim()
+  if (!term || !detailRepo.value) return
+  detailSearching.value = true
+  try {
+    const key = detailRepo.value.repo_key
+    let result: { matches: CodeGraphNode[] }
+    if (mode === 'query') result = await api.queryRepo(key, term)
+    else if (mode === 'callers') result = await api.findCallers(key, term)
+    else if (mode === 'callees') result = await api.findCallees(key, term)
+    else result = await api.analyzeImpact(key, term)
+    detailResults.value = result.matches
+  } catch { detailResults.value = [] }
+  detailSearching.value = false
 }
 </script>
 
@@ -130,9 +180,12 @@ async function syncRepo(key: string) {
                 </td>
                 <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ r.last_synced_at?.slice(0, 19) || '—' }}</td>
                 <td class="px-4 py-3">
-                  <Button variant="ghost" size="sm" @click="syncRepo(r.repo_key)" :disabled="syncingKey === r.repo_key" class="h-8 text-xs">
-                    {{ syncingKey === r.repo_key ? '同步中...' : '同步' }}
-                  </Button>
+                  <div class="flex gap-2">
+                    <Button variant="ghost" size="sm" @click="syncRepo(r.repo_key)" :disabled="syncingKey === r.repo_key" class="h-8 text-xs">
+                      {{ syncingKey === r.repo_key ? '同步中...' : '同步' }}
+                    </Button>
+                    <Button variant="outline" size="sm" @click="openDetail(r)" class="h-8 text-xs">详情</Button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -213,6 +266,97 @@ async function syncRepo(key: string) {
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
           <Button @click="addRepo" :disabled="repoSaving">{{ repoSaving ? '保存中...' : '保存' }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Repo Detail Dialog -->
+    <Dialog :open="showDetail" @update:open="showDetail = $event">
+      <DialogContent class="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{{ detailRepo?.name || '' }} 详情</DialogTitle>
+        </DialogHeader>
+        <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
+        <div v-else class="space-y-4">
+          <!-- Status Banner -->
+          <div v-if="detailStatus" :class="['rounded-lg p-3 text-sm', detailStatus.codegraph_installed ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700']">
+            {{ detailStatus.codegraph_installed ? 'CodeGraph CLI 已安装' : detailStatus.message }}
+          </div>
+
+          <!-- Overview -->
+          <div v-if="detailOverview" class="grid grid-cols-3 gap-3">
+            <div class="rounded-lg border border-border p-3 text-center">
+              <div class="text-2xl font-semibold tabular-nums">{{ detailOverview.file_count }}</div>
+              <div class="text-xs text-muted-foreground">文件数</div>
+            </div>
+            <div class="rounded-lg border border-border p-3 text-center">
+              <div class="text-2xl font-semibold tabular-nums">{{ detailOverview.symbol_count }}</div>
+              <div class="text-xs text-muted-foreground">符号数</div>
+            </div>
+            <div class="rounded-lg border border-border p-3 text-center">
+              <div class="text-xs text-muted-foreground">最近同步</div>
+              <div class="text-sm font-medium">{{ detailOverview.last_synced_at?.slice(0, 19) || '—' }}</div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
+            <button v-for="t in [
+              { key: 'overview', label: '概览' },
+              { key: 'files', label: `文件 (${detailFiles.length})` },
+              { key: 'query', label: '查询' },
+            ]" :key="t.key"
+              :class="['rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', detailTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
+              @click="detailTab = t.key as any">{{ t.label }}</button>
+          </div>
+
+          <!-- Files Tab -->
+          <div v-if="detailTab === 'files'" class="max-h-[300px] overflow-y-auto rounded-lg border border-border">
+            <div v-if="detailFiles.length === 0" class="p-4 text-center text-sm text-muted-foreground">暂无文件（需安装 CodeGraph CLI）</div>
+            <table v-else class="w-full">
+              <thead><tr class="border-b border-border bg-secondary/50">
+                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">路径</th>
+                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">语言</th>
+              </tr></thead>
+              <tbody><tr v-for="f in detailFiles" :key="f.path" class="border-b border-border/40 hover:bg-secondary/30">
+                <td class="px-3 py-1.5 font-mono text-xs">{{ f.path }}</td>
+                <td class="px-3 py-1.5 text-xs text-muted-foreground">{{ f.language }}</td>
+              </tr></tbody>
+            </table>
+          </div>
+
+          <!-- Query Tab -->
+          <div v-if="detailTab === 'query'" class="space-y-3">
+            <div class="flex gap-2">
+              <Input v-model="detailQuery" placeholder="输入符号名或搜索词" class="flex-1" @keydown.enter="searchInRepo('query')" />
+              <Button @click="searchInRepo('query')" :disabled="detailSearching || !detailQuery.trim()" size="sm">搜索</Button>
+            </div>
+            <div class="flex gap-2 flex-wrap">
+              <Button variant="outline" size="sm" @click="searchInRepo('callers')" :disabled="detailSearching || !detailQuery.trim()">调用者</Button>
+              <Button variant="outline" size="sm" @click="searchInRepo('callees')" :disabled="detailSearching || !detailQuery.trim()">被调用者</Button>
+              <Button variant="outline" size="sm" @click="searchInRepo('impact')" :disabled="detailSearching || !detailQuery.trim()">影响分析</Button>
+            </div>
+            <div v-if="detailSearching" class="py-4 text-center text-sm text-muted-foreground">查询中...</div>
+            <div v-else-if="detailResults.length > 0" class="max-h-[300px] overflow-y-auto rounded-lg border border-border">
+              <table class="w-full">
+                <thead><tr class="border-b border-border bg-secondary/50">
+                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">符号</th>
+                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">类型</th>
+                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">文件</th>
+                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">行号</th>
+                </tr></thead>
+                <tbody><tr v-for="r in detailResults" :key="r.symbol + r.path" class="border-b border-border/40 hover:bg-secondary/30">
+                  <td class="px-3 py-1.5 text-sm font-medium">{{ r.symbol }}</td>
+                  <td class="px-3 py-1.5"><Badge variant="secondary" class="text-[11px]">{{ r.kind }}</Badge></td>
+                  <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground">{{ r.path }}</td>
+                  <td class="px-3 py-1.5 text-xs tabular-nums">{{ r.line_start || '—' }}</td>
+                </tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline">关闭</Button></DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

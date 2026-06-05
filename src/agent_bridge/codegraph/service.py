@@ -211,6 +211,37 @@ class CodeGraphService:
             "last_synced_at": repo.get("last_synced_at"),
         }
 
+    def callers(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
+        self._require_repository(repo_key)
+        if not self.client.is_available():
+            return []
+        local_path = self._local_path(repo_key)
+        nodes = self.client.callers(local_path, symbol)
+        return [self._codegraph_node_payload(n) for n in nodes[:limit]]
+
+    def callees(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
+        self._require_repository(repo_key)
+        if not self.client.is_available():
+            return []
+        local_path = self._local_path(repo_key)
+        nodes = self.client.callees(local_path, symbol)
+        return [self._codegraph_node_payload(n) for n in nodes[:limit]]
+
+    def impact(self, actor: str, repo_key: str, symbol: str) -> list[dict[str, Any]]:
+        self._require_repository(repo_key)
+        if not self.client.is_available():
+            return []
+        local_path = self._local_path(repo_key)
+        nodes = self.client.impact(local_path, symbol)
+        return [self._codegraph_node_payload(n) for n in nodes]
+
+    def list_files(self, actor: str, repo_key: str) -> list[dict[str, Any]]:
+        self._require_repository(repo_key)
+        if not self.client.is_available():
+            return []
+        local_path = self._local_path(repo_key)
+        return self.client.files(local_path)
+
     def _require_repository(self, repo_key: str) -> dict[str, Any]:
         repo = self.store.get_code_repository(repo_key)
         if repo is None or repo.get("status") != "active":

@@ -101,3 +101,29 @@ export interface KnowledgeBaseSummary {
   member_count: number
   backend_targets: { slug: string; type: string; status: string }[]
 }
+
+export interface CodeGraphStatus {
+  codegraph_installed: boolean
+  message: string | null
+}
+
+export interface CodeGraphNode {
+  path: string
+  symbol: string
+  kind: string
+  line_start: number | null
+  line_end: number | null
+  snippet: string
+  score: number | null
+}
+
+export interface RepoOverview {
+  repo_key: string
+  name: string
+  git_url: string
+  branch: string
+  status: string
+  file_count: number
+  symbol_count: number
+  last_synced_at: string | null
+}

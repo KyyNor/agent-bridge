@@ -2,10 +2,14 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from agent_bridge.api.schemas import CodeRepositoryRequest
 
 
+class CodeGraphQueryRequest(BaseModel):
+    query: str
+    limit: int = 20
 
 
 def create_builtin_routes(service, actor, call_safely, ensure_capability_schema):
@@ -30,5 +34,35 @@ def create_builtin_routes(service, actor, call_safely, ensure_capability_schema)
     def sync_code_repository(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.sync_repository(current_actor, repo_key))
+
+    @router.get("/builtin/codegraph/repositories/{repo_key}/overview")
+    def get_repo_overview(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.repository_overview(current_actor, repo_key))
+
+    @router.get("/builtin/codegraph/repositories/{repo_key}/files")
+    def list_repo_files(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: {"files": service.codegraph.list_files(current_actor, repo_key)})
+
+    @router.post("/builtin/codegraph/repositories/{repo_key}/query")
+    def query_repo(repo_key: str, payload: CodeGraphQueryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: {"matches": service.codegraph.search_code(current_actor, repo_key, query=payload.query, limit=payload.limit)})
+
+    @router.post("/builtin/codegraph/repositories/{repo_key}/callers")
+    def find_callers(repo_key: str, payload: CodeGraphQueryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: {"matches": service.codegraph.callers(current_actor, repo_key, symbol=payload.query, limit=payload.limit)})
+
+    @router.post("/builtin/codegraph/repositories/{repo_key}/callees")
+    def find_callees(repo_key: str, payload: CodeGraphQueryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: {"matches": service.codegraph.callees(current_actor, repo_key, symbol=payload.query, limit=payload.limit)})
+
+    @router.post("/builtin/codegraph/repositories/{repo_key}/impact")
+    def analyze_impact(repo_key: str, payload: CodeGraphQueryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: {"matches": service.codegraph.impact(current_actor, repo_key, symbol=payload.query)})
 
     return router
