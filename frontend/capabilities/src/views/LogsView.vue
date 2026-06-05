@@ -75,6 +75,11 @@ const displayLogs = computed(() => {
   )
 })
 
+function formatJson(str: string | undefined): string {
+  if (!str) return ''
+  try { return JSON.stringify(JSON.parse(str), null, 2) } catch { return str }
+}
+
 const filterTabs = computed(() => [
   { key: '', label: '全部', count: logs.value.length },
   { key: 'success', label: '成功', count: logs.value.filter(l => l.status === 'success').length },
@@ -193,14 +198,14 @@ const filterTabs = computed(() => [
             <span v-if="detailLog.error_type"> · 类型: {{ detailLog.error_type }}</span>
           </div>
 
-          <div v-if="detailLog.request && Object.keys(detailLog.request).length > 0">
+          <div v-if="detailLog.request_json">
             <div class="mb-1 text-xs font-medium text-muted-foreground">请求</div>
-            <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ JSON.stringify(detailLog.request, null, 2) }}</pre>
+            <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ formatJson(detailLog.request_json) }}</pre>
           </div>
 
-          <div v-if="detailLog.response && Object.keys(detailLog.response).length > 0">
+          <div v-if="detailLog.response_json">
             <div class="mb-1 text-xs font-medium text-muted-foreground">响应</div>
-            <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ JSON.stringify(detailLog.response, null, 2) }}</pre>
+            <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ formatJson(detailLog.response_json) }}</pre>
           </div>
         </div>
       </DialogContent>
