@@ -19,7 +19,7 @@ onMounted(async () => {
   loading.value = false
 })
 
-const enabledCount = computed(() => services.value.filter(s => s.status === 'active').length)
+const enabledCount = computed(() => services.value.filter(s => s.status === 'enabled').length)
 const errorCount = computed(() => services.value.filter(s => s.status === 'error').length)
 const toolCount = computed(() => services.value.length > 0 ? '...' : '—')
 
@@ -101,7 +101,7 @@ function timeAgo(dateStr: string | null): string {
                   <div class="mt-0.5 text-xs text-muted-foreground">{{ s.description || s.name }}</div>
                 </td>
                 <td class="px-4 py-3">
-                  <Badge v-if="s.status === 'active'" variant="secondary" class="bg-green-50 text-green-700">已启用</Badge>
+                  <Badge v-if="s.status === 'enabled'" variant="secondary" class="bg-green-50 text-green-700">已启用</Badge>
                   <Badge v-else-if="s.status === 'error'" variant="destructive">连接失败</Badge>
                   <Badge v-else variant="secondary" class="text-muted-foreground">已停用</Badge>
                 </td>

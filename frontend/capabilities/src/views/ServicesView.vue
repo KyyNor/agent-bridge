@@ -25,7 +25,7 @@ onMounted(async () => {
     const counts: Record<string, number> = {}
     await Promise.all(
       services.value
-        .filter(s => s.status === 'active')
+        .filter(s => s.status === 'enabled')
         .map(async s => {
           try { counts[s.service_key] = (await api.listTools(s.service_key)).length } catch { counts[s.service_key] = 0 }
         })
@@ -37,8 +37,8 @@ onMounted(async () => {
 
 const filtered = computed(() => {
   let list = services.value
-  if (statusFilter.value === 'active') list = list.filter(s => s.status === 'active')
-  if (statusFilter.value === 'inactive') list = list.filter(s => s.status === 'inactive' || s.status === 'disabled')
+  if (statusFilter.value === 'enabled') list = list.filter(s => s.status === 'enabled')
+  if (statusFilter.value === 'disabled') list = list.filter(s => s.status === 'disabled')
   if (statusFilter.value === 'error') list = list.filter(s => s.status === 'error')
   if (search.value) {
     const q = search.value.toLowerCase()
@@ -54,8 +54,8 @@ const filtered = computed(() => {
 
 const filterTabs = [
   { key: 'all', label: '全部', count: computed(() => services.value.length) },
-  { key: 'active', label: '已启用', count: computed(() => services.value.filter(s => s.status === 'active').length) },
-  { key: 'inactive', label: '已停用', count: computed(() => services.value.filter(s => s.status === 'inactive' || s.status === 'disabled').length) },
+  { key: 'enabled', label: '已启用', count: computed(() => services.value.filter(s => s.status === 'enabled').length) },
+  { key: 'disabled', label: '已停用', count: computed(() => services.value.filter(s => s.status === 'disabled').length) },
   { key: 'error', label: '异常', count: computed(() => services.value.filter(s => s.status === 'error').length) },
 ]
 
@@ -79,7 +79,7 @@ async function register() {
 }
 
 async function toggleStatus(svc: McpService) {
-  const newStatus = svc.status === 'active' ? 'disabled' : 'active'
+  const newStatus = svc.status === 'enabled' ? 'disabled' : 'enabled'
   await api.updateServiceStatus(svc.service_key, newStatus)
   services.value = await api.listServices()
 }
@@ -157,7 +157,7 @@ function goto(hash: string) {
               </td>
               <td class="max-w-[280px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">{{ s.endpoint_url }}</td>
               <td class="px-4 py-3">
-                <Badge v-if="s.status === 'active'" variant="secondary" class="bg-green-50 text-green-700">已启用</Badge>
+                <Badge v-if="s.status === 'enabled'" variant="secondary" class="bg-green-50 text-green-700">已启用</Badge>
                 <Badge v-else-if="s.status === 'error'" variant="destructive">连接失败</Badge>
                 <Badge v-else variant="secondary" class="text-muted-foreground">已停用</Badge>
               </td>
@@ -168,8 +168,8 @@ function goto(hash: string) {
                   <button @click="syncTools(s.service_key)" class="rounded-md p-1.5 hover:bg-secondary transition-colors" title="同步工具">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   </button>
-                  <button @click="toggleStatus(s)" class="rounded-md p-1.5 hover:bg-secondary transition-colors" :title="s.status === 'active' ? '停用' : '启用'">
-                    <svg v-if="s.status === 'active'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                  <button @click="toggleStatus(s)" class="rounded-md p-1.5 hover:bg-secondary transition-colors" :title="s.status === 'enabled' ? '停用' : '启用'">
+                    <svg v-if="s.status === 'enabled'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
                     <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
                   </button>
                 </div>
