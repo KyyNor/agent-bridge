@@ -7,10 +7,10 @@ from typing import Any
 
 import pytest
 
-from wiki_manager.capabilities import ProfileResourceType
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import NotFound, ValidationError
-from wiki_manager.services import WikiManagerService
+from agent_bridge.capabilities import ProfileResourceType
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import NotFound, ValidationError
+from agent_bridge.services import AgentBridgeService
 
 
 def _git_repo(path: Path, content: str = "class App:\n    pass\n") -> Path:
@@ -25,13 +25,13 @@ def _git_repo(path: Path, content: str = "class App:\n    pass\n") -> Path:
 
 
 def _service_with_repo(
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
     repo: Path,
     *,
     repo_key: str = "web-app",
     tags: list[str] | None = None,
-) -> WikiManagerService:
-    service = WikiManagerService.create(wm_paths, {"root"})
+) -> AgentBridgeService:
+    service = AgentBridgeService.create(wm_paths, {"root"})
     service.init_system()
     service.codegraph.upsert_repository(
         "root",
@@ -49,7 +49,7 @@ def _service_with_repo(
     return service
 
 
-def _allow_repo(service: WikiManagerService, repo_key: str) -> None:
+def _allow_repo(service: AgentBridgeService, repo_key: str) -> None:
     service.governance.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
     service.governance.replace_profile_resource_rules(
         "root",
@@ -60,7 +60,7 @@ def _allow_repo(service: WikiManagerService, repo_key: str) -> None:
 
 def test_codegraph_builtin_search_and_execute_respect_profile(
     tmp_path: Path,
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
 ) -> None:
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"), tags=["python"])
     _allow_repo(service, "web-app")
@@ -97,7 +97,7 @@ def test_codegraph_builtin_search_and_execute_respect_profile(
 
 def test_codegraph_builtin_list_repositories_filters_allowed_repos(
     tmp_path: Path,
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
 ) -> None:
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo-a"), repo_key="web-app")
     service.codegraph.upsert_repository(
@@ -129,7 +129,7 @@ def test_codegraph_builtin_list_repositories_filters_allowed_repos(
     ]
 
 
-def test_codegraph_builtin_blocks_unallowed_repo(tmp_path: Path, wm_paths: WikiManagerPaths) -> None:
+def test_codegraph_builtin_blocks_unallowed_repo(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"))
     service.governance.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
 
@@ -156,7 +156,7 @@ def test_codegraph_builtin_blocks_unallowed_repo(tmp_path: Path, wm_paths: WikiM
 
 def test_codegraph_builtin_unknown_tool_with_empty_args_raises_not_found(
     tmp_path: Path,
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
 ) -> None:
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"))
     _allow_repo(service, "web-app")
@@ -175,7 +175,7 @@ def test_codegraph_builtin_unknown_tool_with_empty_args_raises_not_found(
 
 def test_codegraph_builtin_backend_failure_is_classified(
     tmp_path: Path,
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"))

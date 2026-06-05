@@ -2,7 +2,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 
 try:
-    __version__ = version("wiki-manager")
+    __version__ = version("agent-bridge")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 

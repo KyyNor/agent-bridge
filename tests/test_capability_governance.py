@@ -4,20 +4,20 @@ import json
 
 import pytest
 
-from wiki_manager.capabilities import CallLogStatus, SourceType
-from wiki_manager.capability_governance import CapabilityGovernanceService
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import AccessDenied, NotFound, ValidationError
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import CallLogStatus, SourceType
+from agent_bridge.capability_governance import CapabilityGovernanceService
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import AccessDenied, NotFound, ValidationError
+from agent_bridge.storage import SQLiteStore
 
 
-def _service(wm_paths: WikiManagerPaths) -> tuple[CapabilityGovernanceService, SQLiteStore]:
+def _service(wm_paths: AgentBridgePaths) -> tuple[CapabilityGovernanceService, SQLiteStore]:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     return CapabilityGovernanceService(store=store, admins={"root"}), store
 
 
-def test_profile_crud_requires_admin_and_lists_rules(wm_paths: WikiManagerPaths) -> None:
+def test_profile_crud_requires_admin_and_lists_rules(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
 
     with pytest.raises(AccessDenied):
@@ -43,7 +43,7 @@ def test_profile_crud_requires_admin_and_lists_rules(wm_paths: WikiManagerPaths)
     assert service.list_profiles("root")[0]["allow_count"] == 1
 
 
-def test_profile_reads_require_admin(wm_paths: WikiManagerPaths) -> None:
+def test_profile_reads_require_admin(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
     log = service.log_tool_call(
@@ -72,7 +72,7 @@ def test_profile_reads_require_admin(wm_paths: WikiManagerPaths) -> None:
         service.get_log(actor="alice", log_id=log["log_id"])
 
 
-def test_policy_filters_sources_with_allow_and_deny(wm_paths: WikiManagerPaths) -> None:
+def test_policy_filters_sources_with_allow_and_deny(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
     service.replace_profile_rules(
@@ -97,7 +97,7 @@ def test_policy_filters_sources_with_allow_and_deny(wm_paths: WikiManagerPaths) 
     assert service.is_source_allowed("root", None, "mcp_service", "hive") is True
 
 
-def test_policy_defaults_allow_when_allow_rules_are_empty_and_denies_first(wm_paths: WikiManagerPaths) -> None:
+def test_policy_defaults_allow_when_allow_rules_are_empty_and_denies_first(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "deny-only", "默认允许", "", "active")
     service.replace_profile_rules(
@@ -116,7 +116,7 @@ def test_policy_defaults_allow_when_allow_rules_are_empty_and_denies_first(wm_pa
     assert visible == ["mysql", "wiki"]
 
 
-def test_policy_rules_match_source_type_and_source_key_pair(wm_paths: WikiManagerPaths) -> None:
+def test_policy_rules_match_source_type_and_source_key_pair(wm_paths: AgentBridgePaths) -> None:
     service, store = _service(wm_paths)
     service.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
     store.replace_profile_source_rules(
@@ -137,7 +137,7 @@ def test_policy_rules_match_source_type_and_source_key_pair(wm_paths: WikiManage
     assert visible == ["mysql"]
 
 
-def test_policy_rejects_invalid_source_type_for_checks(wm_paths: WikiManagerPaths) -> None:
+def test_policy_rejects_invalid_source_type_for_checks(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
     service.replace_profile_rules(
@@ -158,7 +158,7 @@ def test_policy_rejects_invalid_source_type_for_checks(wm_paths: WikiManagerPath
         service.is_source_allowed("root", "safe-readonly", "typo", "mysql")
 
 
-def test_unknown_or_disabled_profile_is_not_found(wm_paths: WikiManagerPaths) -> None:
+def test_unknown_or_disabled_profile_is_not_found(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "disabled", "停用", "", "disabled")
 
@@ -179,7 +179,7 @@ def test_unknown_or_disabled_profile_is_not_found(wm_paths: WikiManagerPaths) ->
         )
 
 
-def test_write_and_read_tool_call_log_payloads(wm_paths: WikiManagerPaths) -> None:
+def test_write_and_read_tool_call_log_payloads(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
 
     log = service.log_tool_call(
@@ -206,14 +206,14 @@ def test_write_and_read_tool_call_log_payloads(wm_paths: WikiManagerPaths) -> No
     assert detail["duration_ms"] == 3
 
 
-def test_missing_log_is_not_found(wm_paths: WikiManagerPaths) -> None:
+def test_missing_log_is_not_found(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
 
     with pytest.raises(NotFound, match="tool call log not found"):
         service.get_log(actor="root", log_id="call_missing")
 
 
-def test_log_filters_and_writes_reject_invalid_source_type_and_status(wm_paths: WikiManagerPaths) -> None:
+def test_log_filters_and_writes_reject_invalid_source_type_and_status(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
 
     with pytest.raises(ValidationError, match="invalid source type"):
@@ -253,7 +253,7 @@ def test_log_filters_and_writes_reject_invalid_source_type_and_status(wm_paths: 
         service.list_logs(actor="root", status="maybe")
 
 
-def test_log_filters_validate_failure_fields(wm_paths: WikiManagerPaths) -> None:
+def test_log_filters_validate_failure_fields(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
 
     with pytest.raises(ValidationError, match="invalid failure stage"):
@@ -299,7 +299,7 @@ def test_log_filters_validate_failure_fields(wm_paths: WikiManagerPaths) -> None
         )
 
 
-def test_rule_validation_rejects_unknown_effect_source_type_and_empty_key(wm_paths: WikiManagerPaths) -> None:
+def test_rule_validation_rejects_unknown_effect_source_type_and_empty_key(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
     service.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
 
@@ -325,7 +325,7 @@ def test_rule_validation_rejects_unknown_effect_source_type_and_empty_key(wm_pat
         )
 
 
-def test_profile_validation_rejects_bad_status_and_missing_profile_rules(wm_paths: WikiManagerPaths) -> None:
+def test_profile_validation_rejects_bad_status_and_missing_profile_rules(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
 
     with pytest.raises(ValidationError, match="invalid profile status"):

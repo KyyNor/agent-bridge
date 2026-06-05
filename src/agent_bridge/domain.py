@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 
-class WikiManagerError(Exception):
+class AgentBridgeError(Exception):
     status_code = 500
 
     def __init__(self, message: str) -> None:
@@ -14,19 +14,19 @@ class WikiManagerError(Exception):
         self.message = message
 
 
-class AccessDenied(WikiManagerError):
+class AccessDenied(AgentBridgeError):
     status_code = 403
 
 
-class NotFound(WikiManagerError):
+class NotFound(AgentBridgeError):
     status_code = 404
 
 
-class ValidationError(WikiManagerError):
+class ValidationError(AgentBridgeError):
     status_code = 400
 
 
-class ConflictError(WikiManagerError):
+class ConflictError(AgentBridgeError):
     status_code = 409
 
 

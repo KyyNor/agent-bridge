@@ -9,17 +9,17 @@ from typing import Annotated, Any, Callable, TypeVar
 import httpx
 import typer
 
-from wiki_manager.client import WikiManagerClient
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.server_process import server_status, start_server, stop_server
+from agent_bridge.client import AgentBridgeClient
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.server_process import server_status, start_server, stop_server
 
 
 app = typer.Typer(
-    help="Manage wiki content from the command line.",
+    help="Agent Bridge: capability and knowledge management.",
     no_args_is_help=True,
 )
 kb_app = typer.Typer(help="Manage knowledge bases.", no_args_is_help=True)
-server_app = typer.Typer(help="Manage the local wiki-manager server.", no_args_is_help=True)
+server_app = typer.Typer(help="Manage the local Agent Bridge server.", no_args_is_help=True)
 metamcp_app = typer.Typer(help="Manage MetaMCP profiles and Claude Code connection.", no_args_is_help=True)
 metamcp_profile_app = typer.Typer(help="Manage Project Profiles.", no_args_is_help=True)
 app.add_typer(kb_app, name="kb")
@@ -32,20 +32,20 @@ T = TypeVar("T")
 
 def _package_version() -> str:
     try:
-        return version("wiki-manager")
+        return version("agent-bridge")
     except PackageNotFoundError:
         return "0.0.0"
 
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"wiki-manager {_package_version()}")
+        typer.echo(f"agent-bridge {_package_version()}")
         raise typer.Exit()
 
 
-def _run_client(call: Callable[[WikiManagerClient], T]) -> T:
+def _run_client(call: Callable[[AgentBridgeClient], T]) -> T:
     try:
-        return call(WikiManagerClient.from_config())
+        return call(AgentBridgeClient.from_config())
     except httpx.HTTPError as exc:
         typer.echo(f"service unavailable: {exc}", err=True)
         raise typer.Exit(1) from None
@@ -62,8 +62,8 @@ def _run_server_action(call: Callable[[], T]) -> T:
         raise typer.Exit(1) from None
 
 
-def _paths_from_root(root: Path | None) -> WikiManagerPaths | None:
-    return WikiManagerPaths.from_root(root) if root is not None else None
+def _paths_from_root(root: Path | None) -> AgentBridgePaths | None:
+    return AgentBridgePaths.from_root(root) if root is not None else None
 
 
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
@@ -99,7 +99,7 @@ def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> di
     servers["agent-capability-hub"] = {
         "type": "http",
         "url": url,
-        "headers": {"X-Wiki-MetaMCP-Profile": profile},
+        "headers": {"X-Agent-Bridge-MetaMCP-Profile": profile},
     }
     config["mcpServers"] = servers
     return config
@@ -180,7 +180,7 @@ def grant_member(
 
 @server_app.command("start")
 def server_start(
-    root: Annotated[Path | None, typer.Option("--root", help="wiki-manager root directory.")] = None,
+    root: Annotated[Path | None, typer.Option("--root", help="Agent Bridge root directory.")] = None,
 ) -> None:
     paths = _paths_from_root(root)
     status = _run_server_action(lambda: start_server(paths) if paths is not None else start_server())
@@ -189,7 +189,7 @@ def server_start(
 
 @server_app.command("stop")
 def server_stop(
-    root: Annotated[Path | None, typer.Option("--root", help="wiki-manager root directory.")] = None,
+    root: Annotated[Path | None, typer.Option("--root", help="Agent Bridge root directory.")] = None,
 ) -> None:
     paths = _paths_from_root(root)
     result = _run_server_action(lambda: stop_server(paths) if paths is not None else stop_server())
@@ -198,7 +198,7 @@ def server_stop(
 
 @server_app.command("status")
 def server_status_cmd(
-    root: Annotated[Path | None, typer.Option("--root", help="wiki-manager root directory.")] = None,
+    root: Annotated[Path | None, typer.Option("--root", help="Agent Bridge root directory.")] = None,
 ) -> None:
     paths = _paths_from_root(root)
     status = _run_server_action(lambda: server_status(paths) if paths is not None else server_status())
@@ -207,7 +207,7 @@ def server_status_cmd(
 
 @server_app.command("init")
 def server_init() -> None:
-    """Initialize the running wiki-manager service schema."""
+    """Initialize the running Agent Bridge service schema."""
     _run_client(lambda client: client.init_system())
     typer.echo("initialized")
 

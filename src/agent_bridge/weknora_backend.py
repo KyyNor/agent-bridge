@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from wiki_manager.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.domain import AskResult, BackendDocStatus, RetrievalResult
 
 
 def _map_parse_status(status: str) -> str:
@@ -177,7 +177,7 @@ class WeknoraBackend:
         response = self._request(
             "POST",
             "/api/v1/sessions",
-            json={"title": "wiki-manager", "description": "wiki-manager API session"},
+            json={"title": "wiki-manager", "description": "agent-bridge API session"},
         )
         self._raise(response)
         return self._data(response)["id"]

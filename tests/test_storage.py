@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wiki_manager.archive import ArchiveStorage
-from wiki_manager.config import ServerConfig, WikiManagerPaths, default_root, ensure_directories, load_server_config
-from wiki_manager.domain import KbRole, Operation, SyncStateStatus
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.archive import ArchiveStorage
+from agent_bridge.config import ServerConfig, AgentBridgePaths, default_root, ensure_directories, load_server_config
+from agent_bridge.domain import KbRole, Operation, SyncStateStatus
+from agent_bridge.storage import SQLiteStore
 
 
 def test_ensure_directories_creates_default_tree(tmp_path: Path) -> None:
-    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+    paths = AgentBridgePaths.from_root(tmp_path / "agent-bridge")
     ensure_directories(paths)
     assert paths.config_dir.is_dir()
     assert paths.data_dir.is_dir()
@@ -20,7 +20,7 @@ def test_ensure_directories_creates_default_tree(tmp_path: Path) -> None:
 
 
 def test_load_server_config_writes_default_admin(tmp_path: Path) -> None:
-    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+    paths = AgentBridgePaths.from_root(tmp_path / "agent-bridge")
     config = load_server_config(paths)
     assert config == ServerConfig(host="127.0.0.1", port=8765, admins={"root"})
     assert "admins = [\"root\"]" in paths.server_config_path.read_text()
@@ -28,15 +28,15 @@ def test_load_server_config_writes_default_admin(tmp_path: Path) -> None:
 
 def test_default_root_uses_environment_override(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "custom-wiki"
-    monkeypatch.setenv("WIKI_MANAGER_ROOT", str(root))
+    monkeypatch.setenv("AGENT_BRIDGE_ROOT", str(root))
 
     assert default_root() == root
-    assert WikiManagerPaths.from_root().root == root
+    assert AgentBridgePaths.from_root().root == root
 
 
 def test_load_server_config_uses_default_user_for_new_admin(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("WIKI_MANAGER_USER", "kyynor")
-    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+    monkeypatch.setenv("AGENT_BRIDGE_USER", "kyynor")
+    paths = AgentBridgePaths.from_root(tmp_path / "agent-bridge")
 
     config = load_server_config(paths)
 
@@ -45,7 +45,7 @@ def test_load_server_config_uses_default_user_for_new_admin(monkeypatch, tmp_pat
 
 
 def test_archive_store_file_by_hash(tmp_path: Path) -> None:
-    paths = WikiManagerPaths.from_root(tmp_path / "wiki-manager")
+    paths = AgentBridgePaths.from_root(tmp_path / "agent-bridge")
     ensure_directories(paths)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"hello wiki")
@@ -56,7 +56,7 @@ def test_archive_store_file_by_hash(tmp_path: Path) -> None:
     assert result.archive_path.read_bytes() == b"hello wiki"
 
 
-def test_sqlite_store_creates_kb_and_members(wm_paths: WikiManagerPaths) -> None:
+def test_sqlite_store_creates_kb_and_members(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     kb = store.create_kb(slug="frontend-docs", name="Frontend Docs", description="", created_by="root")
@@ -66,7 +66,7 @@ def test_sqlite_store_creates_kb_and_members(wm_paths: WikiManagerPaths) -> None
     assert store.get_member_role(kb["id"], "alice") == KbRole.contributor
 
 
-def test_sqlite_store_document_version_and_jobs(wm_paths: WikiManagerPaths) -> None:
+def test_sqlite_store_document_version_and_jobs(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     kb = store.create_kb(slug="frontend-docs", name="Frontend Docs", description="", created_by="root")
@@ -87,7 +87,7 @@ def test_sqlite_store_document_version_and_jobs(wm_paths: WikiManagerPaths) -> N
     assert store.list_docs_for_kb(kb_id=kb["id"])[0]["slug"] == "guide"
 
 
-def test_sqlite_store_list_document_slugs_includes_soft_deleted(wm_paths: WikiManagerPaths) -> None:
+def test_sqlite_store_list_document_slugs_includes_soft_deleted(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     doc = store.create_document(slug="guide", title="Guide", owner_user="alice")
@@ -97,7 +97,7 @@ def test_sqlite_store_list_document_slugs_includes_soft_deleted(wm_paths: WikiMa
     assert "guide" in store.list_document_slugs()
 
 
-def test_purge_document_only_returns_archive_paths_no_longer_referenced(wm_paths: WikiManagerPaths) -> None:
+def test_purge_document_only_returns_archive_paths_no_longer_referenced(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     kb = store.create_kb(slug="frontend-docs", name="Frontend Docs", description="", created_by="root")

@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.codegraph_service import CodeGraphService
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import ValidationError
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.codegraph_service import CodeGraphService
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import ValidationError
+from agent_bridge.storage import SQLiteStore
 
 
 def _git_repo(path: Path) -> Path:
@@ -31,7 +31,7 @@ def _commit_file(repo: Path, path: str, content: str, message: str) -> str:
     return result.stdout.strip()
 
 
-def test_codegraph_register_sync_and_search(tmp_path: Path, wm_paths: WikiManagerPaths) -> None:
+def test_codegraph_register_sync_and_search(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -60,7 +60,7 @@ def test_codegraph_register_sync_and_search(tmp_path: Path, wm_paths: WikiManage
     assert service.get_file("root", "web-app", "app.py")["content"].startswith("def hello")
 
 
-def test_codegraph_sync_fails_for_missing_branch(tmp_path: Path, wm_paths: WikiManagerPaths) -> None:
+def test_codegraph_sync_fails_for_missing_branch(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -87,7 +87,7 @@ def test_codegraph_sync_fails_for_missing_branch(tmp_path: Path, wm_paths: WikiM
     assert "does-not-exist" in saved["last_error"]
 
 
-def test_codegraph_sync_advances_existing_clone(tmp_path: Path, wm_paths: WikiManagerPaths) -> None:
+def test_codegraph_sync_advances_existing_clone(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -123,7 +123,7 @@ def test_codegraph_sync_advances_existing_clone(tmp_path: Path, wm_paths: WikiMa
     assert "NEW_UPSTREAM_CONTENT" in files[0]["snippet"]
 
 
-def test_codegraph_index_skips_symlinks(tmp_path: Path, wm_paths: WikiManagerPaths) -> None:
+def test_codegraph_index_skips_symlinks(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     external = tmp_path / "external.txt"
     external.write_text("EXTERNAL_ONLY_CONTENT\n", encoding="utf-8")

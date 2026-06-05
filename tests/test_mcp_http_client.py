@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from mcp.types import TextContent, Tool
 
-from wiki_manager.mcp_http_client import (
+from agent_bridge.mcp_http_client import (
     McpHttpClient,
     normalize_call_tool_result,
     normalize_tool,
@@ -118,10 +118,10 @@ def test_mcp_http_client_list_tools_handles_pagination(monkeypatch) -> None:
         return FakeStreamContext()
 
     monkeypatch.setattr(
-        "wiki_manager.mcp_http_client.streamablehttp_client",
+        "agent_bridge.mcp_http_client.streamablehttp_client",
         fake_streamablehttp_client,
     )
-    monkeypatch.setattr("wiki_manager.mcp_http_client.ClientSession", FakeClientSession)
+    monkeypatch.setattr("agent_bridge.mcp_http_client.ClientSession", FakeClientSession)
 
     tools = asyncio.run(
         McpHttpClient().list_tools(

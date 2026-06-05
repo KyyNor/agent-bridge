@@ -1,4 +1,4 @@
-"""SQLite storage for wiki-manager."""
+"""SQLite storage for Agent Bridge."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from wiki_manager.capabilities import CallLogStatus, McpServiceStatus, ToolType
-from wiki_manager.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
+from agent_bridge.capabilities import CallLogStatus, McpServiceStatus, ToolType
+from agent_bridge.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
 
 
 SCHEMA = """

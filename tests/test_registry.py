@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.config import BackendConfig, WikiManagerPaths
-from wiki_manager.mock_backend import MockBackend
-from wiki_manager.ragflow_backend import RagFlowBackend
-from wiki_manager.registry import BackendRegistry, create_registry
-from wiki_manager.weknora_backend import WeknoraBackend
+from agent_bridge.config import BackendConfig, AgentBridgePaths
+from agent_bridge.mock_backend import MockBackend
+from agent_bridge.ragflow_backend import RagFlowBackend
+from agent_bridge.registry import BackendRegistry, create_registry
+from agent_bridge.weknora_backend import WeknoraBackend
 
 
 def test_registry_from_empty_config(tmp_path: Path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     registry = create_registry(paths)
     assert registry.backends == {}
 

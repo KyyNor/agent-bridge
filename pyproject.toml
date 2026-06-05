@@ -1,7 +1,7 @@
 [project]
-name = "wiki-manager"
+name = "agent-bridge"
 version = "0.1.0"
-description = "A Python CLI for managing wiki content."
+description = "Agent capability and knowledge bridge for managed MCP access."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -21,7 +21,8 @@ dev = [
 ]
 
 [project.scripts]
-wiki = "wiki_manager.cli:main"
+agent-bridge = "agent_bridge.cli:main"
+agb = "agent_bridge.cli:main"
 
 [tool.pytest.ini_options]
 markers = [

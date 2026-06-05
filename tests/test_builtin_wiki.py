@@ -4,14 +4,14 @@ import asyncio
 
 import pytest
 
-from wiki_manager.capabilities import ProfileResourceType
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import NotFound, ValidationError
-from wiki_manager.services import WikiManagerService
+from agent_bridge.capabilities import ProfileResourceType
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import NotFound, ValidationError
+from agent_bridge.services import AgentBridgeService
 
 
-def _service(wm_paths: WikiManagerPaths) -> WikiManagerService:
-    service = WikiManagerService.create(wm_paths, {"root"})
+def _service(wm_paths: AgentBridgePaths) -> AgentBridgeService:
+    service = AgentBridgeService.create(wm_paths, {"root"})
     service.init_system()
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.create_kb("root", "payroll", "Payroll", "")
@@ -24,7 +24,7 @@ def _service(wm_paths: WikiManagerPaths) -> WikiManagerService:
     return service
 
 
-def test_metamcp_root_search_lists_wiki_builtin_with_allowed_kbs(wm_paths: WikiManagerPaths) -> None:
+def test_metamcp_root_search_lists_wiki_builtin_with_allowed_kbs(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     result = service.capabilities.search("root", None, None, profile_key="safe-readonly")
@@ -35,7 +35,7 @@ def test_metamcp_root_search_lists_wiki_builtin_with_allowed_kbs(wm_paths: WikiM
     assert wiki["resources"] == [{"resource_type": "wiki_kb", "resource_key": "frontend-docs", "name": "Frontend Docs"}]
 
 
-def test_register_external_service_rejects_builtin_wiki_key(wm_paths: WikiManagerPaths) -> None:
+def test_register_external_service_rejects_builtin_wiki_key(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     with pytest.raises(ValidationError, match="service_key is reserved for built-in capability"):
@@ -65,7 +65,7 @@ def test_register_external_service_rejects_builtin_wiki_key(wm_paths: WikiManage
     assert [item["kind"] for item in wiki_items] == ["builtin"]
 
 
-def test_metamcp_wiki_path_lists_fixed_tools(wm_paths: WikiManagerPaths) -> None:
+def test_metamcp_wiki_path_lists_fixed_tools(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     result = service.capabilities.search("root", "wiki", None, profile_key="safe-readonly")
@@ -81,7 +81,7 @@ def test_metamcp_wiki_path_lists_fixed_tools(wm_paths: WikiManagerPaths) -> None
     assert "top_k" in schemas["search"]["properties"]
 
 
-def test_wiki_list_kbs_respects_profile_resources(wm_paths: WikiManagerPaths) -> None:
+def test_wiki_list_kbs_respects_profile_resources(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     result = asyncio.run(service.capabilities.execute("root", "wiki", "list_kbs", {}, profile_key="safe-readonly"))
@@ -91,7 +91,7 @@ def test_wiki_list_kbs_respects_profile_resources(wm_paths: WikiManagerPaths) ->
     assert [kb["slug"] for kb in result["result"]["kbs"]] == ["frontend-docs"]
 
 
-def test_wiki_execute_blocks_unallowed_kb(wm_paths: WikiManagerPaths) -> None:
+def test_wiki_execute_blocks_unallowed_kb(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     with pytest.raises(ValidationError, match=r"resource is blocked by profile policy .*log_id: call_"):
@@ -113,7 +113,7 @@ def test_wiki_execute_blocks_unallowed_kb(wm_paths: WikiManagerPaths) -> None:
     assert log["error_type"] == "profile_policy_blocked"
 
 
-def test_wiki_backend_failure_is_classified(wm_paths: WikiManagerPaths, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wiki_backend_failure_is_classified(wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch) -> None:
     service = _service(wm_paths)
 
     def fail_search(actor: str, kb_slug: str, question: str, top_k: int = 6) -> list[object]:
@@ -143,7 +143,7 @@ def test_wiki_backend_failure_is_classified(wm_paths: WikiManagerPaths, monkeypa
 
 
 def test_wiki_domain_errors_are_not_classified_as_backend_failures(
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = _service(wm_paths)
@@ -173,7 +173,7 @@ def test_wiki_domain_errors_are_not_classified_as_backend_failures(
     assert log["resource_key"] == "frontend-docs"
 
 
-def test_wiki_execute_unknown_tool_with_empty_args_raises_not_found(wm_paths: WikiManagerPaths) -> None:
+def test_wiki_execute_unknown_tool_with_empty_args_raises_not_found(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     with pytest.raises(NotFound) as exc_info:

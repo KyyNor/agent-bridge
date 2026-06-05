@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from wiki_manager.builtin_capabilities import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
-from wiki_manager.capabilities import FailureOwner, FailureStage, ProfileResourceType, ToolType
-from wiki_manager.capability_governance import CapabilityGovernanceService
-from wiki_manager.codegraph_service import CodeGraphService
-from wiki_manager.domain import NotFound, ValidationError, WikiManagerError
+from agent_bridge.builtin_capabilities import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
+from agent_bridge.capabilities import FailureOwner, FailureStage, ProfileResourceType, ToolType
+from agent_bridge.capability_governance import CapabilityGovernanceService
+from agent_bridge.codegraph_service import CodeGraphService
+from agent_bridge.domain import NotFound, ValidationError, AgentBridgeError
 
 
 REPO_TOOLS = {"search_code", "get_file", "find_symbol", "repository_overview"}
@@ -173,7 +173,7 @@ class CodeGraphBuiltinProvider:
                 }
             if tool == "repository_overview":
                 return self.codegraph.repository_overview(actor, repo_key)
-        except WikiManagerError:
+        except AgentBridgeError:
             raise
         except Exception as exc:
             raise self._backend_error(exc, repo_key) from exc

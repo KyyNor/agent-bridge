@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from wiki_manager.config import ROOT_ENV_VAR, WikiManagerPaths, load_server_config
+from agent_bridge.config import ROOT_ENV_VAR, AgentBridgePaths, load_server_config
 
 
 def _read_pid(path: Path) -> int | None:
@@ -23,8 +23,8 @@ def _read_pid(path: Path) -> int | None:
         raise RuntimeError(f"invalid pid file: {path}") from exc
 
 
-def server_status(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
-    resolved = paths or WikiManagerPaths.from_root()
+def server_status(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
+    resolved = paths or AgentBridgePaths.from_root()
     pid = _read_pid(resolved.server_pid_path)
     if pid is None:
         return {"running": False, "pid": None}
@@ -36,8 +36,8 @@ def server_status(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
         return {"running": False, "pid": pid}
 
 
-def start_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
-    resolved = paths or WikiManagerPaths.from_root()
+def start_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
+    resolved = paths or AgentBridgePaths.from_root()
     status = server_status(resolved)
     if status["running"]:
         return status
@@ -50,7 +50,7 @@ def start_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
                 sys.executable,
                 "-m",
                 "uvicorn",
-                "wiki_manager.server:create_app",
+                "agent_bridge.server:create_app",
                 "--factory",
                 "--host",
                 config.host,
@@ -80,8 +80,8 @@ def start_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
     raise RuntimeError(f"server did not become healthy within 5 seconds; see log: {resolved.server_log_path}")
 
 
-def stop_server(paths: WikiManagerPaths | None = None) -> dict[str, Any]:
-    resolved = paths or WikiManagerPaths.from_root()
+def stop_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
+    resolved = paths or AgentBridgePaths.from_root()
     pid = _read_pid(resolved.server_pid_path)
     if pid is None:
         return {"stopped": True, "pid": None}

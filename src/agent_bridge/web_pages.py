@@ -533,8 +533,8 @@ def capability_admin_page(default_user: str = "root") -> str:
         </div>
       </form>
     </dialog>
-    <script>window.WIKI_MANAGER_DEFAULT_USER = __WIKI_MANAGER_DEFAULT_USER__;</script>
+    <script>window.AGENT_BRIDGE_DEFAULT_USER = __AGENT_BRIDGE_DEFAULT_USER__;</script>
     <script src="/static/capabilities/app.js" defer></script>
   </body>
 </html>
-""".replace("__WIKI_MANAGER_DEFAULT_USER__", default_user_json)
+""".replace("__AGENT_BRIDGE_DEFAULT_USER__", default_user_json)

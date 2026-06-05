@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from wiki_manager.server import create_app
+from agent_bridge.server import create_app
 
 
 def _write_mock_backend_config(wm_paths) -> None:
@@ -16,7 +16,7 @@ def _write_mock_backend_config(wm_paths) -> None:
 
 
 def _jobs_by_operation(client: TestClient) -> dict[str, list[dict]]:
-    response = client.get("/status", headers={"X-Wiki-User": "alice"})
+    response = client.get("/status", headers={"X-Agent-Bridge-User": "alice"})
     assert response.status_code == 200
     jobs = response.json()["jobs"]
     grouped: dict[str, list[dict]] = {}
@@ -28,16 +28,16 @@ def _jobs_by_operation(client: TestClient) -> dict[str, list[dict]]:
 def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
     _write_mock_backend_config(wm_paths)
     client = TestClient(create_app(paths=wm_paths, admins={"root"}))
-    assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
+    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     assert client.post(
         "/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     ).status_code == 200
     assert client.post(
         "/kbs/frontend-docs/members",
         json={"linux_user": "alice", "role": "contributor"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     ).status_code == 200
 
     v1 = tmp_path / "Guide.pdf"
@@ -50,14 +50,14 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert added.status_code == 200
     assert added.json()["current_version_no"] == 1
     jobs = _jobs_by_operation(client)
     assert jobs["create"][-1]["status"] == "pending"
 
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "alice"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
@@ -68,25 +68,25 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
             "/docs/guide/versions",
             data={"later": "true"},
             files={"file": ("Guide-v2.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert updated.status_code == 200
     assert updated.json()["current_version_no"] == 2
     jobs = _jobs_by_operation(client)
     assert jobs["update"][-1]["status"] == "pending"
 
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "alice"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
     assert jobs["update"][-1]["status"] == "succeeded"
 
-    deleted = client.post("/docs/guide/delete", headers={"X-Wiki-User": "alice"})
+    deleted = client.post("/docs/guide/delete", headers={"X-Agent-Bridge-User": "alice"})
     assert deleted.status_code == 200
     jobs = _jobs_by_operation(client)
     assert jobs["delete"][-1]["status"] == "pending"
 
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "alice"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
@@ -106,13 +106,13 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     client = TestClient(create_app(paths=wm_paths, admins={"root"}))
 
     # 1. Init system
-    assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
+    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
 
     # 2. Create KB — backend target auto-created from registry config
     kb_resp = client.post(
         "/kbs",
         json={"slug": "auth-docs", "name": "Auth Docs", "description": "Phase 2 test"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     assert kb_resp.status_code == 200
 
@@ -120,7 +120,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     assert client.post(
         "/kbs/auth-docs/members",
         json={"linux_user": "alice", "role": "contributor"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     ).status_code == 200
 
     # Verify backends endpoint lists mock
@@ -139,7 +139,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["auth-docs"], "later": "true"},
             files={"file": ("AuthGuide.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert added.status_code == 200
     assert added.json()["current_version_no"] == 1
@@ -150,14 +150,14 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     assert create_job["backend_slug"] == "mock"
 
     # 4. Sync — verify document synced to mock backend
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "alice"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
     assert jobs["create"][-1]["status"] == "succeeded"
 
     # 5. Check doc detail — verify sync_states visible with backend info
-    doc_detail = client.get("/docs/authguide", headers={"X-Wiki-User": "alice"})
+    doc_detail = client.get("/docs/authguide", headers={"X-Agent-Bridge-User": "alice"})
     assert doc_detail.status_code == 200
     detail = doc_detail.json()
     assert "sync_states" in detail
@@ -172,7 +172,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
             "/docs/authguide/versions",
             data={"later": "true"},
             files={"file": ("AuthGuide-v2.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert updated.status_code == 200
     assert updated.json()["current_version_no"] == 2
@@ -182,14 +182,14 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     assert update_job["backend_slug"] == "mock"
 
     # 7. Sync — verify update synced
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "alice"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
     assert jobs["update"][-1]["status"] == "succeeded"
 
     # 8. Delete document — verify delete sync job for mock backend
-    deleted = client.post("/docs/authguide/delete", headers={"X-Wiki-User": "alice"})
+    deleted = client.post("/docs/authguide/delete", headers={"X-Agent-Bridge-User": "alice"})
     assert deleted.status_code == 200
     jobs = _jobs_by_operation(client)
     delete_job = jobs["delete"][-1]
@@ -197,7 +197,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     assert delete_job["backend_slug"] == "mock"
 
     # 9. Sync — verify delete synced
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Wiki-User": "alice"})
+    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "alice"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)

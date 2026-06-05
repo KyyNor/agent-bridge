@@ -4,17 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.config import BackendConfig, WikiManagerPaths, ensure_directories
-from wiki_manager.domain import AccessDenied, KbRole, NotFound, SyncStateStatus, ValidationError
-from wiki_manager.registry import BackendRegistry
-from wiki_manager.services import WikiManagerService
+from agent_bridge.config import BackendConfig, AgentBridgePaths, ensure_directories
+from agent_bridge.domain import AccessDenied, KbRole, NotFound, SyncStateStatus, ValidationError
+from agent_bridge.registry import BackendRegistry
+from agent_bridge.services import AgentBridgeService
 
 
 def _service_with_mock_backend(
-    wm_paths: WikiManagerPaths, tmp_path: Path | None = None
-) -> WikiManagerService:
+    wm_paths: AgentBridgePaths, tmp_path: Path | None = None
+) -> AgentBridgeService:
     ensure_directories(wm_paths)
-    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service = AgentBridgeService.create(wm_paths, admins={"root"})
     service.registry = BackendRegistry(
         {"mock": BackendConfig(slug="mock", backend_type="mock")},
         paths=tmp_path or wm_paths.root,
@@ -311,7 +311,7 @@ def test_align_backends_marks_removed_backend_inactive(wm_paths, tmp_path):
 
 def test_align_backends_no_registry_is_noop(wm_paths):
     ensure_directories(wm_paths)
-    service = WikiManagerService.create(wm_paths, admins={"root"})
+    service = AgentBridgeService.create(wm_paths, admins={"root"})
     service.registry = None
     service.init_system()
     # Should not raise
@@ -322,7 +322,7 @@ def test_search_with_default_backend(wm_paths, tmp_path: Path, monkeypatch) -> N
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from wiki_manager.domain import RetrievalResult
+    from agent_bridge.domain import RetrievalResult
     mock_results = [RetrievalResult(
         chunk_id="c1", content="hello", document_name="a.md",
         similarity=0.9, dataset_id=kb["id"],
@@ -339,7 +339,7 @@ def test_search_with_explicit_backend(wm_paths, tmp_path: Path, monkeypatch) -> 
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from wiki_manager.domain import RetrievalResult
+    from agent_bridge.domain import RetrievalResult
     adapter = service.registry.get("mock")
     monkeypatch.setattr(adapter, "retrieve", lambda *a, **kw: [])
 
@@ -365,7 +365,7 @@ def test_ask_with_default_backend(wm_paths, tmp_path: Path, monkeypatch) -> None
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from wiki_manager.domain import AskResult
+    from agent_bridge.domain import AskResult
     mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
     adapter = service.registry.get("mock")
     monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, ""))
@@ -378,7 +378,7 @@ def test_ask_persists_chat_id(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
 
-    from wiki_manager.domain import AskResult
+    from agent_bridge.domain import AskResult
     mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
     adapter = service.registry.get("mock")
     monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, "chat-new"))

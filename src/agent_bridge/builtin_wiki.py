@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from wiki_manager.builtin_capabilities import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
-from wiki_manager.capabilities import FailureOwner, FailureStage, ProfileResourceType, ToolType
-from wiki_manager.domain import NotFound, ValidationError, WikiManagerError
+from agent_bridge.builtin_capabilities import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
+from agent_bridge.capabilities import FailureOwner, FailureStage, ProfileResourceType, ToolType
+from agent_bridge.domain import NotFound, ValidationError, AgentBridgeError
 
 if TYPE_CHECKING:
-    from wiki_manager.services import WikiManagerService
+    from agent_bridge.services import AgentBridgeService
 
 
 class WikiBuiltinProvider:
@@ -16,7 +16,7 @@ class WikiBuiltinProvider:
     description = "内置知识库查询能力"
     tags = ["builtin", "knowledge"]
 
-    def __init__(self, service: "WikiManagerService") -> None:
+    def __init__(self, service: "AgentBridgeService") -> None:
         self.service = service
 
     def list_resources(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
@@ -130,7 +130,7 @@ class WikiBuiltinProvider:
                 raise ValidationError("question is required")
             try:
                 results = self.service.search(actor, kb_slug, question, top_k=int(arguments.get("top_k") or 6))
-            except WikiManagerError:
+            except AgentBridgeError:
                 raise
             except Exception as exc:
                 raise self._backend_error(exc, kb_slug) from exc
@@ -147,7 +147,7 @@ class WikiBuiltinProvider:
                 raise ValidationError("question is required")
             try:
                 answer = self.service.ask(actor, kb_slug, question, session_id=arguments.get("session_id"))
-            except WikiManagerError:
+            except AgentBridgeError:
                 raise
             except Exception as exc:
                 raise self._backend_error(exc, kb_slug) from exc

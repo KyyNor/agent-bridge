@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_ROOT = Path("/root/wiki-manager")
-ROOT_ENV_VAR = "WIKI_MANAGER_ROOT"
-USER_ENV_VAR = "WIKI_MANAGER_USER"
+DEFAULT_ROOT = Path("/root/agent-bridge")
+ROOT_ENV_VAR = "AGENT_BRIDGE_ROOT"
+USER_ENV_VAR = "AGENT_BRIDGE_USER"
 
 
 def default_root() -> Path:
@@ -22,7 +22,7 @@ def default_user(fallback: str = "root") -> str:
 
 
 @dataclass(frozen=True)
-class WikiManagerPaths:
+class AgentBridgePaths:
     root: Path
     config_dir: Path
     data_dir: Path
@@ -36,7 +36,7 @@ class WikiManagerPaths:
     server_pid_path: Path
 
     @classmethod
-    def from_root(cls, root: Path | None = None) -> "WikiManagerPaths":
+    def from_root(cls, root: Path | None = None) -> "AgentBridgePaths":
         root = root or default_root()
         return cls(
             root=root,
@@ -76,7 +76,7 @@ class BackendConfig:
     summary_model_id: str | None = None
 
 
-def ensure_directories(paths: WikiManagerPaths) -> None:
+def ensure_directories(paths: AgentBridgePaths) -> None:
     for directory in (
         paths.config_dir,
         paths.data_dir,
@@ -89,7 +89,7 @@ def ensure_directories(paths: WikiManagerPaths) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
-def load_server_config(paths: WikiManagerPaths) -> ServerConfig:
+def load_server_config(paths: AgentBridgePaths) -> ServerConfig:
     ensure_directories(paths)
     if not paths.server_config_path.exists():
         admin = default_user()
@@ -113,7 +113,7 @@ class McpConfig:
     transport: str = "stdio"
 
 
-def load_mcp_config(paths: WikiManagerPaths) -> McpConfig:
+def load_mcp_config(paths: AgentBridgePaths) -> McpConfig:
     if not paths.server_config_path.exists():
         return McpConfig()
     raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
@@ -124,7 +124,7 @@ def load_mcp_config(paths: WikiManagerPaths) -> McpConfig:
     )
 
 
-def load_backend_configs(paths: WikiManagerPaths) -> list[BackendConfig]:
+def load_backend_configs(paths: AgentBridgePaths) -> list[BackendConfig]:
     if not paths.server_config_path.exists():
         return []
     raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))

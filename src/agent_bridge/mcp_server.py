@@ -13,17 +13,17 @@ from fastapi import APIRouter, Request, Response
 from mcp.server.fastmcp import FastMCP
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 
-from wiki_manager.config import default_user
-from wiki_manager.services import WikiManagerService
+from agent_bridge.config import default_user
+from agent_bridge.services import AgentBridgeService
 
-logger = logging.getLogger("wiki_manager.mcp")
+logger = logging.getLogger("agent_bridge.mcp")
 
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 
 
-def create_mcp_server(service: WikiManagerService) -> FastMCP:
+def create_mcp_server(service: AgentBridgeService) -> FastMCP:
     mcp = FastMCP(
-        name="wiki-manager",
+        name="agent-bridge",
         instructions=(
             "Agent Capability Hub gateway. "
             "Use search to discover available MCP tools and services, "
@@ -89,14 +89,14 @@ def create_mcp_server(service: WikiManagerService) -> FastMCP:
     return mcp
 
 
-def setup_mcp_route(app: Any, service: WikiManagerService) -> None:
+def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
     """Register MCP streamable HTTP endpoint on a FastAPI app."""
     mcp = create_mcp_server(service)
     router = APIRouter()
 
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
-        profile = request.headers.get("x-wiki-metamcp-profile")
+        profile = request.headers.get("x-agent-bridge-metamcp-profile")
         logger.info("MCP request method=%s profile=%s", request.method, profile)
         token = _request_profile.set(profile)
         try:

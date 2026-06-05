@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from wiki_manager.capability_governance import CapabilityGovernanceService
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import NotFound, ValidationError
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capability_governance import CapabilityGovernanceService
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import NotFound, ValidationError
+from agent_bridge.storage import SQLiteStore
 
 
-def _service(wm_paths: WikiManagerPaths) -> CapabilityGovernanceService:
+def _service(wm_paths: AgentBridgePaths) -> CapabilityGovernanceService:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     service = CapabilityGovernanceService(store=store, admins={"root"})
@@ -16,7 +16,7 @@ def _service(wm_paths: WikiManagerPaths) -> CapabilityGovernanceService:
     return service
 
 
-def test_profile_resource_rules_round_trip_and_filter(wm_paths: WikiManagerPaths) -> None:
+def test_profile_resource_rules_round_trip_and_filter(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     detail = service.replace_profile_resource_rules(
@@ -43,7 +43,7 @@ def test_profile_resource_rules_round_trip_and_filter(wm_paths: WikiManagerPaths
 
 
 def test_profile_resource_rules_default_open_without_profile_and_closed_with_profile(
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
 ) -> None:
     service = _service(wm_paths)
 
@@ -61,7 +61,7 @@ def test_profile_resource_rules_default_open_without_profile_and_closed_with_pro
     ) == []
 
 
-def test_profile_resource_rules_validate_type_and_profile(wm_paths: WikiManagerPaths) -> None:
+def test_profile_resource_rules_validate_type_and_profile(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
     with pytest.raises(ValidationError, match="invalid resource type"):

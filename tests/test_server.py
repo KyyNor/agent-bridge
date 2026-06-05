@@ -4,8 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from wiki_manager.config import load_server_config
-from wiki_manager.server import create_app
+from agent_bridge.config import load_server_config
+from agent_bridge.server import create_app
 
 
 def test_health(wm_paths) -> None:
@@ -27,18 +27,18 @@ def test_api_documentation_is_disabled(wm_paths) -> None:
 def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
+    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     response = client.post(
         "/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     assert response.status_code == 200
     assert response.json()["slug"] == "frontend-docs"
     grant = client.post(
         "/kbs/frontend-docs/members",
         json={"linux_user": "alice", "role": "contributor"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     assert grant.status_code == 200
     source = tmp_path / "Guide.pdf"
@@ -48,11 +48,11 @@ def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert doc.status_code == 200
     assert doc.json()["slug"] == "guide"
-    docs = client.get("/docs?kb=frontend-docs", headers={"X-Wiki-User": "alice"})
+    docs = client.get("/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "alice"})
     assert docs.status_code == 200
     assert docs.json()[0]["slug"] == "guide"
 
@@ -60,12 +60,12 @@ def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
 def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
+    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     assert (
         client.post(
             "/kbs",
             json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
-            headers={"X-Wiki-User": "root"},
+            headers={"X-Agent-Bridge-User": "root"},
         ).status_code
         == 200
     )
@@ -73,7 +73,7 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
         client.post(
             "/kbs/frontend-docs/members",
             json={"linux_user": "alice", "role": "contributor"},
-            headers={"X-Wiki-User": "root"},
+            headers={"X-Agent-Bridge-User": "root"},
         ).status_code
         == 200
     )
@@ -85,7 +85,7 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("nested/path/Guide.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert doc.status_code == 200
     assert not [path for path in wm_paths.run_dir.iterdir() if path.is_file()]
@@ -97,7 +97,7 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
             f"/docs/{doc.json()['slug']}/versions",
             data={"later": "true"},
             files={"file": ("other:name?.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert update.status_code == 200
     assert not [path for path in wm_paths.run_dir.iterdir() if path.is_file()]
@@ -107,21 +107,21 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
 def test_invisible_kb_returns_404(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Wiki-User": "root"})
-    client.post("/kbs", json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""}, headers={"X-Wiki-User": "root"})
-    response = client.get("/docs?kb=frontend-docs", headers={"X-Wiki-User": "alice"})
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/kbs", json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "alice"})
     assert response.status_code == 404
 
 
 def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
+    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     assert (
         client.post(
             "/kbs",
             json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
-            headers={"X-Wiki-User": "root"},
+            headers={"X-Agent-Bridge-User": "root"},
         ).status_code
         == 200
     )
@@ -129,7 +129,7 @@ def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
         client.post(
             "/kbs/frontend-docs/members",
             json={"linux_user": "alice", "role": "contributor"},
-            headers={"X-Wiki-User": "root"},
+            headers={"X-Agent-Bridge-User": "root"},
         ).status_code
         == 200
     )
@@ -140,15 +140,15 @@ def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
-            headers={"X-Wiki-User": "alice"},
+            headers={"X-Agent-Bridge-User": "alice"},
         )
     assert doc.status_code == 200
 
-    missing_confirm = client.post(f"/docs/{doc.json()['slug']}/purge", json={}, headers={"X-Wiki-User": "alice"})
+    missing_confirm = client.post(f"/docs/{doc.json()['slug']}/purge", json={}, headers={"X-Agent-Bridge-User": "alice"})
     confirmed = client.post(
         f"/docs/{doc.json()['slug']}/purge",
         json={"confirm": True},
-        headers={"X-Wiki-User": "alice"},
+        headers={"X-Agent-Bridge-User": "alice"},
     )
 
     assert missing_confirm.status_code == 400
@@ -160,7 +160,7 @@ def test_create_app_refreshes_admins_from_config_per_request(wm_paths) -> None:
     assert config.admins == {"root"}
     app = create_app(paths=wm_paths, admins=None)
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Wiki-User": "root"}).status_code == 200
+    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
 
     wm_paths.server_config_path.write_text(
         'host = "127.0.0.1"\nport = 8765\nadmins = ["alice"]\n',
@@ -170,7 +170,7 @@ def test_create_app_refreshes_admins_from_config_per_request(wm_paths) -> None:
     response = client.post(
         "/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
-        headers={"X-Wiki-User": "alice"},
+        headers={"X-Agent-Bridge-User": "alice"},
     )
 
     assert response.status_code == 200
@@ -188,24 +188,24 @@ def test_backends_endpoint(wm_paths) -> None:
 def test_doc_with_backend_filter(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Wiki-User": "root"})
-    response = client.get("/docs/nonexistent?backend=mock", headers={"X-Wiki-User": "root"})
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/docs/nonexistent?backend=mock", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code in (200, 404)
 
 
 def test_status_with_backend_filter(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Wiki-User": "root"})
-    response = client.get("/status?backend=mock", headers={"X-Wiki-User": "root"})
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/status?backend=mock", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
 
 
 def test_sync_with_backend_filter(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Wiki-User": "root"})
-    response = client.post("/sync", json={"all_users": False}, params={"backend": "mock"}, headers={"X-Wiki-User": "root"})
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.post("/sync", json={"all_users": False}, params={"backend": "mock"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
 
 
@@ -217,9 +217,9 @@ def test_search_endpoint(wm_paths) -> None:
     )
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Wiki-User": "root"})
-    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Wiki-User": "root"})
-    response = client.get("/search", params={"kb": "test-kb", "q": "hello"}, headers={"X-Wiki-User": "root"})
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/search", params={"kb": "test-kb", "q": "hello"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
     data = response.json()
     assert "results" in data
@@ -233,9 +233,9 @@ def test_ask_endpoint(wm_paths) -> None:
     )
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Wiki-User": "root"})
-    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Wiki-User": "root"})
-    response = client.post("/ask", json={"kb": "test-kb", "question": "what is X?"}, headers={"X-Wiki-User": "root"})
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Agent-Bridge-User": "root"})
+    response = client.post("/ask", json={"kb": "test-kb", "question": "what is X?"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
     data = response.json()
     assert "answer" in data
@@ -244,6 +244,6 @@ def test_ask_endpoint(wm_paths) -> None:
 def test_search_missing_kb(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Wiki-User": "root"})
-    response = client.get("/search", params={"kb": "nonexistent", "q": "hello"}, headers={"X-Wiki-User": "root"})
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/search", params={"kb": "nonexistent", "q": "hello"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 404

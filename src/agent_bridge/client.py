@@ -1,4 +1,4 @@
-"""HTTP client for wiki-manager."""
+"""HTTP client for Agent Bridge."""
 
 from __future__ import annotations
 
@@ -8,20 +8,20 @@ from typing import Any
 
 import httpx
 
-from wiki_manager.config import default_user
+from agent_bridge.config import default_user
 
 
-class WikiManagerClient:
+class AgentBridgeClient:
     def __init__(self, base_url: str, linux_user: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.linux_user = linux_user
 
     @classmethod
-    def from_config(cls) -> "WikiManagerClient":
+    def from_config(cls) -> "AgentBridgeClient":
         return cls(base_url="http://127.0.0.1:8765", linux_user=default_user(getpass.getuser()))
 
     def _headers(self) -> dict[str, str]:
-        return {"X-Wiki-User": self.linux_user}
+        return {"X-Agent-Bridge-User": self.linux_user}
 
     def _raise(self, response: httpx.Response) -> None:
         if response.status_code < 400:

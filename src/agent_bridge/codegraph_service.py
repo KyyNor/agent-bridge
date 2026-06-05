@@ -10,9 +10,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import NotFound, ValidationError, require_admin_user
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.storage import SQLiteStore
 
 
 MAX_INDEX_CHARS = 20_000
@@ -21,7 +21,7 @@ SYMBOL_PATTERN = re.compile(r"^\s*(def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", re.MU
 
 
 class CodeGraphService:
-    def __init__(self, paths: WikiManagerPaths, store: SQLiteStore, admins: set[str]) -> None:
+    def __init__(self, paths: AgentBridgePaths, store: SQLiteStore, admins: set[str]) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins

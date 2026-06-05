@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 
-from wiki_manager.capabilities import McpServiceStatus, ToolType
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import McpServiceStatus, ToolType
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.storage import SQLiteStore
 
 
-def test_mcp_service_crud_round_trip(wm_paths: WikiManagerPaths) -> None:
+def test_mcp_service_crud_round_trip(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
 
@@ -47,7 +47,7 @@ def test_mcp_service_crud_round_trip(wm_paths: WikiManagerPaths) -> None:
     assert disabled["status"] == McpServiceStatus.disabled.value
 
 
-def test_update_mcp_service_replaces_editable_fields(wm_paths: WikiManagerPaths) -> None:
+def test_update_mcp_service_replaces_editable_fields(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.create_mcp_service(
@@ -76,7 +76,7 @@ def test_update_mcp_service_replaces_editable_fields(wm_paths: WikiManagerPaths)
     assert json.loads(updated["tags_json"]) == ["database", "finance"]
 
 
-def test_mark_mcp_service_sync_preserves_status_and_tracks_errors(wm_paths: WikiManagerPaths) -> None:
+def test_mark_mcp_service_sync_preserves_status_and_tracks_errors(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.create_mcp_service(
@@ -107,7 +107,7 @@ def test_mark_mcp_service_sync_preserves_status_and_tracks_errors(wm_paths: Wiki
     assert failed["last_error"] == "sync failed"
 
 
-def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: WikiManagerPaths) -> None:
+def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.create_mcp_service(
@@ -156,7 +156,7 @@ def test_mcp_tool_upsert_replaces_synced_schema(wm_paths: WikiManagerPaths) -> N
     assert store.get_mcp_tool("mysql", "query_sql")["id"] == tool["id"]
 
 
-def test_update_mcp_tool_type_changes_only_admin_configured_type(wm_paths: WikiManagerPaths) -> None:
+def test_update_mcp_tool_type_changes_only_admin_configured_type(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.create_mcp_service(
@@ -185,7 +185,7 @@ def test_update_mcp_tool_type_changes_only_admin_configured_type(wm_paths: WikiM
     assert updated["description"] == "Run a SQL query"
 
 
-def test_mcp_tool_upsert_reactivates_inactive_tool(wm_paths: WikiManagerPaths) -> None:
+def test_mcp_tool_upsert_reactivates_inactive_tool(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.create_mcp_service(
@@ -229,7 +229,7 @@ def test_mcp_tool_upsert_reactivates_inactive_tool(wm_paths: WikiManagerPaths) -
     assert tool["status"] == "active"
 
 
-def test_deactivate_missing_mcp_tools_marks_only_removed_tools_inactive(wm_paths: WikiManagerPaths) -> None:
+def test_deactivate_missing_mcp_tools_marks_only_removed_tools_inactive(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.create_mcp_service(

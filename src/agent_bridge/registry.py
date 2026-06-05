@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wiki_manager.config import BackendConfig, WikiManagerPaths, load_backend_configs
-from wiki_manager.domain import BackendAdapter
-from wiki_manager.mock_backend import MockBackend
+from agent_bridge.config import BackendConfig, AgentBridgePaths, load_backend_configs
+from agent_bridge.domain import BackendAdapter
+from agent_bridge.mock_backend import MockBackend
 
 
 ADAPTER_CLASSES: dict[str, type] = {
@@ -24,7 +24,7 @@ class BackendRegistry:
             if config.backend_type == "mock":
                 self._adapters[slug] = adapter_cls(paths / "data" / "backend" / "mock")
             elif config.backend_type == "ragflow":
-                from wiki_manager.ragflow_backend import RagFlowBackend
+                from agent_bridge.ragflow_backend import RagFlowBackend
 
                 self._adapters[slug] = RagFlowBackend(
                     base_url=config.base_url or "",
@@ -32,7 +32,7 @@ class BackendRegistry:
                     timeout=config.timeout,
                 )
             elif config.backend_type == "weknora":
-                from wiki_manager.weknora_backend import WeknoraBackend
+                from agent_bridge.weknora_backend import WeknoraBackend
 
                 self._adapters[slug] = WeknoraBackend(
                     base_url=config.base_url or "",
@@ -55,7 +55,7 @@ class BackendRegistry:
         return dict(self._adapters)
 
 
-def create_registry(paths: WikiManagerPaths) -> BackendRegistry:
+def create_registry(paths: AgentBridgePaths) -> BackendRegistry:
     configs = load_backend_configs(paths)
     if not configs:
         return BackendRegistry({}, paths.root)

@@ -7,8 +7,8 @@ import httpx
 import pytest
 import respx
 
-from wiki_manager.domain import AskResult, BackendDocStatus, RetrievalResult
-from wiki_manager.ragflow_backend import RagFlowBackend
+from agent_bridge.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.ragflow_backend import RagFlowBackend
 
 
 def test_create_kb(respx_mock):

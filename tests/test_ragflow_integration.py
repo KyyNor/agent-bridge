@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.ragflow_backend import RagFlowBackend
-from wiki_manager.domain import RetrievalResult, AskResult
+from agent_bridge.ragflow_backend import RagFlowBackend
+from agent_bridge.domain import RetrievalResult, AskResult
 
 # ---------------------------------------------------------------------------
 # RagFlow connection details

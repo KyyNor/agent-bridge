@@ -5,11 +5,11 @@ import json
 
 import pytest
 
-from wiki_manager.capabilities import CallLogStatus, McpServiceStatus, ToolType
-from wiki_manager.capability_service import CapabilityService
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import AccessDenied, NotFound, ValidationError
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import CallLogStatus, McpServiceStatus, ToolType
+from agent_bridge.capability_service import CapabilityService
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import AccessDenied, NotFound, ValidationError
+from agent_bridge.storage import SQLiteStore
 
 
 class FakeMcpClient:
@@ -70,14 +70,14 @@ class FakeMcpClient:
         return self.call_result
 
 
-def _service(wm_paths: WikiManagerPaths) -> tuple[CapabilityService, FakeMcpClient]:
+def _service(wm_paths: AgentBridgePaths) -> tuple[CapabilityService, FakeMcpClient]:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     mcp_client = FakeMcpClient()
     return CapabilityService(store=store, mcp_client=mcp_client, admins={"root"}), mcp_client
 
 
-def test_register_service_creates_updates_and_lists_parsed_payload(wm_paths: WikiManagerPaths) -> None:
+def test_register_service_creates_updates_and_lists_parsed_payload(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
 
     created = service.register_service(
@@ -107,7 +107,7 @@ def test_register_service_creates_updates_and_lists_parsed_payload(wm_paths: Wik
     assert "tags_json" not in service.list_services(actor="alice")[0]
 
 
-def test_register_service_requires_admin_and_valid_service_key(wm_paths: WikiManagerPaths) -> None:
+def test_register_service_requires_admin_and_valid_service_key(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
 
     with pytest.raises(AccessDenied):
@@ -133,7 +133,7 @@ def test_register_service_requires_admin_and_valid_service_key(wm_paths: WikiMan
         )
 
 
-def test_set_service_status_requires_admin_validates_status_and_missing_service(wm_paths: WikiManagerPaths) -> None:
+def test_set_service_status_requires_admin_validates_status_and_missing_service(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
 
     with pytest.raises(AccessDenied):
@@ -144,7 +144,7 @@ def test_set_service_status_requires_admin_validates_status_and_missing_service(
         service.set_service_status("root", "docs-api", McpServiceStatus.disabled.value)
 
 
-def test_sync_tools_stores_tools_and_passes_headers(wm_paths: WikiManagerPaths) -> None:
+def test_sync_tools_stores_tools_and_passes_headers(wm_paths: AgentBridgePaths) -> None:
     service, client = _service(wm_paths)
     service.register_service(
         actor="root",
@@ -173,7 +173,7 @@ def test_sync_tools_stores_tools_and_passes_headers(wm_paths: WikiManagerPaths) 
     }
 
 
-def test_sync_tools_marks_failure(wm_paths: WikiManagerPaths) -> None:
+def test_sync_tools_marks_failure(wm_paths: AgentBridgePaths) -> None:
     class FailingMcpClient(FakeMcpClient):
         async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
             raise RuntimeError("mcp unavailable")
@@ -191,7 +191,7 @@ def test_sync_tools_marks_failure(wm_paths: WikiManagerPaths) -> None:
     assert listed[0]["last_error"] == "mcp unavailable"
 
 
-def test_search_root_and_service_path_filters_by_query(wm_paths: WikiManagerPaths) -> None:
+def test_search_root_and_service_path_filters_by_query(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     service.register_service("root", "admin-api", "Admin API", "https://example.test/admin", {}, "Admin capabilities", ["admin"])
@@ -226,7 +226,7 @@ def test_search_root_and_service_path_filters_by_query(wm_paths: WikiManagerPath
 
 @pytest.mark.parametrize("status", [McpServiceStatus.disabled, McpServiceStatus.error])
 def test_disabled_or_error_service_blocks_direct_tool_visibility_and_execute(
-    wm_paths: WikiManagerPaths,
+    wm_paths: AgentBridgePaths,
     status: McpServiceStatus,
 ) -> None:
     service, client = _service(wm_paths)
@@ -268,7 +268,7 @@ def test_disabled_or_error_service_blocks_direct_tool_visibility_and_execute(
     assert execute_log["error_message"] == "MCP service is not enabled"
 
 
-def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: WikiManagerPaths) -> None:
+def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: AgentBridgePaths) -> None:
     class ChangingMcpClient(FakeMcpClient):
         def __init__(self) -> None:
             super().__init__()
@@ -318,7 +318,7 @@ def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: WikiMana
         asyncio.run(service.execute("alice", "docs-api", "get_doc", {"doc_id": "doc-1"}))
 
 
-def test_execute_rejects_unconfigured_tool(wm_paths: WikiManagerPaths) -> None:
+def test_execute_rejects_unconfigured_tool(wm_paths: AgentBridgePaths) -> None:
     service, client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     asyncio.run(service.sync_tools("root", "docs-api"))
@@ -341,7 +341,7 @@ def test_execute_rejects_unconfigured_tool(wm_paths: WikiManagerPaths) -> None:
     assert logs[0]["error_message"] == "tool type is not configured"
 
 
-def test_admin_configures_tool_type_and_sync_preserves_choice(wm_paths: WikiManagerPaths) -> None:
+def test_admin_configures_tool_type_and_sync_preserves_choice(wm_paths: AgentBridgePaths) -> None:
     class ReadonlyNamingMcpClient(FakeMcpClient):
         async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
             return [
@@ -393,7 +393,7 @@ def test_admin_configures_tool_type_and_sync_preserves_choice(wm_paths: WikiMana
     assert tool_types["delete_archive"] == ToolType.unconfigured.value
 
 
-def test_execute_rejects_unexpected_tool_type(wm_paths: WikiManagerPaths) -> None:
+def test_execute_rejects_unexpected_tool_type(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     service.store.upsert_mcp_tool(
@@ -411,7 +411,7 @@ def test_execute_rejects_unexpected_tool_type(wm_paths: WikiManagerPaths) -> Non
         asyncio.run(service.execute("alice", "docs-api", "experimental_tool", {}))
 
 
-def test_execute_calls_readonly_tool(wm_paths: WikiManagerPaths) -> None:
+def test_execute_calls_readonly_tool(wm_paths: AgentBridgePaths) -> None:
     service, client = _service(wm_paths)
     service.register_service(
         "root",
@@ -442,7 +442,7 @@ def test_execute_calls_readonly_tool(wm_paths: WikiManagerPaths) -> None:
     ]
 
 
-def test_search_root_filters_services_by_profile_and_returns_log_id(wm_paths: WikiManagerPaths) -> None:
+def test_search_root_filters_services_by_profile_and_returns_log_id(wm_paths: AgentBridgePaths) -> None:
     service, client = _service(wm_paths)
     service.register_service("root", "mysql", "MySQL", "https://mysql.test/mcp", {}, "SQL service", ["db"])
     service.register_service("root", "hive", "Hive", "https://hive.test/mcp", {}, "Hive service", ["db"])
@@ -472,7 +472,7 @@ def test_search_root_filters_services_by_profile_and_returns_log_id(wm_paths: Wi
     assert [item["service"] for item in json.loads(detail["response_json"])["items"]] == ["mysql"]
 
 
-def test_search_denied_service_returns_empty_items_and_log_id(wm_paths: WikiManagerPaths) -> None:
+def test_search_denied_service_returns_empty_items_and_log_id(wm_paths: AgentBridgePaths) -> None:
     service, client = _service(wm_paths)
     service.register_service("root", "mysql", "MySQL", "https://mysql.test/mcp", {}, "SQL service", ["db"])
     service.register_service("root", "hive", "Hive", "https://hive.test/mcp", {}, "Hive service", ["db"])
@@ -496,7 +496,7 @@ def test_search_denied_service_returns_empty_items_and_log_id(wm_paths: WikiMana
     assert json.loads(detail["response_json"]) == {"path": "hive", "items": []}
 
 
-def test_execute_blocked_by_profile_writes_log_and_does_not_call_client(wm_paths: WikiManagerPaths) -> None:
+def test_execute_blocked_by_profile_writes_log_and_does_not_call_client(wm_paths: AgentBridgePaths) -> None:
     service, client = _service(wm_paths)
     service.register_service("root", "hive", "Hive", "https://hive.test/mcp", {}, "Hive service", ["db"])
     client.tools = [{"name": "query_sql", "description": "Run SQL", "input_schema": {"type": "object"}}]
@@ -525,7 +525,7 @@ def test_execute_blocked_by_profile_writes_log_and_does_not_call_client(wm_paths
     }
 
 
-def test_execute_success_returns_log_id_and_metamcp_execute_log(wm_paths: WikiManagerPaths) -> None:
+def test_execute_success_returns_log_id_and_metamcp_execute_log(wm_paths: AgentBridgePaths) -> None:
     service, client = _service(wm_paths)
     service.register_service("root", "mysql", "MySQL", "https://mysql.test/mcp", {}, "SQL service", ["db"])
     client.tools = [{"name": "query_sql", "description": "Run SQL", "input_schema": {"type": "object"}}]
@@ -549,7 +549,7 @@ def test_execute_success_returns_log_id_and_metamcp_execute_log(wm_paths: WikiMa
     assert json.loads(detail["response_json"])["result"] == client.call_result
 
 
-def test_search_error_message_includes_log_id(wm_paths: WikiManagerPaths) -> None:
+def test_search_error_message_includes_log_id(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
 
     with pytest.raises(NotFound, match=r"profile not found .*log_id: call_") as exc_info:
@@ -561,7 +561,7 @@ def test_search_error_message_includes_log_id(wm_paths: WikiManagerPaths) -> Non
     assert logs[0]["entrypoint"] == "metamcp_search"
 
 
-def test_execute_wraps_mcp_client_failures(wm_paths: WikiManagerPaths) -> None:
+def test_execute_wraps_mcp_client_failures(wm_paths: AgentBridgePaths) -> None:
     class FailingCallMcpClient(FakeMcpClient):
         async def call_tool(
             self,
@@ -597,7 +597,7 @@ def test_execute_wraps_mcp_client_failures(wm_paths: WikiManagerPaths) -> None:
     assert logs[0]["error_message"] == "MCP tool execution failed: transport unavailable"
 
 
-def test_execute_requires_existing_service_and_tool(wm_paths: WikiManagerPaths) -> None:
+def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
 

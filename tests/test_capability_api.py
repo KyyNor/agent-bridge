@@ -6,9 +6,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from wiki_manager.capabilities import FailureOwner, FailureStage, SourceType, ToolType
-from wiki_manager.server import create_app
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import FailureOwner, FailureStage, SourceType, ToolType
+from agent_bridge.server import create_app
+from agent_bridge.storage import SQLiteStore
 
 
 def _git_repo(path: Path) -> Path:
@@ -36,9 +36,9 @@ def test_mcp_service_registration_api(wm_paths) -> None:
             "description": "Database tools",
             "tags": ["database"],
         },
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/capabilities/mcp-services", headers={"X-Wiki-User": "alice"})
+    listed = client.get("/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "alice"})
 
     assert created.status_code == 200
     assert created.json()["service_key"] == "mysql"
@@ -62,7 +62,7 @@ def test_mcp_service_registration_requires_admin(wm_paths) -> None:
             "description": "",
             "tags": [],
         },
-        headers={"X-Wiki-User": "alice"},
+        headers={"X-Agent-Bridge-User": "alice"},
     )
 
     assert response.status_code == 403
@@ -81,7 +81,7 @@ def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths)
             "description": "Database tools",
             "tags": ["database"],
         },
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     updated = client.post(
@@ -93,9 +93,9 @@ def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths)
             "description": "Updated description",
             "tags": ["database", "reporting"],
         },
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/capabilities/mcp-services", headers={"X-Wiki-User": "root"})
+    listed = client.get("/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "root"})
 
     assert updated.status_code == 200
     assert updated.json()["headers"] == {"Authorization": "Bearer secret"}
@@ -107,7 +107,7 @@ def test_capability_admin_page_serves_html(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+    response = client.get("/admin/capabilities", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
@@ -135,7 +135,7 @@ def test_capability_admin_page_is_chinese_control_console(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+    response = client.get("/admin/capabilities", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert "能力治理控制台" in response.text
@@ -164,7 +164,7 @@ def test_capability_admin_page_uses_modal_service_form_and_no_refresh_buttons(wm
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+    response = client.get("/admin/capabilities", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert 'id="openServiceDialog"' in response.text
@@ -182,7 +182,7 @@ def test_capability_admin_page_has_phase2_views_and_modals(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+    response = client.get("/admin/capabilities", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert 'data-view="stats"' in response.text
@@ -231,7 +231,7 @@ def test_capability_admin_page_has_profile_dialog_and_tool_filters(wm_paths) -> 
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/admin/capabilities", headers={"X-Wiki-User": "root"})
+    response = client.get("/admin/capabilities", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert 'id="openProfileDialog"' in response.text
@@ -288,15 +288,15 @@ def test_mcp_service_status_and_tools_api(wm_paths) -> None:
             "name": "MySQL MCP",
             "endpoint_url": "https://mysql.example.test/mcp",
         },
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     disabled = client.post(
         "/capabilities/mcp-services/mysql/status",
         json={"status": "disabled"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
-    tools = client.get("/capabilities/mcp-services/mysql/tools", headers={"X-Wiki-User": "root"})
+    tools = client.get("/capabilities/mcp-services/mysql/tools", headers={"X-Agent-Bridge-User": "root"})
 
     assert disabled.status_code == 200
     assert disabled.json()["status"] == "disabled"
@@ -310,7 +310,7 @@ def test_mcp_tool_type_api_requires_admin_and_updates_tool(wm_paths) -> None:
     client.post(
         "/capabilities/mcp-services",
         json={"service_key": "mysql", "name": "MySQL MCP", "endpoint_url": "https://mysql.example.test/mcp"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     store = SQLiteStore(wm_paths.db_path)
     store.upsert_mcp_tool(
@@ -327,17 +327,17 @@ def test_mcp_tool_type_api_requires_admin_and_updates_tool(wm_paths) -> None:
     denied = client.put(
         "/capabilities/mcp-services/mysql/tools/query_sql/type",
         json={"tool_type": "search"},
-        headers={"X-Wiki-User": "alice"},
+        headers={"X-Agent-Bridge-User": "alice"},
     )
     invalid = client.put(
         "/capabilities/mcp-services/mysql/tools/query_sql/type",
         json={"tool_type": "other"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     updated = client.put(
         "/capabilities/mcp-services/mysql/tools/query_sql/type",
         json={"tool_type": "search"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     assert denied.status_code == 403
@@ -353,30 +353,30 @@ def test_profile_api_and_catalog_preview(wm_paths) -> None:
     client.post(
         "/capabilities/mcp-services",
         json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     client.post(
         "/capabilities/mcp-services",
         json={"service_key": "hive", "name": "Hive", "endpoint_url": "https://hive.test/mcp"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     created = client.post(
         "/capability-profiles",
         json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     rules = client.put(
         "/capability-profiles/safe-readonly/rules",
         json={"rules": [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}]},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/capability-profiles", headers={"X-Wiki-User": "root"})
-    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Wiki-User": "root"})
+    listed = client.get("/capability-profiles", headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Agent-Bridge-User": "root"})
     catalog = client.get(
         "/capability-catalog",
         params={"profile_key": "safe-readonly"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     assert created.status_code == 200
@@ -397,15 +397,15 @@ def test_profile_resource_rules_api(wm_paths) -> None:
     client.post(
         "/capability-profiles",
         json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     saved = client.put(
         "/capability-profiles/safe-readonly/resources",
         json={"resources": [{"resource_type": "wiki_kb", "resource_key": "frontend-docs"}]},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
-    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Wiki-User": "root"})
+    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200
     assert saved.json()["resource_rules"][0]["resource_key"] == "frontend-docs"
@@ -420,10 +420,10 @@ def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
     client.post(
         "/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
-    response = client.get("/builtin/wiki/kbs", headers={"X-Wiki-User": "root"})
+    response = client.get("/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert response.json()[0]["slug"] == "frontend-docs"
@@ -434,17 +434,17 @@ def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    from wiki_manager.mcp_server import create_mcp_server
-    from wiki_manager.services import WikiManagerService
+    from agent_bridge.mcp_server import create_mcp_server
+    from agent_bridge.services import AgentBridgeService
 
-    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
     mcp = create_mcp_server(svc)
     _, structured = asyncio.run(mcp.call_tool("search", {"query": "mysql"}))
     log_id = structured["log_id"]
 
-    listed = client.get("/tool-call-logs", headers={"X-Wiki-User": "root"})
-    detail = client.get(f"/tool-call-logs/{log_id}", headers={"X-Wiki-User": "root"})
+    listed = client.get("/tool-call-logs", headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get(f"/tool-call-logs/{log_id}", headers={"X-Agent-Bridge-User": "root"})
 
     assert listed.status_code == 200
     assert listed.json()[0]["log_id"] == log_id
@@ -492,7 +492,7 @@ def test_tool_call_log_api_filters_by_failure_classification(wm_paths) -> None:
     response = client.get(
         "/tool-call-logs",
         params={"failure_owner": FailureOwner.upstream_mcp.value, "failure_stage": FailureStage.upstream_tool.value},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     assert response.status_code == 200
@@ -521,7 +521,7 @@ def test_tool_call_stats_api_groups_by_dimensions(wm_paths) -> None:
     response = client.get(
         "/tool-call-stats",
         params={"dimensions": "profile_key,source_key,tool_name"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     assert response.status_code == 200
@@ -536,7 +536,7 @@ def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
     client.post(
         "/capabilities/mcp-services",
         json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
     store = SQLiteStore(wm_paths.db_path)
     store.upsert_mcp_tool(
@@ -562,10 +562,10 @@ def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
         status="success",
     )
 
-    source = client.get("/capability-catalog/sources/mcp_service/mysql", headers={"X-Wiki-User": "root"})
+    source = client.get("/capability-catalog/sources/mcp_service/mysql", headers={"X-Agent-Bridge-User": "root"})
     tool = client.get(
         "/capability-catalog/sources/mcp_service/mysql/tools/query_sql",
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     assert source.status_code == 200
@@ -591,10 +591,10 @@ def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
             "description": "Demo app",
             "tags": ["python"],
         },
-        headers={"X-Wiki-User": "root"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/builtin/codegraph/repositories", headers={"X-Wiki-User": "root"})
-    synced = client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Wiki-User": "root"})
+    listed = client.get("/builtin/codegraph/repositories", headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
 
     assert created.status_code == 200
     assert created.json()["repo_key"] == "web-app"
@@ -619,7 +619,7 @@ def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths)
             "git_url": str(repo),
             "branch": "master",
         },
-        headers={"X-Wiki-User": "alice"},
+        headers={"X-Agent-Bridge-User": "alice"},
     )
 
     assert response.status_code == 403

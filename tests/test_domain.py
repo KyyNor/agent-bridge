@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.domain import (
+from agent_bridge.domain import (
     AccessDenied,
     BackendDocStatus,
     DocumentStatus,
@@ -18,8 +18,8 @@ from wiki_manager.domain import (
     can_write_own_doc,
     require_admin_user,
 )
-from wiki_manager.mock_backend import MockBackend
-from wiki_manager.slug import make_slug, unique_slug
+from agent_bridge.mock_backend import MockBackend
+from agent_bridge.slug import make_slug, unique_slug
 
 
 def test_domain_enums_have_expected_values() -> None:
@@ -67,7 +67,7 @@ def test_operation_values_are_stable() -> None:
 
 
 def test_backend_adapter_protocol_is_defined():
-    from wiki_manager.domain import BackendAdapter
+    from agent_bridge.domain import BackendAdapter
 
     assert BackendAdapter is not None
 
@@ -116,7 +116,7 @@ def test_mock_backend_delete_removes_document():
 
 
 def test_retrieval_result_dataclass():
-    from wiki_manager.domain import RetrievalResult
+    from agent_bridge.domain import RetrievalResult
 
     r = RetrievalResult(
         chunk_id="c1",
@@ -130,7 +130,7 @@ def test_retrieval_result_dataclass():
 
 
 def test_ask_result_dataclass():
-    from wiki_manager.domain import AskResult
+    from agent_bridge.domain import AskResult
 
     result = AskResult(answer="yes", chunks=[], session_id="s1")
     assert result.answer == "yes"
@@ -139,7 +139,7 @@ def test_ask_result_dataclass():
 
 
 def test_backend_adapter_protocol_has_retrieve_and_ask():
-    from wiki_manager.domain import BackendAdapter
+    from agent_bridge.domain import BackendAdapter
     import inspect
 
     sig = inspect.signature(BackendAdapter.retrieve)

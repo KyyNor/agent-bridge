@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from wiki_manager.capabilities import CallLogStatus, SourceType
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import CallLogStatus, SourceType
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.storage import SQLiteStore
 
 
-def test_call_log_stats_group_by_profile_service_and_tool(wm_paths: WikiManagerPaths) -> None:
+def test_call_log_stats_group_by_profile_service_and_tool(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     rows = [

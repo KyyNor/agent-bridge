@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 
-from wiki_manager.capabilities import CallLogStatus, PolicyContext, ProfileRuleEffect, SourceRef, SourceType
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import CallLogStatus, PolicyContext, ProfileRuleEffect, SourceRef, SourceType
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.storage import SQLiteStore
 
 
-def test_project_profile_and_rules_round_trip(wm_paths: WikiManagerPaths) -> None:
+def test_project_profile_and_rules_round_trip(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
 
@@ -49,7 +49,7 @@ def test_project_profile_and_rules_round_trip(wm_paths: WikiManagerPaths) -> Non
     assert [(rule["source_key"], rule["effect"]) for rule in rules] == [("hive", "deny"), ("mysql", "allow")]
 
 
-def test_tool_call_log_round_trip_and_filters(wm_paths: WikiManagerPaths) -> None:
+def test_tool_call_log_round_trip_and_filters(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
 
@@ -83,7 +83,7 @@ def test_tool_call_log_round_trip_and_filters(wm_paths: WikiManagerPaths) -> Non
     assert json.loads(detail["request_json"]) == request
 
 
-def test_tool_call_log_allows_missing_profile(wm_paths: WikiManagerPaths) -> None:
+def test_tool_call_log_allows_missing_profile(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
 
@@ -111,7 +111,7 @@ def test_policy_context_defaults_are_profile_optional() -> None:
     assert context.entrypoint == "metamcp_search"
 
 
-def test_tool_call_log_migration_allows_missing_profile(wm_paths: WikiManagerPaths) -> None:
+def test_tool_call_log_migration_allows_missing_profile(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     with store.connect() as conn:
         conn.executescript(

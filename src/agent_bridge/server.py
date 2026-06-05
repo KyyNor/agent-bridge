@@ -11,10 +11,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from wiki_manager.config import WikiManagerPaths, default_user, load_server_config
-from wiki_manager.domain import KbRole, WikiManagerError
-from wiki_manager.services import WikiManagerService
-from wiki_manager.web_pages import capability_admin_page
+from agent_bridge.config import AgentBridgePaths, default_user, load_server_config
+from agent_bridge.domain import KbRole, AgentBridgeError
+from agent_bridge.services import AgentBridgeService
+from agent_bridge.web_pages import capability_admin_page
 
 
 class CreateKbRequest(BaseModel):
@@ -98,10 +98,10 @@ class CodeRepositoryRequest(BaseModel):
     status: str = "active"
 
 
-def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = None) -> FastAPI:
-    resolved_paths = paths or WikiManagerPaths.from_root()
+def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = None) -> FastAPI:
+    resolved_paths = paths or AgentBridgePaths.from_root()
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
-    service = WikiManagerService.create(resolved_paths, resolved_admins)
+    service = AgentBridgeService.create(resolved_paths, resolved_admins)
     capability_schema_ready = False
 
     @asynccontextmanager
@@ -109,12 +109,12 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         service.align_backends()
         yield
 
-    app = FastAPI(title="wiki-manager", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
     static_dir = Path(__file__).parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir), name="capabilities-static")
 
-    def actor(x_wiki_user: str = Header(alias="X-Wiki-User")) -> str:
-        return x_wiki_user
+    def actor(x_agent_bridge_user: str = Header(alias="X-Agent-Bridge-User")) -> str:
+        return x_agent_bridge_user
 
     def call_safely(call: Callable[[], Any]) -> Any:
         try:
@@ -124,7 +124,7 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
                 service.governance.admins = service.admins
                 service.codegraph.admins = service.admins
             return call()
-        except WikiManagerError as exc:
+        except AgentBridgeError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     async def call_safely_async(call: Callable[[], Awaitable[Any]]) -> Any:
@@ -135,7 +135,7 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
                 service.governance.admins = service.admins
                 service.codegraph.admins = service.admins
             return await call()
-        except WikiManagerError as exc:
+        except AgentBridgeError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     def save_upload(file: UploadFile) -> Path:
@@ -552,7 +552,7 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.sync_repository(current_actor, repo_key))
 
-    from wiki_manager.mcp_server import setup_mcp_route
+    from agent_bridge.mcp_server import setup_mcp_route
 
     setup_mcp_route(app, service)
 

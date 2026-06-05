@@ -6,14 +6,14 @@ import json
 import pytest
 
 from test_capability_service import FakeMcpClient
-from wiki_manager.capabilities import CallLogStatus, FailureOwner, FailureStage, SourceType, ToolType
-from wiki_manager.capability_service import CapabilityService
-from wiki_manager.config import WikiManagerPaths
-from wiki_manager.domain import ValidationError
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import CallLogStatus, FailureOwner, FailureStage, SourceType, ToolType
+from agent_bridge.capability_service import CapabilityService
+from agent_bridge.config import AgentBridgePaths
+from agent_bridge.domain import ValidationError
+from agent_bridge.storage import SQLiteStore
 
 
-def test_tool_call_log_records_failure_classification_and_resource(wm_paths: WikiManagerPaths) -> None:
+def test_tool_call_log_records_failure_classification_and_resource(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
 
@@ -54,7 +54,7 @@ def test_tool_call_log_records_failure_classification_and_resource(wm_paths: Wik
     }
 
 
-def test_tool_call_log_filters_by_failure_and_time_range(wm_paths: WikiManagerPaths) -> None:
+def test_tool_call_log_filters_by_failure_and_time_range(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.create_tool_call_log(
@@ -95,7 +95,7 @@ def test_tool_call_log_filters_by_failure_and_time_range(wm_paths: WikiManagerPa
     assert [item["log_id"] for item in filtered] == ["call_policy_block"]
 
 
-def test_execute_classifies_profile_block(wm_paths: WikiManagerPaths) -> None:
+def test_execute_classifies_profile_block(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     service = CapabilityService(store=store, mcp_client=FakeMcpClient(), admins={"root"})
@@ -116,7 +116,7 @@ def test_execute_classifies_profile_block(wm_paths: WikiManagerPaths) -> None:
     assert log["error_type"] == "profile_policy_blocked"
 
 
-def test_execute_classifies_mcp_transport_error(wm_paths: WikiManagerPaths) -> None:
+def test_execute_classifies_mcp_transport_error(wm_paths: AgentBridgePaths) -> None:
     class FailingCallMcpClient(FakeMcpClient):
         async def call_tool(self, endpoint_url, headers, tool_name, arguments):
             raise RuntimeError("transport unavailable")

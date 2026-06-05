@@ -5,7 +5,7 @@ import json
 
 
 def test_mcp_server_exposes_search_and_execute_tools():
-    from wiki_manager.mcp_server import create_mcp_server
+    from agent_bridge.mcp_server import create_mcp_server
 
     class FakeService:
         capabilities = None
@@ -17,7 +17,7 @@ def test_mcp_server_exposes_search_and_execute_tools():
 
 
 def test_mcp_search_tool_has_path_query_schema():
-    from wiki_manager.mcp_server import create_mcp_server
+    from agent_bridge.mcp_server import create_mcp_server
 
     class FakeService:
         capabilities = None
@@ -34,7 +34,7 @@ def test_mcp_search_tool_has_path_query_schema():
 
 
 def test_mcp_execute_tool_has_service_key_tool_arguments_schema():
-    from wiki_manager.mcp_server import create_mcp_server
+    from agent_bridge.mcp_server import create_mcp_server
 
     class FakeService:
         capabilities = None
@@ -50,7 +50,7 @@ def test_mcp_execute_tool_has_service_key_tool_arguments_schema():
 
 
 def test_mcp_search_tool_calls_capability_service():
-    from wiki_manager.mcp_server import create_mcp_server
+    from agent_bridge.mcp_server import create_mcp_server
 
     returned = {"items": [{"service": "svc-1", "tool": "read"}], "path": "/", "log_id": "call_1"}
 
@@ -70,7 +70,7 @@ def test_mcp_search_tool_calls_capability_service():
 
 
 def test_mcp_execute_tool_calls_capability_service():
-    from wiki_manager.mcp_server import create_mcp_server
+    from agent_bridge.mcp_server import create_mcp_server
 
     returned = {"success": True, "result": {}, "service": "svc-1", "tool": "read", "log_id": "call_1"}
 
@@ -90,10 +90,10 @@ def test_mcp_execute_tool_calls_capability_service():
 
 
 def test_mcp_search_with_default_service_initializes_schema(wm_paths):
-    from wiki_manager.mcp_server import create_mcp_server
-    from wiki_manager.services import WikiManagerService
+    from agent_bridge.mcp_server import create_mcp_server
+    from agent_bridge.services import AgentBridgeService
 
-    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
     mcp = create_mcp_server(svc)
     content, structured = asyncio.run(mcp.call_tool("search", {}))

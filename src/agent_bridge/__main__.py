@@ -1,4 +1,4 @@
-from wiki_manager.cli import main
+from agent_bridge.cli import main
 
 
 if __name__ == "__main__":

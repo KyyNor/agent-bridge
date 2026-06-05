@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from wiki_manager.capabilities import (
+from agent_bridge.capabilities import (
     CallLogStatus,
     FailureOwner,
     FailureStage,
@@ -15,8 +15,8 @@ from wiki_manager.capabilities import (
     ProfileRuleEffect,
     SourceType,
 )
-from wiki_manager.domain import NotFound, ValidationError, require_admin_user
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.storage import SQLiteStore
 
 
 VALID_PROFILE_STATUSES = {"active", "disabled"}

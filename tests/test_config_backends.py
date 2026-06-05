@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from wiki_manager.config import BackendConfig, WikiManagerPaths, load_backend_configs, load_server_config, load_mcp_config
+from agent_bridge.config import BackendConfig, AgentBridgePaths, load_backend_configs, load_server_config, load_mcp_config
 
 
 def _write_config(config_dir: Path, content: str) -> None:
@@ -13,14 +13,14 @@ def _write_config(config_dir: Path, content: str) -> None:
 
 
 def test_no_backends_returns_empty(tmp_path: Path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     _write_config(paths.config_dir, 'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n')
     backends = load_backend_configs(paths)
     assert backends == []
 
 
 def test_single_backend_config(tmp_path: Path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     _write_config(paths.config_dir, (
         'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
         '[backends.mock]\nbackend_type = "mock"\n'
@@ -32,7 +32,7 @@ def test_single_backend_config(tmp_path: Path):
 
 
 def test_multiple_backend_configs(tmp_path: Path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     _write_config(paths.config_dir, (
         'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
         '[backends.mock]\nbackend_type = "mock"\n\n'
@@ -49,7 +49,7 @@ def test_multiple_backend_configs(tmp_path: Path):
 
 
 def test_weknora_backend_config_reads_model_ids(tmp_path: Path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     _write_config(paths.config_dir, (
         'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
         '[backends.weknora]\n'
@@ -68,7 +68,7 @@ def test_weknora_backend_config_reads_model_ids(tmp_path: Path):
 
 
 def test_backend_config_missing_required_field(tmp_path: Path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     _write_config(paths.config_dir, (
         'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
         '[backends.ragflow]\nbase_url = "http://localhost:9380"\n'
@@ -83,7 +83,7 @@ def test_load_server_config_reads_default_backend(tmp_path):
         'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\ndefault_backend = "ragflow"\n',
         encoding="utf-8",
     )
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     paths.config_dir.mkdir(parents=True, exist_ok=True)
     import shutil
     shutil.copy2(config_path, paths.server_config_path)
@@ -93,13 +93,13 @@ def test_load_server_config_reads_default_backend(tmp_path):
 
 
 def test_load_server_config_default_backend_none_when_missing(tmp_path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     config = load_server_config(paths)
     assert config.default_backend is None
 
 
 def test_load_mcp_config_returns_defaults(tmp_path):
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     paths.config_dir.mkdir(parents=True, exist_ok=True)
     # No [mcp] section in config
     config = load_mcp_config(paths)
@@ -113,7 +113,7 @@ def test_load_mcp_config_reads_values(tmp_path):
         'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n[mcp]\nenabled = true\ntransport = "sse"\n',
         encoding="utf-8",
     )
-    paths = WikiManagerPaths.from_root(tmp_path)
+    paths = AgentBridgePaths.from_root(tmp_path)
     paths.config_dir.mkdir(parents=True, exist_ok=True)
     import shutil
     shutil.copy2(config_path, paths.server_config_path)

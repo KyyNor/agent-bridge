@@ -1,4 +1,4 @@
-"""Application services for wiki-manager."""
+"""Application services for Agent Bridge."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from wiki_manager.archive import ArchiveStorage
-from wiki_manager.capability_governance import CapabilityGovernanceService
-from wiki_manager.capability_service import CapabilityService
-from wiki_manager.codegraph_service import CodeGraphService
-from wiki_manager.config import WikiManagerPaths, ensure_directories
-from wiki_manager.domain import (
+from agent_bridge.archive import ArchiveStorage
+from agent_bridge.capability_governance import CapabilityGovernanceService
+from agent_bridge.capability_service import CapabilityService
+from agent_bridge.codegraph_service import CodeGraphService
+from agent_bridge.config import AgentBridgePaths, ensure_directories
+from agent_bridge.domain import (
     AccessDenied,
     AskResult,
     KbRole,
@@ -25,19 +25,19 @@ from wiki_manager.domain import (
     can_write_own_doc,
     require_admin_user,
 )
-from wiki_manager.mock_backend import MockBackend
-from wiki_manager.registry import BackendRegistry, create_registry
-from wiki_manager.slug import make_slug, unique_slug
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.mock_backend import MockBackend
+from agent_bridge.registry import BackendRegistry, create_registry
+from agent_bridge.slug import make_slug, unique_slug
+from agent_bridge.storage import SQLiteStore
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md"}
 
 
-class WikiManagerService:
+class AgentBridgeService:
     def __init__(
         self,
-        paths: WikiManagerPaths,
+        paths: AgentBridgePaths,
         store: SQLiteStore,
         archive: ArchiveStorage,
         mock_backend: MockBackend,
@@ -52,14 +52,14 @@ class WikiManagerService:
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
-        from wiki_manager.builtin_codegraph import CodeGraphBuiltinProvider
-        from wiki_manager.builtin_wiki import WikiBuiltinProvider
+        from agent_bridge.builtin_codegraph import CodeGraphBuiltinProvider
+        from agent_bridge.builtin_wiki import WikiBuiltinProvider
 
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
         self.capabilities.register_builtin_provider(CodeGraphBuiltinProvider(self.codegraph, self.governance))
 
     @classmethod
-    def create(cls, paths: WikiManagerPaths, admins: set[str]) -> "WikiManagerService":
+    def create(cls, paths: AgentBridgePaths, admins: set[str]) -> "AgentBridgeService":
         service = cls(
             paths=paths,
             store=SQLiteStore(paths.db_path),
@@ -304,7 +304,7 @@ class WikiManagerService:
             return target
 
         if self.registry:
-            from wiki_manager.config import load_server_config
+            from agent_bridge.config import load_server_config
             config = load_server_config(self.paths)
             if config.default_backend:
                 target = next((t for t in active if t["slug"] == config.default_backend), None)

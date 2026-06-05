@@ -6,8 +6,8 @@ from pathlib import Path
 import httpx
 from typer.testing import CliRunner
 
-from wiki_manager.client import WikiManagerClient
-from wiki_manager.cli import app
+from agent_bridge.client import AgentBridgeClient
+from agent_bridge.cli import app
 
 
 runner = CliRunner()
@@ -21,7 +21,7 @@ def test_kb_list_calls_client(monkeypatch) -> None:
             calls.append("list_kbs")
             return [{"slug": "frontend-docs", "role": "contributor"}]
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["kb", "list"])
     assert result.exit_code == 0
     assert "frontend-docs" in result.stdout
@@ -40,7 +40,7 @@ def test_add_command_sends_file_and_kbs(monkeypatch, tmp_path: Path) -> None:
             captured["later"] = later
             return {"slug": "guide", "current_version_no": 1}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["add", str(source), "--kb", "frontend-docs", "--later"])
     assert result.exit_code == 0
     assert "guide" in result.stdout
@@ -52,7 +52,7 @@ def test_sync_command_prints_processed_count(monkeypatch) -> None:
         def sync(self, all_users, backend=None):
             return {"processed": 2}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["sync"])
     assert result.exit_code == 0
     assert "processed: 2" in result.stdout
@@ -67,19 +67,19 @@ def test_client_init_system_posts_admin_init(monkeypatch) -> None:
         captured["timeout"] = timeout
         return httpx.Response(200, json=None)
 
-    monkeypatch.setattr("wiki_manager.client.httpx.post", fake_post)
-    WikiManagerClient("http://example.test/", "root").init_system()
+    monkeypatch.setattr("agent_bridge.client.httpx.post", fake_post)
+    AgentBridgeClient("http://example.test/", "root").init_system()
     assert captured == {
         "url": "http://example.test/admin/init",
-        "headers": {"X-Wiki-User": "root"},
+        "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
     }
 
 
 def test_client_from_config_uses_environment_user(monkeypatch) -> None:
-    monkeypatch.setenv("WIKI_MANAGER_USER", "kyynor")
+    monkeypatch.setenv("AGENT_BRIDGE_USER", "kyynor")
 
-    client = WikiManagerClient.from_config()
+    client = AgentBridgeClient.from_config()
 
     assert client.linux_user == "kyynor"
 
@@ -94,13 +94,13 @@ def test_client_purge_document_sends_confirmation(monkeypatch) -> None:
         captured["timeout"] = timeout
         return httpx.Response(200, json={"slug": "guide", "status": "purged"})
 
-    monkeypatch.setattr("wiki_manager.client.httpx.post", fake_post)
-    result = WikiManagerClient("http://example.test/", "root").purge_document("guide", confirm=True)
+    monkeypatch.setattr("agent_bridge.client.httpx.post", fake_post)
+    result = AgentBridgeClient("http://example.test/", "root").purge_document("guide", confirm=True)
     assert result == {"slug": "guide", "status": "purged"}
     assert captured == {
         "url": "http://example.test/docs/guide/purge",
         "json": {"confirm": True},
-        "headers": {"X-Wiki-User": "root"},
+        "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
     }
 
@@ -112,7 +112,7 @@ def test_server_init_calls_client(monkeypatch) -> None:
         def init_system(self):
             calls.append("init_system")
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["server", "init"])
     assert result.exit_code == 0
     assert "initialized" in result.stdout
@@ -124,7 +124,7 @@ def test_status_reports_service_unavailable_cleanly(monkeypatch) -> None:
         def status(self, backend=None):
             raise httpx.ConnectError("boom")
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["status"])
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code == 1
@@ -140,7 +140,7 @@ def test_add_missing_file_reports_clean_cli_error() -> None:
 
 
 def test_server_status_command(monkeypatch) -> None:
-    monkeypatch.setattr("wiki_manager.cli.server_status", lambda: {"running": True, "pid": 123})
+    monkeypatch.setattr("agent_bridge.cli.server_status", lambda: {"running": True, "pid": 123})
     result = runner.invoke(app, ["server", "status"])
     assert result.exit_code == 0
     assert "running" in result.stdout
@@ -154,7 +154,7 @@ def test_server_status_accepts_root_option(monkeypatch, tmp_path: Path) -> None:
         captured["root"] = paths.root
         return {"running": True, "pid": 123}
 
-    monkeypatch.setattr("wiki_manager.cli.server_status", fake_status)
+    monkeypatch.setattr("agent_bridge.cli.server_status", fake_status)
     result = runner.invoke(app, ["server", "status", "--root", str(tmp_path)])
 
     assert result.exit_code == 0
@@ -165,7 +165,7 @@ def test_server_start_reports_errors_cleanly(monkeypatch) -> None:
     def fail_start():
         raise OSError("permission denied")
 
-    monkeypatch.setattr("wiki_manager.cli.start_server", fail_start)
+    monkeypatch.setattr("agent_bridge.cli.start_server", fail_start)
     result = runner.invoke(app, ["server", "start"])
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code == 1
@@ -182,7 +182,7 @@ def test_purge_without_yes_exits_without_calling_client(monkeypatch) -> None:
             calls.append((doc_slug, confirm))
             return {"slug": doc_slug, "status": "purged"}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["purge", "guide"])
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code == 1
@@ -199,7 +199,7 @@ def test_purge_with_yes_calls_client(monkeypatch) -> None:
             calls.append((doc_slug, confirm))
             return {"slug": doc_slug, "status": "purged"}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["purge", "guide", "--yes"])
     assert result.exit_code == 0
     assert "purged" in result.stdout
@@ -211,7 +211,7 @@ def test_list_backends(monkeypatch) -> None:
         def list_backends(self):
             return [{"slug": "local-gpt", "type": "openai"}]
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["backends"])
     assert result.exit_code == 0
     assert "local-gpt" in result.stdout
@@ -234,7 +234,7 @@ def test_search_command_calls_client(monkeypatch) -> None:
                 ]
             }
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["search", "how does auth work", "--kb", "frontend-docs"])
     assert result.exit_code == 0
     assert "auth.md" in result.stdout
@@ -246,7 +246,7 @@ def test_search_command_no_results(monkeypatch) -> None:
         def search(self, kb_slug, question, backend=None, top_k=6):
             return {"results": []}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["search", "nonexistent", "--kb", "test-kb"])
     assert result.exit_code == 0
     assert "no results" in result.stdout
@@ -260,7 +260,7 @@ def test_ask_command_calls_client(monkeypatch) -> None:
             calls.append({"kb": kb_slug, "q": question, "backend": backend, "session_id": session_id})
             return {"answer": "OAuth2 uses tokens.", "session_id": "abc123"}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["ask", "how does auth work", "--kb", "frontend-docs"])
     assert result.exit_code == 0
     assert "OAuth2 uses tokens." in result.stdout
@@ -278,13 +278,13 @@ def test_client_search_sends_get(monkeypatch) -> None:
         captured["timeout"] = timeout
         return httpx.Response(200, json={"results": []})
 
-    monkeypatch.setattr("wiki_manager.client.httpx.get", fake_get)
-    result = WikiManagerClient("http://example.test/", "root").search("my-kb", "what?", backend="openai", top_k=3)
+    monkeypatch.setattr("agent_bridge.client.httpx.get", fake_get)
+    result = AgentBridgeClient("http://example.test/", "root").search("my-kb", "what?", backend="openai", top_k=3)
     assert result == {"results": []}
     assert captured == {
         "url": "http://example.test/search",
         "params": {"kb": "my-kb", "q": "what?", "backend": "openai", "top_k": "3"},
-        "headers": {"X-Wiki-User": "root"},
+        "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 30.0,
     }
 
@@ -299,13 +299,13 @@ def test_client_ask_sends_post(monkeypatch) -> None:
         captured["timeout"] = timeout
         return httpx.Response(200, json={"answer": "yes", "session_id": "s1"})
 
-    monkeypatch.setattr("wiki_manager.client.httpx.post", fake_post)
-    result = WikiManagerClient("http://example.test/", "root").ask("my-kb", "is it?", backend="openai", session_id="s1")
+    monkeypatch.setattr("agent_bridge.client.httpx.post", fake_post)
+    result = AgentBridgeClient("http://example.test/", "root").ask("my-kb", "is it?", backend="openai", session_id="s1")
     assert result == {"answer": "yes", "session_id": "s1"}
     assert captured == {
         "url": "http://example.test/ask",
         "json": {"kb": "my-kb", "question": "is it?", "backend": "openai", "session_id": "s1"},
-        "headers": {"X-Wiki-User": "root"},
+        "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 60.0,
     }
 
@@ -318,7 +318,7 @@ def test_metamcp_profile_create_calls_client(monkeypatch) -> None:
             calls.append((profile_key, name, description, status))
             return {"profile_key": profile_key, "name": name}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["metamcp", "profile", "create", "safe-readonly", "--name", "安全只读"])
 
     assert result.exit_code == 0
@@ -335,7 +335,7 @@ def test_metamcp_profile_rules_calls_client(monkeypatch) -> None:
             captured["rules"] = rules
             return {"profile_key": profile_key, "rules": rules}
 
-    monkeypatch.setattr("wiki_manager.cli.WikiManagerClient.from_config", lambda: FakeClient())
+    monkeypatch.setattr("agent_bridge.cli.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         ["metamcp", "profile", "rules", "safe-readonly", "--allow", "mysql", "--deny", "hive"],
@@ -402,7 +402,7 @@ def test_metamcp_add_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
 def test_metamcp_add_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
-    monkeypatch.setattr("wiki_manager.cli._stdin_is_interactive", lambda: True)
+    monkeypatch.setattr("agent_bridge.cli._stdin_is_interactive", lambda: True)
 
     result = runner.invoke(
         app,
@@ -424,7 +424,7 @@ def test_metamcp_add_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path)
 
 def test_metamcp_add_requires_scope_in_non_interactive_mode(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("wiki_manager.cli._stdin_is_interactive", lambda: False)
+    monkeypatch.setattr("agent_bridge.cli._stdin_is_interactive", lambda: False)
 
     result = runner.invoke(
         app,

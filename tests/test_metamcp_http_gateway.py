@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from wiki_manager.capabilities import ProfileResourceType, ProfileRuleEffect, SourceType
-from wiki_manager.mcp_server import _request_profile, create_mcp_server
-from wiki_manager.services import WikiManagerService
-from wiki_manager.storage import SQLiteStore
+from agent_bridge.capabilities import ProfileResourceType, ProfileRuleEffect, SourceType
+from agent_bridge.mcp_server import _request_profile, create_mcp_server
+from agent_bridge.services import AgentBridgeService
+from agent_bridge.storage import SQLiteStore
 
 
 def _register_service(wm_paths, service_key: str, name: str) -> None:
@@ -49,7 +49,7 @@ def test_mcp_search_lists_registered_services(wm_paths) -> None:
     _register_service(wm_paths, "mysql", "MySQL")
     _register_service(wm_paths, "hive", "Hive")
 
-    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
     mcp = create_mcp_server(svc)
     _, structured = asyncio.run(mcp.call_tool("search", {}))
@@ -74,7 +74,7 @@ def test_mcp_search_lists_external_and_builtin_sources_with_profile(wm_paths) ->
         [{"resource_type": ProfileResourceType.wiki_kb.value, "resource_key": "frontend-docs"}],
     )
 
-    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
     mcp = create_mcp_server(svc)
     token = _request_profile.set("safe-readonly")
@@ -97,7 +97,7 @@ def test_mcp_search_filters_by_query(wm_paths) -> None:
     _register_service(wm_paths, "mysql", "MySQL")
     _register_service(wm_paths, "hive", "Hive")
 
-    svc = WikiManagerService.create(wm_paths, {"root"})
+    svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
     mcp = create_mcp_server(svc)
     _, structured = asyncio.run(mcp.call_tool("search", {"query": "my"}))

@@ -1,4 +1,4 @@
-const DEFAULT_USER = window.WIKI_MANAGER_DEFAULT_USER || "root";
+const DEFAULT_USER = window.AGENT_BRIDGE_DEFAULT_USER || "root";
 
 const API_HEADERS = {
   "Content-Type": "application/json",
