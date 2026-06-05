@@ -126,9 +126,17 @@ def _resolve_metamcp_scope(scope: str | None) -> str:
         return scope
     if not _stdin_is_interactive():
         raise ValueError("非交互模式下必须指定 scope")
-    selected = typer.prompt("选择配置范围 project/user", default="project")
-    if selected not in {"project", "user"}:
-        raise ValueError("scope 必须是 project 或 user")
+    import questionary
+    selected = questionary.select(
+        "选择配置范围",
+        choices=[
+            {"name": "project  当前项目 (.mcp.json)", "value": "project"},
+            {"name": "user  全局 (~/.mcp.json)", "value": "user"},
+        ],
+        default="project",
+    ).ask()
+    if selected is None:
+        raise typer.Abort()
     return selected
 
 
