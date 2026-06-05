@@ -10,7 +10,7 @@ import httpx
 import typer
 
 from agent_bridge.client import AgentBridgeClient
-from agent_bridge.runtime.server_process import server_status, start_server
+from agent_bridge.runtime.server_process import server_status, start_server, stop_server
 
 app = typer.Typer(
     help="Agent Bridge: capability and knowledge management.",
@@ -155,7 +155,7 @@ def root(
         ),
     ] = False,
 ) -> None:
-    """Wiki Manager command line interface."""
+    """Agent Bridge command line interface."""
 
 
 @app.command()

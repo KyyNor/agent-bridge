@@ -24,7 +24,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        service.align_backends()
+        try:
+            service.align_backends()
+        except Exception:
+            pass
         yield
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
