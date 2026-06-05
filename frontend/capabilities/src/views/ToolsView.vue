@@ -2,7 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
 import type { McpTool, McpService } from '../api/types'
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
+import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Input } from '../components/ui/input'
@@ -62,46 +62,56 @@ const toolTypes = [
   { value: 'unconfigured', label: '未配置', color: 'bg-gray-100 text-gray-600' },
 ]
 
+const filterTabs = computed(() => [
+  { key: '', label: '全部', count: allTools.value.length },
+  ...toolTypes.map(tt => ({
+    key: tt.value,
+    label: tt.label,
+    count: allTools.value.filter(t => t.tool_type === tt.value).length,
+  })),
+])
+
 function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label || v }
 function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color || '' }
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
+  <div v-else class="space-y-5">
+    <!-- Toolbar -->
+    <div class="flex flex-wrap items-center gap-4">
+      <div class="relative flex-1 max-w-[360px]">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <Input v-model="search" placeholder="搜索工具名称或描述..." class="pl-8" />
+      </div>
+      <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
+        <button
+          v-for="tab in filterTabs" :key="tab.key"
+          :class="[
+            'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+            typeFilter === tab.key
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          ]"
+          @click="typeFilter = tab.key"
+        >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
+      </div>
+      <Select v-model="selectedService">
+        <SelectTrigger class="w-[200px]">
+          <SelectValue placeholder="全部服务" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">全部服务</SelectItem>
+          <SelectItem v-for="s in services" :key="s.service_key" :value="s.service_key">{{ s.name }}</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+
+    <!-- Table -->
     <Card class="border-border">
-      <CardHeader>
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <CardTitle>{{ selectedService ? (services.find(s => s.service_key === selectedService)?.name || '工具目录') : '工具目录' }}</CardTitle>
-          <div class="flex items-center gap-3">
-            <Select v-model="selectedService">
-              <SelectTrigger class="w-[220px]">
-                <SelectValue placeholder="全部服务" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">全部服务 ({{ allTools.length }})</SelectItem>
-                <SelectItem v-for="s in services" :key="s.service_key" :value="s.service_key">{{ s.name }} <span class="text-muted-foreground">({{ allTools.filter(t => t.service_key === s.service_key).length }})</span></SelectItem>
-              </SelectContent>
-            </Select>
-            <Select v-model="typeFilter">
-              <SelectTrigger class="w-[120px]">
-                <SelectValue placeholder="全部层级" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">全部层级</SelectItem>
-                <SelectItem v-for="t in toolTypes" :key="t.value" :value="t.value">{{ t.label }}</SelectItem>
-              </SelectContent>
-            </Select>
-            <div class="relative">
-              <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <Input v-model="search" placeholder="搜索工具..." class="w-[200px] pl-8" />
-            </div>
-          </div>
-        </div>
-      </CardHeader>
       <CardContent class="p-0">
-        <div v-if="loading" class="px-5 py-12 text-center text-sm text-muted-foreground">加载中...</div>
-        <div v-else-if="displayTools.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
-          {{ allTools.length === 0 ? '暂无已同步的工具，请先在服务列表中同步工具。' : '无匹配结果' }}
+        <div v-if="displayTools.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
+          {{ allTools.length === 0 ? '暂无已同步的工具，请先在能力接入中同步工具。' : '无匹配结果' }}
         </div>
         <table v-else class="w-full">
           <thead>
@@ -127,7 +137,7 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
                 <span v-if="t.tags?.length" class="flex flex-wrap gap-1">
                   <span v-for="tag in t.tags" :key="tag" class="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{{ tag }}</span>
                 </span>
-                <span v-else class="text-xs text-muted-foreground">—</span>
+                <span v-else class="text-xs text-muted-foreground">&mdash;</span>
               </td>
               <td class="max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ t.description }}</td>
               <td class="px-4 py-3">
@@ -145,5 +155,9 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
         </table>
       </CardContent>
     </Card>
+
+    <div class="flex items-center justify-between text-sm text-muted-foreground">
+      <span>共 {{ displayTools.length }} 条记录</span>
+    </div>
   </div>
 </template>
