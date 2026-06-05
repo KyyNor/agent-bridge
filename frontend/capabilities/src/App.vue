@@ -20,16 +20,12 @@ const navGroups: NavGroup[] = [
     items: [{ key: 'dashboard', label: '平台概览' }],
   },
   {
-    label: 'MCP 服务',
-    items: [{ key: 'services', label: '服务列表' }],
-  },
-  {
-    label: '工具管理',
-    items: [{ key: 'tools', label: '工具目录' }],
-  },
-  {
-    label: '治理策略',
-    items: [{ key: 'profiles', label: 'Project Profile' }],
+    label: '能力治理',
+    items: [
+      { key: 'services', label: 'MCP 服务' },
+      { key: 'tools', label: '工具目录' },
+      { key: 'profiles', label: 'Project Profile' },
+    ],
   },
   {
     label: '调用观测',
