@@ -79,7 +79,7 @@ export interface ToolCallLog {
 
 export interface ToolCallStats {
   dimensions: string[]
-  buckets: Record<string, unknown>[]
+  items: Record<string, unknown>[]
 }
 
 export interface CodeRepository {

@@ -21,7 +21,7 @@ async function loadStats() {
   loading.value = true
   try {
     const r = await api.stats({ dimensions: dimension.value })
-    stats.value = (r as unknown as { buckets: Record<string, unknown>[] }).buckets || []
+    stats.value = r.items || []
   } catch { stats.value = [] }
   loading.value = false
 }
