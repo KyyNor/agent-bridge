@@ -53,6 +53,10 @@ const filterTabs = computed(() => [
 
 async function createProfile() {
   formError.value = ''
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(form.value.profile_key)) {
+    formError.value = 'Profile 标识仅支持小写英文、数字、连字符和下划线'
+    return
+  }
   saving.value = true
   try {
     await api.upsertProfile({
