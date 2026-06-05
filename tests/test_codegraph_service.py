@@ -149,3 +149,27 @@ def test_codegraph_index_skips_symlinks(tmp_path: Path, wm_paths: AgentBridgePat
     service.sync_repository("root", "web-app")
 
     assert service.search_code("root", "web-app", query="EXTERNAL_ONLY_CONTENT") == []
+
+
+def test_codegraph_sync_uses_codegraph_cli_when_available(
+    tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_bridge.codegraph.client import CodeGraphClient
+
+    repo = _git_repo(tmp_path / "repo")
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    client = CodeGraphClient()
+    monkeypatch.setattr(client, "is_available", lambda: True)
+    monkeypatch.setattr(client, "init", lambda p: None)
+    monkeypatch.setattr(client, "index", lambda p: None)
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
+
+    service.upsert_repository(
+        actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
+        branch="master", auth_ref="", description="Demo app", tags=["python"],
+        sync_interval_minutes=60, status="active",
+    )
+    run = service.sync_repository("root", "web-app")
+    assert run["status"] == "succeeded"
+    assert run["indexed"] == 0

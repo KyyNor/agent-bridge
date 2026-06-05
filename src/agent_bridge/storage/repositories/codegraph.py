@@ -160,6 +160,13 @@ class CodeGraphRepository:
                 raise KeyError(f"codegraph sync run not found: {cursor.lastrowid}")
             return run
 
+    def update_codegraph_sync_run(self, run_id: int, *, stage: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE codegraph_sync_runs SET stage = ? WHERE id = ?",
+                (stage, run_id),
+            )
+
     def finish_codegraph_sync_run(
         self,
         run_id: int,

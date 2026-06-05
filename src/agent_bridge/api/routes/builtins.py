@@ -21,6 +21,11 @@ def create_builtin_routes(service, actor, call_safely, ensure_capability_schema)
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.upsert_repository(current_actor, **payload.model_dump()))
 
+    @router.get("/builtin/codegraph/status")
+    def get_codegraph_status(current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.get_status(current_actor))
+
     @router.post("/builtin/codegraph/repositories/{repo_key}/sync")
     def sync_code_repository(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()

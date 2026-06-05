@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agent_bridge.codegraph.client import CodeGraphClient
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -21,10 +22,17 @@ SYMBOL_PATTERN = re.compile(r"^\s*(def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", re.MU
 
 
 class CodeGraphService:
-    def __init__(self, paths: AgentBridgePaths, store: SQLiteStore, admins: set[str]) -> None:
+    def __init__(
+        self,
+        paths: AgentBridgePaths,
+        store: SQLiteStore,
+        admins: set[str],
+        codegraph_client: CodeGraphClient | None = None,
+    ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
+        self.client = codegraph_client or CodeGraphClient()
 
     def upsert_repository(
         self,
@@ -70,6 +78,14 @@ class CodeGraphService:
         require_admin_user(actor, self.admins)
         return [self._repository_payload(repo) for repo in self.store.list_code_repositories()]
 
+    def get_status(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        available = self.client.is_available()
+        return {
+            "codegraph_installed": available,
+            "message": None if available else "codegraph CLI 未安装，请运行 npm i -g @colbymchenry/codegraph",
+        }
+
     def sync_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         repo = self._require_repository(repo_key)
@@ -80,8 +96,15 @@ class CodeGraphService:
 
         try:
             self._sync_git(repo, local_path)
-            items = self._index_files(repo_key, local_path)
-            self.store.replace_codegraph_index(repo_key, items)
+            self.store.update_codegraph_sync_run(int(run["id"]), stage="indexing")
+            if self.client.is_available():
+                self.client.init(local_path)
+                self.client.index(local_path)
+                indexed_count = 0
+            else:
+                items = self._index_files(repo_key, local_path)
+                self.store.replace_codegraph_index(repo_key, items)
+                indexed_count = len(items)
             last_commit = self._git_output(local_path, ["rev-parse", "HEAD"])
             duration_ms = int((time.perf_counter() - started) * 1000)
             self.store.mark_code_repository_sync(
@@ -98,7 +121,7 @@ class CodeGraphService:
                 error=None,
                 duration_ms=duration_ms,
             )
-            return {"repo_key": repo_key, "status": "succeeded", "indexed": len(items)}
+            return {"repo_key": repo_key, "status": "succeeded", "indexed": indexed_count}
         except Exception as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
             message = str(exc)
@@ -120,6 +143,10 @@ class CodeGraphService:
 
     def search_code(self, actor: str, repo_key: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
         self._require_repository(repo_key)
+        if self.client.is_available():
+            local_path = self._local_path(repo_key)
+            nodes = self.client.query(local_path, query, limit=limit)
+            return [self._codegraph_node_payload(n) for n in nodes]
         return [
             self._index_payload(item)
             for item in self.store.search_codegraph_index(repo_key, query=query, item_type="file", limit=limit)
@@ -127,6 +154,21 @@ class CodeGraphService:
 
     def get_file(self, actor: str, repo_key: str, path: str) -> dict[str, Any]:
         self._require_repository(repo_key)
+        if self.client.is_available():
+            local_path = self._local_path(repo_key)
+            file_path = local_path / path
+            if not file_path.is_file():
+                raise NotFound("file not found")
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                raise NotFound("file not found") from None
+            return {
+                "repo_key": repo_key,
+                "path": path,
+                "language": self._language_for_path(file_path),
+                "content": content,
+            }
         item = self.store.get_codegraph_file(repo_key, path)
         if item is None:
             raise NotFound("file not found")
@@ -139,6 +181,10 @@ class CodeGraphService:
 
     def find_symbol(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
         self._require_repository(repo_key)
+        if self.client.is_available():
+            local_path = self._local_path(repo_key)
+            nodes = self.client.query(local_path, symbol, limit=limit)
+            return [self._codegraph_node_payload(n) for n in nodes]
         return [
             self._index_payload(item)
             for item in self.store.search_codegraph_index(repo_key, query=symbol, item_type="symbol", limit=limit)
@@ -146,6 +192,18 @@ class CodeGraphService:
 
     def repository_overview(self, actor: str, repo_key: str) -> dict[str, Any]:
         repo = self._require_repository(repo_key)
+        if self.client.is_available():
+            local_path = self._local_path(repo_key)
+            try:
+                stats = self.client.status(local_path)
+            except RuntimeError:
+                stats = {}
+            return {
+                **self._repository_payload(repo),
+                "file_count": stats.get("files", 0),
+                "symbol_count": stats.get("nodes", 0),
+                "last_synced_at": repo.get("last_synced_at"),
+            }
         return {
             **self._repository_payload(repo),
             "file_count": self.store.count_codegraph_index_items(repo_key, "file"),
@@ -158,6 +216,20 @@ class CodeGraphService:
         if repo is None or repo.get("status") != "active":
             raise NotFound("repository not found")
         return repo
+
+    def _local_path(self, repo_key: str) -> Path:
+        return self.paths.codegraph_dir / repo_key
+
+    def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "path": node.get("filePath", node.get("path", "")),
+            "symbol": node.get("name", ""),
+            "kind": node.get("kind", ""),
+            "line_start": node.get("startLine"),
+            "line_end": node.get("endLine"),
+            "snippet": node.get("signature", node.get("snippet", "")),
+            "score": node.get("score"),
+        }
 
     def _sync_git(self, repo: dict[str, Any], local_path: Path) -> None:
         if local_path.exists() and not (local_path / ".git").exists():

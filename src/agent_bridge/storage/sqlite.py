@@ -132,6 +132,9 @@ class SQLiteStore:
     def create_codegraph_sync_run(self, repo_key: str, *, status: str, stage: str) -> dict[str, Any]:
         return self.codegraph.create_codegraph_sync_run(repo_key=repo_key, status=status, stage=stage)
 
+    def update_codegraph_sync_run(self, run_id: int, *, stage: str) -> None:
+        return self.codegraph.update_codegraph_sync_run(run_id=run_id, stage=stage)
+
     def finish_codegraph_sync_run(
         self,
         run_id: int,
