@@ -22,9 +22,9 @@ const navGroups: NavGroup[] = [
   {
     label: '能力治理',
     items: [
-      { key: 'services', label: 'MCP 服务' },
+      { key: 'services', label: '能力接入' },
       { key: 'tools', label: '工具目录' },
-      { key: 'profiles', label: 'Project Profile' },
+      { key: 'profiles', label: '能力平面' },
     ],
   },
   {

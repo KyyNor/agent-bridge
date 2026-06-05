@@ -7,6 +7,9 @@ import { Badge } from '../components/ui/badge'
 
 const services = ref<McpService[]>([])
 const loading = ref(true)
+const enabledCount = computed(() => services.value.filter(s => s.status === 'enabled').length)
+const errorCount = computed(() => services.value.filter(s => s.status === 'error').length)
+const toolCount = ref<number | null>(null)
 
 function goto(hash: string) {
   window.location.hash = hash
@@ -15,13 +18,15 @@ function goto(hash: string) {
 onMounted(async () => {
   try {
     services.value = await api.listServices()
+    const active = services.value.filter(s => s.status === 'enabled')
+    let total = 0
+    await Promise.all(active.map(async s => {
+      try { total += (await api.listTools(s.service_key)).length } catch { /* skip */ }
+    }))
+    toolCount.value = total
   } catch { /* empty state */ }
   loading.value = false
 })
-
-const enabledCount = computed(() => services.value.filter(s => s.status === 'enabled').length)
-const errorCount = computed(() => services.value.filter(s => s.status === 'error').length)
-const toolCount = computed(() => services.value.length > 0 ? '...' : '—')
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return '—'
@@ -53,8 +58,7 @@ function timeAgo(dateStr: string | null): string {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         </div>
         <div class="text-[13px] font-medium text-muted-foreground">工具总数</div>
-        <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ toolCount }}</div>
-        <div class="mt-3 text-xs text-muted-foreground">从已启用服务同步</div>
+        <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ toolCount ?? '...' }}</div>
       </div>
 
       <div class="rounded-lg border border-border bg-card p-5 transition-shadow hover:shadow-sm">

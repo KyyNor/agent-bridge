@@ -30,11 +30,10 @@ function navigate(key: string) {
       <div class="border-b border-border/60 px-5 pb-4 pt-5">
         <div class="flex items-center gap-3">
           <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-            A
+            AB
           </div>
           <div class="leading-tight">
-            <div class="text-[15px] font-semibold text-foreground">Agent 能力管理中心</div>
-            <div class="text-xs text-muted-foreground">Capability Hub</div>
+            <div class="text-[15px] font-semibold text-foreground">Agent Bridge</div>
           </div>
         </div>
       </div>
