@@ -123,7 +123,7 @@ function timeAgo(dateStr: string | null): string {
             <CardTitle>快速操作</CardTitle>
           </CardHeader>
           <CardContent class="flex flex-wrap gap-3">
-            <button @click="goto('service-new')" class="flex flex-1 items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-all hover:border-primary hover:shadow-sm">
+            <button @click="goto('services')" class="flex flex-1 items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-all hover:border-primary hover:shadow-sm">
               <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-accent text-primary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               </div>
