@@ -40,6 +40,12 @@ const columnLabels: Record<string, string> = {
   profile_key: 'Profile',
   source_key: '来源',
   tool_name: '工具',
+  calls: '调用次数',
+  success: '成功',
+  error: '失败',
+  blocked: '拦截',
+  avg_duration_ms: '平均耗时',
+  max_duration_ms: '最大耗时',
 }
 
 const totalCount = computed(() => stats.value.reduce((sum, s) => sum + Number(s.count || 0), 0))
