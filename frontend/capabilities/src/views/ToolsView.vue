@@ -1,54 +1,58 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
-import type { McpTool } from '../api/types'
+import type { McpTool, McpService } from '../api/types'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Input } from '../components/ui/input'
 
-const tools = ref<McpTool[]>([])
-const services = ref<{ service_key: string; name: string }[]>([])
+interface ToolWithService extends McpTool {
+  service_name: string
+}
+
+const allTools = ref<ToolWithService[]>([])
+const services = ref<McpService[]>([])
 const selectedService = ref('')
 const loading = ref(false)
 const search = ref('')
 const typeFilter = ref('')
 
 onMounted(async () => {
-  services.value = await api.listServices()
-})
-
-async function loadTools() {
-  if (!selectedService.value) {
-    tools.value = []
-    return
-  }
   loading.value = true
   try {
-    tools.value = await api.listTools(selectedService.value)
-  } catch { tools.value = [] }
+    services.value = await api.listServices()
+    const active = services.value.filter(s => s.status === 'enabled')
+    const results: ToolWithService[] = []
+    for (const s of active) {
+      try {
+        const tools = await api.listTools(s.service_key)
+        for (const t of tools) {
+          results.push({ ...t, service_name: s.name || s.service_key })
+        }
+      } catch { /* ignore errors for individual services */ }
+    }
+    allTools.value = results
+  } catch { /* empty */ }
   loading.value = false
+})
+
+async function updateType(svc: string, toolName: string, newType: string) {
+  await api.updateToolType(svc, toolName, newType)
+  const found = allTools.value.find(x => x.service_key === svc && x.tool_name === toolName)
+  if (found) found.tool_type = newType
 }
 
-async function updateType(svc: string, tool: string, t: string) {
-  await api.updateToolType(svc, tool, t)
-  await loadTools()
-}
-
-const filtered = ref(false)
-const displayTools = ref<McpTool[]>([])
-
-function filter() {
-  let list = tools.value
+const displayTools = computed(() => {
+  let list = allTools.value
+  if (selectedService.value) list = list.filter(t => t.service_key === selectedService.value)
   if (typeFilter.value) list = list.filter(t => t.tool_type === typeFilter.value)
   if (search.value) {
     const q = search.value.toLowerCase()
     list = list.filter(t => t.tool_name.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q))
   }
-  displayTools.value = list
-}
-
-watch([tools, typeFilter, search], () => filter())
+  return list
+})
 
 const toolTypes = [
   { value: 'overview', label: '概览', color: 'bg-blue-50 text-blue-700' },
@@ -67,14 +71,15 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
     <Card class="border-border">
       <CardHeader>
         <div class="flex flex-wrap items-center justify-between gap-4">
-          <CardTitle>工具目录</CardTitle>
+          <CardTitle>{{ selectedService ? (services.find(s => s.service_key === selectedService)?.name || '工具目录') : '工具目录' }}</CardTitle>
           <div class="flex items-center gap-3">
-            <Select v-model="selectedService" @update:model-value="loadTools()">
+            <Select v-model="selectedService">
               <SelectTrigger class="w-[220px]">
-                <SelectValue placeholder="选择服务..." />
+                <SelectValue placeholder="全部服务" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="s in services" :key="s.service_key" :value="s.service_key">{{ s.name }}</SelectItem>
+                <SelectItem value="">全部服务 ({{ allTools.length }})</SelectItem>
+                <SelectItem v-for="s in services" :key="s.service_key" :value="s.service_key">{{ s.name }} <span class="text-muted-foreground">({{ allTools.filter(t => t.service_key === s.service_key).length }})</span></SelectItem>
               </SelectContent>
             </Select>
             <Select v-model="typeFilter">
@@ -96,12 +101,13 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
       <CardContent class="p-0">
         <div v-if="loading" class="px-5 py-12 text-center text-sm text-muted-foreground">加载中...</div>
         <div v-else-if="displayTools.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
-          {{ selectedService ? (search || typeFilter ? '无匹配结果' : '该服务暂无已同步的工具') : '请选择一个服务' }}
+          {{ allTools.length === 0 ? '暂无已同步的工具，请先在服务列表中同步工具。' : '无匹配结果' }}
         </div>
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">工具名称</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">服务</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">层级</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">标签</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">描述</th>
@@ -109,10 +115,11 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
             </tr>
           </thead>
           <tbody>
-            <tr v-for="t in displayTools" :key="t.tool_name" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
+            <tr v-for="t in displayTools" :key="`${t.service_key}:${t.tool_name}`" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
               <td class="px-4 py-3">
                 <span class="font-mono text-[13px] font-semibold text-foreground">{{ t.tool_name }}</span>
               </td>
+              <td class="px-4 py-3 text-sm text-muted-foreground">{{ t.service_name }}</td>
               <td class="px-4 py-3">
                 <Badge variant="secondary" :class="typeColor(t.tool_type)">{{ typeLabel(t.tool_type) }}</Badge>
               </td>
@@ -124,7 +131,7 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
               </td>
               <td class="max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ t.description }}</td>
               <td class="px-4 py-3">
-                <Select :default-value="t.tool_type" @update:model-value="(v) => updateType(selectedService, t.tool_name, String(v))">
+                <Select :default-value="t.tool_type" @update:model-value="(v) => updateType(t.service_key, t.tool_name, String(v))">
                   <SelectTrigger class="h-8 w-[100px] text-xs">
                     <SelectValue />
                   </SelectTrigger>

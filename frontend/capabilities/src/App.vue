@@ -5,7 +5,7 @@ import type { NavGroup } from './components/AppShell.vue'
 import DashboardView from './views/DashboardView.vue'
 import ServicesView from './views/ServicesView.vue'
 import ToolsView from './views/ToolsView.vue'
-import ClaudeConfigView from './views/ClaudeConfigView.vue'
+import ProfilesView from './views/ProfilesView.vue'
 import LogsView from './views/LogsView.vue'
 import StatsView from './views/StatsView.vue'
 
@@ -21,22 +21,15 @@ const navGroups: NavGroup[] = [
   },
   {
     label: 'MCP 服务',
-    items: [
-      { key: 'services', label: '服务列表' },
-      { key: 'service-new', label: '新增服务' },
-    ],
+    items: [{ key: 'services', label: '服务列表' }],
   },
   {
     label: '工具管理',
-    items: [
-      { key: 'tools', label: '工具目录' },
-    ],
+    items: [{ key: 'tools', label: '工具目录' }],
   },
   {
-    label: 'MetaMCP',
-    items: [
-      { key: 'claude', label: '接入说明' },
-    ],
+    label: '治理策略',
+    items: [{ key: 'profiles', label: 'Project Profile' }],
   },
   {
     label: '调用观测',
@@ -52,19 +45,16 @@ const view = computed(() => hash.value)
 
 <template>
   <AppShell :nav-groups="navGroups" :active="hash">
-    <!-- Page Header -->
     <div class="border-b border-border bg-card px-8 py-5">
       <h1 class="text-xl font-semibold text-foreground">
         {{ navGroups.flatMap(g => g.items).find(i => i.key === hash)?.label || 'Agent Bridge' }}
       </h1>
     </div>
-
-    <!-- Page Body -->
     <div class="flex-1 p-6">
       <DashboardView v-if="view === 'dashboard'" />
-      <ServicesView v-else-if="view === 'services' || view === 'service-new'" />
+      <ServicesView v-else-if="view === 'services'" />
       <ToolsView v-else-if="view === 'tools'" />
-      <ClaudeConfigView v-else-if="view === 'claude'" />
+      <ProfilesView v-else-if="view === 'profiles'" />
       <LogsView v-else-if="view === 'logs'" />
       <StatsView v-else-if="view === 'stats'" />
     </div>
