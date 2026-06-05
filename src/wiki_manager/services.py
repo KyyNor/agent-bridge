@@ -106,6 +106,23 @@ class WikiManagerService:
                 kb["role"] = kb["role"] or KbRole.admin.value
         return kbs
 
+    def list_kb_status_summaries(self, actor: str) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for kb in self.list_kbs(actor):
+            targets = self.store.list_backend_targets(kb["id"])
+            docs = self.store.list_docs_for_kb(kb["id"])
+            summaries.append(
+                {
+                    **kb,
+                    "backend_targets": targets,
+                    "document_count": len(docs),
+                    "sync_failed_count": len(
+                        [doc for doc in docs if doc.get("sync_status") == SyncStateStatus.sync_failed.value]
+                    ),
+                }
+            )
+        return summaries
+
     def list_kb_members(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
         kb = self._require_kb_visible(actor, kb_slug)
         if actor not in self.admins and not can_manage_kb(self.store.get_member_role(kb["id"], actor)):

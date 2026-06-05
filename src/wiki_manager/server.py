@@ -534,6 +534,11 @@ def create_app(paths: WikiManagerPaths | None = None, admins: set[str] | None = 
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.list_repositories(current_actor))
 
+    @app.get("/builtin/wiki/kbs")
+    def list_builtin_wiki_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.list_kb_status_summaries(current_actor))
+
     @app.post("/builtin/codegraph/repositories")
     def upsert_code_repository(
         payload: CodeRepositoryRequest,

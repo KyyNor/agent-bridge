@@ -412,6 +412,25 @@ def test_profile_resource_rules_api(wm_paths) -> None:
     assert detail.json()["resource_rules"][0]["resource_type"] == "wiki_kb"
 
 
+def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    client.post(
+        "/kbs",
+        json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
+        headers={"X-Wiki-User": "root"},
+    )
+
+    response = client.get("/builtin/wiki/kbs", headers={"X-Wiki-User": "root"})
+
+    assert response.status_code == 200
+    assert response.json()[0]["slug"] == "frontend-docs"
+    assert "backend_targets" in response.json()[0]
+    assert "document_count" in response.json()[0]
+
+
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
