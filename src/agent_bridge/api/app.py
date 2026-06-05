@@ -6,96 +6,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 
 from agent_bridge.core.config import AgentBridgePaths, default_user, load_server_config
-from agent_bridge.core.domain import KbRole, AgentBridgeError
+from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.knowledge.service import AgentBridgeService
 from agent_bridge.web.pages import capability_admin_page
-
-
-class CreateKbRequest(BaseModel):
-    slug: str
-    name: str
-    description: str = ""
-
-
-class GrantMemberRequest(BaseModel):
-    linux_user: str
-    role: KbRole
-
-
-class SyncRequest(BaseModel):
-    all_users: bool = False
-
-
-class AskRequest(BaseModel):
-    kb: str
-    question: str
-    backend: str | None = None
-    session_id: str | None = None
-
-
-class PurgeRequest(BaseModel):
-    confirm: bool = False
-
-
-class RegisterMcpServiceRequest(BaseModel):
-    service_key: str
-    name: str
-    endpoint_url: str
-    headers: dict[str, Any] | None = None
-    description: str = ""
-    tags: list[str] = Field(default_factory=list)
-
-
-class UpdateMcpServiceStatusRequest(BaseModel):
-    status: str
-
-
-class UpdateMcpToolTypeRequest(BaseModel):
-    tool_type: str
-
-
-class ProjectProfileRequest(BaseModel):
-    profile_key: str
-    name: str
-    description: str = ""
-    status: str = "active"
-
-
-class ProfileSourceRuleRequest(BaseModel):
-    source_type: str
-    source_key: str
-    effect: str
-
-
-class ProfileRulesRequest(BaseModel):
-    rules: list[ProfileSourceRuleRequest] = Field(default_factory=list)
-
-
-class ProfileResourceRuleRequest(BaseModel):
-    resource_type: str
-    resource_key: str
-
-
-class ProfileResourcesRequest(BaseModel):
-    resources: list[ProfileResourceRuleRequest] = Field(default_factory=list)
-
-
-class CodeRepositoryRequest(BaseModel):
-    repo_key: str
-    name: str
-    git_url: str
-    branch: str = "main"
-    auth_ref: str = ""
-    description: str = ""
-    tags: list[str] = Field(default_factory=list)
-    sync_interval_minutes: int = 60
-    status: str = "active"
 
 
 def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = None) -> FastAPI:
@@ -165,10 +83,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         source_keys = [item["service_key"] for item in service.store.list_mcp_services()]
         allowed_keys = set(
             service.governance.filter_source_keys(
-                actor=current_actor,
-                profile_key=profile_key,
-                source_type="mcp_service",
-                source_keys=source_keys,
+                actor=current_actor, profile_key=profile_key, source_type="mcp_service", source_keys=source_keys,
             )
         )
         sources = []
@@ -179,381 +94,27 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             text = f"{item['service_key']} {item['name']} {item.get('description', '')} {' '.join(tags)}".lower()
             if query and query.lower() not in text:
                 continue
-            sources.append(
-                {
-                    "source_type": "mcp_service",
-                    "source_key": item["service_key"],
-                    "name": item["name"],
-                    "description": item["description"],
-                    "status": item["status"],
-                    "tags": tags,
-                }
-            )
+            sources.append({"source_type": "mcp_service", "source_key": item["service_key"], "name": item["name"], "description": item["description"], "status": item["status"], "tags": tags})
         return sources
 
-    @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    # Register route modules
+    from agent_bridge.api.routes.health import router as health_router
+    app.include_router(health_router)
 
-    @app.get("/backends")
-    def list_backends() -> list[dict[str, str]]:
-        if service.registry is None:
-            return []
-        result = []
-        for slug in service.registry.list_slugs():
-            adapter = service.registry.get(slug)
-            module = type(adapter).__module__
-            backend_type = "ragflow" if "ragflow" in module else "mock"
-            result.append({"slug": slug, "type": backend_type, "status": "active"})
-        return result
+    from agent_bridge.api.routes.knowledge import create_knowledge_routes
+    app.include_router(create_knowledge_routes(service, actor, call_safely, save_upload, upload_filename))
 
-    @app.post("/admin/init")
-    def init_system(current_actor: str = Depends(actor)) -> None:
-        return call_safely(lambda: service.init_system())
+    from agent_bridge.api.routes.capabilities import create_capability_routes
+    app.include_router(create_capability_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema, catalog_sources))
 
-    @app.post("/kbs")
-    def create_kb(payload: CreateKbRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return call_safely(lambda: service.create_kb(current_actor, payload.slug, payload.name, payload.description))
+    from agent_bridge.api.routes.governance import create_governance_routes
+    app.include_router(create_governance_routes(service, actor, call_safely, ensure_capability_schema))
 
-    @app.get("/kbs")
-    def list_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return call_safely(lambda: service.list_kbs(current_actor))
+    from agent_bridge.api.routes.builtins import create_builtin_routes
+    app.include_router(create_builtin_routes(service, actor, call_safely, ensure_capability_schema))
 
-    @app.post("/kbs/{kb_slug}/members")
-    def grant_kb_member(
-        kb_slug: str,
-        payload: GrantMemberRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, str]:
-        return call_safely(lambda: service.grant_kb_member(current_actor, kb_slug, payload.linux_user, payload.role))
-
-    @app.get("/kbs/{kb_slug}/members")
-    def list_kb_members(kb_slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return call_safely(lambda: service.list_kb_members(current_actor, kb_slug))
-
-    @app.post("/docs")
-    def add_document(
-        current_actor: str = Depends(actor),
-        file: UploadFile = File(),
-        kb: list[str] = Form(),
-        later: bool = Form(False),
-    ) -> dict[str, Any]:
-        upload_path = save_upload(file)
-        try:
-            return call_safely(
-                lambda: service.add_document(
-                    current_actor,
-                    upload_path,
-                    kb,
-                    later,
-                    original_filename=upload_filename(file),
-                )
-            )
-        finally:
-            upload_path.unlink(missing_ok=True)
-
-    @app.get("/docs")
-    def list_docs(kb: str, backend: str | None = None, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return call_safely(lambda: service.list_docs(current_actor, kb, backend=backend))
-
-    @app.get("/docs/{doc_slug}")
-    def get_doc(doc_slug: str, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return call_safely(lambda: service.get_doc(current_actor, doc_slug, backend=backend))
-
-    @app.post("/docs/{doc_slug}/versions")
-    def update_document(
-        doc_slug: str,
-        current_actor: str = Depends(actor),
-        file: UploadFile = File(),
-        later: bool = Form(False),
-    ) -> dict[str, Any]:
-        upload_path = save_upload(file)
-        try:
-            return call_safely(
-                lambda: service.update_document(
-                    current_actor,
-                    doc_slug,
-                    upload_path,
-                    later,
-                    original_filename=upload_filename(file),
-                )
-            )
-        finally:
-            upload_path.unlink(missing_ok=True)
-
-    @app.post("/docs/{doc_slug}/delete")
-    def delete_document(doc_slug: str, current_actor: str = Depends(actor)) -> dict[str, str]:
-        return call_safely(lambda: service.delete_document(current_actor, doc_slug))
-
-    @app.post("/docs/{doc_slug}/purge")
-    def purge_document(
-        doc_slug: str,
-        payload: PurgeRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, str]:
-        return call_safely(lambda: service.purge_document(current_actor, doc_slug, confirm=payload.confirm))
-
-    @app.get("/status")
-    def status(backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, list[dict[str, Any]]]:
-        return call_safely(lambda: service.status(current_actor, backend=backend))
-
-    @app.post("/sync")
-    def sync(payload: SyncRequest, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, int]:
-        return call_safely(lambda: service.sync(current_actor, all_users=payload.all_users, backend=backend))
-
-    @app.get("/search")
-    def search(q: str, kb: str, backend: str | None = None, top_k: int = 6, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        results = call_safely(
-            lambda: service.search(current_actor, kb, q, backend_slug=backend, top_k=top_k)
-        )
-        return {"results": [{"chunk_id": r.chunk_id, "content": r.content, "document_name": r.document_name, "similarity": r.similarity, "dataset_id": r.dataset_id} for r in results]}
-
-    @app.post("/ask")
-    def ask(payload: AskRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        result = call_safely(
-            lambda: service.ask(current_actor, payload.kb, payload.question, backend_slug=payload.backend, session_id=payload.session_id)
-        )
-        return {
-            "answer": result.answer,
-            "chunks": [{"chunk_id": c.chunk_id, "content": c.content, "document_name": c.document_name, "similarity": c.similarity, "dataset_id": c.dataset_id} for c in result.chunks],
-            "session_id": result.session_id,
-        }
-
-    @app.post("/capabilities/mcp-services")
-    def register_mcp_service(
-        payload: RegisterMcpServiceRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(
-            lambda: service.capabilities.register_service(
-                current_actor,
-                payload.service_key,
-                payload.name,
-                payload.endpoint_url,
-                payload.headers,
-                payload.description,
-                payload.tags,
-            )
-        )
-
-    @app.get("/capabilities/mcp-services")
-    def list_mcp_services(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.capabilities.list_services(current_actor))
-
-    @app.post("/capabilities/mcp-services/{service_key}/status")
-    def update_mcp_service_status(
-        service_key: str,
-        payload: UpdateMcpServiceStatusRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.capabilities.set_service_status(current_actor, service_key, payload.status))
-
-    @app.post("/capabilities/mcp-services/{service_key}/sync")
-    async def sync_mcp_service_tools(service_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        ensure_capability_schema()
-        return await call_safely_async(lambda: service.capabilities.sync_tools(current_actor, service_key))
-
-    @app.get("/capabilities/mcp-services/{service_key}/tools")
-    def list_mcp_service_tools(service_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.capabilities.list_tools(current_actor, service_key))
-
-    @app.put("/capabilities/mcp-services/{service_key}/tools/{tool_name}/type")
-    def update_mcp_tool_type(
-        service_key: str,
-        tool_name: str,
-        payload: UpdateMcpToolTypeRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(
-            lambda: service.capabilities.set_tool_type(
-                current_actor,
-                service_key,
-                tool_name,
-                payload.tool_type,
-            )
-        )
-
-    @app.post("/capability-profiles")
-    def upsert_capability_profile(
-        payload: ProjectProfileRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(
-            lambda: service.governance.upsert_profile(
-                current_actor,
-                payload.profile_key,
-                payload.name,
-                payload.description,
-                payload.status,
-            )
-        )
-
-    @app.get("/capability-profiles")
-    def list_capability_profiles(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.governance.list_profiles(current_actor))
-
-    @app.get("/capability-profiles/{profile_key}")
-    def get_capability_profile(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.governance.get_profile(current_actor, profile_key))
-
-    @app.put("/capability-profiles/{profile_key}/rules")
-    def replace_capability_profile_rules(
-        profile_key: str,
-        payload: ProfileRulesRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        rules = [rule.model_dump() for rule in payload.rules]
-        return call_safely(lambda: service.governance.replace_profile_rules(current_actor, profile_key, rules))
-
-    @app.put("/capability-profiles/{profile_key}/resources")
-    def replace_capability_profile_resources(
-        profile_key: str,
-        payload: ProfileResourcesRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        resources = [resource.model_dump() for resource in payload.resources]
-        return call_safely(lambda: service.governance.replace_profile_resource_rules(current_actor, profile_key, resources))
-
-    @app.get("/tool-call-logs")
-    def list_tool_call_logs(
-        entrypoint: str | None = None,
-        source_type: str | None = None,
-        source_key: str | None = None,
-        tool_name: str | None = None,
-        profile_key: str | None = None,
-        status: str | None = None,
-        failure_stage: str | None = None,
-        failure_owner: str | None = None,
-        error_type: str | None = None,
-        resource_type: str | None = None,
-        resource_key: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-        current_actor: str = Depends(actor),
-    ) -> list[dict[str, Any]]:
-        ensure_capability_schema()
-        return call_safely(
-            lambda: service.governance.list_logs(
-                actor=current_actor,
-                entrypoint=entrypoint,
-                source_type=source_type,
-                source_key=source_key,
-                tool_name=tool_name,
-                profile_key=profile_key,
-                status=status,
-                failure_stage=failure_stage,
-                failure_owner=failure_owner,
-                error_type=error_type,
-                resource_type=resource_type,
-                resource_key=resource_key,
-                limit=limit,
-                offset=offset,
-            )
-        )
-
-    @app.get("/tool-call-logs/{log_id}")
-    def get_tool_call_log(log_id: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.governance.get_log(actor=current_actor, log_id=log_id))
-
-    @app.get("/tool-call-stats")
-    def tool_call_stats(
-        dimensions: str = "profile_key,source_key,tool_name",
-        created_from: str | None = None,
-        created_to: str | None = None,
-        bucket: str | None = None,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        parsed_dimensions = [part.strip() for part in dimensions.split(",") if part.strip()]
-        return call_safely(
-            lambda: service.governance.stats(
-                actor=current_actor,
-                dimensions=parsed_dimensions,
-                created_from=created_from,
-                created_to=created_to,
-                bucket=bucket,
-            )
-        )
-
-    @app.get("/capability-catalog")
-    def capability_catalog(
-        profile_key: str | None = None,
-        query: str | None = None,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(lambda: {"sources": catalog_sources(current_actor, profile_key, query)})
-
-    @app.get("/capability-catalog/sources/{source_type}/{source_key}")
-    def capability_source_detail(source_type: str, source_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        ensure_capability_schema()
-        if source_type != "mcp_service":
-            raise HTTPException(status_code=404, detail="source not found")
-        service_payload = call_safely(lambda: service.capabilities.get_service(current_actor, source_key))
-        tools = call_safely(lambda: service.capabilities.list_tools(current_actor, source_key))
-        return {"source_type": source_type, "source": service_payload, "tools": tools}
-
-    @app.get("/capability-catalog/sources/{source_type}/{source_key}/tools/{tool_name}")
-    def capability_tool_detail(
-        source_type: str,
-        source_key: str,
-        tool_name: str,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        if source_type != "mcp_service":
-            raise HTTPException(status_code=404, detail="tool not found")
-        tools = call_safely(lambda: service.capabilities.list_tools(current_actor, source_key))
-        for tool in tools:
-            if tool["tool"] == tool_name:
-                logs = call_safely(
-                    lambda: service.governance.list_logs(
-                        actor=current_actor,
-                        source_type=source_type,
-                        source_key=source_key,
-                        tool_name=tool_name,
-                        limit=10,
-                    )
-                )
-                return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
-        raise HTTPException(status_code=404, detail="tool not found")
-
-    @app.get("/builtin/codegraph/repositories")
-    def list_code_repositories(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.codegraph.list_repositories(current_actor))
-
-    @app.get("/builtin/wiki/kbs")
-    def list_builtin_wiki_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.list_kb_status_summaries(current_actor))
-
-    @app.post("/builtin/codegraph/repositories")
-    def upsert_code_repository(
-        payload: CodeRepositoryRequest,
-        current_actor: str = Depends(actor),
-    ) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.codegraph.upsert_repository(current_actor, **payload.model_dump()))
-
-    @app.post("/builtin/codegraph/repositories/{repo_key}/sync")
-    def sync_code_repository(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        ensure_capability_schema()
-        return call_safely(lambda: service.codegraph.sync_repository(current_actor, repo_key))
-
+    # MCP streamable HTTP endpoint
     from agent_bridge.capabilities.mcp_server import setup_mcp_route
-
     setup_mcp_route(app, service)
 
     @app.get("/admin/capabilities", response_class=HTMLResponse)
