@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Any, Callable, TypeVar
@@ -102,6 +103,33 @@ def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> di
     }
     config["mcpServers"] = servers
     return config
+
+
+def _stdin_is_interactive() -> bool:
+    return sys.stdin.isatty()
+
+
+def _resolve_metamcp_scope(scope: str | None) -> str:
+    if scope:
+        if scope not in {"project", "user"}:
+            raise ValueError("scope must be project or user")
+        return scope
+    if not _stdin_is_interactive():
+        raise ValueError("scope is required in non-interactive mode")
+    selected = typer.prompt("选择配置范围 project/user", default="project")
+    if selected not in {"project", "user"}:
+        raise ValueError("scope must be project or user")
+    return selected
+
+
+def _confirm_overwrite(existing: dict[str, Any], yes: bool) -> None:
+    servers = existing.get("mcpServers")
+    if not isinstance(servers, dict) or "agent-capability-hub" not in servers:
+        return
+    if yes:
+        return
+    if not typer.confirm("agent-capability-hub already exists, overwrite it?", default=False):
+        raise RuntimeError("aborted")
 
 
 @app.callback()
@@ -231,13 +259,16 @@ def metamcp_profile_rules(
 
 @metamcp_app.command("add")
 def metamcp_add(
-    scope: Annotated[str, typer.Option("--scope", help="project or user.")],
     url: Annotated[str, typer.Option("--url", help="MetaMCP HTTP URL.")],
     profile: Annotated[str, typer.Option("--profile", help="Project Profile key.")],
+    scope: Annotated[str | None, typer.Option("--scope", help="project or user.")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Overwrite existing config without confirmation.")] = False,
 ) -> None:
-    path = _claude_config_path(scope)
     try:
+        resolved_scope = _resolve_metamcp_scope(scope)
+        path = _claude_config_path(resolved_scope)
         existing = _load_json_file(path)
+        _confirm_overwrite(existing, yes)
         path.write_text(
             json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
             encoding="utf-8",

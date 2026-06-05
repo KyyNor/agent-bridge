@@ -397,3 +397,65 @@ def test_metamcp_add_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
     assert result.exit_code == 0
     assert "existing" in data["mcpServers"]
     assert "agent-capability-hub" in data["mcpServers"]
+
+
+def test_metamcp_add_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+    monkeypatch.setattr("wiki_manager.cli._stdin_is_interactive", lambda: True)
+
+    result = runner.invoke(
+        app,
+        [
+            "metamcp",
+            "add",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+            "--profile",
+            "safe-readonly",
+        ],
+        input="project\n",
+    )
+
+    assert result.exit_code == 0
+    assert (tmp_path / ".mcp.json").exists()
+    assert "written:" in result.output
+
+
+def test_metamcp_add_requires_scope_in_non_interactive_mode(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("wiki_manager.cli._stdin_is_interactive", lambda: False)
+
+    result = runner.invoke(
+        app,
+        ["metamcp", "add", "--url", "http://127.0.0.1:8765/mcp", "--profile", "safe-readonly"],
+    )
+
+    assert result.exit_code == 1
+    assert "scope is required in non-interactive mode" in result.stderr
+
+
+def test_metamcp_add_confirms_overwrite(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".mcp.json").write_text(
+        '{"mcpServers":{"agent-capability-hub":{"url":"old"}}}',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "metamcp",
+            "add",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+            "--profile",
+            "safe-readonly",
+        ],
+        input="n\n",
+    )
+
+    assert result.exit_code == 1
+    assert "aborted" in result.stderr
