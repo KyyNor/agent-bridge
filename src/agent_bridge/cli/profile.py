@@ -73,8 +73,8 @@ def profile_rules(
 
 @profile_app.command("use")
 def profile_use(
-    url: Annotated[str, typer.Option("--url", help="Agent Bridge MetaMCP 地址")],
-    profile: Annotated[str, typer.Option("--profile", help="要激活的 Profile 标识")],
+    profile: Annotated[str, typer.Argument(help="要激活的 Profile 标识")],
+    url: Annotated[str, typer.Option("--url", help="Agent Bridge MCP 地址")] = "http://127.0.0.1:8765/mcp",
     scope: Annotated[str | None, typer.Option("--scope", help="配置范围: project 或 user")] = None,
     yes: Annotated[bool, typer.Option("--yes", help="覆盖已有配置")] = False,
 ) -> None:
