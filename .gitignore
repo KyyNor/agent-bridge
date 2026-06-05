@@ -15,3 +15,5 @@ wheels/
 .worktrees/
 .superpowers/
 .claude/worktrees/
+frontend/**/node_modules/
+frontend/**/dist/

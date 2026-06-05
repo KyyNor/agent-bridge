@@ -1,0 +1,1 @@
+{"root":["./src/main.ts","./src/api/client.ts","./src/api/types.ts","./src/composables/useapi.ts","./src/app.vue","./src/components/appshell.vue","./src/views/builtinsview.vue","./src/views/claudeconfigview.vue","./src/views/logsview.vue","./src/views/profilesview.vue","./src/views/servicesview.vue","./src/views/statsview.vue","./src/views/toolsview.vue"],"version":"5.6.3"}
