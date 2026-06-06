@@ -18,18 +18,13 @@ const filterCategory = ref('')
 // Categories
 const categories = ref<CodeRepoCategory[]>([])
 
-// Add repo dialog
-const showAddRepo = ref(false)
+// Repo form dialog
+const showRepoForm = ref(false)
+const repoFormMode = ref<'add' | 'edit'>('add')
 const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' })
 const repoSaving = ref(false)
 const repoError = ref('')
 const syncingKey = ref('')
-
-// Edit repo dialog
-const showEditRepo = ref(false)
-const editForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' })
-const editSaving = ref(false)
-const editError = ref('')
 
 // Repo detail dialog
 const showDetail = ref(false)
@@ -59,7 +54,25 @@ async function loadCategories() {
   try { categories.value = await api.listCategories() } catch { categories.value = [] }
 }
 
-async function addRepo() {
+function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
+  repoFormMode.value = mode
+  repoError.value = ''
+  if (mode === 'edit' && r) {
+    repoForm.value = {
+      repo_key: r.repo_key,
+      name: r.name,
+      git_url: r.git_url,
+      branch: r.branch,
+      description: r.description || '',
+      category_key: r.category_key || '',
+    }
+  } else {
+    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' }
+  }
+  showRepoForm.value = true
+}
+
+async function saveRepo() {
   repoError.value = ''
   if (!repoForm.value.repo_key || !repoForm.value.name || !repoForm.value.git_url) {
     repoError.value = '请填写仓库标识、名称和 Git URL'
@@ -75,39 +88,12 @@ async function addRepo() {
       description: repoForm.value.description,
       category_key: repoForm.value.category_key,
     })
-    showAddRepo.value = false
-    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' }
+    showRepoForm.value = false
     await loadRepos()
   } catch (e: any) {
-    repoError.value = e.message || '添加失败'
+    repoError.value = e.message || '保存失败'
   }
   repoSaving.value = false
-}
-
-function openEdit(r: CodeRepository) {
-  editForm.value = {
-    repo_key: r.repo_key,
-    name: r.name,
-    git_url: r.git_url,
-    branch: r.branch,
-    description: r.description || '',
-    category_key: r.category_key || '',
-  }
-  editError.value = ''
-  showEditRepo.value = true
-}
-
-async function saveEdit() {
-  editError.value = ''
-  editSaving.value = true
-  try {
-    await api.upsertCodeRepo(editForm.value)
-    showEditRepo.value = false
-    await loadRepos()
-  } catch (e: any) {
-    editError.value = e.message || '保存失败'
-  }
-  editSaving.value = false
 }
 
 async function syncRepo(key: string) {
@@ -216,7 +202,7 @@ function categoryName(key: string) {
           <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
         </SelectContent>
       </Select>
-      <Button @click="showAddRepo = true">
+      <Button @click="openRepoForm('add')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         添加仓库
       </Button>
@@ -266,7 +252,7 @@ function categoryName(key: string) {
                   <Button variant="ghost" size="sm" @click="syncRepo(r.repo_key)" :disabled="syncingKey === r.repo_key" class="h-8 text-xs">
                     {{ syncingKey === r.repo_key ? '同步中...' : '同步' }}
                   </Button>
-                  <Button variant="outline" size="sm" @click="openEdit(r)" class="h-8 text-xs">编辑</Button>
+                  <Button variant="outline" size="sm" @click="openRepoForm('edit', r)" class="h-8 text-xs">编辑</Button>
                   <Button variant="outline" size="sm" @click="openDetail(r)" class="h-8 text-xs">详情</Button>
                 </div>
               </td>
@@ -277,37 +263,33 @@ function categoryName(key: string) {
     </Card>
     <div class="text-sm text-muted-foreground">共 {{ filteredRepos.length }} / {{ repos.length }} 个仓库</div>
 
-    <!-- Add Repo Dialog -->
-    <Dialog :open="showAddRepo" @update:open="showAddRepo = $event">
+    <!-- Add/Edit Repo Dialog -->
+    <Dialog :open="showRepoForm" @update:open="showRepoForm = $event">
       <DialogContent class="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>添加代码仓库</DialogTitle>
+          <DialogTitle>{{ repoFormMode === 'add' ? '添加代码仓库' : '编辑代码仓库' }}</DialogTitle>
         </DialogHeader>
-        <form @submit.prevent="addRepo" class="space-y-4">
+        <form @submit.prevent="saveRepo" class="space-y-4">
           <div v-if="repoError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ repoError }}</div>
           <div class="space-y-2">
-            <label class="text-sm font-medium">仓库标识 <span class="text-destructive">*</span></label>
-            <Input v-model="repoForm.repo_key" placeholder="my-project" required />
+            <label class="text-sm font-medium">仓库标识 <span v-if="repoFormMode === 'add'" class="text-destructive">*</span></label>
+            <Input v-if="repoFormMode === 'add'" v-model="repoForm.repo_key" placeholder="my-project" required />
+            <Input v-else :model-value="repoForm.repo_key" disabled class="bg-secondary" />
           </div>
           <div class="space-y-2">
             <label class="text-sm font-medium">名称 <span class="text-destructive">*</span></label>
             <Input v-model="repoForm.name" placeholder="我的项目" required />
           </div>
           <div class="space-y-2">
-            <label class="text-sm font-medium">Git URL <span class="text-destructive">*</span></label>
-            <Input v-model="repoForm.git_url" placeholder="https://github.com/org/repo.git" required />
+            <label class="text-sm font-medium">Git URL <span v-if="repoFormMode === 'add'" class="text-destructive">*</span></label>
+            <Input v-if="repoFormMode === 'add'" v-model="repoForm.git_url" placeholder="https://github.com/org/repo.git" required />
+            <Input v-else :model-value="repoForm.git_url" disabled class="bg-secondary" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <label class="text-sm font-medium">分支</label>
               <Input v-model="repoForm.branch" placeholder="main" />
             </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">描述</label>
-              <Input v-model="repoForm.description" placeholder="项目代码仓库" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <label class="text-sm font-medium">分类</label>
               <Select v-model="repoForm.category_key">
@@ -321,60 +303,14 @@ function categoryName(key: string) {
               </Select>
             </div>
           </div>
-        </form>
-        <DialogFooter>
-          <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
-          <Button @click="addRepo" :disabled="repoSaving">{{ repoSaving ? '保存中...' : '保存' }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <!-- Edit Repo Dialog -->
-    <Dialog :open="showEditRepo" @update:open="showEditRepo = $event">
-      <DialogContent class="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>编辑代码仓库</DialogTitle>
-        </DialogHeader>
-        <form @submit.prevent="saveEdit" class="space-y-4">
-          <div v-if="editError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ editError }}</div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">仓库标识</label>
-            <Input :model-value="editForm.repo_key" disabled class="bg-secondary" />
-          </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">名称 <span class="text-destructive">*</span></label>
-            <Input v-model="editForm.name" required />
-          </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">Git URL</label>
-            <Input :model-value="editForm.git_url" disabled class="bg-secondary" />
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-2">
-              <label class="text-sm font-medium">分支</label>
-              <Input v-model="editForm.branch" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">分类</label>
-              <Select v-model="editForm.category_key">
-                <SelectTrigger>
-                  <SelectValue placeholder="无分类" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">无分类</SelectItem>
-                  <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
           <div class="space-y-2">
             <label class="text-sm font-medium">描述</label>
-            <Input v-model="editForm.description" />
+            <Input v-model="repoForm.description" placeholder="项目代码仓库" />
           </div>
         </form>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
-          <Button @click="saveEdit()" :disabled="editSaving">{{ editSaving ? '保存中...' : '保存' }}</Button>
+          <Button @click="saveRepo" :disabled="repoSaving">{{ repoSaving ? '保存中...' : '保存' }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
