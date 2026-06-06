@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
-import type { CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../api/types'
+import type { BackendInfo, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -25,8 +25,11 @@ const editingCategory = ref(false)
 // Scheduler status
 const schedulerStatus = ref<SchedulerStatus | null>(null)
 
+// Backends
+const backends = ref<BackendInfo[]>([])
+
 onMounted(async () => {
-  await Promise.all([loadSyncConfig(), loadCategories(), loadSchedulerStatus()])
+  await Promise.all([loadSyncConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
   loading.value = false
 })
 
@@ -40,6 +43,10 @@ async function loadCategories() {
 
 async function loadSchedulerStatus() {
   try { schedulerStatus.value = await api.getSchedulerStatus() } catch { schedulerStatus.value = null }
+}
+
+async function loadBackends() {
+  try { backends.value = await api.listBackends() } catch { backends.value = [] }
 }
 
 function validateCron(expr: string): boolean {
@@ -122,6 +129,41 @@ async function deleteCategory(key: string) {
           标准 5 段 cron 表达式：<code class="font-mono">分钟 小时 日 月 星期</code>。例如
           <code class="font-mono">*/30 * * * *</code>（每30分钟）、<code class="font-mono">0 */2 * * *</code>（每2小时）、<code class="font-mono">0 8 * * 1-5</code>（工作日早8点）。
         </div>
+      </CardContent>
+    </Card>
+
+    <!-- Backend Management -->
+    <Card class="border-border">
+      <CardContent class="space-y-4 p-5">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-semibold">后端管理</div>
+            <div class="text-xs text-muted-foreground">文档知识同步目标，后端配置在 config 文件中管理</div>
+          </div>
+          <Button variant="outline" size="sm" @click="loadBackends()">刷新</Button>
+        </div>
+        <div v-if="backends.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无已配置的后端</div>
+        <table v-else class="w-full">
+          <thead>
+            <tr class="border-b border-border bg-secondary/50">
+              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">标识</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">类型</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="b in backends" :key="b.slug" class="border-b border-border/40 hover:bg-secondary/30">
+              <td class="px-3 py-2 font-mono text-sm">{{ b.slug }}</td>
+              <td class="px-3 py-2 text-sm text-muted-foreground">{{ b.type }}</td>
+              <td class="px-3 py-2">
+                <Badge variant="secondary" class="text-[11px]"
+                  :class="b.status === 'active' ? 'bg-green-50 text-green-700' : b.status === 'error' ? 'bg-red-50 text-red-700' : ''">
+                  {{ b.status }}
+                </Badge>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </CardContent>
     </Card>
 
