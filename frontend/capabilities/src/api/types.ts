@@ -259,14 +259,14 @@ export interface CodeRepoCategory {
 
 export interface KnowledgeSyncConfig {
   code_sync_enabled: boolean
-  code_sync_interval_minutes: number
+  code_sync_cron: string
 }
 
 export interface SchedulerStatus {
   running: boolean
+  cron: string
   jobs: {
     repo_key: string
-    interval_minutes: number
     next_run_at: string | null
   }[]
 }

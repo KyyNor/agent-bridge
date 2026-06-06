@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS code_repo_categories (
 CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   code_sync_enabled INTEGER NOT NULL DEFAULT 0,
-  code_sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
+  code_sync_cron TEXT NOT NULL DEFAULT '*/30 * * * *',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

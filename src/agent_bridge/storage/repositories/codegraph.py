@@ -314,7 +314,7 @@ class CodeGraphRepository:
     # -- Sync Config --
 
     def get_sync_config(self) -> dict[str, Any]:
-        defaults = {"code_sync_enabled": False, "code_sync_interval_minutes": 60}
+        defaults = {"code_sync_enabled": False, "code_sync_cron": "*/30 * * * *"}
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM knowledge_sync_config WHERE id = 1").fetchone()
             if row is None:
@@ -323,17 +323,17 @@ class CodeGraphRepository:
             result["code_sync_enabled"] = bool(result.get("code_sync_enabled"))
             return result
 
-    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_interval_minutes: int) -> dict[str, Any]:
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_enabled, code_sync_interval_minutes)
+                INSERT INTO knowledge_sync_config (id, code_sync_enabled, code_sync_cron)
                 VALUES (1, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_enabled = excluded.code_sync_enabled,
-                  code_sync_interval_minutes = excluded.code_sync_interval_minutes,
+                  code_sync_cron = excluded.code_sync_cron,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (int(code_sync_enabled), code_sync_interval_minutes),
+                (int(code_sync_enabled), code_sync_cron),
             )
             return self.get_sync_config()

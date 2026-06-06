@@ -20,14 +20,14 @@ const categories = ref<CodeRepoCategory[]>([])
 
 // Add repo dialog
 const showAddRepo = ref(false)
-const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', sync_interval_minutes: 60 })
+const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' })
 const repoSaving = ref(false)
 const repoError = ref('')
 const syncingKey = ref('')
 
 // Edit repo dialog
 const showEditRepo = ref(false)
-const editForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', sync_interval_minutes: 60 })
+const editForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' })
 const editSaving = ref(false)
 const editError = ref('')
 
@@ -74,10 +74,9 @@ async function addRepo() {
       branch: repoForm.value.branch || 'main',
       description: repoForm.value.description,
       category_key: repoForm.value.category_key,
-      sync_interval_minutes: repoForm.value.sync_interval_minutes || 60,
     })
     showAddRepo.value = false
-    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', sync_interval_minutes: 60 }
+    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' }
     await loadRepos()
   } catch (e: any) {
     repoError.value = e.message || '添加失败'
@@ -93,7 +92,6 @@ function openEdit(r: CodeRepository) {
     branch: r.branch,
     description: r.description || '',
     category_key: r.category_key || '',
-    sync_interval_minutes: r.sync_interval_minutes || 60,
   }
   editError.value = ''
   showEditRepo.value = true
@@ -321,10 +319,6 @@ function categoryName(key: string) {
                   <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">同步间隔（分钟）</label>
-              <Input v-model.number="repoForm.sync_interval_minutes" type="number" min="1" placeholder="60" />
             </div>
           </div>
         </form>

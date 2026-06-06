@@ -11,8 +11,9 @@ import { Badge } from '../components/ui/badge'
 const loading = ref(true)
 
 // Sync config
-const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_interval_minutes: 60 })
+const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_cron: '*/30 * * * *' })
 const configSaving = ref(false)
+const cronError = ref('')
 
 // Categories
 const categories = ref<CodeRepoCategory[]>([])
@@ -41,10 +42,22 @@ async function loadSchedulerStatus() {
   try { schedulerStatus.value = await api.getSchedulerStatus() } catch { schedulerStatus.value = null }
 }
 
+function validateCron(expr: string): boolean {
+  const parts = expr.trim().split(/\s+/)
+  if (parts.length !== 5) {
+    cronError.value = 'Cron 表达式需要 5 段（分 时 日 月 周）'
+    return false
+  }
+  cronError.value = ''
+  return true
+}
+
 async function saveSyncConfig() {
+  if (!validateCron(syncConfig.value.code_sync_cron)) return
   configSaving.value = true
   try {
     syncConfig.value = await api.saveSyncConfig(syncConfig.value)
+    cronError.value = ''
     await loadSchedulerStatus()
   } catch { /* ignore */ }
   configSaving.value = false
@@ -97,16 +110,17 @@ async function deleteCategory(key: string) {
             启用定时同步
           </label>
           <div class="flex items-center gap-2 text-sm">
-            <span class="text-muted-foreground">同步间隔</span>
-            <Input v-model.number="syncConfig.code_sync_interval_minutes" type="number" min="1" class="w-20" />
-            <span class="text-muted-foreground">分钟</span>
+            <span class="text-muted-foreground">Cron 表达式</span>
+            <Input v-model="syncConfig.code_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
           </div>
           <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
             {{ configSaving ? '保存中...' : '保存' }}
           </Button>
         </div>
+        <div v-if="cronError" class="text-xs text-destructive">{{ cronError }}</div>
         <div class="text-xs text-muted-foreground">
-          启用后，系统将按设定间隔对每个代码仓库执行 git pull 并重新解析索引。各仓库可在编辑时单独设置同步间隔。
+          标准 5 段 cron 表达式：<code class="font-mono">分钟 小时 日 月 星期</code>。例如
+          <code class="font-mono">*/30 * * * *</code>（每30分钟）、<code class="font-mono">0 */2 * * *</code>（每2小时）、<code class="font-mono">0 8 * * 1-5</code>（工作日早8点）。
         </div>
       </CardContent>
     </Card>
@@ -154,10 +168,11 @@ async function deleteCategory(key: string) {
         </div>
         <div v-if="!schedulerStatus" class="py-4 text-center text-sm text-muted-foreground">无法获取调度状态</div>
         <div v-else>
-          <div class="mb-3 flex items-center gap-2">
+          <div class="mb-3 flex items-center gap-3">
             <Badge :variant="schedulerStatus.running ? 'secondary' : 'outline'" :class="schedulerStatus.running ? 'bg-green-50 text-green-700' : ''">
               {{ schedulerStatus.running ? '运行中' : '已暂停' }}
             </Badge>
+            <span v-if="schedulerStatus.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.cron }}</span>
           </div>
           <div v-if="schedulerStatus.jobs.length === 0" class="py-4 text-center text-sm text-muted-foreground">
             {{ schedulerStatus.running ? '没有活跃的代码仓库' : '—' }}
@@ -166,14 +181,12 @@ async function deleteCategory(key: string) {
             <thead>
               <tr class="border-b border-border bg-secondary/50">
                 <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">仓库</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">间隔（分钟）</th>
                 <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">下次执行</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="j in schedulerStatus.jobs" :key="j.repo_key" class="border-b border-border/40">
                 <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
-                <td class="px-3 py-2 text-sm">{{ j.interval_minutes }}</td>
                 <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
               </tr>
             </tbody>

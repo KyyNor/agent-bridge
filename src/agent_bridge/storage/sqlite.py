@@ -83,6 +83,13 @@ class SQLiteStore:
                     "sync_interval_minutes": "INTEGER NOT NULL DEFAULT 60",
                 },
             )
+            self._ensure_columns(
+                conn,
+                "knowledge_sync_config",
+                {
+                    "code_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
+                },
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_failure "
                 "ON tool_call_logs(failure_owner, failure_stage, error_type)"
@@ -190,8 +197,8 @@ class SQLiteStore:
     def get_sync_config(self) -> dict[str, Any]:
         return self.codegraph.get_sync_config()
 
-    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_interval_minutes: int) -> dict[str, Any]:
-        return self.codegraph.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_interval_minutes=code_sync_interval_minutes)
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str) -> dict[str, Any]:
+        return self.codegraph.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron)
 
     def create_mcp_service(
         self,

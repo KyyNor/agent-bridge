@@ -97,4 +97,4 @@ class CodeRepoCategoryRequest(BaseModel):
 
 class KnowledgeSyncConfigRequest(BaseModel):
     code_sync_enabled: bool = False
-    code_sync_interval_minutes: int = 60
+    code_sync_cron: str = "*/30 * * * *"
