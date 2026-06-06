@@ -62,19 +62,19 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
     <div class="grid grid-cols-4 gap-4">
       <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">总调用次数</div>
-        <div class="text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ totalCount }}</div>
+        <div class="mt-1 text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ totalCount }}</div>
       </Card>
       <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">维度条目</div>
-        <div class="text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ stats.length }}</div>
+        <div class="mt-1 text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ stats.length }}</div>
       </Card>
       <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">最高频次</div>
-        <div class="text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ maxCount }}</div>
+        <div class="mt-1 text-[24px] font-bold leading-tight tabular-nums text-foreground">{{ maxCount }}</div>
       </Card>
       <Card class="p-4">
         <div class="text-[13px] font-medium text-muted-foreground">当前维度</div>
-        <div class="text-[24px] font-bold leading-tight text-foreground">{{ dimensions.find(d => d.key === dimension)?.label }}</div>
+        <div class="mt-1 text-[24px] font-bold leading-tight text-foreground">{{ dimensions.find(d => d.key === dimension)?.label }}</div>
       </Card>
     </div>
 
@@ -106,9 +106,9 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th v-for="col in columns" :key="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ columnLabels[col] || col }}</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">调用次数</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">占比</th>
+              <th v-for="col in columns" :key="col" class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">{{ columnLabels[col] || col }}</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">调用次数</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">占比</th>
             </tr>
           </thead>
           <tbody>

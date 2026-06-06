@@ -44,38 +44,48 @@ function timeAgo(dateStr: string | null): string {
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-6">
     <!-- Stat Cards -->
-    <div class="grid grid-cols-4 gap-5">
-      <Card class="p-5 transition-shadow hover:shadow-sm">
-        <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-primary">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+    <div class="grid grid-cols-4 gap-4">
+      <Card class="p-4">
+        <div class="flex items-center justify-between">
+          <div class="text-[13px] font-medium text-muted-foreground">MCP 服务</div>
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
         </div>
-        <div class="text-[13px] font-medium text-muted-foreground">MCP 服务</div>
-        <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ services.length }}</div>
+        <div class="mt-2 text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ services.length }}</div>
       </Card>
 
-      <Card class="p-5 transition-shadow hover:shadow-sm">
-        <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-600">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      <Card class="p-4">
+        <div class="flex items-center justify-between">
+          <div class="text-[13px] font-medium text-muted-foreground">工具总数</div>
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-green-50 text-green-600">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          </div>
         </div>
-        <div class="text-[13px] font-medium text-muted-foreground">工具总数</div>
-        <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ toolCount ?? '...' }}</div>
+        <div class="mt-2 text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ toolCount ?? '...' }}</div>
       </Card>
 
-      <Card class="p-5 transition-shadow hover:shadow-sm">
-        <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-primary">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
+      <Card class="p-4">
+        <div class="flex items-center justify-between">
+          <div class="text-[13px] font-medium text-muted-foreground">启用服务</div>
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-blue-50 text-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg>
+          </div>
         </div>
-        <div class="text-[13px] font-medium text-muted-foreground">启用服务</div>
-        <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ enabledCount }}</div>
+        <div class="mt-2 text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ enabledCount }}</div>
       </Card>
 
-      <Card class="p-5 transition-shadow hover:shadow-sm">
-        <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-destructive">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      <Card class="p-4">
+        <div class="flex items-center justify-between">
+          <div class="text-[13px] font-medium text-muted-foreground">同步异常</div>
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-red-50 text-destructive">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          </div>
         </div>
-        <div class="text-[13px] font-medium text-muted-foreground">同步异常</div>
-        <div class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ errorCount }}</div>
-        <div class="mt-3 cursor-pointer text-xs text-destructive hover:underline" @click="goto('services')">查看详情 &rarr;</div>
+        <div class="mt-2 flex items-baseline gap-2">
+          <span class="text-[28px] font-bold leading-tight tabular-nums text-foreground">{{ errorCount }}</span>
+          <span v-if="errorCount > 0" class="cursor-pointer text-xs text-destructive hover:underline" @click="goto('services')">查看</span>
+        </div>
       </Card>
     </div>
 
@@ -93,9 +103,9 @@ function timeAgo(dateStr: string | null): string {
           <table v-else class="w-full">
             <thead>
               <tr class="border-b border-border bg-secondary/50">
-                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">服务名称</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
-                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">最近同步</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">服务名称</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">最近同步</th>
               </tr>
             </thead>
             <tbody>
@@ -152,37 +162,37 @@ function timeAgo(dateStr: string | null): string {
             <div class="flex h-1.5 overflow-hidden rounded-full bg-secondary">
               <div class="bg-green-500 transition-all" :style="{ width: services.length ? `${(enabledCount / services.length) * 100}%` : '0%' }" />
               <div class="bg-red-500 transition-all" :style="{ width: services.length ? `${(errorCount / services.length) * 100}%` : '0%' }" />
-              <div class="flex-1 bg-gray-300" />
+              <div class="flex-1 bg-border" />
             </div>
 
             <div class="space-y-3">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-green-500" />
-                  <span class="text-sm">已启用 · 正常运行</span>
+                  <span class="text-sm">正常运行</span>
                 </div>
-                <span class="text-sm tabular-nums text-muted-foreground">{{ enabledCount }} 服务</span>
+                <span class="text-sm tabular-nums text-muted-foreground">{{ enabledCount }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
-                  <span class="h-2 w-2 rounded-full bg-gray-300" />
+                  <span class="h-2 w-2 rounded-full bg-border" />
                   <span class="text-sm">已停用</span>
                 </div>
-                <span class="text-sm tabular-nums text-muted-foreground">{{ services.length - enabledCount - errorCount }} 服务</span>
+                <span class="text-sm tabular-nums text-muted-foreground">{{ services.length - enabledCount - errorCount }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-destructive" />
                   <span class="text-sm">异常</span>
                 </div>
-                <span class="text-sm tabular-nums text-muted-foreground">{{ errorCount }} 服务</span>
+                <span class="text-sm tabular-nums text-muted-foreground">{{ errorCount }}</span>
               </div>
             </div>
 
             <hr class="border-border/60">
 
             <div v-if="errorCount > 0">
-              <div class="mb-3 text-sm font-semibold">需要关注</div>
+              <div class="mb-3 text-sm font-medium">需要关注</div>
               <div class="space-y-3">
                 <div v-for="s in services.filter(x => x.status === 'error')" :key="s.service_key" class="border-l-[3px] border-l-destructive bg-red-50 px-3 py-2">
                   <div class="flex items-center justify-between">

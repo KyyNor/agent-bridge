@@ -127,13 +127,13 @@ const filterTabs = computed(() => [
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">时间</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Profile</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">工具</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">耗时</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">错误</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"></th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">时间</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Profile</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">耗时</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">错误</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
           </thead>
           <tbody>

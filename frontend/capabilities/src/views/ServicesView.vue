@@ -137,12 +137,12 @@ function timeAgo(dateStr: string | null): string {
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">服务名称</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">连接地址</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">工具数</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">最近同步</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">操作</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">服务名称</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">连接地址</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具数</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">最近同步</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">操作</th>
             </tr>
           </thead>
           <tbody>

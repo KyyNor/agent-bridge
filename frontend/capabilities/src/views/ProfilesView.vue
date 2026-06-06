@@ -199,10 +199,10 @@ async function toggleResource(type: string, key: string) {
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Profile</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Allow</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">操作</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Profile</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Allow</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">操作</th>
             </tr>
           </thead>
           <tbody>

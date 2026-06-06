@@ -116,12 +116,12 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">工具名称</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">服务</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">层级</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">标签</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">描述</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">配置</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具名称</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">服务</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">层级</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标签</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">描述</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">配置</th>
             </tr>
           </thead>
           <tbody>

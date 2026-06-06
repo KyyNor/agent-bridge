@@ -96,14 +96,10 @@ async function deleteCategory(key: string) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
-    <div class="flex items-center gap-4">
-      <h2 class="text-lg font-semibold">知识处理配置</h2>
-    </div>
-
     <!-- Sync Config -->
     <Card class="border-border">
       <CardContent class="space-y-4 p-5">
-        <div class="text-sm font-semibold">代码知识定时同步</div>
+        <div class="text-sm font-medium">代码知识定时同步</div>
         <div class="flex items-center gap-4">
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" v-model="syncConfig.code_sync_enabled" class="size-4 rounded-sm border-border" />
@@ -129,17 +125,17 @@ async function deleteCategory(key: string) {
     <Card class="border-border">
       <CardContent class="space-y-4 p-5">
         <div class="flex items-center justify-between">
-          <div class="text-sm font-semibold">代码仓库分类</div>
+          <div class="text-sm font-medium">代码仓库分类</div>
           <Button @click="openAddCategory()" size="sm">添加分类</Button>
         </div>
         <div v-if="categories.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无分类，点击「添加分类」开始</div>
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">标识</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">名称</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">描述</th>
-              <th class="px-3 py-2 text-right text-xs font-semibold text-muted-foreground"></th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标识</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">名称</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">描述</th>
+              <th class="px-3 py-2 text-right text-xs font-medium text-muted-foreground"></th>
             </tr>
           </thead>
           <tbody>
@@ -163,7 +159,7 @@ async function deleteCategory(key: string) {
     <Card class="border-border">
       <CardContent class="space-y-4 p-5">
         <div class="flex items-center justify-between">
-          <div class="text-sm font-semibold">调度状态</div>
+          <div class="text-sm font-medium">调度状态</div>
           <Button variant="outline" size="sm" @click="loadSchedulerStatus()">刷新</Button>
         </div>
         <div v-if="!schedulerStatus" class="py-4 text-center text-sm text-muted-foreground">无法获取调度状态</div>
@@ -180,8 +176,8 @@ async function deleteCategory(key: string) {
           <table v-else class="w-full">
             <thead>
               <tr class="border-b border-border bg-secondary/50">
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">仓库</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">下次执行</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
               </tr>
             </thead>
             <tbody>

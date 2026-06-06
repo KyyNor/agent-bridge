@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import NavIcon from './NavIcon.vue'
+
 export interface NavItem {
   key: string
   label: string
+  description?: string
   badge?: string | number
   disabled?: boolean
 }
@@ -25,9 +28,9 @@ function navigate(key: string) {
 <template>
   <div class="flex min-h-screen">
     <!-- Sidebar -->
-    <aside class="fixed top-0 left-0 bottom-0 z-50 flex w-[240px] flex-col border-r border-sidebar-border bg-card">
+    <aside class="fixed top-0 left-0 bottom-0 z-50 flex w-[240px] flex-col border-r border-border bg-card">
       <!-- Logo -->
-      <div class="border-b border-border/60 px-5 pb-4 pt-5">
+      <div class="px-5 pb-4 pt-6">
         <div class="flex items-center gap-3">
           <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
             AB
@@ -39,9 +42,9 @@ function navigate(key: string) {
       </div>
 
       <!-- Navigation -->
-      <nav class="flex-1 overflow-y-auto px-3 py-3">
-        <div v-for="group in navGroups" :key="group.label" class="mb-2">
-          <div class="mb-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+      <nav class="flex-1 overflow-y-auto px-3 py-1">
+        <div v-for="group in navGroups" :key="group.label" class="mb-3">
+          <div class="mb-1 px-3 py-1.5 text-[11px] font-medium text-muted-foreground/60">
             {{ group.label }}
           </div>
           <button
@@ -49,22 +52,23 @@ function navigate(key: string) {
             :key="item.key"
             :disabled="item.disabled"
             :class="[
-              'flex w-full items-center gap-3 rounded-lg px-3 py-2 mb-0.5 text-[13px] font-medium transition-colors',
+              'flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] mb-0.5 text-[13px] transition-colors',
               item.disabled
-                ? 'cursor-default text-gray-400'
+                ? 'cursor-default text-muted-foreground/40'
                 : active === item.key
-                  ? 'bg-accent text-accent-foreground font-semibold'
-                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  ? 'bg-primary/[0.06] text-primary font-medium'
+                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
             ]"
             @click="!item.disabled && navigate(item.key)"
           >
+            <NavIcon :name="item.key" />
             <span>{{ item.label }}</span>
             <span
               v-if="item.badge"
               :class="[
                 'ml-auto rounded-full px-1.5 py-px text-[11px] font-semibold',
                 active === item.key
-                  ? 'bg-primary/15 text-primary'
+                  ? 'bg-primary/10 text-primary'
                   : 'bg-secondary text-muted-foreground'
               ]"
             >{{ item.badge }}</span>
@@ -73,8 +77,8 @@ function navigate(key: string) {
       </nav>
 
       <!-- Footer -->
-      <div class="border-t border-border/60 px-5 py-4 text-xs text-gray-400">
-        {{ footer || 'v0.1.0 · 阶段一' }}
+      <div class="border-t border-border/50 px-5 py-4 text-[11px] text-muted-foreground/50">
+        {{ footer || 'v0.1.0' }}
       </div>
     </aside>
 

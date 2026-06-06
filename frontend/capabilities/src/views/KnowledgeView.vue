@@ -196,13 +196,13 @@ function onFileSelected(e: Event) {
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">名称</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">标识</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">文档数</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">同步失败</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">后端状态</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">角色</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"></th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">名称</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标识</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">文档数</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">同步失败</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">后端状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">角色</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
           </thead>
           <tbody>
@@ -299,11 +299,11 @@ function onFileSelected(e: Event) {
             <div v-if="detailDocs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无文档</div>
             <table v-else class="w-full">
               <thead><tr class="border-b border-border bg-secondary/50">
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">标题</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">上传者</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">版本</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">状态</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground"></th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">上传者</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
               </tr></thead>
               <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/40 hover:bg-secondary/30">
                 <td class="px-3 py-2 text-sm font-medium">{{ d.title }}</td>
@@ -335,8 +335,8 @@ function onFileSelected(e: Event) {
             </div>
             <table class="w-full">
               <thead><tr class="border-b border-border bg-secondary/50">
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">用户</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">角色</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">用户</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">角色</th>
               </tr></thead>
               <tbody><tr v-for="m in detailMembers" :key="m.linux_user" class="border-b border-border/40">
                 <td class="px-3 py-2 text-sm">{{ m.linux_user }}</td>
@@ -354,12 +354,12 @@ function onFileSelected(e: Event) {
             <div v-if="detailSyncJobs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无同步任务</div>
             <table v-else class="w-full">
               <thead><tr class="border-b border-border bg-secondary/50">
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">文档</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">操作</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">状态</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">后端</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">错误</th>
-                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">时间</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">文档</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">操作</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">后端</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">时间</th>
               </tr></thead>
               <tbody><tr v-for="j in detailSyncJobs" :key="j.id" class="border-b border-border/40 hover:bg-secondary/30">
                 <td class="px-3 py-2 text-sm">{{ j.doc_title }}</td>

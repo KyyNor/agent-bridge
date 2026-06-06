@@ -220,13 +220,13 @@ function categoryName(key: string) {
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">仓库</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">分类</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Git URL</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">分支</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">最近同步</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"></th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">仓库</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">分类</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Git URL</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">分支</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">最近同步</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
           </thead>
           <tbody>
@@ -358,7 +358,7 @@ function categoryName(key: string) {
           <!-- Overview Tab -->
           <div v-if="detailTab === 'overview'" class="space-y-3">
             <div class="rounded-lg border border-border p-4">
-              <div class="mb-3 text-sm font-semibold">仓库信息</div>
+              <div class="mb-3 text-sm font-medium">仓库信息</div>
               <div class="grid gap-3 text-sm sm:grid-cols-2">
                 <div>
                   <div class="text-xs text-muted-foreground">仓库标识</div>
@@ -379,7 +379,7 @@ function categoryName(key: string) {
               </div>
             </div>
             <div v-if="detailRepo?.last_error" class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              <div class="mb-1 font-semibold">同步错误</div>
+              <div class="mb-1 font-medium">同步错误</div>
               <div class="whitespace-pre-wrap break-words">{{ detailRepo.last_error }}</div>
             </div>
           </div>
@@ -394,10 +394,10 @@ function categoryName(key: string) {
             <div v-else-if="detailResults.length > 0" class="max-h-[300px] overflow-y-auto rounded-lg border border-border">
               <table class="w-full table-fixed">
                 <thead><tr class="border-b border-border bg-secondary/50">
-                  <th class="w-[20%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">符号</th>
-                  <th class="w-[12%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">类型</th>
-                  <th class="w-[55%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">文件</th>
-                  <th class="w-[13%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">行号</th>
+                  <th class="w-[20%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">符号</th>
+                  <th class="w-[12%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">类型</th>
+                  <th class="w-[55%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">文件</th>
+                  <th class="w-[13%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">行号</th>
                 </tr></thead>
                 <tbody><tr v-for="r in detailResults" :key="r.symbol + r.path" class="border-b border-border/40 hover:bg-secondary/30">
                   <td class="px-3 py-1.5 text-sm font-medium truncate" :title="r.symbol">{{ r.symbol }}</td>
