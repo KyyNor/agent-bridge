@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeGraph 集成与知识库 Web 管理改造计划</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #657187;
+      --line: #dce2ec;
+      --blue: #2357d9;
+      --green: #16845b;
+      --amber: #a15c05;
+      --red: #b42318;
+      --soft-blue: #eaf0ff;
+      --soft-green: #e9f8f1;
+      --soft-amber: #fff4df;
+      --shadow: 0 18px 48px rgba(23, 32, 51, 0.09);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.62;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 40px 22px 64px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    h1, h2, h3 { line-height: 1.22; margin: 0; letter-spacing: 0; }
+    h1 { font-size: 34px; max-width: 820px; }
+    h2 { font-size: 22px; margin-bottom: 14px; }
+    h3 { font-size: 16px; margin-bottom: 8px; }
+    p { margin: 0 0 12px; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #eef2f7;
+      font-size: 0.92em;
+    }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+
+    .summary {
+      margin-top: 16px;
+      max-width: 820px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .meta {
+      min-width: 220px;
+      padding: 18px;
+      border-radius: 8px;
+      background: var(--soft-blue);
+      color: #1d3f9f;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    section {
+      margin-top: 24px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+    }
+
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: #edf2f9;
+      color: #43516a;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .tag.green { background: var(--soft-green); color: var(--green); }
+    .tag.amber { background: var(--soft-amber); color: var(--amber); }
+    .tag.blue { background: var(--soft-blue); color: var(--blue); }
+
+    ul, ol { margin: 10px 0 0; padding-left: 22px; }
+    li { margin: 7px 0; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .step {
+      min-height: 118px;
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--blue);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      background: #f3f6fa;
+      font-weight: 700;
+    }
+
+    .note {
+      padding: 14px 16px;
+      border-left: 4px solid var(--blue);
+      border-radius: 6px;
+      background: var(--soft-blue);
+      color: #203c87;
+    }
+
+    .risk {
+      border-left-color: var(--amber);
+      background: var(--soft-amber);
+      color: #704506;
+    }
+
+    .done {
+      border-left-color: var(--green);
+      background: var(--soft-green);
+      color: #116246;
+    }
+
+    @media (max-width: 860px) {
+      header, .two, .three, .flow { grid-template-columns: 1fr; }
+      h1 { font-size: 28px; }
+      main { padding: 22px 14px 44px; }
+      header, section { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="eyebrow">Modification Plan</div>
+        <h1>CodeGraph 集成与知识库 Web 完整管理改造计划</h1>
+        <p class="summary">
+          本计划围绕两个明确目标展开：将当前自研轻量代码解析替换为
+          <a href="https://github.com/colbymchenry/codegraph">colbymchenry/codegraph</a>
+          的本地知识图谱能力；同时把知识库从“CLI + API 可用”提升为“Web 页面可完整管理”。
+        </p>
+      </div>
+      <div class="meta">
+        <strong>适用项目</strong><br />
+        agent-bridge<br /><br />
+        <strong>建议优先级</strong><br />
+        P0: CodeGraph 替换<br />
+        P1: 知识库管理闭环
+      </div>
+    </header>
+
+    <section>
+      <h2>当前判断</h2>
+      <div class="grid two">
+        <div class="card">
+          <span class="tag amber">CodeGraph 现状</span>
+          <p>
+            当前 <code>src/agent_bridge/codegraph/service.py</code> 自行 clone 仓库后遍历文件，
+            只保存文件内容和 Python <code>def/class</code> 正则符号。它更像全文检索加简易符号表，
+            没有调用图、影响分析、跨语言 AST、框架路由识别和自动同步。
+          </p>
+        </div>
+        <div class="card">
+          <span class="tag amber">知识库 Web 现状</span>
+          <p>
+            后端已经有知识库、文档、成员、同步、检索和问答 API；Vue 前端目前在
+            <code>BuiltinsView.vue</code> 里只展示知识库概览，没有创建知识库、上传文档、
+            文档详情、成员授权、同步任务处理和问答检索页面。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>目标架构</h2>
+      <div class="flow">
+        <div class="step">
+          <strong>1. 仓库登记</strong>
+          Web/接口保存 repo 元数据、权限、分支和状态。
+        </div>
+        <div class="step">
+          <strong>2. 本地工作区</strong>
+          Agent Bridge 负责 clone/fetch 到受控目录。
+        </div>
+        <div class="step">
+          <strong>3. CodeGraph</strong>
+          使用 <code>codegraph init/index/sync/status</code> 或 MCP 工具构建和查询
+          <code>.codegraph/codegraph.db</code>。
+        </div>
+        <div class="step">
+          <strong>4. Builtin 能力</strong>
+          内置工具转发到 CodeGraph 的 search/explore/callers/callees/impact/node/files/status。
+        </div>
+        <div class="step">
+          <strong>5. Web 管理</strong>
+          统一管理代码仓库、知识库、文档、成员、同步和问答检索。
+        </div>
+      </div>
+      <p class="note">
+        CodeGraph 官方能力包括本地 SQLite 图谱、FTS5 搜索、MCP 工具、20+ 语言、调用关系、
+        影响分析、框架路由识别和文件监听自动同步。Agent Bridge 应复用这些能力，而不是再维护
+        自己的解析器和索引表。
+      </p>
+    </section>
+
+    <section>
+      <h2>一、CodeGraph 集成改造</h2>
+      <div class="grid two">
+        <div class="card">
+          <h3>1. 新增适配层</h3>
+          <ul>
+            <li>新增 <code>CodeGraphClient</code>，封装 CodeGraph 的 CLI/MCP 调用。</li>
+            <li>优先使用 <code>codegraph serve --mcp</code> 暴露的工具，覆盖 <code>codegraph_explore</code> 等核心能力。</li>
+            <li>对 <code>status</code>、<code>files</code>、<code>query</code> 等命令保留 CLI JSON 路径，便于健康检查和同步流程。</li>
+            <li>为每个 repo 以本地路径作为工作目录，避免跨仓库状态污染。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>2. 替换索引逻辑</h3>
+          <ul>
+            <li>删除或停用 <code>_index_files</code>、<code>SYMBOL_PATTERN</code>、<code>codegraph_index_items</code> 写入逻辑。</li>
+            <li><code>sync_repository</code> 改为 clone/fetch 后执行 <code>codegraph init -i</code> 或 <code>codegraph sync</code>。</li>
+            <li>同步结果来自 <code>codegraph status --json</code> 和进程退出码，写回 <code>codegraph_sync_runs</code>。</li>
+            <li>保留 <code>code_repositories</code> 作为 Agent Bridge 的登记、权限和展示表。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>3. 扩展内置工具</h3>
+          <ul>
+            <li>保留兼容工具：<code>search_code</code>、<code>get_file</code>、<code>find_symbol</code>、<code>repository_overview</code>。</li>
+            <li>新增语义工具：<code>explore</code>、<code>callers</code>、<code>callees</code>、<code>impact</code>、<code>node</code>、<code>files</code>、<code>status</code>。</li>
+            <li>工具实现只做参数校验、权限校验、结果标准化，不再解析源码。</li>
+            <li>继续接入现有 profile resource policy，资源类型保持 <code>code_repo</code>。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>4. 依赖与部署策略</h3>
+          <ul>
+            <li>启动时检测 <code>codegraph</code> 是否在 PATH，未安装时 Web 显示明确修复提示。</li>
+            <li>文档推荐安装方式：<code>npm i -g @colbymchenry/codegraph</code> 或官方安装脚本。</li>
+            <li>不要把 npm 包强行绑定进 Python 后端；默认走外部 CLI/MCP，降低 Node 运行时约束。</li>
+            <li>可选后续优化：为热路径维护 MCP stdio 进程池，避免每次查询重复启动。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>二、知识库 Web 完整管理</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>页面/模块</th>
+            <th>主要能力</th>
+            <th>需要补齐的 API 或前端动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>知识库列表</td>
+            <td>查看、创建、筛选、状态汇总、后端目标状态、同步失败数。</td>
+            <td>复用 <code>GET /kbs</code>、<code>POST /kbs</code>、<code>GET /builtin/wiki/kbs</code>，修正前端字段 <code>document_count</code> 与 <code>doc_count</code> 不一致。</td>
+          </tr>
+          <tr>
+            <td>知识库详情</td>
+            <td>文档列表、成员列表、同步状态、后端目标、最近错误。</td>
+            <td>组合 <code>GET /docs?kb=</code>、<code>GET /kbs/{slug}/members</code>、<code>GET /status</code>。</td>
+          </tr>
+          <tr>
+            <td>文档管理</td>
+            <td>上传、选择一个或多个知识库、稍后同步、查看详情、上传新版本、软删除、确认清理。</td>
+            <td>前端增加 multipart 上传；复用 <code>POST /docs</code>、<code>POST /docs/{slug}/versions</code>、<code>POST /docs/{slug}/delete</code>、<code>POST /docs/{slug}/purge</code>。</td>
+          </tr>
+          <tr>
+            <td>成员与权限</td>
+            <td>新增成员、修改角色、查看可管理者和贡献者。</td>
+            <td>先用 <code>POST /kbs/{slug}/members</code> 覆盖新增/更新；如需移除成员，新增删除 API。</td>
+          </tr>
+          <tr>
+            <td>同步中心</td>
+            <td>查看待处理、失败、成功任务；按后端筛选；手动同步当前用户或全量同步。</td>
+            <td>复用 <code>GET /status</code>、<code>POST /sync</code>；前端显示失败原因和重试入口。</td>
+          </tr>
+          <tr>
+            <td>检索与问答</td>
+            <td>选择知识库/后端，搜索 chunk，进行问答，展示引用片段和会话 ID。</td>
+            <td>复用 <code>GET /search</code>、<code>POST /ask</code>；前端提供结果列表和 answer panel。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>实施阶段</h2>
+      <div class="grid three">
+        <div class="card">
+          <span class="tag blue">Phase 1</span>
+          <h3>CodeGraph 最小替换</h3>
+          <ol>
+            <li>加入 <code>CodeGraphClient</code> 和安装检测。</li>
+            <li>将同步改为调用官方 <code>codegraph</code>。</li>
+            <li>重写测试，证明不再写入自研索引。</li>
+            <li>让现有 <code>search_code/find_symbol/status</code> API 通过适配层返回结果。</li>
+          </ol>
+        </div>
+        <div class="card">
+          <span class="tag blue">Phase 2</span>
+          <h3>语义能力接入</h3>
+          <ol>
+            <li>实现 MCP stdio 调用或短生命周期 MCP 调用器。</li>
+            <li>新增 explore/callers/callees/impact/node/files 工具。</li>
+            <li>保持 profile resource policy 和治理日志。</li>
+            <li>前端仓库详情展示图谱状态、文件树和影响分析入口。</li>
+          </ol>
+        </div>
+        <div class="card">
+          <span class="tag blue">Phase 3</span>
+          <h3>知识库 Web 闭环</h3>
+          <ol>
+            <li>新增 Knowledge 路由或独立视图，不再塞在 Builtins 概览页里。</li>
+            <li>完成知识库、文档、成员、同步、搜索、问答六类交互。</li>
+            <li>补齐删除成员、编辑知识库基础信息等 API 缺口。</li>
+            <li>做端到端测试和前端构建产物更新。</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>后端改动清单</h2>
+      <ul>
+        <li><code>src/agent_bridge/codegraph/service.py</code>：改为 orchestration service，只负责仓库同步、权限和调用 CodeGraph 适配层。</li>
+        <li><code>src/agent_bridge/codegraph/client.py</code>：新增，封装 CLI/MCP 调用、超时、JSON 解析、错误归一化。</li>
+        <li><code>src/agent_bridge/capabilities/builtin_codegraph.py</code>：工具列表扩展到官方 CodeGraph 语义工具。</li>
+        <li><code>src/agent_bridge/storage/schema.py</code>：保留 repo 和 sync run；逐步废弃 <code>codegraph_index_items</code>，用 migration 或兼容空表处理老数据。</li>
+        <li><code>src/agent_bridge/api/routes/builtins.py</code>：增加 repo 详情、状态、查询、文件树、影响分析接口，供 Web 页面调用。</li>
+        <li><code>src/agent_bridge/api/routes/knowledge.py</code>：补齐删除成员、编辑知识库、后端目标管理等 Web 必需操作。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>前端改动清单</h2>
+      <ul>
+        <li>新增 <code>KnowledgeView.vue</code>，作为知识库管理主入口。</li>
+        <li>新增 <code>KnowledgeDetailView.vue</code> 或同页 master-detail，承载文档、成员、同步、问答 tabs。</li>
+        <li>扩展 <code>api/client.ts</code> 与 <code>api/types.ts</code>：补齐 knowledge CRUD、multipart 上传、sync、search、ask、codegraph status/query 类型。</li>
+        <li>将 <code>BuiltinsView.vue</code> 保留为内置能力概览，把完整知识库管理迁移到独立页面。</li>
+        <li>使用现有 shadcn-vue 风格组件，新增文件上传、确认弹窗、状态 badge、失败详情抽屉和结果引用列表。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>迁移策略</h2>
+      <div class="grid two">
+        <p class="note">
+          <strong>兼容优先：</strong>第一版不删除 <code>codegraph_index_items</code> 表，只停止写入；
+          API 返回结构尽量兼容现有测试和前端，内部数据源换成 CodeGraph。
+        </p>
+        <p class="note risk">
+          <strong>风险控制：</strong>CodeGraph MCP/CLI 输出格式可能随版本变化。适配层必须集中处理版本检测、
+          JSON schema 校验、超时和错误信息，避免业务服务散落调用细节。
+        </p>
+      </div>
+    </section>
+
+    <section>
+      <h2>验收标准</h2>
+      <ul>
+        <li>同步一个 TypeScript/Python/Go 任意仓库后，本地仓库目录出现 <code>.codegraph/codegraph.db</code>，Agent Bridge 不再生成自研索引内容。</li>
+        <li>内置 CodeGraph 工具可以返回搜索、文件树、调用者、被调用者、影响分析和状态结果。</li>
+        <li>Profile resource policy 仍能限制某个用户或 profile 访问指定代码仓库。</li>
+        <li>Web 页面可以完成知识库创建、成员授权、文档上传、版本更新、删除、同步、状态查看、搜索和问答。</li>
+        <li>失败场景可见：未安装 CodeGraph、clone 失败、index 失败、知识库后端同步失败都能在 Web 上看到明确错误。</li>
+        <li>测试覆盖后端单测、API 集成测试、前端 build，以及至少一条知识库 Web E2E 流程。</li>
+      </ul>
+      <p class="note done">
+        建议实施顺序：先替换 CodeGraph 后端数据源，再扩展语义工具，最后做 Web 管理闭环。
+        这样能先把“方向错误的自研解析”收住，再把可视化管理补完整。
+      </p>
+    </section>
+  </main>
+</body>
+</html>
