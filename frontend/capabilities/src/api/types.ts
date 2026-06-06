@@ -219,10 +219,21 @@ export interface CodeGraphNode {
   path: string
   symbol: string
   kind: string
+  language?: string | null
   line_start: number | null
   line_end: number | null
   snippet: string
   score: number | null
+}
+
+export interface CodeGraphExploreResult {
+  repo: string
+  query: string
+  mcp_result: {
+    is_error: boolean
+    structured: unknown
+    content: unknown[]
+  }
 }
 
 export interface RepoOverview {

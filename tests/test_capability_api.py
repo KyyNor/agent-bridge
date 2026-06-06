@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -437,6 +438,8 @@ def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
     source = Path("frontend/capabilities/src/views/CodeRepoView.vue").read_text(encoding="utf-8")
 
     assert "detailTab === 'overview'" in source
+    assert "detailTab === 'explore'" in source
+    assert "{ key: 'explore', label: 'Explore' }" in source
     assert "仓库信息" in source
     assert "同步错误" in source
     assert "CodeGraph CLI 已安装" not in source
@@ -450,6 +453,7 @@ def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
     assert "api.findCallees" not in source
     assert "api.analyzeImpact" not in source
     assert "api.queryRepo" in source
+    assert "api.exploreRepo" in source
     assert "searchInRepo('callers')" not in source
 
 
@@ -672,6 +676,50 @@ def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) 
     assert query.json()["matches"][0]["path"] == "app.py"
     assert callers.status_code == 200
     assert "matches" in callers.json()
+
+
+def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_paths) -> None:
+    class FakeMcpClient:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def call_tool(self, project_dir: Path, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append({"project_dir": project_dir, "tool_name": tool_name, "arguments": arguments})
+            return {"is_error": False, "structured": {"answer": "ok"}, "content": []}
+
+    repo = _git_repo(tmp_path / "repo")
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/builtin/codegraph/repositories",
+        json={
+            "repo_key": "web-app",
+            "name": "Web App",
+            "git_url": str(repo),
+            "branch": "master",
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+    fake_mcp = FakeMcpClient()
+    app.state.agent_bridge_service.codegraph.mcp_client = fake_mcp
+
+    response = client.post(
+        "/builtin/codegraph/repositories/web-app/explore",
+        json={"query": "hello"},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["repo"] == "web-app"
+    assert response.json()["mcp_result"]["structured"] == {"answer": "ok"}
+    assert fake_mcp.calls == [
+        {
+            "project_dir": wm_paths.codegraph_dir / "web-app",
+            "tool_name": "codegraph_explore",
+            "arguments": {"query": "hello", "projectPath": str(wm_paths.codegraph_dir / "web-app")},
+        }
+    ]
 
 
 def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths) -> None:

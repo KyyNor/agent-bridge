@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, RepoOverview } from '../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, RepoOverview } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -26,8 +26,12 @@ const detailOverview = ref<RepoOverview | null>(null)
 const detailStatus = ref<CodeGraphStatus | null>(null)
 const detailQuery = ref('')
 const detailResults = ref<CodeGraphNode[]>([])
-const detailTab = ref<'overview' | 'query'>('overview')
+const detailExploreQuery = ref('')
+const detailExploreResult = ref<CodeGraphExploreResult | null>(null)
+const detailExploreError = ref('')
+const detailTab = ref<'overview' | 'query' | 'explore'>('overview')
 const detailSearching = ref(false)
+const detailExploring = ref(false)
 
 onMounted(async () => {
   await loadRepos()
@@ -78,6 +82,9 @@ async function openDetail(r: CodeRepository) {
   detailTab.value = 'overview'
   detailResults.value = []
   detailQuery.value = ''
+  detailExploreQuery.value = ''
+  detailExploreResult.value = null
+  detailExploreError.value = ''
   try {
     const [status, overview] = await Promise.allSettled([
       api.getCodeGraphStatus(),
@@ -99,6 +106,25 @@ async function searchInRepo() {
     detailResults.value = result.matches
   } catch { detailResults.value = [] }
   detailSearching.value = false
+}
+
+async function exploreRepo() {
+  const term = detailExploreQuery.value.trim()
+  if (!term || !detailRepo.value) return
+  detailExploring.value = true
+  detailExploreError.value = ''
+  detailExploreResult.value = null
+  try {
+    const result = await api.exploreRepo(detailRepo.value.repo_key, term)
+    detailExploreResult.value = result
+  } catch (e: any) {
+    detailExploreError.value = e.message || 'Explore 执行失败'
+  }
+  detailExploring.value = false
+}
+
+function formatJson(value: unknown) {
+  return JSON.stringify(value, null, 2)
 }
 </script>
 
@@ -231,6 +257,7 @@ async function searchInRepo() {
             <button v-for="t in [
               { key: 'overview', label: '概览' },
               { key: 'query', label: '查询' },
+              { key: 'explore', label: 'Explore' },
             ]" :key="t.key"
               :class="['rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', detailTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
               @click="detailTab = t.key as any">{{ t.label }}</button>
@@ -287,6 +314,30 @@ async function searchInRepo() {
                   <td class="px-3 py-1.5 text-xs tabular-nums">{{ r.line_start || '—' }}</td>
                 </tr></tbody>
               </table>
+            </div>
+          </div>
+
+          <!-- Explore Tab -->
+          <div v-if="detailTab === 'explore'" class="space-y-3">
+            <div class="flex gap-2">
+              <Input v-model="detailExploreQuery" placeholder="输入要交给 CodeGraph Explore 的问题" class="flex-1" @keydown.enter="exploreRepo()" />
+              <Button @click="exploreRepo()" :disabled="detailExploring || !detailExploreQuery.trim()" size="sm">
+                {{ detailExploring ? '执行中...' : '执行' }}
+              </Button>
+            </div>
+            <div v-if="detailExploreError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {{ detailExploreError }}
+            </div>
+            <div v-if="detailExploring" class="py-4 text-center text-sm text-muted-foreground">执行中...</div>
+            <div v-else-if="detailExploreResult" class="space-y-3">
+              <div v-if="detailExploreResult.mcp_result.structured" class="rounded-lg border border-border p-3">
+                <div class="mb-2 text-xs font-medium text-muted-foreground">Structured</div>
+                <pre class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ formatJson(detailExploreResult.mcp_result.structured) }}</pre>
+              </div>
+              <div class="rounded-lg border border-border p-3">
+                <div class="mb-2 text-xs font-medium text-muted-foreground">Content</div>
+                <pre class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ formatJson(detailExploreResult.mcp_result.content) }}</pre>
+              </div>
             </div>
           </div>
         </div>

@@ -58,7 +58,20 @@ def _allow_repo(service: AgentBridgeService, repo_key: str) -> None:
     )
 
 
-def test_codegraph_builtin_search_and_execute_respect_profile(
+class FakeCodeGraphMcpClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def call_tool(self, project_dir: Path, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append({"project_dir": project_dir, "tool_name": tool_name, "arguments": arguments})
+        return {
+            "is_error": False,
+            "structured": {"answer": "explored"},
+            "content": [{"type": "text", "text": "explored"}],
+        }
+
+
+def test_codegraph_builtin_search_exposes_only_explore_tool(
     tmp_path: Path,
     wm_paths: AgentBridgePaths,
 ) -> None:
@@ -67,74 +80,53 @@ def test_codegraph_builtin_search_and_execute_respect_profile(
 
     root = service.capabilities.search("root", None, None, profile_key="safe-readonly")
     tools = service.capabilities.search("root", "codegraph", None, profile_key="safe-readonly")
-    result = asyncio.run(
-        service.capabilities.execute(
-            "root",
-            "codegraph",
-            "search_code",
-            {"repo": "web-app", "query": "App"},
-            profile_key="safe-readonly",
-        )
-    )
 
     codegraph = next(item for item in root["items"] if item["service"] == "codegraph")
     assert codegraph["kind"] == "builtin"
+    assert codegraph["tool_count"] == 1
     assert codegraph["resources"] == [
         {"resource_type": "code_repo", "resource_key": "web-app", "name": "Web App"}
     ]
-    assert [item["tool"] for item in tools["items"]] == [
-        "find_symbol",
-        "get_file",
-        "list_repositories",
-        "repository_overview",
-        "search_code",
-        "callers",
-        "callees",
-        "impact",
-        "list_files",
-    ]
+    assert [item["tool"] for item in tools["items"]] == ["codegraph_explore"]
     schemas = {item["tool"]: item["input_schema"] for item in tools["items"]}
-    assert schemas["search_code"]["required"] == ["repo", "query"]
-    assert schemas["get_file"]["required"] == ["repo", "path"]
-    assert result["result"]["matches"][0]["path"] == "app.py"
+    assert schemas["codegraph_explore"]["required"] == ["repo", "query"]
 
 
-def test_codegraph_builtin_list_repositories_filters_allowed_repos(
+def test_codegraph_builtin_explore_uses_repo_scoped_stdio_mcp_after_profile_check(
     tmp_path: Path,
     wm_paths: AgentBridgePaths,
 ) -> None:
-    service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo-a"), repo_key="web-app")
-    service.codegraph.upsert_repository(
-        "root",
-        "api",
-        "API",
-        str(_git_repo(tmp_path / "repo-b", "def endpoint():\n    return True\n")),
-        "master",
-        "",
-        "",
-        [],
-        60,
-        "active",
-    )
+    service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"), tags=["python"])
+    fake_mcp = FakeCodeGraphMcpClient()
+    service.codegraph.mcp_client = fake_mcp
     _allow_repo(service, "web-app")
 
     result = asyncio.run(
         service.capabilities.execute(
             "root",
             "codegraph",
-            "list_repositories",
-            {},
+            "codegraph_explore",
+            {"repo": "web-app", "query": "App flow"},
             profile_key="safe-readonly",
         )
     )
 
-    assert result["result"]["repositories"] == [
-        {"resource_type": "code_repo", "resource_key": "web-app", "name": "Web App"}
+    assert result["result"]["repo"] == "web-app"
+    assert result["result"]["query"] == "App flow"
+    assert result["result"]["mcp_result"]["structured"] == {"answer": "explored"}
+    assert fake_mcp.calls == [
+        {
+            "project_dir": wm_paths.codegraph_dir / "web-app",
+            "tool_name": "codegraph_explore",
+            "arguments": {"query": "App flow", "projectPath": str(wm_paths.codegraph_dir / "web-app")},
+        }
     ]
 
 
 def test_codegraph_builtin_blocks_unallowed_repo(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"))
+    fake_mcp = FakeCodeGraphMcpClient()
+    service.codegraph.mcp_client = fake_mcp
     service.governance.upsert_profile("root", "safe-readonly", "安全只读", "", "active")
 
     with pytest.raises(ValidationError, match=r"resource is blocked by profile policy .*log_id: call_"):
@@ -142,8 +134,8 @@ def test_codegraph_builtin_blocks_unallowed_repo(tmp_path: Path, wm_paths: Agent
             service.capabilities.execute(
                 "root",
                 "codegraph",
-                "get_file",
-                {"repo": "web-app", "path": "app.py"},
+                "codegraph_explore",
+                {"repo": "web-app", "query": "App"},
                 profile_key="safe-readonly",
             )
         )
@@ -156,6 +148,7 @@ def test_codegraph_builtin_blocks_unallowed_repo(tmp_path: Path, wm_paths: Agent
     assert log["failure_stage"] == "profile_policy"
     assert log["failure_owner"] == "policy"
     assert log["error_type"] == "profile_policy_blocked"
+    assert fake_mcp.calls == []
 
 
 def test_codegraph_builtin_unknown_tool_with_empty_args_raises_not_found(
@@ -185,17 +178,17 @@ def test_codegraph_builtin_backend_failure_is_classified(
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"))
     _allow_repo(service, "web-app")
 
-    def fail_search(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        raise RuntimeError("index unavailable")
+    async def fail_explore(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("mcp unavailable")
 
-    monkeypatch.setattr(service.codegraph, "search_code", fail_search)
+    monkeypatch.setattr(service.codegraph, "explore", fail_explore)
 
-    with pytest.raises(ValidationError, match=r"CodeGraph builtin backend failed: index unavailable .*log_id: call_"):
+    with pytest.raises(ValidationError, match=r"CodeGraph builtin backend failed: mcp unavailable .*log_id: call_"):
         asyncio.run(
             service.capabilities.execute(
                 "root",
                 "codegraph",
-                "search_code",
+                "codegraph_explore",
                 {"repo": "web-app", "query": "App"},
                 profile_key="safe-readonly",
             )
@@ -211,7 +204,7 @@ def test_codegraph_builtin_backend_failure_is_classified(
     assert log["resource_key"] == "web-app"
 
 
-def test_codegraph_builtin_semantic_tools_are_registered(
+def test_codegraph_builtin_legacy_semantic_tools_are_not_registered(
     tmp_path: Path,
     wm_paths: AgentBridgePaths,
 ) -> None:
@@ -220,9 +213,4 @@ def test_codegraph_builtin_semantic_tools_are_registered(
 
     tools = service.capabilities.search("root", "codegraph", None, profile_key="safe-readonly")
     tool_names = [item["tool"] for item in tools["items"]]
-    assert "callers" in tool_names
-    assert "callees" in tool_names
-    assert "impact" in tool_names
-    assert "list_files" in tool_names
-    # total 9 tools
-    assert len(tool_names) == 9
+    assert tool_names == ["codegraph_explore"]

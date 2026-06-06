@@ -9,7 +9,7 @@ from agent_bridge.codegraph.service import CodeGraphService
 from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
 
 
-REPO_TOOLS = {"search_code", "get_file", "find_symbol", "repository_overview", "callers", "callees", "impact", "list_files"}
+EXPLORE_TOOL = "codegraph_explore"
 
 
 class CodeGraphBuiltinProvider:
@@ -45,130 +45,23 @@ class CodeGraphBuiltinProvider:
     def list_tools(self, actor: str, profile_key: str | None) -> list[BuiltinTool]:
         return [
             BuiltinTool(
-                "find_symbol",
-                "CodeGraph Symbol",
-                "Find symbol definitions in an allowed repository.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "repo": {"type": "string"},
-                        "symbol": {"type": "string"},
-                        "limit": {"type": "integer", "default": 20},
-                    },
-                    "required": ["repo", "symbol"],
-                },
-                ToolType.search.value,
-            ),
-            BuiltinTool(
-                "get_file",
-                "CodeGraph File",
-                "Read a file from an allowed repository.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "repo": {"type": "string"},
-                        "path": {"type": "string"},
-                    },
-                    "required": ["repo", "path"],
-                },
-                ToolType.detail.value,
-            ),
-            BuiltinTool(
-                "list_repositories",
-                "CodeGraph Repositories",
-                "List allowed code repositories.",
-                {"type": "object", "properties": {}},
-                ToolType.overview.value,
-            ),
-            BuiltinTool(
-                "repository_overview",
-                "CodeGraph Repository Overview",
-                "Show repository status and summary.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "repo": {"type": "string"},
-                    },
-                    "required": ["repo"],
-                },
-                ToolType.detail.value,
-            ),
-            BuiltinTool(
-                "search_code",
-                "CodeGraph Search",
-                "Search code in an allowed repository.",
+                EXPLORE_TOOL,
+                "CodeGraph Explore",
+                "Explore an allowed code repository through the repo-scoped CodeGraph MCP server.",
                 {
                     "type": "object",
                     "properties": {
                         "repo": {"type": "string"},
                         "query": {"type": "string"},
-                        "limit": {"type": "integer", "default": 20},
                     },
                     "required": ["repo", "query"],
                 },
                 ToolType.search.value,
             ),
-            BuiltinTool(
-                "callers",
-                "CodeGraph Callers",
-                "Find functions that call the given symbol.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "repo": {"type": "string"},
-                        "symbol": {"type": "string"},
-                        "limit": {"type": "integer", "default": 20},
-                    },
-                    "required": ["repo", "symbol"],
-                },
-                ToolType.search.value,
-            ),
-            BuiltinTool(
-                "callees",
-                "CodeGraph Callees",
-                "Find functions called by the given symbol.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "repo": {"type": "string"},
-                        "symbol": {"type": "string"},
-                        "limit": {"type": "integer", "default": 20},
-                    },
-                    "required": ["repo", "symbol"],
-                },
-                ToolType.search.value,
-            ),
-            BuiltinTool(
-                "impact",
-                "CodeGraph Impact",
-                "Analyze the impact of changes to the given symbol.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "repo": {"type": "string"},
-                        "symbol": {"type": "string"},
-                    },
-                    "required": ["repo", "symbol"],
-                },
-                ToolType.search.value,
-            ),
-            BuiltinTool(
-                "list_files",
-                "CodeGraph Files",
-                "List tracked files in a repository.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "repo": {"type": "string"},
-                    },
-                    "required": ["repo"],
-                },
-                ToolType.overview.value,
-            ),
         ]
 
     def resource_from_arguments(self, tool: str, arguments: dict[str, Any]) -> BuiltinResourceRef | None:
-        if tool not in REPO_TOOLS:
+        if tool != EXPLORE_TOOL:
             return None
         repo_key = self._repo_key(arguments)
         if not repo_key:
@@ -182,9 +75,7 @@ class CodeGraphBuiltinProvider:
         arguments: dict[str, Any],
         profile_key: str | None,
     ) -> dict[str, Any]:
-        if tool == "list_repositories":
-            return {"repositories": self.list_resources(actor, profile_key)}
-        if tool not in REPO_TOOLS:
+        if tool != EXPLORE_TOOL:
             raise NotFound("tool not found")
 
         repo_key = self._repo_key(arguments)
@@ -199,83 +90,21 @@ class CodeGraphBuiltinProvider:
             raise ValidationError("resource is blocked by profile policy")
 
         try:
-            if tool == "search_code":
-                query = str(arguments.get("query") or "").strip()
-                if not query:
-                    raise ValidationError("query is required")
-                return {
-                    "matches": self.codegraph.search_code(
-                        actor,
-                        repo_key,
-                        query=query,
-                        limit=self._limit(arguments),
-                    )
-                }
-            if tool == "get_file":
-                path = str(arguments.get("path") or "").strip()
-                if not path:
-                    raise ValidationError("path is required")
-                return self.codegraph.get_file(actor, repo_key, path)
-            if tool == "find_symbol":
-                symbol = str(arguments.get("symbol") or "").strip()
-                if not symbol:
-                    raise ValidationError("symbol is required")
-                return {
-                    "matches": self.codegraph.find_symbol(
-                        actor,
-                        repo_key,
-                        symbol=symbol,
-                        limit=self._limit(arguments),
-                    )
-                }
-            if tool == "repository_overview":
-                return self.codegraph.repository_overview(actor, repo_key)
-            if tool == "callers":
-                symbol = str(arguments.get("symbol") or "").strip()
-                if not symbol:
-                    raise ValidationError("symbol is required")
-                return {
-                    "matches": self.codegraph.callers(
-                        actor, repo_key, symbol=symbol, limit=self._limit(arguments),
-                    )
-                }
-            if tool == "callees":
-                symbol = str(arguments.get("symbol") or "").strip()
-                if not symbol:
-                    raise ValidationError("symbol is required")
-                return {
-                    "matches": self.codegraph.callees(
-                        actor, repo_key, symbol=symbol, limit=self._limit(arguments),
-                    )
-                }
-            if tool == "impact":
-                symbol = str(arguments.get("symbol") or "").strip()
-                if not symbol:
-                    raise ValidationError("symbol is required")
-                return {
-                    "matches": self.codegraph.impact(actor, repo_key, symbol=symbol)
-                }
-            if tool == "list_files":
-                return {
-                    "files": self.codegraph.list_files(actor, repo_key)
-                }
+            query = str(arguments.get("query") or "").strip()
+            if not query:
+                raise ValidationError("query is required")
+            return await self.codegraph.explore(
+                actor,
+                repo_key,
+                query=query,
+            )
         except AgentBridgeError:
             raise
         except Exception as exc:
             raise self._backend_error(exc, repo_key) from exc
 
-        raise NotFound("tool not found")
-
     def _repo_key(self, arguments: dict[str, Any]) -> str:
         return str(arguments.get("repo") or arguments.get("repo_key") or "").strip()
-
-    def _limit(self, arguments: dict[str, Any]) -> int:
-        raw = arguments.get("limit", 20)
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            raise ValidationError("limit must be an integer") from None
-        return max(1, min(value, 50))
 
     def _backend_error(self, exc: Exception, repo_key: str) -> Exception:
         return mark_builtin_failure(

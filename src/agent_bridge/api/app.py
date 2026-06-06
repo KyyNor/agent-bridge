@@ -31,6 +31,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         yield
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
+    app.state.agent_bridge_service = service
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir), name="capabilities-static")
 
@@ -114,7 +115,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     app.include_router(create_governance_routes(service, actor, call_safely, ensure_capability_schema))
 
     from agent_bridge.api.routes.builtins import create_builtin_routes
-    app.include_router(create_builtin_routes(service, actor, call_safely, ensure_capability_schema))
+    app.include_router(create_builtin_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema))
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capabilities.mcp_server import setup_mcp_route

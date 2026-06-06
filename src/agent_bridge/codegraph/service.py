@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_bridge.codegraph.client import CodeGraphClient
+from agent_bridge.codegraph.mcp_client import CodeGraphMcpClient
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -28,11 +29,13 @@ class CodeGraphService:
         store: SQLiteStore,
         admins: set[str],
         codegraph_client: CodeGraphClient | None = None,
+        mcp_client: CodeGraphMcpClient | None = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.client = codegraph_client or CodeGraphClient()
+        self.mcp_client = mcp_client or CodeGraphMcpClient()
 
     def upsert_repository(
         self,
@@ -248,6 +251,22 @@ class CodeGraphService:
             return []
         local_path = self._local_path(repo_key)
         return self.client.files(local_path)
+
+    async def explore(self, actor: str, repo_key: str, query: str) -> dict[str, Any]:
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        if not local_path.is_dir():
+            raise NotFound("repository local path not found")
+        mcp_result = await self.mcp_client.call_tool(
+            local_path,
+            "codegraph_explore",
+            {"query": query, "projectPath": str(local_path)},
+        )
+        return {
+            "repo": repo_key,
+            "query": query,
+            "mcp_result": mcp_result,
+        }
 
     def _require_repository(self, repo_key: str) -> dict[str, Any]:
         repo = self.store.get_code_repository(repo_key)

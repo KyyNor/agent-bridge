@@ -12,7 +12,7 @@ class CodeGraphQueryRequest(BaseModel):
     limit: int = 20
 
 
-def create_builtin_routes(service, actor, call_safely, ensure_capability_schema):
+def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema):
     router = APIRouter()
 
     @router.get("/builtin/codegraph/repositories")
@@ -49,6 +49,11 @@ def create_builtin_routes(service, actor, call_safely, ensure_capability_schema)
     def query_repo(repo_key: str, payload: CodeGraphQueryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
         return call_safely(lambda: {"matches": service.codegraph.search_code(current_actor, repo_key, query=payload.query, limit=payload.limit)})
+
+    @router.post("/builtin/codegraph/repositories/{repo_key}/explore")
+    async def explore_repo(repo_key: str, payload: CodeGraphQueryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return await call_safely_async(lambda: service.codegraph.explore(current_actor, repo_key, query=payload.query))
 
     @router.post("/builtin/codegraph/repositories/{repo_key}/callers")
     def find_callers(repo_key: str, payload: CodeGraphQueryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:

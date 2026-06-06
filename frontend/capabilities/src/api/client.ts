@@ -3,6 +3,7 @@ import type {
   CatalogSource,
   CodeGraphStatus,
   CodeGraphNode,
+  CodeGraphExploreResult,
   CodeRepository,
   Document,
   DocumentDetail,
@@ -123,6 +124,8 @@ export const api = {
   listRepoFiles: (repoKey: string) => get<{ files: { path: string; language: string }[] }>(`/builtin/codegraph/repositories/${repoKey}/files`),
   queryRepo: (repoKey: string, query: string, limit = 20) =>
     post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/query`, { query, limit }),
+  exploreRepo: (repoKey: string, query: string) =>
+    post<CodeGraphExploreResult>(`/builtin/codegraph/repositories/${repoKey}/explore`, { query }),
   findCallers: (repoKey: string, symbol: string, limit = 20) =>
     post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/callers`, { query: symbol, limit }),
   findCallees: (repoKey: string, symbol: string, limit = 20) =>
