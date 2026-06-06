@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { marked } from 'marked'
 import { api } from '../api/client'
 import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, RepoOverview } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
@@ -123,9 +124,13 @@ async function exploreRepo() {
   detailExploring.value = false
 }
 
-function formatJson(value: unknown) {
-  return JSON.stringify(value, null, 2)
-}
+const exploreMarkdownHtml = computed(() => {
+  const content = detailExploreResult.value?.mcp_result?.content
+  if (!Array.isArray(content)) return ''
+  const textItem = content.find((c: any) => c.type === 'text' && c.text)
+  if (!textItem) return ''
+  return marked.parse(textItem.text, { async: false }) as string
+})
 </script>
 
 <template>
@@ -225,7 +230,7 @@ function formatJson(value: unknown) {
 
     <!-- Repo Detail Dialog -->
     <Dialog :open="showDetail" @update:open="showDetail = $event">
-      <DialogContent class="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+      <DialogContent class="sm:max-w-[900px] max-h-[85vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>{{ detailRepo?.name || '' }} 详情</DialogTitle>
         </DialogHeader>
@@ -300,17 +305,17 @@ function formatJson(value: unknown) {
             </div>
             <div v-if="detailSearching" class="py-4 text-center text-sm text-muted-foreground">查询中...</div>
             <div v-else-if="detailResults.length > 0" class="max-h-[300px] overflow-y-auto rounded-lg border border-border">
-              <table class="w-full">
+              <table class="w-full table-fixed">
                 <thead><tr class="border-b border-border bg-secondary/50">
-                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">符号</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">类型</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">文件</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">行号</th>
+                  <th class="w-[20%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">符号</th>
+                  <th class="w-[12%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">类型</th>
+                  <th class="w-[55%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">文件</th>
+                  <th class="w-[13%] px-3 py-2 text-left text-xs font-semibold text-muted-foreground">行号</th>
                 </tr></thead>
                 <tbody><tr v-for="r in detailResults" :key="r.symbol + r.path" class="border-b border-border/40 hover:bg-secondary/30">
-                  <td class="px-3 py-1.5 text-sm font-medium">{{ r.symbol }}</td>
+                  <td class="px-3 py-1.5 text-sm font-medium truncate" :title="r.symbol">{{ r.symbol }}</td>
                   <td class="px-3 py-1.5"><Badge variant="secondary" class="text-[11px]">{{ r.kind }}</Badge></td>
-                  <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground">{{ r.path }}</td>
+                  <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground truncate" :title="r.path">{{ r.path }}</td>
                   <td class="px-3 py-1.5 text-xs tabular-nums">{{ r.line_start || '—' }}</td>
                 </tr></tbody>
               </table>
@@ -332,11 +337,12 @@ function formatJson(value: unknown) {
             <div v-else-if="detailExploreResult" class="space-y-3">
               <div v-if="detailExploreResult.mcp_result.structured" class="rounded-lg border border-border p-3">
                 <div class="mb-2 text-xs font-medium text-muted-foreground">Structured</div>
-                <pre class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ formatJson(detailExploreResult.mcp_result.structured) }}</pre>
+                <pre class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ JSON.stringify(detailExploreResult.mcp_result.structured, null, 2) }}</pre>
               </div>
               <div class="rounded-lg border border-border p-3">
                 <div class="mb-2 text-xs font-medium text-muted-foreground">Content</div>
-                <pre class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ formatJson(detailExploreResult.mcp_result.content) }}</pre>
+                <div v-if="exploreMarkdownHtml" class="prose prose-sm max-w-none max-h-[500px] overflow-y-auto" v-html="exploreMarkdownHtml"></div>
+                <pre v-else class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ JSON.stringify(detailExploreResult.mcp_result.content, null, 2) }}</pre>
               </div>
             </div>
           </div>
