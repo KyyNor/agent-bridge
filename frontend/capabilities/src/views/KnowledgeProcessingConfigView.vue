@@ -1,6 +1,212 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { api } from '../api/client'
+import type { CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../api/types'
+import { Card, CardContent } from '../components/ui/card'
+import { Button } from '../components/ui/button'
+import { Input } from '../components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../components/ui/dialog'
+import { Badge } from '../components/ui/badge'
+
+const loading = ref(true)
+
+// Sync config
+const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_interval_minutes: 60 })
+const configSaving = ref(false)
+
+// Categories
+const categories = ref<CodeRepoCategory[]>([])
+const showCategoryDialog = ref(false)
+const categoryForm = ref({ category_key: '', name: '', description: '' })
+const categorySaving = ref(false)
+const editingCategory = ref(false)
+
+// Scheduler status
+const schedulerStatus = ref<SchedulerStatus | null>(null)
+
+onMounted(async () => {
+  await Promise.all([loadSyncConfig(), loadCategories(), loadSchedulerStatus()])
+  loading.value = false
+})
+
+async function loadSyncConfig() {
+  try { syncConfig.value = await api.getSyncConfig() } catch { /* ignore */ }
+}
+
+async function loadCategories() {
+  try { categories.value = await api.listCategories() } catch { categories.value = [] }
+}
+
+async function loadSchedulerStatus() {
+  try { schedulerStatus.value = await api.getSchedulerStatus() } catch { schedulerStatus.value = null }
+}
+
+async function saveSyncConfig() {
+  configSaving.value = true
+  try {
+    syncConfig.value = await api.saveSyncConfig(syncConfig.value)
+    await loadSchedulerStatus()
+  } catch { /* ignore */ }
+  configSaving.value = false
+}
+
+function openAddCategory() {
+  editingCategory.value = false
+  categoryForm.value = { category_key: '', name: '', description: '' }
+  showCategoryDialog.value = true
+}
+
+function openEditCategory(c: CodeRepoCategory) {
+  editingCategory.value = true
+  categoryForm.value = { category_key: c.category_key, name: c.name, description: c.description }
+  showCategoryDialog.value = true
+}
+
+async function saveCategory() {
+  categorySaving.value = true
+  try {
+    await api.upsertCategory(categoryForm.value)
+    showCategoryDialog.value = false
+    await loadCategories()
+  } catch { /* ignore */ }
+  categorySaving.value = false
+}
+
+async function deleteCategory(key: string) {
+  try {
+    await api.deleteCategory(key)
+    await loadCategories()
+  } catch { /* ignore */ }
+}
+</script>
+
 <template>
-  <div class="rounded-lg border border-dashed border-border px-5 py-12 text-center">
-    <div class="text-base font-semibold text-foreground">知识处理配置</div>
-    <div class="mt-2 text-sm text-muted-foreground">暂未配置</div>
+  <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
+  <div v-else class="space-y-5">
+    <div class="flex items-center gap-4">
+      <h2 class="text-lg font-semibold">知识处理配置</h2>
+    </div>
+
+    <!-- Sync Config -->
+    <Card class="border-border">
+      <CardContent class="space-y-4 p-5">
+        <div class="text-sm font-semibold">代码知识定时同步</div>
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" v-model="syncConfig.code_sync_enabled" class="size-4 rounded-sm border-border" />
+            启用定时同步
+          </label>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-muted-foreground">同步间隔</span>
+            <Input v-model.number="syncConfig.code_sync_interval_minutes" type="number" min="1" class="w-20" />
+            <span class="text-muted-foreground">分钟</span>
+          </div>
+          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
+            {{ configSaving ? '保存中...' : '保存' }}
+          </Button>
+        </div>
+        <div class="text-xs text-muted-foreground">
+          启用后，系统将按设定间隔对每个代码仓库执行 git pull 并重新解析索引。各仓库可在编辑时单独设置同步间隔。
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Categories -->
+    <Card class="border-border">
+      <CardContent class="space-y-4 p-5">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-semibold">代码仓库分类</div>
+          <Button @click="openAddCategory()" size="sm">添加分类</Button>
+        </div>
+        <div v-if="categories.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无分类，点击「添加分类」开始</div>
+        <table v-else class="w-full">
+          <thead>
+            <tr class="border-b border-border bg-secondary/50">
+              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">标识</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">名称</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">描述</th>
+              <th class="px-3 py-2 text-right text-xs font-semibold text-muted-foreground"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in categories" :key="c.category_key" class="border-b border-border/40 hover:bg-secondary/30">
+              <td class="px-3 py-2 font-mono text-xs">{{ c.category_key }}</td>
+              <td class="px-3 py-2 text-sm">{{ c.name }}</td>
+              <td class="px-3 py-2 text-xs text-muted-foreground">{{ c.description || '—' }}</td>
+              <td class="px-3 py-2 text-right">
+                <div class="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openEditCategory(c)">编辑</Button>
+                  <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive" @click="deleteCategory(c.category_key)">删除</Button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+
+    <!-- Scheduler Status -->
+    <Card class="border-border">
+      <CardContent class="space-y-4 p-5">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-semibold">调度状态</div>
+          <Button variant="outline" size="sm" @click="loadSchedulerStatus()">刷新</Button>
+        </div>
+        <div v-if="!schedulerStatus" class="py-4 text-center text-sm text-muted-foreground">无法获取调度状态</div>
+        <div v-else>
+          <div class="mb-3 flex items-center gap-2">
+            <Badge :variant="schedulerStatus.running ? 'secondary' : 'outline'" :class="schedulerStatus.running ? 'bg-green-50 text-green-700' : ''">
+              {{ schedulerStatus.running ? '运行中' : '已暂停' }}
+            </Badge>
+          </div>
+          <div v-if="schedulerStatus.jobs.length === 0" class="py-4 text-center text-sm text-muted-foreground">
+            {{ schedulerStatus.running ? '没有活跃的代码仓库' : '—' }}
+          </div>
+          <table v-else class="w-full">
+            <thead>
+              <tr class="border-b border-border bg-secondary/50">
+                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">仓库</th>
+                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">间隔（分钟）</th>
+                <th class="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">下次执行</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="j in schedulerStatus.jobs" :key="j.repo_key" class="border-b border-border/40">
+                <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
+                <td class="px-3 py-2 text-sm">{{ j.interval_minutes }}</td>
+                <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Category Dialog -->
+    <Dialog :open="showCategoryDialog" @update:open="showCategoryDialog = $event">
+      <DialogContent class="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle>{{ editingCategory ? '编辑分类' : '添加分类' }}</DialogTitle>
+        </DialogHeader>
+        <form @submit.prevent="saveCategory" class="space-y-4">
+          <div class="space-y-2">
+            <label class="text-sm font-medium">分类标识 <span class="text-destructive">*</span></label>
+            <Input v-model="categoryForm.category_key" placeholder="backend-services" :disabled="editingCategory" required />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">名称 <span class="text-destructive">*</span></label>
+            <Input v-model="categoryForm.name" placeholder="后端服务" required />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">描述</label>
+            <Input v-model="categoryForm.description" placeholder="后端服务相关仓库" />
+          </div>
+        </form>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
+          <Button @click="saveCategory()" :disabled="categorySaving">{{ categorySaving ? '保存中...' : '保存' }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

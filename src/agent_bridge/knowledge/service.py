@@ -9,6 +9,7 @@ from typing import Any
 from agent_bridge.knowledge.archive import ArchiveStorage
 from agent_bridge.capabilities.governance import CapabilityGovernanceService
 from agent_bridge.capabilities.service import CapabilityService
+from agent_bridge.codegraph.scheduler import CodeGraphScheduler
 from agent_bridge.codegraph.service import CodeGraphService
 from agent_bridge.core.config import AgentBridgePaths, ensure_directories
 from agent_bridge.core.domain import (
@@ -52,6 +53,7 @@ class AgentBridgeService:
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
+        self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         from agent_bridge.capabilities.builtin_codegraph import CodeGraphBuiltinProvider
         from agent_bridge.capabilities.builtin_wiki import WikiBuiltinProvider
 
@@ -255,6 +257,36 @@ class AgentBridgeService:
             self._run_job(job)
             processed += 1
         return {"processed": processed}
+
+    # -- Code repo categories --
+
+    def list_categories(self, actor: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        return self.store.list_categories()
+
+    def upsert_category(self, actor: str, *, category_key: str, name: str, description: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return self.store.upsert_category(category_key=category_key, name=name, description=description)
+
+    def delete_category(self, actor: str, category_key: str) -> None:
+        require_admin_user(actor, self.admins)
+        self.store.delete_category(category_key=category_key)
+
+    # -- Sync config & scheduler --
+
+    def get_sync_config(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return self.store.get_sync_config()
+
+    def save_sync_config(self, actor: str, *, code_sync_enabled: bool, code_sync_interval_minutes: int) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        result = self.store.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_interval_minutes=code_sync_interval_minutes)
+        self.codegraph_scheduler.refresh()
+        return result
+
+    def get_scheduler_status(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return self.codegraph_scheduler.get_status()
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
         if actor in self.admins:

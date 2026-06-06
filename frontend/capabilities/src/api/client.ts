@@ -18,6 +18,9 @@ import type {
   RepoOverview,
   SearchResultChunk,
   SyncJob,
+  CodeRepoCategory,
+  KnowledgeSyncConfig,
+  SchedulerStatus,
   ToolCallLog,
   ToolCallStats,
 } from './types'
@@ -111,27 +114,38 @@ export const api = {
   toolDetail: (type: string, key: string, tool: string) =>
     get(`/capability-catalog/sources/${type}/${key}/tools/${tool}`),
 
-  // Builtins
-  listCodeRepos: () => get<CodeRepository[]>('/builtin/codegraph/repositories'),
+  // Code Repos
+  listCodeRepos: () => get<CodeRepository[]>('/code-repo/repositories'),
   upsertCodeRepo: (r: Partial<CodeRepository> & { repo_key: string; name: string; git_url: string }) =>
-    post<CodeRepository>('/builtin/codegraph/repositories', { status: 'active', ...r }),
-  syncCodeRepo: (key: string) => post(`/builtin/codegraph/repositories/${key}/sync`),
+    post<CodeRepository>('/code-repo/repositories', { status: 'active', ...r }),
+  syncCodeRepo: (key: string) => post(`/code-repo/repositories/${key}/sync`),
   listWikiKbs: () => get<KnowledgeBaseSummary[]>('/builtin/wiki/kbs'),
 
   // CodeGraph detail
-  getCodeGraphStatus: () => get<CodeGraphStatus>('/builtin/codegraph/status'),
-  getRepoOverview: (repoKey: string) => get<RepoOverview>(`/builtin/codegraph/repositories/${repoKey}/overview`),
-  listRepoFiles: (repoKey: string) => get<{ files: { path: string; language: string }[] }>(`/builtin/codegraph/repositories/${repoKey}/files`),
+  getCodeGraphStatus: () => get<CodeGraphStatus>('/code-repo/status'),
+  getRepoOverview: (repoKey: string) => get<RepoOverview>(`/code-repo/repositories/${repoKey}/overview`),
+  listRepoFiles: (repoKey: string) => get<{ files: { path: string; language: string }[] }>(`/code-repo/repositories/${repoKey}/files`),
   queryRepo: (repoKey: string, query: string, limit = 20) =>
-    post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/query`, { query, limit }),
+    post<{ matches: CodeGraphNode[] }>(`/code-repo/repositories/${repoKey}/query`, { query, limit }),
   exploreRepo: (repoKey: string, query: string) =>
-    post<CodeGraphExploreResult>(`/builtin/codegraph/repositories/${repoKey}/explore`, { query }),
+    post<CodeGraphExploreResult>(`/code-repo/repositories/${repoKey}/explore`, { query }),
   findCallers: (repoKey: string, symbol: string, limit = 20) =>
-    post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/callers`, { query: symbol, limit }),
+    post<{ matches: CodeGraphNode[] }>(`/code-repo/repositories/${repoKey}/callers`, { query: symbol, limit }),
   findCallees: (repoKey: string, symbol: string, limit = 20) =>
-    post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/callees`, { query: symbol, limit }),
+    post<{ matches: CodeGraphNode[] }>(`/code-repo/repositories/${repoKey}/callees`, { query: symbol, limit }),
   analyzeImpact: (repoKey: string, symbol: string) =>
-    post<{ matches: CodeGraphNode[] }>(`/builtin/codegraph/repositories/${repoKey}/impact`, { query: symbol }),
+    post<{ matches: CodeGraphNode[] }>(`/code-repo/repositories/${repoKey}/impact`, { query: symbol }),
+
+  // Categories
+  listCategories: () => get<CodeRepoCategory[]>('/code-repo/categories'),
+  upsertCategory: (c: { category_key: string; name: string; description?: string }) =>
+    post<CodeRepoCategory>('/code-repo/categories', c),
+  deleteCategory: (key: string) => post<{ ok: boolean }>(`/code-repo/categories/${key}/delete`),
+
+  // Sync Config
+  getSyncConfig: () => get<KnowledgeSyncConfig>('/sync-config'),
+  saveSyncConfig: (config: KnowledgeSyncConfig) => post<KnowledgeSyncConfig>('/sync-config', config),
+  getSchedulerStatus: () => get<SchedulerStatus>('/sync-config/scheduler-status'),
 
   // Knowledge Bases
   listKbs: () => get<KnowledgeBase[]>('/kbs'),

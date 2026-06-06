@@ -28,7 +28,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.align_backends()
         except Exception:
             pass
+        service.codegraph_scheduler.start()
         yield
+        service.codegraph_scheduler.stop()
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
     app.state.agent_bridge_service = service

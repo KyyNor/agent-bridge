@@ -2,22 +2,32 @@
 import { computed, onMounted, ref } from 'vue'
 import { marked } from 'marked'
 import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, RepoOverview } from '../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 
 const repos = ref<CodeRepository[]>([])
 const loading = ref(true)
 
+// Categories
+const categories = ref<CodeRepoCategory[]>([])
+
 // Add repo dialog
 const showAddRepo = ref(false)
-const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '' })
+const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', sync_interval_minutes: 60 })
 const repoSaving = ref(false)
 const repoError = ref('')
 const syncingKey = ref('')
+
+// Edit repo dialog
+const showEditRepo = ref(false)
+const editForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', sync_interval_minutes: 60 })
+const editSaving = ref(false)
+const editError = ref('')
 
 // Repo detail dialog
 const showDetail = ref(false)
@@ -35,12 +45,16 @@ const detailSearching = ref(false)
 const detailExploring = ref(false)
 
 onMounted(async () => {
-  await loadRepos()
+  await Promise.all([loadRepos(), loadCategories()])
   loading.value = false
 })
 
 async function loadRepos() {
   try { repos.value = await api.listCodeRepos() } catch { repos.value = [] }
+}
+
+async function loadCategories() {
+  try { categories.value = await api.listCategories() } catch { categories.value = [] }
 }
 
 async function addRepo() {
@@ -57,14 +71,43 @@ async function addRepo() {
       git_url: repoForm.value.git_url,
       branch: repoForm.value.branch || 'main',
       description: repoForm.value.description,
+      category_key: repoForm.value.category_key,
+      sync_interval_minutes: repoForm.value.sync_interval_minutes || 60,
     })
     showAddRepo.value = false
-    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '' }
+    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', sync_interval_minutes: 60 }
     await loadRepos()
   } catch (e: any) {
     repoError.value = e.message || '添加失败'
   }
   repoSaving.value = false
+}
+
+function openEdit(r: CodeRepository) {
+  editForm.value = {
+    repo_key: r.repo_key,
+    name: r.name,
+    git_url: r.git_url,
+    branch: r.branch,
+    description: r.description || '',
+    category_key: r.category_key || '',
+    sync_interval_minutes: r.sync_interval_minutes || 60,
+  }
+  editError.value = ''
+  showEditRepo.value = true
+}
+
+async function saveEdit() {
+  editError.value = ''
+  editSaving.value = true
+  try {
+    await api.upsertCodeRepo(editForm.value)
+    showEditRepo.value = false
+    await loadRepos()
+  } catch (e: any) {
+    editError.value = e.message || '保存失败'
+  }
+  editSaving.value = false
 }
 
 async function syncRepo(key: string) {
@@ -182,6 +225,7 @@ const exploreMarkdownHtml = computed(() => {
                   <Button variant="ghost" size="sm" @click="syncRepo(r.repo_key)" :disabled="syncingKey === r.repo_key" class="h-8 text-xs">
                     {{ syncingKey === r.repo_key ? '同步中...' : '同步' }}
                   </Button>
+                  <Button variant="outline" size="sm" @click="openEdit(r)" class="h-8 text-xs">编辑</Button>
                   <Button variant="outline" size="sm" @click="openDetail(r)" class="h-8 text-xs">详情</Button>
                 </div>
               </td>
@@ -212,18 +256,94 @@ const exploreMarkdownHtml = computed(() => {
             <label class="text-sm font-medium">Git URL <span class="text-destructive">*</span></label>
             <Input v-model="repoForm.git_url" placeholder="https://github.com/org/repo.git" required />
           </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">分支</label>
-            <Input v-model="repoForm.branch" placeholder="main" />
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">分支</label>
+              <Input v-model="repoForm.branch" placeholder="main" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">描述</label>
+              <Input v-model="repoForm.description" placeholder="项目代码仓库" />
+            </div>
           </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">描述</label>
-            <Input v-model="repoForm.description" placeholder="项目代码仓库" />
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">分类</label>
+              <Select v-model="repoForm.category_key">
+                <SelectTrigger>
+                  <SelectValue placeholder="无分类" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">无分类</SelectItem>
+                  <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">同步间隔（分钟）</label>
+              <Input v-model.number="repoForm.sync_interval_minutes" type="number" min="1" placeholder="60" />
+            </div>
           </div>
         </form>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
           <Button @click="addRepo" :disabled="repoSaving">{{ repoSaving ? '保存中...' : '保存' }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Edit Repo Dialog -->
+    <Dialog :open="showEditRepo" @update:open="showEditRepo = $event">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>编辑代码仓库</DialogTitle>
+        </DialogHeader>
+        <form @submit.prevent="saveEdit" class="space-y-4">
+          <div v-if="editError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ editError }}</div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">仓库标识</label>
+            <Input :model-value="editForm.repo_key" disabled class="bg-secondary" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">名称 <span class="text-destructive">*</span></label>
+            <Input v-model="editForm.name" required />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">Git URL</label>
+            <Input :model-value="editForm.git_url" disabled class="bg-secondary" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">分支</label>
+              <Input v-model="editForm.branch" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">分类</label>
+              <Select v-model="editForm.category_key">
+                <SelectTrigger>
+                  <SelectValue placeholder="无分类" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">无分类</SelectItem>
+                  <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">同步间隔（分钟）</label>
+              <Input v-model.number="editForm.sync_interval_minutes" type="number" min="1" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">描述</label>
+              <Input v-model="editForm.description" />
+            </div>
+          </div>
+        </form>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
+          <Button @click="saveEdit()" :disabled="editSaving">{{ editSaving ? '保存中...' : '保存' }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

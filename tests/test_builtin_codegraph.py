@@ -42,6 +42,7 @@ def _service_with_repo(
         "",
         "",
         tags or [],
+        "",
         60,
         "active",
     )

@@ -47,6 +47,7 @@ class CodeGraphService:
         auth_ref: str,
         description: str,
         tags: list[str],
+        category_key: str,
         sync_interval_minutes: int,
         status: str,
     ) -> dict[str, Any]:
@@ -72,6 +73,7 @@ class CodeGraphService:
             auth_ref=auth_ref,
             description=description,
             tags=tags,
+            category_key=category_key,
             sync_interval_minutes=sync_interval_minutes,
             status=status,
         )

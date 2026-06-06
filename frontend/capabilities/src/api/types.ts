@@ -89,6 +89,8 @@ export interface CodeRepository {
   branch: string
   description: string
   tags: string[]
+  category_key: string
+  sync_interval_minutes: number
   status: string
   last_synced_at: string | null
   last_error: string | null
@@ -245,4 +247,26 @@ export interface RepoOverview {
   file_count: number
   symbol_count: number
   last_synced_at: string | null
+}
+
+export interface CodeRepoCategory {
+  category_key: string
+  name: string
+  description: string
+  created_at: string
+  updated_at: string
+}
+
+export interface KnowledgeSyncConfig {
+  code_sync_enabled: boolean
+  code_sync_interval_minutes: number
+}
+
+export interface SchedulerStatus {
+  running: boolean
+  jobs: {
+    repo_key: string
+    interval_minutes: number
+    next_run_at: string | null
+  }[]
 }

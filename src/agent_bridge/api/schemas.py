@@ -84,5 +84,17 @@ class CodeRepositoryRequest(BaseModel):
     auth_ref: str = ""
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    category_key: str = ""
     sync_interval_minutes: int = 60
     status: str = "active"
+
+
+class CodeRepoCategoryRequest(BaseModel):
+    category_key: str
+    name: str
+    description: str = ""
+
+
+class KnowledgeSyncConfigRequest(BaseModel):
+    code_sync_enabled: bool = False
+    code_sync_interval_minutes: int = 60

@@ -23,6 +23,7 @@ class CodeGraphRepository:
         auth_ref: str,
         description: str,
         tags: list[str],
+        category_key: str,
         sync_interval_minutes: int,
         status: str,
     ) -> dict[str, Any]:
@@ -37,10 +38,11 @@ class CodeGraphRepository:
                   auth_ref,
                   description,
                   tags_json,
+                  category_key,
                   sync_interval_minutes,
                   status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repo_key) DO UPDATE SET
                   name = excluded.name,
                   git_url = excluded.git_url,
@@ -48,6 +50,7 @@ class CodeGraphRepository:
                   auth_ref = excluded.auth_ref,
                   description = excluded.description,
                   tags_json = excluded.tags_json,
+                  category_key = excluded.category_key,
                   sync_interval_minutes = excluded.sync_interval_minutes,
                   status = excluded.status,
                   updated_at = CURRENT_TIMESTAMP
@@ -60,6 +63,7 @@ class CodeGraphRepository:
                     auth_ref,
                     description,
                     json.dumps(tags, ensure_ascii=False),
+                    category_key,
                     sync_interval_minutes,
                     status,
                 ),
@@ -269,3 +273,67 @@ class CodeGraphRepository:
         end = min(len(content), query_index + len(query) + 160)
         row["snippet"] = content[start:end]
         return row
+
+    # -- Categories --
+
+    def upsert_category(
+        self,
+        *,
+        category_key: str,
+        name: str,
+        description: str,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO code_repo_categories (category_key, name, description)
+                VALUES (?, ?, ?)
+                ON CONFLICT(category_key) DO UPDATE SET
+                  name = excluded.name,
+                  description = excluded.description,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (category_key, name, description),
+            )
+            row = conn.execute("SELECT * FROM code_repo_categories WHERE category_key = ?", (category_key,)).fetchone()
+            cat = row_to_dict(row)
+            if cat is None:
+                raise KeyError(f"category not found: {category_key}")
+            return cat
+
+    def list_categories(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM code_repo_categories ORDER BY name").fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_category(self, category_key: str) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE code_repositories SET category_key = '' WHERE category_key = ?", (category_key,))
+            conn.execute("DELETE FROM code_repo_categories WHERE category_key = ?", (category_key,))
+
+    # -- Sync Config --
+
+    def get_sync_config(self) -> dict[str, Any]:
+        defaults = {"code_sync_enabled": False, "code_sync_interval_minutes": 60}
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM knowledge_sync_config WHERE id = 1").fetchone()
+            if row is None:
+                return defaults
+            result = row_to_dict(row)
+            result["code_sync_enabled"] = bool(result.get("code_sync_enabled"))
+            return result
+
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_interval_minutes: int) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO knowledge_sync_config (id, code_sync_enabled, code_sync_interval_minutes)
+                VALUES (1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  code_sync_enabled = excluded.code_sync_enabled,
+                  code_sync_interval_minutes = excluded.code_sync_interval_minutes,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (int(code_sync_enabled), code_sync_interval_minutes),
+            )
+            return self.get_sync_config()

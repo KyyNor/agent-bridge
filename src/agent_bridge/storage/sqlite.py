@@ -75,6 +75,14 @@ class SQLiteStore:
                     "response_summary_json": "TEXT NOT NULL DEFAULT '{}'",
                 },
             )
+            self._ensure_columns(
+                conn,
+                "code_repositories",
+                {
+                    "category_key": "TEXT NOT NULL DEFAULT ''",
+                    "sync_interval_minutes": "INTEGER NOT NULL DEFAULT 60",
+                },
+            )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_failure "
                 "ON tool_call_logs(failure_owner, failure_stage, error_type)"
@@ -104,10 +112,11 @@ class SQLiteStore:
         auth_ref: str,
         description: str,
         tags: list[str],
+        category_key: str,
         sync_interval_minutes: int,
         status: str,
     ) -> dict[str, Any]:
-        return self.codegraph.upsert_code_repository(repo_key=repo_key, name=name, git_url=git_url, branch=branch, auth_ref=auth_ref, description=description, tags=tags, sync_interval_minutes=sync_interval_minutes, status=status)
+        return self.codegraph.upsert_code_repository(repo_key=repo_key, name=name, git_url=git_url, branch=branch, auth_ref=auth_ref, description=description, tags=tags, category_key=category_key, sync_interval_minutes=sync_interval_minutes, status=status)
 
     def list_code_repositories(self) -> list[dict[str, Any]]:
         return self.codegraph.list_code_repositories()
@@ -164,6 +173,25 @@ class SQLiteStore:
 
     def _add_codegraph_snippet(self, row: dict[str, Any], query: str) -> dict[str, Any]:
         return self.codegraph._add_codegraph_snippet(row=row, query=query)
+
+    # -- Categories --
+
+    def upsert_category(self, *, category_key: str, name: str, description: str) -> dict[str, Any]:
+        return self.codegraph.upsert_category(category_key=category_key, name=name, description=description)
+
+    def list_categories(self) -> list[dict[str, Any]]:
+        return self.codegraph.list_categories()
+
+    def delete_category(self, category_key: str) -> None:
+        return self.codegraph.delete_category(category_key=category_key)
+
+    # -- Sync Config --
+
+    def get_sync_config(self) -> dict[str, Any]:
+        return self.codegraph.get_sync_config()
+
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_interval_minutes: int) -> dict[str, Any]:
+        return self.codegraph.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_interval_minutes=code_sync_interval_minutes)
 
     def create_mcp_service(
         self,

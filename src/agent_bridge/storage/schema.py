@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS code_repositories (
   auth_ref TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
   tags_json TEXT NOT NULL DEFAULT '[]',
+  category_key TEXT NOT NULL DEFAULT '',
   sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
   status TEXT NOT NULL DEFAULT 'active',
   local_path TEXT,
@@ -220,4 +221,18 @@ CREATE TABLE IF NOT EXISTS codegraph_index_items (
 );
 CREATE INDEX IF NOT EXISTS idx_codegraph_index_repo_path ON codegraph_index_items(repo_key, path);
 CREATE INDEX IF NOT EXISTS idx_codegraph_index_symbol ON codegraph_index_items(repo_key, symbol);
+CREATE TABLE IF NOT EXISTS code_repo_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS knowledge_sync_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  code_sync_enabled INTEGER NOT NULL DEFAULT 0,
+  code_sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """

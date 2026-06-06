@@ -457,11 +457,12 @@ def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
     assert "searchInRepo('callers')" not in source
 
 
-def test_frontend_knowledge_processing_config_page_is_placeholder() -> None:
+def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
     source = Path("frontend/capabilities/src/views/KnowledgeProcessingConfigView.vue").read_text(encoding="utf-8")
 
     assert "知识处理配置" in source
-    assert "暂未配置" in source
+    assert "定时同步" in source
+    assert "code_sync_enabled" in source
 
 
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
@@ -615,7 +616,7 @@ def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
     client = TestClient(app)
 
     created = client.post(
-        "/builtin/codegraph/repositories",
+        "/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -626,8 +627,8 @@ def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/builtin/codegraph/repositories", headers={"X-Agent-Bridge-User": "root"})
-    synced = client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/code-repo/repositories", headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
 
     assert created.status_code == 200
     assert created.json()["repo_key"] == "web-app"
@@ -644,7 +645,7 @@ def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) 
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/builtin/codegraph/repositories",
+        "/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -653,17 +654,17 @@ def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) 
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
 
-    status = client.get("/builtin/codegraph/status", headers={"X-Agent-Bridge-User": "root"})
-    overview = client.get("/builtin/codegraph/repositories/web-app/overview", headers={"X-Agent-Bridge-User": "root"})
+    status = client.get("/code-repo/status", headers={"X-Agent-Bridge-User": "root"})
+    overview = client.get("/code-repo/repositories/web-app/overview", headers={"X-Agent-Bridge-User": "root"})
     query = client.post(
-        "/builtin/codegraph/repositories/web-app/query",
+        "/code-repo/repositories/web-app/query",
         json={"query": "hello", "limit": 5},
         headers={"X-Agent-Bridge-User": "root"},
     )
     callers = client.post(
-        "/builtin/codegraph/repositories/web-app/callers",
+        "/code-repo/repositories/web-app/callers",
         json={"query": "hello", "limit": 5},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -691,7 +692,7 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/builtin/codegraph/repositories",
+        "/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -700,12 +701,12 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
     fake_mcp = FakeMcpClient()
     app.state.agent_bridge_service.codegraph.mcp_client = fake_mcp
 
     response = client.post(
-        "/builtin/codegraph/repositories/web-app/explore",
+        "/code-repo/repositories/web-app/explore",
         json={"query": "hello"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -728,7 +729,7 @@ def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths)
     client = TestClient(app)
 
     response = client.post(
-        "/builtin/codegraph/repositories",
+        "/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
