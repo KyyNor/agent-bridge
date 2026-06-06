@@ -6,8 +6,9 @@ import DashboardView from './views/DashboardView.vue'
 import ServicesView from './views/ServicesView.vue'
 import ToolsView from './views/ToolsView.vue'
 import ProfilesView from './views/ProfilesView.vue'
-import BuiltinsView from './views/BuiltinsView.vue'
+import CodeRepoView from './views/CodeRepoView.vue'
 import KnowledgeView from './views/KnowledgeView.vue'
+import KnowledgeProcessingConfigView from './views/KnowledgeProcessingConfigView.vue'
 import LogsView from './views/LogsView.vue'
 import StatsView from './views/StatsView.vue'
 
@@ -30,15 +31,11 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: '资源管理',
-    items: [
-      { key: 'builtins', label: '内置资源' },
-    ],
-  },
-  {
     label: '知识管理',
     items: [
-      { key: 'knowledge', label: '知识库' },
+      { key: 'knowledge', label: '文档知识' },
+      { key: 'code-repos', label: '代码知识' },
+      { key: 'knowledge-config', label: '知识处理配置' },
     ],
   },
   {
@@ -65,8 +62,9 @@ const view = computed(() => hash.value)
       <ServicesView v-else-if="view === 'services'" />
       <ToolsView v-else-if="view === 'tools'" />
       <ProfilesView v-else-if="view === 'profiles'" />
-      <BuiltinsView v-else-if="view === 'builtins'" />
+      <CodeRepoView v-else-if="view === 'code-repos'" />
       <KnowledgeView v-else-if="view === 'knowledge'" />
+      <KnowledgeProcessingConfigView v-else-if="view === 'knowledge-config'" />
       <LogsView v-else-if="view === 'logs'" />
       <StatsView v-else-if="view === 'stats'" />
     </div>

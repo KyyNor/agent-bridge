@@ -33,7 +33,7 @@ function applyDimension(key: string) {
 
 const columns = computed(() => {
   if (stats.value.length === 0) return []
-  return Object.keys(stats.value[0]).filter(k => k !== 'count')
+  return Object.keys(stats.value[0]).filter(k => k !== 'calls')
 })
 
 const columnLabels: Record<string, string> = {
@@ -48,8 +48,12 @@ const columnLabels: Record<string, string> = {
   max_duration_ms: '最大耗时',
 }
 
-const totalCount = computed(() => stats.value.reduce((sum, s) => sum + Number(s.count || 0), 0))
-const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map(s => Number(s.count || 0))) : 0)
+function callCount(s: Record<string, unknown>) {
+  return Number(s.calls || 0)
+}
+
+const totalCount = computed(() => stats.value.reduce((sum, s) => sum + callCount(s), 0))
+const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map(callCount)) : 0)
 </script>
 
 <template>
@@ -112,11 +116,11 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
               <td v-for="col in columns" :key="col" class="px-4 py-3 text-sm">{{ (s as Record<string, unknown>)[col] || '—' }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-3">
-                  <div class="h-2 rounded-full bg-primary" :style="{ width: `${Math.max(8, (Number(s.count) / maxCount) * 120)}px` }" />
-                  <span class="font-semibold tabular-nums">{{ s.count }}</span>
+                  <div class="h-2 rounded-full bg-primary" :style="{ width: `${Math.max(8, (callCount(s) / maxCount) * 120)}px` }" />
+                  <span class="font-semibold tabular-nums">{{ callCount(s) }}</span>
                 </div>
               </td>
-              <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">{{ totalCount ? ((Number(s.count) / totalCount) * 100).toFixed(1) : 0 }}%</td>
+              <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">{{ totalCount ? ((callCount(s) / totalCount) * 100).toFixed(1) : 0 }}%</td>
             </tr>
           </tbody>
         </table>

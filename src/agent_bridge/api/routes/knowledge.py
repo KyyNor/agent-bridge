@@ -25,7 +25,12 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
         for slug in service.registry.list_slugs():
             adapter = service.registry.get(slug)
             module = type(adapter).__module__
-            backend_type = "ragflow" if "ragflow" in module else "mock"
+            if "ragflow" in module:
+                backend_type = "ragflow"
+            elif "weknora" in module:
+                backend_type = "weknora"
+            else:
+                backend_type = "mock"
             result.append({"slug": slug, "type": backend_type, "status": "active"})
         return result
 

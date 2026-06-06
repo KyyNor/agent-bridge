@@ -22,7 +22,7 @@ def test_kb_list_calls_client(monkeypatch) -> None:
             return [{"slug": "frontend-docs", "role": "contributor"}]
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["kb", "list"])
+    result = runner.invoke(app, ["wiki", "kb", "list"])
     assert result.exit_code == 0
     assert "frontend-docs" in result.stdout
     assert calls == ["list_kbs"]
@@ -41,7 +41,7 @@ def test_add_command_sends_file_and_kbs(monkeypatch, tmp_path: Path) -> None:
             return {"slug": "guide", "current_version_no": 1}
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["add", str(source), "--kb", "frontend-docs", "--later"])
+    result = runner.invoke(app, ["wiki", "add", str(source), "--kb", "frontend-docs", "--later"])
     assert result.exit_code == 0
     assert "guide" in result.stdout
     assert captured == {"source": source, "kb_slugs": ["frontend-docs"], "later": True}
@@ -53,9 +53,9 @@ def test_sync_command_prints_processed_count(monkeypatch) -> None:
             return {"processed": 2}
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["sync"])
+    result = runner.invoke(app, ["wiki", "sync"])
     assert result.exit_code == 0
-    assert "processed: 2" in result.stdout
+    assert "已处理: 2" in result.stdout
 
 
 def test_client_init_system_posts_admin_init(monkeypatch) -> None:
@@ -115,7 +115,7 @@ def test_server_init_calls_client(monkeypatch) -> None:
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["server", "init"])
     assert result.exit_code == 0
-    assert "initialized" in result.stdout
+    assert "初始化完成" in result.stdout
     assert calls == ["init_system"]
 
 
@@ -125,15 +125,15 @@ def test_status_reports_service_unavailable_cleanly(monkeypatch) -> None:
             raise httpx.ConnectError("boom")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["status"])
+    result = runner.invoke(app, ["wiki", "status"])
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code == 1
-    assert "service unavailable" in result.stderr or "boom" in result.stderr
+    assert "服务不可用" in result.stderr or "boom" in result.stderr
     assert "Traceback" not in output
 
 
 def test_add_missing_file_reports_clean_cli_error() -> None:
-    result = runner.invoke(app, ["add", "missing.pdf", "--kb", "frontend-docs"])
+    result = runner.invoke(app, ["wiki", "add", "missing.pdf", "--kb", "frontend-docs"])
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code != 0
     assert "Traceback" not in output
@@ -143,7 +143,7 @@ def test_server_status_command(monkeypatch) -> None:
     monkeypatch.setattr("agent_bridge.cli.app.server_status", lambda: {"running": True, "pid": 123})
     result = runner.invoke(app, ["server", "status"])
     assert result.exit_code == 0
-    assert "running" in result.stdout
+    assert "运行中" in result.stdout
     assert "123" in result.stdout
 
 
@@ -169,7 +169,7 @@ def test_server_start_reports_errors_cleanly(monkeypatch) -> None:
     result = runner.invoke(app, ["server", "start"])
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code == 1
-    assert "server error" in result.stderr
+    assert "服务错误" in result.stderr
     assert "permission denied" in result.stderr
     assert "Traceback" not in output
 
@@ -183,10 +183,10 @@ def test_purge_without_yes_exits_without_calling_client(monkeypatch) -> None:
             return {"slug": doc_slug, "status": "purged"}
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["purge", "guide"])
+    result = runner.invoke(app, ["wiki", "purge", "guide"])
     output = f"{result.stdout}{result.stderr}"
     assert result.exit_code == 1
-    assert "requires --yes" in output
+    assert "需要 --yes 确认" in output
     assert "Traceback" not in output
     assert calls == []
 
@@ -200,7 +200,7 @@ def test_purge_with_yes_calls_client(monkeypatch) -> None:
             return {"slug": doc_slug, "status": "purged"}
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["purge", "guide", "--yes"])
+    result = runner.invoke(app, ["wiki", "purge", "guide", "--yes"])
     assert result.exit_code == 0
     assert "purged" in result.stdout
     assert calls == [("guide", True)]
@@ -212,7 +212,7 @@ def test_list_backends(monkeypatch) -> None:
             return [{"slug": "local-gpt", "type": "openai"}]
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["backends"])
+    result = runner.invoke(app, ["wiki", "backends"])
     assert result.exit_code == 0
     assert "local-gpt" in result.stdout
     assert "openai" in result.stdout
@@ -235,7 +235,7 @@ def test_search_command_calls_client(monkeypatch) -> None:
             }
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["search", "how does auth work", "--kb", "frontend-docs"])
+    result = runner.invoke(app, ["wiki", "search", "how does auth work", "--kb", "frontend-docs"])
     assert result.exit_code == 0
     assert "auth.md" in result.stdout
     assert calls == [{"kb": "frontend-docs", "q": "how does auth work", "backend": None, "top_k": 6}]
@@ -247,9 +247,9 @@ def test_search_command_no_results(monkeypatch) -> None:
             return {"results": []}
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["search", "nonexistent", "--kb", "test-kb"])
+    result = runner.invoke(app, ["wiki", "search", "nonexistent", "--kb", "test-kb"])
     assert result.exit_code == 0
-    assert "no results" in result.stdout
+    assert "无结果" in result.stdout
 
 
 def test_ask_command_calls_client(monkeypatch) -> None:
@@ -261,7 +261,7 @@ def test_ask_command_calls_client(monkeypatch) -> None:
             return {"answer": "OAuth2 uses tokens.", "session_id": "abc123"}
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["ask", "how does auth work", "--kb", "frontend-docs"])
+    result = runner.invoke(app, ["wiki", "ask", "how does auth work", "--kb", "frontend-docs"])
     assert result.exit_code == 0
     assert "OAuth2 uses tokens." in result.stdout
     assert "session: abc123" in result.stdout
@@ -310,7 +310,7 @@ def test_client_ask_sends_post(monkeypatch) -> None:
     }
 
 
-def test_metamcp_profile_create_calls_client(monkeypatch) -> None:
+def test_profile_create_calls_client(monkeypatch) -> None:
     calls = []
 
     class FakeClient:
@@ -319,14 +319,14 @@ def test_metamcp_profile_create_calls_client(monkeypatch) -> None:
             return {"profile_key": profile_key, "name": name}
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["metamcp", "profile", "create", "safe-readonly", "--name", "安全只读"])
+    result = runner.invoke(app, ["profile", "create", "safe-readonly", "--name", "安全只读"])
 
     assert result.exit_code == 0
     assert "safe-readonly" in result.stdout
     assert calls == [("safe-readonly", "安全只读", "", "active")]
 
 
-def test_metamcp_profile_rules_calls_client(monkeypatch) -> None:
+def test_profile_rules_calls_client(monkeypatch) -> None:
     captured = {}
 
     class FakeClient:
@@ -338,7 +338,7 @@ def test_metamcp_profile_rules_calls_client(monkeypatch) -> None:
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
-        ["metamcp", "profile", "rules", "safe-readonly", "--allow", "mysql", "--deny", "hive"],
+        ["profile", "rules", "safe-readonly", "--allow", "mysql", "--deny", "hive"],
     )
 
     assert result.exit_code == 0
@@ -349,19 +349,18 @@ def test_metamcp_profile_rules_calls_client(monkeypatch) -> None:
     ]
 
 
-def test_metamcp_add_writes_project_config(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_writes_project_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(
         app,
         [
-            "metamcp",
-            "add",
+            "profile",
+            "use",
+            "safe-readonly",
             "--scope",
             "project",
             "--url",
             "http://127.0.0.1:8765/mcp",
-            "--profile",
-            "safe-readonly",
         ],
     )
 
@@ -371,7 +370,7 @@ def test_metamcp_add_writes_project_config(monkeypatch, tmp_path: Path) -> None:
     assert "safe-readonly" in config.read_text(encoding="utf-8")
 
 
-def test_metamcp_add_preserves_existing_servers(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     config = tmp_path / ".mcp.json"
     config.write_text(
@@ -382,14 +381,13 @@ def test_metamcp_add_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
     result = runner.invoke(
         app,
         [
-            "metamcp",
-            "add",
+            "profile",
+            "use",
+            "safe-readonly",
             "--scope",
             "project",
             "--url",
             "http://127.0.0.1:8765/mcp",
-            "--profile",
-            "safe-readonly",
         ],
     )
 
@@ -399,43 +397,42 @@ def test_metamcp_add_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
     assert "agent-capability-hub" in data["mcpServers"]
 
 
-def test_metamcp_add_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
     monkeypatch.setattr("agent_bridge.cli.app._stdin_is_interactive", lambda: True)
+    monkeypatch.setattr("questionary.select", lambda *args, **kwargs: type("Prompt", (), {"ask": lambda self: "project"})())
 
     result = runner.invoke(
         app,
         [
-            "metamcp",
-            "add",
+            "profile",
+            "use",
+            "safe-readonly",
             "--url",
             "http://127.0.0.1:8765/mcp",
-            "--profile",
-            "safe-readonly",
         ],
-        input="project\n",
     )
 
     assert result.exit_code == 0
     assert (tmp_path / ".mcp.json").exists()
-    assert "written:" in result.output
+    assert "已写入:" in result.output
 
 
-def test_metamcp_add_requires_scope_in_non_interactive_mode(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_requires_scope_in_non_interactive_mode(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("agent_bridge.cli.app._stdin_is_interactive", lambda: False)
 
     result = runner.invoke(
         app,
-        ["metamcp", "add", "--url", "http://127.0.0.1:8765/mcp", "--profile", "safe-readonly"],
+        ["profile", "use", "safe-readonly", "--url", "http://127.0.0.1:8765/mcp"],
     )
 
     assert result.exit_code == 1
-    assert "scope is required in non-interactive mode" in result.stderr
+    assert "非交互模式下必须指定 scope" in result.stderr
 
 
-def test_metamcp_add_confirms_overwrite(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_confirms_overwrite(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".mcp.json").write_text(
         '{"mcpServers":{"agent-capability-hub":{"url":"old"}}}',
@@ -445,17 +442,16 @@ def test_metamcp_add_confirms_overwrite(monkeypatch, tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         [
-            "metamcp",
-            "add",
+            "profile",
+            "use",
+            "safe-readonly",
             "--scope",
             "project",
             "--url",
             "http://127.0.0.1:8765/mcp",
-            "--profile",
-            "safe-readonly",
         ],
         input="n\n",
     )
 
     assert result.exit_code == 1
-    assert "aborted" in result.stderr
+    assert "已取消" in result.stderr

@@ -317,9 +317,9 @@ async function toggleResource(type: string, key: string) {
 
           <!-- KB Resources -->
           <div>
-            <div class="mb-2 text-sm font-medium">允许访问的知识库</div>
+            <div class="mb-2 text-sm font-medium">允许访问的文档知识</div>
             <div v-if="allKbs.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
-              暂无知识库，请先在内置资源中添加
+              暂无文档知识，请先在文档知识中添加
             </div>
             <div v-else class="max-h-[200px] space-y-1 overflow-y-auto">
               <label
@@ -344,7 +344,7 @@ async function toggleResource(type: string, key: string) {
           <div>
             <div class="mb-2 text-sm font-medium">允许访问的代码仓库</div>
             <div v-if="allRepos.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
-              暂无代码仓库，请先在内置资源中添加
+              暂无代码仓库，请先在代码知识中添加
             </div>
             <div v-else class="max-h-[200px] space-y-1 overflow-y-auto">
               <label

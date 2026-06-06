@@ -100,7 +100,7 @@ class CodeGraphService:
             if self.client.is_available():
                 self.client.init(local_path)
                 self.client.index(local_path)
-                indexed_count = 0
+                indexed_count = len(self.client.files(local_path))
             else:
                 items = self._index_files(repo_key, local_path)
                 self.store.replace_codegraph_index(repo_key, items)
@@ -155,8 +155,12 @@ class CodeGraphService:
     def get_file(self, actor: str, repo_key: str, path: str) -> dict[str, Any]:
         self._require_repository(repo_key)
         if self.client.is_available():
-            local_path = self._local_path(repo_key)
-            file_path = local_path / path
+            local_path = self._local_path(repo_key).resolve()
+            file_path = (local_path / path).resolve()
+            try:
+                file_path.relative_to(local_path)
+            except ValueError:
+                raise NotFound("file not found") from None
             if not file_path.is_file():
                 raise NotFound("file not found")
             try:
@@ -198,10 +202,13 @@ class CodeGraphService:
                 stats = self.client.status(local_path)
             except RuntimeError:
                 stats = {}
+            file_count = stats.get("files")
+            if file_count is None:
+                file_count = len(self.client.files(local_path))
             return {
                 **self._repository_payload(repo),
-                "file_count": stats.get("files", 0),
-                "symbol_count": stats.get("nodes", 0),
+                "file_count": file_count,
+                "symbol_count": stats.get("nodes", stats.get("symbols", 0)),
                 "last_synced_at": repo.get("last_synced_at"),
             }
         return {
@@ -252,14 +259,24 @@ class CodeGraphService:
         return self.paths.codegraph_dir / repo_key
 
     def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
+        score = node.get("score")
+        node = node.get("node", node)
+        name = str(node.get("name", "") or "")
+        signature = node.get("signature")
+        snippet = node.get("snippet")
+        if not snippet and signature:
+            signature_text = str(signature)
+            separator = "" if signature_text.startswith(("(", "[", "{")) else " "
+            snippet = f"{name}{separator}{signature_text}".strip()
         return {
             "path": node.get("filePath", node.get("path", "")),
-            "symbol": node.get("name", ""),
+            "symbol": name,
             "kind": node.get("kind", ""),
+            "language": node.get("language"),
             "line_start": node.get("startLine"),
             "line_end": node.get("endLine"),
-            "snippet": node.get("signature", node.get("snippet", "")),
-            "score": node.get("score"),
+            "snippet": snippet or name,
+            "score": node.get("score", score),
         }
 
     def _sync_git(self, repo: dict[str, Any], local_path: Path) -> None:

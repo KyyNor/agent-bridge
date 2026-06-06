@@ -329,11 +329,12 @@ class AgentBridgeService:
         if adapter is None:
             adapter = self.mock_backend
         try:
+            backend_kb_id = job.get("backend_kb_id") or job["kb_slug"]
             if job["operation"] == "delete":
                 sync_state = self.store.get_sync_state(job["doc_id"], job["kb_id"], job["backend_slug"])
                 backend_doc_id = sync_state["backend_doc_id"] if sync_state else None
                 if backend_doc_id:
-                    adapter.delete(job["kb_slug"], backend_doc_id)
+                    adapter.delete(backend_kb_id, backend_doc_id)
                 self.store.upsert_sync_state(
                     job["doc_id"],
                     job["kb_id"],
@@ -343,7 +344,7 @@ class AgentBridgeService:
                 )
             else:
                 backend_doc_id = adapter.upload(
-                    backend_kb_id=job["kb_slug"],
+                    backend_kb_id=backend_kb_id,
                     doc_slug=job["doc_slug"],
                     file_path=Path(job["archive_path"]),
                     filename=job["doc_slug"],

@@ -314,11 +314,14 @@ class KnowledgeRepository:
                   job.operation,
                   d.slug AS doc_slug,
                   kb.slug AS kb_slug,
+                  COALESCE(target.backend_kb_id, kb.slug) AS backend_kb_id,
                   v.version_no AS version_no,
                   v.archive_path AS archive_path
                 FROM sync_jobs job
                 JOIN documents d ON d.id = job.doc_id
                 JOIN knowledge_bases kb ON kb.id = job.kb_id
+                LEFT JOIN backend_targets target
+                  ON target.kb_id = job.kb_id AND target.slug = job.backend_slug
                 LEFT JOIN document_versions v ON v.id = job.version_id
                 LEFT JOIN knowledge_base_members member
                   ON member.kb_id = kb.id AND member.linux_user = ?

@@ -190,6 +190,59 @@ def test_immediate_add_syncs_to_mock_backend(wm_paths, tmp_path: Path) -> None:
     assert docs[0]["sync_status"] == "synced"
 
 
+def test_sync_uses_backend_kb_id_for_upload_and_delete(wm_paths, tmp_path: Path) -> None:
+    class RecordingBackend:
+        def __init__(self) -> None:
+            self.upload_kb_ids: list[str] = []
+            self.delete_kb_ids: list[str] = []
+
+        def create_kb(self, slug: str, name: str) -> str:
+            return "backend-dataset-123"
+
+        def delete_kb(self, backend_kb_id: str) -> None:
+            pass
+
+        def upload(self, backend_kb_id: str, doc_slug: str, file_path: Path, filename: str) -> str:
+            self.upload_kb_ids.append(backend_kb_id)
+            return "backend-doc-456"
+
+        def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
+            self.delete_kb_ids.append(backend_kb_id)
+
+        def get_status(self, backend_kb_id: str, backend_doc_id: str):
+            from agent_bridge.core.domain import BackendDocStatus
+
+            return BackendDocStatus(status="completed")
+
+        def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6):
+            return []
+
+        def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None):
+            from agent_bridge.core.domain import AskResult
+
+            return AskResult(answer="", chunks=[], session_id=None), ""
+
+    ensure_directories(wm_paths)
+    backend = RecordingBackend()
+    service = AgentBridgeService.create(wm_paths, admins={"root"})
+    service.registry = BackendRegistry(
+        {"custom": BackendConfig(slug="custom", backend_type="mock")},
+        paths=tmp_path,
+    )
+    service.registry._adapters["custom"] = backend  # type: ignore[attr-defined]
+    service.init_system()
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+
+    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
+    service.delete_document("alice", doc["slug"], later=False)
+
+    assert backend.upload_kb_ids == ["backend-dataset-123"]
+    assert backend.delete_kb_ids == ["backend-dataset-123"]
+
+
 def test_sync_processes_later_job(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")

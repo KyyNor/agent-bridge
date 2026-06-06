@@ -115,7 +115,7 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
             "name": "CodeGraph",
             "description": "内置代码仓库结构和代码查询能力",
             "tags": ["builtin", "code"],
-            "tool_count": 5,
+            "tool_count": 9,
             "status": "enabled",
             "resources": [],
         },

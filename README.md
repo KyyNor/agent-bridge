@@ -34,12 +34,12 @@ uv run pytest -v
 uv run agent-bridge server start
 uv run agent-bridge server init
 open http://127.0.0.1:8765/admin/capabilities
-uv run agb kb create frontend-docs --name "Frontend Docs"
-uv run agb kb grant frontend-docs alice contributor
-uv run agb add ./Guide.pdf --kb frontend-docs --later
-uv run agb sync
-uv run agb docs --kb frontend-docs
-uv run agb status
+uv run agb wiki kb create frontend-docs --name "Frontend Docs"
+uv run agb wiki kb grant frontend-docs alice contributor
+uv run agb wiki add ./Guide.pdf --kb frontend-docs --later
+uv run agb wiki sync
+uv run agb wiki docs --kb frontend-docs
+uv run agb wiki status
 ```
 
 The short command `agb` is equivalent to `agent-bridge`.
@@ -93,10 +93,10 @@ MetaMCP `execute` example:
 ## Governance Usage
 
 ```bash
-uv run agent-bridge metamcp profile create safe-readonly --name "safe-readonly"
-uv run agent-bridge metamcp profile rules safe-readonly --allow mysql --deny hive
-uv run agent-bridge metamcp add --scope project --url http://127.0.0.1:8765/mcp --profile safe-readonly
-uv run agent-bridge metamcp config --scope project
+uv run agent-bridge profile create safe-readonly --name "safe-readonly"
+uv run agent-bridge profile rules safe-readonly --allow mysql --deny hive
+uv run agent-bridge profile use safe-readonly --scope project --url http://127.0.0.1:8765/mcp
+uv run agent-bridge profile config --scope project
 ```
 
 ## Frontend Development

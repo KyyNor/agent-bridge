@@ -181,7 +181,7 @@ function onFileSelected(e: Event) {
     <div class="flex flex-wrap items-center gap-4">
       <Button @click="showCreate = true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        创建知识库
+        创建文档知识
       </Button>
       <Button variant="outline" @click="loadKbs()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -192,7 +192,7 @@ function onFileSelected(e: Event) {
     <!-- KB Table -->
     <Card class="border-border">
       <CardContent class="p-0">
-        <div v-if="kbs.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无知识库，点击「创建知识库」开始</div>
+        <div v-if="kbs.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无文档知识，点击「创建文档知识」开始</div>
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
@@ -237,13 +237,13 @@ function onFileSelected(e: Event) {
         </table>
       </CardContent>
     </Card>
-    <div class="text-sm text-muted-foreground">共 {{ kbs.length }} 个知识库</div>
+    <div class="text-sm text-muted-foreground">共 {{ kbs.length }} 个文档知识</div>
 
     <!-- Create KB Dialog -->
     <Dialog :open="showCreate" @update:open="showCreate = $event">
       <DialogContent class="sm:max-w-[450px]">
         <DialogHeader>
-          <DialogTitle>创建知识库</DialogTitle>
+          <DialogTitle>创建文档知识</DialogTitle>
         </DialogHeader>
         <form @submit.prevent="createKb" class="space-y-4">
           <div v-if="createError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ createError }}</div>
@@ -253,11 +253,11 @@ function onFileSelected(e: Event) {
           </div>
           <div class="space-y-2">
             <label class="text-sm font-medium">名称 <span class="text-destructive">*</span></label>
-            <Input v-model="createForm.name" placeholder="我的知识库" required />
+            <Input v-model="createForm.name" placeholder="我的文档知识" required />
           </div>
           <div class="space-y-2">
             <label class="text-sm font-medium">描述</label>
-            <Input v-model="createForm.description" placeholder="知识库描述" />
+            <Input v-model="createForm.description" placeholder="文档知识描述" />
           </div>
         </form>
         <DialogFooter>
@@ -366,7 +366,7 @@ function onFileSelected(e: Event) {
                 <td class="px-3 py-2 text-xs">{{ j.operation }}</td>
                 <td class="px-3 py-2">
                   <Badge variant="secondary" class="text-[11px]"
-                    :class="j.status === 'done' ? 'bg-green-50 text-green-700' : j.status === 'failed' ? 'bg-red-50 text-red-700' : ''">
+                    :class="j.status === 'succeeded' ? 'bg-green-50 text-green-700' : j.status === 'failed' ? 'bg-red-50 text-red-700' : ''">
                     {{ j.status }}
                   </Badge>
                 </td>

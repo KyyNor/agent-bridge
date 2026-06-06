@@ -323,7 +323,7 @@ def test_execute_rejects_unconfigured_tool(wm_paths: AgentBridgePaths) -> None:
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
     asyncio.run(service.sync_tools("root", "docs-api"))
 
-    with pytest.raises(ValidationError, match=r"tool type is not configured .*log_id: call_") as exc_info:
+    with pytest.raises(ValidationError, match=r"工具类型未配置.*log_id: call_") as exc_info:
         asyncio.run(service.execute("alice", "docs-api", "delete_doc", {"doc_id": "1"}))
 
     assert client.call_tool_calls == []
@@ -337,8 +337,9 @@ def test_execute_rejects_unconfigured_tool(wm_paths: AgentBridgePaths) -> None:
         "arguments": {"doc_id": "1"},
         "profile_key": None,
     }
-    assert json.loads(logs[0]["response_json"])["error"] == "tool type is not configured"
-    assert logs[0]["error_message"] == "tool type is not configured"
+    expected_error = "工具类型未配置，请联系管理员在 Agent Bridge 中配置工具类型"
+    assert json.loads(logs[0]["response_json"])["error"] == expected_error
+    assert logs[0]["error_message"] == expected_error
 
 
 def test_admin_configures_tool_type_and_sync_preserves_choice(wm_paths: AgentBridgePaths) -> None:

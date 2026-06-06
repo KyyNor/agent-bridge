@@ -324,6 +324,142 @@ def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
     assert "document_count" in response.json()[0]
 
 
+def test_knowledge_web_management_api_flow(tmp_path: Path, wm_paths) -> None:
+    wm_paths.config_dir.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n[backends.mock]\nbackend_type = "mock"\n',
+        encoding="utf-8",
+    )
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    source = tmp_path / "Guide.md"
+    source.write_text("# Guide\n\nhello web knowledge\n", encoding="utf-8")
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+
+    created = client.post(
+        "/kbs",
+        json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    member = client.post(
+        "/kbs/frontend-docs/members",
+        json={"linux_user": "alice", "role": "contributor"},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    uploaded = client.post(
+        "/docs",
+        data={"kb": "frontend-docs", "later": "true"},
+        files={"file": ("Guide.md", source.read_bytes(), "text/markdown")},
+        headers={"X-Agent-Bridge-User": "alice"},
+    )
+    docs = client.get("/docs", params={"kb": "frontend-docs"}, headers={"X-Agent-Bridge-User": "alice"})
+    detail = client.get("/docs/guide", headers={"X-Agent-Bridge-User": "alice"})
+    members = client.get("/kbs/frontend-docs/members", headers={"X-Agent-Bridge-User": "root"})
+    status = client.get("/status", headers={"X-Agent-Bridge-User": "alice"})
+    summary = client.get("/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "alice"})
+
+    assert created.status_code == 200
+    assert member.status_code == 200
+    assert uploaded.status_code == 200
+    assert uploaded.json()["slug"] == "guide"
+    assert docs.status_code == 200
+    assert docs.json()[0]["slug"] == "guide"
+    assert detail.status_code == 200
+    assert detail.json()["kb_slugs"] == ["frontend-docs"]
+    assert members.status_code == 200
+    assert members.json()[0]["linux_user"] == "alice"
+    assert status.status_code == 200
+    assert status.json()["jobs"][0]["status"] == "pending"
+    assert summary.status_code == 200
+    assert summary.json()[0]["document_count"] == 1
+
+
+def test_backend_list_reports_weknora_type(wm_paths) -> None:
+    wm_paths.config_dir.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        '\n'.join([
+            'host = "127.0.0.1"',
+            'port = 8765',
+            'admins = ["root"]',
+            '',
+            '[backends.weknora-main]',
+            'backend_type = "weknora"',
+            'base_url = "http://weknora.example.test"',
+            'api_key = "test-key"',
+        ]),
+        encoding="utf-8",
+    )
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/backends", headers={"X-Agent-Bridge-User": "root"})
+
+    assert response.status_code == 200
+    assert response.json() == [{"slug": "weknora-main", "type": "weknora", "status": "active"}]
+
+
+def test_frontend_stats_view_uses_calls_field_from_backend() -> None:
+    source = Path("frontend/capabilities/src/views/StatsView.vue").read_text(encoding="utf-8")
+
+    assert "callCount" in source
+    assert "s.count" not in source
+
+
+def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None:
+    source = Path("frontend/capabilities/src/App.vue").read_text(encoding="utf-8")
+
+    assert "label: '资源管理'" not in source
+    assert "{ key: 'knowledge', label: '文档知识' }" in source
+    assert "{ key: 'code-repos', label: '代码知识' }" in source
+    assert "{ key: 'knowledge-config', label: '知识处理配置' }" in source
+    assert "KnowledgeProcessingConfigView" in source
+    assert "CodeRepoView" in source
+    assert "view === 'knowledge-config'" in source
+    assert "view === 'code-repos'" in source
+    assert "BuiltinsView" not in source
+    assert "view === 'builtins'" not in source
+    assert source.count("label: '知识管理'") == 1
+
+
+def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> None:
+    knowledge = Path("frontend/capabilities/src/views/KnowledgeView.vue").read_text(encoding="utf-8")
+    profiles = Path("frontend/capabilities/src/views/ProfilesView.vue").read_text(encoding="utf-8")
+
+    assert "创建文档知识" in knowledge
+    assert "暂无文档知识，点击「创建文档知识」开始" in knowledge
+    assert "知识库" not in knowledge
+    assert "允许访问的文档知识" in profiles
+    assert "请先在文档知识中添加" in profiles
+    assert "请先在代码知识中添加" in profiles
+
+
+def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
+    source = Path("frontend/capabilities/src/views/CodeRepoView.vue").read_text(encoding="utf-8")
+
+    assert "detailTab === 'overview'" in source
+    assert "仓库信息" in source
+    assert "同步错误" in source
+    assert "CodeGraph CLI 已安装" not in source
+    assert "CodeGraph 状态" not in source
+    assert "调用者表示" not in source
+    assert "被调用者表示" not in source
+    assert "key: 'files'" not in source
+    assert "detailTab === 'files'" not in source
+    assert "api.listRepoFiles" not in source
+    assert "api.findCallers" not in source
+    assert "api.findCallees" not in source
+    assert "api.analyzeImpact" not in source
+    assert "api.queryRepo" in source
+    assert "searchInRepo('callers')" not in source
+
+
+def test_frontend_knowledge_processing_config_page_is_placeholder() -> None:
+    source = Path("frontend/capabilities/src/views/KnowledgeProcessingConfigView.vue").read_text(encoding="utf-8")
+
+    assert "知识处理配置" in source
+    assert "暂未配置" in source
+
+
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -497,6 +633,45 @@ def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
     assert synced.status_code == 200
     assert synced.json()["status"] == "succeeded"
     assert synced.json()["indexed"] >= 1
+
+
+def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/builtin/codegraph/repositories",
+        json={
+            "repo_key": "web-app",
+            "name": "Web App",
+            "git_url": str(repo),
+            "branch": "master",
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    client.post("/builtin/codegraph/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+
+    status = client.get("/builtin/codegraph/status", headers={"X-Agent-Bridge-User": "root"})
+    overview = client.get("/builtin/codegraph/repositories/web-app/overview", headers={"X-Agent-Bridge-User": "root"})
+    query = client.post(
+        "/builtin/codegraph/repositories/web-app/query",
+        json={"query": "hello", "limit": 5},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    callers = client.post(
+        "/builtin/codegraph/repositories/web-app/callers",
+        json={"query": "hello", "limit": 5},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert status.status_code == 200
+    assert "codegraph_installed" in status.json()
+    assert overview.status_code == 200
+    assert overview.json()["file_count"] >= 1
+    assert query.status_code == 200
+    assert query.json()["matches"][0]["path"] == "app.py"
+    assert callers.status_code == 200
+    assert "matches" in callers.json()
 
 
 def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths) -> None:

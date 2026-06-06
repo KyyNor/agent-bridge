@@ -170,7 +170,7 @@ def test_unknown_or_disabled_profile_is_not_found(wm_paths: AgentBridgePaths) ->
             source_keys=["mysql"],
         )
 
-    with pytest.raises(NotFound, match="profile not found"):
+    with pytest.raises(ValidationError, match="profile is disabled"):
         service.filter_source_keys(
             actor="root",
             profile_key="disabled",

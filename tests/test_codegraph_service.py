@@ -7,7 +7,7 @@ import pytest
 
 from agent_bridge.codegraph.service import CodeGraphService
 from agent_bridge.core.config import AgentBridgePaths
-from agent_bridge.core.domain import ValidationError
+from agent_bridge.core.domain import NotFound, ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -163,6 +163,7 @@ def test_codegraph_sync_uses_codegraph_cli_when_available(
     monkeypatch.setattr(client, "is_available", lambda: True)
     monkeypatch.setattr(client, "init", lambda p: None)
     monkeypatch.setattr(client, "index", lambda p: None)
+    monkeypatch.setattr(client, "files", lambda p: [{"path": "app.py", "language": "python"}])
     service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
 
     service.upsert_repository(
@@ -172,7 +173,7 @@ def test_codegraph_sync_uses_codegraph_cli_when_available(
     )
     run = service.sync_repository("root", "web-app")
     assert run["status"] == "succeeded"
-    assert run["indexed"] == 0
+    assert run["indexed"] == 1
 
 
 def test_codegraph_semantic_methods_require_cli(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
@@ -181,6 +182,7 @@ def test_codegraph_semantic_methods_require_cli(tmp_path: Path, wm_paths: AgentB
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     service = CodeGraphService(paths=wm_paths, store=store, admins={"root"})
+    service.client._available = False
     service.upsert_repository(
         actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
         branch="master", auth_ref="", description="", tags=[], sync_interval_minutes=60, status="active",
@@ -189,6 +191,26 @@ def test_codegraph_semantic_methods_require_cli(tmp_path: Path, wm_paths: AgentB
     assert service.callees("root", "web-app", "hello") == []
     assert service.impact("root", "web-app", "hello") == []
     assert service.list_files("root", "web-app") == []
+
+
+def test_codegraph_get_file_rejects_paths_outside_repository(tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch) -> None:
+    from agent_bridge.codegraph.client import CodeGraphClient
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    client = CodeGraphClient()
+    monkeypatch.setattr(client, "is_available", lambda: True)
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
+    service.upsert_repository(
+        actor="root", repo_key="web-app", name="Web App", git_url=str(tmp_path / "repo"),
+        branch="master", auth_ref="", description="", tags=[], sync_interval_minutes=60, status="active",
+    )
+    local_repo = wm_paths.codegraph_dir / "web-app"
+    local_repo.mkdir(parents=True)
+    (wm_paths.codegraph_dir / "secret.txt").write_text("SECRET\n", encoding="utf-8")
+
+    with pytest.raises(NotFound, match="file not found"):
+        service.get_file("root", "web-app", "../secret.txt")
 
 
 def test_codegraph_semantic_methods_delegate_to_client(
@@ -237,3 +259,54 @@ def test_codegraph_semantic_methods_delegate_to_client(
     files = service.list_files("root", "web-app")
     assert len(files) == 1
     assert files[0]["path"] == "app.py"
+
+
+def test_codegraph_node_payload_unwraps_cli_query_result(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"})
+
+    payload = service._codegraph_node_payload({
+        "node": {
+            "name": "hello",
+            "kind": "function",
+            "filePath": "app.py",
+            "startLine": 1,
+            "endLine": 2,
+            "signature": "()",
+        },
+        "score": 90.0,
+    })
+
+    assert payload["path"] == "app.py"
+    assert payload["symbol"] == "hello"
+    assert payload["score"] == 90.0
+
+
+def test_codegraph_overview_falls_back_to_files_when_cli_status_is_empty(
+    tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_bridge.codegraph.client import CodeGraphClient
+
+    repo = _git_repo(tmp_path / "repo")
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    client = CodeGraphClient()
+    monkeypatch.setattr(client, "is_available", lambda: True)
+    monkeypatch.setattr(client, "init", lambda p: None)
+    monkeypatch.setattr(client, "index", lambda p: None)
+    monkeypatch.setattr(client, "status", lambda p: {})
+    monkeypatch.setattr(client, "files", lambda p: [
+        {"path": "app.py", "language": "python"},
+        {"path": "README.md", "language": "markdown"},
+    ])
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
+    service.upsert_repository(
+        actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
+        branch="master", auth_ref="", description="", tags=[], sync_interval_minutes=60, status="active",
+    )
+    service.sync_repository("root", "web-app")
+
+    overview = service.repository_overview("root", "web-app")
+
+    assert overview["file_count"] == 2
