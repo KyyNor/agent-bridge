@@ -24,6 +24,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        service.store.init_schema()
         try:
             service.align_backends()
         except Exception:

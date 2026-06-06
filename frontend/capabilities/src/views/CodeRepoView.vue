@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 
 const repos = ref<CodeRepository[]>([])
 const loading = ref(true)
+const searchQuery = ref('')
+const filterCategory = ref('')
 
 // Categories
 const categories = ref<CodeRepoCategory[]>([])
@@ -170,10 +172,32 @@ async function exploreRepo() {
 const exploreMarkdownHtml = computed(() => {
   const content = detailExploreResult.value?.mcp_result?.content
   if (!Array.isArray(content)) return ''
-  const textItem = content.find((c: any) => c.type === 'text' && c.text)
+  const textItem = content.find((c: any) => c.type === 'text' && c.text) as { text: string } | undefined
   if (!textItem) return ''
   return marked.parse(textItem.text, { async: false }) as string
 })
+
+const filteredRepos = computed(() => {
+  let list = repos.value
+  if (filterCategory.value) {
+    list = list.filter(r => r.category_key === filterCategory.value)
+  }
+  if (searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase()
+    list = list.filter(r =>
+      r.name.toLowerCase().includes(q) ||
+      r.repo_key.toLowerCase().includes(q) ||
+      r.git_url.toLowerCase().includes(q) ||
+      (r.description || '').toLowerCase().includes(q)
+    )
+  }
+  return list
+})
+
+function categoryName(key: string) {
+  if (!key) return ''
+  return categories.value.find(c => c.category_key === key)?.name || key
+}
 </script>
 
 <template>
@@ -181,6 +205,19 @@ const exploreMarkdownHtml = computed(() => {
   <div v-else class="space-y-5">
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
+      <div class="relative flex-1 max-w-[360px]">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <Input v-model="searchQuery" placeholder="搜索仓库名称、标识或地址..." class="pl-8" />
+      </div>
+      <Select v-model="filterCategory">
+        <SelectTrigger class="w-[160px]">
+          <SelectValue placeholder="全部分类" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">全部分类</SelectItem>
+          <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
+        </SelectContent>
+      </Select>
       <Button @click="showAddRepo = true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         添加仓库
@@ -195,10 +232,12 @@ const exploreMarkdownHtml = computed(() => {
     <Card class="border-border">
       <CardContent class="p-0">
         <div v-if="repos.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无代码仓库，点击「添加仓库」开始</div>
+        <div v-else-if="filteredRepos.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">没有匹配的仓库</div>
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border bg-secondary/50">
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">仓库</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">分类</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Git URL</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">分支</th>
               <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">状态</th>
@@ -207,12 +246,16 @@ const exploreMarkdownHtml = computed(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in repos" :key="r.repo_key" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
+            <tr v-for="r in filteredRepos" :key="r.repo_key" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ r.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ r.repo_key }}</div>
               </td>
-              <td class="max-w-[280px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">{{ r.git_url }}</td>
+              <td class="px-4 py-3">
+                <Badge v-if="r.category_key" variant="secondary">{{ categoryName(r.category_key) }}</Badge>
+                <span v-else class="text-xs text-muted-foreground">—</span>
+              </td>
+              <td class="max-w-[240px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">{{ r.git_url }}</td>
               <td class="px-4 py-3 text-sm">{{ r.branch }}</td>
               <td class="px-4 py-3">
                 <Badge v-if="r.status === 'active'" variant="secondary" class="bg-green-50 text-green-700">正常</Badge>
@@ -234,7 +277,7 @@ const exploreMarkdownHtml = computed(() => {
         </table>
       </CardContent>
     </Card>
-    <div class="text-sm text-muted-foreground">共 {{ repos.length }} 个仓库</div>
+    <div class="text-sm text-muted-foreground">共 {{ filteredRepos.length }} / {{ repos.length }} 个仓库</div>
 
     <!-- Add Repo Dialog -->
     <Dialog :open="showAddRepo" @update:open="showAddRepo = $event">
@@ -330,15 +373,9 @@ const exploreMarkdownHtml = computed(() => {
               </Select>
             </div>
           </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-2">
-              <label class="text-sm font-medium">同步间隔（分钟）</label>
-              <Input v-model.number="editForm.sync_interval_minutes" type="number" min="1" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">描述</label>
-              <Input v-model="editForm.description" />
-            </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">描述</label>
+            <Input v-model="editForm.description" />
           </div>
         </form>
         <DialogFooter>
