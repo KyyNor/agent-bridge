@@ -57,12 +57,12 @@ const view = computed(() => hash.value)
   <AppShell :nav-groups="navGroups" :active="hash">
     <div class="flex-1 overflow-y-auto">
       <!-- Page Header -->
-      <div class="border-b border-border/50 bg-card px-8 py-5">
-        <h1 class="text-lg font-semibold text-foreground">{{ currentNav?.label || 'Agent Bridge' }}</h1>
-        <p v-if="currentNav?.description" class="mt-1 text-sm text-muted-foreground">{{ currentNav.description }}</p>
+      <div class="bg-card px-7 py-5">
+        <h1 class="text-base font-semibold text-foreground">{{ currentNav?.label || 'Agent Bridge' }}</h1>
+        <p v-if="currentNav?.description" class="mt-0.5 text-[13px] text-muted-foreground">{{ currentNav.description }}</p>
       </div>
       <!-- Content -->
-      <div class="p-6">
+      <div class="p-7">
         <DashboardView v-if="view === 'dashboard'" />
         <ServicesView v-else-if="view === 'services'" />
         <ToolsView v-else-if="view === 'tools'" />

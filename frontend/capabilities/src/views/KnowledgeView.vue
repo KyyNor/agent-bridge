@@ -190,12 +190,12 @@ function onFileSelected(e: Event) {
     </div>
 
     <!-- KB Table -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="p-0">
         <div v-if="kbs.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无文档知识，点击「创建文档知识」开始</div>
         <table v-else class="w-full">
           <thead>
-            <tr class="border-b border-border bg-secondary/50">
+            <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">名称</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标识</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">文档数</th>
@@ -206,7 +206,7 @@ function onFileSelected(e: Event) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="k in kbs" :key="k.slug" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
+            <tr v-for="k in kbs" :key="k.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ k.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ k.description }}</div>
@@ -298,14 +298,14 @@ function onFileSelected(e: Event) {
             </div>
             <div v-if="detailDocs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无文档</div>
             <table v-else class="w-full">
-              <thead><tr class="border-b border-border bg-secondary/50">
+              <thead><tr class="border-b border-border">
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">上传者</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
               </tr></thead>
-              <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/40 hover:bg-secondary/30">
+              <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/40 hover:bg-muted/50">
                 <td class="px-3 py-2 text-sm font-medium">{{ d.title }}</td>
                 <td class="px-3 py-2 text-xs text-muted-foreground">{{ d.owner_user }}</td>
                 <td class="px-3 py-2 text-xs tabular-nums">v{{ d.current_version_no || 0 }}</td>
@@ -334,7 +334,7 @@ function onFileSelected(e: Event) {
               <Button size="sm" @click="grantMember" :disabled="!memberUser.trim() || grantingMember">{{ grantingMember ? '添加中...' : '添加成员' }}</Button>
             </div>
             <table class="w-full">
-              <thead><tr class="border-b border-border bg-secondary/50">
+              <thead><tr class="border-b border-border">
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">用户</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">角色</th>
               </tr></thead>
@@ -353,7 +353,7 @@ function onFileSelected(e: Event) {
             </div>
             <div v-if="detailSyncJobs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无同步任务</div>
             <table v-else class="w-full">
-              <thead><tr class="border-b border-border bg-secondary/50">
+              <thead><tr class="border-b border-border">
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">文档</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">操作</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
@@ -361,7 +361,7 @@ function onFileSelected(e: Event) {
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">时间</th>
               </tr></thead>
-              <tbody><tr v-for="j in detailSyncJobs" :key="j.id" class="border-b border-border/40 hover:bg-secondary/30">
+              <tbody><tr v-for="j in detailSyncJobs" :key="j.id" class="border-b border-border/40 hover:bg-muted/50">
                 <td class="px-3 py-2 text-sm">{{ j.doc_title }}</td>
                 <td class="px-3 py-2 text-xs">{{ j.operation }}</td>
                 <td class="px-3 py-2">

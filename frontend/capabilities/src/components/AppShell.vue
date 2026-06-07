@@ -28,62 +28,62 @@ function navigate(key: string) {
 <template>
   <div class="flex min-h-screen">
     <!-- Sidebar -->
-    <aside class="fixed top-0 left-0 bottom-0 z-50 flex w-[240px] flex-col border-r border-border bg-card">
+    <aside class="fixed top-0 left-0 bottom-0 z-50 flex w-[210px] flex-col bg-card">
       <!-- Logo -->
-      <div class="px-5 pb-4 pt-6">
-        <div class="flex items-center gap-3">
-          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+      <div class="px-5 pb-5 pt-6">
+        <div class="flex items-center gap-2.5">
+          <div class="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
             AB
           </div>
-          <div class="leading-tight">
-            <div class="text-[15px] font-semibold text-foreground">Agent Bridge</div>
-          </div>
+          <span class="text-sm font-semibold text-foreground tracking-tight">Agent Bridge</span>
         </div>
       </div>
 
       <!-- Navigation -->
-      <nav class="flex-1 overflow-y-auto px-3 py-1">
-        <div v-for="group in navGroups" :key="group.label" class="mb-3">
-          <div class="mb-1 px-3 py-1.5 text-[11px] font-medium text-muted-foreground/60">
+      <nav class="flex-1 overflow-y-auto px-3">
+        <div v-for="group in navGroups" :key="group.label" class="mb-4">
+          <div class="px-2 pb-1 text-[11px] font-medium text-muted-foreground/50">
             {{ group.label }}
           </div>
-          <button
-            v-for="item in group.items"
-            :key="item.key"
-            :disabled="item.disabled"
-            :class="[
-              'flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] mb-0.5 text-[13px] transition-colors',
-              item.disabled
-                ? 'cursor-default text-muted-foreground/40'
-                : active === item.key
-                  ? 'bg-primary/[0.06] text-primary font-medium'
-                  : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
-            ]"
-            @click="!item.disabled && navigate(item.key)"
-          >
-            <NavIcon :name="item.key" />
-            <span>{{ item.label }}</span>
-            <span
-              v-if="item.badge"
+          <div class="space-y-0.5">
+            <button
+              v-for="item in group.items"
+              :key="item.key"
+              :disabled="item.disabled"
               :class="[
-                'ml-auto rounded-full px-1.5 py-px text-[11px] font-semibold',
-                active === item.key
-                  ? 'bg-primary/10 text-primary'
-                  : 'bg-secondary text-muted-foreground'
+                'flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] text-[13px] transition-colors',
+                item.disabled
+                  ? 'cursor-default text-muted-foreground/30'
+                  : active === item.key
+                    ? 'bg-primary/8 text-primary font-medium'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               ]"
-            >{{ item.badge }}</span>
-          </button>
+              @click="!item.disabled && navigate(item.key)"
+            >
+              <NavIcon :name="item.key" />
+              <span>{{ item.label }}</span>
+              <span
+                v-if="item.badge"
+                :class="[
+                  'ml-auto rounded-full px-1.5 py-px text-[10px] font-semibold',
+                  active === item.key
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-muted text-muted-foreground'
+                ]"
+              >{{ item.badge }}</span>
+            </button>
+          </div>
         </div>
       </nav>
 
       <!-- Footer -->
-      <div class="border-t border-border/50 px-5 py-4 text-[11px] text-muted-foreground/50">
+      <div class="px-5 py-4 text-[11px] text-muted-foreground/40">
         {{ footer || 'v0.1.0' }}
       </div>
     </aside>
 
     <!-- Main Content -->
-    <div class="ml-[240px] flex min-h-screen flex-1 flex-col">
+    <div class="ml-[210px] flex min-h-screen flex-1 flex-col">
       <slot />
     </div>
   </div>

@@ -97,7 +97,7 @@ async function deleteCategory(key: string) {
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
     <!-- Sync Config -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="space-y-4 p-5">
         <div class="text-sm font-medium">代码知识定时同步</div>
         <div class="flex items-center gap-4">
@@ -122,7 +122,7 @@ async function deleteCategory(key: string) {
     </Card>
 
     <!-- Categories -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="space-y-4 p-5">
         <div class="flex items-center justify-between">
           <div class="text-sm font-medium">代码仓库分类</div>
@@ -131,7 +131,7 @@ async function deleteCategory(key: string) {
         <div v-if="categories.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无分类，点击「添加分类」开始</div>
         <table v-else class="w-full">
           <thead>
-            <tr class="border-b border-border bg-secondary/50">
+            <tr class="border-b border-border">
               <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标识</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">名称</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">描述</th>
@@ -156,7 +156,7 @@ async function deleteCategory(key: string) {
     </Card>
 
     <!-- Scheduler Status -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="space-y-4 p-5">
         <div class="flex items-center justify-between">
           <div class="text-sm font-medium">调度状态</div>
@@ -175,7 +175,7 @@ async function deleteCategory(key: string) {
           </div>
           <table v-else class="w-full">
             <thead>
-              <tr class="border-b border-border bg-secondary/50">
+              <tr class="border-b border-border">
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
               </tr>

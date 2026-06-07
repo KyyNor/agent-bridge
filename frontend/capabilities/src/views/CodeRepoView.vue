@@ -213,13 +213,13 @@ function categoryName(key: string) {
     </div>
 
     <!-- Code Repos Table -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="p-0">
         <div v-if="repos.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无代码仓库，点击「添加仓库」开始</div>
         <div v-else-if="filteredRepos.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">没有匹配的仓库</div>
         <table v-else class="w-full">
           <thead>
-            <tr class="border-b border-border bg-secondary/50">
+            <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">仓库</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">分类</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Git URL</th>
@@ -230,7 +230,7 @@ function categoryName(key: string) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in filteredRepos" :key="r.repo_key" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
+            <tr v-for="r in filteredRepos" :key="r.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ r.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ r.repo_key }}</div>
@@ -393,13 +393,13 @@ function categoryName(key: string) {
             <div v-if="detailSearching" class="py-4 text-center text-sm text-muted-foreground">查询中...</div>
             <div v-else-if="detailResults.length > 0" class="max-h-[300px] overflow-y-auto rounded-lg border border-border">
               <table class="w-full table-fixed">
-                <thead><tr class="border-b border-border bg-secondary/50">
+                <thead><tr class="border-b border-border">
                   <th class="w-[20%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">符号</th>
                   <th class="w-[12%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">类型</th>
                   <th class="w-[55%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">文件</th>
                   <th class="w-[13%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">行号</th>
                 </tr></thead>
-                <tbody><tr v-for="r in detailResults" :key="r.symbol + r.path" class="border-b border-border/40 hover:bg-secondary/30">
+                <tbody><tr v-for="r in detailResults" :key="r.symbol + r.path" class="border-b border-border/40 hover:bg-muted/50">
                   <td class="px-3 py-1.5 text-sm font-medium truncate" :title="r.symbol">{{ r.symbol }}</td>
                   <td class="px-3 py-1.5"><Badge variant="secondary" class="text-[11px]">{{ r.kind }}</Badge></td>
                   <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground truncate" :title="r.path">{{ r.path }}</td>

@@ -129,14 +129,14 @@ function timeAgo(dateStr: string | null): string {
     </div>
 
     <!-- Table -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="p-0">
         <div v-if="filtered.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
           {{ search ? '无匹配结果' : '暂无已登记的服务' }}
         </div>
         <table v-else class="w-full">
           <thead>
-            <tr class="border-b border-border bg-secondary/50">
+            <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">服务名称</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">连接地址</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
@@ -146,7 +146,7 @@ function timeAgo(dateStr: string | null): string {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="s in filtered" :key="s.service_key" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
+            <tr v-for="s in filtered" :key="s.service_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <span class="text-[13px] font-medium text-foreground">{{ s.service_key }}</span>
                 <div class="mt-0.5 text-xs text-muted-foreground">{{ s.description || s.name }}</div>

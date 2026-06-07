@@ -99,20 +99,20 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
     </div>
 
     <!-- Table -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="p-0">
         <div v-if="loading" class="px-5 py-12 text-center text-sm text-muted-foreground">加载中...</div>
         <div v-else-if="stats.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无统计数据</div>
         <table v-else class="w-full">
           <thead>
-            <tr class="border-b border-border bg-secondary/50">
+            <tr class="border-b border-border">
               <th v-for="col in columns" :key="col" class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">{{ columnLabels[col] || col }}</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">调用次数</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">占比</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(s, i) in stats" :key="i" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
+            <tr v-for="(s, i) in stats" :key="i" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td v-for="col in columns" :key="col" class="px-4 py-3 text-sm">{{ (s as Record<string, unknown>)[col] || '—' }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-3">

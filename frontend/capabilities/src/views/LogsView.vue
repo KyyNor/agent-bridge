@@ -121,12 +121,12 @@ const filterTabs = computed(() => [
     </div>
 
     <!-- Table -->
-    <Card class="border-border">
+    <Card>
       <CardContent class="p-0">
         <div v-if="displayLogs.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无调用日志</div>
         <table v-else class="w-full">
           <thead>
-            <tr class="border-b border-border bg-secondary/50">
+            <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">时间</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Profile</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具</th>
@@ -137,7 +137,7 @@ const filterTabs = computed(() => [
             </tr>
           </thead>
           <tbody>
-            <tr v-for="l in displayLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-secondary/30">
+            <tr v-for="l in displayLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ l.created_at?.slice(0, 19) }}</td>
               <td class="px-4 py-3 text-sm">{{ l.profile_key || '—' }}</td>
               <td class="px-4 py-3 font-mono text-sm">{{ l.tool_name || '—' }}</td>
