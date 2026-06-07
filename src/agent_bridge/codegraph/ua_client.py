@@ -391,8 +391,7 @@ class UnderstandAnythingClient:
         if error:
             return {"success": False, "error": error, "debug": log_msgs}
 
-        ua_dir = project_dir / UA_DIR
-        env = {**os.environ, "GRAPH_DIR": str(ua_dir)}
+        env = {**os.environ, "GRAPH_DIR": str(project_dir)}
 
         # Prefer installed vite, fall back to npx
         vite_bin = dashboard_dir / "node_modules" / ".bin" / "vite"
@@ -401,7 +400,7 @@ class UnderstandAnythingClient:
         else:
             cmd = ["npx", "vite", "--host", "127.0.0.1", "--no-open"]
 
-        log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir} GRAPH_DIR={ua_dir}")
+        log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir} GRAPH_DIR={project_dir}")
         logger.info("start_dashboard: launching %s in %s", cmd, dashboard_dir)
         try:
             proc = subprocess.Popen(
