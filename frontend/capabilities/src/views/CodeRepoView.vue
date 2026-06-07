@@ -399,7 +399,7 @@ function categoryName(key: string) {
                   <th class="w-[55%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">文件</th>
                   <th class="w-[13%] px-3 py-2 text-left text-xs font-medium text-muted-foreground">行号</th>
                 </tr></thead>
-                <tbody><tr v-for="r in detailResults" :key="r.symbol + r.path" class="border-b border-border/40 hover:bg-muted/50">
+                <tbody><tr v-for="r in detailResults" :key="r.symbol + r.path" class="border-b border-border/60 transition-colors hover:bg-muted/50">
                   <td class="px-3 py-1.5 text-sm font-medium truncate" :title="r.symbol">{{ r.symbol }}</td>
                   <td class="px-3 py-1.5"><Badge variant="secondary" class="text-[11px]">{{ r.kind }}</Badge></td>
                   <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground truncate" :title="r.path">{{ r.path }}</td>
