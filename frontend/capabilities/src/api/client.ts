@@ -25,6 +25,8 @@ import type {
   ToolCallStats,
   UAStatus,
   UASummary,
+  UAAvailability,
+  UAAnalyzeResult,
 } from './types'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
@@ -141,6 +143,8 @@ export const api = {
   // Understand Anything
   getUAStatus: (repoKey: string) => get<UAStatus>(`/code-repo/repositories/${repoKey}/understand/status`),
   getUASummary: (repoKey: string) => get<UASummary>(`/code-repo/repositories/${repoKey}/understand/summary`),
+  checkUAAvailability: (repoKey: string) => get<UAAvailability>(`/code-repo/repositories/${repoKey}/understand/availability`),
+  triggerUAAnalyze: (repoKey: string) => post<UAAnalyzeResult>(`/code-repo/repositories/${repoKey}/understand/analyze`),
 
   // Categories
   listCategories: () => get<CodeRepoCategory[]>('/code-repo/categories'),

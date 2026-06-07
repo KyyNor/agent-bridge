@@ -88,6 +88,16 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
             return JSONResponse(status_code=404, content={"error": "understand_graph_not_found"})
         return result
 
+    @router.get("/code-repo/repositories/{repo_key}/understand/availability")
+    def check_understand_availability(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.check_understand_availability(current_actor, repo_key))
+
+    @router.post("/code-repo/repositories/{repo_key}/understand/analyze")
+    def trigger_understand_analyze(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.analyze_understand(current_actor, repo_key))
+
     # -- Categories --
 
     @router.get("/code-repo/categories")

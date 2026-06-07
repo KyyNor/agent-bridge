@@ -321,6 +321,39 @@ class CodeGraphService:
             "tours": result.tours,
         }
 
+    def check_understand_availability(self, actor: str, repo_key: str | None = None) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        project_dir = self._local_path(repo_key) if repo_key else None
+        sync_config = self.store.get_sync_config()
+        ua_git_url = sync_config.get("ua_git_url", "")
+        avail = self.ua_client.check_availability_with_config(
+            project_dir=project_dir, ua_git_url=ua_git_url,
+        ) if project_dir else self.ua_client.check_availability()
+        return {
+            "claude_installed": avail.claude_installed,
+            "ua_skill_available": avail.ua_skill_available,
+            "message": avail.message,
+            "ua_git_url_configured": bool(ua_git_url),
+        }
+
+    def analyze_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        if not local_path.is_dir():
+            raise NotFound("repository local path not found — please sync first")
+        sync_config = self.store.get_sync_config()
+        ua_git_url = sync_config.get("ua_git_url", "")
+        result = self.ua_client.analyze(local_path, ua_git_url=ua_git_url)
+        return {
+            "success": result.success,
+            "node_count": result.node_count,
+            "edge_count": result.edge_count,
+            "error": result.error,
+            "output": result.output,
+            "duration_ms": result.duration_ms,
+        }
+
     def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
         score = node.get("score")
         node = node.get("node", node)

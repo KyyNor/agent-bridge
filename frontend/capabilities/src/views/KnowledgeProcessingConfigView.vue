@@ -11,7 +11,7 @@ import { Badge } from '../components/ui/badge'
 const loading = ref(true)
 
 // Sync config
-const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_cron: '*/30 * * * *' })
+const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_cron: '*/30 * * * *', ua_git_url: '' })
 const configSaving = ref(false)
 const cronError = ref('')
 
@@ -121,6 +121,24 @@ async function deleteCategory(key: string) {
         <div class="text-xs text-muted-foreground">
           标准 5 段 cron 表达式：<code class="font-mono">分钟 小时 日 月 星期</code>。例如
           <code class="font-mono">*/30 * * * *</code>（每30分钟）、<code class="font-mono">0 */2 * * *</code>（每2小时）、<code class="font-mono">0 8 * * 1-5</code>（工作日早8点）。
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- UA Config -->
+    <Card class="border-border">
+      <CardContent class="space-y-4 p-5">
+        <div class="text-sm font-semibold">Understand Anything 配置</div>
+        <div class="flex items-center gap-3">
+          <div class="flex-1">
+            <Input v-model="syncConfig.ua_git_url" placeholder="https://github.com/Lum1104/Understand-Anything.git" class="font-mono text-xs" />
+          </div>
+          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
+            {{ configSaving ? '保存中...' : '保存' }}
+          </Button>
+        </div>
+        <div class="text-xs text-muted-foreground">
+          配置后，运行 UA 分析时若技能未安装，会自动从该地址 clone 并在目标仓库下建立项目级软链接。内网可替换为内部 Git 镜像地址。留空则不自动安装。
         </div>
       </CardContent>
     </Card>

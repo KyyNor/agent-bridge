@@ -260,6 +260,7 @@ export interface CodeRepoCategory {
 export interface KnowledgeSyncConfig {
   code_sync_enabled: boolean
   code_sync_cron: string
+  ua_git_url: string
 }
 
 export interface SchedulerStatus {
@@ -293,4 +294,20 @@ export interface UASummary {
   modules: { name: string; summary: string }[]
   key_nodes: { id: string; name: string; type: string; summary: string }[]
   tours: { title: string; description: string; step_count: number }[]
+}
+
+export interface UAAvailability {
+  claude_installed: boolean
+  ua_skill_available: boolean
+  message: string | null
+  ua_git_url_configured: boolean
+}
+
+export interface UAAnalyzeResult {
+  success: boolean
+  node_count: number
+  edge_count: number
+  error: string | null
+  output: string | null
+  duration_ms: number
 }

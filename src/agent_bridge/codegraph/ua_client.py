@@ -1,9 +1,12 @@
-"""Read-only client for Understand Anything knowledge graph artifacts."""
+"""Client for Understand Anything knowledge graph artifacts — read status/summary and trigger analysis."""
 
 from __future__ import annotations
 
 import json
 import logging
+import shutil
+import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,6 +16,35 @@ logger = logging.getLogger(__name__)
 UA_DIR = ".understand-anything"
 GRAPH_FILE = "knowledge-graph.json"
 META_FILE = "meta.json"
+SKILL_DIR_NAME = ".claude/skill"
+UA_SKILLS = [
+    "understand",
+    "understand-chat",
+    "understand-dashboard",
+    "understand-diff",
+    "understand-domain",
+    "understand-explain",
+    "understand-knowledge",
+    "understand-onboard",
+]
+
+ANALYZE_PROMPT = """\
+Use the Understand Anything skill to analyze this repository: {project_dir}
+
+Requirements:
+- Generate .understand-anything/knowledge-graph.json
+- Use --language zh
+- Prefer incremental update if the graph already exists
+- Do not modify source code
+- Report only final status, graph path, node count, edge count, and errors
+"""
+
+
+@dataclass
+class UAAvailability:
+    claude_installed: bool
+    ua_skill_available: bool
+    message: str | None = None
 
 
 @dataclass
@@ -41,7 +73,191 @@ class UAGraphSummary:
     tours: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass
+class UAAnalyzeResult:
+    success: bool
+    node_count: int = 0
+    edge_count: int = 0
+    error: str | None = None
+    output: str | None = None
+    duration_ms: int = 0
+
+
 class UnderstandAnythingClient:
+
+    def _ua_repo_dir(self) -> Path:
+        return Path.home() / ".understand-anything" / "repo"
+
+    def _ua_skills_src_dir(self) -> Path:
+        return self._ua_repo_dir() / "understand-anything-plugin" / "skills"
+
+    def check_availability(self, *, project_dir: Path | None = None) -> UAAvailability:
+        claude_path = shutil.which("claude")
+        if not claude_path:
+            return UAAvailability(
+                claude_installed=False,
+                ua_skill_available=False,
+                message="claude CLI 未安装。请先安装 Claude Code: npm install -g @anthropic-ai/claude-code",
+            )
+
+        # Check if skills are linked in the target project
+        if project_dir:
+            skill_dir = project_dir / SKILL_DIR_NAME
+            understand_link = skill_dir / "understand"
+            if understand_link.exists() or understand_link.is_symlink():
+                return UAAvailability(claude_installed=True, ua_skill_available=True)
+
+        # Fallback: check global claude skill list
+        try:
+            result = subprocess.run(
+                [claude_path, "skill", "list"],
+                capture_output=True, text=True, timeout=15,
+            )
+            output = result.stdout + result.stderr
+            if "understand" in output.lower():
+                return UAAvailability(claude_installed=True, ua_skill_available=True)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+        return UAAvailability(
+            claude_installed=True,
+            ua_skill_available=False,
+            message="Understand Anything 技能未安装，且未配置自动安装地址。请在「知识处理配置」中填写 UA Git URL。",
+        )
+
+    def check_availability_with_config(
+        self, *, project_dir: Path, ua_git_url: str,
+    ) -> UAAvailability:
+        avail = self.check_availability(project_dir=project_dir)
+        if avail.ua_skill_available:
+            return avail
+        if not ua_git_url:
+            return avail
+        return UAAvailability(
+            claude_installed=True,
+            ua_skill_available=False,
+            message=None,
+        )
+
+    def ensure_skills(self, project_dir: Path, ua_git_url: str) -> str | None:
+        """Clone UA repo and symlink skills. Returns error string or None on success."""
+        repo_dir = self._ua_repo_dir()
+        skills_src = self._ua_skills_src_dir()
+
+        # Clone or update the shared repo
+        if not (repo_dir / ".git").is_dir():
+            logger.info("Cloning UA repo from %s", ua_git_url)
+            try:
+                repo_dir.parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    ["git", "clone", ua_git_url, str(repo_dir)],
+                    capture_output=True, text=True, timeout=120, check=True,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+                msg = exc.stderr if hasattr(exc, "stderr") and exc.stderr else str(exc)
+                return f"clone UA 仓库失败: {msg}"
+        else:
+            # Pull latest
+            try:
+                subprocess.run(
+                    ["git", "pull", "--ff-only"],
+                    cwd=str(repo_dir), capture_output=True, text=True, timeout=60, check=True,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                pass  # stale repo is fine
+
+        if not skills_src.is_dir():
+            return f"UA 仓库已 clone 但未找到 skills 目录: {skills_src}"
+
+        # Create .claude/skill/ and symlink each skill
+        skill_dir = project_dir / SKILL_DIR_NAME
+        skill_dir.mkdir(parents=True, exist_ok=True)
+
+        for skill_name in UA_SKILLS:
+            link_path = skill_dir / skill_name
+            target = skills_src / skill_name
+            if not target.is_dir():
+                continue
+            if link_path.is_symlink() or link_path.exists():
+                if link_path.resolve() == target.resolve():
+                    continue
+                link_path.unlink()
+            link_path.symlink_to(target)
+
+        return None
+
+    def analyze(
+        self,
+        project_dir: Path,
+        *,
+        ua_git_url: str = "",
+        language: str = "zh",
+        timeout: int = 600,
+    ) -> UAAnalyzeResult:
+        # Step 1: Check if skills are already available
+        avail = self.check_availability(project_dir=project_dir)
+        if not avail.claude_installed:
+            return UAAnalyzeResult(success=False, error=avail.message)
+
+        # Step 2: If not available, try auto-install
+        if not avail.ua_skill_available:
+            if not ua_git_url:
+                return UAAnalyzeResult(success=False, error=avail.message)
+            install_error = self.ensure_skills(project_dir, ua_git_url)
+            if install_error:
+                return UAAnalyzeResult(success=False, error=install_error)
+            # Re-check after install
+            avail = self.check_availability(project_dir=project_dir)
+            if not avail.ua_skill_available:
+                return UAAnalyzeResult(success=False, error="自动安装 UA 技能后仍未检测到")
+
+        # Step 3: Run analysis
+        prompt = ANALYZE_PROMPT.format(project_dir=str(project_dir))
+        started = time.perf_counter()
+        try:
+            proc = subprocess.run(
+                ["claude", "-p", "--dangerously-skip-permissions", prompt],
+                cwd=str(project_dir),
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return UAAnalyzeResult(success=False, error=f"分析超时（{timeout}s）", duration_ms=duration_ms)
+        except (FileNotFoundError, OSError) as exc:
+            return UAAnalyzeResult(success=False, error=str(exc))
+
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        output = (proc.stdout or "")[-4000:]
+
+        if proc.returncode != 0:
+            return UAAnalyzeResult(
+                success=False,
+                error=(proc.stderr or "")[:2000] or f"claude -p exited with code {proc.returncode}",
+                output=output,
+                duration_ms=duration_ms,
+            )
+
+        graph_path = project_dir / UA_DIR / GRAPH_FILE
+        if not graph_path.is_file():
+            return UAAnalyzeResult(
+                success=False,
+                error="分析完成但未生成 knowledge-graph.json",
+                output=output,
+                duration_ms=duration_ms,
+            )
+
+        try:
+            data = json.loads(graph_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return UAAnalyzeResult(success=False, error=f"图谱解析失败: {exc}", output=output, duration_ms=duration_ms)
+
+        return UAAnalyzeResult(
+            success=True,
+            node_count=len(data.get("nodes") or []),
+            edge_count=len(data.get("edges") or []),
+            output=output,
+            duration_ms=duration_ms,
+        )
 
     def status(self, project_dir: Path, current_commit: str | None = None) -> UAGraphStatus:
         graph_path = project_dir / UA_DIR / GRAPH_FILE

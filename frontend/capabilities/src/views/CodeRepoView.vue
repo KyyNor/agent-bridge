@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary } from '../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -45,6 +45,10 @@ const detailExploring = ref(false)
 const uaStatus = ref<UAStatus | null>(null)
 const uaSummary = ref<UASummary | null>(null)
 const uaLoading = ref(false)
+const uaAvailability = ref<UAAvailability | null>(null)
+const uaAnalyzing = ref(false)
+const uaAnalyzeError = ref('')
+const uaAnalyzeSuccess = ref('')
 
 onMounted(async () => {
   await Promise.all([loadRepos(), loadCategories()])
@@ -122,6 +126,10 @@ async function openDetail(r: CodeRepository) {
   detailExploreError.value = ''
   uaStatus.value = null
   uaSummary.value = null
+  uaAvailability.value = null
+  uaAnalyzing.value = false
+  uaAnalyzeError.value = ''
+  uaAnalyzeSuccess.value = ''
   try {
     const [status, overview] = await Promise.allSettled([
       api.getCodeGraphStatus(),
@@ -194,14 +202,35 @@ async function loadUAData() {
   if (!detailRepo.value) return
   uaLoading.value = true
   try {
-    const [statusResult, summaryResult] = await Promise.allSettled([
+    const [avail, statusResult, summaryResult] = await Promise.allSettled([
+      api.checkUAAvailability(detailRepo.value.repo_key),
       api.getUAStatus(detailRepo.value.repo_key),
       api.getUASummary(detailRepo.value.repo_key),
     ])
+    uaAvailability.value = avail.status === 'fulfilled' ? avail.value : null
     uaStatus.value = statusResult.status === 'fulfilled' ? statusResult.value : null
     uaSummary.value = summaryResult.status === 'fulfilled' ? summaryResult.value : null
   } catch { /* ignore */ }
   uaLoading.value = false
+}
+
+async function triggerAnalyze() {
+  if (!detailRepo.value) return
+  uaAnalyzing.value = true
+  uaAnalyzeError.value = ''
+  uaAnalyzeSuccess.value = ''
+  try {
+    const result = await api.triggerUAAnalyze(detailRepo.value.repo_key)
+    if (result.success) {
+      uaAnalyzeSuccess.value = `分析完成：${result.node_count} 节点、${result.edge_count} 边，耗时 ${(result.duration_ms / 1000).toFixed(1)}s`
+      await loadUAData()
+    } else {
+      uaAnalyzeError.value = result.error || '分析失败'
+    }
+  } catch (e: any) {
+    uaAnalyzeError.value = e.message || '分析失败'
+  }
+  uaAnalyzing.value = false
 }
 
 watch(detailTab, (tab) => {
@@ -466,6 +495,28 @@ watch(detailTab, (tab) => {
           <div v-if="detailTab === 'understand'" class="space-y-3">
             <div v-if="uaLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
             <template v-else>
+              <!-- Availability Check -->
+              <div v-if="uaAvailability && !uaAvailability.ua_skill_available && !uaAvailability.ua_git_url_configured" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                <div class="font-medium">Understand Anything 不可用</div>
+                <div class="mt-1">请在「知识处理配置」页面填写 UA Git URL 以启用自动安装。</div>
+              </div>
+              <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
+                <span>UA 技能未安装，将在运行分析时自动安装</span>
+                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                  {{ uaAnalyzing ? '安装并分析中...' : '安装并分析' }}
+                </Button>
+              </div>
+              <div v-else-if="uaAvailability && uaAvailability.ua_skill_available" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
+                <span>Understand Anything 技能已就绪</span>
+                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                  {{ uaAnalyzing ? '分析中...' : '运行分析' }}
+                </Button>
+              </div>
+
+              <!-- Analyze Result -->
+              <div v-if="uaAnalyzeSuccess" class="rounded-lg bg-green-50 p-3 text-sm text-green-700">{{ uaAnalyzeSuccess }}</div>
+              <div v-if="uaAnalyzeError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ uaAnalyzeError }}</div>
+
               <!-- Status Banner -->
               <div v-if="!uaStatus?.graph_exists" class="rounded-lg border border-border bg-secondary/50 p-4 text-center">
                 <div class="text-sm text-muted-foreground">暂无知识图谱</div>

@@ -314,26 +314,28 @@ class CodeGraphRepository:
     # -- Sync Config --
 
     def get_sync_config(self) -> dict[str, Any]:
-        defaults = {"code_sync_enabled": False, "code_sync_cron": "*/30 * * * *"}
+        defaults = {"code_sync_enabled": False, "code_sync_cron": "*/30 * * * *", "ua_git_url": ""}
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM knowledge_sync_config WHERE id = 1").fetchone()
             if row is None:
                 return defaults
             result = row_to_dict(row)
             result["code_sync_enabled"] = bool(result.get("code_sync_enabled"))
+            result.setdefault("ua_git_url", "")
             return result
 
-    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str) -> dict[str, Any]:
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "") -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_enabled, code_sync_cron)
-                VALUES (1, ?, ?)
+                INSERT INTO knowledge_sync_config (id, code_sync_enabled, code_sync_cron, ua_git_url)
+                VALUES (1, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_enabled = excluded.code_sync_enabled,
                   code_sync_cron = excluded.code_sync_cron,
+                  ua_git_url = excluded.ua_git_url,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (int(code_sync_enabled), code_sync_cron),
+                (int(code_sync_enabled), code_sync_cron, ua_git_url),
             )
             return self.get_sync_config()
