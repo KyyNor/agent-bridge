@@ -311,3 +311,10 @@ export interface UAAnalyzeResult {
   output: string | null
   duration_ms: number
 }
+
+export interface UADashboardStatus {
+  running: boolean
+  url?: string | null
+  pid?: number | null
+  started_at?: string | null
+}

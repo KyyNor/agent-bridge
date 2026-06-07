@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 UA_DIR = ".understand-anything"
 GRAPH_FILE = "knowledge-graph.json"
 META_FILE = "meta.json"
-SKILL_DIR_NAME = ".claude/skill"
+DASHBOARD_META_FILE = ".dashboard-meta.json"
+SKILL_DIR_NAME = ".claude/skills"
 UA_SKILLS = [
     "understand",
     "understand-chat",
@@ -356,6 +358,124 @@ class UnderstandAnythingClient:
             return json.loads(graph_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             return None
+
+    # -- Dashboard lifecycle --
+
+    def dashboard_status(self, project_dir: Path) -> dict[str, Any]:
+        meta = self._read_dashboard_meta(project_dir)
+        if meta is None:
+            return {"running": False}
+        pid = meta.get("pid")
+        if pid is not None and self._is_pid_alive(pid):
+            return {"running": True, "url": meta.get("url"), "pid": pid, "started_at": meta.get("started_at")}
+        return {"running": False}
+
+    def start_dashboard(self, project_dir: Path, *, timeout: int = 60) -> dict[str, Any]:
+        # Check if already running
+        current = self.dashboard_status(project_dir)
+        if current["running"]:
+            return {"success": True, "url": current["url"], "pid": current["pid"]}
+
+        # Need a graph to serve
+        graph_path = project_dir / UA_DIR / GRAPH_FILE
+        if not graph_path.is_file():
+            return {"success": False, "error": "请先运行分析生成知识图谱"}
+
+        # Launch via claude -p with dashboard skill
+        prompt = (
+            "Use the Understand Anything dashboard skill for this repository: "
+            f"{project_dir}\n\n"
+            "Return ONLY the final local Dashboard URL on the last line. "
+            "Do not open browser windows. Do not output anything after the URL."
+        )
+        try:
+            proc = subprocess.Popen(
+                ["claude", "-p", "--dangerously-skip-permissions", prompt],
+                cwd=str(project_dir),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True,
+            )
+        except (FileNotFoundError, OSError) as exc:
+            return {"success": False, "error": str(exc)}
+
+        # Read stdout with timeout to get the URL
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            return {"success": False, "error": f"启动 Dashboard 超时（{timeout}s）"}
+
+        if proc.returncode != 0:
+            err = (stderr or "")[:2000] or f"claude -p exited with code {proc.returncode}"
+            return {"success": False, "error": err}
+
+        # Parse URL from last line of output
+        lines = stdout.strip().splitlines()
+        url = lines[-1].strip() if lines else ""
+        if not url.startswith("http"):
+            # Try to find a URL anywhere in the output
+            import re
+            url_match = re.search(r"https?://\S+", stdout)
+            url = url_match.group(0) if url_match else ""
+
+        if not url:
+            return {"success": False, "error": "未能获取 Dashboard URL", "output": stdout[-2000:]}
+
+        # Write meta so we can track it
+        meta = {
+            "pid": proc.pid,
+            "url": url,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        self._write_dashboard_meta(project_dir, meta)
+        return {"success": True, "url": url, "pid": proc.pid}
+
+    def stop_dashboard(self, project_dir: Path) -> dict[str, Any]:
+        meta = self._read_dashboard_meta(project_dir)
+        if meta is None:
+            return {"stopped": False, "error": "Dashboard 未运行"}
+
+        pid = meta.get("pid")
+        stopped = False
+        if pid is not None:
+            try:
+                os.kill(pid, 15)  # SIGTERM
+                stopped = True
+            except ProcessLookupError:
+                stopped = True  # already dead
+            except OSError:
+                pass
+
+        self._delete_dashboard_meta(project_dir)
+        return {"stopped": stopped}
+
+    def _read_dashboard_meta(self, project_dir: Path) -> dict[str, Any] | None:
+        path = project_dir / UA_DIR / DASHBOARD_META_FILE
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _write_dashboard_meta(self, project_dir: Path, meta: dict[str, Any]) -> None:
+        path = project_dir / UA_DIR / DASHBOARD_META_FILE
+        ua_dir = project_dir / UA_DIR
+        ua_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _delete_dashboard_meta(self, project_dir: Path) -> None:
+        path = project_dir / UA_DIR / DASHBOARD_META_FILE
+        if path.is_file():
+            path.unlink()
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, OSError):
+            return False
 
     def _read_meta(self, project_dir: Path) -> dict[str, Any] | None:
         meta_path = project_dir / UA_DIR / META_FILE

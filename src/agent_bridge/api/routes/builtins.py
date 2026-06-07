@@ -98,6 +98,21 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.analyze_understand(current_actor, repo_key))
 
+    @router.get("/code-repo/repositories/{repo_key}/understand/dashboard")
+    def dashboard_status(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.dashboard_status_understand(current_actor, repo_key))
+
+    @router.post("/code-repo/repositories/{repo_key}/understand/dashboard/start")
+    def start_dashboard(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.start_dashboard_understand(current_actor, repo_key))
+
+    @router.post("/code-repo/repositories/{repo_key}/understand/dashboard/stop")
+    def stop_dashboard(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.stop_dashboard_understand(current_actor, repo_key))
+
     # -- Categories --
 
     @router.get("/code-repo/categories")

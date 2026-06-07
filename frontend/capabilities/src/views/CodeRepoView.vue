@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability } from '../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability, UADashboardStatus } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -49,6 +49,10 @@ const uaAvailability = ref<UAAvailability | null>(null)
 const uaAnalyzing = ref(false)
 const uaAnalyzeError = ref('')
 const uaAnalyzeSuccess = ref('')
+const uaDashboard = ref<UADashboardStatus | null>(null)
+const uaDashboardStarting = ref(false)
+const uaDashboardStopping = ref(false)
+const uaDashboardError = ref('')
 
 onMounted(async () => {
   await Promise.all([loadRepos(), loadCategories()])
@@ -130,6 +134,8 @@ async function openDetail(r: CodeRepository) {
   uaAnalyzing.value = false
   uaAnalyzeError.value = ''
   uaAnalyzeSuccess.value = ''
+  uaDashboard.value = null
+  uaDashboardError.value = ''
   try {
     const [status, overview] = await Promise.allSettled([
       api.getCodeGraphStatus(),
@@ -202,14 +208,16 @@ async function loadUAData() {
   if (!detailRepo.value) return
   uaLoading.value = true
   try {
-    const [avail, statusResult, summaryResult] = await Promise.allSettled([
+    const [avail, statusResult, summaryResult, dashResult] = await Promise.allSettled([
       api.checkUAAvailability(detailRepo.value.repo_key),
       api.getUAStatus(detailRepo.value.repo_key),
       api.getUASummary(detailRepo.value.repo_key),
+      api.getUADashboardStatus(detailRepo.value.repo_key),
     ])
     uaAvailability.value = avail.status === 'fulfilled' ? avail.value : null
     uaStatus.value = statusResult.status === 'fulfilled' ? statusResult.value : null
     uaSummary.value = summaryResult.status === 'fulfilled' ? summaryResult.value : null
+    uaDashboard.value = dashResult.status === 'fulfilled' ? dashResult.value : null
   } catch { /* ignore */ }
   uaLoading.value = false
 }
@@ -231,6 +239,35 @@ async function triggerAnalyze() {
     uaAnalyzeError.value = e.message || '分析失败'
   }
   uaAnalyzing.value = false
+}
+
+async function loadDashboardStatus() {
+  if (!detailRepo.value) return
+  try {
+    uaDashboard.value = await api.getUADashboardStatus(detailRepo.value.repo_key)
+  } catch { uaDashboard.value = null }
+}
+
+async function startDashboard() {
+  if (!detailRepo.value) return
+  uaDashboardStarting.value = true
+  uaDashboardError.value = ''
+  try {
+    uaDashboard.value = await api.startUADashboard(detailRepo.value.repo_key)
+  } catch (e: any) {
+    uaDashboardError.value = e.message || '启动失败'
+  }
+  uaDashboardStarting.value = false
+}
+
+async function stopDashboard() {
+  if (!detailRepo.value) return
+  uaDashboardStopping.value = true
+  try {
+    await api.stopUADashboard(detailRepo.value.repo_key)
+    uaDashboard.value = null
+  } catch { /* ignore */ }
+  uaDashboardStopping.value = false
 }
 
 watch(detailTab, (tab) => {
@@ -516,6 +553,32 @@ watch(detailTab, (tab) => {
               <!-- Analyze Result -->
               <div v-if="uaAnalyzeSuccess" class="rounded-lg bg-green-50 p-3 text-sm text-green-700">{{ uaAnalyzeSuccess }}</div>
               <div v-if="uaAnalyzeError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ uaAnalyzeError }}</div>
+
+              <!-- Dashboard -->
+              <div v-if="uaDashboard?.running" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="font-medium text-blue-700">Dashboard 运行中</div>
+                    <div v-if="uaDashboard.url" class="mt-0.5 font-mono text-xs text-blue-600 break-all">{{ uaDashboard.url }}</div>
+                    <div v-if="uaDashboard.started_at" class="mt-0.5 text-xs text-blue-500">启动于 {{ uaDashboard.started_at }}</div>
+                  </div>
+                  <div class="flex gap-2 shrink-0">
+                    <a v-if="uaDashboard.url" :href="uaDashboard.url" target="_blank" rel="noopener">
+                      <Button size="sm">打开 Dashboard</Button>
+                    </a>
+                    <Button variant="outline" size="sm" @click="stopDashboard" :disabled="uaDashboardStopping">
+                      {{ uaDashboardStopping ? '关闭中...' : '关闭' }}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="uaStatus?.graph_exists && uaDashboard" class="rounded-lg border border-border bg-secondary/50 p-3 text-sm flex items-center justify-between">
+                <span class="text-muted-foreground">Dashboard 未启动</span>
+                <Button size="sm" @click="startDashboard" :disabled="uaDashboardStarting">
+                  {{ uaDashboardStarting ? '启动中...' : '启动 Dashboard' }}
+                </Button>
+              </div>
+              <div v-if="uaDashboardError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ uaDashboardError }}</div>
 
               <!-- Status Banner -->
               <div v-if="!uaStatus?.graph_exists" class="rounded-lg border border-border bg-secondary/50 p-4 text-center">

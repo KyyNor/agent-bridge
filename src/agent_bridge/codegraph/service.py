@@ -354,6 +354,26 @@ class CodeGraphService:
             "duration_ms": result.duration_ms,
         }
 
+    def dashboard_status_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        return self.ua_client.dashboard_status(local_path)
+
+    def start_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        if not local_path.is_dir():
+            raise NotFound("repository local path not found — please sync first")
+        return self.ua_client.start_dashboard(local_path)
+
+    def stop_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        return self.ua_client.stop_dashboard(local_path)
+
     def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
         score = node.get("score")
         node = node.get("node", node)
