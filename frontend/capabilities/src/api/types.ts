@@ -208,8 +208,14 @@ export interface SearchResultChunk {
 
 export interface BackendInfo {
   slug: string
-  type: string
+  backend_type: string
   status: string
+  base_url: string | null
+  api_key_set: boolean
+  timeout: number
+  embedding_model_id: string | null
+  summary_model_id: string | null
+  runtime_status: string
 }
 
 export interface CodeGraphStatus {

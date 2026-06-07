@@ -9,6 +9,8 @@ from agent_bridge.api.schemas import (
     GrantMemberRequest,
     PurgeRequest,
     SyncRequest,
+    UpsertBackendRequest,
+    UpdateBackendRequest,
 )
 
 
@@ -18,21 +20,31 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
     router = APIRouter()
 
     @router.get("/backends")
-    def list_backends() -> list[dict[str, str]]:
-        if service.registry is None:
-            return []
-        result = []
-        for slug in service.registry.list_slugs():
-            adapter = service.registry.get(slug)
-            module = type(adapter).__module__
-            if "ragflow" in module:
-                backend_type = "ragflow"
-            elif "weknora" in module:
-                backend_type = "weknora"
-            else:
-                backend_type = "mock"
-            result.append({"slug": slug, "type": backend_type, "status": "active"})
-        return result
+    def list_backends() -> list[dict[str, Any]]:
+        return call_safely(lambda: service.list_backends())
+
+    @router.post("/backends")
+    def add_backend(payload: UpsertBackendRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return call_safely(lambda: service.add_backend(
+            current_actor, payload.slug, payload.backend_type,
+            base_url=payload.base_url, api_key=payload.api_key,
+            timeout=payload.timeout, embedding_model_id=payload.embedding_model_id,
+            summary_model_id=payload.summary_model_id,
+        ))
+
+    @router.put("/backends/{slug}")
+    def update_backend(slug: str, payload: UpdateBackendRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return call_safely(lambda: service.update_backend(
+            current_actor, slug,
+            backend_type=payload.backend_type, base_url=payload.base_url,
+            api_key=payload.api_key, timeout=payload.timeout,
+            embedding_model_id=payload.embedding_model_id,
+            summary_model_id=payload.summary_model_id,
+        ))
+
+    @router.post("/backends/{slug}/delete")
+    def delete_backend(slug: str, current_actor: str = Depends(actor)) -> dict[str, str]:
+        return call_safely(lambda: service.remove_backend(current_actor, slug))
 
     @router.post("/admin/init")
     def init_system(current_actor: str = Depends(actor)) -> None:

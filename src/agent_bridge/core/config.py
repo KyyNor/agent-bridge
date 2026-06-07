@@ -145,3 +145,22 @@ def load_backend_configs(paths: AgentBridgePaths) -> list[BackendConfig]:
             summary_model_id=section.get("summary_model_id"),
         ))
     return result
+
+
+def migrate_toml_backends_to_db(paths: AgentBridgePaths, store: Any) -> None:
+    """One-time migration: TOML backends → DB (skips slugs already in DB)."""
+    toml_configs = load_backend_configs(paths)
+    if not toml_configs:
+        return
+    existing = {b["slug"] for b in store.list_backends()}
+    for cfg in toml_configs:
+        if cfg.slug not in existing:
+            store.upsert_backend(
+                slug=cfg.slug,
+                backend_type=cfg.backend_type,
+                base_url=cfg.base_url,
+                api_key=cfg.api_key,
+                timeout=cfg.timeout,
+                embedding_model_id=cfg.embedding_model_id,
+                summary_model_id=cfg.summary_model_id,
+            )

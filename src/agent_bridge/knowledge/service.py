@@ -11,7 +11,7 @@ from agent_bridge.capabilities.governance import CapabilityGovernanceService
 from agent_bridge.capabilities.service import CapabilityService
 from agent_bridge.codegraph.scheduler import CodeGraphScheduler
 from agent_bridge.codegraph.service import CodeGraphService
-from agent_bridge.core.config import AgentBridgePaths, ensure_directories
+from agent_bridge.core.config import AgentBridgePaths, BackendConfig, ensure_directories, migrate_toml_backends_to_db
 from agent_bridge.core.domain import (
     AccessDenied,
     AskResult,
@@ -27,7 +27,7 @@ from agent_bridge.core.domain import (
     require_admin_user,
 )
 from agent_bridge.knowledge.backends.mock import MockBackend
-from agent_bridge.knowledge.backends.registry import BackendRegistry, create_registry
+from agent_bridge.knowledge.backends.registry import BackendRegistry, create_registry_from_db
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -69,7 +69,9 @@ class AgentBridgeService:
             mock_backend=MockBackend(paths.mock_backend_dir),
             admins=admins,
         )
-        service.registry = create_registry(paths)
+        service.store.init_schema()
+        migrate_toml_backends_to_db(paths, service.store)
+        service.registry = create_registry_from_db(paths, service.store)
         return service
 
     def init_system(self) -> None:
@@ -459,6 +461,84 @@ class AgentBridgeService:
                             except Exception:
                                 pass
                         self.store.set_backend_target_status(kb["id"], backend_slug, "active")
+
+    def list_backends(self) -> list[dict[str, Any]]:
+        rows = self.store.list_backends()
+        for row in rows:
+            row["api_key_set"] = bool(row.get("api_key"))
+            # Determine runtime status
+            if self.registry and row["slug"] in self.registry.backends:
+                row["runtime_status"] = "active"
+            else:
+                row["runtime_status"] = "inactive"
+        return rows
+
+    def add_backend(self, actor: str, slug: str, backend_type: str, base_url: str | None = None,
+                    api_key: str | None = None, timeout: int = 120,
+                    embedding_model_id: str | None = None, summary_model_id: str | None = None) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if backend_type not in ("mock", "ragflow", "weknora"):
+            raise ValidationError(f"unsupported backend type: {backend_type}")
+        row = self.store.upsert_backend(
+            slug=slug, backend_type=backend_type, base_url=base_url,
+            api_key=api_key, timeout=timeout,
+            embedding_model_id=embedding_model_id, summary_model_id=summary_model_id,
+        )
+        config = BackendConfig(
+            slug=slug, backend_type=backend_type, base_url=base_url,
+            api_key=api_key, timeout=timeout,
+            embedding_model_id=embedding_model_id, summary_model_id=summary_model_id,
+        )
+        if self.registry:
+            self.registry.add_backend(config)
+            self.align_backends()
+        row["api_key_set"] = bool(api_key)
+        row["runtime_status"] = "active"
+        return row
+
+    def update_backend(self, actor: str, slug: str, backend_type: str | None = None,
+                       base_url: str | None = None, api_key: str | None = None,
+                       timeout: int | None = None, embedding_model_id: str | None = None,
+                       summary_model_id: str | None = None) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        existing = self.store.get_backend(slug)
+        if existing is None:
+            raise NotFound(f"backend '{slug}' not found")
+        resolved_type = backend_type or existing["backend_type"]
+        # Keep existing api_key if not provided (empty string means clear, None means keep)
+        resolved_key = existing.get("api_key") if api_key is None else (api_key or None)
+        row = self.store.upsert_backend(
+            slug=slug, backend_type=resolved_type, base_url=base_url if base_url is not None else existing.get("base_url"),
+            api_key=resolved_key, timeout=timeout if timeout is not None else existing.get("timeout", 120),
+            embedding_model_id=embedding_model_id if embedding_model_id is not None else existing.get("embedding_model_id"),
+            summary_model_id=summary_model_id if summary_model_id is not None else existing.get("summary_model_id"),
+        )
+        config = BackendConfig(
+            slug=slug, backend_type=resolved_type,
+            base_url=row.get("base_url"), api_key=resolved_key,
+            timeout=row.get("timeout", 120),
+            embedding_model_id=row.get("embedding_model_id"),
+            summary_model_id=row.get("summary_model_id"),
+        )
+        if self.registry:
+            self.registry.update_backend(config)
+            self.align_backends()
+        row["api_key_set"] = bool(resolved_key)
+        row["runtime_status"] = "active"
+        return row
+
+    def remove_backend(self, actor: str, slug: str) -> dict[str, str]:
+        require_admin_user(actor, self.admins)
+        existing = self.store.get_backend(slug)
+        if existing is None:
+            raise NotFound(f"backend '{slug}' not found")
+        self.store.delete_backend(slug)
+        if self.registry:
+            self.registry.remove_backend(slug)
+            # Mark all backend_targets for this slug as inactive
+            for kb in self.store.list_kbs():
+                self.store.set_backend_target_status(kb["id"], slug, "inactive")
+        return {"slug": slug, "status": "removed"}
 
     def _require_kb_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
         kb = self.store.get_kb_by_slug(kb_slug)

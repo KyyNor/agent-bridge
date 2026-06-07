@@ -53,6 +53,18 @@ CREATE TABLE IF NOT EXISTS document_kbs (
   deleted_at TEXT,
   PRIMARY KEY (doc_id, kb_id)
 );
+CREATE TABLE IF NOT EXISTS backends (
+  slug TEXT PRIMARY KEY,
+  backend_type TEXT NOT NULL,
+  base_url TEXT,
+  api_key TEXT,
+  timeout INTEGER NOT NULL DEFAULT 120,
+  embedding_model_id TEXT,
+  summary_model_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS backend_targets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,

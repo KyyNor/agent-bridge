@@ -64,14 +64,17 @@ async function createKb() {
   }
   createSaving.value = true
   try {
+    const slug = createForm.value.slug
     await api.createKb({
-      slug: createForm.value.slug,
+      slug,
       name: createForm.value.name,
       description: createForm.value.description || undefined,
     })
     showCreate.value = false
     createForm.value = { slug: '', name: '', description: '' }
     await loadKbs()
+    const newKb = kbs.value.find(k => k.slug === slug)
+    if (newKb) openDetail(newKb)
   } catch (e: any) {
     createError.value = e.message || '创建失败'
   }
@@ -279,7 +282,7 @@ function onFileSelected(e: Event) {
           <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
             <button v-for="t in [
               { key: 'docs', label: `文档 (${detailDocs.length})` },
-              { key: 'members', label: `成员 (${detailMembers.length})` },
+              { key: 'members', label: `访问权限 (${detailMembers.length})` },
               { key: 'sync', label: `同步 (${detailSyncJobs.length})` },
               { key: 'search', label: '检索' },
             ]" :key="t.key"
@@ -324,6 +327,7 @@ function onFileSelected(e: Event) {
 
           <!-- Members Tab -->
           <div v-if="detailTab === 'members'" class="space-y-3">
+            <div class="text-xs text-muted-foreground">管理此知识库的访问权限，指定用户可查看、上传文档或管理知识库。</div>
             <div class="flex items-center gap-3">
               <Input v-model="memberUser" placeholder="用户名" class="w-40" />
               <select v-model="memberRole" class="h-9 rounded-md border border-border bg-background px-3 text-sm">
@@ -331,7 +335,7 @@ function onFileSelected(e: Event) {
                 <option value="contributor">贡献者</option>
                 <option value="admin">管理员</option>
               </select>
-              <Button size="sm" @click="grantMember" :disabled="!memberUser.trim() || grantingMember">{{ grantingMember ? '添加中...' : '添加成员' }}</Button>
+              <Button size="sm" @click="grantMember" :disabled="!memberUser.trim() || grantingMember">{{ grantingMember ? '添加中...' : '授权' }}</Button>
             </div>
             <table class="w-full">
               <thead><tr class="border-b border-border">

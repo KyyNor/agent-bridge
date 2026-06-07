@@ -127,7 +127,9 @@ class CapabilityGovernanceService:
             if rule["effect"] == ProfileRuleEffect.deny.value
         }
 
-        allowed = [source_key for source_key in source_keys if not allow or source_key in allow]
+        if not allow:
+            return []
+        allowed = [source_key for source_key in source_keys if source_key in allow]
         return [source_key for source_key in allowed if source_key not in deny]
 
     def is_source_allowed(

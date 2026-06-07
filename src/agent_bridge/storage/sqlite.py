@@ -378,6 +378,18 @@ class SQLiteStore:
     def update_backend_target_config(self, kb_id: int, slug: str, config_updates: dict[str, Any]) -> None:
         return self.knowledge.update_backend_target_config(kb_id=kb_id, slug=slug, config_updates=config_updates)
 
+    def list_backends(self) -> list[dict[str, Any]]:
+        return self.knowledge.list_backends()
+
+    def get_backend(self, slug: str) -> dict[str, Any] | None:
+        return self.knowledge.get_backend(slug=slug)
+
+    def upsert_backend(self, **kwargs) -> dict[str, Any]:
+        return self.knowledge.upsert_backend(**kwargs)
+
+    def delete_backend(self, slug: str) -> bool:
+        return self.knowledge.delete_backend(slug=slug)
+
     def list_sync_states_for_doc(self, doc_id: int) -> list[dict[str, Any]]:
         return self.knowledge.list_sync_states_for_doc(doc_id=doc_id)
 
