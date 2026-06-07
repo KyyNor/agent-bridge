@@ -98,3 +98,22 @@ class CodeRepoCategoryRequest(BaseModel):
 class KnowledgeSyncConfigRequest(BaseModel):
     code_sync_enabled: bool = False
     code_sync_cron: str = "*/30 * * * *"
+
+
+class UpsertBackendRequest(BaseModel):
+    slug: str
+    backend_type: str
+    base_url: str | None = None
+    api_key: str | None = None
+    timeout: int = 120
+    embedding_model_id: str | None = None
+    summary_model_id: str | None = None
+
+
+class UpdateBackendRequest(BaseModel):
+    backend_type: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    timeout: int | None = None
+    embedding_model_id: str | None = None
+    summary_model_id: str | None = None

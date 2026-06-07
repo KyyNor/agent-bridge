@@ -538,3 +538,42 @@ class KnowledgeRepository:
                 "UPDATE backend_targets SET config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
                 (json.dumps(existing, ensure_ascii=False), kb_id, slug),
             )
+
+    # ── Backends ──
+
+    def list_backends(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM backends ORDER BY slug").fetchall()
+            return [dict(row) for row in rows]
+
+    def get_backend(self, slug: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM backends WHERE slug = ?", (slug,)).fetchone()
+            return dict(row) if row else None
+
+    def upsert_backend(self, *, slug: str, backend_type: str, base_url: str | None = None,
+                       api_key: str | None = None, timeout: int = 120,
+                       embedding_model_id: str | None = None, summary_model_id: str | None = None) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO backends (slug, backend_type, base_url, api_key, timeout, embedding_model_id, summary_model_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(slug) DO UPDATE SET
+                  backend_type = excluded.backend_type,
+                  base_url = excluded.base_url,
+                  api_key = excluded.api_key,
+                  timeout = excluded.timeout,
+                  embedding_model_id = excluded.embedding_model_id,
+                  summary_model_id = excluded.summary_model_id,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (slug, backend_type, base_url, api_key, timeout, embedding_model_id, summary_model_id),
+            )
+            row = conn.execute("SELECT * FROM backends WHERE slug = ?", (slug,)).fetchone()
+            return dict(row)
+
+    def delete_backend(self, slug: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM backends WHERE slug = ?", (slug,))
+            return cursor.rowcount > 0
