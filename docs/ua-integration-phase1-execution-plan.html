@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Understand Anything 集成 · 一阶段执行计划</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #152033;
+      --muted: #667085;
+      --line: #d9e1ec;
+      --blue: #2456d6;
+      --blue-soft: #e9efff;
+      --green: #0b7f5b;
+      --green-soft: #e7f6ef;
+      --amber: #a15c05;
+      --amber-soft: #fff4df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --slate: #263244;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 46px rgba(38, 50, 68, 0.11);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, rgba(36, 86, 214, 0.08), transparent 280px), var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.68;
+    }
+    main { width: min(1100px, calc(100vw - 40px)); margin: 0 auto; padding: 34px 0 78px; }
+    section {
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(38, 50, 68, 0.07);
+      padding: 26px;
+    }
+    header {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(233,239,255,0.86)), var(--paper);
+      box-shadow: var(--shadow);
+      padding: 36px;
+    }
+    h1, h2, h3, h4 { margin: 0; line-height: 1.25; }
+    h1 { font-size: clamp(28px, 3.8vw, 44px); font-weight: 900; margin-top: 8px; }
+    h2 { font-size: 22px; font-weight: 880; }
+    h3 { font-size: 17px; font-weight: 840; }
+    h4 { font-size: 14px; font-weight: 800; color: var(--blue); }
+    p { margin: 0; }
+    p + p { margin-top: 8px; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f4f7fb;
+      color: #13284f;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+    pre {
+      margin: 12px 0 0;
+      overflow: auto;
+      border: 1px solid #172033;
+      border-radius: 8px;
+      background: #111827;
+      color: #e5edf9;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    ul, ol { margin: 8px 0 0; padding-left: 20px; }
+    li + li { margin-top: 5px; }
+    li { color: var(--muted); font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; font-size: 14px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 11px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--slate-soft); color: var(--slate); font-weight: 860; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+    .eyebrow { color: var(--blue); font-size: 13px; font-weight: 860; letter-spacing: 0.08em; text-transform: uppercase; }
+    .lead { margin-top: 14px; max-width: 820px; color: var(--muted); font-size: 15px; }
+    .grid { display: grid; gap: 14px; margin-top: 16px; }
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 16px;
+    }
+    .card p, .card li { font-size: 13px; }
+    .tag {
+      display: inline-flex; align-items: center; min-height: 24px;
+      padding: 2px 9px; border-radius: 999px;
+      background: var(--slate-soft); color: #43516a;
+      font-size: 12px; font-weight: 760;
+    }
+    .tag.blue { background: var(--blue-soft); color: var(--blue); }
+    .tag.green { background: var(--green-soft); color: var(--green); }
+    .tag.amber { background: var(--amber-soft); color: var(--amber); }
+    .note {
+      margin-top: 14px;
+      border-left: 4px solid var(--blue);
+      border-radius: 7px;
+      background: var(--blue-soft);
+      padding: 14px 16px;
+      color: #1d3f9f;
+      font-size: 14px;
+    }
+    .note.warning { border-left-color: var(--amber); background: var(--amber-soft); color: #7a4608; }
+    .task-group { margin-top: 20px; }
+    .task-group + .task-group { padding-top: 20px; border-top: 1px solid var(--line); }
+    .task-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+    .task-header h3 { margin: 0; }
+    .file-ref { color: var(--muted); font-size: 12px; font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+    .step-list { margin-top: 6px; }
+    .step-list > li { margin-top: 4px; }
+    .check { color: var(--green); font-weight: 700; }
+    .num { color: var(--blue); font-weight: 800; }
+    nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+    nav a {
+      border: 1px solid var(--line); border-radius: 8px;
+      background: var(--paper); color: var(--slate);
+      padding: 8px 12px; text-decoration: none;
+      font-size: 13px; font-weight: 820;
+    }
+    @media (max-width: 780px) { .two, .three { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Phase 1 Execution Plan</div>
+    <h1>Understand Anything 集成 · 一阶段执行计划</h1>
+    <p class="lead">
+      产物识别与状态页。后端新增 <code>UnderstandAnythingClient</code>，从已 clone 仓库读取
+      <code>.understand-anything/knowledge-graph.json</code>，暴露 status/summary API；
+      前端在仓库详情弹窗中新增 Understand tab 展示状态与摘要。<strong>不触发分析</strong>，只读现有产物。
+    </p>
+  </header>
+
+  <nav>
+    <a href="#scope">范围</a>
+    <a href="#overview">总览</a>
+    <a href="#t1">T1 · Client</a>
+    <a href="#t2">T2 · Service</a>
+    <a href="#t3">T3 · API</a>
+    <a href="#t4">T4 · Frontend</a>
+    <a href="#graph">图谱结构</a>
+    <a href="#test">测试</a>
+    <a href="#not-in-scope">不在范围内</a>
+  </nav>
+
+  <!-- ── Scope ── -->
+  <section id="scope">
+    <h2>范围与目标</h2>
+    <div class="grid two">
+      <div class="card">
+        <h3>本阶段要做的</h3>
+        <ul>
+          <li>读取已 clone 仓库目录下的 <code>.understand-anything/</code> 产物</li>
+          <li>解析 <code>knowledge-graph.json</code>，提取状态、统计和摘要</li>
+          <li>暴露两个只读 API：<code>status</code> 和 <code>summary</code></li>
+          <li>前端 Understand tab 展示状态和结构化摘要</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>本阶段不做的</h3>
+        <ul>
+          <li>不触发 UA 分析（Phase 2）</li>
+          <li>不启动 Dashboard（Phase 3）</li>
+          <li>不新增 agent 内置工具（Phase 4）</li>
+          <li>不新增数据库表（MVP 只读文件系统）</li>
+          <li>不修改 UA 产物文件</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Overview ── -->
+  <section id="overview">
+    <h2>任务总览</h2>
+    <table>
+      <thead>
+        <tr><th style="width:60px">任务</th><th>内容</th><th style="width:80px">涉及文件</th><th style="width:80px">依赖</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="num">T1</span></td>
+          <td><strong>UnderstandAnythingClient</strong> — 封装文件系统读取与图谱解析</td>
+          <td>1 new</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td><span class="num">T2</span></td>
+          <td><strong>Service 集成</strong> — 在 CodeGraphService 上挂 UA 查询方法</td>
+          <td>1 modify</td>
+          <td>T1</td>
+        </tr>
+        <tr>
+          <td><span class="num">T3</span></td>
+          <td><strong>API 路由</strong> — 新增 <code>/understand/status</code> 和 <code>/understand/summary</code></td>
+          <td>1 modify</td>
+          <td>T2</td>
+        </tr>
+        <tr>
+          <td><span class="num">T4</span></td>
+          <td><strong>前端 Understand tab</strong> — 状态栏 + 结构化摘要展示</td>
+          <td>1 modify</td>
+          <td>T3</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="note">
+      依赖链是线性的：T1 → T2 → T3 → T4。每个任务完成后可独立验证，不需要等全部完成。
+    </div>
+  </section>
+
+  <!-- ── T1 ── -->
+  <section id="t1">
+    <h2><span class="num">T1</span> UnderstandAnythingClient</h2>
+    <p class="file-ref">新建: src/agent_bridge/codegraph/ua_client.py</p>
+    <p>纯文件系统操作，不依赖外部 CLI，不含网络调用。职责是读取和解析 <code>.understand-anything/</code> 目录下的产物。</p>
+
+    <h3 style="margin-top:18px">类设计</h3>
+    <pre><code>from dataclasses import dataclass
+from pathlib import Path
+
+@dataclass
+class UAGraphStatus:
+    graph_exists: bool
+    graph_path: str | None
+    stale: bool               # git commit 与 meta 不匹配
+    node_count: int
+    edge_count: int
+    layer_count: int
+    tour_count: int
+    analyzed_at: str | None
+    git_commit: str | None
+    analyzed_files: int | None
+    error: str | None         # 解析错误信息
+
+@dataclass
+class UAGraphSummary:
+    project_name: str | None
+    description: str | None
+    languages: list[str]
+    frameworks: list[str]
+    modules: list[dict]       # [{name, summary, file_count}]
+    key_nodes: list[dict]     # [{id, name, type, summary}]
+    tours: list[dict]         # [{title, description, step_count}]
+
+class UnderstandAnythingClient:
+
+    def status(self, project_dir: Path, current_commit: str | None = None) -> UAGraphStatus:
+        """读取 .understand-anything/ 状态。不抛异常，解析失败在 error 字段体现。"""
+
+    def summary(self, project_dir: Path) -> UAGraphSummary | None:
+        """读取图谱摘要。图谱不存在返回 None。"""
+
+    def read_graph_raw(self, project_dir: Path) -> dict | None:
+        """读取完整 knowledge-graph.json 的原始 dict。供后续 API 或工具使用。"""</code></pre>
+
+    <h3 style="margin-top:18px">实现要点</h3>
+    <ul>
+      <li><code>status()</code>：检查 <code>.understand-anything/knowledge-graph.json</code> 是否存在 → 解析 JSON → 统计 nodes/edges/layers/tour → 对比 <code>meta.json</code> 的 <code>gitCommitHash</code> 与传入 <code>current_commit</code> 判断 stale → 任何异常都捕获为 <code>error</code></li>
+      <li><code>summary()</code>：读图谱 JSON → 提取 <code>project</code> 字段（name, description, languages, frameworks）→ 聚合 modules（type=module 的 nodes）→ 取 key_nodes（summary 最长的前 10 个非 file 类型节点）→ 提取 tours</li>
+      <li><code>read_graph_raw()</code>：简单 <code>json.loads()</code>，文件不存在返回 None</li>
+      <li>所有 JSON 读取用宽松模式：缺失字段用默认值，不因 schema 变化崩溃</li>
+    </ul>
+  </section>
+
+  <!-- ── T2 ── -->
+  <section id="t2">
+    <h2><span class="num">T2</span> Service 集成</h2>
+    <p class="file-ref">修改: src/agent_bridge/codegraph/service.py</p>
+    <p>在 <code>CodeGraphService</code> 上新增 UA 相关方法，复用已有的 repo 查找和路径计算逻辑。</p>
+
+    <h3 style="margin-top:18px">新增方法</h3>
+    <pre><code># service.py — 新增方法
+
+def get_understand_status(self, repo_key: str) -> dict:
+    """返回 UA 图谱状态。"""
+    repo = self._get_repo(repo_key)           # 复用已有的 repo 查找
+    local_path = self._repo_path(repo_key)    # paths.codegraph_dir / repo_key
+    current_commit = repo.get("last_commit")
+    return self.ua_client.status(local_path, current_commit)
+
+def get_understand_summary(self, repo_key: str) -> dict | None:
+    """返回 UA 摘要。图谱不存在返回 None。"""
+    self._get_repo(repo_key)
+    local_path = self._repo_path(repo_key)
+    return self.ua_client.summary(local_path)</code></pre>
+
+    <h3 style="margin-top:18px">修改点</h3>
+    <ol>
+      <li>构造函数注入 <code>UnderstandAnythingClient</code>（可选，默认创建）</li>
+      <li>提取 <code>_get_repo(repo_key)</code> 和 <code>_repo_path(repo_key)</code> 内部方法（当前逻辑在 <code>sync_repository</code> 里内联，抽出来复用）</li>
+      <li>新增上述两个公开方法</li>
+    </ol>
+  </section>
+
+  <!-- ── T3 ── -->
+  <section id="t3">
+    <h2><span class="num">T3</span> API 路由</h2>
+    <p class="file-ref">修改: src/agent_bridge/api/routes/builtins.py</p>
+    <p>新增两个只读端点，遵循现有路由模式（factory + <code>call_safely</code> 包装）。</p>
+
+    <table>
+      <thead>
+        <tr><th>Method</th><th>Path</th><th>Handler</th><th>返回</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>GET</code></td>
+          <td><code>/code-repo/repositories/{repo_key}/understand/status</code></td>
+          <td><code>get_understand_status</code></td>
+          <td><code>UAGraphStatus</code> 的 JSON</td>
+        </tr>
+        <tr>
+          <td><code>GET</code></td>
+          <td><code>/code-repo/repositories/{repo_key}/understand/summary</code></td>
+          <td><code>get_understand_summary</code></td>
+          <td><code>UAGraphSummary</code> 的 JSON，图谱不存在返回 404</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3 style="margin-top:18px">实现要点</h3>
+    <ul>
+      <li>与现有 <code>get_repo_overview</code> 路由结构一致：解析 <code>repo_key</code> path param → 调 service → 返回 JSON</li>
+      <li>summary 端点：图谱不存在时返回 <code>{"error": "understand_graph_not_found"}</code> + 404，而非 500</li>
+      <li>两个端点都需要 admin 权限（与现有 code-repo 端点一致）</li>
+    </ul>
+  </section>
+
+  <!-- ── T4 ── -->
+  <section id="t4">
+    <h2><span class="num">T4</span> 前端 Understand Tab</h2>
+    <p class="file-ref">修改: frontend/capabilities/src/views/CodeRepoView.vue</p>
+    <p>在仓库详情弹窗中新增第四个 tab "Understand"，展示 UA 状态和摘要。</p>
+
+    <h3 style="margin-top:18px">UI 结构</h3>
+    <pre><code>Understand Tab
+├── 状态栏（顶部横幅）
+│   ├── 图谱不存在 → 灰色提示 "暂无知识图谱"
+│   ├── 图谱存在但已过期 → 黄色提示 "图谱可能过期（commit 不匹配）"
+│   ├── 图谱正常 → 绿色提示 "知识图谱可用"
+│   └── 右侧：节点 N · 边 E · 层 L · 分析时间
+│
+├── 摘要区（图谱存在时显示）
+│   ├── 项目描述
+│   ├── 语言 / 框架（tag 展示）
+│   ├── 主要模块列表（名称 + 摘要）
+│   └── 导览列表（如果有 tour）
+│
+└── 诊断区（底部，折叠式）
+    └── 最近分析 commit、文件数、图谱路径</code></pre>
+
+    <h3 style="margin-top:18px">实现要点</h3>
+    <ul>
+      <li>Tab 切换：<code>detailTab</code> ref 新增 <code>'understand'</code> 值，按钮区新增 "Understand" tab</li>
+      <li>数据加载：切换到 Understand tab 时调用 <code>GET /code-repo/repositories/{repo_key}/understand/status</code> 和 <code>summary</code></li>
+      <li>用 <code>onMounted</code> 或 tab 切换 watch 触发，避免弹窗打开时无条件请求</li>
+      <li>TypeScript 类型：<code>frontend/src/api/client.ts</code> 新增 UA 相关接口类型</li>
+      <li>样式：复用现有 Tab 面板的布局和 shadcn 组件（Badge, Card, Collapsible）</li>
+      <li>API client：<code>client.ts</code> 新增 <code>getUnderstandStatus(repoKey)</code> 和 <code>getUnderstandSummary(repoKey)</code></li>
+    </ul>
+  </section>
+
+  <!-- ── Graph Structure ── -->
+  <section id="graph">
+    <h2>附录：knowledge-graph.json 关键字段</h2>
+    <p>Phase 1 需要读取的字段（宽松解析，缺失不崩溃）：</p>
+    <table>
+      <thead>
+        <tr><th>路径</th><th>用途</th><th>Phase 1 使用</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>.version</code></td><td>图谱版本号</td><td>记录，暂不消费</td></tr>
+        <tr><td><code>.project.name</code></td><td>项目名</td><td>摘要展示</td></tr>
+        <tr><td><code>.project.description</code></td><td>项目描述</td><td>摘要展示</td></tr>
+        <tr><td><code>.project.languages[]</code></td><td>语言列表</td><td>摘要展示</td></tr>
+        <tr><td><code>.project.frameworks[]</code></td><td>框架列表</td><td>摘要展示</td></tr>
+        <tr><td><code>.project.gitCommitHash</code></td><td>分析时的 commit</td><td>staleness 判断</td></tr>
+        <tr><td><code>.nodes[]</code></td><td>所有节点</td><td>统计数量、提取模块和关键节点</td></tr>
+        <tr><td><code>.edges[]</code></td><td>所有边</td><td>统计数量</td></tr>
+        <tr><td><code>.layers[]</code></td><td>架构层</td><td>统计数量</td></tr>
+        <tr><td><code>.tour[]</code></td><td>导览步骤</td><td>统计数量、摘要展示</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:10px">meta.json 关键字段：</p>
+    <table>
+      <thead><tr><th>字段</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td><code>.lastAnalyzedAt</code></td><td>分析时间 → 状态栏展示</td></tr>
+        <tr><td><code>.gitCommitHash</code></td><td>对比 repo last_commit 判断 stale</td></tr>
+        <tr><td><code>.analyzedFiles</code></td><td>分析的文件数 → 诊断区展示</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Testing ── -->
+  <section id="test">
+    <h2>验证方式</h2>
+    <div class="grid two">
+      <div class="card">
+        <span class="tag green">手动验证</span>
+        <h3>端到端检查</h3>
+        <ol>
+          <li>找一个已有 UA 图谱的仓库（如 taosha_analyse_platform）</li>
+          <li>在 Agent Bridge 中注册该仓库（git_url 和 branch 可填占位值，local_path 手动指向已有 clone）</li>
+          <li>或直接将已有 <code>.understand-anything</code> 目录复制到 <code>{root}/codegraph/{repo_key}/</code></li>
+          <li>打开仓库详情 → Understand tab → 确认状态和摘要正常展示</li>
+          <li>测试无图谱的仓库 → 应显示 "暂无知识图谱"</li>
+        </ol>
+      </div>
+      <div class="card">
+        <span class="tag blue">单元测试</span>
+        <h3>核心场景</h3>
+        <ul>
+          <li><code>UnderstandAnythingClient.status()</code>：图谱存在/不存在/JSON 损坏</li>
+          <li><code>UnderstandAnythingClient.summary()</code>：正常提取/字段缺失</li>
+          <li>stale 判断：commit 匹配/不匹配/缺失</li>
+          <li>API 端点：200 正常返回 / 404 图谱不存在 / 404 repo 不存在</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Not in scope ── -->
+  <section id="not-in-scope">
+    <h2>后续阶段预览（不在本阶段范围）</h2>
+    <table>
+      <thead><tr><th>Phase</th><th>内容</th><th>前置条件</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="num">2</span></td>
+          <td>通过 <code>claude -p</code> 触发分析，<code>UnderstandAnythingClient.analyze()</code>，分析 run 记录</td>
+          <td>Phase 1 完成 + claude CLI 可用</td>
+        </tr>
+        <tr>
+          <td><span class="num">3</span></td>
+          <td>Dashboard 入口：启动/获取 UA Dashboard URL，前端打开按钮</td>
+          <td>Phase 2 完成</td>
+        </tr>
+        <tr>
+          <td><span class="num">4</span></td>
+          <td>Agent 内置工具：overview / search / tour，接入 resource rule 和 governance</td>
+          <td>Phase 1 完成</td>
+        </tr>
+        <tr>
+          <td><span class="num">5</span></td>
+          <td>原生图谱体验评估：Vue 原生图视图 vs iframe 嵌入</td>
+          <td>Phase 3 完成 + 用户反馈</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>

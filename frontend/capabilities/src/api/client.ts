@@ -23,6 +23,8 @@ import type {
   SchedulerStatus,
   ToolCallLog,
   ToolCallStats,
+  UAStatus,
+  UASummary,
 } from './types'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
@@ -135,6 +137,10 @@ export const api = {
     post<{ matches: CodeGraphNode[] }>(`/code-repo/repositories/${repoKey}/callees`, { query: symbol, limit }),
   analyzeImpact: (repoKey: string, symbol: string) =>
     post<{ matches: CodeGraphNode[] }>(`/code-repo/repositories/${repoKey}/impact`, { query: symbol }),
+
+  // Understand Anything
+  getUAStatus: (repoKey: string) => get<UAStatus>(`/code-repo/repositories/${repoKey}/understand/status`),
+  getUASummary: (repoKey: string) => get<UASummary>(`/code-repo/repositories/${repoKey}/understand/summary`),
 
   // Categories
   listCategories: () => get<CodeRepoCategory[]>('/code-repo/categories'),

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview } from '../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -37,9 +37,14 @@ const detailResults = ref<CodeGraphNode[]>([])
 const detailExploreQuery = ref('')
 const detailExploreResult = ref<CodeGraphExploreResult | null>(null)
 const detailExploreError = ref('')
-const detailTab = ref<'overview' | 'query' | 'explore'>('overview')
+const detailTab = ref<'overview' | 'query' | 'explore' | 'understand'>('overview')
 const detailSearching = ref(false)
 const detailExploring = ref(false)
+
+// UA (Understand Anything) state
+const uaStatus = ref<UAStatus | null>(null)
+const uaSummary = ref<UASummary | null>(null)
+const uaLoading = ref(false)
 
 onMounted(async () => {
   await Promise.all([loadRepos(), loadCategories()])
@@ -115,6 +120,8 @@ async function openDetail(r: CodeRepository) {
   detailExploreQuery.value = ''
   detailExploreResult.value = null
   detailExploreError.value = ''
+  uaStatus.value = null
+  uaSummary.value = null
   try {
     const [status, overview] = await Promise.allSettled([
       api.getCodeGraphStatus(),
@@ -182,6 +189,26 @@ function categoryName(key: string) {
   if (!key) return ''
   return categories.value.find(c => c.category_key === key)?.name || key
 }
+
+async function loadUAData() {
+  if (!detailRepo.value) return
+  uaLoading.value = true
+  try {
+    const [statusResult, summaryResult] = await Promise.allSettled([
+      api.getUAStatus(detailRepo.value.repo_key),
+      api.getUASummary(detailRepo.value.repo_key),
+    ])
+    uaStatus.value = statusResult.status === 'fulfilled' ? statusResult.value : null
+    uaSummary.value = summaryResult.status === 'fulfilled' ? summaryResult.value : null
+  } catch { /* ignore */ }
+  uaLoading.value = false
+}
+
+watch(detailTab, (tab) => {
+  if (tab === 'understand' && !uaStatus.value && !uaLoading.value) {
+    loadUAData()
+  }
+})
 </script>
 
 <template>
@@ -350,6 +377,7 @@ function categoryName(key: string) {
               { key: 'overview', label: '概览' },
               { key: 'query', label: '查询' },
               { key: 'explore', label: 'Explore' },
+              { key: 'understand', label: 'Understand' },
             ]" :key="t.key"
               :class="['rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', detailTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
               @click="detailTab = t.key as any">{{ t.label }}</button>
@@ -432,6 +460,81 @@ function categoryName(key: string) {
                 <pre v-else class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ JSON.stringify(detailExploreResult.mcp_result.content, null, 2) }}</pre>
               </div>
             </div>
+          </div>
+
+          <!-- Understand Tab -->
+          <div v-if="detailTab === 'understand'" class="space-y-3">
+            <div v-if="uaLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
+            <template v-else>
+              <!-- Status Banner -->
+              <div v-if="!uaStatus?.graph_exists" class="rounded-lg border border-border bg-secondary/50 p-4 text-center">
+                <div class="text-sm text-muted-foreground">暂无知识图谱</div>
+                <div class="mt-1 text-xs text-muted-foreground">可通过 Understand Anything 技能生成</div>
+              </div>
+              <template v-else>
+                <div v-if="uaStatus?.stale" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
+                  图谱可能已过期（commit 不匹配）
+                </div>
+                <div v-else class="rounded-lg bg-green-50 p-3 text-sm text-green-700">
+                  知识图谱可用
+                </div>
+                <div class="grid grid-cols-4 gap-2">
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.node_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">节点</div>
+                  </div>
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.edge_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">边</div>
+                  </div>
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.layer_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">层</div>
+                  </div>
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.tour_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">导览</div>
+                  </div>
+                </div>
+
+                <!-- Summary -->
+                <div v-if="uaSummary" class="space-y-3">
+                  <div v-if="uaSummary.description" class="rounded-lg border border-border p-4">
+                    <div class="text-sm text-muted-foreground">{{ uaSummary.description }}</div>
+                  </div>
+                  <div v-if="uaSummary.languages.length || uaSummary.frameworks.length" class="flex flex-wrap gap-1.5">
+                    <Badge v-for="lang in uaSummary.languages" :key="lang" variant="secondary" class="bg-blue-50 text-blue-700">{{ lang }}</Badge>
+                    <Badge v-for="fw in uaSummary.frameworks" :key="fw" variant="secondary" class="bg-green-50 text-green-700">{{ fw }}</Badge>
+                  </div>
+                  <div v-if="uaSummary.modules.length" class="rounded-lg border border-border">
+                    <div class="border-b border-border bg-secondary/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">主要模块</div>
+                    <div v-for="m in uaSummary.modules" :key="m.name" class="border-b border-border/40 px-4 py-2.5 last:border-b-0">
+                      <div class="text-sm font-medium">{{ m.name }}</div>
+                      <div v-if="m.summary" class="text-xs text-muted-foreground">{{ m.summary }}</div>
+                    </div>
+                  </div>
+                  <div v-if="uaSummary.tours.length" class="rounded-lg border border-border">
+                    <div class="border-b border-border bg-secondary/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">导览</div>
+                    <div v-for="t in uaSummary.tours" :key="t.title" class="px-4 py-2.5">
+                      <div class="text-sm font-medium">{{ t.title }}</div>
+                      <div class="text-xs text-muted-foreground">{{ t.step_count }} 步 · {{ t.description }}</div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Diagnostics -->
+              <details v-if="uaStatus?.graph_exists" class="rounded-lg border border-border">
+                <summary class="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">诊断信息</summary>
+                <div class="border-t border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
+                  <div v-if="uaStatus?.analyzed_at">分析时间: {{ uaStatus.analyzed_at }}</div>
+                  <div v-if="uaStatus?.git_commit">分析 commit: <span class="font-mono">{{ uaStatus.git_commit?.slice(0, 12) }}</span></div>
+                  <div v-if="uaStatus?.analyzed_files != null">分析文件数: {{ uaStatus.analyzed_files }}</div>
+                  <div v-if="uaStatus?.graph_path">图谱路径: <span class="font-mono text-[11px]">{{ uaStatus.graph_path }}</span></div>
+                  <div v-if="uaStatus?.error" class="text-red-600">错误: {{ uaStatus.error }}</div>
+                </div>
+              </details>
+            </template>
           </div>
         </div>
         <DialogFooter>

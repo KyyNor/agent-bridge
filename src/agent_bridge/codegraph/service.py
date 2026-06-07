@@ -12,6 +12,7 @@ from typing import Any
 
 from agent_bridge.codegraph.client import CodeGraphClient
 from agent_bridge.codegraph.mcp_client import CodeGraphMcpClient
+from agent_bridge.codegraph.ua_client import UnderstandAnythingClient
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -30,12 +31,14 @@ class CodeGraphService:
         admins: set[str],
         codegraph_client: CodeGraphClient | None = None,
         mcp_client: CodeGraphMcpClient | None = None,
+        ua_client: UnderstandAnythingClient | None = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.client = codegraph_client or CodeGraphClient()
         self.mcp_client = mcp_client or CodeGraphMcpClient()
+        self.ua_client = ua_client or UnderstandAnythingClient()
 
     def upsert_repository(
         self,
@@ -278,6 +281,45 @@ class CodeGraphService:
 
     def _local_path(self, repo_key: str) -> Path:
         return self.paths.codegraph_dir / repo_key
+
+    # -- Understand Anything --
+
+    def get_understand_status(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        repo = self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        current_commit = repo.get("last_commit")
+        result = self.ua_client.status(local_path, current_commit)
+        return {
+            "graph_exists": result.graph_exists,
+            "graph_path": result.graph_path,
+            "stale": result.stale,
+            "node_count": result.node_count,
+            "edge_count": result.edge_count,
+            "layer_count": result.layer_count,
+            "tour_count": result.tour_count,
+            "analyzed_at": result.analyzed_at,
+            "git_commit": result.git_commit,
+            "analyzed_files": result.analyzed_files,
+            "error": result.error,
+        }
+
+    def get_understand_summary(self, actor: str, repo_key: str) -> dict[str, Any] | None:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        result = self.ua_client.summary(local_path)
+        if result is None:
+            return None
+        return {
+            "project_name": result.project_name,
+            "description": result.description,
+            "languages": result.languages,
+            "frameworks": result.frameworks,
+            "modules": result.modules,
+            "key_nodes": result.key_nodes,
+            "tours": result.tours,
+        }
 
     def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
         score = node.get("score")
