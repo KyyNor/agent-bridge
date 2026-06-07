@@ -102,24 +102,11 @@ class UnderstandAnythingClient:
                 message="claude CLI 未安装。请先安装 Claude Code: npm install -g @anthropic-ai/claude-code",
             )
 
-        # Check if skills are linked in the target project
         if project_dir:
             skill_dir = project_dir / SKILL_DIR_NAME
             understand_link = skill_dir / "understand"
             if understand_link.exists() or understand_link.is_symlink():
                 return UAAvailability(claude_installed=True, ua_skill_available=True)
-
-        # Fallback: check global claude skill list
-        try:
-            result = subprocess.run(
-                [claude_path, "skill", "list"],
-                capture_output=True, text=True, timeout=15,
-            )
-            output = result.stdout + result.stderr
-            if "understand" in output.lower():
-                return UAAvailability(claude_installed=True, ua_skill_available=True)
-        except (subprocess.TimeoutExpired, OSError):
-            pass
 
         return UAAvailability(
             claude_installed=True,
@@ -364,71 +351,119 @@ class UnderstandAnythingClient:
     def dashboard_status(self, project_dir: Path) -> dict[str, Any]:
         meta = self._read_dashboard_meta(project_dir)
         if meta is None:
+            logger.debug("dashboard_status: no meta file at %s", project_dir / UA_DIR / DASHBOARD_META_FILE)
             return {"running": False}
         pid = meta.get("pid")
-        if pid is not None and self._is_pid_alive(pid):
+        alive = pid is not None and self._is_pid_alive(pid)
+        logger.debug("dashboard_status: pid=%s alive=%s url=%s", pid, alive, meta.get("url"))
+        if alive:
             return {"running": True, "url": meta.get("url"), "pid": pid, "started_at": meta.get("started_at")}
+        logger.debug("dashboard_status: pid %s is dead, returning not running", pid)
         return {"running": False}
 
-    def start_dashboard(self, project_dir: Path, *, timeout: int = 60) -> dict[str, Any]:
-        # Check if already running
+    def start_dashboard(self, project_dir: Path, *, timeout: int = 90) -> dict[str, Any]:
+        log_msgs: list[str] = []
+
         current = self.dashboard_status(project_dir)
         if current["running"]:
+            logger.info("dashboard already running: pid=%s url=%s", current.get("pid"), current.get("url"))
             return {"success": True, "url": current["url"], "pid": current["pid"]}
 
-        # Need a graph to serve
         graph_path = project_dir / UA_DIR / GRAPH_FILE
+        log_msgs.append(f"graph_path={graph_path} exists={graph_path.is_file()}")
+        logger.debug("start_dashboard: %s", log_msgs[-1])
         if not graph_path.is_file():
             return {"success": False, "error": "请先运行分析生成知识图谱"}
 
-        # Launch via claude -p with dashboard skill
-        prompt = (
-            "Use the Understand Anything dashboard skill for this repository: "
-            f"{project_dir}\n\n"
-            "Return ONLY the final local Dashboard URL on the last line. "
-            "Do not open browser windows. Do not output anything after the URL."
-        )
+        dashboard_dir = self._find_dashboard_dir(project_dir)
+        log_msgs.append(f"dashboard_dir={dashboard_dir}")
+        logger.debug("start_dashboard: %s", log_msgs[-1])
+        if dashboard_dir is None:
+            return {
+                "success": False,
+                "error": "找不到 Dashboard 目录，请确认 UA 技能已安装",
+                "debug": log_msgs,
+            }
+
+        error = self._ensure_dashboard_built(dashboard_dir)
+        log_msgs.append(f"ensure_built={error}")
+        logger.debug("start_dashboard: %s", log_msgs[-1])
+        if error:
+            return {"success": False, "error": error, "debug": log_msgs}
+
+        ua_dir = project_dir / UA_DIR
+        env = {**os.environ, "GRAPH_DIR": str(ua_dir)}
+
+        # Prefer installed vite, fall back to npx
+        vite_bin = dashboard_dir / "node_modules" / ".bin" / "vite"
+        if vite_bin.is_file():
+            cmd = [str(vite_bin), "--host", "127.0.0.1", "--no-open"]
+        else:
+            cmd = ["npx", "vite", "--host", "127.0.0.1", "--no-open"]
+
+        log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir} GRAPH_DIR={ua_dir}")
+        logger.info("start_dashboard: launching %s in %s", cmd, dashboard_dir)
         try:
             proc = subprocess.Popen(
-                ["claude", "-p", "--dangerously-skip-permissions", prompt],
-                cwd=str(project_dir),
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True,
+                cmd,
+                cwd=str(dashboard_dir),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, env=env, start_new_session=True,
             )
         except (FileNotFoundError, OSError) as exc:
-            return {"success": False, "error": str(exc)}
+            log_msgs.append(f"popen_error={exc}")
+            logger.error("start_dashboard: Popen failed: %s", exc)
+            return {"success": False, "error": str(exc), "debug": log_msgs}
 
-        # Read stdout with timeout to get the URL
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        log_msgs.append(f"pid={proc.pid}")
+        logger.debug("start_dashboard: process started pid=%s", proc.pid)
+
+        import re
+        url = None
+        deadline = time.time() + timeout
+        buffer = ""
+        while time.time() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    rc = proc.returncode
+                    log_msgs.append(f"process_exited rc={rc}")
+                    logger.warning("start_dashboard: process exited with rc=%s", rc)
+                    break
+                time.sleep(0.1)
+                continue
+            # Log first few lines for debugging
+            stripped = line.rstrip()
+            if len(buffer) < 3000:
+                logger.debug("start_dashboard stdout: %s", stripped[:200])
+            buffer += line
+            # Vite prints: ➜  Local:   http://localhost:5173/?token=xxx
+            m = re.search(r"https?://(?:127\.0\.0\.1|localhost):\d+\S*token=\S+", buffer)
+            if m:
+                url = m.group(0)
+                # Clean trailing punctuation
+                url = re.sub(r"[,;.!]+$", "", url)
+                logger.info("start_dashboard: found URL %s", url)
+                break
+
+        if url is None:
             proc.kill()
-            return {"success": False, "error": f"启动 Dashboard 超时（{timeout}s）"}
+            log_msgs.append(f"timeout after {timeout}s")
+            logger.error("start_dashboard: timeout, captured output:\n%s", buffer[-2000:])
+            return {
+                "success": False,
+                "error": f"Dashboard 启动超时（{timeout}s），请检查日志",
+                "output": buffer[-2000:],
+                "debug": log_msgs,
+            }
 
-        if proc.returncode != 0:
-            err = (stderr or "")[:2000] or f"claude -p exited with code {proc.returncode}"
-            return {"success": False, "error": err}
-
-        # Parse URL from last line of output
-        lines = stdout.strip().splitlines()
-        url = lines[-1].strip() if lines else ""
-        if not url.startswith("http"):
-            # Try to find a URL anywhere in the output
-            import re
-            url_match = re.search(r"https?://\S+", stdout)
-            url = url_match.group(0) if url_match else ""
-
-        if not url:
-            return {"success": False, "error": "未能获取 Dashboard URL", "output": stdout[-2000:]}
-
-        # Write meta so we can track it
         meta = {
             "pid": proc.pid,
             "url": url,
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         self._write_dashboard_meta(project_dir, meta)
-        return {"success": True, "url": url, "pid": proc.pid}
+        return {"success": True, "running": True, "url": url, "pid": proc.pid}
 
     def stop_dashboard(self, project_dir: Path) -> dict[str, Any]:
         meta = self._read_dashboard_meta(project_dir)
@@ -439,15 +474,92 @@ class UnderstandAnythingClient:
         stopped = False
         if pid is not None:
             try:
-                os.kill(pid, 15)  # SIGTERM
+                os.killpg(pid, 15)  # SIGTERM the whole process group
                 stopped = True
             except ProcessLookupError:
-                stopped = True  # already dead
+                stopped = True
             except OSError:
                 pass
 
         self._delete_dashboard_meta(project_dir)
         return {"stopped": stopped}
+
+    def _find_dashboard_dir(self, project_dir: Path) -> Path | None:
+        """Resolve dashboard dir from .claude/skills/understand-dashboard symlink."""
+        skill_link = project_dir / SKILL_DIR_NAME / "understand-dashboard"
+        logger.debug("_find_dashboard_dir: checking %s", skill_link)
+        if not skill_link.exists():
+            logger.debug("_find_dashboard_dir: %s does not exist (is_symlink=%s)", skill_link, skill_link.is_symlink())
+            return None
+        if not skill_link.is_symlink():
+            logger.debug("_find_dashboard_dir: %s exists but is not a symlink", skill_link)
+            return None
+        skill_real = skill_link.resolve()
+        logger.debug("_find_dashboard_dir: symlink resolves to %s", skill_real)
+        plugin_root = skill_real.parent.parent
+        logger.debug("_find_dashboard_dir: plugin_root=%s", plugin_root)
+        dashboard_dir = plugin_root / "packages" / "dashboard"
+        if not dashboard_dir.is_dir():
+            logger.debug("_find_dashboard_dir: %s is not a directory", dashboard_dir)
+            return None
+        pkg = dashboard_dir / "package.json"
+        if not pkg.is_file():
+            logger.debug("_find_dashboard_dir: %s not found", pkg)
+            return None
+        logger.info("_find_dashboard_dir: found dashboard at %s", dashboard_dir)
+        return dashboard_dir
+
+    def _ensure_dashboard_built(self, dashboard_dir: Path) -> str | None:
+        """Install deps and build core if not already done. Returns error or None."""
+        plugin_root = dashboard_dir.parent.parent
+        build_flag = plugin_root / "packages" / "core" / ".built-flag"
+        logger.debug("_ensure_dashboard_built: build_flag=%s exists=%s", build_flag, build_flag.is_file())
+        if build_flag.is_file():
+            return None
+
+        logger.info("_ensure_dashboard_built: running pnpm install in %s", dashboard_dir)
+        try:
+            result = subprocess.run(
+                ["pnpm", "install", "--frozen-lockfile", "--prefer-offline"],
+                cwd=str(dashboard_dir), capture_output=True, text=True, timeout=120,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            logger.error("_ensure_dashboard_built: pnpm not found or timed out: %s", exc)
+            return f"pnpm 未安装或超时: {exc}"
+        if result.returncode != 0:
+            # Try without frozen lockfile
+            logger.warning(
+                "_ensure_dashboard_built: pnpm install --frozen-lockfile failed (rc=%s), retrying without frozen",
+                result.returncode,
+            )
+            try:
+                result = subprocess.run(
+                    ["pnpm", "install", "--prefer-offline"],
+                    cwd=str(dashboard_dir), capture_output=True, text=True, timeout=120,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+                return f"pnpm 安装失败: {exc}"
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout)[:500]
+            logger.error("_ensure_dashboard_built: pnpm install failed: %s", err)
+            return f"安装 Dashboard 依赖失败: {err}"
+
+        logger.info("_ensure_dashboard_built: running pnpm --filter @understand-anything/core build in %s", plugin_root)
+        try:
+            result = subprocess.run(
+                ["pnpm", "--filter", "@understand-anything/core", "build"],
+                cwd=str(plugin_root), capture_output=True, text=True, timeout=120,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            return f"构建 UA core 失败: {exc}"
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout)[:500]
+            logger.error("_ensure_dashboard_built: core build failed: %s", err)
+            return f"构建 UA core 失败: {err}"
+
+        build_flag.touch()
+        logger.info("_ensure_dashboard_built: build complete, flag set")
+        return None
 
     def _read_dashboard_meta(self, project_dir: Path) -> dict[str, Any] | None:
         path = project_dir / UA_DIR / DASHBOARD_META_FILE
