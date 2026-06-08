@@ -53,8 +53,8 @@ class AgentBridgePaths:
         )
 
     @property
-    def codegraph_dir(self) -> Path:
-        return self.root / "codegraph"
+    def repos_dir(self) -> Path:
+        return self.root / "repos"
 
 
 @dataclass(frozen=True)
@@ -82,7 +82,7 @@ def ensure_directories(paths: AgentBridgePaths) -> None:
         paths.data_dir,
         paths.archive_dir,
         paths.mock_backend_dir,
-        paths.codegraph_dir,
+        paths.repos_dir,
         paths.logs_dir,
         paths.run_dir,
     ):

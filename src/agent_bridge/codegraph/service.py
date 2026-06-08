@@ -39,7 +39,7 @@ class CodeGraphService:
         self.admins = admins
         self.client = codegraph_client or CodeGraphClient()
         self.mcp_client = mcp_client or CodeGraphMcpClient()
-        self.ua_client = ua_client or UnderstandAnythingClient()
+        self.ua_client = ua_client or UnderstandAnythingClient(root=paths.root)
 
     def upsert_repository(
         self,
@@ -98,8 +98,8 @@ class CodeGraphService:
     def sync_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         repo = self._require_repository(repo_key)
-        self.paths.codegraph_dir.mkdir(parents=True, exist_ok=True)
-        local_path = self.paths.codegraph_dir / repo_key
+        self.paths.repos_dir.mkdir(parents=True, exist_ok=True)
+        local_path = self.paths.repos_dir / repo_key
         run = self.store.create_codegraph_sync_run(repo_key, status="running", stage="git")
         started = time.perf_counter()
 
@@ -281,7 +281,7 @@ class CodeGraphService:
         return repo
 
     def _local_path(self, repo_key: str) -> Path:
-        return self.paths.codegraph_dir / repo_key
+        return self.paths.repos_dir / repo_key
 
     # -- Understand Anything --
 

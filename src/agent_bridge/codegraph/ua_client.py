@@ -206,10 +206,13 @@ class DashboardPool:
 
 class UnderstandAnythingClient:
 
-    def __init__(self) -> None:
+    def __init__(self, root: Path | None = None) -> None:
+        self._root = root
         self.pool = DashboardPool(max_sessions=20, idle_timeout=3600)
 
     def _ua_repo_dir(self) -> Path:
+        if self._root is not None:
+            return self._root / "understand-anything-plugin"
         return Path.home() / ".understand-anything" / "repo"
 
     def _ua_skills_src_dir(self) -> Path:

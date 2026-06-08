@@ -117,9 +117,9 @@ def test_codegraph_builtin_explore_uses_repo_scoped_stdio_mcp_after_profile_chec
     assert result["result"]["mcp_result"]["structured"] == {"answer": "explored"}
     assert fake_mcp.calls == [
         {
-            "project_dir": wm_paths.codegraph_dir / "web-app",
+            "project_dir": wm_paths.repos_dir / "web-app",
             "tool_name": "codegraph_explore",
-            "arguments": {"query": "App flow", "projectPath": str(wm_paths.codegraph_dir / "web-app")},
+            "arguments": {"query": "App flow", "projectPath": str(wm_paths.repos_dir / "web-app")},
         }
     ]
 

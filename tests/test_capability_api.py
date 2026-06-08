@@ -716,9 +716,9 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
     assert response.json()["mcp_result"]["structured"] == {"answer": "ok"}
     assert fake_mcp.calls == [
         {
-            "project_dir": wm_paths.codegraph_dir / "web-app",
+            "project_dir": wm_paths.repos_dir / "web-app",
             "tool_name": "codegraph_explore",
-            "arguments": {"query": "hello", "projectPath": str(wm_paths.codegraph_dir / "web-app")},
+            "arguments": {"query": "hello", "projectPath": str(wm_paths.repos_dir / "web-app")},
         }
     ]
 

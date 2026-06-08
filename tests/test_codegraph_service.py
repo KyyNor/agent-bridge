@@ -210,9 +210,9 @@ def test_codegraph_get_file_rejects_paths_outside_repository(tmp_path: Path, wm_
         actor="root", repo_key="web-app", name="Web App", git_url=str(tmp_path / "repo"),
         branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, status="active",
     )
-    local_repo = wm_paths.codegraph_dir / "web-app"
+    local_repo = wm_paths.repos_dir / "web-app"
     local_repo.mkdir(parents=True)
-    (wm_paths.codegraph_dir / "secret.txt").write_text("SECRET\n", encoding="utf-8")
+    (wm_paths.repos_dir / "secret.txt").write_text("SECRET\n", encoding="utf-8")
 
     with pytest.raises(NotFound, match="file not found"):
         service.get_file("root", "web-app", "../secret.txt")
