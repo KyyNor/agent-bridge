@@ -507,9 +507,9 @@ class UnderstandAnythingClient:
 
         vite_bin = dashboard_dir / "node_modules" / ".bin" / "vite"
         if vite_bin.is_file():
-            cmd = [str(vite_bin), "--host", "127.0.0.1", "--port", "5173", "--no-open"]
+            cmd = [str(vite_bin), "--host", "127.0.0.1", "--port", "48000", "--no-open"]
         else:
-            cmd = ["npx", "vite", "--host", "127.0.0.1", "--port", "5173", "--no-open"]
+            cmd = ["npx", "vite", "--host", "127.0.0.1", "--port", "48000", "--no-open"]
 
         log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir}")
         logger.info("_launch_vite: %s in %s", cmd, dashboard_dir)
