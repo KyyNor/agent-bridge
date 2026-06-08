@@ -194,30 +194,13 @@ async function deleteBackend(slug: string) {
       <CardContent class="space-y-4 p-5">
         <div class="text-sm font-medium">定时任务管理</div>
 
-        <!-- 代码同步 -->
-        <div class="rounded-lg border border-border p-3 space-y-2">
-          <div class="text-xs font-medium text-muted-foreground">代码同步</div>
-          <div class="flex items-center gap-2 text-sm">
-            <span class="text-muted-foreground">Cron</span>
-            <Input v-model="syncConfig.code_sync_cron" placeholder="0 * * * *" class="w-40 font-mono text-xs" />
-          </div>
-          <div class="text-xs text-muted-foreground">
-            为所有活跃代码库定时执行 git pull 同步。默认 <code class="font-mono">0 * * * *</code>（每小时整点）。
-          </div>
+        <div class="flex items-center gap-6">
+          <div class="text-sm shrink-0 whitespace-nowrap">代码同步 <span class="text-xs text-muted-foreground">(CodeGraph)</span></div>
+          <Input v-model="syncConfig.code_sync_cron" placeholder="0 * * * *" class="w-40 font-mono text-xs" />
         </div>
-
-        <!-- 代码理解 -->
-        <div class="rounded-lg border border-border p-3 space-y-2">
-          <div class="text-xs font-medium text-muted-foreground">代码理解</div>
-          <div class="flex items-center gap-4">
-            <div class="flex items-center gap-2 text-sm">
-              <span class="text-muted-foreground">Cron</span>
-              <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
-            </div>
-          </div>
-          <div class="text-xs text-muted-foreground">
-            为开启了「自动理解」的代码库定时运行 Understand Anything 分析。默认 <code class="font-mono">0 2 * * *</code>（每天凌晨 2 点）。
-          </div>
+        <div class="flex items-center gap-6">
+          <div class="text-sm shrink-0 whitespace-nowrap">代码理解 <span class="text-xs text-muted-foreground">(Understand Anything)</span></div>
+          <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
         </div>
 
         <div class="flex items-center gap-3">
@@ -297,20 +280,6 @@ async function deleteBackend(slug: string) {
       <CardContent class="space-y-4 p-5">
         <div class="text-sm font-medium">知识库管理</div>
 
-        <!-- UA Config -->
-        <div class="rounded-lg border border-border p-3 space-y-2">
-          <div class="text-xs font-medium text-muted-foreground">Understand Anything 配置</div>
-          <div class="flex items-center gap-3">
-            <Input v-model="syncConfig.ua_git_url" placeholder="https://github.com/Lum1104/Understand-Anything.git" class="font-mono text-xs flex-1" />
-            <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
-              {{ configSaving ? '保存中...' : '保存' }}
-            </Button>
-          </div>
-          <div class="text-xs text-muted-foreground">
-            配置后，运行 UA 分析时若技能未安装，会自动从该地址 clone 并在目标仓库下建立项目级软链接。内网可替换为内部 Git 镜像地址。留空则不自动安装。
-          </div>
-        </div>
-
         <!-- Backend Management -->
         <div class="border-t border-border pt-4">
           <div class="flex items-center justify-between mb-3">
@@ -361,8 +330,14 @@ async function deleteBackend(slug: string) {
     <!-- 代码仓库管理 -->
     <Card>
       <CardContent class="space-y-4 p-5">
-        <div class="flex items-center justify-between">
-          <div class="text-sm font-medium">代码仓库管理</div>
+        <div class="text-sm font-medium">代码仓库管理</div>
+        <div class="flex items-center gap-3">
+          <div class="text-sm shrink-0 whitespace-nowrap">UA Git URL <span class="text-xs text-muted-foreground">(Understand Anything)</span></div>
+          <Input v-model="syncConfig.ua_git_url" placeholder="https://github.com/Lum1104/Understand-Anything.git" class="font-mono text-xs flex-1" />
+          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">保存</Button>
+        </div>
+        <div class="flex items-center justify-between border-t border-border pt-4">
+          <div class="text-xs font-medium text-muted-foreground">仓库分类</div>
           <Button @click="openAddCategory()" size="sm">添加分类</Button>
         </div>
         <div v-if="categories.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无分类，点击「添加分类」开始</div>
