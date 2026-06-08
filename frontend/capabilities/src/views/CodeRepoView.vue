@@ -109,7 +109,7 @@ function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
       branch: r.branch,
       description: r.description || '',
       category_key: r.category_key || '__none__',
-      auto_understand: r.auto_understand || false,
+      auto_understand: Boolean(r.auto_understand),
     }
     editingHasAuth.value = r.has_auth_ref || false
   } else {
