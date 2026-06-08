@@ -28,6 +28,7 @@ import type {
   UAAvailability,
   UAAnalyzeResult,
   UADashboardStatus,
+  TestCloneResult,
 } from './types'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
@@ -119,10 +120,21 @@ export const api = {
   toolDetail: (type: string, key: string, tool: string) =>
     get(`/capability-catalog/sources/${type}/${key}/tools/${tool}`),
 
+  // Resource-Profile 双向关联
+  getResourceProfiles: (resourceType: string, resourceKey: string) =>
+    get<ProfileResourceRule[]>(`/resource-profiles/${resourceType}/${resourceKey}`),
+  setResourceProfiles: (resourceType: string, resourceKey: string, profileKeys: string[]) =>
+    put<{ resource_type: string; resource_key: string; profile_keys: string[] }>(
+      `/resource-profiles/${resourceType}/${resourceKey}`,
+      { profile_keys: profileKeys }
+    ),
+
   // Code Repos
   listCodeRepos: () => get<CodeRepository[]>('/code-repo/repositories'),
   upsertCodeRepo: (r: Partial<CodeRepository> & { repo_key: string; name: string; git_url: string }) =>
     post<CodeRepository>('/code-repo/repositories', { status: 'active', ...r }),
+  testClone: (gitUrl: string, authRef: string) =>
+    post<TestCloneResult>('/code-repo/test-clone', { git_url: gitUrl, auth_ref: authRef }),
   syncCodeRepo: (key: string) => post(`/code-repo/repositories/${key}/sync`),
   listWikiKbs: () => get<KnowledgeBaseSummary[]>('/builtin/wiki/kbs'),
 

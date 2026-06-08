@@ -12,6 +12,11 @@ class _CodeGraphQueryRequest(BaseModel):
     limit: int = 20
 
 
+class _TestCloneRequest(BaseModel):
+    git_url: str
+    auth_ref: str = ""
+
+
 def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema):
     router = APIRouter()
 
@@ -26,6 +31,11 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
     def upsert_code_repository(payload: CodeRepositoryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.upsert_repository(current_actor, **payload.model_dump()))
+
+    @router.post("/code-repo/test-clone")
+    def test_clone(payload: _TestCloneRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.test_clone(current_actor, payload.git_url, payload.auth_ref))
 
     @router.get("/code-repo/status")
     def get_codegraph_status(current_actor: str = Depends(actor)) -> dict[str, Any]:

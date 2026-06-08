@@ -9,6 +9,7 @@ from agent_bridge.api.schemas import (
     ProfileRulesRequest,
     ProfileSourceRuleRequest,
     ProjectProfileRequest,
+    ResourceProfilesRequest,
 )
 
 
@@ -68,5 +69,15 @@ def create_governance_routes(service, actor, call_safely, ensure_capability_sche
         ensure_capability_schema()
         parsed_dimensions = [part.strip() for part in dimensions.split(",") if part.strip()]
         return call_safely(lambda: service.governance.stats(actor=current_actor, dimensions=parsed_dimensions, created_from=created_from, created_to=created_to, bucket=bucket))
+
+    @router.get("/resource-profiles/{resource_type}/{resource_key}")
+    def get_resource_profiles(resource_type: str, resource_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.get_resource_profiles(current_actor, resource_type, resource_key))
+
+    @router.put("/resource-profiles/{resource_type}/{resource_key}")
+    def set_resource_profiles(resource_type: str, resource_key: str, payload: ResourceProfilesRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.set_resource_profiles(current_actor, resource_type, resource_key, payload.profile_keys))
 
     return router

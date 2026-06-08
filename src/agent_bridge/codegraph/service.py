@@ -70,6 +70,11 @@ class CodeGraphService:
         if sync_interval_minutes < 1:
             raise ValidationError("sync interval must be positive")
 
+        if not auth_ref:
+            existing = self.store.get_code_repository(repo_key)
+            if existing:
+                auth_ref = existing.get("auth_ref", "")
+
         repository = self.store.upsert_code_repository(
             repo_key=repo_key,
             name=name,
@@ -426,10 +431,12 @@ class CodeGraphService:
     def _sync_git(self, repo: dict[str, Any], local_path: Path) -> None:
         if local_path.exists() and not (local_path / ".git").exists():
             shutil.rmtree(local_path)
+        auth_url = self._auth_url(repo)
         if not local_path.exists():
-            self._run_git(local_path.parent, ["clone", str(repo["git_url"]), str(local_path)])
+            self._run_git(local_path.parent, ["clone", auth_url, str(local_path)])
         else:
             self._run_git(local_path, ["fetch", "--all", "--prune"])
+            self._run_git_result(local_path, ["remote", "set-url", "origin", auth_url])
         branch = str(repo["branch"])
         checkout = self._run_git_result(local_path, ["checkout", branch])
         if checkout.returncode == 0:
@@ -531,9 +538,78 @@ class CodeGraphService:
         result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
         return result.stdout.strip()
 
+    def _auth_url(self, repo: dict[str, Any]) -> str:
+        """Return git URL with embedded credentials if auth_ref is configured."""
+        git_url = str(repo.get("git_url", ""))
+        auth_ref = repo.get("auth_ref", "") or ""
+        if not auth_ref:
+            return git_url
+        try:
+            auth = json.loads(auth_ref)
+        except (json.JSONDecodeError, TypeError):
+            return git_url
+        auth_type = auth.get("type", "")
+        if auth_type == "username_password":
+            user = auth.get("username", "")
+            pwd = auth.get("password", "")
+            if user and pwd:
+                return self._embed_credentials(git_url, user, pwd)
+        elif auth_type == "token":
+            token = auth.get("token", "")
+            if token:
+                return self._embed_token(git_url, token)
+        return git_url
+
+    @staticmethod
+    def _embed_credentials(url: str, user: str, pwd: str) -> str:
+        import urllib.parse
+        for prefix in ("https://", "http://"):
+            if url.startswith(prefix):
+                rest = url[len(prefix):]
+                if "@" in rest:
+                    rest = rest.split("@", 1)[1]
+                encoded_user = urllib.parse.quote(user, safe="")
+                encoded_pwd = urllib.parse.quote(pwd, safe="")
+                return f"{prefix}{encoded_user}:{encoded_pwd}@{rest}"
+        return url
+
+    @staticmethod
+    def _embed_token(url: str, token: str) -> str:
+        import urllib.parse
+        for prefix in ("https://", "http://"):
+            if url.startswith(prefix):
+                rest = url[len(prefix):]
+                if "@" in rest:
+                    rest = rest.split("@", 1)[1]
+                encoded_token = urllib.parse.quote(token, safe="")
+                return f"{prefix}oauth2:{encoded_token}@{rest}"
+        return url
+
+    def test_clone(self, actor: str, git_url: str, auth_ref: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        repo = {"git_url": git_url, "auth_ref": auth_ref}
+        auth_url = self._auth_url(repo)
+        try:
+            result = subprocess.run(
+                ["git", "ls-remote", "--heads", auth_url],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                return {"success": True, "message": "认证成功，可以访问仓库"}
+            error_msg = (result.stderr or result.stdout or "").strip()
+            if auth_url != git_url:
+                error_msg = error_msg.replace(auth_url, git_url)
+            return {"success": False, "message": f"无法访问: {error_msg}"}
+        except subprocess.TimeoutExpired:
+            return {"success": False, "message": "连接超时，请检查仓库地址"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
     def _repository_payload(self, repo: dict[str, Any]) -> dict[str, Any]:
         payload = dict(repo)
         payload["tags"] = json.loads(str(payload.pop("tags_json", "[]") or "[]"))
+        payload["has_auth_ref"] = bool(payload.get("auth_ref", ""))
+        payload.pop("auth_ref", None)
         return payload
 
     def _index_payload(self, item: dict[str, Any]) -> dict[str, Any]:

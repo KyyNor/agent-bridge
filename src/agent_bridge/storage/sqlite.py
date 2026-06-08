@@ -307,6 +307,12 @@ class SQLiteStore:
     def list_profile_resource_rules(self, profile_key: str) -> list[dict[str, Any]]:
         return self.governance.list_profile_resource_rules(profile_key=profile_key)
 
+    def list_resource_rule_profiles(self, resource_type: str, resource_key: str) -> list[dict[str, Any]]:
+        return self.governance.list_resource_rule_profiles(resource_type=resource_type, resource_key=resource_key)
+
+    def replace_resource_rule_profiles(self, resource_type: str, resource_key: str, profile_keys: list[str]) -> None:
+        return self.governance.replace_resource_rule_profiles(resource_type=resource_type, resource_key=resource_key, profile_keys=profile_keys)
+
     def create_tool_call_log(
         self,
         *,

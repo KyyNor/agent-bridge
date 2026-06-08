@@ -95,6 +95,12 @@ export interface CodeRepository {
   status: string
   last_synced_at: string | null
   last_error: string | null
+  has_auth_ref?: boolean
+}
+
+export interface TestCloneResult {
+  success: boolean
+  message: string
 }
 
 export interface KnowledgeBaseSummary {

@@ -76,6 +76,10 @@ class ProfileResourcesRequest(BaseModel):
     resources: list[ProfileResourceRuleRequest] = Field(default_factory=list)
 
 
+class ResourceProfilesRequest(BaseModel):
+    profile_keys: list[str] = Field(default_factory=list)
+
+
 class CodeRepositoryRequest(BaseModel):
     repo_key: str
     name: str

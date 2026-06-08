@@ -186,6 +186,38 @@ class CapabilityGovernanceService:
             resource_keys=[resource_key],
         )
 
+    def get_resource_profiles(
+        self, actor: str, resource_type: str, resource_key: str
+    ) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        normalized_type = self._validate_resource_type(resource_type)
+        return self.store.list_resource_rule_profiles(
+            resource_type=normalized_type, resource_key=resource_key
+        )
+
+    def set_resource_profiles(
+        self,
+        actor: str,
+        resource_type: str,
+        resource_key: str,
+        profile_keys: list[str],
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        normalized_type = self._validate_resource_type(resource_type)
+        for pk in profile_keys:
+            if self.store.get_project_profile(pk) is None:
+                raise NotFound(f"profile not found: {pk}")
+        self.store.replace_resource_rule_profiles(
+            resource_type=normalized_type,
+            resource_key=resource_key,
+            profile_keys=profile_keys,
+        )
+        return {
+            "resource_type": normalized_type,
+            "resource_key": resource_key,
+            "profile_keys": profile_keys,
+        }
+
     def log_tool_call(
         self,
         *,

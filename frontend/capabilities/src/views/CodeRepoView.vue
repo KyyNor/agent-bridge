@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability } from '../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability, ProjectProfile, TestCloneResult } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -25,6 +25,15 @@ const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', desc
 const repoSaving = ref(false)
 const repoError = ref('')
 const syncingKey = ref('')
+
+// Clone auth
+const authType = ref<'none' | 'username_password' | 'token'>('none')
+const authUsername = ref('')
+const authPassword = ref('')
+const authToken = ref('')
+const testCloneResult = ref<TestCloneResult | null>(null)
+const testCloning = ref(false)
+const editingHasAuth = ref(false)
 
 // Repo detail dialog
 const showDetail = ref(false)
@@ -61,6 +70,14 @@ const dashboardSrc = computed(() => {
   return url + (url.includes('?') ? '&' : '?') + 'theme=dark'
 })
 
+// Plane assignment dialog
+const showPlaneDialog = ref(false)
+const planeRepo = ref<CodeRepository | null>(null)
+const allProfiles = ref<ProjectProfile[]>([])
+const selectedProfileKeys = ref<string[]>([])
+const pendingProfileKeys = ref<string[]>([])
+const planeSaving = ref(false)
+
 onMounted(async () => {
   await Promise.all([loadRepos(), loadCategories()])
   loading.value = false
@@ -77,6 +94,12 @@ async function loadCategories() {
 function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
   repoFormMode.value = mode
   repoError.value = ''
+  authType.value = 'none'
+  authUsername.value = ''
+  authPassword.value = ''
+  authToken.value = ''
+  testCloneResult.value = null
+  editingHasAuth.value = false
   if (mode === 'edit' && r) {
     repoForm.value = {
       repo_key: r.repo_key,
@@ -87,6 +110,7 @@ function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
       category_key: r.category_key || '',
       auto_understand: r.auto_understand || false,
     }
+    editingHasAuth.value = r.has_auth_ref || false
   } else {
     repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', auto_understand: false }
   }
@@ -101,7 +125,17 @@ async function saveRepo() {
   }
   repoSaving.value = true
   try {
-    await api.upsertCodeRepo({
+    let authRef = ''
+    if (authType.value === 'username_password' && authUsername.value) {
+      authRef = JSON.stringify({
+        type: 'username_password',
+        username: authUsername.value,
+        password: authPassword.value,
+      })
+    } else if (authType.value === 'token' && authToken.value) {
+      authRef = JSON.stringify({ type: 'token', token: authToken.value })
+    }
+    const payload: any = {
       repo_key: repoForm.value.repo_key,
       name: repoForm.value.name,
       git_url: repoForm.value.git_url,
@@ -109,13 +143,38 @@ async function saveRepo() {
       description: repoForm.value.description,
       category_key: repoForm.value.category_key,
       auto_understand: repoForm.value.auto_understand,
-    })
+    }
+    if (authRef || repoFormMode.value === 'add') {
+      payload.auth_ref = authRef
+    }
+    await api.upsertCodeRepo(payload)
     showRepoForm.value = false
     await loadRepos()
   } catch (e: any) {
     repoError.value = e.message || '保存失败'
   }
   repoSaving.value = false
+}
+
+async function testCloneConnection() {
+  testCloneResult.value = null
+  testCloning.value = true
+  let authRef = ''
+  if (authType.value === 'username_password' && authUsername.value) {
+    authRef = JSON.stringify({
+      type: 'username_password',
+      username: authUsername.value,
+      password: authPassword.value,
+    })
+  } else if (authType.value === 'token' && authToken.value) {
+    authRef = JSON.stringify({ type: 'token', token: authToken.value })
+  }
+  try {
+    testCloneResult.value = await api.testClone(repoForm.value.git_url, authRef)
+  } catch (e: any) {
+    testCloneResult.value = { success: false, message: e.message || '测试失败' }
+  }
+  testCloning.value = false
 }
 
 async function syncRepo(key: string) {
@@ -208,6 +267,43 @@ const filteredRepos = computed(() => {
   }
   return list
 })
+
+async function openPlaneDialog(r: CodeRepository) {
+  planeRepo.value = r
+  selectedProfileKeys.value = []
+  pendingProfileKeys.value = []
+  allProfiles.value = []
+  try {
+    const [profiles, rules] = await Promise.all([
+      api.listProfiles(),
+      api.getResourceProfiles('code_repo', r.repo_key),
+    ])
+    allProfiles.value = profiles
+    selectedProfileKeys.value = rules.map((rule: any) => rule.profile_key)
+    pendingProfileKeys.value = [...selectedProfileKeys.value]
+  } catch { /* ignore */ }
+  showPlaneDialog.value = true
+}
+
+function togglePlaneProfile(profileKey: string) {
+  const idx = pendingProfileKeys.value.indexOf(profileKey)
+  if (idx >= 0) {
+    pendingProfileKeys.value.splice(idx, 1)
+  } else {
+    pendingProfileKeys.value.push(profileKey)
+  }
+}
+
+async function savePlaneProfiles() {
+  if (!planeRepo.value) return
+  planeSaving.value = true
+  try {
+    await api.setResourceProfiles('code_repo', planeRepo.value.repo_key, [...pendingProfileKeys.value])
+    selectedProfileKeys.value = [...pendingProfileKeys.value]
+    showPlaneDialog.value = false
+  } catch { /* ignore */ }
+  planeSaving.value = false
+}
 
 function categoryName(key: string) {
   if (!key) return ''
@@ -395,6 +491,7 @@ watch(showDetail, (open) => {
                   </Button>
                   <Button variant="outline" size="sm" @click="openRepoForm('edit', r)" class="h-8 text-xs">编辑</Button>
                   <Button variant="outline" size="sm" @click="openDetail(r)" class="h-8 text-xs">详情</Button>
+                  <Button variant="outline" size="sm" @click="openPlaneDialog(r)" class="h-8 text-xs">能力平面</Button>
                 </div>
               </td>
             </tr>
@@ -426,6 +523,47 @@ watch(showDetail, (open) => {
             <Input v-if="repoFormMode === 'add'" v-model="repoForm.git_url" placeholder="https://github.com/org/repo.git" required />
             <Input v-else :model-value="repoForm.git_url" disabled class="bg-secondary" />
           </div>
+          <!-- Clone Credentials -->
+          <div class="space-y-3 rounded-lg border border-border p-3">
+            <div class="flex items-center justify-between">
+              <label class="text-sm font-medium">Clone 凭证（可选）</label>
+              <select v-model="authType" class="h-8 rounded-md border border-border bg-background px-2 text-xs">
+                <option value="none">无需凭证</option>
+                <option value="username_password">用户名+密码</option>
+                <option value="token">Access Token</option>
+              </select>
+            </div>
+            <div v-if="editingHasAuth && authType === 'none'" class="text-xs text-muted-foreground">
+              已配置凭证，如需修改请选择凭证类型
+            </div>
+            <template v-if="authType === 'username_password'">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1.5">
+                  <label class="text-xs text-muted-foreground">用户名</label>
+                  <Input v-model="authUsername" placeholder="git 用户名" />
+                </div>
+                <div class="space-y-1.5">
+                  <label class="text-xs text-muted-foreground">密码/Token</label>
+                  <Input v-model="authPassword" type="password" placeholder="密码或 Personal Access Token" />
+                </div>
+              </div>
+            </template>
+            <template v-if="authType === 'token'">
+              <div class="space-y-1.5">
+                <label class="text-xs text-muted-foreground">Access Token</label>
+                <Input v-model="authToken" type="password" placeholder="Personal Access Token" />
+              </div>
+            </template>
+            <div class="flex items-center gap-3">
+              <Button variant="outline" size="sm" @click="testCloneConnection" :disabled="testCloning || !repoForm.git_url">
+                {{ testCloning ? '测试中...' : '测试连接' }}
+              </Button>
+              <div v-if="testCloneResult" :class="['text-xs', testCloneResult.success ? 'text-green-600' : 'text-red-600']">
+                {{ testCloneResult.message }}
+              </div>
+            </div>
+          </div>
+
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <label class="text-sm font-medium">分支</label>
@@ -456,6 +594,35 @@ watch(showDetail, (open) => {
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
           <Button @click="saveRepo" :disabled="repoSaving">{{ repoSaving ? '保存中...' : '保存' }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Plane Assignment Dialog -->
+    <Dialog :open="showPlaneDialog" @update:open="showPlaneDialog = $event">
+      <DialogContent class="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>{{ planeRepo?.name || '' }} — 归属能力平面</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-2">
+          <div class="text-xs text-muted-foreground">选择此仓库归属于哪些能力平面。</div>
+          <div v-if="allProfiles.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无能力平面</div>
+          <div v-else class="max-h-[320px] space-y-1 overflow-y-auto rounded-lg border border-border p-1">
+            <label v-for="p in allProfiles" :key="p.profile_key"
+              class="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-muted/50"
+            >
+              <input type="checkbox" :value="p.profile_key" :checked="pendingProfileKeys.includes(p.profile_key)"
+                @change="togglePlaneProfile(p.profile_key)" class="size-4 rounded" />
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium truncate">{{ p.name || p.profile_key }}</div>
+                <div class="text-xs text-muted-foreground">{{ p.profile_key }}</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
+          <Button @click="savePlaneProfiles" :disabled="planeSaving">{{ planeSaving ? '保存中...' : '确认' }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

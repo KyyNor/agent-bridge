@@ -23,9 +23,12 @@ const configProfile = ref<ProjectProfile | null>(null)
 const configLoading = ref(false)
 const configRules = ref<ProfileSourceRule[]>([])
 const configResources = ref<ProfileResourceRule[]>([])
+const pendingRules = ref<ProfileSourceRule[]>([])
+const pendingResources = ref<ProfileResourceRule[]>([])
 const allServices = ref<McpService[]>([])
 const allKbs = ref<KnowledgeBaseSummary[]>([])
 const allRepos = ref<CodeRepository[]>([])
+const configSaving = ref(false)
 
 
 const copied = ref('')
@@ -122,44 +125,53 @@ async function openConfig(p: ProjectProfile) {
     allRepos.value = repos
     configRules.value = full.rules || []
     configResources.value = full.resource_rules || []
+    pendingRules.value = [...configRules.value]
+    pendingResources.value = [...configResources.value]
   } catch {
     configRules.value = []
     configResources.value = []
+    pendingRules.value = []
+    pendingResources.value = []
   }
   configLoading.value = false
 }
 
 function isServiceAllowed(key: string) {
-  return configRules.value.some(r => r.source_key === key && r.effect === 'allow')
+  return pendingRules.value.some(r => r.source_key === key && r.effect === 'allow')
 }
 
-async function toggleServiceAllow(key: string) {
-  if (!configProfile.value) return
-  let rules: ProfileSourceRule[]
+function toggleServiceAllow(key: string) {
   if (isServiceAllowed(key)) {
-    rules = configRules.value.filter(r => !(r.source_key === key && r.effect === 'allow'))
+    pendingRules.value = pendingRules.value.filter(r => !(r.source_key === key && r.effect === 'allow'))
   } else {
-    rules = [...configRules.value, { source_type: 'mcp_service', source_key: key, effect: 'allow' as const }]
+    pendingRules.value = [...pendingRules.value, { source_type: 'mcp_service', source_key: key, effect: 'allow' as const }]
   }
-  await api.replaceProfileRules(configProfile.value.profile_key, rules)
-  configRules.value = rules
-  profiles.value = await api.listProfiles()
 }
 
 function isResourceAllowed(type: string, key: string) {
-  return configResources.value.some(r => r.resource_type === type && r.resource_key === key)
+  return pendingResources.value.some(r => r.resource_type === type && r.resource_key === key)
 }
 
-async function toggleResource(type: string, key: string) {
-  if (!configProfile.value) return
-  let resources: ProfileResourceRule[]
+function toggleResource(type: string, key: string) {
   if (isResourceAllowed(type, key)) {
-    resources = configResources.value.filter(r => !(r.resource_type === type && r.resource_key === key))
+    pendingResources.value = pendingResources.value.filter(r => !(r.resource_type === type && r.resource_key === key))
   } else {
-    resources = [...configResources.value, { resource_type: type, resource_key: key }]
+    pendingResources.value = [...pendingResources.value, { resource_type: type, resource_key: key }]
   }
-  await api.replaceProfileResources(configProfile.value.profile_key, resources)
-  configResources.value = resources
+}
+
+async function saveConfig() {
+  if (!configProfile.value) return
+  configSaving.value = true
+  try {
+    await api.replaceProfileRules(configProfile.value.profile_key, pendingRules.value)
+    await api.replaceProfileResources(configProfile.value.profile_key, pendingResources.value)
+    configRules.value = [...pendingRules.value]
+    configResources.value = [...pendingResources.value]
+    profiles.value = await api.listProfiles()
+    showConfig.value = false
+  } catch { /* ignore */ }
+  configSaving.value = false
 }
 </script>
 
@@ -365,6 +377,10 @@ async function toggleResource(type: string, key: string) {
             </div>
           </div>
         </div>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
+          <Button @click="saveConfig" :disabled="configSaving">{{ configSaving ? '保存中...' : '确认' }}</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   </div>

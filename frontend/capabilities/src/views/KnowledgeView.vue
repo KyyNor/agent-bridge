@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
-import type { KnowledgeBaseSummary, Document, KbMember, SyncJob, SearchResultChunk } from '../api/types'
+import type { KnowledgeBaseSummary, Document, KbMember, SyncJob, SearchResultChunk, ProjectProfile } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -46,6 +46,14 @@ const asking = ref(false)
 const showDocDetail = ref(false)
 const docDetailSlug = ref('')
 const docDetailLoading = ref(false)
+
+// Plane assignment dialog
+const showPlaneDialog = ref(false)
+const planeKb = ref<KnowledgeBaseSummary | null>(null)
+const allProfiles = ref<ProjectProfile[]>([])
+const selectedProfileKeys = ref<string[]>([])
+const pendingProfileKeys = ref<string[]>([])
+const planeSaving = ref(false)
 
 onMounted(async () => {
   await loadKbs()
@@ -175,6 +183,43 @@ function onFileSelected(e: Event) {
   const target = e.target as HTMLInputElement
   uploadFile.value = target.files?.[0] || null
 }
+
+async function openPlaneDialog(k: KnowledgeBaseSummary) {
+  planeKb.value = k
+  selectedProfileKeys.value = []
+  pendingProfileKeys.value = []
+  allProfiles.value = []
+  try {
+    const [profiles, rules] = await Promise.all([
+      api.listProfiles(),
+      api.getResourceProfiles('wiki_kb', k.slug),
+    ])
+    allProfiles.value = profiles
+    selectedProfileKeys.value = rules.map((rule: any) => rule.profile_key)
+    pendingProfileKeys.value = [...selectedProfileKeys.value]
+  } catch { /* ignore */ }
+  showPlaneDialog.value = true
+}
+
+function togglePlaneProfile(profileKey: string) {
+  const idx = pendingProfileKeys.value.indexOf(profileKey)
+  if (idx >= 0) {
+    pendingProfileKeys.value.splice(idx, 1)
+  } else {
+    pendingProfileKeys.value.push(profileKey)
+  }
+}
+
+async function savePlaneProfiles() {
+  if (!planeKb.value) return
+  planeSaving.value = true
+  try {
+    await api.setResourceProfiles('wiki_kb', planeKb.value.slug, [...pendingProfileKeys.value])
+    selectedProfileKeys.value = [...pendingProfileKeys.value]
+    showPlaneDialog.value = false
+  } catch { /* ignore */ }
+  planeSaving.value = false
+}
 </script>
 
 <template>
@@ -233,7 +278,10 @@ function onFileSelected(e: Event) {
                 <Badge variant="secondary" class="text-[11px]">{{ k.role }}</Badge>
               </td>
               <td class="px-4 py-3">
-                <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
+                <div class="flex gap-2">
+                  <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
+                  <Button variant="outline" size="sm" @click="openPlaneDialog(k)" class="h-8 text-xs">能力平面</Button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -266,6 +314,35 @@ function onFileSelected(e: Event) {
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
           <Button @click="createKb" :disabled="createSaving">{{ createSaving ? '创建中...' : '创建' }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Plane Assignment Dialog -->
+    <Dialog :open="showPlaneDialog" @update:open="showPlaneDialog = $event">
+      <DialogContent class="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>{{ planeKb?.name || '' }} — 归属能力平面</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-2">
+          <div class="text-xs text-muted-foreground">选择此知识库归属于哪些能力平面。</div>
+          <div v-if="allProfiles.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无能力平面</div>
+          <div v-else class="max-h-[320px] space-y-1 overflow-y-auto rounded-lg border border-border p-1">
+            <label v-for="p in allProfiles" :key="p.profile_key"
+              class="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-muted/50"
+            >
+              <input type="checkbox" :value="p.profile_key" :checked="pendingProfileKeys.includes(p.profile_key)"
+                @change="togglePlaneProfile(p.profile_key)" class="size-4 rounded" />
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium truncate">{{ p.name || p.profile_key }}</div>
+                <div class="text-xs text-muted-foreground">{{ p.profile_key }}</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
+          <Button @click="savePlaneProfiles" :disabled="planeSaving">{{ planeSaving ? '保存中...' : '确认' }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

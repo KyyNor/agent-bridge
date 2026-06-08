@@ -199,6 +199,37 @@ class GovernanceRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def list_resource_rule_profiles(
+        self, resource_type: str, resource_key: str
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM profile_resource_rules
+                WHERE resource_type = ? AND resource_key = ?
+                ORDER BY profile_key
+                """,
+                (resource_type, resource_key),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def replace_resource_rule_profiles(
+        self, resource_type: str, resource_key: str, profile_keys: list[str]
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM profile_resource_rules WHERE resource_type = ? AND resource_key = ?",
+                (resource_type, resource_key),
+            )
+            for profile_key in profile_keys:
+                conn.execute(
+                    """
+                    INSERT INTO profile_resource_rules (profile_key, resource_type, resource_key)
+                    VALUES (?, ?, ?)
+                    """,
+                    (profile_key, resource_type, resource_key),
+                )
+
     def create_tool_call_log(
         self,
         *,
