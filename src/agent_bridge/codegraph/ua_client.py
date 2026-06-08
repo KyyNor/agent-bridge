@@ -97,6 +97,7 @@ class DashboardPool:
         self._lock = threading.Lock()
         self._cleanup_interval = 300
         self._start_cleanup_thread()
+        atexit.register(self.stop_all)
 
     # -- Public API --
 
