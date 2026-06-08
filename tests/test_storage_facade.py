@@ -70,7 +70,7 @@ def test_governance_facade_and_repository_share_db_path(store: SQLiteStore) -> N
 def test_codegraph_facade_and_repository_share_db_path(store: SQLiteStore) -> None:
     repo = store.upsert_code_repository(
         repo_key="repo1", name="Repo 1", git_url="https://example.com/repo.git",
-        branch="main", auth_ref="", description="", tags=[], sync_interval_minutes=60, status="active",
+        branch="main", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, auto_understand=False, status="active",
     )
     assert repo["repo_key"] == "repo1"
 

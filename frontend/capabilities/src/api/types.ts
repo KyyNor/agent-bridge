@@ -91,6 +91,7 @@ export interface CodeRepository {
   tags: string[]
   category_key: string
   sync_interval_minutes: number
+  auto_understand: boolean
   status: string
   last_synced_at: string | null
   last_error: string | null
@@ -267,15 +268,21 @@ export interface KnowledgeSyncConfig {
   code_sync_enabled: boolean
   code_sync_cron: string
   ua_git_url: string
+  understand_cron: string
 }
 
-export interface SchedulerStatus {
+export interface SingleSchedulerStatus {
   running: boolean
   cron: string
   jobs: {
     repo_key: string
     next_run_at: string | null
   }[]
+}
+
+export interface SchedulerStatus {
+  code_sync: SingleSchedulerStatus
+  understand: SingleSchedulerStatus
 }
 
 export interface UAStatus {

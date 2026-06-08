@@ -31,8 +31,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         except Exception:
             pass
         service.codegraph_scheduler.start()
+        service.understand_scheduler.start()
         yield
         service.codegraph.ua_client.stop_all_dashboards()
+        service.understand_scheduler.stop()
         service.codegraph_scheduler.stop()
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)

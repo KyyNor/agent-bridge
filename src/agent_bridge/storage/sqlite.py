@@ -81,6 +81,7 @@ class SQLiteStore:
                 {
                     "category_key": "TEXT NOT NULL DEFAULT ''",
                     "sync_interval_minutes": "INTEGER NOT NULL DEFAULT 60",
+                    "auto_understand": "INTEGER NOT NULL DEFAULT 0",
                 },
             )
             self._ensure_columns(
@@ -95,6 +96,7 @@ class SQLiteStore:
                 "knowledge_sync_config",
                 {
                     "code_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
+                    "understand_cron": "TEXT NOT NULL DEFAULT '0 2 * * *'",
                 },
             )
             conn.execute(
@@ -128,9 +130,10 @@ class SQLiteStore:
         tags: list[str],
         category_key: str,
         sync_interval_minutes: int,
+        auto_understand: bool,
         status: str,
     ) -> dict[str, Any]:
-        return self.codegraph.upsert_code_repository(repo_key=repo_key, name=name, git_url=git_url, branch=branch, auth_ref=auth_ref, description=description, tags=tags, category_key=category_key, sync_interval_minutes=sync_interval_minutes, status=status)
+        return self.codegraph.upsert_code_repository(repo_key=repo_key, name=name, git_url=git_url, branch=branch, auth_ref=auth_ref, description=description, tags=tags, category_key=category_key, sync_interval_minutes=sync_interval_minutes, auto_understand=auto_understand, status=status)
 
     def list_code_repositories(self) -> list[dict[str, Any]]:
         return self.codegraph.list_code_repositories()
@@ -204,8 +207,8 @@ class SQLiteStore:
     def get_sync_config(self) -> dict[str, Any]:
         return self.codegraph.get_sync_config()
 
-    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "") -> dict[str, Any]:
-        return self.codegraph.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron, ua_git_url=ua_git_url)
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *") -> dict[str, Any]:
+        return self.codegraph.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron)
 
     def create_mcp_service(
         self,

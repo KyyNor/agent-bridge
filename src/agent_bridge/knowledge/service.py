@@ -11,6 +11,7 @@ from agent_bridge.capabilities.governance import CapabilityGovernanceService
 from agent_bridge.capabilities.service import CapabilityService
 from agent_bridge.codegraph.scheduler import CodeGraphScheduler
 from agent_bridge.codegraph.service import CodeGraphService
+from agent_bridge.codegraph.understand_scheduler import UnderstandingScheduler
 from agent_bridge.core.config import AgentBridgePaths, BackendConfig, ensure_directories, migrate_toml_backends_to_db
 from agent_bridge.core.domain import (
     AccessDenied,
@@ -54,6 +55,7 @@ class AgentBridgeService:
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
+        self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         from agent_bridge.capabilities.builtin_codegraph import CodeGraphBuiltinProvider
         from agent_bridge.capabilities.builtin_wiki import WikiBuiltinProvider
 
@@ -280,15 +282,19 @@ class AgentBridgeService:
         require_admin_user(actor, self.admins)
         return self.store.get_sync_config()
 
-    def save_sync_config(self, actor: str, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "") -> dict[str, Any]:
+    def save_sync_config(self, actor: str, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *") -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        result = self.store.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron, ua_git_url=ua_git_url)
+        result = self.store.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron)
         self.codegraph_scheduler.refresh()
+        self.understand_scheduler.refresh()
         return result
 
     def get_scheduler_status(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        return self.codegraph_scheduler.get_status()
+        return {
+            "code_sync": self.codegraph_scheduler.get_status(),
+            "understand": self.understand_scheduler.get_status(),
+        }
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
         if actor in self.admins:

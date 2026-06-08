@@ -86,6 +86,7 @@ class CodeRepositoryRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     category_key: str = ""
     sync_interval_minutes: int = 60
+    auto_understand: bool = False
     status: str = "active"
 
 
@@ -99,6 +100,7 @@ class KnowledgeSyncConfigRequest(BaseModel):
     code_sync_enabled: bool = False
     code_sync_cron: str = "*/30 * * * *"
     ua_git_url: str = ""
+    understand_cron: str = "0 2 * * *"
 
 
 class UpsertBackendRequest(BaseModel):

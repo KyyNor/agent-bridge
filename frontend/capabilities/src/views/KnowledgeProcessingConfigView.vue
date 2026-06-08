@@ -11,7 +11,7 @@ import { Badge } from '../components/ui/badge'
 const loading = ref(true)
 
 // Sync config
-const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_cron: '*/30 * * * *', ua_git_url: '' })
+const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_cron: '*/30 * * * *', ua_git_url: '', understand_cron: '0 2 * * *' })
 const configSaving = ref(false)
 const cronError = ref('')
 
@@ -66,15 +66,20 @@ async function loadBackends() {
 function validateCron(expr: string): boolean {
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) {
-    cronError.value = 'Cron 表达式需要 5 段（分 时 日 月 周）'
     return false
   }
-  cronError.value = ''
   return true
 }
 
 async function saveSyncConfig() {
-  if (!validateCron(syncConfig.value.code_sync_cron)) return
+  if (!validateCron(syncConfig.value.code_sync_cron)) {
+    cronError.value = '代码同步 Cron 表达式需要 5 段（分 时 日 月 周）'
+    return
+  }
+  if (!validateCron(syncConfig.value.understand_cron)) {
+    cronError.value = '代码理解 Cron 表达式需要 5 段（分 时 日 月 周）'
+    return
+  }
   configSaving.value = true
   try {
     syncConfig.value = await api.saveSyncConfig(syncConfig.value)
@@ -233,7 +238,7 @@ async function deleteBackend(slug: string) {
     <!-- Sync Config -->
     <Card>
       <CardContent class="space-y-4 p-5">
-        <div class="text-sm font-medium">代码知识定时同步</div>
+        <div class="text-sm font-medium">定时任务配置</div>
         <div class="flex items-center gap-4">
           <label class="flex items-center gap-2 text-sm">
             <input type="checkbox" v-model="syncConfig.code_sync_enabled" class="size-4 rounded-sm border-border" />
@@ -251,6 +256,25 @@ async function deleteBackend(slug: string) {
         <div class="text-xs text-muted-foreground">
           标准 5 段 cron 表达式：<code class="font-mono">分钟 小时 日 月 星期</code>。例如
           <code class="font-mono">*/30 * * * *</code>（每30分钟）、<code class="font-mono">0 */2 * * *</code>（每2小时）、<code class="font-mono">0 8 * * 1-5</code>（工作日早8点）。
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Understand Cron Config -->
+    <Card>
+      <CardContent class="space-y-4 p-5">
+        <div class="text-sm font-medium">代码库理解周期配置</div>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-muted-foreground">Cron 表达式</span>
+            <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
+          </div>
+          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
+            {{ configSaving ? '保存中...' : '保存' }}
+          </Button>
+        </div>
+        <div class="text-xs text-muted-foreground">
+          为开启了「自动理解」的代码库定时运行 Understand Anything 分析。默认 <code class="font-mono">0 2 * * *</code>（每天凌晨 2 点）。
         </div>
       </CardContent>
     </Card>
@@ -315,30 +339,61 @@ async function deleteBackend(slug: string) {
           <Button variant="outline" size="sm" @click="loadSchedulerStatus()">刷新</Button>
         </div>
         <div v-if="!schedulerStatus" class="py-4 text-center text-sm text-muted-foreground">无法获取调度状态</div>
-        <div v-else>
-          <div class="mb-3 flex items-center gap-3">
-            <Badge :variant="schedulerStatus.running ? 'secondary' : 'outline'" :class="schedulerStatus.running ? 'bg-green-50 text-green-700' : ''">
-              {{ schedulerStatus.running ? '运行中' : '已暂停' }}
-            </Badge>
-            <span v-if="schedulerStatus.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.cron }}</span>
+        <div v-else class="space-y-4">
+          <!-- Code Sync Scheduler -->
+          <div>
+            <div class="mb-2 flex items-center gap-3">
+              <span class="text-xs font-medium text-muted-foreground">代码同步</span>
+              <Badge :variant="schedulerStatus.code_sync.running ? 'secondary' : 'outline'" :class="schedulerStatus.code_sync.running ? 'bg-green-50 text-green-700' : ''">
+                {{ schedulerStatus.code_sync.running ? '运行中' : '已暂停' }}
+              </Badge>
+              <span v-if="schedulerStatus.code_sync.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.code_sync.cron }}</span>
+            </div>
+            <div v-if="schedulerStatus.code_sync.jobs.length === 0" class="py-2 text-center text-sm text-muted-foreground">
+              {{ schedulerStatus.code_sync.running ? '没有活跃的代码仓库' : '—' }}
+            </div>
+            <table v-else class="w-full">
+              <thead>
+                <tr class="border-b border-border">
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="j in schedulerStatus.code_sync.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                  <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
+                  <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div v-if="schedulerStatus.jobs.length === 0" class="py-4 text-center text-sm text-muted-foreground">
-            {{ schedulerStatus.running ? '没有活跃的代码仓库' : '—' }}
+          <!-- Understand Scheduler -->
+          <div>
+            <div class="mb-2 flex items-center gap-3">
+              <span class="text-xs font-medium text-muted-foreground">代码理解</span>
+              <Badge :variant="schedulerStatus.understand.running ? 'secondary' : 'outline'" :class="schedulerStatus.understand.running ? 'bg-green-50 text-green-700' : ''">
+                {{ schedulerStatus.understand.running ? '运行中' : '已暂停' }}
+              </Badge>
+              <span v-if="schedulerStatus.understand.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.understand.cron }}</span>
+            </div>
+            <div v-if="schedulerStatus.understand.jobs.length === 0" class="py-2 text-center text-sm text-muted-foreground">
+              {{ schedulerStatus.understand.running ? '没有开启自动理解的仓库' : '—' }}
+            </div>
+            <table v-else class="w-full">
+              <thead>
+                <tr class="border-b border-border">
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="j in schedulerStatus.understand.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                  <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
+                  <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <table v-else class="w-full">
-            <thead>
-              <tr class="border-b border-border">
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="j in schedulerStatus.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-                <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
-                <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
       </CardContent>
     </Card>

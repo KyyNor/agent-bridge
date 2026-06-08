@@ -25,6 +25,7 @@ class CodeGraphRepository:
         tags: list[str],
         category_key: str,
         sync_interval_minutes: int,
+        auto_understand: bool,
         status: str,
     ) -> dict[str, Any]:
         with self._connect() as conn:
@@ -40,9 +41,10 @@ class CodeGraphRepository:
                   tags_json,
                   category_key,
                   sync_interval_minutes,
+                  auto_understand,
                   status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repo_key) DO UPDATE SET
                   name = excluded.name,
                   git_url = excluded.git_url,
@@ -52,6 +54,7 @@ class CodeGraphRepository:
                   tags_json = excluded.tags_json,
                   category_key = excluded.category_key,
                   sync_interval_minutes = excluded.sync_interval_minutes,
+                  auto_understand = excluded.auto_understand,
                   status = excluded.status,
                   updated_at = CURRENT_TIMESTAMP
                 """,
@@ -65,6 +68,7 @@ class CodeGraphRepository:
                     json.dumps(tags, ensure_ascii=False),
                     category_key,
                     sync_interval_minutes,
+                    int(auto_understand),
                     status,
                 ),
             )
@@ -314,7 +318,7 @@ class CodeGraphRepository:
     # -- Sync Config --
 
     def get_sync_config(self) -> dict[str, Any]:
-        defaults = {"code_sync_enabled": False, "code_sync_cron": "*/30 * * * *", "ua_git_url": ""}
+        defaults = {"code_sync_enabled": False, "code_sync_cron": "*/30 * * * *", "ua_git_url": "", "understand_cron": "0 2 * * *"}
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM knowledge_sync_config WHERE id = 1").fetchone()
             if row is None:
@@ -324,18 +328,19 @@ class CodeGraphRepository:
             result.setdefault("ua_git_url", "")
             return result
 
-    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "") -> dict[str, Any]:
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *") -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_enabled, code_sync_cron, ua_git_url)
-                VALUES (1, ?, ?, ?)
+                INSERT INTO knowledge_sync_config (id, code_sync_enabled, code_sync_cron, ua_git_url, understand_cron)
+                VALUES (1, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_enabled = excluded.code_sync_enabled,
                   code_sync_cron = excluded.code_sync_cron,
                   ua_git_url = excluded.ua_git_url,
+                  understand_cron = excluded.understand_cron,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (int(code_sync_enabled), code_sync_cron, ua_git_url),
+                (int(code_sync_enabled), code_sync_cron, ua_git_url, understand_cron),
             )
             return self.get_sync_config()

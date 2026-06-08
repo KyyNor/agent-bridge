@@ -44,6 +44,7 @@ def _service_with_repo(
         tags or [],
         "",
         60,
+        False,
         "active",
     )
     service.codegraph.sync_repository("root", repo_key)

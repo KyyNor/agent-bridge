@@ -21,7 +21,7 @@ const categories = ref<CodeRepoCategory[]>([])
 // Repo form dialog
 const showRepoForm = ref(false)
 const repoFormMode = ref<'add' | 'edit'>('add')
-const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' })
+const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', auto_understand: false })
 const repoSaving = ref(false)
 const repoError = ref('')
 const syncingKey = ref('')
@@ -85,9 +85,10 @@ function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
       branch: r.branch,
       description: r.description || '',
       category_key: r.category_key || '',
+      auto_understand: r.auto_understand || false,
     }
   } else {
-    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '' }
+    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', auto_understand: false }
   }
   showRepoForm.value = true
 }
@@ -107,6 +108,7 @@ async function saveRepo() {
       branch: repoForm.value.branch || 'main',
       description: repoForm.value.description,
       category_key: repoForm.value.category_key,
+      auto_understand: repoForm.value.auto_understand,
     })
     showRepoForm.value = false
     await loadRepos()
@@ -446,6 +448,10 @@ watch(showDetail, (open) => {
             <label class="text-sm font-medium">描述</label>
             <Input v-model="repoForm.description" placeholder="项目代码仓库" />
           </div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" v-model="repoForm.auto_understand" class="size-4 rounded-sm border-border" id="repo-auto-understand" />
+            <label for="repo-auto-understand" class="text-sm">自动理解（定时运行 Understand Anything 分析）</label>
+          </div>
         </form>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
@@ -587,22 +593,27 @@ watch(showDetail, (open) => {
             <div v-if="uaLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
             <template v-else>
               <!-- Availability Check -->
-              <div v-if="uaAvailability && !uaAvailability.ua_skill_available && !uaAvailability.ua_git_url_configured" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
-                <div class="font-medium">Understand Anything 不可用</div>
-                <div class="mt-1">请在「知识处理配置」页面填写 UA Git URL 以启用自动安装。</div>
+              <div v-if="detailRepo?.auto_understand" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+                此代码库已开启自动理解，将按定时任务周期自动运行分析。
               </div>
-              <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
-                <span>UA 技能未安装，将在运行分析时自动安装</span>
-                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
-                  {{ uaAnalyzing ? '安装并分析中...' : '安装并分析' }}
-                </Button>
-              </div>
-              <div v-else-if="uaAvailability && uaAvailability.ua_skill_available" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
-                <span>Understand Anything 技能已就绪</span>
-                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
-                  {{ uaAnalyzing ? '分析中...' : '运行分析' }}
-                </Button>
-              </div>
+              <template v-else>
+                <div v-if="uaAvailability && !uaAvailability.ua_skill_available && !uaAvailability.ua_git_url_configured" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                  <div class="font-medium">Understand Anything 不可用</div>
+                  <div class="mt-1">请在「知识处理配置」页面填写 UA Git URL 以启用自动安装。</div>
+                </div>
+                <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
+                  <span>UA 技能未安装，将在运行分析时自动安装</span>
+                  <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                    {{ uaAnalyzing ? '安装并分析中...' : '安装并分析' }}
+                  </Button>
+                </div>
+                <div v-else-if="uaAvailability && uaAvailability.ua_skill_available" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
+                  <span>Understand Anything 技能已就绪</span>
+                  <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                    {{ uaAnalyzing ? '分析中...' : '运行分析' }}
+                  </Button>
+                </div>
+              </template>
 
               <!-- Analyze Result -->
               <div v-if="uaAnalyzeSuccess" class="rounded-lg bg-green-50 p-3 text-sm text-green-700">{{ uaAnalyzeSuccess }}</div>
@@ -630,10 +641,7 @@ watch(showDetail, (open) => {
                 <div class="mt-1 text-xs text-muted-foreground">可通过 Understand Anything 技能生成</div>
               </div>
               <template v-else>
-                <div v-if="uaStatus?.stale" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
-                  图谱可能已过期（commit 不匹配）
-                </div>
-                <div v-else class="rounded-lg bg-green-50 p-3 text-sm text-green-700">
+                <div class="rounded-lg bg-green-50 p-3 text-sm text-green-700">
                   知识图谱可用
                 </div>
                 <div class="grid grid-cols-4 gap-2">

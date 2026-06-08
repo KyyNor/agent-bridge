@@ -201,6 +201,7 @@ CREATE TABLE IF NOT EXISTS code_repositories (
   tags_json TEXT NOT NULL DEFAULT '[]',
   category_key TEXT NOT NULL DEFAULT '',
   sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
+  auto_understand INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   local_path TEXT,
   last_commit TEXT,
@@ -246,6 +247,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   code_sync_enabled INTEGER NOT NULL DEFAULT 0,
   code_sync_cron TEXT NOT NULL DEFAULT '*/30 * * * *',
   ua_git_url TEXT NOT NULL DEFAULT '',
+  understand_cron TEXT NOT NULL DEFAULT '0 2 * * *',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

@@ -48,6 +48,7 @@ def test_codegraph_register_sync_and_search(tmp_path: Path, wm_paths: AgentBridg
         tags=["python"],
         category_key="",
         sync_interval_minutes=60,
+        auto_understand=False,
         status="active",
     )
     run = service.sync_repository("root", "web-app")
@@ -77,6 +78,7 @@ def test_codegraph_sync_fails_for_missing_branch(tmp_path: Path, wm_paths: Agent
         tags=["python"],
         category_key="",
         sync_interval_minutes=60,
+        auto_understand=False,
         status="active",
     )
 
@@ -105,6 +107,7 @@ def test_codegraph_sync_advances_existing_clone(tmp_path: Path, wm_paths: AgentB
         tags=["python"],
         category_key="",
         sync_interval_minutes=60,
+        auto_understand=False,
         status="active",
     )
     service.sync_repository("root", "web-app")
@@ -147,6 +150,7 @@ def test_codegraph_index_skips_symlinks(tmp_path: Path, wm_paths: AgentBridgePat
         tags=["python"],
         category_key="",
         sync_interval_minutes=60,
+        auto_understand=False,
         status="active",
     )
 
@@ -174,7 +178,7 @@ def test_codegraph_sync_uses_codegraph_cli_when_available(
         actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
         branch="master", auth_ref="", description="Demo app", tags=["python"],
         category_key="",
-        sync_interval_minutes=60, status="active",
+        sync_interval_minutes=60, auto_understand=False, status="active",
     )
     run = service.sync_repository("root", "web-app")
     assert run["status"] == "succeeded"
@@ -190,7 +194,7 @@ def test_codegraph_semantic_methods_require_cli(tmp_path: Path, wm_paths: AgentB
     service.client._available = False
     service.upsert_repository(
         actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
-        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, status="active",
+        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, auto_understand=False, status="active",
     )
     assert service.callers("root", "web-app", "hello") == []
     assert service.callees("root", "web-app", "hello") == []
@@ -208,7 +212,7 @@ def test_codegraph_get_file_rejects_paths_outside_repository(tmp_path: Path, wm_
     service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
     service.upsert_repository(
         actor="root", repo_key="web-app", name="Web App", git_url=str(tmp_path / "repo"),
-        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, status="active",
+        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, auto_understand=False, status="active",
     )
     local_repo = wm_paths.repos_dir / "web-app"
     local_repo.mkdir(parents=True)
@@ -244,7 +248,7 @@ def test_codegraph_semantic_methods_delegate_to_client(
     service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
     service.upsert_repository(
         actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
-        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, status="active",
+        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, auto_understand=False, status="active",
     )
     service.sync_repository("root", "web-app")
 
@@ -308,7 +312,7 @@ def test_codegraph_overview_falls_back_to_files_when_cli_status_is_empty(
     service = CodeGraphService(paths=wm_paths, store=store, admins={"root"}, codegraph_client=client)
     service.upsert_repository(
         actor="root", repo_key="web-app", name="Web App", git_url=str(repo),
-        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, status="active",
+        branch="master", auth_ref="", description="", tags=[], category_key="", sync_interval_minutes=60, auto_understand=False, status="active",
     )
     service.sync_repository("root", "web-app")
 

@@ -53,6 +53,7 @@ class CodeGraphService:
         tags: list[str],
         category_key: str,
         sync_interval_minutes: int,
+        auto_understand: bool,
         status: str,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -79,6 +80,7 @@ class CodeGraphService:
             tags=tags,
             category_key=category_key,
             sync_interval_minutes=sync_interval_minutes,
+            auto_understand=auto_understand,
             status=status,
         )
         return self._repository_payload(repository)
