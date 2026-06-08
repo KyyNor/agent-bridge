@@ -650,14 +650,14 @@ watch(showDetail, (open) => {
                     <Badge v-for="fw in uaSummary.frameworks" :key="fw" variant="secondary" class="bg-green-50 text-green-700">{{ fw }}</Badge>
                   </div>
                   <div v-if="uaSummary.modules.length" class="rounded-lg border border-border">
-                    <div class="border-b border-border bg-secondary/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">主要模块</div>
+                    <div class="border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">主要模块</div>
                     <div v-for="m in uaSummary.modules" :key="m.name" class="border-b border-border/40 px-4 py-2.5 last:border-b-0">
                       <div class="text-sm font-medium">{{ m.name }}</div>
                       <div v-if="m.summary" class="text-xs text-muted-foreground">{{ m.summary }}</div>
                     </div>
                   </div>
                   <div v-if="uaSummary.tours.length" class="rounded-lg border border-border">
-                    <div class="border-b border-border bg-secondary/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">导览</div>
+                    <div class="border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">导览</div>
                     <div v-for="t in uaSummary.tours" :key="t.title" class="px-4 py-2.5">
                       <div class="text-sm font-medium">{{ t.title }}</div>
                       <div class="text-xs text-muted-foreground">{{ t.step_count }} 步 · {{ t.description }}</div>

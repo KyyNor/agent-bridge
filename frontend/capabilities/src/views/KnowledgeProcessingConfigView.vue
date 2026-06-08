@@ -258,7 +258,7 @@ async function deleteBackend(slug: string) {
     <!-- UA Config -->
     <Card class="border-border">
       <CardContent class="space-y-4 p-5">
-        <div class="text-sm font-semibold">Understand Anything 配置</div>
+        <div class="text-sm font-medium">Understand Anything 配置</div>
         <div class="flex items-center gap-3">
           <div class="flex-1">
             <Input v-model="syncConfig.ua_git_url" placeholder="https://github.com/Lum1104/Understand-Anything.git" class="font-mono text-xs" />
