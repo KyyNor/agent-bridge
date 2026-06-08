@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import CronExpressionParser from 'cron-parser'
 import { api } from '../api/client'
 import type { BackendInfo, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../api/types'
 import { formatLocalDatetime } from '../lib/time'
@@ -64,21 +65,34 @@ async function loadBackends() {
   try { backends.value = await api.listBackends() } catch { backends.value = [] }
 }
 
-function validateCron(expr: string): boolean {
-  const parts = expr.trim().split(/\s+/)
-  if (parts.length !== 5) {
-    return false
+function getNextRuns(expr: string): Date[] | null {
+  try {
+    const interval = CronExpressionParser.parse(expr.trim())
+    return [interval.next().toDate(), interval.next().toDate()]
+  } catch {
+    return null
   }
-  return true
 }
 
+function formatNextRuns(expr: string): string | null {
+  const runs = getNextRuns(expr)
+  if (!runs) return null
+  return runs.map(d => {
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return `${mm}/${dd} ${hh}:${min}`
+  }).join('  →  ')
+}
+
+const codeSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.code_sync_cron))
+const understandNextRuns = computed(() => formatNextRuns(syncConfig.value.understand_cron))
+const cronValid = computed(() => codeSyncNextRuns.value !== null && understandNextRuns.value !== null)
+
 async function saveSyncConfig() {
-  if (!validateCron(syncConfig.value.code_sync_cron)) {
-    cronError.value = '代码同步 Cron 表达式需要 5 段（分 时 日 月 周）'
-    return
-  }
-  if (!validateCron(syncConfig.value.understand_cron)) {
-    cronError.value = '代码理解 Cron 表达式需要 5 段（分 时 日 月 周）'
+  if (!cronValid.value) {
+    cronError.value = 'Cron 表达式无效，请检查后重试'
     return
   }
   configSaving.value = true
@@ -197,14 +211,18 @@ async function deleteBackend(slug: string) {
         <div class="flex items-center gap-6">
           <div class="text-sm shrink-0 whitespace-nowrap">代码同步 <span class="text-xs text-muted-foreground">(CodeGraph)</span></div>
           <Input v-model="syncConfig.code_sync_cron" placeholder="0 * * * *" class="w-40 font-mono text-xs" />
+          <span v-if="codeSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ codeSyncNextRuns }}</span>
+          <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
         <div class="flex items-center gap-6">
           <div class="text-sm shrink-0 whitespace-nowrap">代码理解 <span class="text-xs text-muted-foreground">(Understand Anything)</span></div>
           <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
+          <span v-if="understandNextRuns" class="text-xs text-muted-foreground font-mono">{{ understandNextRuns }}</span>
+          <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
 
         <div class="flex items-center gap-3">
-          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
+          <Button @click="saveSyncConfig()" :disabled="configSaving || !cronValid" size="sm">
             {{ configSaving ? '保存中...' : '保存配置' }}
           </Button>
           <span v-if="cronError" class="text-xs text-destructive">{{ cronError }}</span>
