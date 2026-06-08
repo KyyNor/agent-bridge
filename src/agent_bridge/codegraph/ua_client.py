@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,7 +20,6 @@ logger = logging.getLogger(__name__)
 UA_DIR = ".understand-anything"
 GRAPH_FILE = "knowledge-graph.json"
 META_FILE = "meta.json"
-DASHBOARD_META_FILE = ".dashboard-meta.json"
 SKILL_DIR_NAME = ".claude/skills"
 UA_SKILLS = [
     "understand",
@@ -85,7 +87,126 @@ class UAAnalyzeResult:
     duration_ms: int = 0
 
 
+class DashboardPool:
+    """Manages multiple Dashboard vite processes with LRU eviction and idle timeout."""
+
+    def __init__(self, max_sessions: int = 20, idle_timeout: int = 3600) -> None:
+        self._max = max_sessions
+        self._idle_timeout = idle_timeout
+        self._sessions: dict[str, dict[str, Any]] = {}
+        self._lock = threading.Lock()
+        self._cleanup_interval = 300
+        self._start_cleanup_thread()
+
+    # -- Public API --
+
+    def acquire(self, project_key: str, launcher: Any) -> dict[str, Any]:
+        """Get or create a dashboard session. Returns {running, url, ...}."""
+        with self._lock:
+            session = self._sessions.get(project_key)
+            if session and self._is_pid_alive(session["pid"]):
+                session["last_accessed_at"] = time.time()
+                logger.debug("pool: reused session for %s pid=%s", project_key, session["pid"])
+                return {"running": True, "url": session["url"], "pid": session["pid"],
+                        "started_at": session.get("started_at")}
+
+            if session:
+                self._remove_locked(project_key)
+
+            if len(self._sessions) >= self._max:
+                self._evict_lru_locked()
+
+            result = launcher()
+            if not result.get("success"):
+                return result
+
+            now = time.time()
+            self._sessions[project_key] = {
+                "pid": result["pid"],
+                "url": result["url"],
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+                "last_accessed_at": now,
+            }
+            logger.info("pool: started session for %s pid=%s url=%s total=%d",
+                        project_key, result["pid"], result["url"], len(self._sessions))
+            return {"running": True, "url": result["url"], "pid": result["pid"]}
+
+    def touch(self, project_key: str) -> None:
+        with self._lock:
+            session = self._sessions.get(project_key)
+            if session:
+                session["last_accessed_at"] = time.time()
+
+    def status(self, project_key: str) -> dict[str, Any]:
+        with self._lock:
+            session = self._sessions.get(project_key)
+            if session and self._is_pid_alive(session["pid"]):
+                return {"running": True, "url": session["url"], "pid": session["pid"],
+                        "started_at": session.get("started_at")}
+            if session:
+                self._remove_locked(project_key)
+            return {"running": False}
+
+    def stop(self, project_key: str) -> dict[str, Any]:
+        with self._lock:
+            return self._remove_locked(project_key)
+
+    def stop_all(self) -> None:
+        with self._lock:
+            for key in list(self._sessions):
+                self._remove_locked(key)
+
+    # -- Internal --
+
+    def _remove_locked(self, project_key: str) -> dict[str, Any]:
+        session = self._sessions.pop(project_key, None)
+        if session is None:
+            return {"stopped": False}
+        try:
+            os.killpg(session["pid"], 15)
+        except (ProcessLookupError, OSError):
+            pass
+        logger.info("pool: stopped session for %s pid=%s", project_key, session["pid"])
+        return {"stopped": True}
+
+    def _evict_lru_locked(self) -> None:
+        oldest_key = min(self._sessions, key=lambda k: self._sessions[k]["last_accessed_at"])
+        logger.info("pool: evicting LRU session %s", oldest_key)
+        self._remove_locked(oldest_key)
+
+    def _evict_idle(self) -> None:
+        cutoff = time.time() - self._idle_timeout
+        with self._lock:
+            for key in list(self._sessions):
+                session = self._sessions[key]
+                if session["last_accessed_at"] < cutoff and self._is_pid_alive(session["pid"]):
+                    logger.info("pool: evicting idle session %s (last access %ds ago)",
+                                key, int(time.time() - session["last_accessed_at"]))
+                    self._remove_locked(key)
+
+    def _start_cleanup_thread(self) -> None:
+        def _run():
+            self._evict_idle()
+            t = threading.Timer(self._cleanup_interval, _run)
+            t.daemon = True
+            t.start()
+        t = threading.Timer(self._cleanup_interval, _run)
+        t.daemon = True
+        t.start()
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, OSError):
+            return False
+
+
 class UnderstandAnythingClient:
+
+    def __init__(self) -> None:
+        self.pool = DashboardPool(max_sessions=20, idle_timeout=3600)
 
     def _ua_repo_dir(self) -> Path:
         return Path.home() / ".understand-anything" / "repo"
@@ -349,75 +470,57 @@ class UnderstandAnythingClient:
     # -- Dashboard lifecycle --
 
     def dashboard_status(self, project_dir: Path) -> dict[str, Any]:
-        meta = self._read_dashboard_meta(project_dir)
-        if meta is None:
-            logger.debug("dashboard_status: no meta file at %s", project_dir / UA_DIR / DASHBOARD_META_FILE)
-            return {"running": False}
-        pid = meta.get("pid")
-        alive = pid is not None and self._is_pid_alive(pid)
-        logger.debug("dashboard_status: pid=%s alive=%s url=%s", pid, alive, meta.get("url"))
-        if alive:
-            return {"running": True, "url": meta.get("url"), "pid": pid, "started_at": meta.get("started_at")}
-        logger.debug("dashboard_status: pid %s is dead, returning not running", pid)
-        return {"running": False}
+        return self.pool.status(str(project_dir))
 
     def start_dashboard(self, project_dir: Path, *, timeout: int = 90) -> dict[str, Any]:
-        log_msgs: list[str] = []
-
-        current = self.dashboard_status(project_dir)
-        if current["running"]:
-            logger.info("dashboard already running: pid=%s url=%s", current.get("pid"), current.get("url"))
-            return {"success": True, "url": current["url"], "pid": current["pid"]}
-
-        graph_path = project_dir / UA_DIR / GRAPH_FILE
-        log_msgs.append(f"graph_path={graph_path} exists={graph_path.is_file()}")
-        logger.debug("start_dashboard: %s", log_msgs[-1])
-        if not graph_path.is_file():
+        # Check graph exists first
+        if not (project_dir / UA_DIR / GRAPH_FILE).is_file():
             return {"success": False, "error": "请先运行分析生成知识图谱"}
-
         dashboard_dir = self._find_dashboard_dir(project_dir)
-        log_msgs.append(f"dashboard_dir={dashboard_dir}")
-        logger.debug("start_dashboard: %s", log_msgs[-1])
         if dashboard_dir is None:
-            return {
-                "success": False,
-                "error": "找不到 Dashboard 目录，请确认 UA 技能已安装",
-                "debug": log_msgs,
-            }
-
+            return {"success": False, "error": "找不到 Dashboard 目录，请确认 UA 技能已安装"}
         error = self._ensure_dashboard_built(dashboard_dir)
-        log_msgs.append(f"ensure_built={error}")
-        logger.debug("start_dashboard: %s", log_msgs[-1])
         if error:
-            return {"success": False, "error": error, "debug": log_msgs}
+            return {"success": False, "error": error}
 
+        def _launch() -> dict[str, Any]:
+            return self._launch_vite(project_dir, dashboard_dir, timeout)
+
+        result = self.pool.acquire(str(project_dir), _launch)
+        if result.get("running"):
+            return {"success": True, "running": True, "url": result["url"], "pid": result["pid"]}
+        return result
+
+    def touch_dashboard(self, project_dir: Path) -> None:
+        self.pool.touch(str(project_dir))
+
+    def stop_dashboard(self, project_dir: Path) -> dict[str, Any]:
+        return self.pool.stop(str(project_dir))
+
+    def stop_all_dashboards(self) -> None:
+        self.pool.stop_all()
+
+    def _launch_vite(self, project_dir: Path, dashboard_dir: Path, timeout: int) -> dict[str, Any]:
+        log_msgs: list[str] = []
         env = {**os.environ, "GRAPH_DIR": str(project_dir)}
 
-        # Prefer installed vite, fall back to npx
         vite_bin = dashboard_dir / "node_modules" / ".bin" / "vite"
         if vite_bin.is_file():
-            cmd = [str(vite_bin), "--host", "127.0.0.1", "--no-open"]
+            cmd = [str(vite_bin), "--host", "127.0.0.1", "--port", "5173", "--no-open"]
         else:
-            cmd = ["npx", "vite", "--host", "127.0.0.1", "--no-open"]
+            cmd = ["npx", "vite", "--host", "127.0.0.1", "--port", "5173", "--no-open"]
 
-        log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir} GRAPH_DIR={project_dir}")
-        logger.info("start_dashboard: launching %s in %s", cmd, dashboard_dir)
+        log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir}")
+        logger.info("_launch_vite: %s in %s", cmd, dashboard_dir)
         try:
             proc = subprocess.Popen(
-                cmd,
-                cwd=str(dashboard_dir),
+                cmd, cwd=str(dashboard_dir),
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, env=env, start_new_session=True,
             )
         except (FileNotFoundError, OSError) as exc:
-            log_msgs.append(f"popen_error={exc}")
-            logger.error("start_dashboard: Popen failed: %s", exc)
             return {"success": False, "error": str(exc), "debug": log_msgs}
 
-        log_msgs.append(f"pid={proc.pid}")
-        logger.debug("start_dashboard: process started pid=%s", proc.pid)
-
-        import re
         url = None
         deadline = time.time() + timeout
         buffer = ""
@@ -425,63 +528,31 @@ class UnderstandAnythingClient:
             line = proc.stdout.readline()
             if not line:
                 if proc.poll() is not None:
-                    rc = proc.returncode
-                    log_msgs.append(f"process_exited rc={rc}")
-                    logger.warning("start_dashboard: process exited with rc=%s", rc)
+                    log_msgs.append(f"process_exited rc={proc.returncode}")
+                    logger.warning("_launch_vite: exited rc=%s", proc.returncode)
                     break
                 time.sleep(0.1)
                 continue
-            # Log first few lines for debugging
             stripped = line.rstrip()
             if len(buffer) < 3000:
-                logger.debug("start_dashboard stdout: %s", stripped[:200])
+                logger.debug("_launch_vite stdout: %s", stripped[:200])
             buffer += line
-            # Vite prints: ➜  Local:   http://localhost:5173/?token=xxx
             m = re.search(r"https?://(?:127\.0\.0\.1|localhost):\d+\S*token=\S+", buffer)
             if m:
-                url = m.group(0)
-                # Clean trailing punctuation
-                url = re.sub(r"[,;.!]+$", "", url)
-                logger.info("start_dashboard: found URL %s", url)
+                url = re.sub(r"[,;.!]+$", "", m.group(0))
+                logger.info("_launch_vite: found URL %s", url)
                 break
 
         if url is None:
             proc.kill()
-            log_msgs.append(f"timeout after {timeout}s")
-            logger.error("start_dashboard: timeout, captured output:\n%s", buffer[-2000:])
             return {
                 "success": False,
-                "error": f"Dashboard 启动超时（{timeout}s），请检查日志",
+                "error": f"Dashboard 启动超时（{timeout}s）",
                 "output": buffer[-2000:],
                 "debug": log_msgs,
             }
 
-        meta = {
-            "pid": proc.pid,
-            "url": url,
-            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-        self._write_dashboard_meta(project_dir, meta)
-        return {"success": True, "running": True, "url": url, "pid": proc.pid}
-
-    def stop_dashboard(self, project_dir: Path) -> dict[str, Any]:
-        meta = self._read_dashboard_meta(project_dir)
-        if meta is None:
-            return {"stopped": False, "error": "Dashboard 未运行"}
-
-        pid = meta.get("pid")
-        stopped = False
-        if pid is not None:
-            try:
-                os.killpg(pid, 15)  # SIGTERM the whole process group
-                stopped = True
-            except ProcessLookupError:
-                stopped = True
-            except OSError:
-                pass
-
-        self._delete_dashboard_meta(project_dir)
-        return {"stopped": stopped}
+        return {"success": True, "pid": proc.pid, "url": url}
 
     def _find_dashboard_dir(self, project_dir: Path) -> Path | None:
         """Resolve dashboard dir from .claude/skills/understand-dashboard symlink."""
@@ -559,34 +630,6 @@ class UnderstandAnythingClient:
         build_flag.touch()
         logger.info("_ensure_dashboard_built: build complete, flag set")
         return None
-
-    def _read_dashboard_meta(self, project_dir: Path) -> dict[str, Any] | None:
-        path = project_dir / UA_DIR / DASHBOARD_META_FILE
-        if not path.is_file():
-            return None
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-
-    def _write_dashboard_meta(self, project_dir: Path, meta: dict[str, Any]) -> None:
-        path = project_dir / UA_DIR / DASHBOARD_META_FILE
-        ua_dir = project_dir / UA_DIR
-        ua_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _delete_dashboard_meta(self, project_dir: Path) -> None:
-        path = project_dir / UA_DIR / DASHBOARD_META_FILE
-        if path.is_file():
-            path.unlink()
-
-    @staticmethod
-    def _is_pid_alive(pid: int) -> bool:
-        try:
-            os.kill(pid, 0)
-            return True
-        except (ProcessLookupError, OSError):
-            return False
 
     def _read_meta(self, project_dir: Path) -> dict[str, Any] | None:
         meta_path = project_dir / UA_DIR / META_FILE

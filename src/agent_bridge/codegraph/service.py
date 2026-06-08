@@ -290,6 +290,7 @@ class CodeGraphService:
         local_path = self._local_path(repo_key)
         current_commit = repo.get("last_commit")
         result = self.ua_client.status(local_path, current_commit)
+        dash = self.ua_client.dashboard_status(local_path)
         return {
             "graph_exists": result.graph_exists,
             "graph_path": result.graph_path,
@@ -302,6 +303,8 @@ class CodeGraphService:
             "git_commit": result.git_commit,
             "analyzed_files": result.analyzed_files,
             "error": result.error,
+            "dashboard_running": dash.get("running", False),
+            "dashboard_url": dash.get("url"),
         }
 
     def get_understand_summary(self, actor: str, repo_key: str) -> dict[str, Any] | None:
@@ -373,6 +376,13 @@ class CodeGraphService:
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         return self.ua_client.stop_dashboard(local_path)
+
+    def touch_understand_dashboard(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        self.ua_client.touch_dashboard(local_path)
+        return {"ok": True}
 
     def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
         score = node.get("score")

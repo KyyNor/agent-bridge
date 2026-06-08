@@ -284,6 +284,8 @@ export interface UAStatus {
   git_commit: string | null
   analyzed_files: number | null
   error: string | null
+  dashboard_running: boolean
+  dashboard_url: string | null
 }
 
 export interface UASummary {

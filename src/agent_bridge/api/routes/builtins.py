@@ -113,6 +113,11 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
         ensure_capability_schema()
         return call_safely(lambda: service.codegraph.stop_dashboard_understand(current_actor, repo_key))
 
+    @router.post("/code-repo/repositories/{repo_key}/understand/dashboard/touch")
+    def touch_dashboard(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.touch_understand_dashboard(current_actor, repo_key))
+
     # -- Categories --
 
     @router.get("/code-repo/categories")
