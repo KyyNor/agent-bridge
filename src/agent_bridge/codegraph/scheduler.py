@@ -9,7 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CRON = "*/30 * * * *"
+_DEFAULT_CRON = "0 * * * *"
 
 
 class CodeGraphScheduler:
@@ -22,8 +22,6 @@ class CodeGraphScheduler:
 
     def start(self) -> None:
         config = self._store.get_sync_config()
-        if not config.get("code_sync_enabled"):
-            return
         self._current_cron = config.get("code_sync_cron") or _DEFAULT_CRON
         self._ensure_scheduler()
         self._refresh_jobs()
@@ -38,9 +36,6 @@ class CodeGraphScheduler:
 
     def refresh(self) -> None:
         config = self._store.get_sync_config()
-        if not config.get("code_sync_enabled"):
-            self.stop()
-            return
         self._current_cron = config.get("code_sync_cron") or _DEFAULT_CRON
         self._ensure_scheduler()
         if not self._scheduler.running:

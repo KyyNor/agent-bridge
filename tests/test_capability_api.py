@@ -462,7 +462,7 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
 
     assert "知识处理配置" in source
     assert "定时同步" in source
-    assert "code_sync_enabled" in source
+    assert "code_sync_cron" in source
 
 
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:

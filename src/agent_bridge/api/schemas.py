@@ -101,8 +101,7 @@ class CodeRepoCategoryRequest(BaseModel):
 
 
 class KnowledgeSyncConfigRequest(BaseModel):
-    code_sync_enabled: bool = False
-    code_sync_cron: str = "*/30 * * * *"
+    code_sync_cron: str = "0 * * * *"
     ua_git_url: str = ""
     understand_cron: str = "0 2 * * *"
 

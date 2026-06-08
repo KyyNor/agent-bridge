@@ -282,9 +282,9 @@ class AgentBridgeService:
         require_admin_user(actor, self.admins)
         return self.store.get_sync_config()
 
-    def save_sync_config(self, actor: str, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *") -> dict[str, Any]:
+    def save_sync_config(self, actor: str, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *") -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        result = self.store.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron)
+        result = self.store.save_sync_config(code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron)
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()
         return result

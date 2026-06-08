@@ -271,7 +271,6 @@ export interface CodeRepoCategory {
 }
 
 export interface KnowledgeSyncConfig {
-  code_sync_enabled: boolean
   code_sync_cron: string
   ua_git_url: string
   understand_cron: string

@@ -12,7 +12,7 @@ import { Badge } from '../components/ui/badge'
 const loading = ref(true)
 
 // Sync config
-const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_enabled: false, code_sync_cron: '*/30 * * * *', ua_git_url: '', understand_cron: '0 2 * * *' })
+const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_cron: '0 * * * *', ua_git_url: '', understand_cron: '0 2 * * *' })
 const configSaving = ref(false)
 const cronError = ref('')
 
@@ -197,15 +197,12 @@ async function deleteBackend(slug: string) {
         <!-- 代码同步 -->
         <div class="rounded-lg border border-border p-3 space-y-2">
           <div class="text-xs font-medium text-muted-foreground">代码同步</div>
-          <div class="flex items-center gap-4">
-            <label class="flex items-center gap-2 text-sm">
-              <input type="checkbox" v-model="syncConfig.code_sync_enabled" class="size-4 rounded-sm border-border" />
-              启用
-            </label>
-            <div class="flex items-center gap-2 text-sm">
-              <span class="text-muted-foreground">Cron</span>
-              <Input v-model="syncConfig.code_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
-            </div>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-muted-foreground">Cron</span>
+            <Input v-model="syncConfig.code_sync_cron" placeholder="0 * * * *" class="w-40 font-mono text-xs" />
+          </div>
+          <div class="text-xs text-muted-foreground">
+            为所有活跃代码库定时执行 git pull 同步。默认 <code class="font-mono">0 * * * *</code>（每小时整点）。
           </div>
         </div>
 
