@@ -52,6 +52,8 @@ const uaAnalyzeSuccess = ref('')
 const uaDashboardStarting = ref(false)
 const dashboardMaximized = ref(false)
 let uaTouchTimer: ReturnType<typeof setInterval> | null = null
+const UA_DASHBOARD_THEME_KEY = 'ua-theme'
+const UA_DASHBOARD_DEFAULT_THEME = { presetId: 'light-minimal', accentId: 'indigo' }
 
 const dashboardSrc = computed(() => {
   const url = uaStatus.value?.dashboard_url
@@ -220,6 +222,9 @@ async function loadUAData() {
       api.getUASummary(detailRepo.value.repo_key),
     ])
     uaAvailability.value = avail.status === 'fulfilled' ? avail.value : null
+    if (statusResult.status === 'fulfilled' && statusResult.value.dashboard_running) {
+      applyUADashboardDefaultTheme()
+    }
     uaStatus.value = statusResult.status === 'fulfilled' ? statusResult.value : null
     uaSummary.value = summaryResult.status === 'fulfilled' ? summaryResult.value : null
 
@@ -240,12 +245,21 @@ async function autoStartDashboard() {
   try {
     const result = await api.startUADashboard(detailRepo.value.repo_key) as any
     if (result.success && uaStatus.value) {
+      applyUADashboardDefaultTheme()
       uaStatus.value.dashboard_running = true
       uaStatus.value.dashboard_url = result.url || null
       startTouchTimer()
     }
   } catch { /* ignore */ }
   uaDashboardStarting.value = false
+}
+
+function applyUADashboardDefaultTheme() {
+  try {
+    window.localStorage.setItem(UA_DASHBOARD_THEME_KEY, JSON.stringify(UA_DASHBOARD_DEFAULT_THEME))
+  } catch {
+    // Ignore storage failures; the dashboard will fall back to its own default.
+  }
 }
 
 function startTouchTimer() {
