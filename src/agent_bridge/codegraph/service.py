@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_bridge.codegraph.client import CodeGraphClient
+from agent_bridge.codegraph.dashboard_urls import external_dashboard_url
 from agent_bridge.codegraph.mcp_client import CodeGraphMcpClient
 from agent_bridge.codegraph.ua_client import UnderstandAnythingClient
 from agent_bridge.core.config import AgentBridgePaths
@@ -304,7 +305,7 @@ class CodeGraphService:
             "analyzed_files": result.analyzed_files,
             "error": result.error,
             "dashboard_running": dash.get("running", False),
-            "dashboard_url": dash.get("url"),
+            "dashboard_url": external_dashboard_url(repo_key, dash.get("url")),
         }
 
     def get_understand_summary(self, actor: str, repo_key: str) -> dict[str, Any] | None:
@@ -361,7 +362,7 @@ class CodeGraphService:
         require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
-        return self.ua_client.dashboard_status(local_path)
+        return self._external_dashboard_payload(repo_key, self.ua_client.dashboard_status(local_path))
 
     def start_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -369,7 +370,7 @@ class CodeGraphService:
         local_path = self._local_path(repo_key)
         if not local_path.is_dir():
             raise NotFound("repository local path not found — please sync first")
-        return self.ua_client.start_dashboard(local_path)
+        return self._external_dashboard_payload(repo_key, self.ua_client.start_dashboard(local_path))
 
     def stop_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -383,6 +384,21 @@ class CodeGraphService:
         local_path = self._local_path(repo_key)
         self.ua_client.touch_dashboard(local_path)
         return {"ok": True}
+
+    def dashboard_proxy_target(self, repo_key: str) -> str | None:
+        repo = self.store.get_code_repository(repo_key)
+        if repo is None or repo.get("status") != "active":
+            return None
+        dash = self.ua_client.dashboard_status(self._local_path(repo_key))
+        if not dash.get("running"):
+            return None
+        url = dash.get("url")
+        return str(url) if url else None
+
+    def _external_dashboard_payload(self, repo_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if "url" not in payload:
+            return payload
+        return {**payload, "url": external_dashboard_url(repo_key, payload.get("url"))}
 
     def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
         score = node.get("score")

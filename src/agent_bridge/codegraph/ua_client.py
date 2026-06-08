@@ -504,12 +504,13 @@ class UnderstandAnythingClient:
     def _launch_vite(self, project_dir: Path, dashboard_dir: Path, timeout: int) -> dict[str, Any]:
         log_msgs: list[str] = []
         env = {**os.environ, "GRAPH_DIR": str(project_dir)}
+        base_path = f"/dashboard/{project_dir.name}/"
 
         vite_bin = dashboard_dir / "node_modules" / ".bin" / "vite"
         if vite_bin.is_file():
-            cmd = [str(vite_bin), "--host", "127.0.0.1", "--port", "48000", "--no-open"]
+            cmd = [str(vite_bin), "--host", "127.0.0.1", "--port", "48000", "--base", base_path, "--no-open"]
         else:
-            cmd = ["npx", "vite", "--host", "127.0.0.1", "--port", "48000", "--no-open"]
+            cmd = ["npx", "vite", "--host", "127.0.0.1", "--port", "48000", "--base", base_path, "--no-open"]
 
         log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir}")
         logger.info("_launch_vite: %s in %s", cmd, dashboard_dir)

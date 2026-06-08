@@ -10,6 +10,7 @@ from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware
 from agent_bridge.core.config import AgentBridgePaths, default_user, load_server_config
 from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.knowledge.service import AgentBridgeService
@@ -36,6 +37,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
     app.state.agent_bridge_service = service
+    app.add_middleware(DashboardProxyMiddleware, target_resolver=service.codegraph.dashboard_proxy_target)
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir), name="capabilities-static")
 
