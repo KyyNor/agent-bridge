@@ -188,120 +188,183 @@ async function deleteBackend(slug: string) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
-    <!-- Backend Management -->
+    <!-- 定时任务管理 -->
     <Card>
       <CardContent class="space-y-4 p-5">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-sm font-medium">后端管理</div>
-            <div class="text-xs text-muted-foreground">文档知识同步与检索目标后端</div>
-          </div>
-          <div class="flex gap-2">
-            <Button variant="outline" size="sm" @click="loadBackends()">刷新</Button>
-            <Button size="sm" @click="openAddBackend()">添加后端</Button>
-          </div>
-        </div>
-        <div v-if="backends.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无后端，点击「添加后端」开始配置</div>
-        <table v-else class="w-full">
-          <thead>
-            <tr class="border-b border-border">
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标识</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">类型</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Base URL</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
-              <th class="px-3 py-2 text-right text-xs font-medium text-muted-foreground"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="b in backends" :key="b.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-              <td class="px-3 py-2 font-mono text-sm">{{ b.slug }}</td>
-              <td class="px-3 py-2 text-sm">{{ b.backend_type }}</td>
-              <td class="px-3 py-2 text-xs text-muted-foreground truncate max-w-[250px]">{{ b.base_url || '—' }}</td>
-              <td class="px-3 py-2">
-                <Badge variant="secondary" class="text-[11px]"
-                  :class="b.runtime_status === 'active' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'">
-                  {{ b.runtime_status === 'active' ? '运行中' : '未激活' }}
-                </Badge>
-              </td>
-              <td class="px-3 py-2 text-right">
-                <div class="flex justify-end gap-2">
-                  <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openEditBackend(b)">编辑</Button>
-                  <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive" @click="deleteBackend(b.slug)">删除</Button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </CardContent>
-    </Card>
+        <div class="text-sm font-medium">定时任务管理</div>
 
-    <!-- Sync Config -->
-    <Card>
-      <CardContent class="space-y-4 p-5">
-        <div class="text-sm font-medium">定时任务配置</div>
-        <div class="flex items-center gap-4">
-          <label class="flex items-center gap-2 text-sm">
-            <input type="checkbox" v-model="syncConfig.code_sync_enabled" class="size-4 rounded-sm border-border" />
-            启用定时同步
-          </label>
-          <div class="flex items-center gap-2 text-sm">
-            <span class="text-muted-foreground">Cron 表达式</span>
-            <Input v-model="syncConfig.code_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
+        <!-- 代码同步 -->
+        <div class="rounded-lg border border-border p-3 space-y-2">
+          <div class="text-xs font-medium text-muted-foreground">代码同步</div>
+          <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" v-model="syncConfig.code_sync_enabled" class="size-4 rounded-sm border-border" />
+              启用
+            </label>
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-muted-foreground">Cron</span>
+              <Input v-model="syncConfig.code_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
+            </div>
           </div>
-          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
-            {{ configSaving ? '保存中...' : '保存' }}
-          </Button>
         </div>
-        <div v-if="cronError" class="text-xs text-destructive">{{ cronError }}</div>
-        <div class="text-xs text-muted-foreground">
-          标准 5 段 cron 表达式：<code class="font-mono">分钟 小时 日 月 星期</code>。例如
-          <code class="font-mono">*/30 * * * *</code>（每30分钟）、<code class="font-mono">0 */2 * * *</code>（每2小时）、<code class="font-mono">0 8 * * 1-5</code>（工作日早8点）。
-        </div>
-      </CardContent>
-    </Card>
 
-    <!-- Understand Cron Config -->
-    <Card>
-      <CardContent class="space-y-4 p-5">
-        <div class="text-sm font-medium">代码库理解周期配置</div>
-        <div class="flex items-center gap-4">
-          <div class="flex items-center gap-2 text-sm">
-            <span class="text-muted-foreground">Cron 表达式</span>
-            <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
+        <!-- 代码理解 -->
+        <div class="rounded-lg border border-border p-3 space-y-2">
+          <div class="text-xs font-medium text-muted-foreground">代码理解</div>
+          <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-muted-foreground">Cron</span>
+              <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
+            </div>
           </div>
-          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
-            {{ configSaving ? '保存中...' : '保存' }}
-          </Button>
+          <div class="text-xs text-muted-foreground">
+            为开启了「自动理解」的代码库定时运行 Understand Anything 分析。默认 <code class="font-mono">0 2 * * *</code>（每天凌晨 2 点）。
+          </div>
         </div>
-        <div class="text-xs text-muted-foreground">
-          为开启了「自动理解」的代码库定时运行 Understand Anything 分析。默认 <code class="font-mono">0 2 * * *</code>（每天凌晨 2 点）。
-        </div>
-      </CardContent>
-    </Card>
 
-    <!-- UA Config -->
-    <Card class="border-border">
-      <CardContent class="space-y-4 p-5">
-        <div class="text-sm font-medium">Understand Anything 配置</div>
         <div class="flex items-center gap-3">
-          <div class="flex-1">
-            <Input v-model="syncConfig.ua_git_url" placeholder="https://github.com/Lum1104/Understand-Anything.git" class="font-mono text-xs" />
-          </div>
           <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
-            {{ configSaving ? '保存中...' : '保存' }}
+            {{ configSaving ? '保存中...' : '保存配置' }}
           </Button>
+          <span v-if="cronError" class="text-xs text-destructive">{{ cronError }}</span>
         </div>
-        <div class="text-xs text-muted-foreground">
-          配置后，运行 UA 分析时若技能未安装，会自动从该地址 clone 并在目标仓库下建立项目级软链接。内网可替换为内部 Git 镜像地址。留空则不自动安装。
+
+        <!-- 调度状态 -->
+        <div class="border-t border-border pt-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-xs font-medium text-muted-foreground">调度状态</div>
+            <Button variant="outline" size="sm" @click="loadSchedulerStatus()">刷新</Button>
+          </div>
+          <div v-if="!schedulerStatus" class="py-4 text-center text-sm text-muted-foreground">无法获取调度状态</div>
+          <div v-else class="space-y-3">
+            <div>
+              <div class="mb-2 flex items-center gap-3">
+                <span class="text-xs text-muted-foreground">代码同步</span>
+                <Badge :variant="schedulerStatus.code_sync.running ? 'secondary' : 'outline'" :class="schedulerStatus.code_sync.running ? 'bg-green-50 text-green-700' : ''">
+                  {{ schedulerStatus.code_sync.running ? '运行中' : '已暂停' }}
+                </Badge>
+                <span v-if="schedulerStatus.code_sync.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.code_sync.cron }}</span>
+              </div>
+              <div v-if="schedulerStatus.code_sync.jobs.length === 0" class="py-2 text-center text-xs text-muted-foreground">
+                {{ schedulerStatus.code_sync.running ? '没有活跃的代码仓库' : '—' }}
+              </div>
+              <table v-else class="w-full">
+                <thead>
+                  <tr class="border-b border-border">
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="j in schedulerStatus.code_sync.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                    <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <div class="mb-2 flex items-center gap-3">
+                <span class="text-xs text-muted-foreground">代码理解</span>
+                <Badge :variant="schedulerStatus.understand.running ? 'secondary' : 'outline'" :class="schedulerStatus.understand.running ? 'bg-green-50 text-green-700' : ''">
+                  {{ schedulerStatus.understand.running ? '运行中' : '已暂停' }}
+                </Badge>
+                <span v-if="schedulerStatus.understand.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.understand.cron }}</span>
+              </div>
+              <div v-if="schedulerStatus.understand.jobs.length === 0" class="py-2 text-center text-xs text-muted-foreground">
+                {{ schedulerStatus.understand.running ? '没有开启自动理解的仓库' : '—' }}
+              </div>
+              <table v-else class="w-full">
+                <thead>
+                  <tr class="border-b border-border">
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="j in schedulerStatus.understand.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                    <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
 
-    <!-- Categories -->
+    <!-- 知识库管理 -->
+    <Card>
+      <CardContent class="space-y-4 p-5">
+        <div class="text-sm font-medium">知识库管理</div>
+
+        <!-- UA Config -->
+        <div class="rounded-lg border border-border p-3 space-y-2">
+          <div class="text-xs font-medium text-muted-foreground">Understand Anything 配置</div>
+          <div class="flex items-center gap-3">
+            <Input v-model="syncConfig.ua_git_url" placeholder="https://github.com/Lum1104/Understand-Anything.git" class="font-mono text-xs flex-1" />
+            <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">
+              {{ configSaving ? '保存中...' : '保存' }}
+            </Button>
+          </div>
+          <div class="text-xs text-muted-foreground">
+            配置后，运行 UA 分析时若技能未安装，会自动从该地址 clone 并在目标仓库下建立项目级软链接。内网可替换为内部 Git 镜像地址。留空则不自动安装。
+          </div>
+        </div>
+
+        <!-- Backend Management -->
+        <div class="border-t border-border pt-4">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="text-xs font-medium text-muted-foreground">知识库后端</div>
+              <div class="text-xs text-muted-foreground">文档知识同步与检索目标后端</div>
+            </div>
+            <div class="flex gap-2">
+              <Button variant="outline" size="sm" @click="loadBackends()">刷新</Button>
+              <Button size="sm" @click="openAddBackend()">添加后端</Button>
+            </div>
+          </div>
+          <div v-if="backends.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无后端，点击「添加后端」开始配置</div>
+          <table v-else class="w-full">
+            <thead>
+              <tr class="border-b border-border">
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标识</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">类型</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Base URL</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
+                <th class="px-3 py-2 text-right text-xs font-medium text-muted-foreground"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="b in backends" :key="b.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                <td class="px-3 py-2 font-mono text-sm">{{ b.slug }}</td>
+                <td class="px-3 py-2 text-sm">{{ b.backend_type }}</td>
+                <td class="px-3 py-2 text-xs text-muted-foreground truncate max-w-[250px]">{{ b.base_url || '—' }}</td>
+                <td class="px-3 py-2">
+                  <Badge variant="secondary" class="text-[11px]"
+                    :class="b.runtime_status === 'active' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'">
+                    {{ b.runtime_status === 'active' ? '运行中' : '未激活' }}
+                  </Badge>
+                </td>
+                <td class="px-3 py-2 text-right">
+                  <div class="flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openEditBackend(b)">编辑</Button>
+                    <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive" @click="deleteBackend(b.slug)">删除</Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- 代码仓库管理 -->
     <Card>
       <CardContent class="space-y-4 p-5">
         <div class="flex items-center justify-between">
-          <div class="text-sm font-medium">代码仓库分类</div>
+          <div class="text-sm font-medium">代码仓库管理</div>
           <Button @click="openAddCategory()" size="sm">添加分类</Button>
         </div>
         <div v-if="categories.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无分类，点击「添加分类」开始</div>
@@ -328,73 +391,6 @@ async function deleteBackend(slug: string) {
             </tr>
           </tbody>
         </table>
-      </CardContent>
-    </Card>
-
-    <!-- Scheduler Status -->
-    <Card>
-      <CardContent class="space-y-4 p-5">
-        <div class="flex items-center justify-between">
-          <div class="text-sm font-medium">调度状态</div>
-          <Button variant="outline" size="sm" @click="loadSchedulerStatus()">刷新</Button>
-        </div>
-        <div v-if="!schedulerStatus" class="py-4 text-center text-sm text-muted-foreground">无法获取调度状态</div>
-        <div v-else class="space-y-4">
-          <!-- Code Sync Scheduler -->
-          <div>
-            <div class="mb-2 flex items-center gap-3">
-              <span class="text-xs font-medium text-muted-foreground">代码同步</span>
-              <Badge :variant="schedulerStatus.code_sync.running ? 'secondary' : 'outline'" :class="schedulerStatus.code_sync.running ? 'bg-green-50 text-green-700' : ''">
-                {{ schedulerStatus.code_sync.running ? '运行中' : '已暂停' }}
-              </Badge>
-              <span v-if="schedulerStatus.code_sync.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.code_sync.cron }}</span>
-            </div>
-            <div v-if="schedulerStatus.code_sync.jobs.length === 0" class="py-2 text-center text-sm text-muted-foreground">
-              {{ schedulerStatus.code_sync.running ? '没有活跃的代码仓库' : '—' }}
-            </div>
-            <table v-else class="w-full">
-              <thead>
-                <tr class="border-b border-border">
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="j in schedulerStatus.code_sync.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-                  <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
-                  <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <!-- Understand Scheduler -->
-          <div>
-            <div class="mb-2 flex items-center gap-3">
-              <span class="text-xs font-medium text-muted-foreground">代码理解</span>
-              <Badge :variant="schedulerStatus.understand.running ? 'secondary' : 'outline'" :class="schedulerStatus.understand.running ? 'bg-green-50 text-green-700' : ''">
-                {{ schedulerStatus.understand.running ? '运行中' : '已暂停' }}
-              </Badge>
-              <span v-if="schedulerStatus.understand.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.understand.cron }}</span>
-            </div>
-            <div v-if="schedulerStatus.understand.jobs.length === 0" class="py-2 text-center text-sm text-muted-foreground">
-              {{ schedulerStatus.understand.running ? '没有开启自动理解的仓库' : '—' }}
-            </div>
-            <table v-else class="w-full">
-              <thead>
-                <tr class="border-b border-border">
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
-                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="j in schedulerStatus.understand.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-                  <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
-                  <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
       </CardContent>
     </Card>
 
