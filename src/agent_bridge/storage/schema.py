@@ -245,6 +245,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   code_sync_enabled INTEGER NOT NULL DEFAULT 0,
   code_sync_cron TEXT NOT NULL DEFAULT '*/30 * * * *',
+  ua_git_url TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

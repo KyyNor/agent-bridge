@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview } from '../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability } from '../api/types'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -37,9 +37,27 @@ const detailResults = ref<CodeGraphNode[]>([])
 const detailExploreQuery = ref('')
 const detailExploreResult = ref<CodeGraphExploreResult | null>(null)
 const detailExploreError = ref('')
-const detailTab = ref<'overview' | 'query' | 'explore'>('overview')
+const detailTab = ref<'overview' | 'query' | 'explore' | 'understand'>('overview')
 const detailSearching = ref(false)
 const detailExploring = ref(false)
+
+// UA (Understand Anything) state
+const uaStatus = ref<UAStatus | null>(null)
+const uaSummary = ref<UASummary | null>(null)
+const uaLoading = ref(false)
+const uaAvailability = ref<UAAvailability | null>(null)
+const uaAnalyzing = ref(false)
+const uaAnalyzeError = ref('')
+const uaAnalyzeSuccess = ref('')
+const uaDashboardStarting = ref(false)
+const dashboardMaximized = ref(false)
+let uaTouchTimer: ReturnType<typeof setInterval> | null = null
+
+const dashboardSrc = computed(() => {
+  const url = uaStatus.value?.dashboard_url
+  if (!url) return ''
+  return url + (url.includes('?') ? '&' : '?') + 'theme=dark'
+})
 
 onMounted(async () => {
   await Promise.all([loadRepos(), loadCategories()])
@@ -115,6 +133,15 @@ async function openDetail(r: CodeRepository) {
   detailExploreQuery.value = ''
   detailExploreResult.value = null
   detailExploreError.value = ''
+  uaStatus.value = null
+  uaSummary.value = null
+  uaAvailability.value = null
+  uaAnalyzing.value = false
+  uaAnalyzeError.value = ''
+  uaAnalyzeSuccess.value = ''
+  uaDashboardStarting.value = false
+  dashboardMaximized.value = false
+  stopTouchTimer()
   try {
     const [status, overview] = await Promise.allSettled([
       api.getCodeGraphStatus(),
@@ -182,6 +209,98 @@ function categoryName(key: string) {
   if (!key) return ''
   return categories.value.find(c => c.category_key === key)?.name || key
 }
+
+async function loadUAData() {
+  if (!detailRepo.value) return
+  uaLoading.value = true
+  try {
+    const [avail, statusResult, summaryResult] = await Promise.allSettled([
+      api.checkUAAvailability(detailRepo.value.repo_key),
+      api.getUAStatus(detailRepo.value.repo_key),
+      api.getUASummary(detailRepo.value.repo_key),
+    ])
+    uaAvailability.value = avail.status === 'fulfilled' ? avail.value : null
+    uaStatus.value = statusResult.status === 'fulfilled' ? statusResult.value : null
+    uaSummary.value = summaryResult.status === 'fulfilled' ? summaryResult.value : null
+
+    // Auto-start dashboard if graph exists but not running
+    if (uaStatus.value?.graph_exists && !uaStatus.value.dashboard_running && !uaDashboardStarting.value) {
+      autoStartDashboard()
+    }
+    if (uaStatus.value?.dashboard_running) {
+      startTouchTimer()
+    }
+  } catch { /* ignore */ }
+  uaLoading.value = false
+}
+
+async function autoStartDashboard() {
+  if (!detailRepo.value) return
+  uaDashboardStarting.value = true
+  try {
+    const result = await api.startUADashboard(detailRepo.value.repo_key) as any
+    if (result.success && uaStatus.value) {
+      uaStatus.value.dashboard_running = true
+      uaStatus.value.dashboard_url = result.url || null
+      startTouchTimer()
+    }
+  } catch { /* ignore */ }
+  uaDashboardStarting.value = false
+}
+
+function startTouchTimer() {
+  stopTouchTimer()
+  if (!detailRepo.value) return
+  const key = detailRepo.value.repo_key
+  // Touch immediately and every 5 minutes
+  api.touchDashboard(key).catch(() => {})
+  uaTouchTimer = setInterval(() => {
+    api.touchDashboard(key).catch(() => {})
+  }, 5 * 60 * 1000)
+}
+
+function stopTouchTimer() {
+  if (uaTouchTimer) {
+    clearInterval(uaTouchTimer)
+    uaTouchTimer = null
+  }
+}
+
+onBeforeUnmount(() => {
+  stopTouchTimer()
+})
+
+async function triggerAnalyze() {
+  if (!detailRepo.value) return
+  uaAnalyzing.value = true
+  uaAnalyzeError.value = ''
+  uaAnalyzeSuccess.value = ''
+  try {
+    const result = await api.triggerUAAnalyze(detailRepo.value.repo_key)
+    if (result.success) {
+      uaAnalyzeSuccess.value = `分析完成：${result.node_count} 节点、${result.edge_count} 边，耗时 ${(result.duration_ms / 1000).toFixed(1)}s`
+      await loadUAData()
+    } else {
+      uaAnalyzeError.value = result.error || '分析失败'
+    }
+  } catch (e: any) {
+    uaAnalyzeError.value = e.message || '分析失败'
+  }
+  uaAnalyzing.value = false
+}
+
+watch(detailTab, (tab) => {
+  if (tab === 'understand' && !uaStatus.value && !uaLoading.value) {
+    loadUAData()
+  }
+})
+
+watch(showDetail, (open) => {
+  if (!open) {
+    dashboardMaximized.value = false
+    stopTouchTimer()
+  }
+})
 </script>
 
 <template>
@@ -349,7 +468,8 @@ function categoryName(key: string) {
             <button v-for="t in [
               { key: 'overview', label: '概览' },
               { key: 'query', label: '查询' },
-              { key: 'explore', label: 'Explore' },
+              { key: 'explore', label: '探索' },
+              { key: 'understand', label: '理解' },
             ]" :key="t.key"
               :class="['rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', detailTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
               @click="detailTab = t.key as any">{{ t.label }}</button>
@@ -432,6 +552,132 @@ function categoryName(key: string) {
                 <pre v-else class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ JSON.stringify(detailExploreResult.mcp_result.content, null, 2) }}</pre>
               </div>
             </div>
+          </div>
+
+          <!-- Understand Tab -->
+          <div v-if="detailTab === 'understand'" class="space-y-3">
+            <div v-if="uaLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
+            <template v-else>
+              <!-- Availability Check -->
+              <div v-if="uaAvailability && !uaAvailability.ua_skill_available && !uaAvailability.ua_git_url_configured" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                <div class="font-medium">Understand Anything 不可用</div>
+                <div class="mt-1">请在「知识处理配置」页面填写 UA Git URL 以启用自动安装。</div>
+              </div>
+              <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
+                <span>UA 技能未安装，将在运行分析时自动安装</span>
+                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                  {{ uaAnalyzing ? '安装并分析中...' : '安装并分析' }}
+                </Button>
+              </div>
+              <div v-else-if="uaAvailability && uaAvailability.ua_skill_available" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
+                <span>Understand Anything 技能已就绪</span>
+                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                  {{ uaAnalyzing ? '分析中...' : '运行分析' }}
+                </Button>
+              </div>
+
+              <!-- Analyze Result -->
+              <div v-if="uaAnalyzeSuccess" class="rounded-lg bg-green-50 p-3 text-sm text-green-700">{{ uaAnalyzeSuccess }}</div>
+              <div v-if="uaAnalyzeError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ uaAnalyzeError }}</div>
+
+              <!-- Dashboard iframe -->
+              <div v-if="uaStatus?.dashboard_running && dashboardSrc" class="flex flex-col rounded-lg border border-border overflow-hidden" :class="{ '!border-0': dashboardMaximized }" style="min-height: 60vh">
+                <div class="flex items-center justify-between gap-2 px-3 py-1.5 bg-secondary/50 border-b border-border shrink-0">
+                  <span class="text-xs font-medium text-muted-foreground">Dashboard</span>
+                  <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="dashboardMaximized ? '还原' : '最大化'" @click="dashboardMaximized = !dashboardMaximized">
+                    <svg v-if="!dashboardMaximized" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                    <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
+                  </Button>
+                </div>
+                <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" style="min-height: 60vh" />
+              </div>
+              <div v-else-if="uaDashboardStarting" class="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                <svg class="animate-spin size-4" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                启动 Dashboard...
+              </div>
+
+              <!-- Maximized Dashboard Overlay -->
+              <teleport to="body">
+                <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[9999] flex flex-col bg-background">
+                  <div class="flex items-center justify-between gap-2 px-4 py-2 bg-secondary/50 border-b border-border shrink-0">
+                    <span class="text-sm font-medium text-muted-foreground">Dashboard</span>
+                    <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="还原" @click="dashboardMaximized = false">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
+                    </Button>
+                  </div>
+                  <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" />
+                </div>
+              </teleport>
+
+              <!-- Status Banner -->
+              <div v-if="!uaStatus?.graph_exists" class="rounded-lg border border-border bg-secondary/50 p-4 text-center">
+                <div class="text-sm text-muted-foreground">暂无知识图谱</div>
+                <div class="mt-1 text-xs text-muted-foreground">可通过 Understand Anything 技能生成</div>
+              </div>
+              <template v-else>
+                <div v-if="uaStatus?.stale" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
+                  图谱可能已过期（commit 不匹配）
+                </div>
+                <div v-else class="rounded-lg bg-green-50 p-3 text-sm text-green-700">
+                  知识图谱可用
+                </div>
+                <div class="grid grid-cols-4 gap-2">
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.node_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">节点</div>
+                  </div>
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.edge_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">边</div>
+                  </div>
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.layer_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">层</div>
+                  </div>
+                  <div class="rounded-lg border border-border p-2.5 text-center">
+                    <div class="text-lg font-semibold tabular-nums">{{ uaStatus?.tour_count || 0 }}</div>
+                    <div class="text-[11px] text-muted-foreground">导览</div>
+                  </div>
+                </div>
+
+                <!-- Summary -->
+                <div v-if="uaSummary" class="space-y-3">
+                  <div v-if="uaSummary.description" class="rounded-lg border border-border p-4">
+                    <div class="text-sm text-muted-foreground">{{ uaSummary.description }}</div>
+                  </div>
+                  <div v-if="uaSummary.languages.length || uaSummary.frameworks.length" class="flex flex-wrap gap-1.5">
+                    <Badge v-for="lang in uaSummary.languages" :key="lang" variant="secondary" class="bg-blue-50 text-blue-700">{{ lang }}</Badge>
+                    <Badge v-for="fw in uaSummary.frameworks" :key="fw" variant="secondary" class="bg-green-50 text-green-700">{{ fw }}</Badge>
+                  </div>
+                  <div v-if="uaSummary.modules.length" class="rounded-lg border border-border">
+                    <div class="border-b border-border bg-secondary/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">主要模块</div>
+                    <div v-for="m in uaSummary.modules" :key="m.name" class="border-b border-border/40 px-4 py-2.5 last:border-b-0">
+                      <div class="text-sm font-medium">{{ m.name }}</div>
+                      <div v-if="m.summary" class="text-xs text-muted-foreground">{{ m.summary }}</div>
+                    </div>
+                  </div>
+                  <div v-if="uaSummary.tours.length" class="rounded-lg border border-border">
+                    <div class="border-b border-border bg-secondary/50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">导览</div>
+                    <div v-for="t in uaSummary.tours" :key="t.title" class="px-4 py-2.5">
+                      <div class="text-sm font-medium">{{ t.title }}</div>
+                      <div class="text-xs text-muted-foreground">{{ t.step_count }} 步 · {{ t.description }}</div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Diagnostics -->
+              <details v-if="uaStatus?.graph_exists" class="rounded-lg border border-border">
+                <summary class="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">诊断信息</summary>
+                <div class="border-t border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
+                  <div v-if="uaStatus?.analyzed_at">分析时间: {{ uaStatus.analyzed_at }}</div>
+                  <div v-if="uaStatus?.git_commit">分析 commit: <span class="font-mono">{{ uaStatus.git_commit?.slice(0, 12) }}</span></div>
+                  <div v-if="uaStatus?.analyzed_files != null">分析文件数: {{ uaStatus.analyzed_files }}</div>
+                  <div v-if="uaStatus?.graph_path">图谱路径: <span class="font-mono text-[11px]">{{ uaStatus.graph_path }}</span></div>
+                  <div v-if="uaStatus?.error" class="text-red-600">错误: {{ uaStatus.error }}</div>
+                </div>
+              </details>
+            </template>
           </div>
         </div>
         <DialogFooter>

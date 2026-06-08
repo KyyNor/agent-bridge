@@ -12,6 +12,7 @@ from typing import Any
 
 from agent_bridge.codegraph.client import CodeGraphClient
 from agent_bridge.codegraph.mcp_client import CodeGraphMcpClient
+from agent_bridge.codegraph.ua_client import UnderstandAnythingClient
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -30,12 +31,14 @@ class CodeGraphService:
         admins: set[str],
         codegraph_client: CodeGraphClient | None = None,
         mcp_client: CodeGraphMcpClient | None = None,
+        ua_client: UnderstandAnythingClient | None = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.client = codegraph_client or CodeGraphClient()
         self.mcp_client = mcp_client or CodeGraphMcpClient()
+        self.ua_client = ua_client or UnderstandAnythingClient()
 
     def upsert_repository(
         self,
@@ -278,6 +281,108 @@ class CodeGraphService:
 
     def _local_path(self, repo_key: str) -> Path:
         return self.paths.codegraph_dir / repo_key
+
+    # -- Understand Anything --
+
+    def get_understand_status(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        repo = self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        current_commit = repo.get("last_commit")
+        result = self.ua_client.status(local_path, current_commit)
+        dash = self.ua_client.dashboard_status(local_path)
+        return {
+            "graph_exists": result.graph_exists,
+            "graph_path": result.graph_path,
+            "stale": result.stale,
+            "node_count": result.node_count,
+            "edge_count": result.edge_count,
+            "layer_count": result.layer_count,
+            "tour_count": result.tour_count,
+            "analyzed_at": result.analyzed_at,
+            "git_commit": result.git_commit,
+            "analyzed_files": result.analyzed_files,
+            "error": result.error,
+            "dashboard_running": dash.get("running", False),
+            "dashboard_url": dash.get("url"),
+        }
+
+    def get_understand_summary(self, actor: str, repo_key: str) -> dict[str, Any] | None:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        result = self.ua_client.summary(local_path)
+        if result is None:
+            return None
+        return {
+            "project_name": result.project_name,
+            "description": result.description,
+            "languages": result.languages,
+            "frameworks": result.frameworks,
+            "modules": result.modules,
+            "key_nodes": result.key_nodes,
+            "tours": result.tours,
+        }
+
+    def check_understand_availability(self, actor: str, repo_key: str | None = None) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        project_dir = self._local_path(repo_key) if repo_key else None
+        sync_config = self.store.get_sync_config()
+        ua_git_url = sync_config.get("ua_git_url", "")
+        avail = self.ua_client.check_availability_with_config(
+            project_dir=project_dir, ua_git_url=ua_git_url,
+        ) if project_dir else self.ua_client.check_availability()
+        return {
+            "claude_installed": avail.claude_installed,
+            "ua_skill_available": avail.ua_skill_available,
+            "message": avail.message,
+            "ua_git_url_configured": bool(ua_git_url),
+        }
+
+    def analyze_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        if not local_path.is_dir():
+            raise NotFound("repository local path not found — please sync first")
+        sync_config = self.store.get_sync_config()
+        ua_git_url = sync_config.get("ua_git_url", "")
+        result = self.ua_client.analyze(local_path, ua_git_url=ua_git_url)
+        return {
+            "success": result.success,
+            "node_count": result.node_count,
+            "edge_count": result.edge_count,
+            "error": result.error,
+            "output": result.output,
+            "duration_ms": result.duration_ms,
+        }
+
+    def dashboard_status_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        return self.ua_client.dashboard_status(local_path)
+
+    def start_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        if not local_path.is_dir():
+            raise NotFound("repository local path not found — please sync first")
+        return self.ua_client.start_dashboard(local_path)
+
+    def stop_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        return self.ua_client.stop_dashboard(local_path)
+
+    def touch_understand_dashboard(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_repository(repo_key)
+        local_path = self._local_path(repo_key)
+        self.ua_client.touch_dashboard(local_path)
+        return {"ok": True}
 
     def _codegraph_node_payload(self, node: dict[str, Any]) -> dict[str, Any]:
         score = node.get("score")

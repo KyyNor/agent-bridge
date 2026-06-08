@@ -72,6 +72,52 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
         ensure_capability_schema()
         return call_safely(lambda: {"matches": service.codegraph.impact(current_actor, repo_key, symbol=payload.query)})
 
+    # -- Understand Anything --
+
+    @router.get("/code-repo/repositories/{repo_key}/understand/status")
+    def get_understand_status(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.get_understand_status(current_actor, repo_key))
+
+    @router.get("/code-repo/repositories/{repo_key}/understand/summary")
+    def get_understand_summary(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        result = call_safely(lambda: service.codegraph.get_understand_summary(current_actor, repo_key))
+        if result is None:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=404, content={"error": "understand_graph_not_found"})
+        return result
+
+    @router.get("/code-repo/repositories/{repo_key}/understand/availability")
+    def check_understand_availability(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.check_understand_availability(current_actor, repo_key))
+
+    @router.post("/code-repo/repositories/{repo_key}/understand/analyze")
+    def trigger_understand_analyze(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.analyze_understand(current_actor, repo_key))
+
+    @router.get("/code-repo/repositories/{repo_key}/understand/dashboard")
+    def dashboard_status(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.dashboard_status_understand(current_actor, repo_key))
+
+    @router.post("/code-repo/repositories/{repo_key}/understand/dashboard/start")
+    def start_dashboard(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.start_dashboard_understand(current_actor, repo_key))
+
+    @router.post("/code-repo/repositories/{repo_key}/understand/dashboard/stop")
+    def stop_dashboard(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.stop_dashboard_understand(current_actor, repo_key))
+
+    @router.post("/code-repo/repositories/{repo_key}/understand/dashboard/touch")
+    def touch_dashboard(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.codegraph.touch_understand_dashboard(current_actor, repo_key))
+
     # -- Categories --
 
     @router.get("/code-repo/categories")

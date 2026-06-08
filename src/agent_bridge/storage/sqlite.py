@@ -87,6 +87,13 @@ class SQLiteStore:
                 conn,
                 "knowledge_sync_config",
                 {
+                    "ua_git_url": "TEXT NOT NULL DEFAULT ''",
+                },
+            )
+            self._ensure_columns(
+                conn,
+                "knowledge_sync_config",
+                {
                     "code_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
                 },
             )
@@ -197,8 +204,8 @@ class SQLiteStore:
     def get_sync_config(self) -> dict[str, Any]:
         return self.codegraph.get_sync_config()
 
-    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str) -> dict[str, Any]:
-        return self.codegraph.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron)
+    def save_sync_config(self, *, code_sync_enabled: bool, code_sync_cron: str, ua_git_url: str = "") -> dict[str, Any]:
+        return self.codegraph.save_sync_config(code_sync_enabled=code_sync_enabled, code_sync_cron=code_sync_cron, ua_git_url=ua_git_url)
 
     def create_mcp_service(
         self,
