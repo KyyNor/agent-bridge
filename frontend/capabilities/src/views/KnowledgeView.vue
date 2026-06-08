@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
 import type { KnowledgeBaseSummary, Document, KbMember, SyncJob, SearchResultChunk, ProjectProfile } from '../api/types'
+import { formatLocalDatetime } from '../lib/time'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -453,7 +454,7 @@ async function savePlaneProfiles() {
                 </td>
                 <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.backend_slug }}</td>
                 <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-red-600" :title="j.error ?? ''">{{ j.error || '—' }}</td>
-                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ j.updated_at?.slice(0, 19) }}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ formatLocalDatetime(j.updated_at) }}</td>
               </tr></tbody>
             </table>
           </div>

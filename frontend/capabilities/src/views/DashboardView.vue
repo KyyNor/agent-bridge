@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api } from '../api/client'
 import type { McpService } from '../api/types'
 import { Badge } from '../components/ui/badge'
+import { timeAgo } from '../lib/time'
 
 const services = ref<McpService[]>([])
 const loading = ref(true)
@@ -26,17 +27,6 @@ onMounted(async () => {
   } catch { /* empty state */ }
   loading.value = false
 })
-
-function timeAgo(dateStr: string | null): string {
-  if (!dateStr) return '—'
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins} 分钟前`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours} 小时前`
-  return `${Math.floor(hours / 24)} 天前`
-}
 
 function statusDot(s: McpService) {
   if (s.status === 'enabled') return 'bg-emerald-400'

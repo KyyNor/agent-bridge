@@ -2,6 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
 import type { BackendInfo, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../api/types'
+import { formatLocalDatetime } from '../lib/time'
 import { Card, CardContent } from '../components/ui/card'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -258,7 +259,7 @@ async function deleteBackend(slug: string) {
                 <tbody>
                   <tr v-for="j in schedulerStatus.code_sync.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
-                    <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -284,7 +285,7 @@ async function deleteBackend(slug: string) {
                 <tbody>
                   <tr v-for="j in schedulerStatus.understand.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
-                    <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.next_run_at?.replace('T', ' ').slice(0, 19) || '—' }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                   </tr>
                 </tbody>
               </table>

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../api/client'
 import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability, ProjectProfile, TestCloneResult } from '../api/types'
+import { formatLocalDatetime } from '../lib/time'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -483,7 +484,7 @@ watch(showDetail, (open) => {
                 <Badge v-else-if="r.status === 'error'" variant="destructive">异常</Badge>
                 <Badge v-else variant="secondary">{{ r.status }}</Badge>
               </td>
-              <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ r.last_synced_at?.slice(0, 19) || '—' }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(r.last_synced_at) }}</td>
               <td class="px-4 py-3">
                 <div class="flex gap-2">
                   <Button variant="ghost" size="sm" @click="syncRepo(r.repo_key)" :disabled="syncingKey === r.repo_key" class="h-8 text-xs">
@@ -660,7 +661,7 @@ watch(showDetail, (open) => {
             </div>
             <div class="rounded-lg border border-border p-3 text-center">
               <div class="text-xs text-muted-foreground">最近同步</div>
-              <div class="text-sm font-medium">{{ detailOverview.last_synced_at?.slice(0, 19) || '—' }}</div>
+              <div class="text-sm font-medium">{{ formatLocalDatetime(detailOverview.last_synced_at) }}</div>
             </div>
           </div>
 

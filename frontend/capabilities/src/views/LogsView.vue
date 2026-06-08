@@ -2,6 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
 import type { ToolCallLog } from '../api/types'
+import { formatLocalDatetime } from '../lib/time'
 import { Card, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -138,7 +139,7 @@ const filterTabs = computed(() => [
           </thead>
           <tbody>
             <tr v-for="l in displayLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-              <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ l.created_at?.slice(0, 19) }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(l.created_at) }}</td>
               <td class="px-4 py-3 text-sm">{{ l.profile_key || '—' }}</td>
               <td class="px-4 py-3 font-mono text-sm">{{ l.tool_name || '—' }}</td>
               <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">{{ l.duration_ms != null ? `${l.duration_ms}ms` : '—' }}</td>
@@ -185,7 +186,7 @@ const filterTabs = computed(() => [
                 <Badge v-else variant="secondary">{{ detailLog.status }}</Badge>
               </div>
             </div>
-            <div><span class="text-muted-foreground">时间</span><div class="font-medium">{{ detailLog.created_at?.slice(0, 19) }}</div></div>
+            <div><span class="text-muted-foreground">时间</span><div class="font-medium">{{ formatLocalDatetime(detailLog.created_at) }}</div></div>
           </div>
 
           <div v-if="detailLog.error_message" class="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive">

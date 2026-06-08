@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { api } from '../api/client'
 import type { McpService } from '../api/types'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
+import { timeAgo } from '../lib/time'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -87,17 +88,6 @@ async function toggleStatus(svc: McpService) {
 async function syncTools(key: string) {
   await api.syncServiceTools(key)
   services.value = await api.listServices()
-}
-
-function timeAgo(dateStr: string | null): string {
-  if (!dateStr) return '—'
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins} 分钟前`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours} 小时前`
-  return `${Math.floor(hours / 24)} 天前`
 }
 </script>
 
