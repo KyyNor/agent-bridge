@@ -341,4 +341,4 @@ class CodeGraphRepository:
                 """,
                 (code_sync_cron, ua_git_url, understand_cron),
             )
-            return self.get_sync_config()
+            return {"code_sync_cron": code_sync_cron, "ua_git_url": ua_git_url, "understand_cron": understand_cron}
