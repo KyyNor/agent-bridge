@@ -266,6 +266,12 @@ function stopTouchTimer() {
   }
 }
 
+function preventDashboardOutsideClose(event: Event) {
+  if (dashboardMaximized.value) {
+    event.preventDefault()
+  }
+}
+
 onBeforeUnmount(() => {
   stopTouchTimer()
 })
@@ -436,8 +442,16 @@ watch(showDetail, (open) => {
 
     <!-- Repo Detail Dialog -->
     <Dialog :open="showDetail" @update:open="showDetail = $event">
-      <DialogContent class="sm:max-w-[900px] max-h-[85vh] overflow-y-auto overflow-x-hidden">
-        <DialogHeader>
+      <DialogContent
+        :show-close-button="!dashboardMaximized"
+        :class="[
+          'sm:max-w-[900px] max-h-[85vh] overflow-y-auto overflow-x-hidden',
+          dashboardMaximized && '!fixed !inset-0 !top-0 !left-0 !z-[9999] !h-screen !max-h-none !w-screen !max-w-none !translate-x-0 !translate-y-0 !rounded-none !p-0 !ring-0 !overflow-hidden',
+        ]"
+        @pointer-down-outside="preventDashboardOutsideClose"
+        @interact-outside="preventDashboardOutsideClose"
+      >
+        <DialogHeader v-if="!dashboardMaximized">
           <DialogTitle>{{ detailRepo?.name || '' }} 详情</DialogTitle>
         </DialogHeader>
         <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
@@ -589,25 +603,12 @@ watch(showDetail, (open) => {
                     <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
                   </Button>
                 </div>
-                <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" style="min-height: 60vh" />
+                <iframe v-if="!dashboardMaximized" :src="dashboardSrc" class="flex-1 border-0 w-full" style="min-height: 60vh" />
               </div>
               <div v-else-if="uaDashboardStarting" class="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
                 <svg class="animate-spin size-4" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                 启动 Dashboard...
               </div>
-
-              <!-- Maximized Dashboard Overlay -->
-              <teleport to="body">
-                <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[9999] flex flex-col bg-background">
-                  <div class="flex items-center justify-between gap-2 px-4 py-2 bg-secondary/50 border-b border-border shrink-0">
-                    <span class="text-sm font-medium text-muted-foreground">Dashboard</span>
-                    <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="还原" @click="dashboardMaximized = false">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
-                    </Button>
-                  </div>
-                  <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" />
-                </div>
-              </teleport>
 
               <!-- Status Banner -->
               <div v-if="!uaStatus?.graph_exists" class="rounded-lg border border-border bg-secondary/50 p-4 text-center">
@@ -680,9 +681,18 @@ watch(showDetail, (open) => {
             </template>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter v-if="!dashboardMaximized">
           <DialogClose as-child><Button variant="outline">关闭</Button></DialogClose>
         </DialogFooter>
+        <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[10000] flex flex-col bg-background">
+          <div class="flex items-center justify-between gap-2 px-4 py-2 bg-secondary/50 border-b border-border shrink-0">
+            <span class="text-sm font-medium text-muted-foreground">Dashboard</span>
+            <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="还原" @click="dashboardMaximized = false">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
+            </Button>
+          </div>
+          <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" />
+        </div>
       </DialogContent>
     </Dialog>
   </div>
