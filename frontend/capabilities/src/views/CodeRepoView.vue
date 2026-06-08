@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 const repos = ref<CodeRepository[]>([])
 const loading = ref(true)
 const searchQuery = ref('')
-const filterCategory = ref('')
+const filterCategory = ref('__all__')
 
 // Categories
 const categories = ref<CodeRepoCategory[]>([])
@@ -22,7 +22,7 @@ const categories = ref<CodeRepoCategory[]>([])
 // Repo form dialog
 const showRepoForm = ref(false)
 const repoFormMode = ref<'add' | 'edit'>('add')
-const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', auto_understand: false })
+const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false })
 const repoSaving = ref(false)
 const repoError = ref('')
 const syncingKey = ref('')
@@ -108,12 +108,12 @@ function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
       git_url: r.git_url,
       branch: r.branch,
       description: r.description || '',
-      category_key: r.category_key || '',
+      category_key: r.category_key || '__none__',
       auto_understand: r.auto_understand || false,
     }
     editingHasAuth.value = r.has_auth_ref || false
   } else {
-    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '', auto_understand: false }
+    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false }
   }
   showRepoForm.value = true
 }
@@ -142,7 +142,7 @@ async function saveRepo() {
       git_url: repoForm.value.git_url,
       branch: repoForm.value.branch || 'main',
       description: repoForm.value.description,
-      category_key: repoForm.value.category_key,
+      category_key: repoForm.value.category_key === '__none__' ? '' : repoForm.value.category_key,
       auto_understand: repoForm.value.auto_understand,
     }
     if (authRef || repoFormMode.value === 'add') {
@@ -254,7 +254,7 @@ const exploreMarkdownHtml = computed(() => {
 
 const filteredRepos = computed(() => {
   let list = repos.value
-  if (filterCategory.value) {
+  if (filterCategory.value && filterCategory.value !== '__all__') {
     list = list.filter(r => r.category_key === filterCategory.value)
   }
   if (searchQuery.value.trim()) {
@@ -436,7 +436,7 @@ watch(showDetail, (open) => {
           <SelectValue placeholder="全部分类" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">全部分类</SelectItem>
+          <SelectItem value="__all__">全部分类</SelectItem>
           <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
         </SelectContent>
       </Select>
@@ -577,7 +577,7 @@ watch(showDetail, (open) => {
                   <SelectValue placeholder="无分类" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">无分类</SelectItem>
+                  <SelectItem value="__none__">无分类</SelectItem>
                   <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
                 </SelectContent>
               </Select>

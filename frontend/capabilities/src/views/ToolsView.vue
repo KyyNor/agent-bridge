@@ -13,7 +13,7 @@ interface ToolWithService extends McpTool {
 
 const allTools = ref<ToolWithService[]>([])
 const services = ref<McpService[]>([])
-const selectedService = ref('')
+const selectedService = ref('__all__')
 const loading = ref(false)
 const search = ref('')
 const typeFilter = ref('')
@@ -45,7 +45,7 @@ async function updateType(svc: string, toolName: string, newType: string) {
 
 const displayTools = computed(() => {
   let list = allTools.value
-  if (selectedService.value) list = list.filter(t => t.service_key === selectedService.value)
+  if (selectedService.value && selectedService.value !== '__all__') list = list.filter(t => t.service_key === selectedService.value)
   if (typeFilter.value) list = list.filter(t => t.tool_type === typeFilter.value)
   if (search.value) {
     const q = search.value.toLowerCase()
@@ -101,7 +101,7 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
           <SelectValue placeholder="全部服务" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">全部服务</SelectItem>
+          <SelectItem value="__all__">全部服务</SelectItem>
           <SelectItem v-for="s in services" :key="s.service_key" :value="s.service_key">{{ s.name }}</SelectItem>
         </SelectContent>
       </Select>
