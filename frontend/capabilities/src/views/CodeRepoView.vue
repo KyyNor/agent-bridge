@@ -50,7 +50,14 @@ const uaAnalyzing = ref(false)
 const uaAnalyzeError = ref('')
 const uaAnalyzeSuccess = ref('')
 const uaDashboardStarting = ref(false)
+const dashboardMaximized = ref(false)
 let uaTouchTimer: ReturnType<typeof setInterval> | null = null
+
+const dashboardSrc = computed(() => {
+  const url = uaStatus.value?.dashboard_url
+  if (!url) return ''
+  return url + (url.includes('?') ? '&' : '?') + 'theme=dark'
+})
 
 onMounted(async () => {
   await Promise.all([loadRepos(), loadCategories()])
@@ -133,6 +140,7 @@ async function openDetail(r: CodeRepository) {
   uaAnalyzeError.value = ''
   uaAnalyzeSuccess.value = ''
   uaDashboardStarting.value = false
+  dashboardMaximized.value = false
   stopTouchTimer()
   try {
     const [status, overview] = await Promise.allSettled([
@@ -284,6 +292,13 @@ async function triggerAnalyze() {
 watch(detailTab, (tab) => {
   if (tab === 'understand' && !uaStatus.value && !uaLoading.value) {
     loadUAData()
+  }
+})
+
+watch(showDetail, (open) => {
+  if (!open) {
+    dashboardMaximized.value = false
+    stopTouchTimer()
   }
 })
 </script>
@@ -566,13 +581,33 @@ watch(detailTab, (tab) => {
               <div v-if="uaAnalyzeError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ uaAnalyzeError }}</div>
 
               <!-- Dashboard iframe -->
-              <div v-if="uaStatus?.dashboard_running && uaStatus?.dashboard_url" class="flex flex-col rounded-lg border border-border overflow-hidden" style="min-height: 60vh">
-                <iframe :src="uaStatus.dashboard_url" class="flex-1 border-0 w-full" style="min-height: 60vh" />
+              <div v-if="uaStatus?.dashboard_running && dashboardSrc" class="flex flex-col rounded-lg border border-border overflow-hidden" :class="{ '!border-0': dashboardMaximized }" style="min-height: 60vh">
+                <div class="flex items-center justify-between gap-2 px-3 py-1.5 bg-secondary/50 border-b border-border shrink-0">
+                  <span class="text-xs font-medium text-muted-foreground">Dashboard</span>
+                  <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="dashboardMaximized ? '还原' : '最大化'" @click="dashboardMaximized = !dashboardMaximized">
+                    <svg v-if="!dashboardMaximized" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                    <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
+                  </Button>
+                </div>
+                <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" style="min-height: 60vh" />
               </div>
               <div v-else-if="uaDashboardStarting" class="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
                 <svg class="animate-spin size-4" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                 启动 Dashboard...
               </div>
+
+              <!-- Maximized Dashboard Overlay -->
+              <teleport to="body">
+                <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[9999] flex flex-col bg-background">
+                  <div class="flex items-center justify-between gap-2 px-4 py-2 bg-secondary/50 border-b border-border shrink-0">
+                    <span class="text-sm font-medium text-muted-foreground">Dashboard</span>
+                    <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="还原" @click="dashboardMaximized = false">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
+                    </Button>
+                  </div>
+                  <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" />
+                </div>
+              </teleport>
 
               <!-- Status Banner -->
               <div v-if="!uaStatus?.graph_exists" class="rounded-lg border border-border bg-secondary/50 p-4 text-center">
