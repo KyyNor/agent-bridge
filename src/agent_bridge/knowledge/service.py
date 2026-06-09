@@ -12,6 +12,7 @@ from agent_bridge.capabilities.service import CapabilityService
 from agent_bridge.codegraph.scheduler import CodeGraphScheduler
 from agent_bridge.codegraph.service import CodeGraphService
 from agent_bridge.codegraph.understand_scheduler import UnderstandingScheduler
+from agent_bridge.knowledge.doc_sync_scheduler import DocSyncScheduler
 from agent_bridge.core.config import AgentBridgePaths, BackendConfig, ensure_directories, migrate_toml_backends_to_db
 from agent_bridge.core.domain import (
     AccessDenied,
@@ -56,6 +57,7 @@ class AgentBridgeService:
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
+        self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
         from agent_bridge.capabilities.builtin_codegraph import CodeGraphBuiltinProvider
         from agent_bridge.capabilities.builtin_wiki import WikiBuiltinProvider
 
@@ -287,6 +289,7 @@ class AgentBridgeService:
         result = self.store.save_sync_config(code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron, doc_sync_cron=doc_sync_cron)
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()
+        self.doc_sync_scheduler.refresh()
         return result
 
     def get_scheduler_status(self, actor: str) -> dict[str, Any]:
@@ -294,7 +297,7 @@ class AgentBridgeService:
         return {
             "code_sync": self.codegraph_scheduler.get_status(),
             "understand": self.understand_scheduler.get_status(),
-            "doc_sync": {"running": True, "cron": self.store.get_sync_config().get("doc_sync_cron", "*/30 * * * *")},
+            "doc_sync": self.doc_sync_scheduler.get_status(),
         }
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
