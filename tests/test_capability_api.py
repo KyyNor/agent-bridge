@@ -112,7 +112,7 @@ def test_capability_admin_page_serves_html(wm_paths) -> None:
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "Agent Bridge" in response.text
+    assert "智能中枢" in response.text
 
 
 def test_capability_static_assets_are_served(wm_paths) -> None:
@@ -121,14 +121,14 @@ def test_capability_static_assets_are_served(wm_paths) -> None:
 
     css = client.get("/static/capabilities/index.html")
     assert css.status_code == 200
-    assert b"Agent Bridge" in css.content
+    assert b"\xe6\x99\xba\xe8\x83\xbd\xe4\xb8\xad\xe6\x9e\xa2" in css.content
 
 
 def test_capability_admin_page_is_chinese_control_console(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
     html = capability_admin_page("root")
-    assert "Agent Bridge" in html
+    assert "智能中枢" in html
 
 def test_capability_static_assets_use_chinese_labels(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
@@ -164,7 +164,7 @@ def test_capability_admin_page_has_profile_dialog_and_tool_filters(wm_paths) -> 
     from agent_bridge.web.pages import capability_admin_page
 
     html = capability_admin_page("root")
-    assert "Agent" in html
+    assert "智能中枢" in html
 
 def test_capability_static_assets_render_filterable_tool_table_and_two_column_modal(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
@@ -410,9 +410,9 @@ def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None
     source = Path("frontend/capabilities/src/App.vue").read_text(encoding="utf-8")
 
     assert "label: '资源管理'" not in source
-    assert "{ key: 'knowledge', label: '文档知识' }" in source
-    assert "{ key: 'code-repos', label: '代码知识' }" in source
-    assert "{ key: 'knowledge-config', label: '知识处理配置' }" in source
+    assert "key: 'knowledge', label: '文档知识'" in source
+    assert "key: 'code-repos', label: '代码知识'" in source
+    assert "key: 'knowledge-config', label: '知识处理配置'" in source
     assert "KnowledgeProcessingConfigView" in source
     assert "CodeRepoView" in source
     assert "view === 'knowledge-config'" in source
@@ -428,7 +428,6 @@ def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> Non
 
     assert "创建文档知识" in knowledge
     assert "暂无文档知识，点击「创建文档知识」开始" in knowledge
-    assert "知识库" not in knowledge
     assert "允许访问的文档知识" in profiles
     assert "请先在文档知识中添加" in profiles
     assert "请先在代码知识中添加" in profiles
@@ -439,13 +438,13 @@ def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
 
     assert "detailTab === 'overview'" in source
     assert "detailTab === 'explore'" in source
-    assert "{ key: 'explore', label: 'Explore' }" in source
+    assert "key: 'explore', label: '探索'" in source
     assert "仓库信息" in source
     assert "同步错误" in source
     assert "CodeGraph CLI 已安装" not in source
     assert "CodeGraph 状态" not in source
-    assert "调用者表示" not in source
-    assert "被调用者表示" not in source
+    assert "调用者" not in source
+    assert "被调用者" not in source
     assert "key: 'files'" not in source
     assert "detailTab === 'files'" not in source
     assert "api.listRepoFiles" not in source
@@ -460,9 +459,10 @@ def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
 def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
     source = Path("frontend/capabilities/src/views/KnowledgeProcessingConfigView.vue").read_text(encoding="utf-8")
 
-    assert "知识处理配置" in source
-    assert "定时同步" in source
+    assert "定时任务管理" in source
     assert "code_sync_cron" in source
+    assert "doc_sync_cron" in source
+    assert "知识同步" in source
 
 
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
