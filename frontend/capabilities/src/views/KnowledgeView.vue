@@ -175,8 +175,11 @@ async function doAsk() {
 function onUploadFilesSelected(e: Event) {
   const target = e.target as HTMLInputElement
   if (target.files && target.files.length > 0) {
+    const allowed = ALLOWED_DOC_EXTENSIONS
     for (let i = 0; i < target.files.length; i++) {
-      uploadFiles.value.push(target.files[i])
+      const f = target.files[i]
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase()
+      if (allowed.includes(ext)) uploadFiles.value.push(f)
     }
   }
   target.value = ''
