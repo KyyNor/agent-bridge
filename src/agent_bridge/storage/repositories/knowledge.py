@@ -318,7 +318,8 @@ class KnowledgeRepository:
                   kb.name AS kb_name,
                   COALESCE(target.backend_kb_id, kb.slug) AS backend_kb_id,
                   v.version_no AS version_no,
-                  v.archive_path AS archive_path
+                  v.archive_path AS archive_path,
+                  v.original_filename AS original_filename
                 FROM sync_jobs job
                 JOIN documents d ON d.id = job.doc_id
                 JOIN knowledge_bases kb ON kb.id = job.kb_id

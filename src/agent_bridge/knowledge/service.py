@@ -415,7 +415,7 @@ class AgentBridgeService:
                     backend_kb_id=backend_kb_id,
                     doc_slug=job["doc_slug"],
                     file_path=Path(job["archive_path"]),
-                    filename=job["doc_slug"],
+                    filename=job.get("original_filename") or job["doc_slug"],
                 )
                 self.store.upsert_sync_state(
                     job["doc_id"],
