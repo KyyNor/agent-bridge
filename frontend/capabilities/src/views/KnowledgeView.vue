@@ -54,6 +54,7 @@ const uploadKb = ref<KnowledgeBaseSummary | null>(null)
 const uploadFiles = ref<File[]>([])
 const uploading = ref(false)
 const uploadDragOver = ref(false)
+const ALLOWED_DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md']
 const allProfiles = ref<ProjectProfile[]>([])
 const selectedProfileKeys = ref<string[]>([])
 const pendingProfileKeys = ref<string[]>([])
@@ -186,7 +187,9 @@ function handleUploadDragOver(e: DragEvent) {
   uploadDragOver.value = true
 }
 
-function handleUploadDragLeave() {
+function handleUploadDragLeave(e: DragEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  if (e.relatedTarget && el?.contains(e.relatedTarget as Node)) return
   uploadDragOver.value = false
 }
 
@@ -198,7 +201,7 @@ function handleUploadDrop(e: DragEvent) {
 }
 
 function addFilesFromDataTransfer(dt: DataTransfer) {
-  const allowed = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md']
+  const allowed = ALLOWED_DOC_EXTENSIONS
   const entries: FileSystemEntry[] = []
   for (let i = 0; i < dt.items.length; i++) {
     const entry = dt.items[i].webkitGetAsEntry()
@@ -222,12 +225,15 @@ function traverseEntry(entry: FileSystemEntry, allowed: string[]) {
     ;(entry as FileSystemFileEntry).file(f => uploadFiles.value.push(f))
   } else if (entry.isDirectory) {
     const reader = (entry as FileSystemDirectoryEntry).createReader()
-    reader.readEntries(entries => entries.forEach(e => traverseEntry(e, allowed)))
+    const readAll = () => {
+      reader.readEntries(entries => {
+        if (entries.length === 0) return
+        entries.forEach(e => traverseEntry(e, allowed))
+        readAll()
+      })
+    }
+    readAll()
   }
-}
-
-function removeUploadFile(index: number) {
-  uploadFiles.value.splice(index, 1)
 }
 
 function openUploadDialog(kb: KnowledgeBaseSummary) {
