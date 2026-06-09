@@ -329,7 +329,6 @@ async function savePlaneProfiles() {
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标识</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">文档数</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">同步失败</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">后端状态</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">角色</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
@@ -345,15 +344,6 @@ async function savePlaneProfiles() {
               <td class="px-4 py-3 tabular-nums text-sm">
                 <Badge v-if="k.sync_failed_count > 0" variant="destructive">{{ k.sync_failed_count }}</Badge>
                 <span v-else class="text-muted-foreground">0</span>
-              </td>
-              <td class="px-4 py-3">
-                <div class="flex flex-wrap gap-1">
-                  <Badge v-for="bt in k.backend_targets" :key="bt.slug" variant="secondary" class="text-[11px]"
-                    :class="bt.status === 'active' ? 'bg-green-50 text-green-700' : 'text-muted-foreground'">
-                    {{ bt.backend_type }}: {{ bt.slug }}
-                  </Badge>
-                  <span v-if="!k.backend_targets?.length" class="text-xs text-muted-foreground">—</span>
-                </div>
               </td>
               <td class="px-4 py-3">
                 <Badge variant="secondary" class="text-[11px]">{{ k.role }}</Badge>

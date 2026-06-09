@@ -98,7 +98,8 @@ async function saveSyncConfig() {
   }
   configSaving.value = true
   try {
-    syncConfig.value = await api.saveSyncConfig(syncConfig.value)
+    const saved = await api.saveSyncConfig(syncConfig.value)
+    syncConfig.value = { ...syncConfig.value, ...saved }
     cronError.value = ''
     await loadSchedulerStatus()
   } catch { /* ignore */ }
