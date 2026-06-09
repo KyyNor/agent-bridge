@@ -376,6 +376,11 @@ class AgentBridgeService:
                 return adapter
         return self.mock_backend
 
+    @staticmethod
+    def _is_kb_gone(exc: Exception) -> bool:
+        msg = str(exc)
+        return "knowledge base not found" in msg.lower() or ("404" in msg and "1003" in msg)
+
     def _run_job(self, job: dict[str, Any]) -> bool:
         doc_title = job.get("doc_title", job.get("doc_slug", "?"))
         backend = job.get("backend_slug", "?")
@@ -417,6 +422,17 @@ class AgentBridgeService:
             logger.info("Doc sync job #%d: OK", job["id"])
             return True
         except Exception as exc:
+            if self._is_kb_gone(exc) and job.get("kb_name") and job.get("kb_slug"):
+                logger.warning("Doc sync job #%d: backend KB gone, rebuilding...", job["id"])
+                try:
+                    new_id = adapter.create_kb(job["kb_slug"], job["kb_name"])
+                    self.store.rebuild_backend_target(job["kb_id"], job["backend_slug"], new_id)
+                    logger.info("Doc sync job #%d: backend KB rebuilt, %d docs rescheduled", job["id"], 0)
+                    self.store.update_job_status(job["id"], SyncJobStatus.pending)
+                except Exception as rebuild_exc:
+                    logger.error("Doc sync job #%d: rebuild failed — %s", job["id"], rebuild_exc)
+                    self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
+                return False
             logger.error("Doc sync job #%d: FAILED — %s", job["id"], exc)
             failed_status = (
                 SyncStateStatus.delete_failed if job["operation"] == "delete" else SyncStateStatus.sync_failed

@@ -392,6 +392,9 @@ class SQLiteStore:
     def update_backend_target_kb_id(self, kb_id: int, slug: str, backend_kb_id: str) -> None:
         return self.knowledge.update_backend_target_kb_id(kb_id=kb_id, slug=slug, backend_kb_id=backend_kb_id)
 
+    def rebuild_backend_target(self, kb_id: int, backend_slug: str, new_backend_kb_id: str) -> None:
+        return self.knowledge.rebuild_backend_target(kb_id=kb_id, backend_slug=backend_slug, new_backend_kb_id=new_backend_kb_id)
+
     def update_backend_target_config(self, kb_id: int, slug: str, config_updates: dict[str, Any]) -> None:
         return self.knowledge.update_backend_target_config(kb_id=kb_id, slug=slug, config_updates=config_updates)
 

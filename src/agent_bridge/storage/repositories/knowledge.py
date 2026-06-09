@@ -313,7 +313,9 @@ class KnowledgeRepository:
                   job.backend_slug,
                   job.operation,
                   d.slug AS doc_slug,
+                  d.title AS doc_title,
                   kb.slug AS kb_slug,
+                  kb.name AS kb_name,
                   COALESCE(target.backend_kb_id, kb.slug) AS backend_kb_id,
                   v.version_no AS version_no,
                   v.archive_path AS archive_path
@@ -525,6 +527,27 @@ class KnowledgeRepository:
                 "UPDATE backend_targets SET backend_kb_id = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
                 (backend_kb_id, kb_id, slug),
             )
+
+    def rebuild_backend_target(self, kb_id: int, backend_slug: str, new_backend_kb_id: str) -> None:
+        """Re-create backend target after Weknora KB was deleted: update ID, reset states, reschedule all docs."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE backend_targets SET backend_kb_id = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
+                (new_backend_kb_id, kb_id, backend_slug),
+            )
+            conn.execute(
+                "UPDATE sync_states SET backend_doc_id = NULL, status = ?, backend_status = NULL WHERE kb_id = ? AND backend_slug = ?",
+                (SyncStateStatus.not_synced.value, kb_id, backend_slug),
+            )
+            docs = conn.execute(
+                "SELECT d.id AS doc_id, v.id AS version_id FROM document_kbs dk JOIN documents d ON d.id = dk.doc_id LEFT JOIN document_versions v ON v.id = d.current_version_id WHERE dk.kb_id = ? AND d.deleted_at IS NULL",
+                (kb_id,),
+            ).fetchall()
+            for row in docs:
+                conn.execute(
+                    "INSERT INTO sync_jobs (doc_id, kb_id, backend_slug, operation, version_id, status) VALUES (?, ?, ?, ?, ?, ?)",
+                    (row["doc_id"], kb_id, backend_slug, Operation.create.value, row["version_id"], SyncJobStatus.pending.value),
+                )
 
     def update_backend_target_config(self, kb_id: int, slug: str, config_updates: dict[str, Any]) -> None:
         with self._connect() as conn:
