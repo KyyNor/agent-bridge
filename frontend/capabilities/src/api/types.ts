@@ -274,6 +274,7 @@ export interface KnowledgeSyncConfig {
   code_sync_cron: string
   ua_git_url: string
   understand_cron: string
+  doc_sync_cron: string
 }
 
 export interface SingleSchedulerStatus {
@@ -288,6 +289,7 @@ export interface SingleSchedulerStatus {
 export interface SchedulerStatus {
   code_sync: SingleSchedulerStatus
   understand: SingleSchedulerStatus
+  doc_sync: SingleSchedulerStatus
 }
 
 export interface UAStatus {
