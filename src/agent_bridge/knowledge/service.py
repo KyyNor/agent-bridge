@@ -378,8 +378,14 @@ class AgentBridgeService:
 
     @staticmethod
     def _is_kb_gone(exc: Exception) -> bool:
-        msg = str(exc)
-        return "knowledge base not found" in msg.lower() or ("404" in msg and "1003" in msg)
+        msg = str(exc).lower()
+        if "knowledge base not found" in msg:
+            return True
+        if "404" in msg and "1003" in msg:          # Weknora
+            return True
+        if "ragflow" in msg and "404" in msg:       # RagFlow HTTP 404
+            return True
+        return False
 
     def _run_job(self, job: dict[str, Any]) -> bool:
         doc_title = job.get("doc_title", job.get("doc_slug", "?"))
