@@ -528,8 +528,8 @@ class KnowledgeRepository:
                 (backend_kb_id, kb_id, slug),
             )
 
-    def rebuild_backend_target(self, kb_id: int, backend_slug: str, new_backend_kb_id: str) -> None:
-        """Re-create backend target after Weknora KB was deleted: update ID, reset states, reschedule all docs."""
+    def rebuild_backend_target(self, kb_id: int, backend_slug: str, new_backend_kb_id: str) -> int:
+        """Re-create backend target after backend KB was deleted: update ID, reset states, replace all sync jobs."""
         with self._connect() as conn:
             conn.execute(
                 "UPDATE backend_targets SET backend_kb_id = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
@@ -539,15 +539,23 @@ class KnowledgeRepository:
                 "UPDATE sync_states SET backend_doc_id = NULL, status = ?, backend_status = NULL WHERE kb_id = ? AND backend_slug = ?",
                 (SyncStateStatus.not_synced.value, kb_id, backend_slug),
             )
+            # Remove existing pending/failed/running jobs — they point to the dead KB
+            conn.execute(
+                "DELETE FROM sync_jobs WHERE kb_id = ? AND backend_slug = ? AND status IN (?, ?, ?)",
+                (kb_id, backend_slug, SyncJobStatus.pending.value, SyncJobStatus.failed.value, SyncJobStatus.running.value),
+            )
             docs = conn.execute(
                 "SELECT d.id AS doc_id, v.id AS version_id FROM document_kbs dk JOIN documents d ON d.id = dk.doc_id LEFT JOIN document_versions v ON v.id = d.current_version_id WHERE dk.kb_id = ? AND d.deleted_at IS NULL",
                 (kb_id,),
             ).fetchall()
+            count = 0
             for row in docs:
                 conn.execute(
                     "INSERT INTO sync_jobs (doc_id, kb_id, backend_slug, operation, version_id, status) VALUES (?, ?, ?, ?, ?, ?)",
                     (row["doc_id"], kb_id, backend_slug, Operation.create.value, row["version_id"], SyncJobStatus.pending.value),
                 )
+                count += 1
+            return count
 
     def update_backend_target_config(self, kb_id: int, slug: str, config_updates: dict[str, Any]) -> None:
         with self._connect() as conn:

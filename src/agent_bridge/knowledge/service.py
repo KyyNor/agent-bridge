@@ -432,9 +432,10 @@ class AgentBridgeService:
                 logger.warning("Doc sync job #%d: backend KB gone, rebuilding...", job["id"])
                 try:
                     new_id = adapter.create_kb(job["kb_slug"], job["kb_name"])
-                    self.store.rebuild_backend_target(job["kb_id"], job["backend_slug"], new_id)
-                    logger.info("Doc sync job #%d: backend KB rebuilt, %d docs rescheduled", job["id"], 0)
-                    self.store.update_job_status(job["id"], SyncJobStatus.pending)
+                    doc_count = self.store.rebuild_backend_target(job["kb_id"], job["backend_slug"], new_id)
+                    self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
+                    logger.info("Doc sync job #%d: backend KB rebuilt, %d docs rescheduled", job["id"], doc_count)
+                    return True
                 except Exception as rebuild_exc:
                     logger.error("Doc sync job #%d: rebuild failed — %s", job["id"], rebuild_exc)
                     self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
