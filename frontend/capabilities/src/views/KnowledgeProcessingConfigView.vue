@@ -13,7 +13,7 @@ import { Badge } from '../components/ui/badge'
 const loading = ref(true)
 
 // Sync config
-const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_cron: '0 * * * *', ua_git_url: '', understand_cron: '0 2 * * *' })
+const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_cron: '0 * * * *', ua_git_url: '', understand_cron: '0 2 * * *', doc_sync_cron: '*/30 * * * *' })
 const configSaving = ref(false)
 const cronError = ref('')
 
@@ -88,7 +88,8 @@ function formatNextRuns(expr: string): string | null {
 
 const codeSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.code_sync_cron))
 const understandNextRuns = computed(() => formatNextRuns(syncConfig.value.understand_cron))
-const cronValid = computed(() => codeSyncNextRuns.value !== null && understandNextRuns.value !== null)
+const docSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.doc_sync_cron || '*/30 * * * *'))
+const cronValid = computed(() => codeSyncNextRuns.value !== null && understandNextRuns.value !== null && docSyncNextRuns.value !== null)
 
 async function saveSyncConfig() {
   if (!cronValid.value) {
@@ -220,6 +221,12 @@ async function deleteBackend(slug: string) {
           <span v-if="understandNextRuns" class="text-xs text-muted-foreground font-mono">{{ understandNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
+        <div class="flex items-center gap-6">
+          <div class="text-sm shrink-0 whitespace-nowrap">知识同步 <span class="text-xs text-muted-foreground">(文档知识同步)</span></div>
+          <Input v-model="syncConfig.doc_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
+          <span v-if="docSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ docSyncNextRuns }}</span>
+          <span v-else class="text-xs text-destructive">表达式无效</span>
+        </div>
 
         <div class="flex items-center gap-3">
           <Button @click="saveSyncConfig()" :disabled="configSaving || !cronValid" size="sm">
@@ -287,6 +294,16 @@ async function deleteBackend(slug: string) {
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div>
+              <div class="mb-2 flex items-center gap-3">
+                <span class="text-xs text-muted-foreground">知识同步</span>
+                <Badge :variant="schedulerStatus.doc_sync?.running ? 'secondary' : 'outline'" :class="schedulerStatus.doc_sync?.running ? 'bg-green-50 text-green-700' : ''">
+                  {{ schedulerStatus.doc_sync?.running ? '运行中' : '已暂停' }}
+                </Badge>
+                <span v-if="schedulerStatus.doc_sync?.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.doc_sync.cron }}</span>
+              </div>
+              <div class="py-2 text-xs text-muted-foreground">处理所有待处理和失败的文档同步任务</div>
             </div>
           </div>
         </div>
