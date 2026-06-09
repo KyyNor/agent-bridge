@@ -208,8 +208,8 @@ class SQLiteStore:
     def get_sync_config(self) -> dict[str, Any]:
         return self.codegraph.get_sync_config()
 
-    def save_sync_config(self, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *") -> dict[str, Any]:
-        return self.codegraph.save_sync_config(code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron)
+    def save_sync_config(self, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *", doc_sync_cron: str = "*/30 * * * *") -> dict[str, Any]:
+        return self.codegraph.save_sync_config(code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron, doc_sync_cron=doc_sync_cron)
 
     def create_mcp_service(
         self,
