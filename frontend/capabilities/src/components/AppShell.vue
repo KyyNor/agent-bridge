@@ -33,9 +33,9 @@ function navigate(key: string) {
       <div class="px-5 pb-5 pt-6">
         <div class="flex items-center gap-2.5">
           <div class="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
-            AB
+            智
           </div>
-          <span class="text-sm font-semibold text-foreground tracking-tight">Agent Bridge</span>
+          <span class="text-sm font-semibold text-foreground tracking-tight">智能中枢</span>
         </div>
       </div>
 

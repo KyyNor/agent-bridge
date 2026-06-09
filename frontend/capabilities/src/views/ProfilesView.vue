@@ -61,7 +61,7 @@ const filterTabs = computed(() => [
 async function createProfile() {
   formError.value = ''
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(form.value.profile_key)) {
-    formError.value = 'Profile 标识仅支持小写英文、数字、连字符和下划线'
+    formError.value = '能力平面标识仅支持小写英文、数字、连字符和下划线'
     return
   }
   saving.value = true
@@ -182,7 +182,7 @@ async function saveConfig() {
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[360px]">
         <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <Input v-model="search" placeholder="搜索 Profile 标识或名称..." class="pl-8" />
+        <Input v-model="search" placeholder="搜索能力平面标识或名称..." class="pl-8" />
       </div>
       <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
         <button
@@ -198,20 +198,20 @@ async function saveConfig() {
       </div>
       <Button @click="showAdd = true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        添加 Profile
-      </Button>
+        添加能力平面
+</Button>
     </div>
 
     <!-- Table -->
     <Card>
       <CardContent class="p-0">
         <div v-if="filtered.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
-          {{ search ? '无匹配结果' : '暂无 Profile' }}
+          {{ search ? '无匹配结果' : '暂无能力平面' }}
         </div>
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border">
-              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Profile</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">能力平面</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Allow</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">操作</th>
@@ -256,12 +256,12 @@ async function saveConfig() {
     <Dialog :open="showAdd" @update:open="showAdd = $event">
       <DialogContent class="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>添加 Profile</DialogTitle>
+          <DialogTitle>添加能力平面</DialogTitle>
         </DialogHeader>
         <form @submit.prevent="createProfile" class="space-y-4">
           <div v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ formError }}</div>
           <div class="space-y-2">
-            <label class="text-sm font-medium">Profile 标识 <span class="text-destructive">*</span></label>
+            <label class="text-sm font-medium">能力平面标识 <span class="text-destructive">*</span></label>
             <Input v-model="form.profile_key" placeholder="safe-readonly" required />
           </div>
           <div class="space-y-2">
