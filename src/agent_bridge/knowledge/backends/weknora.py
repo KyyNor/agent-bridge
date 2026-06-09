@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
+
+logger = logging.getLogger(__name__)
+
+# Default parser engine rules — tell Weknora which engine to use per file type
+_PARSER_ENGINE_RULES = [
+    {"file_types": ["pdf"], "engine": "builtin"},
+    {"file_types": ["docx", "doc"], "engine": "builtin"},
+    {"file_types": ["pptx", "ppt"], "engine": "markitdown"},
+    {"file_types": ["xlsx", "xls"], "engine": "builtin"},
+    {"file_types": ["csv"], "engine": "simple"},
+    {"file_types": ["md", "markdown"], "engine": "builtin"},
+    {"file_types": ["txt"], "engine": "simple"},
+    {"file_types": ["json"], "engine": "simple"},
+    {"file_types": ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"], "engine": "builtin"},
+    {"file_types": ["mp3", "wav", "m4a", "flac", "ogg"], "engine": "simple"},
+]
 
 
 def _map_parse_status(status: str) -> str:
@@ -40,9 +57,34 @@ class WeknoraBackend:
         self.timeout = timeout
         self.embedding_model_id = embedding_model_id
         self.summary_model_id = summary_model_id
+        self._model_name_to_id: dict[str, str] | None = None
 
     def _headers(self) -> dict[str, str]:
         return {"X-API-Key": self.api_key}
+
+    def _fetch_models(self) -> dict[str, str]:
+        """Fetch models from Weknora and return a name→UUID mapping. Cached after first call."""
+        if self._model_name_to_id is not None:
+            return self._model_name_to_id
+        try:
+            response = self._request("GET", "/api/v1/models")
+            self._raise(response)
+            models = self._data(response) or []
+            self._model_name_to_id = {m["name"]: m["id"] for m in models if isinstance(m, dict) and m.get("name") and m.get("id")}
+            logger.info("Fetched %d models from Weknora", len(self._model_name_to_id))
+        except Exception:
+            logger.warning("Failed to fetch models from Weknora, using raw IDs", exc_info=True)
+            self._model_name_to_id = {}
+        return self._model_name_to_id
+
+    def _resolve_model_id(self, raw: str | None) -> str | None:
+        """Resolve a model name or UUID to a UUID using Weknora's model list."""
+        if not raw:
+            return None
+        models = self._fetch_models()
+        if raw in models:
+            return models[raw]
+        return raw
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         headers = kwargs.pop("headers", None) or {}
@@ -73,16 +115,39 @@ class WeknoraBackend:
         return payload.get("data") if isinstance(payload, dict) else payload
 
     def create_kb(self, slug: str, name: str) -> str:
+        embedding_id = self._resolve_model_id(self.embedding_model_id)
+        summary_id = self._resolve_model_id(self.summary_model_id)
         body: dict[str, Any] = {
             "name": name,
             "description": slug,
             "type": "document",
+            "chunking_config": {
+                "chunk_size": 512,
+                "chunk_overlap": 80,
+                "separators": ["\n\n", "\n", "。", "！", "？", ";", "；"],
+                "enable_parent_child": True,
+                "parent_chunk_size": 4096,
+                "child_chunk_size": 384,
+                "strategy": "auto",
+                "parser_engine_rules": _PARSER_ENGINE_RULES,
+            },
+            "embedding_model_id": embedding_id,
+            "summary_model_id": summary_id,
             "storage_provider_config": {"provider": "local"},
+            "indexing_strategy": {
+                "vector_enabled": True,
+                "keyword_enabled": True,
+                "wiki_enabled": True,
+                "graph_enabled": False,
+            },
+            "question_generation_config": {"enabled": True, "question_count": 3},
         }
-        if self.embedding_model_id:
-            body["embedding_model_id"] = self.embedding_model_id
-        if self.summary_model_id:
-            body["summary_model_id"] = self.summary_model_id
+        if summary_id:
+            body["wiki_config"] = {
+                "synthesis_model_id": summary_id,
+                "max_pages_per_ingest": 0,
+                "extraction_granularity": "standard",
+            }
         response = self._request("POST", "/api/v1/knowledge-bases", json=body)
         self._raise(response)
         return self._data(response)["id"]

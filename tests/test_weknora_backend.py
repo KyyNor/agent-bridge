@@ -12,6 +12,9 @@ from agent_bridge.knowledge.backends.weknora import WeknoraBackend
 
 def test_create_kb_posts_document_kb(respx_mock):
     base_url = "http://localhost"
+    respx_mock.get(f"{base_url}/api/v1/models").mock(
+        return_value=httpx.Response(200, json={"success": True, "data": []})
+    )
     route = respx_mock.post(f"{base_url}/api/v1/knowledge-bases").mock(
         return_value=httpx.Response(201, json={"success": True, "data": {"id": "kb-123"}})
     )
@@ -26,16 +29,18 @@ def test_create_kb_posts_document_kb(respx_mock):
     kb_id = backend.create_kb("frontend-docs", "Frontend Docs")
 
     request = route.calls.last.request
+    body = json.loads(request.content)
     assert kb_id == "kb-123"
     assert request.headers["X-API-Key"] == "test-key"
-    assert json.loads(request.content) == {
-        "name": "Frontend Docs",
-        "description": "frontend-docs",
-        "type": "document",
-        "storage_provider_config": {"provider": "local"},
-        "embedding_model_id": "emb-1",
-        "summary_model_id": "chat-1",
-    }
+    assert body["name"] == "Frontend Docs"
+    assert body["description"] == "frontend-docs"
+    assert body["type"] == "document"
+    assert body["embedding_model_id"] == "emb-1"
+    assert body["summary_model_id"] == "chat-1"
+    assert "parser_engine_rules" in body["chunking_config"]
+    assert body["chunking_config"]["parser_engine_rules"][1] == {"file_types": ["docx", "doc"], "engine": "builtin"}
+    assert body["indexing_strategy"]["wiki_enabled"] is True
+    assert body["question_generation_config"]["enabled"] is True
 
 
 def test_upload_uses_file_endpoint(respx_mock, tmp_path: Path):
