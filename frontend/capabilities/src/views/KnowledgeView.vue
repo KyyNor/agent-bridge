@@ -24,10 +24,6 @@ const detailDocs = ref<Document[]>([])
 const detailMembers = ref<KbMember[]>([])
 const detailSyncJobs = ref<SyncJob[]>([])
 const detailLoading = ref(false)
-// Upload state
-const uploadFile = ref<File | null>(null)
-const uploadLater = ref(false)
-const uploading = ref(false)
 // Member grant
 const memberUser = ref('')
 const memberRole = ref('viewer')
@@ -51,6 +47,13 @@ const docDetailLoading = ref(false)
 // Plane assignment dialog
 const showPlaneDialog = ref(false)
 const planeKb = ref<KnowledgeBaseSummary | null>(null)
+
+// 上传对话框
+const showUploadDialog = ref(false)
+const uploadKb = ref<KnowledgeBaseSummary | null>(null)
+const uploadFiles = ref<File[]>([])
+const uploading = ref(false)
+const uploadDragOver = ref(false)
 const allProfiles = ref<ProjectProfile[]>([])
 const selectedProfileKeys = ref<string[]>([])
 const pendingProfileKeys = ref<string[]>([])
@@ -111,18 +114,6 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   detailLoading.value = false
 }
 
-async function uploadDocument() {
-  if (!uploadFile.value || !detailKb.value) return
-  uploading.value = true
-  try {
-    await api.addDocument(uploadFile.value, [detailKb.value.slug], uploadLater.value)
-    uploadFile.value = null
-    uploadLater.value = false
-    detailDocs.value = await api.listDocs(detailKb.value.slug)
-  } catch { /* ignore */ }
-  uploading.value = false
-}
-
 async function deleteDoc(slug: string) {
   if (!detailKb.value) return
   try {
@@ -180,9 +171,89 @@ async function doAsk() {
   asking.value = false
 }
 
-function onFileSelected(e: Event) {
+function onUploadFilesSelected(e: Event) {
   const target = e.target as HTMLInputElement
-  uploadFile.value = target.files?.[0] || null
+  if (target.files && target.files.length > 0) {
+    for (let i = 0; i < target.files.length; i++) {
+      uploadFiles.value.push(target.files[i])
+    }
+  }
+  target.value = ''
+}
+
+function handleUploadDragOver(e: DragEvent) {
+  e.preventDefault()
+  uploadDragOver.value = true
+}
+
+function handleUploadDragLeave() {
+  uploadDragOver.value = false
+}
+
+function handleUploadDrop(e: DragEvent) {
+  e.preventDefault()
+  uploadDragOver.value = false
+  if (!e.dataTransfer) return
+  addFilesFromDataTransfer(e.dataTransfer)
+}
+
+function addFilesFromDataTransfer(dt: DataTransfer) {
+  const allowed = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md']
+  const entries: FileSystemEntry[] = []
+  for (let i = 0; i < dt.items.length; i++) {
+    const entry = dt.items[i].webkitGetAsEntry()
+    if (entry) entries.push(entry)
+  }
+  if (entries.length === 0) {
+    for (let i = 0; i < dt.files.length; i++) {
+      const f = dt.files[i]
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase()
+      if (allowed.includes(ext)) uploadFiles.value.push(f)
+    }
+    return
+  }
+  entries.forEach(entry => traverseEntry(entry, allowed))
+}
+
+function traverseEntry(entry: FileSystemEntry, allowed: string[]) {
+  if (entry.isFile) {
+    const ext = '.' + entry.name.split('.').pop()?.toLowerCase()
+    if (!allowed.includes(ext)) return
+    ;(entry as FileSystemFileEntry).file(f => uploadFiles.value.push(f))
+  } else if (entry.isDirectory) {
+    const reader = (entry as FileSystemDirectoryEntry).createReader()
+    reader.readEntries(entries => entries.forEach(e => traverseEntry(e, allowed)))
+  }
+}
+
+function removeUploadFile(index: number) {
+  uploadFiles.value.splice(index, 1)
+}
+
+function openUploadDialog(kb: KnowledgeBaseSummary) {
+  uploadKb.value = kb
+  uploadFiles.value = []
+  showUploadDialog.value = true
+}
+
+async function uploadDocuments() {
+  if (!uploadKb.value || uploadFiles.value.length === 0) return
+  uploading.value = true
+  try {
+    for (const file of uploadFiles.value) {
+      await api.addDocument(file, [uploadKb.value.slug], true)
+    }
+    showUploadDialog.value = false
+    uploadFiles.value = []
+    await loadKbs()
+  } catch { /* ignore */ }
+  uploading.value = false
+}
+
+function getFileSizeLabel(bytes: number) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
 async function openPlaneDialog(k: KnowledgeBaseSummary) {
@@ -280,6 +351,10 @@ async function savePlaneProfiles() {
               </td>
               <td class="px-4 py-3">
                 <div class="flex gap-2">
+                  <Button size="sm" @click="openUploadDialog(k)" class="h-8 text-xs">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    上传
+                  </Button>
                   <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
                   <Button variant="outline" size="sm" @click="openPlaneDialog(k)" class="h-8 text-xs">能力平面</Button>
                 </div>
@@ -370,13 +445,7 @@ async function savePlaneProfiles() {
 
           <!-- Documents Tab -->
           <div v-if="detailTab === 'docs'" class="space-y-3">
-            <div class="flex items-center gap-3">
-              <input type="file" @change="onFileSelected" class="text-sm" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md" />
-              <label class="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <input type="checkbox" v-model="uploadLater" /> 稍后同步
-              </label>
-              <Button size="sm" @click="uploadDocument" :disabled="!uploadFile || uploading">{{ uploading ? '上传中...' : '上传' }}</Button>
-            </div>
+            <div class="text-xs text-muted-foreground">点击知识库列表中的「上传」按钮添加文档，上传后由定时任务自动同步</div>
             <div v-if="detailDocs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无文档</div>
             <table v-else class="w-full">
               <thead><tr class="border-b border-border">
@@ -497,6 +566,73 @@ async function savePlaneProfiles() {
         </div>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline">关闭</Button></DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 上传文档对话框 -->
+    <Dialog :open="showUploadDialog" @update:open="showUploadDialog = $event">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>上传文档 — {{ uploadKb?.name || '' }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="text-xs text-muted-foreground">
+            目标知识库：<span class="font-medium text-foreground">{{ uploadKb?.name }}</span>
+            <span class="font-mono ml-1">({{ uploadKb?.slug }})</span>
+          </div>
+
+          <!-- 拖拽区域 -->
+          <div v-if="uploadFiles.length === 0"
+            :class="['rounded-lg border-2 border-dashed p-10 text-center transition-colors cursor-pointer',
+              uploadDragOver ? 'border-primary bg-primary/5' : 'border-border bg-muted/20']"
+            @dragover="handleUploadDragOver"
+            @dragleave="handleUploadDragLeave"
+            @drop="handleUploadDrop"
+          >
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" class="mx-auto mb-3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div class="text-sm font-medium mb-1">拖拽文件或文件夹到此处</div>
+            <div class="text-xs text-muted-foreground mb-4">支持 PDF、Word、Excel、PPT、TXT、Markdown — 上传后将由定时任务自动同步</div>
+            <div class="flex items-center justify-center gap-3">
+              <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium cursor-pointer hover:bg-primary/80">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                选择文件
+                <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md" @change="onUploadFilesSelected" />
+              </label>
+              <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm border border-border bg-background text-sm font-medium cursor-pointer hover:bg-muted">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                选择文件夹
+                <input type="file" multiple webkitdirectory class="hidden" @change="onUploadFilesSelected" />
+              </label>
+            </div>
+          </div>
+
+          <!-- 文件列表 -->
+          <div v-else class="rounded-lg border-2 border-green-200 bg-muted/20 p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm font-medium">已选择 <span class="text-green-700">{{ uploadFiles.length }}</span> 个文件</span>
+              <Button variant="ghost" size="xs" class="h-7 text-xs text-muted-foreground" @click="uploadFiles = []">清除</Button>
+            </div>
+            <div class="space-y-1.5 max-h-[240px] overflow-y-auto">
+              <div v-for="(f, i) in uploadFiles" :key="i"
+                class="flex items-center gap-2.5 px-3 py-2 rounded border border-border bg-background text-sm"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span class="flex-1 truncate">{{ f.name }}</span>
+                <span class="text-xs text-muted-foreground shrink-0">{{ getFileSizeLabel(f.size) }}</span>
+              </div>
+            </div>
+            <label class="block mt-3 py-2 border border-dashed border-border rounded text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/50 transition-colors">
+              + 继续添加文件
+              <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md" @change="onUploadFilesSelected" />
+            </label>
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
+          <Button @click="uploadDocuments" :disabled="uploadFiles.length === 0 || uploading">
+            {{ uploading ? '上传中...' : `上传 (${uploadFiles.length})` }}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
