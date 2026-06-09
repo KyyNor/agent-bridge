@@ -75,6 +75,6 @@ class DocSyncScheduler:
         admin = next(iter(self._admins), "root")
         try:
             result = self._service.sync(admin, all_users=True)
-            logger.info("Scheduled doc sync completed: %s processed", result.get("processed", 0))
+            logger.info("Scheduled doc sync finished: %s jobs processed", result.get("processed", 0))
         except Exception:
-            logger.exception("Scheduled doc sync failed")
+            logger.exception("Scheduled doc sync failed with unexpected error")

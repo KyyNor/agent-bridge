@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Any
 
 from agent_bridge.knowledge.archive import ArchiveStorage
@@ -258,11 +261,17 @@ class AgentBridgeService:
             actor=None if all_users or actor in self.admins else actor,
             backend_slug=backend,
         )
-        processed = 0
+        logger.info("Doc sync: %d pending jobs", len(jobs))
+        succeeded = 0
+        failed = 0
         for job in jobs:
-            self._run_job(job)
-            processed += 1
-        return {"processed": processed}
+            ok = self._run_job(job)
+            if ok:
+                succeeded += 1
+            else:
+                failed += 1
+        logger.info("Doc sync finished: %d succeeded, %d failed", succeeded, failed)
+        return {"processed": len(jobs)}
 
     # -- Code repo categories --
 
@@ -367,7 +376,11 @@ class AgentBridgeService:
                 return adapter
         return self.mock_backend
 
-    def _run_job(self, job: dict[str, Any]) -> None:
+    def _run_job(self, job: dict[str, Any]) -> bool:
+        doc_title = job.get("doc_title", job.get("doc_slug", "?"))
+        backend = job.get("backend_slug", "?")
+        op = job.get("operation", "?")
+        logger.info("Doc sync job #%d: %s '%s' -> %s", job["id"], op, doc_title, backend)
         self.store.update_job_status(job["id"], SyncJobStatus.running)
         adapter = self.registry.get(job["backend_slug"]) if self.registry else None
         if adapter is None:
@@ -401,7 +414,10 @@ class AgentBridgeService:
                     SyncStateStatus.synced,
                 )
             self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
+            logger.info("Doc sync job #%d: OK", job["id"])
+            return True
         except Exception as exc:
+            logger.error("Doc sync job #%d: FAILED — %s", job["id"], exc)
             failed_status = (
                 SyncStateStatus.delete_failed if job["operation"] == "delete" else SyncStateStatus.sync_failed
             )
@@ -414,6 +430,7 @@ class AgentBridgeService:
                 backend_error=str(exc),
             )
             self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
+            return False
 
     def purge_document(self, actor: str, doc_slug: str, confirm: bool = False) -> dict[str, str]:
         doc = self._require_doc_edit(actor, doc_slug, include_deleted=True)
