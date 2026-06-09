@@ -104,6 +104,7 @@ class KnowledgeSyncConfigRequest(BaseModel):
     code_sync_cron: str = "0 * * * *"
     ua_git_url: str = ""
     understand_cron: str = "0 2 * * *"
+    doc_sync_cron: str = "*/30 * * * *"
 
 
 class UpsertBackendRequest(BaseModel):

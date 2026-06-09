@@ -97,6 +97,7 @@ class SQLiteStore:
                 {
                     "code_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
                     "understand_cron": "TEXT NOT NULL DEFAULT '0 2 * * *'",
+                    "doc_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
                 },
             )
             conn.execute(

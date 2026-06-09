@@ -318,27 +318,34 @@ class CodeGraphRepository:
     # -- Sync Config --
 
     def get_sync_config(self) -> dict[str, Any]:
-        defaults = {"code_sync_cron": "0 * * * *", "ua_git_url": "", "understand_cron": "0 2 * * *"}
+        defaults = {"code_sync_cron": "0 * * * *", "ua_git_url": "", "understand_cron": "0 2 * * *", "doc_sync_cron": "*/30 * * * *"}
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM knowledge_sync_config WHERE id = 1").fetchone()
+            row = conn.execute(
+                "SELECT code_sync_cron, ua_git_url, understand_cron, doc_sync_cron FROM knowledge_sync_config WHERE id = 1"
+            ).fetchone()
             if row is None:
                 return defaults
-            result = row_to_dict(row)
-            result.setdefault("ua_git_url", "")
+            result = {
+                "code_sync_cron": row[0] or defaults["code_sync_cron"],
+                "ua_git_url": row[1] or "",
+                "understand_cron": row[2] or defaults["understand_cron"],
+                "doc_sync_cron": row[3] if len(row) > 3 and row[3] else defaults["doc_sync_cron"],
+            }
             return result
 
-    def save_sync_config(self, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *") -> dict[str, Any]:
+    def save_sync_config(self, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *", doc_sync_cron: str = "*/30 * * * *") -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron)
-                VALUES (1, ?, ?, ?)
+                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron, doc_sync_cron)
+                VALUES (1, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_cron = excluded.code_sync_cron,
                   ua_git_url = excluded.ua_git_url,
                   understand_cron = excluded.understand_cron,
+                  doc_sync_cron = excluded.doc_sync_cron,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (code_sync_cron, ua_git_url, understand_cron),
+                (code_sync_cron, ua_git_url, understand_cron, doc_sync_cron),
             )
-            return {"code_sync_cron": code_sync_cron, "ua_git_url": ua_git_url, "understand_cron": understand_cron}
+            return {"code_sync_cron": code_sync_cron, "ua_git_url": ua_git_url, "understand_cron": understand_cron, "doc_sync_cron": doc_sync_cron}
