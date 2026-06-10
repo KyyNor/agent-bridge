@@ -216,3 +216,56 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     # 10. Test align_backends — backends endpoint still lists mock
     backends_after = client.get("/backends").json()
     assert any(b["slug"] == "mock" for b in backends_after)
+
+
+def test_retrieval_strategy_e2e(wm_paths, tmp_path):
+    """E2E: KB defaults -> profile override -> strategy resolution."""
+    from agent_bridge.core.config import BackendConfig, ensure_directories
+    from agent_bridge.knowledge.backends.registry import BackendRegistry
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    ensure_directories(wm_paths)
+    svc = AgentBridgeService.create(wm_paths, admins={"root"})
+    svc.registry = BackendRegistry(
+        {
+            "weknora": BackendConfig(slug="weknora", backend_type="weknora", base_url="http://localhost", api_key="test"),
+            "ragflow": BackendConfig(slug="ragflow", backend_type="ragflow", base_url="http://localhost", api_key="test"),
+        },
+        paths=tmp_path,
+    )
+    svc.init_system()
+
+    # 1. Create KB
+    svc.create_kb("root", "docs", "Documentation", "")
+    kb = svc.store.get_kb_by_slug("docs")
+    assert kb is not None
+
+    # 2. No defaults -> first active backend
+    _, strategy = svc.resolve_retrieval_strategy("docs", profile_key=None)
+    assert strategy.backend_slug in ("weknora", "ragflow")
+
+    # 3. Set KB defaults
+    svc.update_kb_defaults("root", "docs", default_backend_slug="weknora", default_agent_id="hybrid-rag-wiki")
+    kb = svc.store.get_kb_by_slug("docs")
+    assert kb["default_backend_slug"] == "weknora"
+    assert kb["default_agent_id"] == "hybrid-rag-wiki"
+    _, strategy = svc.resolve_retrieval_strategy("docs", profile_key=None)
+    assert strategy.backend_slug == "weknora"
+    assert strategy.agent_id == "hybrid-rag-wiki"
+
+    # 4. Create profile and assign KB with override
+    svc.governance.upsert_profile("root", "team-a", "Team A", "desc", "active")
+    svc.governance.set_resource_profiles(
+        "root", "wiki_kb", "docs", ["team-a"],
+        overrides={"team-a": {"retrieval_backend_slug": "ragflow", "retrieval_agent_id": None}},
+    )
+    _, strategy = svc.resolve_retrieval_strategy("docs", profile_key="team-a")
+    assert strategy.backend_slug == "ragflow"
+    assert strategy.agent_id is None
+
+    # 5. Profile without override falls back to KB defaults
+    svc.governance.upsert_profile("root", "team-b", "Team B", "desc", "active")
+    svc.governance.set_resource_profiles("root", "wiki_kb", "docs", ["team-b"])
+    _, strategy = svc.resolve_retrieval_strategy("docs", profile_key="team-b")
+    assert strategy.backend_slug == "weknora"
+    assert strategy.agent_id == "hybrid-rag-wiki"
