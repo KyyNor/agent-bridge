@@ -53,7 +53,7 @@ class MockBackend:
     def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6) -> list[RetrievalResult]:
         return []
 
-    def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None) -> tuple[AskResult, str]:
+    def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None, agent_id: str | None = None) -> tuple[AskResult, str]:
         return AskResult(
             answer="mock backend does not support Q&A",
             chunks=[],

@@ -254,6 +254,7 @@ class RagFlowBackend:
         question: str,
         chat_id: str | None = None,
         session_id: str | None = None,
+        agent_id: str | None = None,
     ) -> tuple[AskResult, str]:
         if chat_id is None:
             chat_id = self._create_chat_assistant(backend_kb_id)
