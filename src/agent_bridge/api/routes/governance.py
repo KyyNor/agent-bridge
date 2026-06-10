@@ -78,6 +78,9 @@ def create_governance_routes(service, actor, call_safely, ensure_capability_sche
     @router.put("/resource-profiles/{resource_type}/{resource_key}")
     def set_resource_profiles(resource_type: str, resource_key: str, payload: ResourceProfilesRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
-        return call_safely(lambda: service.governance.set_resource_profiles(current_actor, resource_type, resource_key, payload.profile_keys))
+        return call_safely(lambda: service.governance.set_resource_profiles(
+            current_actor, resource_type, resource_key,
+            payload.profile_keys, overrides=payload.overrides,
+        ))
 
     return router

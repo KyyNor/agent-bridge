@@ -201,6 +201,7 @@ class CapabilityGovernanceService:
         resource_type: str,
         resource_key: str,
         profile_keys: list[str],
+        overrides: dict[str, dict[str, str | None]] | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_type = self._validate_resource_type(resource_type)
@@ -211,6 +212,7 @@ class CapabilityGovernanceService:
             resource_type=normalized_type,
             resource_key=resource_key,
             profile_keys=profile_keys,
+            overrides=overrides,
         )
         return {
             "resource_type": normalized_type,

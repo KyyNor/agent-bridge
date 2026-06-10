@@ -27,6 +27,7 @@ class AskRequest(BaseModel):
     question: str
     backend: str | None = None
     session_id: str | None = None
+    profile_key: str | None = None
 
 
 class PurgeRequest(BaseModel):
@@ -78,6 +79,12 @@ class ProfileResourcesRequest(BaseModel):
 
 class ResourceProfilesRequest(BaseModel):
     profile_keys: list[str] = Field(default_factory=list)
+    overrides: dict[str, dict[str, str | None]] | None = None
+
+
+class UpdateKbDefaultsRequest(BaseModel):
+    default_backend_slug: str | None = None
+    default_agent_id: str | None = None
 
 
 class CodeRepositoryRequest(BaseModel):

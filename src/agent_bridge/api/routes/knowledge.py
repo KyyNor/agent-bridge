@@ -9,6 +9,7 @@ from agent_bridge.api.schemas import (
     GrantMemberRequest,
     PurgeRequest,
     SyncRequest,
+    UpdateKbDefaultsRequest,
     UpsertBackendRequest,
     UpdateBackendRequest,
 )
@@ -129,8 +130,12 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
 
     @router.post("/ask")
     def ask(payload: AskRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        result = call_safely(lambda: service.ask(current_actor, payload.kb, payload.question, backend_slug=payload.backend, session_id=payload.session_id))
+        result = call_safely(lambda: service.ask(current_actor, payload.kb, payload.question, backend_slug=payload.backend, session_id=payload.session_id, profile_key=payload.profile_key))
         return {"answer": result.answer, "chunks": [{"chunk_id": c.chunk_id, "content": c.content, "document_name": c.document_name, "similarity": c.similarity, "dataset_id": c.dataset_id} for c in result.chunks], "session_id": result.session_id}
+
+    @router.put("/kbs/{kb_slug}/defaults")
+    def update_kb_defaults(kb_slug: str, payload: UpdateKbDefaultsRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return call_safely(lambda: service.update_kb_defaults(current_actor, kb_slug, default_backend_slug=payload.default_backend_slug, default_agent_id=payload.default_agent_id))
 
     @router.get("/builtin/wiki/kbs")
     def list_builtin_wiki_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
