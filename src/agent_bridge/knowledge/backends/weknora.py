@@ -226,20 +226,28 @@ class WeknoraBackend:
         if session_id is None:
             session_id = self._create_session()
 
-        body: dict[str, Any] = {
-            "query": question,
-            "knowledge_base_ids": [backend_kb_id],
-            "disable_title": True,
-            "channel": "api",
-        }
         if agent_id is not None:
-            body["agent_enabled"] = True
-            body["agent_id"] = agent_id
-            body["web_search_enabled"] = False
+            endpoint = f"/api/v1/agent-chat/{session_id}"
+            body: dict[str, Any] = {
+                "query": question,
+                "agent_enabled": True,
+                "agent_id": agent_id,
+                "knowledge_base_ids": [backend_kb_id],
+                "web_search_enabled": False,
+                "channel": "api",
+            }
+        else:
+            endpoint = f"/api/v1/knowledge-chat/{session_id}"
+            body = {
+                "query": question,
+                "knowledge_base_ids": [backend_kb_id],
+                "disable_title": True,
+                "channel": "api",
+            }
 
         response = self._request(
             "POST",
-            f"/api/v1/knowledge-chat/{session_id}",
+            endpoint,
             json=body,
         )
         self._raise(response)

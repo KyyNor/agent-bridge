@@ -110,17 +110,21 @@ def test_ask_passes_agent_id(backend):
     chat_resp.json.return_value = {"success": True}
 
     call_args = {}
+    call_url = {}
     def capture_request(method, url, **kwargs):
         if method == "POST" and "sessions" in url:
             return session_resp
-        if method == "POST" and "knowledge-chat" in url:
+        if method == "POST" and "agent-chat" in url:
             call_args.update(kwargs)
+            call_url["url"] = url
             return chat_resp
         return _mock_response()
 
     with patch("httpx.request", side_effect=capture_request):
         result, chat_id = backend.ask("kb-123", "test question", agent_id="my-agent")
 
+    assert "agent-chat" in call_url.get("url", "")
     body = call_args.get("json", {})
     assert body.get("agent_enabled") is True
     assert body.get("agent_id") == "my-agent"
+    assert body.get("web_search_enabled") is False
