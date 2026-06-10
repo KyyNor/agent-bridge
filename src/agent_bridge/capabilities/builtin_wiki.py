@@ -146,7 +146,7 @@ class WikiBuiltinProvider:
             if not question:
                 raise ValidationError("question is required")
             try:
-                answer = self.service.ask(actor, kb_slug, question, session_id=arguments.get("session_id"))
+                answer = self.service.ask(actor, kb_slug, question, session_id=arguments.get("session_id"), profile_key=profile_key)
             except AgentBridgeError:
                 raise
             except Exception as exc:

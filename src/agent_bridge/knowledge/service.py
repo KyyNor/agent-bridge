@@ -24,6 +24,7 @@ from agent_bridge.core.domain import (
     NotFound,
     Operation,
     RetrievalResult,
+    RetrievalStrategy,
     SyncJobStatus,
     SyncStateStatus,
     ValidationError,
@@ -33,6 +34,7 @@ from agent_bridge.core.domain import (
 )
 from agent_bridge.knowledge.backends.mock import MockBackend
 from agent_bridge.knowledge.backends.registry import BackendRegistry, create_registry_from_db
+from agent_bridge.knowledge.backends.weknora import WeknoraBackend
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -79,11 +81,23 @@ class AgentBridgeService:
         service.store.init_schema()
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
+        service.ensure_weknora_agents()
         return service
 
     def init_system(self) -> None:
         ensure_directories(self.paths)
         self.store.init_schema()
+
+    def ensure_weknora_agents(self) -> None:
+        if not self.registry:
+            return
+        for slug in self.registry.list_slugs():
+            adapter = self.registry.get(slug)
+            if isinstance(adapter, WeknoraBackend):
+                try:
+                    adapter.ensure_hybrid_agent()
+                except Exception:
+                    logger.warning("Failed to ensure hybrid agent for backend '%s'", slug, exc_info=True)
 
     def create_kb(self, actor: str, slug: str, name: str, description: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -324,12 +338,60 @@ class AgentBridgeService:
         adapter = self._get_adapter(target["slug"])
         return adapter.retrieve(target["backend_kb_id"], question, top_k)
 
+    def update_kb_defaults(self, actor: str, kb_slug: str, *,
+                           default_backend_slug: str | None = None,
+                           default_agent_id: str | None = None) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        kb = self.store.get_kb_by_slug(kb_slug)
+        if kb is None:
+            raise NotFound("knowledge base not found")
+        self.store.update_kb_defaults(kb["id"], default_backend_slug, default_agent_id)
+        return self.store.get_kb_by_slug(kb_slug)
+
+    def resolve_retrieval_strategy(self, kb_slug: str, profile_key: str | None) -> tuple[dict[str, Any], RetrievalStrategy]:
+        kb = self.store.get_kb_by_slug(kb_slug)
+        if kb is None:
+            raise NotFound("knowledge base not found")
+
+        # 1. If profile provided, check profile resource rule overrides
+        if profile_key:
+            rule = self.store.get_profile_resource_rule(profile_key, "wiki_kb", kb_slug)
+            if rule:
+                backend = rule.get("retrieval_backend_slug")
+                agent = rule.get("retrieval_agent_id")
+                if backend or agent:
+                    return kb, RetrievalStrategy(
+                        backend_slug=backend or kb.get("default_backend_slug") or self._first_active_backend(kb),
+                        agent_id=agent,
+                    )
+
+        # 2. KB-level defaults
+        if kb.get("default_backend_slug"):
+            return kb, RetrievalStrategy(
+                backend_slug=kb["default_backend_slug"],
+                agent_id=kb.get("default_agent_id"),
+            )
+
+        # 3. System fallback
+        return kb, RetrievalStrategy(backend_slug=self._first_active_backend(kb))
+
+    def _first_active_backend(self, kb: dict[str, Any]) -> str:
+        targets = self.store.list_backend_targets(kb["id"])
+        active = [t for t in targets if t["status"] == "active"]
+        if not active:
+            raise NotFound(f"no retrieval backend available for knowledge base '{kb['slug']}'")
+        return active[0]["slug"]
+
     def ask(self, actor: str, kb_slug: str, question: str, *,
             backend_slug: str | None = None,
-            session_id: str | None = None) -> AskResult:
-        kb = self._require_kb_visible(actor, kb_slug)
-        target = self._resolve_retrieval_target(kb, backend_slug)
+            session_id: str | None = None,
+            profile_key: str | None = None) -> AskResult:
+        kb, strategy = self.resolve_retrieval_strategy(kb_slug, profile_key)
+        resolved_backend = backend_slug or strategy.backend_slug
+        target = self._resolve_retrieval_target(kb, resolved_backend)
         adapter = self._get_adapter(target["slug"])
+        agent_id = strategy.agent_id if target["slug"] == strategy.backend_slug else None
+
         config_json = target.get("config_json")
         existing_chat_id = None
         if config_json:
@@ -339,6 +401,7 @@ class AgentBridgeService:
         result, new_chat_id = adapter.ask(
             target["backend_kb_id"], question,
             chat_id=existing_chat_id, session_id=session_id,
+            agent_id=agent_id,
         )
         if new_chat_id and new_chat_id != existing_chat_id:
             self.store.update_backend_target_config(

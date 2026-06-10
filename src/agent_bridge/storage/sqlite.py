@@ -311,8 +311,11 @@ class SQLiteStore:
     def list_resource_rule_profiles(self, resource_type: str, resource_key: str) -> list[dict[str, Any]]:
         return self.governance.list_resource_rule_profiles(resource_type=resource_type, resource_key=resource_key)
 
-    def replace_resource_rule_profiles(self, resource_type: str, resource_key: str, profile_keys: list[str]) -> None:
-        return self.governance.replace_resource_rule_profiles(resource_type=resource_type, resource_key=resource_key, profile_keys=profile_keys)
+    def replace_resource_rule_profiles(self, resource_type: str, resource_key: str, profile_keys: list[str], overrides: dict[str, dict[str, str | None]] | None = None) -> None:
+        return self.governance.replace_resource_rule_profiles(resource_type=resource_type, resource_key=resource_key, profile_keys=profile_keys, overrides=overrides)
+
+    def get_profile_resource_rule(self, profile_key: str, resource_type: str, resource_key: str) -> dict[str, Any] | None:
+        return self.governance.get_profile_resource_rule(profile_key=profile_key, resource_type=resource_type, resource_key=resource_key)
 
     def create_tool_call_log(
         self,
@@ -379,6 +382,9 @@ class SQLiteStore:
 
     def get_kb_by_slug(self, slug: str) -> dict[str, Any] | None:
         return self.knowledge.get_kb_by_slug(slug=slug)
+
+    def update_kb_defaults(self, kb_id: int, default_backend_slug: str | None, default_agent_id: str | None) -> None:
+        return self.knowledge.update_kb_defaults(kb_id=kb_id, default_backend_slug=default_backend_slug, default_agent_id=default_agent_id)
 
     def ensure_backend_target(self, kb_id: int, slug: str, backend_type: str) -> None:
         return self.knowledge.ensure_backend_target(kb_id=kb_id, slug=slug, backend_type=backend_type)
