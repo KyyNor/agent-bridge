@@ -58,6 +58,7 @@ class WeknoraBackend:
         self.embedding_model_id = embedding_model_id
         self.summary_model_id = summary_model_id
         self._model_name_to_id: dict[str, str] | None = None
+        self._hybrid_agent_id: str | None = None
 
     def _headers(self) -> dict[str, str]:
         return {"X-API-Key": self.api_key}
@@ -220,23 +221,77 @@ class WeknoraBackend:
         question: str,
         chat_id: str | None = None,
         session_id: str | None = None,
+        agent_id: str | None = None,
     ) -> tuple[AskResult, str]:
         if session_id is None:
             session_id = self._create_session()
 
+        body: dict[str, Any] = {
+            "query": question,
+            "knowledge_base_ids": [backend_kb_id],
+            "disable_title": True,
+            "channel": "api",
+        }
+        if agent_id is not None:
+            body["agent_enabled"] = True
+            body["agent_id"] = agent_id
+            body["web_search_enabled"] = False
+
         response = self._request(
             "POST",
             f"/api/v1/knowledge-chat/{session_id}",
-            json={
-                "query": question,
-                "knowledge_base_ids": [backend_kb_id],
-                "disable_title": True,
-                "channel": "api",
-            },
+            json=body,
         )
         self._raise(response)
         answer, chunks = self._parse_sse_response(response.text, backend_kb_id)
         return AskResult(answer=answer, chunks=chunks, session_id=session_id), (chat_id or "")
+
+    def list_agents(self) -> list[dict[str, Any]]:
+        """List all agents from Weknora."""
+        response = self._request("GET", "/api/v1/agents")
+        self._raise(response)
+        return self._data(response) or []
+
+    def get_type_presets(self) -> list[dict[str, Any]]:
+        """Get agent type presets from Weknora."""
+        response = self._request("GET", "/api/v1/agents/type-presets")
+        self._raise(response)
+        return self._data(response) or []
+
+    def create_agent(self, name: str, preset_config: dict[str, Any]) -> dict[str, Any]:
+        """Create a new agent in Weknora from a type preset."""
+        i18n = preset_config.get("i18n", {})
+        zh_cn = i18n.get("zh-CN", {}) if isinstance(i18n, dict) else {}
+        body = {
+            "name": name,
+            "description": zh_cn.get("description", ""),
+            "is_builtin": False,
+            "config": preset_config.get("config", {}),
+        }
+        response = self._request("POST", "/api/v1/agents", json=body)
+        self._raise(response)
+        return self._data(response)
+
+    def ensure_hybrid_agent(self) -> str:
+        """Ensure a hybrid-rag-wiki agent exists, creating one if needed. Returns the agent ID."""
+        if self._hybrid_agent_id is not None:
+            return self._hybrid_agent_id
+
+        agents = self.list_agents()
+        for agent in agents:
+            config = agent.get("config", {})
+            if config.get("agent_type") == "hybrid-rag-wiki" or config.get("system_prompt_id") == "hybrid_rag_wiki_agent":
+                self._hybrid_agent_id = agent["id"]
+                return self._hybrid_agent_id
+
+        presets = self.get_type_presets()
+        preset = next((p for p in presets if p.get("id") == "hybrid-rag-wiki"), None)
+        if preset is None:
+            raise RuntimeError("hybrid-rag-wiki preset not found in Weknora type presets")
+
+        created = self.create_agent("AgentBridge混合智能体", preset)
+        self._hybrid_agent_id = created["id"]
+        return self._hybrid_agent_id
 
     def _create_session(self) -> str:
         response = self._request(
