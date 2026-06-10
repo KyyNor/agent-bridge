@@ -609,3 +609,22 @@ class KnowledgeRepository:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM backends WHERE slug = ?", (slug,))
             return cursor.rowcount > 0
+
+    def update_kb_defaults(self, kb_id: int, default_backend_slug: str | None, default_agent_id: str | None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE knowledge_bases
+                SET default_backend_slug = ?, default_agent_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (default_backend_slug, default_agent_id, kb_id),
+            )
+
+    def migrate_kb_defaults_columns(self) -> None:
+        with self._connect() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_bases)").fetchall()}
+            if "default_backend_slug" not in columns:
+                conn.execute("ALTER TABLE knowledge_bases ADD COLUMN default_backend_slug TEXT")
+            if "default_agent_id" not in columns:
+                conn.execute("ALTER TABLE knowledge_bases ADD COLUMN default_agent_id TEXT")

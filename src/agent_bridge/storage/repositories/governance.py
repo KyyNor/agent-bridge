@@ -214,20 +214,28 @@ class GovernanceRepository:
             return [dict(row) for row in rows]
 
     def replace_resource_rule_profiles(
-        self, resource_type: str, resource_key: str, profile_keys: list[str]
+        self, resource_type: str, resource_key: str, profile_keys: list[str], overrides: dict[str, dict[str, str | None]] | None = None
     ) -> None:
+        overrides = overrides or {}
         with self._connect() as conn:
             conn.execute(
                 "DELETE FROM profile_resource_rules WHERE resource_type = ? AND resource_key = ?",
                 (resource_type, resource_key),
             )
             for profile_key in profile_keys:
+                ovr = overrides.get(profile_key, {})
                 conn.execute(
                     """
-                    INSERT INTO profile_resource_rules (profile_key, resource_type, resource_key)
-                    VALUES (?, ?, ?)
+                    INSERT INTO profile_resource_rules (profile_key, resource_type, resource_key, retrieval_backend_slug, retrieval_agent_id)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (profile_key, resource_type, resource_key),
+                    (
+                        profile_key,
+                        resource_type,
+                        resource_key,
+                        ovr.get("retrieval_backend_slug"),
+                        ovr.get("retrieval_agent_id"),
+                    ),
                 )
 
     def create_tool_call_log(
@@ -437,5 +445,24 @@ class GovernanceRepository:
             row = conn.execute(
                 "SELECT * FROM tool_call_logs WHERE log_id = ?",
                 (log_id,),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def migrate_profile_resource_retrieval_columns(self) -> None:
+        with self._connect() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(profile_resource_rules)").fetchall()}
+            if "retrieval_backend_slug" not in columns:
+                conn.execute("ALTER TABLE profile_resource_rules ADD COLUMN retrieval_backend_slug TEXT")
+            if "retrieval_agent_id" not in columns:
+                conn.execute("ALTER TABLE profile_resource_rules ADD COLUMN retrieval_agent_id TEXT")
+
+    def get_profile_resource_rule(self, profile_key: str, resource_type: str, resource_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM profile_resource_rules
+                WHERE profile_key = ? AND resource_type = ? AND resource_key = ?
+                """,
+                (profile_key, resource_type, resource_key),
             ).fetchone()
             return row_to_dict(row)

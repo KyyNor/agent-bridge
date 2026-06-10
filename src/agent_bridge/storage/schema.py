@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
   description TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
+  default_backend_slug TEXT,
+  default_agent_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -156,6 +158,8 @@ CREATE TABLE IF NOT EXISTS profile_resource_rules (
   profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
   resource_type TEXT NOT NULL,
   resource_key TEXT NOT NULL,
+  retrieval_backend_slug TEXT,
+  retrieval_agent_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (profile_key, resource_type, resource_key)
 );
