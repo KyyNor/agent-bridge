@@ -7,10 +7,12 @@ import pytest
 
 from agent_bridge.core.domain import (
     AccessDenied,
+    BackendAdapter,
     BackendDocStatus,
     DocumentStatus,
     KbRole,
     Operation,
+    RetrievalStrategy,
     SyncJobStatus,
     SyncStateStatus,
     can_manage_kb,
@@ -165,3 +167,22 @@ def test_mock_backend_ask_returns_fallback():
         assert "does not support" in result.answer
         assert result.chunks == []
         assert chat_id == ""
+
+
+def test_retrieval_strategy_dataclass():
+    s = RetrievalStrategy(backend_slug="weknora", agent_id="hybrid-rag-wiki")
+    assert s.backend_slug == "weknora"
+    assert s.agent_id == "hybrid-rag-wiki"
+
+
+def test_retrieval_strategy_agent_id_optional():
+    s = RetrievalStrategy(backend_slug="ragflow")
+    assert s.agent_id is None
+
+
+def test_backend_adapter_ask_accepts_agent_id():
+    """Verify the protocol's ask() signature includes agent_id."""
+    import inspect
+    sig = inspect.signature(BackendAdapter.ask)
+    params = list(sig.parameters.keys())
+    assert "agent_id" in params
