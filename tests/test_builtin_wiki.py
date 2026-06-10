@@ -31,7 +31,7 @@ def test_metamcp_root_search_lists_wiki_builtin_with_allowed_kbs(wm_paths: Agent
 
     wiki = next(item for item in result["items"] if item["service"] == "wiki")
     assert wiki["kind"] == "builtin"
-    assert wiki["tool_count"] == 4
+    assert wiki["tool_count"] == 5
     assert wiki["resources"] == [{"resource_type": "wiki_kb", "resource_key": "frontend-docs", "name": "Frontend Docs"}]
 
 
@@ -70,7 +70,7 @@ def test_metamcp_wiki_path_lists_fixed_tools(wm_paths: AgentBridgePaths) -> None
 
     result = service.capabilities.search("root", "wiki", None, profile_key="safe-readonly")
 
-    assert [item["tool"] for item in result["items"]] == ["ask", "get_document", "list_kbs", "search"]
+    assert [item["tool"] for item in result["items"]] == ["ask", "get_document", "list_kbs", "search_all", "search"]
     assert result["items"][0]["service"] == "wiki"
     assert result["items"][0]["display_tool"] == "wiki.ask"
     schemas = {item["tool"]: item["input_schema"] for item in result["items"]}

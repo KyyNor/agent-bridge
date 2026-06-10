@@ -128,6 +128,10 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
         results = call_safely(lambda: service.search(current_actor, kb, q, backend_slug=backend, top_k=top_k))
         return {"results": [{"chunk_id": r.chunk_id, "content": r.content, "document_name": r.document_name, "similarity": r.similarity, "dataset_id": r.dataset_id} for r in results]}
 
+    @router.get("/search-all")
+    def search_all(q: str, top_k: int = 6, profile_key: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return call_safely(lambda: {"results": service.search_all(current_actor, q, top_k=top_k, profile_key=profile_key)})
+
     @router.post("/ask")
     def ask(payload: AskRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         result = call_safely(lambda: service.ask(current_actor, payload.kb, payload.question, backend_slug=payload.backend, session_id=payload.session_id, profile_key=payload.profile_key))

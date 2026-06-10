@@ -74,6 +74,20 @@ class WikiBuiltinProvider:
                 ToolType.overview.value,
             ),
             BuiltinTool(
+                "search_all",
+                "Wiki Search All",
+                "Search across all allowed KBs, returning which KBs have matching content.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "top_k": {"type": "integer", "default": 6},
+                    },
+                    "required": ["question"],
+                },
+                ToolType.search.value,
+            ),
+            BuiltinTool(
                 "search",
                 "Wiki Search",
                 "Search snippets in an allowed KB.",
@@ -91,7 +105,7 @@ class WikiBuiltinProvider:
         ]
 
     def resource_from_arguments(self, tool: str, arguments: dict[str, Any]) -> BuiltinResourceRef | None:
-        if tool not in {"search", "ask", "get_document"}:
+        if tool not in {"search", "search_all", "ask", "get_document"}:
             return None
         kb_slug = str(arguments.get("kb") or arguments.get("kb_slug") or "").strip()
         if not kb_slug:
@@ -112,8 +126,30 @@ class WikiBuiltinProvider:
                     for kb in self.list_resources(actor, profile_key)
                 ]
             }
-        if tool not in {"search", "ask", "get_document"}:
+        if tool not in {"search", "search_all", "ask", "get_document"}:
             raise NotFound("tool not found")
+        if tool == "search_all":
+            question = str(arguments.get("question") or "").strip()
+            if not question:
+                raise ValidationError("question is required")
+            try:
+                results = self.service.search_all(
+                    actor, question,
+                    top_k=int(arguments.get("top_k") or 6),
+                    profile_key=profile_key,
+                )
+            except AgentBridgeError:
+                raise
+            except Exception as exc:
+                raise mark_builtin_failure(
+                    ValidationError(f"Wiki builtin backend failed: {exc}"),
+                    stage=FailureStage.builtin_backend.value,
+                    owner=FailureOwner.builtin_backend.value,
+                    error_type="builtin_backend_error",
+                    resource_type=ProfileResourceType.wiki_kb.value,
+                    resource_key="",
+                ) from exc
+            return {"results": results}
         kb_slug = str(arguments.get("kb") or arguments.get("kb_slug") or "").strip()
         if not kb_slug:
             raise ValidationError("kb is required")

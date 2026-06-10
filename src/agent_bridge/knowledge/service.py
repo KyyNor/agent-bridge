@@ -330,6 +330,40 @@ class AgentBridgeService:
             jobs = self.store.list_jobs_for_user(actor, backend_slug=backend)
         return {"jobs": jobs}
 
+    def search_all(self, actor: str, question: str, *,
+                   profile_key: str | None = None,
+                   top_k: int = 6) -> list[dict[str, Any]]:
+        from agent_bridge.capabilities.models import ProfileResourceType
+
+        kbs = self.list_kbs(actor)
+        if profile_key:
+            allowed = set(
+                self.governance.filter_resource_keys(
+                    actor=actor,
+                    profile_key=profile_key,
+                    resource_type=ProfileResourceType.wiki_kb.value,
+                    resource_keys=[kb["slug"] for kb in kbs],
+                )
+            )
+            kbs = [kb for kb in kbs if kb["slug"] in allowed]
+
+        results: list[dict[str, Any]] = []
+        for kb in kbs:
+            try:
+                target = self._resolve_retrieval_target(kb, None)
+                adapter = self._get_adapter(target["slug"])
+                chunks = adapter.retrieve(target["backend_kb_id"], question, top_k)
+                if chunks:
+                    doc_names = {c.document_name for c in chunks}
+                    results.append({
+                        "kb_slug": kb["slug"],
+                        "document_count": len(doc_names),
+                        "chunk_count": len(chunks),
+                    })
+            except Exception:
+                logger.warning("search_all: failed to search KB '%s'", kb["slug"], exc_info=True)
+        return results
+
     def search(self, actor: str, kb_slug: str, question: str, *,
                backend_slug: str | None = None,
                top_k: int = 6) -> list[RetrievalResult]:
