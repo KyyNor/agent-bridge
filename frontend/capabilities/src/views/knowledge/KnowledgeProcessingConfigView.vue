@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import CronExpressionParser from 'cron-parser'
-import { api } from '../api/client'
-import type { BackendInfo, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../api/types'
-import { formatLocalDatetime } from '../lib/time'
-import { Card, CardContent } from '../components/ui/card'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../components/ui/dialog'
-import { Badge } from '../components/ui/badge'
+import { api } from '../../api/client'
+import type { BackendInfo, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../../api/types'
+import { formatLocalDatetime } from '../../lib/time'
+import { Card, CardContent } from '../../components/ui/card'
+import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
+import { Badge } from '../../components/ui/badge'
 
 const loading = ref(true)
 

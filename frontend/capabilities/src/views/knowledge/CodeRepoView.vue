@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
-import { api } from '../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability, ProjectProfile, TestCloneResult } from '../api/types'
-import { formatLocalDatetime } from '../lib/time'
-import { Card, CardContent } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
+import { api } from '../../api/client'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability, ProjectProfile, TestCloneResult } from '../../api/types'
+import { formatLocalDatetime } from '../../lib/time'
+import { Card, CardContent } from '../../components/ui/card'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 
 const repos = ref<CodeRepository[]>([])
 const loading = ref(true)

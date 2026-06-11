@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { api } from '../api/client'
-import type { McpTool, McpService } from '../api/types'
-import { Card, CardContent } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
-import { Input } from '../components/ui/input'
+import { api } from '../../api/client'
+import type { McpTool, McpService } from '../../api/types'
+import { Card, CardContent } from '../../components/ui/card'
+import { Badge } from '../../components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import { Input } from '../../components/ui/input'
 
 interface ToolWithService extends McpTool {
   service_name: string

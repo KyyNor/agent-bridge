@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Bridge 功能完整性评估报告</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1a1a2e; --card: #ffffff; --border: #e5e7eb;
+    --muted: #6b7280; --accent: #6366f1; --accent-light: #eef2ff;
+    --green: #059669; --green-bg: #ecfdf5; --green-border: #a7f3d0;
+    --amber: #d97706; --amber-bg: #fffbeb; --amber-border: #fde68a;
+    --red: #dc2626; --red-bg: #fef2f2; --red-border: #fecaca;
+    --blue: #2563eb; --blue-bg: #eff6ff; --blue-border: #bfdbfe;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 32px; }
+
+  .header { margin-bottom: 48px; border-bottom: 2px solid var(--accent); padding-bottom: 24px; }
+  .header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  .header .meta { margin-top: 8px; color: var(--muted); font-size: 14px; display: flex; gap: 20px; }
+
+  /* Score Cards */
+  .score-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 40px; }
+  .score-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+  .score-card .label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 8px; }
+  .score-card .score { font-size: 40px; font-weight: 800; line-height: 1; }
+  .score-card .score small { font-size: 18px; font-weight: 400; color: var(--muted); }
+  .score-card .detail { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .score-card .bar { height: 6px; border-radius: 3px; background: var(--border); margin-top: 12px; overflow: hidden; }
+  .score-card .bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+
+  /* Section */
+  .section { margin-bottom: 40px; }
+  .section-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
+  .section-title .icon { font-size: 22px; }
+  .section-desc { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+
+  /* Module Card */
+  .module { background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; overflow: hidden; }
+  .module-header { padding: 18px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .module-header h3 { font-size: 16px; font-weight: 600; }
+  .module-header .badge { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
+  .badge-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .badge-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+  .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+  .badge-blue { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+  .module-body { padding: 20px 24px; }
+
+  /* Lists */
+  .check-list { list-style: none; }
+  .check-list li { padding: 6px 0; font-size: 14px; display: flex; align-items: flex-start; gap: 8px; }
+  .check-list li .dot { flex-shrink: 0; margin-top: 3px; }
+  .check-list li .text { flex: 1; }
+  .check-list li .sub { color: var(--muted); font-size: 13px; }
+
+  .gap-list { list-style: none; }
+  .gap-list li { padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; display: flex; align-items: flex-start; gap: 10px; }
+  .gap-list li .severity { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-top: 2px; text-transform: uppercase; }
+  .severity-high { background: var(--red-bg); color: var(--red); }
+  .severity-medium { background: var(--amber-bg); color: var(--amber); }
+  .severity-low { background: var(--blue-bg); color: var(--blue); }
+  .gap-list li .gap-text { flex: 1; }
+  .gap-list li .gap-text strong { display: block; margin-bottom: 2px; }
+  .gap-list li .gap-text span { color: var(--muted); font-size: 13px; }
+
+  /* Data Flow Diagram */
+  .flow-diagram { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+  .flow-diagram h4 { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .flow-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; }
+  .flow-node { background: var(--green-bg); border: 1px solid var(--green-border); border-radius: 6px; padding: 4px 10px; font-weight: 500; color: var(--green); }
+  .flow-node.broken { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
+  .flow-node.missing { background: #f3f4f6; border: 1px dashed var(--muted); color: var(--muted); }
+  .flow-arrow { color: var(--muted); font-size: 16px; }
+
+  /* Governance Verdict */
+  .verdict { background: var(--card); border: 2px solid var(--accent); border-radius: 12px; padding: 32px; margin-top: 40px; }
+  .verdict h2 { font-size: 22px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .verdict p { font-size: 15px; margin-bottom: 12px; }
+  .verdict .highlight { background: var(--accent-light); padding: 2px 6px; border-radius: 4px; font-weight: 600; color: var(--accent); }
+  .verdict-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+  .verdict-item { padding: 16px; border-radius: 8px; font-size: 14px; }
+  .verdict-item.ok { background: var(--green-bg); border: 1px solid var(--green-border); }
+  .verdict-item.warn { background: var(--amber-bg); border: 1px solid var(--amber-border); }
+  .verdict-item strong { display: block; margin-bottom: 4px; }
+
+  /* Recommendations */
+  .rec-list { counter-reset: rec; list-style: none; margin-top: 32px; }
+  .rec-list li { counter-increment: rec; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 20px 20px 56px; margin-bottom: 12px; position: relative; }
+  .rec-list li::before { content: counter(rec); position: absolute; left: 20px; top: 20px; width: 24px; height: 24px; background: var(--accent); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .rec-list li strong { display: block; font-size: 15px; margin-bottom: 4px; }
+  .rec-list li span { color: var(--muted); font-size: 13px; }
+  .rec-list li .tags { margin-top: 8px; display: flex; gap: 6px; }
+  .rec-list li .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--accent-light); color: var(--accent); font-weight: 500; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .score-grid { grid-template-columns: 1fr; }
+    .verdict-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>Agent Bridge 功能完整性评估</h1>
+    <div class="meta">
+      <span>评估日期: 2026-06-11</span>
+      <span>对照需求: Phase 1 → Phase 1.5 → Phase 2 全量</span>
+      <span>代码分支: main</span>
+    </div>
+  </div>
+
+  <!-- Score Overview -->
+  <div class="score-grid">
+    <div class="score-card">
+      <div class="label">知识管理</div>
+      <div class="score" style="color: var(--green)">92<small>/100</small></div>
+      <div class="detail">10 项完成 · 1 项断链 · 1 项延期</div>
+      <div class="bar"><div class="bar-fill" style="width: 92%; background: var(--green);"></div></div>
+    </div>
+    <div class="score-card">
+      <div class="label">能力管理</div>
+      <div class="score" style="color: var(--amber)">78<small>/100</small></div>
+      <div class="detail">8 项完成 · 2 项断链 · 3 项未启动</div>
+      <div class="bar"><div class="bar-fill" style="width: 78%; background: var(--amber);"></div></div>
+    </div>
+    <div class="score-card">
+      <div class="label">调用观测</div>
+      <div class="score" style="color: var(--amber)">72<small>/100</small></div>
+      <div class="detail">6 项完成 · 0 项断链 · 5 项待增强</div>
+      <div class="bar"><div class="bar-fill" style="width: 72%; background: var(--amber);"></div></div>
+    </div>
+  </div>
+
+  <!-- ===================== 知识管理 ===================== -->
+  <div class="section">
+    <div class="section-title"><span class="icon">📚</span> 知识管理</div>
+    <div class="section-desc">KB 全生命周期管理、多后端同步、检索与问答、MCP 集成</div>
+
+    <div class="module">
+      <div class="module-header">
+        <h3>已完成功能</h3>
+        <span class="badge badge-green">10 / 12</span>
+      </div>
+      <div class="module-body">
+        <ul class="check-list">
+          <li><span class="dot">✅</span><span class="text">KB CRUD + slug 标识 + RBAC (viewer/contributor/admin) + 前端管理界面</span></li>
+          <li><span class="dot">✅</span><span class="text">文档全生命周期: 上传 → 版本化 → 软删除 → 归档 → 物理清理<br><span class="sub">拖拽上传、文件夹上传、多文件批量处理</span></span></li>
+          <li><span class="dot">✅</span><span class="text">多后端架构: Mock / RagFlow / Weknora 三套适配器 + BackendRegistry 运行时管理</span></li>
+          <li><span class="dot">✅</span><span class="text">同步管道: 异步 SyncJob + 自动对齐(align_backends) + 定时调度(doc_sync_scheduler)</span></li>
+          <li><span class="dot">✅</span><span class="text">检索与问答: search / search_all / ask + SSE 流式 + 会话持久化(chat_id)</span></li>
+          <li><span class="dot">✅</span><span class="text">检索策略链: Profile 覆盖 → KB 默认值 → 首个活跃后端<br><span class="sub">后端 service + storage + schema 全链路已通</span></span></li>
+          <li><span class="dot">✅</span><span class="text">Wiki 内建 MCP 能力: list_kbs / search / search_all / ask / get_document<br><span class="sub">Profile 治理 KB 访问范围</span></span></li>
+          <li><span class="dot">✅</span><span class="text">Weknora Agent 管理: ensure_hybrid_agent + agent_id 穿透到 ask()</span></li>
+          <li><span class="dot">✅</span><span class="text">知识处理配置页: 定时任务编辑 + 后端 CRUD + 分类管理</span></li>
+          <li><span class="dot">✅</span><span class="text">代码知识: CodeGraph + Understand Anything 集成 + 内建 MCP 能力</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="module">
+      <div class="module-header">
+        <h3>⚠️ 断点 & 缺口</h3>
+        <span class="badge badge-amber">2 项</span>
+      </div>
+      <div class="module-body">
+        <ul class="gap-list">
+          <li>
+            <span class="severity severity-high">断链</span>
+            <div class="gap-text">
+              <strong>检索策略配置 UI 未接入</strong>
+              <span>后端已实现 resolve_retrieval_strategy()、schema 已加 default_backend_slug / default_agent_id / retrieval_backend_slug / retrieval_agent_id 字段、API 已有 PUT /kbs/{slug}/defaults。但前端 types.ts 无这些字段、api/client.ts 无 updateKbDefaults 方法、KnowledgeView.vue 和 ProfilesView.vue 无对应 UI。管理员无法通过界面配置 KB 默认检索后端或 Profile 级别的检索覆盖。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-low">延期</span>
+            <div class="gap-text">
+              <strong>KnowledgeAdapter 多后端编排层</strong>
+              <span>需求文档 Feature 3 明确标注"本期延期"。跨后端批量检索、结果合并去重、Weknora 多 KB 批量调用等场景暂不支持。search_all 目前是逐 KB 检索。</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Data Flow: Retrieval Strategy -->
+    <div class="flow-diagram">
+      <h4>检索策略数据流 — 断点位置</h4>
+      <div class="flow-row">
+        <span class="flow-node">DB Schema</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node">Storage Repo</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node">Service (resolve)</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node">API Route</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-node broken">Frontend UI ❌</span>
+      </div>
+      <div class="flow-row" style="margin-top:8px; font-size:12px; color:var(--muted);">
+        default_backend_slug ✓ · default_agent_id ✓ · retrieval_backend_slug ✓ · retrieval_agent_id ✓ &nbsp;|&nbsp; types.ts ✗ · client.ts ✗ · KnowledgeView ✗ · ProfilesView ✗
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== 能力管理 ===================== -->
+  <div class="section">
+    <div class="section-title"><span class="icon">🔧</span> 能力管理</div>
+    <div class="section-desc">MCP 服务注册、工具同步、分类治理、Profile 策略、MetaMCP 网关</div>
+
+    <div class="module">
+      <div class="module-header">
+        <h3>已完成功能</h3>
+        <span class="badge badge-green">8 / 13</span>
+      </div>
+      <div class="module-body">
+        <ul class="check-list">
+          <li><span class="dot">✅</span><span class="text">MCP 服务注册: CRUD + 启停 + 连接头管理 + 前端 ServicesView</span></li>
+          <li><span class="dot">✅</span><span class="text">工具同步: 从远程 MCP 端点拉取 → 本地 upsert → 失活清理 + 前端触发</span></li>
+          <li><span class="dot">✅</span><span class="text">工具分类: overview / search / detail / action 四类 + action 拒绝执行 + 前端 ToolsView</span></li>
+          <li><span class="dot">✅</span><span class="text">MetaMCP 网关: search (路径浏览) + execute (转发执行) → 单一 /mcp 入口</span></li>
+          <li><span class="dot">✅</span><span class="text">Profile 治理: 服务级 allow/deny + 资源级允许 + 服务端强制 + 前端 ProfilesView</span></li>
+          <li><span class="dot">✅</span><span class="text">能力目录 API: /capability-catalog 三级浏览 (根→来源→工具)</span></li>
+          <li><span class="dot">✅</span><span class="text">CLI 集成: agb profile create/list/rules/use → 写入 .mcp.json</span></li>
+          <li><span class="dot">✅</span><span class="text">内建能力: Wiki + CodeGraph 双 BuiltinProvider → 统一治理</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="module">
+      <div class="module-header">
+        <h3>⚠️ 断点 & 缺口</h3>
+        <span class="badge badge-amber">5 项</span>
+      </div>
+      <div class="module-body">
+        <ul class="gap-list">
+          <li>
+            <span class="severity severity-high">断链</span>
+            <div class="gap-text">
+              <strong>Profile 资源规则未暴露检索覆盖配置</strong>
+              <span>ProfilesView.vue 有 resource_type / resource_key 的勾选，但没有 retrieval_backend_slug / retrieval_agent_id 的 UI。Profile 级别的检索策略覆盖在后端已就绪，但前端无法配置。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-medium">未启动</span>
+            <div class="gap-text">
+              <strong>工作流管理 (WorkflowView) 为空壳占位</strong>
+              <span>导航已有入口但页面仅显示 "🚧 正在开发中"。无后端存储、无 API、无前端逻辑。需求文档中无详细工作流规格。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-medium">未启动</span>
+            <div class="gap-text">
+              <strong>Action 工具治理</strong>
+              <span>Phase 2 需求中有定义: 风险等级 (低/中/高/禁止)、执行策略 (不可执行/需确认/需审批/试运行)。当前 action 类型工具仅注册不可执行，无风险分级和审批流。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-low">未启动</span>
+            <div class="gap-text">
+              <strong>工具试用 (Trial Run) 功能</strong>
+              <span>Phase 1 需求中定义了 MetaMCP search 试用、execute 试用、KB 搜索/问答试用。前端无试用面板，管理员无法在 UI 上直接测试工具。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-low">未启动</span>
+            <div class="gap-text">
+              <strong>MetaMCP 接入说明页</strong>
+              <span>Phase 1 页面定义中有独立的"接入说明"页: 展示接入地址、search 路径浏览规则、execute 参数、示例代码、错误码。当前仅有 ProfilesView 里的"复制命令"按钮。</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== 调用观测 ===================== -->
+  <div class="section">
+    <div class="section-title"><span class="icon">📊</span> 调用观测</div>
+    <div class="section-desc">调用日志、故障归因、聚合统计、趋势分析、仪表盘</div>
+
+    <div class="module">
+      <div class="module-header">
+        <h3>已完成功能</h3>
+        <span class="badge badge-green">6 / 11</span>
+      </div>
+      <div class="module-body">
+        <ul class="check-list">
+          <li><span class="dot">✅</span><span class="text">调用日志: tool_call_logs 全字段 + request/response JSON + 6 种索引</span></li>
+          <li><span class="dot">✅</span><span class="text">故障归因: failure_stage (8 级) + failure_owner (4 方) + error_type (8 类)<br><span class="sub">profile_policy_blocked / mcp_transport_error / builtin_backend_error 等</span></span></li>
+          <li><span class="dot">✅</span><span class="text">状态三态: success / error / blocked + 前端三色 Badge + 计数 Tab</span></li>
+          <li><span class="dot">✅</span><span class="text">聚合统计: 多维度 GROUP BY + 成功/失败/拦截计数 + avg/max 耗时</span></li>
+          <li><span class="dot">✅</span><span class="text">日志详情弹窗: 完整 JSON 展示 + 故障阶段/责任方/类型 + 格式化</span></li>
+          <li><span class="dot">✅</span><span class="text">统计页: 维度切换 + 条形图可视化 + 占比计算</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="module">
+      <div class="module-header">
+        <h3>⚠️ 待增强</h3>
+        <span class="badge badge-amber">5 项</span>
+      </div>
+      <div class="module-body">
+        <ul class="gap-list">
+          <li>
+            <span class="severity severity-high">缺失</span>
+            <div class="gap-text">
+              <strong>统计页无时间粒度与快捷区间</strong>
+              <span>后端 API 支持 bucket=hour/day 参数，但前端 StatsView.vue 未使用。无 24h/7d/30d 快捷选择、无时间序列趋势图。Phase 2 需求明确要求这些功能。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-high">缺失</span>
+            <div class="gap-text">
+              <strong>统计→日志无穿透链接</strong>
+              <span>Phase 2 需求要求: "从统计页点击某一行 → 跳转到已过滤的日志列表"。当前 StatsView 表格行无点击事件、无法跳转。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-medium">缺失</span>
+            <div class="gap-text">
+              <strong>仪表盘不覆盖知识与观测健康</strong>
+              <span>DashboardView 仅展示 MCP 服务状态。无 KB 同步失败、无代码仓库状态、无调用趋势、无近期错误摘要。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-medium">缺失</span>
+            <div class="gap-text">
+              <strong>无 P50/P95 延迟分位数</strong>
+              <span>后端仅提供 avg_duration_ms 和 max_duration_ms。Phase 2 需求要求 P50/P95。</span>
+            </div>
+          </li>
+          <li>
+            <span class="severity severity-low">延期</span>
+            <div class="gap-text">
+              <strong>日志运维功能: 导出/保留/截断/脱敏</strong>
+              <span>Phase 2 P2 保留项: CSV 导出、日志保留策略、大负载截断、字段级脱敏配置。当前全量存储无清理机制。</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== 治理支撑评估 ===================== -->
+  <div class="verdict">
+    <h2>🏛️ 团队知识与工具治理支撑评估</h2>
+    <p>
+      核心治理闭环 <span class="highlight">注册 → 分类 → 策略 → 执行 → 审计</span> 已完整拉通。
+      以下逐一评估实际治理场景的支撑情况:
+    </p>
+    <div class="verdict-grid">
+      <div class="verdict-item ok">
+        <strong>✅ 工具注册与发现</strong>
+        管理员可注册外部 MCP 服务、同步工具、分类标记。AI Agent 通过 MetaMCP search 浏览可用能力。满足"有什么工具"的治理需求。
+      </div>
+      <div class="verdict-item ok">
+        <strong>✅ 权限与访问控制</strong>
+        Profile 机制支持按团队/项目隔离: 服务级 allow/deny + 资源级 KB/Repo 允许列表。CLI 一键绑定配置。满足"谁能用什么"的治理需求。
+      </div>
+      <div class="verdict-item ok">
+        <strong>✅ 知识库管理与共享</strong>
+        KB 独立管理、多后端同步、RBAC 成员管理、Profile 控制可见范围。Wiki 内建 MCP 让 Agent 可直接检索。满足"知识在哪里、谁能看"的治理需求。
+      </div>
+      <div class="verdict-item ok">
+        <strong>✅ 调用审计与故障追踪</strong>
+        每次调用全量记录 (谁调了什么、成功/失败/拦截、耗时、请求响应)。故障归因到具体阶段和责任方。满足"出了什么问题、谁的锅"的治理需求。
+      </div>
+      <div class="verdict-item warn">
+        <strong>⚠️ 检索策略运营</strong>
+        多后端检索策略的后端链路已通，但管理员无法通过 UI 配置 KB 默认检索后端和 Profile 级覆盖。需补充前端 UI 才能实际运营。
+      </div>
+      <div class="verdict-item warn">
+        <strong>⚠️ 运营趋势与报警</strong>
+        调用统计无时间趋势、无分位数延迟、无错误 Top-N 排行、无主动报警。可事后查日志，但不支持"趋势变差了及时感知"。
+      </div>
+      <div class="verdict-item warn">
+        <strong>⚠️ Action 工具安全管控</strong>
+        写操作工具只能注册、不能执行。无风险分级、无审批流、无试运行。团队如果有写入类 MCP 工具，当前无法安全地开放。
+      </div>
+      <div class="verdict-item warn">
+        <strong>⚠️ 工作流编排</strong>
+        多步骤知识处理工作流 (如: 文档入库 → 自动抽取 → 质量检查 → 发布) 无任何支撑。导航入口已有，但仅占位页。
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== 优先建议 ===================== -->
+  <div class="section" style="margin-top: 40px;">
+    <div class="section-title"><span class="icon">🎯</span> 优先修复建议</div>
+    <div class="section-desc">按治理影响排序，优先修复断链点</div>
+
+    <ol class="rec-list">
+      <li>
+        <strong>补齐检索策略前端 UI</strong>
+        <span>KnowledgeView 增加 KB 默认后端/Agent 下拉选择；ProfilesView 资源规则增加检索覆盖字段。前端 types.ts 和 client.ts 同步补齐。这是目前唯一的"后端已通、前端断链"问题，修复成本最低、治理价值最高。</span>
+        <div class="tags"><span class="tag">断链修复</span><span class="tag">前端</span><span class="tag">优先级 P0</span></div>
+      </li>
+      <li>
+        <strong>统计页增强: 时间区间 + 穿透链接</strong>
+        <span>StatsView 增加 24h/7d/30d 快捷按钮 + bucket 参数传递 + 时间序列展示。表格行增加点击跳转到已过滤的 LogsView (通过 URL hash 传参)。后端已支持，仅前端工作。</span>
+        <div class="tags"><span class="tag">体验增强</span><span class="tag">前端</span><span class="tag">优先级 P1</span></div>
+      </li>
+      <li>
+        <strong>仪表盘扩展: 覆盖知识 + 观测</strong>
+        <span>DashboardView 增加: KB 同步失败计数、代码仓库状态、最近 24h 调用量、近期错误 Top 5。让仪表盘成为真正的"运维入口"。</span>
+        <div class="tags"><span class="tag">体验增强</span><span class="tag">全栈</span><span class="tag">优先级 P1</span></div>
+      </li>
+      <li>
+        <strong>定义工作流 MVP 范围</strong>
+        <span>当前 WorkflowView 是空壳。建议先明确最小场景 (如: 文档入库自动同步 + 质量检查通知)，再设计数据模型和 API。不建议盲目开发。</span>
+        <div class="tags"><span class="tag">规划</span><span class="tag">产品定义</span><span class="tag">优先级 P2</span></div>
+      </li>
+      <li>
+        <strong>Action 工具治理设计</strong>
+        <span>当团队有写入类 MCP 工具需求时启动。建议从"风险分级 + 确认执行"两级开始，审批流和试运行后续迭代。</span>
+        <div class="tags"><span class="tag">延期项</span><span class="tag">全栈</span><span class="tag">优先级 P2</span></div>
+      </li>
+      <li>
+        <strong>日志运维: 导出 + 保留策略</strong>
+        <span>长期运行后 tool_call_logs 表会膨胀。增加定时清理 (如保留 90 天) + CSV 导出按钮。大负载截断 (request_json > 100KB) 也应考虑。</span>
+        <div class="tags"><span class="tag">运维</span><span class="tag">后端</span><span class="tag">优先级 P2</span></div>
+      </li>
+    </ol>
+  </div>
+
+  <!-- Footer -->
+  <div style="margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: 13px;">
+    Agent Bridge 功能完整性评估 · 生成于 2026-06-11 · 对照 11 份实施计划 + 5 份需求规格全量审查
+  </div>
+
+</div>
+</body>
+</html>

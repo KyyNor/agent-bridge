@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { api } from '../api/client'
-import type { McpService } from '../api/types'
-import { Badge } from '../components/ui/badge'
-import { timeAgo } from '../lib/time'
+import { api } from '../../api/client'
+import type { McpService } from '../../api/types'
+import { Badge } from '../../components/ui/badge'
+import { timeAgo } from '../../lib/time'
 
 const services = ref<McpService[]>([])
 const loading = ref(true)

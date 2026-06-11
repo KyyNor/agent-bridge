@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { api } from '../api/client'
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
-import { Button } from '../components/ui/button'
+import { api } from '../../api/client'
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
+import { Button } from '../../components/ui/button'
 
 const stats = ref<Record<string, unknown>[]>([])
 const loading = ref(false)

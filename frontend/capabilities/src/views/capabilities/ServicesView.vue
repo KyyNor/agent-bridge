@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { api } from '../api/client'
-import type { McpService } from '../api/types'
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
-import { timeAgo } from '../lib/time'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../components/ui/dialog'
+import { api } from '../../api/client'
+import type { McpService } from '../../api/types'
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card'
+import { timeAgo } from '../../lib/time'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 
 const services = ref<McpService[]>([])
 const toolCounts = ref<Record<string, number>>({})

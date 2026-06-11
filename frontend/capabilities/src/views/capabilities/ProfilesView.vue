@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { api } from '../api/client'
-import type { ProjectProfile, ProfileSourceRule, ProfileResourceRule, McpService, KnowledgeBaseSummary, CodeRepository } from '../api/types'
-import { Card, CardContent } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../components/ui/dialog'
+import { api } from '../../api/client'
+import type { ProjectProfile, ProfileSourceRule, ProfileResourceRule, McpService, KnowledgeBaseSummary, CodeRepository } from '../../api/types'
+import { Card, CardContent } from '../../components/ui/card'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 
 const profiles = ref<ProjectProfile[]>([])
 const loading = ref(true)

@@ -2,15 +2,16 @@
 import { ref, computed } from 'vue'
 import AppShell from './components/AppShell.vue'
 import type { NavGroup } from './components/AppShell.vue'
-import DashboardView from './views/DashboardView.vue'
-import ServicesView from './views/ServicesView.vue'
-import ToolsView from './views/ToolsView.vue'
-import ProfilesView from './views/ProfilesView.vue'
-import CodeRepoView from './views/CodeRepoView.vue'
-import KnowledgeView from './views/KnowledgeView.vue'
-import KnowledgeProcessingConfigView from './views/KnowledgeProcessingConfigView.vue'
-import LogsView from './views/LogsView.vue'
-import StatsView from './views/StatsView.vue'
+import DashboardView from './views/dashboard/DashboardView.vue'
+import ServicesView from './views/capabilities/ServicesView.vue'
+import ToolsView from './views/capabilities/ToolsView.vue'
+import ProfilesView from './views/capabilities/ProfilesView.vue'
+import CodeRepoView from './views/knowledge/CodeRepoView.vue'
+import KnowledgeView from './views/knowledge/KnowledgeView.vue'
+import KnowledgeProcessingConfigView from './views/knowledge/KnowledgeProcessingConfigView.vue'
+import WorkflowView from './views/workflow/WorkflowView.vue'
+import LogsView from './views/monitoring/LogsView.vue'
+import StatsView from './views/monitoring/StatsView.vue'
 
 const hash = ref(window.location.hash.slice(1) || 'dashboard')
 window.addEventListener('hashchange', () => {
@@ -38,6 +39,12 @@ const navGroups: NavGroup[] = [
       { key: 'knowledge', label: '文档知识', description: '管理文档知识库和文档' },
       { key: 'code-repos', label: '代码知识', description: '管理代码仓库和知识图谱' },
       { key: 'knowledge-config', label: '知识处理配置', description: '配置同步计划和仓库分类' },
+    ],
+  },
+  {
+    label: '工作流',
+    items: [
+      { key: 'workflow', label: '工作流管理', description: '管理和编排知识工作流' },
     ],
   },
   {
@@ -70,6 +77,7 @@ const view = computed(() => hash.value)
         <CodeRepoView v-else-if="view === 'code-repos'" />
         <KnowledgeView v-else-if="view === 'knowledge'" />
         <KnowledgeProcessingConfigView v-else-if="view === 'knowledge-config'" />
+        <WorkflowView v-else-if="view === 'workflow'" />
         <LogsView v-else-if="view === 'logs'" />
         <StatsView v-else-if="view === 'stats'" />
       </div>

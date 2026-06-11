@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { api } from '../api/client'
-import type { ToolCallLog } from '../api/types'
-import { formatLocalDatetime } from '../lib/time'
-import { Card, CardContent } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
-import { Button } from '../components/ui/button'
-import { Input } from '../components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog'
+import { api } from '../../api/client'
+import type { ToolCallLog } from '../../api/types'
+import { formatLocalDatetime } from '../../lib/time'
+import { Card, CardContent } from '../../components/ui/card'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { Input } from '../../components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 
 const logs = ref<ToolCallLog[]>([])
 const loading = ref(false)
