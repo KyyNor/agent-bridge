@@ -26,13 +26,13 @@ class UnderstandingScheduler:
         self._ensure_scheduler()
         self._refresh_jobs()
         self._scheduler.start()
-        logger.info("Understand scheduler started with cron: %s", self._current_cron)
+        logger.info("Understand 调度器已启动 cron: %s", self._current_cron)
 
     def stop(self) -> None:
         if self._scheduler:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
-            logger.info("Understand scheduler stopped")
+            logger.info("Understand 调度器已停止")
 
     def refresh(self) -> None:
         config = self._store.get_sync_config()
@@ -40,7 +40,7 @@ class UnderstandingScheduler:
         self._ensure_scheduler()
         if not self._scheduler.running:
             self._scheduler.start()
-            logger.info("Understand scheduler started with cron: %s", self._current_cron)
+            logger.info("Understand 调度器已启动 cron: %s", self._current_cron)
         self._refresh_jobs()
 
     def get_status(self) -> dict[str, Any]:
@@ -66,7 +66,7 @@ class UnderstandingScheduler:
         try:
             trigger = CronTrigger.from_crontab(self._current_cron)
         except (ValueError, TypeError) as exc:
-            logger.error("Invalid cron expression '%s': %s", self._current_cron, exc)
+            logger.error("无效的 cron 表达式 '%s': %s", self._current_cron, exc)
             return
         repos = self._store.list_code_repositories()
         for repo in repos:
@@ -80,12 +80,12 @@ class UnderstandingScheduler:
                 id=f"understand_{repo['repo_key']}",
                 kwargs={"repo_key": repo["repo_key"]},
             )
-            logger.debug("Scheduled understand for %s with cron: %s", repo["repo_key"], self._current_cron)
+            logger.debug("已调度 Understand 分析 %s cron: %s", repo["repo_key"], self._current_cron)
 
     def _run_understand(self, repo_key: str) -> None:
         admin = next(iter(self._admins), "root")
         try:
             self._service.analyze_understand(admin, repo_key)
-            logger.info("Scheduled understand completed for %s", repo_key)
+            logger.info("定时 Understand 分析完成 %s", repo_key)
         except Exception:
-            logger.exception("Scheduled understand failed for %s", repo_key)
+            logger.exception("定时 Understand 分析失败 %s", repo_key)

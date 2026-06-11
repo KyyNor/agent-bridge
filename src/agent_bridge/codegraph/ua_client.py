@@ -107,7 +107,7 @@ class DashboardPool:
             session = self._sessions.get(project_key)
             if session and self._is_pid_alive(session["pid"]):
                 session["last_accessed_at"] = time.time()
-                logger.debug("pool: reused session for %s pid=%s", project_key, session["pid"])
+                logger.debug("会话池: 复用会话 %s pid=%s", project_key, session["pid"])
                 return {"running": True, "url": session["url"], "pid": session["pid"],
                         "started_at": session.get("started_at")}
 
@@ -128,7 +128,7 @@ class DashboardPool:
                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
                 "last_accessed_at": now,
             }
-            logger.info("pool: started session for %s pid=%s url=%s total=%d",
+            logger.info("会话池: 启动会话 %s pid=%s url=%s 总数=%d",
                         project_key, result["pid"], result["url"], len(self._sessions))
             return {"running": True, "url": result["url"], "pid": result["pid"]}
 
@@ -167,12 +167,12 @@ class DashboardPool:
             os.killpg(session["pid"], 15)
         except (ProcessLookupError, OSError):
             pass
-        logger.info("pool: stopped session for %s pid=%s", project_key, session["pid"])
+        logger.info("会话池: 停止会话 %s pid=%s", project_key, session["pid"])
         return {"stopped": True}
 
     def _evict_lru_locked(self) -> None:
         oldest_key = min(self._sessions, key=lambda k: self._sessions[k]["last_accessed_at"])
-        logger.info("pool: evicting LRU session %s", oldest_key)
+        logger.info("会话池: 淘汰最久未用会话 %s", oldest_key)
         self._remove_locked(oldest_key)
 
     def _evict_idle(self) -> None:
@@ -181,7 +181,7 @@ class DashboardPool:
             for key in list(self._sessions):
                 session = self._sessions[key]
                 if session["last_accessed_at"] < cutoff and self._is_pid_alive(session["pid"]):
-                    logger.info("pool: evicting idle session %s (last access %ds ago)",
+                    logger.info("会话池: 淘汰空闲会话 %s (上次访问 %ds 前)",
                                 key, int(time.time() - session["last_accessed_at"]))
                     self._remove_locked(key)
 
@@ -260,7 +260,7 @@ class UnderstandAnythingClient:
 
         # Clone or update the shared repo
         if not (repo_dir / ".git").is_dir():
-            logger.info("Cloning UA repo from %s", ua_git_url)
+            logger.info("正在克隆 UA 仓库 %s", ua_git_url)
             try:
                 repo_dir.parent.mkdir(parents=True, exist_ok=True)
                 subprocess.run(
@@ -516,7 +516,7 @@ class UnderstandAnythingClient:
             cmd = ["npx", "vite", "--host", "127.0.0.1", "--port", "48000", "--base", base_path, "--no-open"]
 
         log_msgs.append(f"cmd={' '.join(cmd)} cwd={dashboard_dir}")
-        logger.info("_launch_vite: %s in %s", cmd, dashboard_dir)
+        logger.info("启动 Vite: %s 目录=%s", cmd, dashboard_dir)
         try:
             proc = subprocess.Popen(
                 cmd, cwd=str(dashboard_dir),
@@ -534,18 +534,18 @@ class UnderstandAnythingClient:
             if not line:
                 if proc.poll() is not None:
                     log_msgs.append(f"process_exited rc={proc.returncode}")
-                    logger.warning("_launch_vite: exited rc=%s", proc.returncode)
+                    logger.warning("Vite 进程已退出 rc=%s", proc.returncode)
                     break
                 time.sleep(0.1)
                 continue
             stripped = line.rstrip()
             if len(buffer) < 3000:
-                logger.debug("_launch_vite stdout: %s", stripped[:200])
+                logger.debug("Vite 输出: %s", stripped[:200])
             buffer += line
             m = re.search(r"https?://(?:127\.0\.0\.1|localhost):\d+\S*token=\S+", buffer)
             if m:
                 url = re.sub(r"[,;.!]+$", "", m.group(0))
-                logger.info("_launch_vite: found URL %s", url)
+                logger.info("Vite 发现 URL %s", url)
                 break
 
         if url is None:
@@ -562,49 +562,49 @@ class UnderstandAnythingClient:
     def _find_dashboard_dir(self, project_dir: Path) -> Path | None:
         """Resolve dashboard dir from .claude/skills/understand-dashboard symlink."""
         skill_link = project_dir / SKILL_DIR_NAME / "understand-dashboard"
-        logger.debug("_find_dashboard_dir: checking %s", skill_link)
+        logger.debug("查找 Dashboard 目录: 检查 %s", skill_link)
         if not skill_link.exists():
-            logger.debug("_find_dashboard_dir: %s does not exist (is_symlink=%s)", skill_link, skill_link.is_symlink())
+            logger.debug("查找 Dashboard 目录: %s 不存在 (is_symlink=%s)", skill_link, skill_link.is_symlink())
             return None
         if not skill_link.is_symlink():
-            logger.debug("_find_dashboard_dir: %s exists but is not a symlink", skill_link)
+            logger.debug("查找 Dashboard 目录: %s 存在但不是符号链接", skill_link)
             return None
         skill_real = skill_link.resolve()
-        logger.debug("_find_dashboard_dir: symlink resolves to %s", skill_real)
+        logger.debug("查找 Dashboard 目录: 符号链接指向 %s", skill_real)
         plugin_root = skill_real.parent.parent
-        logger.debug("_find_dashboard_dir: plugin_root=%s", plugin_root)
+        logger.debug("查找 Dashboard 目录: plugin_root=%s", plugin_root)
         dashboard_dir = plugin_root / "packages" / "dashboard"
         if not dashboard_dir.is_dir():
-            logger.debug("_find_dashboard_dir: %s is not a directory", dashboard_dir)
+            logger.debug("查找 Dashboard 目录: %s 不是目录", dashboard_dir)
             return None
         pkg = dashboard_dir / "package.json"
         if not pkg.is_file():
-            logger.debug("_find_dashboard_dir: %s not found", pkg)
+            logger.debug("查找 Dashboard 目录: %s 未找到", pkg)
             return None
-        logger.info("_find_dashboard_dir: found dashboard at %s", dashboard_dir)
+        logger.info("查找 Dashboard 目录: 找到 %s", dashboard_dir)
         return dashboard_dir
 
     def _ensure_dashboard_built(self, dashboard_dir: Path) -> str | None:
         """Install deps and build core if not already done. Returns error or None."""
         plugin_root = dashboard_dir.parent.parent
         build_flag = plugin_root / "packages" / "core" / ".built-flag"
-        logger.debug("_ensure_dashboard_built: build_flag=%s exists=%s", build_flag, build_flag.is_file())
+        logger.debug("确保 Dashboard 已构建: build_flag=%s exists=%s", build_flag, build_flag.is_file())
         if build_flag.is_file():
             return None
 
-        logger.info("_ensure_dashboard_built: running pnpm install in %s", dashboard_dir)
+        logger.info("确保 Dashboard 已构建: 在 %s 中运行 pnpm install", dashboard_dir)
         try:
             result = subprocess.run(
                 ["pnpm", "install", "--frozen-lockfile", "--prefer-offline"],
                 cwd=str(dashboard_dir), capture_output=True, text=True, timeout=120,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-            logger.error("_ensure_dashboard_built: pnpm not found or timed out: %s", exc)
+            logger.error("确保 Dashboard 已构建: pnpm 未找到或超时: %s", exc)
             return f"pnpm 未安装或超时: {exc}"
         if result.returncode != 0:
             # Try without frozen lockfile
             logger.warning(
-                "_ensure_dashboard_built: pnpm install --frozen-lockfile failed (rc=%s), retrying without frozen",
+                "确保 Dashboard 已构建: pnpm install --frozen-lockfile 失败 (rc=%s)，尝试不带 frozen 重试",
                 result.returncode,
             )
             try:
@@ -616,10 +616,10 @@ class UnderstandAnythingClient:
                 return f"pnpm 安装失败: {exc}"
         if result.returncode != 0:
             err = (result.stderr or result.stdout)[:500]
-            logger.error("_ensure_dashboard_built: pnpm install failed: %s", err)
+            logger.error("确保 Dashboard 已构建: pnpm install 失败: %s", err)
             return f"安装 Dashboard 依赖失败: {err}"
 
-        logger.info("_ensure_dashboard_built: running pnpm --filter @understand-anything/core build in %s", plugin_root)
+        logger.info("确保 Dashboard 已构建: 在 %s 中运行 pnpm --filter @understand-anything/core build", plugin_root)
         try:
             result = subprocess.run(
                 ["pnpm", "--filter", "@understand-anything/core", "build"],
@@ -629,11 +629,11 @@ class UnderstandAnythingClient:
             return f"构建 UA core 失败: {exc}"
         if result.returncode != 0:
             err = (result.stderr or result.stdout)[:500]
-            logger.error("_ensure_dashboard_built: core build failed: %s", err)
+            logger.error("确保 Dashboard 已构建: core 构建失败: %s", err)
             return f"构建 UA core 失败: {err}"
 
         build_flag.touch()
-        logger.info("_ensure_dashboard_built: build complete, flag set")
+        logger.info("确保 Dashboard 已构建: 构建完成，标记已设置")
         return None
 
     def _read_meta(self, project_dir: Path) -> dict[str, Any] | None:

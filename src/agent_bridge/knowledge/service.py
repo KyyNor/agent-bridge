@@ -97,7 +97,7 @@ class AgentBridgeService:
                 try:
                     adapter.ensure_hybrid_agent()
                 except Exception:
-                    logger.warning("Failed to ensure hybrid agent for backend '%s'", slug, exc_info=True)
+                    logger.warning("确保后端 '%s' 混合智能体失败", slug, exc_info=True)
 
     def create_kb(self, actor: str, slug: str, name: str, description: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -275,7 +275,7 @@ class AgentBridgeService:
             actor=None if all_users or actor in self.admins else actor,
             backend_slug=backend,
         )
-        logger.info("Doc sync: %d pending jobs", len(jobs))
+        logger.info("文档同步: %d 个待处理任务", len(jobs))
         succeeded = 0
         failed = 0
         for job in jobs:
@@ -284,7 +284,7 @@ class AgentBridgeService:
                 succeeded += 1
             else:
                 failed += 1
-        logger.info("Doc sync finished: %d succeeded, %d failed", succeeded, failed)
+        logger.info("文档同步完成: %d 成功, %d 失败", succeeded, failed)
         return {"processed": len(jobs)}
 
     # -- Code repo categories --
@@ -361,7 +361,7 @@ class AgentBridgeService:
                         "chunk_count": len(chunks),
                     })
             except Exception:
-                logger.warning("search_all: failed to search KB '%s'", kb["slug"], exc_info=True)
+                logger.warning("全局搜索失败: KB '%s'", kb["slug"], exc_info=True)
         return results
 
     def search(self, actor: str, kb_slug: str, question: str, *,
@@ -488,7 +488,7 @@ class AgentBridgeService:
         doc_title = job.get("doc_title", job.get("doc_slug", "?"))
         backend = job.get("backend_slug", "?")
         op = job.get("operation", "?")
-        logger.info("Doc sync job #%d: %s '%s' -> %s", job["id"], op, doc_title, backend)
+        logger.info("文档同步任务 #%d: %s '%s' -> %s", job["id"], op, doc_title, backend)
         self.store.update_job_status(job["id"], SyncJobStatus.running)
         adapter = self.registry.get(job["backend_slug"]) if self.registry else None
         if adapter is None:
@@ -522,22 +522,22 @@ class AgentBridgeService:
                     SyncStateStatus.synced,
                 )
             self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
-            logger.info("Doc sync job #%d: OK", job["id"])
+            logger.info("文档同步任务 #%d: 成功", job["id"])
             return True
         except Exception as exc:
             if self._is_kb_gone(exc) and job.get("kb_name") and job.get("kb_slug"):
-                logger.warning("Doc sync job #%d: backend KB gone, rebuilding...", job["id"])
+                logger.warning("文档同步任务 #%d: 后端 KB 已丢失，正在重建...", job["id"])
                 try:
                     new_id = adapter.create_kb(job["kb_slug"], job["kb_name"])
                     doc_count = self.store.rebuild_backend_target(job["kb_id"], job["backend_slug"], new_id)
                     self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
-                    logger.info("Doc sync job #%d: backend KB rebuilt, %d docs rescheduled", job["id"], doc_count)
+                    logger.info("文档同步任务 #%d: 后端 KB 已重建，%d 个文档已重新调度", job["id"], doc_count)
                     return True
                 except Exception as rebuild_exc:
-                    logger.error("Doc sync job #%d: rebuild failed — %s", job["id"], rebuild_exc)
+                    logger.error("文档同步任务 #%d: 重建失败 — %s", job["id"], rebuild_exc)
                     self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
                 return False
-            logger.error("Doc sync job #%d: FAILED — %s", job["id"], exc)
+            logger.error("文档同步任务 #%d: 失败 — %s", job["id"], exc)
             failed_status = (
                 SyncStateStatus.delete_failed if job["operation"] == "delete" else SyncStateStatus.sync_failed
             )

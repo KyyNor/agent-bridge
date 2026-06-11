@@ -29,13 +29,13 @@ class DocSyncScheduler:
         self._ensure_scheduler()
         self._refresh_jobs()
         self._scheduler.start()
-        logger.info("DocSync scheduler started with cron: %s", self._current_cron)
+        logger.info("DocSync 调度器已启动 cron: %s", self._current_cron)
 
     def stop(self) -> None:
         if self._scheduler:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
-            logger.info("DocSync scheduler stopped")
+            logger.info("DocSync 调度器已停止")
 
     def refresh(self) -> None:
         config = self._store.get_sync_config()
@@ -43,7 +43,7 @@ class DocSyncScheduler:
         self._ensure_scheduler()
         if not self._scheduler.running:
             self._scheduler.start()
-            logger.info("DocSync scheduler started with cron: %s", self._current_cron)
+            logger.info("DocSync 调度器已启动 cron: %s", self._current_cron)
         self._refresh_jobs()
 
     def get_status(self) -> dict[str, Any]:
@@ -62,19 +62,19 @@ class DocSyncScheduler:
         try:
             trigger = CronTrigger.from_crontab(self._current_cron)
         except (ValueError, TypeError) as exc:
-            logger.error("Invalid cron expression '%s': %s", self._current_cron, exc)
+            logger.error("无效的 cron 表达式 '%s': %s", self._current_cron, exc)
             return
         self._scheduler.add_job(
             self._run_sync,
             trigger=trigger,
             id="doc_sync",
         )
-        logger.debug("Scheduled doc sync with cron: %s", self._current_cron)
+        logger.debug("已调度文档同步 cron: %s", self._current_cron)
 
     def _run_sync(self) -> None:
         admin = next(iter(self._admins), "root")
         try:
             result = self._service.sync(admin, all_users=True)
-            logger.info("Scheduled doc sync finished: %s jobs processed", result.get("processed", 0))
+            logger.info("定时文档同步完成: 已处理 %s 个任务", result.get("processed", 0))
         except Exception:
-            logger.exception("Scheduled doc sync failed with unexpected error")
+            logger.exception("定时文档同步异常失败")

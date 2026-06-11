@@ -72,9 +72,9 @@ class WeknoraBackend:
             self._raise(response)
             models = self._data(response) or []
             self._model_name_to_id = {m["name"]: m["id"] for m in models if isinstance(m, dict) and m.get("name") and m.get("id")}
-            logger.info("Fetched %d models from Weknora", len(self._model_name_to_id))
+            logger.info("从 Weknora 获取了 %d 个模型", len(self._model_name_to_id))
         except Exception:
-            logger.warning("Failed to fetch models from Weknora, using raw IDs", exc_info=True)
+            logger.warning("从 Weknora 获取模型失败，使用原始 ID", exc_info=True)
             self._model_name_to_id = {}
         return self._model_name_to_id
 

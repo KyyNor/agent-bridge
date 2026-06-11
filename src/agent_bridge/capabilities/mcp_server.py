@@ -45,7 +45,7 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
         limit: int = 20,
     ) -> dict[str, Any]:
         profile_key = _request_profile.get()
-        logger.info("search profile=%s path=%s query=%s limit=%s", profile_key, path, query, limit)
+        logger.info("搜索 profile=%s path=%s query=%s limit=%s", profile_key, path, query, limit)
         started = time.monotonic()
         try:
             result = service.capabilities.search(
@@ -55,10 +55,10 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
                 limit=limit,
                 profile_key=profile_key,
             )
-            logger.info("search ok profile=%s duration=%.0fms items=%d", profile_key, (time.monotonic() - started) * 1000, len(result.get("items", [])))
+            logger.info("搜索完成 profile=%s 耗时=%.0fms 结果数=%d", profile_key, (time.monotonic() - started) * 1000, len(result.get("items", [])))
             return result
         except Exception as exc:
-            logger.error("search fail profile=%s duration=%.0fms error=%s", profile_key, (time.monotonic() - started) * 1000, exc)
+            logger.error("搜索失败 profile=%s 耗时=%.0fms 错误=%s", profile_key, (time.monotonic() - started) * 1000, exc)
             raise
 
     @mcp.tool(
@@ -70,7 +70,7 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
         arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         profile_key = _request_profile.get()
-        logger.info("execute profile=%s service=%s tool=%s args=%s", profile_key, service_key, tool, json.dumps(arguments or {}, ensure_ascii=False))
+        logger.info("执行 profile=%s service=%s tool=%s args=%s", profile_key, service_key, tool, json.dumps(arguments or {}, ensure_ascii=False))
         started = time.monotonic()
         try:
             result = await service.capabilities.execute(
@@ -80,10 +80,10 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
                 arguments=arguments or {},
                 profile_key=profile_key,
             )
-            logger.info("execute ok profile=%s service=%s tool=%s duration=%.0fms success=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, result.get("success"))
+            logger.info("执行完成 profile=%s service=%s tool=%s 耗时=%.0fms success=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, result.get("success"))
             return result
         except Exception as exc:
-            logger.error("execute fail profile=%s service=%s tool=%s duration=%.0fms error=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, exc)
+            logger.error("执行失败 profile=%s service=%s tool=%s 耗时=%.0fms 错误=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, exc)
             raise
 
     return mcp
@@ -97,14 +97,14 @@ def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
         profile = request.headers.get("x-agent-bridge-metamcp-profile")
-        logger.info("MCP request method=%s profile=%s", request.method, profile)
+        logger.info("MCP 请求 method=%s profile=%s", request.method, profile)
         token = _request_profile.set(profile)
         try:
             response = await _dispatch_mcp(mcp, request)
-            logger.info("MCP response status=%d profile=%s", response.status_code, profile)
+            logger.info("MCP 响应 status=%d profile=%s", response.status_code, profile)
             return response
         except Exception as exc:
-            logger.error("MCP error profile=%s error=%s", profile, exc)
+            logger.error("MCP 错误 profile=%s 错误=%s", profile, exc)
             raise
         finally:
             _request_profile.reset(token)
