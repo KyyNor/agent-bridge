@@ -12,6 +12,8 @@ import httpx
 
 from agent_bridge.core.config import ROOT_ENV_VAR, AgentBridgePaths, load_server_config
 
+_LOG_CONFIG_PATH = str(Path(__file__).resolve().parent.parent / "logging.json")
+
 
 def _read_pid(path: Path) -> int | None:
     if not path.exists():
@@ -56,6 +58,8 @@ def start_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
                 config.host,
                 "--port",
                 str(config.port),
+                "--log-config",
+                _LOG_CONFIG_PATH,
             ],
             stdout=log,
             stderr=log,
