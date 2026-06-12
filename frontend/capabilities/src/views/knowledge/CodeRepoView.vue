@@ -641,7 +641,7 @@ watch(showDetail, (open) => {
     </Dialog>
 
     <!-- Repo Detail Dialog -->
-    <Dialog :open="showDetail" @update:open="showDetail = $event">
+    <Dialog :open="showDetail" :modal="!dashboardMaximized" @update:open="showDetail = $event">
       <DialogContent
         :show-close-button="!dashboardMaximized"
         class="sm:max-w-[900px] max-h-[85vh] overflow-y-auto overflow-x-hidden"
@@ -900,14 +900,14 @@ watch(showDetail, (open) => {
         </DialogFooter>
       </DialogContent>
       <Teleport to="body">
-        <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[10000] flex flex-col bg-background">
+        <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[10000] flex flex-col bg-background pointer-events-auto">
           <div class="flex items-center justify-between gap-2 px-4 py-2 bg-secondary/50 border-b border-border shrink-0">
             <span class="text-sm font-medium text-muted-foreground">Dashboard</span>
             <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="还原" @click="dashboardMaximized = false">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
             </Button>
           </div>
-          <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" />
+          <iframe :src="dashboardSrc" class="flex-1 border-0 w-full pointer-events-auto" />
         </div>
       </Teleport>
     </Dialog>
