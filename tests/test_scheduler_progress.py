@@ -94,3 +94,26 @@ def test_understanding_scheduler_exposes_latest_run_progress_in_status() -> None
     assert progress["status"] == "succeeded"
     assert progress["message"] == "理解完成，节点 7，边 9"
     assert progress["error"] is None
+
+
+def test_understanding_scheduler_logs_failed_runs(caplog) -> None:
+    class Service:
+        def analyze_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+            assert actor == "root"
+            assert repo_key == "agent-bridge"
+            return {"success": False, "error": "分析超时（600s）", "node_count": 0, "edge_count": 0}
+
+    scheduler = UnderstandingScheduler(Service(), _CodeStore(), {"root"})
+    scheduler.start()
+    try:
+        with caplog.at_level("WARNING"):
+            scheduler._run_understand("agent-bridge")
+        status = scheduler.get_status()
+    finally:
+        scheduler.stop()
+
+    progress = status["jobs"][0]["progress"]
+    assert progress["status"] == "failed"
+    assert progress["message"] == "代码理解失败"
+    assert progress["error"] == "分析超时（600s）"
+    assert any("定时 Understand 分析失败 agent-bridge" in record.message for record in caplog.records)

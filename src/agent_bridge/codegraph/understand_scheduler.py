@@ -21,6 +21,8 @@ class UnderstandingScheduler:
         self._scheduler: BackgroundScheduler | None = None
         self._current_cron: str = _DEFAULT_CRON
         self._runs: dict[str, dict[str, Any]] = {}
+        self._current_run: dict[str, Any] | None = None
+        self._last_run: dict[str, Any] | None = None
 
     def start(self) -> None:
         config = self._store.get_sync_config()
@@ -47,7 +49,13 @@ class UnderstandingScheduler:
 
     def get_status(self) -> dict[str, Any]:
         if not self._scheduler or not self._scheduler.running:
-            return {"running": False, "cron": self._current_cron, "jobs": []}
+            return {
+                "running": False,
+                "cron": self._current_cron,
+                "jobs": [],
+                "current_run": self._current_run,
+                "last_run": self._last_run,
+            }
         jobs = []
         for job in self._scheduler.get_jobs():
             repo_key = str(job.kwargs.get("repo_key", job.id))
@@ -56,7 +64,13 @@ class UnderstandingScheduler:
                 "next_run_at": str(job.next_run_time.isoformat()) if job.next_run_time else None,
                 "progress": self._runs.get(repo_key),
             })
-        return {"running": True, "cron": self._current_cron, "jobs": jobs}
+        return {
+            "running": True,
+            "cron": self._current_cron,
+            "jobs": jobs,
+            "current_run": self._current_run,
+            "last_run": self._last_run,
+        }
 
     def _ensure_scheduler(self) -> None:
         if self._scheduler is None:
@@ -87,7 +101,7 @@ class UnderstandingScheduler:
 
     def _run_understand(self, repo_key: str) -> None:
         admin = next(iter(self._admins), "root")
-        self._runs[repo_key] = {
+        self._current_run = self._runs[repo_key] = {
             "status": "running",
             "started_at": _now_iso(),
             "finished_at": None,
@@ -96,13 +110,27 @@ class UnderstandingScheduler:
         }
         try:
             result = self._service.analyze_understand(admin, repo_key)
+            run_status = "succeeded" if result.get("success") else "failed"
             self._runs[repo_key].update({
-                "status": "succeeded" if result.get("success") else "failed",
+                "status": run_status,
                 "finished_at": _now_iso(),
-                "message": f"理解完成，节点 {result.get('node_count', 0)}，边 {result.get('edge_count', 0)}",
+                "message": (
+                    f"理解完成，节点 {result.get('node_count', 0)}，边 {result.get('edge_count', 0)}"
+                    if run_status == "succeeded"
+                    else "代码理解失败"
+                ),
                 "error": result.get("error"),
             })
-            logger.info("定时 Understand 分析完成 %s", repo_key)
+            self._last_run = dict(self._runs[repo_key])
+            self._current_run = None
+            if run_status == "succeeded":
+                logger.info("定时 Understand 分析完成 %s", repo_key)
+            else:
+                logger.warning(
+                    "定时 Understand 分析失败 %s: %s",
+                    repo_key,
+                    result.get("error") or "unknown error",
+                )
         except Exception as exc:
             self._runs[repo_key].update({
                 "status": "failed",
@@ -110,6 +138,8 @@ class UnderstandingScheduler:
                 "message": "代码理解失败",
                 "error": str(exc),
             })
+            self._last_run = dict(self._runs[repo_key])
+            self._current_run = None
             logger.exception("定时 Understand 分析失败 %s", repo_key)
 
 

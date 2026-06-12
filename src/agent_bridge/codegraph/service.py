@@ -330,7 +330,15 @@ class CodeGraphService:
         local_path = self._local_path(repo_key)
         result = self.ua_client.summary(local_path)
         if result is None:
-            return None
+            return {
+                "project_name": None,
+                "description": None,
+                "languages": [],
+                "frameworks": [],
+                "modules": [],
+                "key_nodes": [],
+                "tours": [],
+            }
         return {
             "project_name": result.project_name,
             "description": result.description,

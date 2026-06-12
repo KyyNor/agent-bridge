@@ -115,6 +115,16 @@ def test_capability_admin_page_serves_html(wm_paths) -> None:
     assert "智能中枢" in response.text
 
 
+def test_root_redirects_to_capability_admin_page(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/admin/capabilities"
+
+
 def test_capability_static_assets_are_served(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -691,6 +701,35 @@ def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) 
     assert query.json()["matches"][0]["path"] == "app.py"
     assert callers.status_code == 200
     assert "matches" in callers.json()
+
+
+def test_understand_summary_returns_empty_payload_when_graph_missing(tmp_path: Path, wm_paths) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post(
+        "/code-repo/repositories",
+        json={
+            "repo_key": "web-app",
+            "name": "Web App",
+            "git_url": str(repo),
+            "branch": "master",
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    response = client.get("/code-repo/repositories/web-app/understand/summary", headers={"X-Agent-Bridge-User": "root"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "project_name": None,
+        "description": None,
+        "languages": [],
+        "frameworks": [],
+        "modules": [],
+        "key_nodes": [],
+        "tours": [],
+    }
 
 
 def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_paths) -> None:

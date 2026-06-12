@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware
@@ -44,6 +44,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     app.add_middleware(DashboardProxyMiddleware, target_resolver=service.codegraph.dashboard_proxy_target)
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir), name="capabilities-static")
+
+    @app.get("/")
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/admin/capabilities", status_code=307)
 
     def actor(x_agent_bridge_user: str = Header(alias="X-Agent-Bridge-User")) -> str:
         return x_agent_bridge_user

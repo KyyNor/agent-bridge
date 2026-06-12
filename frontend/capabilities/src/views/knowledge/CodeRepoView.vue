@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
-import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability, ProjectProfile, TestCloneResult } from '../../api/types'
+import type { CodeRepository, CodeGraphStatus, CodeGraphNode, CodeGraphExploreResult, CodeRepoCategory, RepoOverview, UAStatus, UASummary, UAAvailability, ProjectProfile, TestCloneResult, SchedulerStatus, SchedulerRunProgress } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -56,6 +56,7 @@ const uaStatus = ref<UAStatus | null>(null)
 const uaSummary = ref<UASummary | null>(null)
 const uaLoading = ref(false)
 const uaAvailability = ref<UAAvailability | null>(null)
+const uaSchedulerStatus = ref<SchedulerStatus | null>(null)
 const uaAnalyzing = ref(false)
 const uaAnalyzeError = ref('')
 const uaAnalyzeSuccess = ref('')
@@ -69,6 +70,14 @@ const dashboardSrc = computed(() => {
   const url = uaStatus.value?.dashboard_url
   if (!url) return ''
   return url + (url.includes('?') ? '&' : '?') + 'theme=dark'
+})
+
+const uaUnderstandRun = computed<SchedulerRunProgress | null>(() => {
+  const understand = uaSchedulerStatus.value?.understand
+  if (!understand) return null
+
+  const jobProgress = understand.jobs.find(job => job.repo_key === detailRepo.value?.repo_key)?.progress ?? null
+  return understand.last_run ?? understand.current_run ?? jobProgress
 })
 
 // Plane assignment dialog
@@ -200,6 +209,7 @@ async function openDetail(r: CodeRepository) {
   uaStatus.value = null
   uaSummary.value = null
   uaAvailability.value = null
+  uaSchedulerStatus.value = null
   uaAnalyzing.value = false
   uaAnalyzeError.value = ''
   uaAnalyzeSuccess.value = ''
@@ -315,10 +325,11 @@ async function loadUAData() {
   if (!detailRepo.value) return
   uaLoading.value = true
   try {
-    const [avail, statusResult, summaryResult] = await Promise.allSettled([
+    const [avail, statusResult, summaryResult, schedulerResult] = await Promise.allSettled([
       api.checkUAAvailability(detailRepo.value.repo_key),
       api.getUAStatus(detailRepo.value.repo_key),
       api.getUASummary(detailRepo.value.repo_key),
+      api.getSchedulerStatus(),
     ])
     uaAvailability.value = avail.status === 'fulfilled' ? avail.value : null
     if (statusResult.status === 'fulfilled' && statusResult.value.dashboard_running) {
@@ -326,6 +337,7 @@ async function loadUAData() {
     }
     uaStatus.value = statusResult.status === 'fulfilled' ? statusResult.value : null
     uaSummary.value = summaryResult.status === 'fulfilled' ? summaryResult.value : null
+    uaSchedulerStatus.value = schedulerResult.status === 'fulfilled' ? schedulerResult.value : null
 
     // Auto-start dashboard if graph exists but not running
     if (uaStatus.value?.graph_exists && !uaStatus.value.dashboard_running && !uaDashboardStarting.value) {
@@ -786,6 +798,21 @@ watch(showDetail, (open) => {
               <!-- Analyze Result -->
               <div v-if="uaAnalyzeSuccess" class="rounded-lg bg-green-50 p-3 text-sm text-green-700">{{ uaAnalyzeSuccess }}</div>
               <div v-if="uaAnalyzeError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ uaAnalyzeError }}</div>
+
+              <div v-if="uaUnderstandRun" class="rounded-lg border p-3 text-sm" :class="uaUnderstandRun.status === 'failed' ? 'border-red-200 bg-red-50 text-red-700' : uaUnderstandRun.status === 'succeeded' ? 'border-green-200 bg-green-50 text-green-700' : 'border-blue-200 bg-blue-50 text-blue-700'">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="font-medium">最近一次定时分析</div>
+                  <Badge variant="secondary" :class="uaUnderstandRun.status === 'failed' ? 'bg-red-100 text-red-700' : uaUnderstandRun.status === 'succeeded' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'">
+                    {{ uaUnderstandRun.status === 'succeeded' ? '成功' : uaUnderstandRun.status === 'failed' ? '失败' : uaUnderstandRun.status }}
+                  </Badge>
+                </div>
+                <div class="mt-2 grid gap-1 text-xs text-muted-foreground">
+                  <div v-if="uaUnderstandRun.started_at">开始时间: {{ uaUnderstandRun.started_at }}</div>
+                  <div v-if="uaUnderstandRun.finished_at">结束时间: {{ uaUnderstandRun.finished_at }}</div>
+                  <div v-if="uaUnderstandRun.message">{{ uaUnderstandRun.message }}</div>
+                  <div v-if="uaUnderstandRun.error" class="text-red-600">错误: {{ uaUnderstandRun.error }}</div>
+                </div>
+              </div>
 
               <!-- Dashboard iframe -->
               <div v-if="uaStatus?.dashboard_running && dashboardSrc" class="flex flex-col rounded-lg border border-border overflow-hidden" :class="{ '!border-0': dashboardMaximized }" style="min-height: 60vh">

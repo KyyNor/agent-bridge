@@ -306,7 +306,7 @@ class UnderstandAnythingClient:
         *,
         ua_git_url: str = "",
         language: str = "zh",
-        timeout: int = 600,
+        timeout: int = 6000,
     ) -> UAAnalyzeResult:
         # Step 1: Check if skills are already available
         avail = self.check_availability(project_dir=project_dir)
