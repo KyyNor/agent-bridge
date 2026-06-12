@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,6 +20,7 @@ class CodeGraphScheduler:
         self._admins = admins
         self._scheduler: BackgroundScheduler | None = None
         self._current_cron: str = _DEFAULT_CRON
+        self._runs: dict[str, dict[str, Any]] = {}
 
     def start(self) -> None:
         config = self._store.get_sync_config()
@@ -52,6 +54,7 @@ class CodeGraphScheduler:
             jobs.append({
                 "repo_key": repo_key,
                 "next_run_at": str(job.next_run_time.isoformat()) if job.next_run_time else None,
+                "progress": self._runs.get(repo_key),
             })
         return {"running": True, "cron": self._current_cron, "jobs": jobs}
 
@@ -82,8 +85,31 @@ class CodeGraphScheduler:
 
     def _sync_repo(self, repo_key: str) -> None:
         admin = next(iter(self._admins), "root")
+        self._runs[repo_key] = {
+            "status": "running",
+            "started_at": _now_iso(),
+            "finished_at": None,
+            "message": "正在同步代码仓库",
+            "error": None,
+        }
         try:
-            self._service.sync_repository(admin, repo_key)
+            result = self._service.sync_repository(admin, repo_key)
+            self._runs[repo_key].update({
+                "status": "succeeded",
+                "finished_at": _now_iso(),
+                "message": f"同步完成，索引 {result.get('indexed', 0)} 项",
+                "error": None,
+            })
             logger.info("定时同步完成 %s", repo_key)
-        except Exception:
+        except Exception as exc:
+            self._runs[repo_key].update({
+                "status": "failed",
+                "finished_at": _now_iso(),
+                "message": "同步失败",
+                "error": str(exc),
+            })
             logger.exception("定时同步失败 %s", repo_key)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()

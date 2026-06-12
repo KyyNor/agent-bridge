@@ -42,7 +42,7 @@ class BackendRegistry:
                 embedding_model_id=config.embedding_model_id,
                 summary_model_id=config.summary_model_id,
             )
-        return None
+        raise ValueError(f"unknown backend type: {config.backend_type}")
 
     def get(self, slug: str) -> BackendAdapter | None:
         return self._adapters.get(slug)

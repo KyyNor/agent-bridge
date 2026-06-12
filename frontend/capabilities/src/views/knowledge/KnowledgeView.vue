@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, KbMember, SyncJob, SearchResultChunk, ProjectProfile } from '../../api/types'
+import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -19,15 +19,10 @@ const createError = ref('')
 // Detail dialog
 const showDetail = ref(false)
 const detailKb = ref<KnowledgeBaseSummary | null>(null)
-const detailTab = ref<'docs' | 'members' | 'sync' | 'search'>('docs')
+const detailTab = ref<'docs' | 'sync' | 'search'>('docs')
 const detailDocs = ref<Document[]>([])
-const detailMembers = ref<KbMember[]>([])
 const detailSyncJobs = ref<SyncJob[]>([])
 const detailLoading = ref(false)
-// Member grant
-const memberUser = ref('')
-const memberRole = ref('viewer')
-const grantingMember = ref(false)
 // Sync
 const syncing = ref(false)
 // Search/Q&A
@@ -103,13 +98,11 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   askAnswer.value = ''
   askChunks.value = []
   try {
-    const [docs, members, syncStatus] = await Promise.allSettled([
+    const [docs, syncStatus] = await Promise.allSettled([
       api.listDocs(kb.slug),
-      api.listKbMembers(kb.slug),
       api.getSyncStatus(),
     ])
     detailDocs.value = docs.status === 'fulfilled' ? docs.value : []
-    detailMembers.value = members.status === 'fulfilled' ? members.value : []
     detailSyncJobs.value = syncStatus.status === 'fulfilled' ? syncStatus.value.jobs.filter((j: SyncJob) => j.kb_slug === kb.slug) : []
   } catch { /* ignore */ }
   detailLoading.value = false
@@ -121,17 +114,6 @@ async function deleteDoc(slug: string) {
     await api.deleteDocument(slug)
     detailDocs.value = await api.listDocs(detailKb.value.slug)
   } catch { /* ignore */ }
-}
-
-async function grantMember() {
-  if (!detailKb.value || !memberUser.value.trim()) return
-  grantingMember.value = true
-  try {
-    await api.grantKbMember(detailKb.value.slug, { linux_user: memberUser.value.trim(), role: memberRole.value })
-    memberUser.value = ''
-    detailMembers.value = await api.listKbMembers(detailKb.value.slug)
-  } catch { /* ignore */ }
-  grantingMember.value = false
 }
 
 async function triggerSync() {
@@ -329,7 +311,6 @@ async function savePlaneProfiles() {
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标识</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">文档数</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">同步失败</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">角色</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
           </thead>
@@ -344,9 +325,6 @@ async function savePlaneProfiles() {
               <td class="px-4 py-3 tabular-nums text-sm">
                 <Badge v-if="k.sync_failed_count > 0" variant="destructive">{{ k.sync_failed_count }}</Badge>
                 <span v-else class="text-muted-foreground">0</span>
-              </td>
-              <td class="px-4 py-3">
-                <Badge variant="secondary" class="text-[11px]">{{ k.role }}</Badge>
               </td>
               <td class="px-4 py-3">
                 <div class="flex gap-2">
@@ -434,7 +412,6 @@ async function savePlaneProfiles() {
           <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
             <button v-for="t in [
               { key: 'docs', label: `文档 (${detailDocs.length})` },
-              { key: 'members', label: `访问权限 (${detailMembers.length})` },
               { key: 'sync', label: `同步 (${detailSyncJobs.length})` },
               { key: 'search', label: '检索' },
             ]" :key="t.key"
@@ -467,30 +444,6 @@ async function savePlaneProfiles() {
                 <td class="px-3 py-2">
                   <Button variant="ghost" size="sm" class="h-7 text-xs text-red-600 hover:text-red-700" @click="deleteDoc(d.slug)">删除</Button>
                 </td>
-              </tr></tbody>
-            </table>
-          </div>
-
-          <!-- Members Tab -->
-          <div v-if="detailTab === 'members'" class="space-y-3">
-            <div class="text-xs text-muted-foreground">管理此知识库的访问权限，指定用户可查看、上传文档或管理知识库。</div>
-            <div class="flex items-center gap-3">
-              <Input v-model="memberUser" placeholder="用户名" class="w-40" />
-              <select v-model="memberRole" class="h-9 rounded-md border border-border bg-background px-3 text-sm">
-                <option value="viewer">查看者</option>
-                <option value="contributor">贡献者</option>
-                <option value="admin">管理员</option>
-              </select>
-              <Button size="sm" @click="grantMember" :disabled="!memberUser.trim() || grantingMember">{{ grantingMember ? '添加中...' : '授权' }}</Button>
-            </div>
-            <table class="w-full">
-              <thead><tr class="border-b border-border">
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">用户</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">角色</th>
-              </tr></thead>
-              <tbody><tr v-for="m in detailMembers" :key="m.linux_user" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-                <td class="px-3 py-2 text-sm">{{ m.linux_user }}</td>
-                <td class="px-3 py-2"><Badge variant="secondary" class="text-[11px]">{{ m.role }}</Badge></td>
               </tr></tbody>
             </table>
           </div>

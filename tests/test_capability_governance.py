@@ -97,9 +97,9 @@ def test_policy_filters_sources_with_allow_and_deny(wm_paths: AgentBridgePaths) 
     assert service.is_source_allowed("root", None, "mcp_service", "hive") is True
 
 
-def test_policy_defaults_allow_when_allow_rules_are_empty_and_denies_first(wm_paths: AgentBridgePaths) -> None:
+def test_policy_uses_allow_list_when_profile_has_no_allow_rules(wm_paths: AgentBridgePaths) -> None:
     service, _store = _service(wm_paths)
-    service.upsert_profile("root", "deny-only", "默认允许", "", "active")
+    service.upsert_profile("root", "deny-only", "默认拒绝", "", "active")
     service.replace_profile_rules(
         "root",
         "deny-only",
@@ -113,7 +113,7 @@ def test_policy_defaults_allow_when_allow_rules_are_empty_and_denies_first(wm_pa
         source_keys=["mysql", "hive", "wiki"],
     )
 
-    assert visible == ["mysql", "wiki"]
+    assert visible == []
 
 
 def test_policy_rules_match_source_type_and_source_key_pair(wm_paths: AgentBridgePaths) -> None:

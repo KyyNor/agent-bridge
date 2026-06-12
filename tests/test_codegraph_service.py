@@ -7,7 +7,7 @@ import pytest
 
 from agent_bridge.codegraph.service import CodeGraphService
 from agent_bridge.core.config import AgentBridgePaths
-from agent_bridge.core.domain import NotFound, ValidationError
+from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -60,6 +60,34 @@ def test_codegraph_register_sync_and_search(tmp_path: Path, wm_paths: AgentBridg
     assert files[0]["language"] == "python"
     assert "hello" in files[0]["snippet"]
     assert service.get_file("root", "web-app", "app.py")["content"].startswith("def hello")
+
+
+def test_codegraph_read_methods_require_admin(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"})
+    service.upsert_repository(
+        actor="root",
+        repo_key="web-app",
+        name="Web App",
+        git_url=str(repo),
+        branch="master",
+        auth_ref="",
+        description="Demo app",
+        tags=["python"],
+        category_key="",
+        sync_interval_minutes=60,
+        auto_understand=False,
+        status="active",
+    )
+
+    with pytest.raises(AccessDenied):
+        service.repository_overview("alice", "web-app")
+    with pytest.raises(AccessDenied):
+        service.search_code("alice", "web-app", query="hello")
+    with pytest.raises(AccessDenied):
+        service.list_files("alice", "web-app")
 
 
 def test_codegraph_sync_fails_for_missing_branch(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:

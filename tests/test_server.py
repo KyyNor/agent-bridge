@@ -35,12 +35,6 @@ def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
     )
     assert response.status_code == 200
     assert response.json()["slug"] == "frontend-docs"
-    grant = client.post(
-        "/kbs/frontend-docs/members",
-        json={"linux_user": "alice", "role": "contributor"},
-        headers={"X-Agent-Bridge-User": "root"},
-    )
-    assert grant.status_code == 200
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
     with source.open("rb") as handle:
@@ -48,11 +42,11 @@ def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
-            headers={"X-Agent-Bridge-User": "alice"},
+            headers={"X-Agent-Bridge-User": "root"},
         )
     assert doc.status_code == 200
     assert doc.json()["slug"] == "guide"
-    docs = client.get("/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "alice"})
+    docs = client.get("/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "root"})
     assert docs.status_code == 200
     assert docs.json()[0]["slug"] == "guide"
 
@@ -69,15 +63,6 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
         ).status_code
         == 200
     )
-    assert (
-        client.post(
-            "/kbs/frontend-docs/members",
-            json={"linux_user": "alice", "role": "contributor"},
-            headers={"X-Agent-Bridge-User": "root"},
-        ).status_code
-        == 200
-    )
-
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
     with source.open("rb") as handle:
@@ -85,7 +70,7 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("nested/path/Guide.pdf", handle, "application/pdf")},
-            headers={"X-Agent-Bridge-User": "alice"},
+            headers={"X-Agent-Bridge-User": "root"},
         )
     assert doc.status_code == 200
     assert not [path for path in wm_paths.run_dir.iterdir() if path.is_file()]
@@ -97,7 +82,7 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
             f"/docs/{doc.json()['slug']}/versions",
             data={"later": "true"},
             files={"file": ("other:name?.pdf", handle, "application/pdf")},
-            headers={"X-Agent-Bridge-User": "alice"},
+            headers={"X-Agent-Bridge-User": "root"},
         )
     assert update.status_code == 200
     assert not [path for path in wm_paths.run_dir.iterdir() if path.is_file()]
@@ -110,7 +95,7 @@ def test_invisible_kb_returns_404(wm_paths) -> None:
     client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
     client.post("/kbs", json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
     response = client.get("/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "alice"})
-    assert response.status_code == 404
+    assert response.status_code == 403
 
 
 def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
@@ -125,14 +110,6 @@ def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
         ).status_code
         == 200
     )
-    assert (
-        client.post(
-            "/kbs/frontend-docs/members",
-            json={"linux_user": "alice", "role": "contributor"},
-            headers={"X-Agent-Bridge-User": "root"},
-        ).status_code
-        == 200
-    )
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
     with source.open("rb") as handle:
@@ -140,15 +117,15 @@ def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
             "/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
-            headers={"X-Agent-Bridge-User": "alice"},
+            headers={"X-Agent-Bridge-User": "root"},
         )
     assert doc.status_code == 200
 
-    missing_confirm = client.post(f"/docs/{doc.json()['slug']}/purge", json={}, headers={"X-Agent-Bridge-User": "alice"})
+    missing_confirm = client.post(f"/docs/{doc.json()['slug']}/purge", json={}, headers={"X-Agent-Bridge-User": "root"})
     confirmed = client.post(
         f"/docs/{doc.json()['slug']}/purge",
         json={"confirm": True},
-        headers={"X-Agent-Bridge-User": "alice"},
+        headers={"X-Agent-Bridge-User": "root"},
     )
 
     assert missing_confirm.status_code == 400
@@ -180,7 +157,7 @@ def test_create_app_refreshes_admins_from_config_per_request(wm_paths) -> None:
 def test_backends_endpoint(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    response = client.get("/backends")
+    response = client.get("/backends", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
@@ -199,6 +176,14 @@ def test_status_with_backend_filter(wm_paths) -> None:
     client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
     response = client.get("/status?backend=mock", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
+
+
+def test_status_requires_admin(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/status", headers={"X-Agent-Bridge-User": "alice"})
+    assert response.status_code == 403
 
 
 def test_sync_with_backend_filter(wm_paths) -> None:

@@ -116,7 +116,7 @@ def test_wiki_execute_blocks_unallowed_kb(wm_paths: AgentBridgePaths) -> None:
 def test_wiki_backend_failure_is_classified(wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch) -> None:
     service = _service(wm_paths)
 
-    def fail_search(actor: str, kb_slug: str, question: str, top_k: int = 6) -> list[object]:
+    def fail_search(actor: str, kb_slug: str, question: str, top_k: int = 6, profile_key: str | None = None) -> list[object]:
         raise RuntimeError("backend unavailable")
 
     monkeypatch.setattr(service, "search", fail_search)
@@ -148,7 +148,7 @@ def test_wiki_domain_errors_are_not_classified_as_backend_failures(
 ) -> None:
     service = _service(wm_paths)
 
-    def fail_search(actor: str, kb_slug: str, question: str, top_k: int = 6) -> list[object]:
+    def fail_search(actor: str, kb_slug: str, question: str, top_k: int = 6, profile_key: str | None = None) -> list[object]:
         raise NotFound("knowledge base not found")
 
     monkeypatch.setattr(service, "search", fail_search)

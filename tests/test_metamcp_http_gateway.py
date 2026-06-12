@@ -73,6 +73,10 @@ def test_mcp_search_lists_external_and_builtin_sources_with_profile(wm_paths) ->
         "safe-readonly",
         [{"resource_type": ProfileResourceType.wiki_kb.value, "resource_key": "frontend-docs"}],
     )
+    store.replace_profile_source_rules(
+        "safe-readonly",
+        [{"source_type": "mcp_service", "source_key": "mysql", "effect": "allow"}],
+    )
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

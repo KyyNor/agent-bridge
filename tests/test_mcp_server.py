@@ -105,7 +105,7 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
             "name": "Wiki",
             "description": "内置知识库查询能力",
             "tags": ["builtin", "knowledge"],
-            "tool_count": 4,
+            "tool_count": 5,
             "status": "enabled",
             "resources": [],
         },

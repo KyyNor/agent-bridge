@@ -4,18 +4,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agent_bridge.core.domain import KbRole
-
-
 class CreateKbRequest(BaseModel):
     slug: str
     name: str
     description: str = ""
-
-
-class GrantMemberRequest(BaseModel):
-    linux_user: str
-    role: KbRole
 
 
 class SyncRequest(BaseModel):

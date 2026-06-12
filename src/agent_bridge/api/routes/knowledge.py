@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from agent_bridge.api.schemas import (
     AskRequest,
     CreateKbRequest,
-    GrantMemberRequest,
     PurgeRequest,
     SyncRequest,
     UpdateKbDefaultsRequest,
@@ -21,8 +20,8 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
     router = APIRouter()
 
     @router.get("/backends")
-    def list_backends() -> list[dict[str, Any]]:
-        return call_safely(lambda: service.list_backends())
+    def list_backends(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return call_safely(lambda: service.list_backends(current_actor))
 
     @router.post("/backends")
     def add_backend(payload: UpsertBackendRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -58,16 +57,6 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
     @router.get("/kbs")
     def list_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return call_safely(lambda: service.list_kbs(current_actor))
-
-    @router.post("/kbs/{kb_slug}/members")
-    def grant_kb_member(
-        kb_slug: str, payload: GrantMemberRequest, current_actor: str = Depends(actor),
-    ) -> dict[str, str]:
-        return call_safely(lambda: service.grant_kb_member(current_actor, kb_slug, payload.linux_user, payload.role))
-
-    @router.get("/kbs/{kb_slug}/members")
-    def list_kb_members(kb_slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return call_safely(lambda: service.list_kb_members(current_actor, kb_slug))
 
     @router.post("/docs")
     def add_document(
@@ -124,8 +113,8 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
         return call_safely(lambda: service.sync(current_actor, all_users=payload.all_users, backend=backend))
 
     @router.get("/search")
-    def search(q: str, kb: str, backend: str | None = None, top_k: int = 6, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        results = call_safely(lambda: service.search(current_actor, kb, q, backend_slug=backend, top_k=top_k))
+    def search(q: str, kb: str, backend: str | None = None, top_k: int = 6, profile_key: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        results = call_safely(lambda: service.search(current_actor, kb, q, backend_slug=backend, profile_key=profile_key, top_k=top_k))
         return {"results": [{"chunk_id": r.chunk_id, "content": r.content, "document_name": r.document_name, "similarity": r.similarity, "dataset_id": r.dataset_id} for r in results]}
 
     @router.get("/search-all")

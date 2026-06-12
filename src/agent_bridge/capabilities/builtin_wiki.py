@@ -20,7 +20,9 @@ class WikiBuiltinProvider:
         self.service = service
 
     def list_resources(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
-        kbs = self.service.list_kbs(actor)
+        kbs = self.service.store.list_kbs()
+        if actor not in self.service.admins and not profile_key:
+            return []
         visible = set(
             self.service.governance.filter_resource_keys(
                 actor=actor,
@@ -165,7 +167,13 @@ class WikiBuiltinProvider:
             if not question:
                 raise ValidationError("question is required")
             try:
-                results = self.service.search(actor, kb_slug, question, top_k=int(arguments.get("top_k") or 6))
+                results = self.service.search(
+                    actor,
+                    kb_slug,
+                    question,
+                    top_k=int(arguments.get("top_k") or 6),
+                    profile_key=profile_key,
+                )
             except AgentBridgeError:
                 raise
             except Exception as exc:
@@ -192,9 +200,7 @@ class WikiBuiltinProvider:
             doc_slug = str(arguments.get("doc_slug") or "").strip()
             if not doc_slug:
                 raise ValidationError("doc_slug is required")
-            doc = self.service.get_doc(actor, doc_slug)
-            if kb_slug not in doc.get("kb_slugs", []):
-                raise NotFound("document not found")
+            doc = self.service.get_doc_for_kb(actor, kb_slug, doc_slug, profile_key=profile_key)
             return {"document": doc}
         raise NotFound("tool not found")
 

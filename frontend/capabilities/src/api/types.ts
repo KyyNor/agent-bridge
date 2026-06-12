@@ -112,7 +112,7 @@ export interface KnowledgeBaseSummary {
   created_by: string
   created_at: string
   updated_at: string
-  role: string
+  role?: string
   backend_targets: { id: number; kb_id: number; slug: string; backend_type: string; backend_kb_id: string | null; config_json: string; status: string; created_at: string; updated_at: string }[]
   document_count: number
   sync_failed_count: number
@@ -127,14 +127,7 @@ export interface KnowledgeBase {
   created_by: string
   created_at: string
   updated_at: string
-  role: string
-}
-
-export interface KbMember {
-  linux_user: string
-  role: string
-  created_at: string
-  updated_at: string
+  role?: string
 }
 
 export interface Document {
@@ -283,7 +276,30 @@ export interface SingleSchedulerStatus {
   jobs: {
     repo_key: string
     next_run_at: string | null
+    progress?: SchedulerRunProgress | null
   }[]
+  current_run?: SchedulerRunProgress | null
+  last_run?: SchedulerRunProgress | null
+}
+
+export interface SchedulerRunProgress {
+  status: string
+  started_at: string | null
+  finished_at: string | null
+  total?: number
+  processed?: number
+  succeeded?: number
+  failed?: number
+  current_job?: {
+    id?: number
+    operation?: string
+    backend_slug?: string
+    kb_slug?: string
+    doc_slug?: string
+    doc_title?: string
+  } | null
+  message?: string | null
+  error?: string | null
 }
 
 export interface SchedulerStatus {

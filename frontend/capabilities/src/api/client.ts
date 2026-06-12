@@ -9,7 +9,6 @@ import type {
   DocumentDetail,
   KnowledgeBase,
   KnowledgeBaseSummary,
-  KbMember,
   McpService,
   McpTool,
   ProjectProfile,
@@ -178,9 +177,6 @@ export const api = {
   listKbs: () => get<KnowledgeBase[]>('/kbs'),
   createKb: (data: { slug: string; name: string; description?: string }) =>
     post<KnowledgeBase>('/kbs', data),
-  listKbMembers: (slug: string) => get<KbMember[]>(`/kbs/${slug}/members`),
-  grantKbMember: (slug: string, data: { linux_user: string; role: string }) =>
-    post(`/kbs/${slug}/members`, data),
 
   // Documents
   listDocs: (kb: string, backend?: string) => {

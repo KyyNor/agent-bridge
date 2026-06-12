@@ -19,11 +19,9 @@ app = typer.Typer(
 
 # Register sub-apps
 from agent_bridge.cli.server import server_app  # noqa: E402
-from agent_bridge.cli.wiki import wiki_app  # noqa: E402
 from agent_bridge.cli.profile import profile_app  # noqa: E402
 
 app.add_typer(server_app, name="server")
-app.add_typer(wiki_app, name="wiki")
 app.add_typer(profile_app, name="profile")
 
 # Re-export symbols used by test monkeypatching
@@ -34,11 +32,6 @@ from agent_bridge.cli.server import (  # noqa: E402, F401
     server_init,
     server_start,
     server_stop,
-)
-from agent_bridge.cli.knowledge import (  # noqa: E402, F401
-    list_kbs,
-    create_kb,
-    grant_member,
 )
 from agent_bridge.cli.profile import (  # noqa: E402, F401
     profile_create,

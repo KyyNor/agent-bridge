@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from agent_bridge.core.config import BackendConfig, AgentBridgePaths, ensure_directories
-from agent_bridge.core.domain import AccessDenied, KbRole, NotFound, SyncStateStatus, ValidationError
+from agent_bridge.core.domain import AccessDenied, NotFound, SyncStateStatus, ValidationError
 from agent_bridge.knowledge.backends.registry import BackendRegistry
 from agent_bridge.knowledge.service import AgentBridgeService
 
@@ -23,12 +23,13 @@ def _service_with_mock_backend(
     return service
 
 
-def test_admin_creates_kb_and_grants_member(wm_paths, tmp_path: Path) -> None:
+def test_admin_creates_kb_and_member_roles_are_disabled(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb(actor="root", slug="frontend-docs", name="Frontend Docs", description="")
-    service.grant_kb_member(actor="root", kb_slug="frontend-docs", linux_user="alice", role=KbRole.contributor)
     assert kb["slug"] == "frontend-docs"
-    assert service.list_kbs(actor="alice")[0]["slug"] == "frontend-docs"
+    assert service.list_kbs(actor="root")[0]["slug"] == "frontend-docs"
+    with pytest.raises(ValidationError, match="member roles are no longer supported"):
+        service.grant_kb_member(actor="root", kb_slug="frontend-docs", linux_user="alice", role="contributor")
 
 
 def test_non_admin_cannot_create_kb(wm_paths, tmp_path: Path) -> None:
@@ -37,134 +38,113 @@ def test_non_admin_cannot_create_kb(wm_paths, tmp_path: Path) -> None:
         service.create_kb(actor="alice", slug="frontend-docs", name="Frontend Docs", description="")
 
 
-def test_contributor_adds_doc_to_multiple_kbs(wm_paths, tmp_path: Path) -> None:
+def test_admin_adds_doc_to_multiple_kbs(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.create_kb("root", "backend-docs", "Backend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
-    service.grant_kb_member("root", "backend-docs", "alice", KbRole.contributor)
     source = tmp_path / "接口说明.pdf"
     source.write_bytes(b"version one")
-    doc = service.add_document(actor="alice", source=source, kb_slugs=["frontend-docs", "backend-docs"], later=True)
+    doc = service.add_document(actor="root", source=source, kb_slugs=["frontend-docs", "backend-docs"], later=True)
     assert doc["slug"] == "接口说明"
     assert doc["current_version_no"] == 1
-    assert len(service.list_docs(actor="alice", kb_slug="frontend-docs")) == 1
-    assert len(service.list_docs(actor="alice", kb_slug="backend-docs")) == 1
+    assert len(service.list_docs(actor="root", kb_slug="frontend-docs")) == 1
+    assert len(service.list_docs(actor="root", kb_slug="backend-docs")) == 1
 
 
 def test_update_document_creates_new_version(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     v1 = tmp_path / "Guide.pdf"
     v2 = tmp_path / "Guide-v2.pdf"
     v1.write_bytes(b"one")
     v2.write_bytes(b"two")
-    doc = service.add_document("alice", v1, ["frontend-docs"], later=True)
-    updated = service.update_document("alice", doc["slug"], v2, later=True)
+    doc = service.add_document("root", v1, ["frontend-docs"], later=True)
+    updated = service.update_document("root", doc["slug"], v2, later=True)
     assert updated["current_version_no"] == 2
 
 
-def test_viewer_cannot_add_document(wm_paths, tmp_path: Path) -> None:
+def test_non_admin_cannot_add_document(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "bob", KbRole.viewer)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
     with pytest.raises(AccessDenied):
-        service.add_document("bob", source, ["frontend-docs"], later=True)
+        service.add_document("alice", source, ["frontend-docs"], later=True)
 
 
 def test_invisible_document_edits_return_not_found(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     v1 = tmp_path / "Guide.pdf"
     v2 = tmp_path / "Guide-v2.pdf"
     v1.write_bytes(b"one")
     v2.write_bytes(b"two")
-    doc = service.add_document("alice", v1, ["frontend-docs"], later=True)
+    doc = service.add_document("root", v1, ["frontend-docs"], later=True)
 
-    with pytest.raises(NotFound, match="document not found"):
-        service.update_document("bob", doc["slug"], v2, later=True)
-    with pytest.raises(NotFound, match="document not found"):
-        service.delete_document("bob", doc["slug"])
-    with pytest.raises(NotFound, match="document not found"):
-        service.purge_document("bob", doc["slug"], confirm=True)
+    with pytest.raises(AccessDenied):
+        service.update_document("alice", doc["slug"], v2, later=True)
+    with pytest.raises(AccessDenied):
+        service.delete_document("alice", doc["slug"])
+    with pytest.raises(AccessDenied):
+        service.purge_document("alice", doc["slug"], confirm=True)
 
 
-def test_shared_document_requires_admin_for_all_associated_kbs(wm_paths, tmp_path: Path) -> None:
+def test_admin_can_update_shared_document(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "kb-a", "KB A", "")
     service.create_kb("root", "kb-b", "KB B", "")
-    service.grant_kb_member("root", "kb-a", "alice", KbRole.contributor)
-    service.grant_kb_member("root", "kb-b", "alice", KbRole.contributor)
-    service.grant_kb_member("root", "kb-a", "carol", KbRole.admin)
-    service.grant_kb_member("root", "kb-b", "carol", KbRole.viewer)
     v1 = tmp_path / "Guide.pdf"
     v2 = tmp_path / "Guide-v2.pdf"
     v1.write_bytes(b"one")
     v2.write_bytes(b"two")
-    doc = service.add_document("alice", v1, ["kb-a", "kb-b"], later=True)
+    doc = service.add_document("root", v1, ["kb-a", "kb-b"], later=True)
 
-    with pytest.raises(AccessDenied):
-        service.update_document("carol", doc["slug"], v2, later=True)
-    with pytest.raises(AccessDenied):
-        service.delete_document("carol", doc["slug"])
-    with pytest.raises(AccessDenied):
-        service.purge_document("carol", doc["slug"], confirm=True)
-
-    service.grant_kb_member("root", "kb-b", "carol", KbRole.admin)
-    updated = service.update_document("carol", doc["slug"], v2, later=True)
+    updated = service.update_document("root", doc["slug"], v2, later=True)
     assert updated["current_version_no"] == 2
 
 
 def test_purge_requires_confirmation(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    doc = service.add_document("alice", source, ["frontend-docs"], later=True)
+    doc = service.add_document("root", source, ["frontend-docs"], later=True)
 
     with pytest.raises(ValidationError, match="purge requires confirmation"):
-        service.purge_document("alice", doc["slug"])
+        service.purge_document("root", doc["slug"])
 
 
 def test_purge_keeps_shared_archive_until_last_reference_is_removed(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     first = tmp_path / "Guide-A.pdf"
     second = tmp_path / "Guide-B.pdf"
     first.write_bytes(b"same bytes")
     second.write_bytes(b"same bytes")
-    doc_a = service.add_document("alice", first, ["frontend-docs"], later=True)
-    doc_b = service.add_document("alice", second, ["frontend-docs"], later=True)
+    doc_a = service.add_document("root", first, ["frontend-docs"], later=True)
+    doc_b = service.add_document("root", second, ["frontend-docs"], later=True)
     version_b = service.store.list_versions(doc_b["id"])[0]
     archive_path = Path(version_b["archive_path"])
 
     assert archive_path.exists()
-    service.purge_document("alice", doc_a["slug"], confirm=True)
+    service.purge_document("root", doc_a["slug"], confirm=True)
 
     assert archive_path.exists()
     assert archive_path.read_bytes() == b"same bytes"
     assert service.store.list_versions(doc_b["id"])[0]["archive_path"] == str(archive_path)
 
-    service.purge_document("alice", doc_b["slug"], confirm=True)
+    service.purge_document("root", doc_b["slug"], confirm=True)
     assert not archive_path.exists()
 
 
-def test_get_doc_does_not_expose_archive_paths_to_viewer(wm_paths, tmp_path: Path) -> None:
+def test_get_doc_does_not_expose_archive_paths_to_admin_response(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
-    service.grant_kb_member("root", "frontend-docs", "bob", KbRole.viewer)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    doc = service.add_document("alice", source, ["frontend-docs"], later=True)
+    doc = service.add_document("root", source, ["frontend-docs"], later=True)
 
-    visible = service.get_doc("bob", doc["slug"])
+    visible = service.get_doc("root", doc["slug"])
 
     assert visible["versions"]
     assert "archive_path" not in visible["versions"][0]
@@ -173,20 +153,19 @@ def test_get_doc_does_not_expose_archive_paths_to_viewer(wm_paths, tmp_path: Pat
 def test_invisible_kb_returns_not_found(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    with pytest.raises(NotFound):
+    with pytest.raises(AccessDenied):
         service.list_docs(actor="alice", kb_slug="frontend-docs")
 
 
 def test_immediate_add_syncs_to_mock_backend(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    service.add_document("alice", source, ["frontend-docs"], later=False)
-    status = service.status(actor="alice")
+    service.add_document("root", source, ["frontend-docs"], later=False)
+    status = service.status(actor="root")
     assert status["jobs"][0]["status"] == "succeeded"
-    docs = service.list_docs(actor="alice", kb_slug="frontend-docs")
+    docs = service.list_docs(actor="root", kb_slug="frontend-docs")
     assert docs[0]["sync_status"] == "synced"
 
 
@@ -232,12 +211,11 @@ def test_sync_uses_backend_kb_id_for_upload_and_delete(wm_paths, tmp_path: Path)
     service.registry._adapters["custom"] = backend  # type: ignore[attr-defined]
     service.init_system()
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
 
-    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
-    service.delete_document("alice", doc["slug"], later=False)
+    doc = service.add_document("root", source, ["frontend-docs"], later=False)
+    service.delete_document("root", doc["slug"], later=False)
 
     assert backend.upload_kb_ids == ["backend-dataset-123"]
     assert backend.delete_kb_ids == ["backend-dataset-123"]
@@ -246,34 +224,32 @@ def test_sync_uses_backend_kb_id_for_upload_and_delete(wm_paths, tmp_path: Path)
 def test_sync_processes_later_job(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    service.add_document("alice", source, ["frontend-docs"], later=True)
-    before = service.status(actor="alice")
+    service.add_document("root", source, ["frontend-docs"], later=True)
+    before = service.status(actor="root")
     assert before["jobs"][0]["status"] == "pending"
-    result = service.sync(actor="alice", all_users=False)
+    result = service.sync(actor="root", all_users=False)
     assert result["processed"] == 1
-    after = service.status(actor="alice")
+    after = service.status(actor="root")
     assert after["jobs"][0]["status"] == "succeeded"
 
 
 def test_delete_creates_delete_job_and_sync_marks_deleted(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
-    service.delete_document("alice", doc["slug"])
+    doc = service.add_document("root", source, ["frontend-docs"], later=False)
+    service.delete_document("root", doc["slug"])
 
-    before = service.status(actor="alice")
+    before = service.status(actor="root")
     assert before["jobs"][-1]["operation"] == "delete"
     assert before["jobs"][-1]["status"] == "pending"
 
-    service.sync(actor="alice", all_users=False)
+    service.sync(actor="root", all_users=False)
 
-    after = service.status(actor="alice")
+    after = service.status(actor="root")
     assert after["jobs"][-1]["status"] == "succeeded"
     sync_state = service.store.get_sync_state(doc["id"], kb["id"], backend_slug="mock")
     assert sync_state is not None
@@ -283,14 +259,13 @@ def test_delete_creates_delete_job_and_sync_marks_deleted(wm_paths, tmp_path: Pa
 def test_delete_with_later_false_syncs_immediately(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
+    doc = service.add_document("root", source, ["frontend-docs"], later=False)
 
-    service.delete_document("alice", doc["slug"], later=False)
+    service.delete_document("root", doc["slug"], later=False)
 
-    status = service.status(actor="alice")
+    status = service.status(actor="root")
     assert status["jobs"][-1]["operation"] == "delete"
     assert status["jobs"][-1]["status"] == "succeeded"
 
@@ -298,10 +273,9 @@ def test_delete_with_later_false_syncs_immediately(wm_paths, tmp_path: Path) -> 
 def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    doc = service.add_document("alice", source, ["frontend-docs"], later=True)
+    doc = service.add_document("root", source, ["frontend-docs"], later=True)
 
     def fail_upsert(*args, **kwargs):
         raise RuntimeError("backend down")
@@ -309,9 +283,9 @@ def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) 
     # Monkeypatch the registry adapter, not mock_backend directly
     mock_adapter = service.registry.get("mock")
     monkeypatch.setattr(mock_adapter, "upload", fail_upsert)
-    service.sync("alice", all_users=False)
+    service.sync("root", all_users=False)
 
-    status = service.status("alice")
+    status = service.status("root")
     assert status["jobs"][0]["status"] == "failed"
     sync_state = service.store.get_sync_state(doc["id"], kb["id"])
     assert sync_state is not None
@@ -321,20 +295,19 @@ def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) 
 def test_delete_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
-    service.grant_kb_member("root", "frontend-docs", "alice", KbRole.contributor)
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
-    doc = service.add_document("alice", source, ["frontend-docs"], later=False)
-    service.delete_document("alice", doc["slug"])
+    doc = service.add_document("root", source, ["frontend-docs"], later=False)
+    service.delete_document("root", doc["slug"])
 
     def fail_delete(*args, **kwargs):
         raise RuntimeError("backend down")
 
     mock_adapter = service.registry.get("mock")
     monkeypatch.setattr(mock_adapter, "delete", fail_delete)
-    service.sync("alice", all_users=False)
+    service.sync("root", all_users=False)
 
-    status = service.status("alice")
+    status = service.status("root")
     assert status["jobs"][-1]["status"] == "failed"
     sync_state = service.store.get_sync_state(doc["id"], kb["id"])
     assert sync_state is not None
@@ -443,3 +416,31 @@ def test_ask_persists_chat_id(wm_paths, tmp_path: Path, monkeypatch) -> None:
     mock_target = next(t for t in targets if t["slug"] == "mock")
     config = json.loads(mock_target["config_json"])
     assert config["chat_id"] == "chat-new"
+
+
+def test_ask_requires_capability_profile_for_non_admin(wm_paths, tmp_path: Path, monkeypatch) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+
+    from agent_bridge.core.domain import AskResult
+    mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
+    adapter = service.registry.get("mock")
+    monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, ""))
+
+    service.governance.upsert_profile("root", "safe", "Safe", "", "active")
+
+    with pytest.raises(AccessDenied, match="capability profile is required"):
+        service.ask("alice", "frontend-docs", "what is X?")
+
+    with pytest.raises(AccessDenied, match="resource is blocked by profile policy"):
+        service.ask("alice", "frontend-docs", "what is X?", profile_key="safe")
+
+    service.governance.set_resource_profiles(
+        "root",
+        "wiki_kb",
+        "frontend-docs",
+        ["safe"],
+    )
+
+    result = service.ask("alice", "frontend-docs", "what is X?", profile_key="safe")
+    assert result.answer == "yes"

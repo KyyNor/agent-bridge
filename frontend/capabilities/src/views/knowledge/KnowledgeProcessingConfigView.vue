@@ -91,6 +91,31 @@ const understandNextRuns = computed(() => formatNextRuns(syncConfig.value.unders
 const docSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.doc_sync_cron || '*/30 * * * *'))
 const cronValid = computed(() => codeSyncNextRuns.value !== null && understandNextRuns.value !== null && docSyncNextRuns.value !== null)
 
+function runBadgeClass(status?: string | null): string {
+  if (status === 'succeeded') return 'bg-green-50 text-green-700'
+  if (status === 'failed') return 'bg-red-50 text-red-700'
+  if (status === 'running') return 'bg-blue-50 text-blue-700'
+  return ''
+}
+
+function runLabel(status?: string | null): string {
+  if (status === 'succeeded') return '成功'
+  if (status === 'failed') return '失败'
+  if (status === 'running') return '执行中'
+  return '未执行'
+}
+
+function docRunText(run: any): string {
+  if (!run) return '暂无执行记录'
+  const total = run.total ?? 0
+  const processed = run.processed ?? 0
+  const succeeded = run.succeeded ?? 0
+  const failed = run.failed ?? 0
+  const current = run.current_job?.doc_title || run.current_job?.doc_slug
+  const base = total ? `${processed}/${total}，成功 ${succeeded}，失败 ${failed}` : `成功 ${succeeded}，失败 ${failed}`
+  return current ? `${base}，当前：${current}` : base
+}
+
 async function saveSyncConfig() {
   if (!cronValid.value) {
     cronError.value = 'Cron 表达式无效，请检查后重试'
@@ -260,12 +285,19 @@ async function deleteBackend(slug: string) {
                   <tr class="border-b border-border">
                     <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
                     <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">最近进度</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="j in schedulerStatus.code_sync.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">
+                      <Badge v-if="j.progress" variant="secondary" class="mr-2 text-[11px]" :class="runBadgeClass(j.progress.status)">
+                        {{ runLabel(j.progress.status) }}
+                      </Badge>
+                      <span>{{ j.progress?.message || '暂无执行记录' }}</span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -286,12 +318,19 @@ async function deleteBackend(slug: string) {
                   <tr class="border-b border-border">
                     <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
                     <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">最近进度</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="j in schedulerStatus.understand.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">
+                      <Badge v-if="j.progress" variant="secondary" class="mr-2 text-[11px]" :class="runBadgeClass(j.progress.status)">
+                        {{ runLabel(j.progress.status) }}
+                      </Badge>
+                      <span>{{ j.progress?.message || '暂无执行记录' }}</span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -304,7 +343,25 @@ async function deleteBackend(slug: string) {
                 </Badge>
                 <span v-if="schedulerStatus.doc_sync?.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.doc_sync.cron }}</span>
               </div>
-              <div class="py-2 text-xs text-muted-foreground">处理所有待处理和失败的文档同步任务</div>
+              <div class="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="text-muted-foreground">当前执行</span>
+                  <Badge v-if="schedulerStatus.doc_sync?.current_run" variant="secondary" class="text-[11px]" :class="runBadgeClass(schedulerStatus.doc_sync.current_run.status)">
+                    {{ runLabel(schedulerStatus.doc_sync.current_run.status) }}
+                  </Badge>
+                  <span class="text-muted-foreground">{{ docRunText(schedulerStatus.doc_sync?.current_run) }}</span>
+                </div>
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="text-muted-foreground">最近一次</span>
+                  <Badge v-if="schedulerStatus.doc_sync?.last_run" variant="secondary" class="text-[11px]" :class="runBadgeClass(schedulerStatus.doc_sync.last_run.status)">
+                    {{ runLabel(schedulerStatus.doc_sync.last_run.status) }}
+                  </Badge>
+                  <span class="text-muted-foreground">{{ docRunText(schedulerStatus.doc_sync?.last_run) }}</span>
+                  <span v-if="schedulerStatus.doc_sync?.last_run?.finished_at" class="font-mono text-muted-foreground">
+                    {{ formatLocalDatetime(schedulerStatus.doc_sync.last_run.finished_at) }}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

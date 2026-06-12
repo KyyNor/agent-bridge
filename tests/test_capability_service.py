@@ -454,7 +454,10 @@ def test_search_root_filters_services_by_profile_and_returns_log_id(wm_paths: Ag
     service.governance.replace_profile_rules(
         "root",
         "safe-readonly",
-        [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}],
+        [
+            {"source_type": "mcp_service", "source_key": "mysql", "effect": "allow"},
+            {"source_type": "mcp_service", "source_key": "hive", "effect": "deny"},
+        ],
     )
 
     result = service.search("root", None, None, profile_key="safe-readonly")

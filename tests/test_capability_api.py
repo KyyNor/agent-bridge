@@ -282,7 +282,7 @@ def test_profile_api_and_catalog_preview(wm_paths) -> None:
     assert detail.status_code == 200
     assert detail.json()["rules"][0]["effect"] == "deny"
     assert catalog.status_code == 200
-    assert [item["source_key"] for item in catalog.json()["sources"]] == ["mysql"]
+    assert [item["source_key"] for item in catalog.json()["sources"]] == []
 
 
 def test_profile_resource_rules_api(wm_paths) -> None:
@@ -342,33 +342,31 @@ def test_knowledge_web_management_api_flow(tmp_path: Path, wm_paths) -> None:
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    member = client.post(
-        "/kbs/frontend-docs/members",
-        json={"linux_user": "alice", "role": "contributor"},
+    uploaded = client.post(
+        "/docs",
+        data={"kb": "frontend-docs", "later": "true"},
+        files={"file": ("Guide.md", source.read_bytes(), "text/markdown")},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    uploaded = client.post(
+    blocked_upload = client.post(
         "/docs",
         data={"kb": "frontend-docs", "later": "true"},
         files={"file": ("Guide.md", source.read_bytes(), "text/markdown")},
         headers={"X-Agent-Bridge-User": "alice"},
     )
-    docs = client.get("/docs", params={"kb": "frontend-docs"}, headers={"X-Agent-Bridge-User": "alice"})
-    detail = client.get("/docs/guide", headers={"X-Agent-Bridge-User": "alice"})
-    members = client.get("/kbs/frontend-docs/members", headers={"X-Agent-Bridge-User": "root"})
-    status = client.get("/status", headers={"X-Agent-Bridge-User": "alice"})
-    summary = client.get("/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "alice"})
+    docs = client.get("/docs", params={"kb": "frontend-docs"}, headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get("/docs/guide", headers={"X-Agent-Bridge-User": "root"})
+    status = client.get("/status", headers={"X-Agent-Bridge-User": "root"})
+    summary = client.get("/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "root"})
 
     assert created.status_code == 200
-    assert member.status_code == 200
     assert uploaded.status_code == 200
     assert uploaded.json()["slug"] == "guide"
+    assert blocked_upload.status_code == 403
     assert docs.status_code == 200
     assert docs.json()[0]["slug"] == "guide"
     assert detail.status_code == 200
     assert detail.json()["kb_slugs"] == ["frontend-docs"]
-    assert members.status_code == 200
-    assert members.json()[0]["linux_user"] == "alice"
     assert status.status_code == 200
     assert status.json()["jobs"][0]["status"] == "pending"
     assert summary.status_code == 200
@@ -396,11 +394,25 @@ def test_backend_list_reports_weknora_type(wm_paths) -> None:
     response = client.get("/backends", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
-    assert response.json() == [{"slug": "weknora-main", "type": "weknora", "status": "active"}]
+    payload = response.json()
+    assert payload[0]["slug"] == "weknora-main"
+    assert payload[0]["backend_type"] == "weknora"
+    assert payload[0]["status"] == "active"
+    assert payload[0]["api_key_set"] is True
+    assert "api_key" not in payload[0]
+
+
+def test_backend_list_requires_admin(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/backends", headers={"X-Agent-Bridge-User": "alice"})
+
+    assert response.status_code == 403
 
 
 def test_frontend_stats_view_uses_calls_field_from_backend() -> None:
-    source = Path("frontend/capabilities/src/views/StatsView.vue").read_text(encoding="utf-8")
+    source = Path("frontend/capabilities/src/views/monitoring/StatsView.vue").read_text(encoding="utf-8")
 
     assert "callCount" in source
     assert "s.count" not in source
@@ -423,8 +435,8 @@ def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None
 
 
 def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> None:
-    knowledge = Path("frontend/capabilities/src/views/KnowledgeView.vue").read_text(encoding="utf-8")
-    profiles = Path("frontend/capabilities/src/views/ProfilesView.vue").read_text(encoding="utf-8")
+    knowledge = Path("frontend/capabilities/src/views/knowledge/KnowledgeView.vue").read_text(encoding="utf-8")
+    profiles = Path("frontend/capabilities/src/views/capabilities/ProfilesView.vue").read_text(encoding="utf-8")
 
     assert "创建文档知识" in knowledge
     assert "暂无文档知识，点击「创建文档知识」开始" in knowledge
@@ -434,7 +446,7 @@ def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> Non
 
 
 def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
-    source = Path("frontend/capabilities/src/views/CodeRepoView.vue").read_text(encoding="utf-8")
+    source = Path("frontend/capabilities/src/views/knowledge/CodeRepoView.vue").read_text(encoding="utf-8")
 
     assert "detailTab === 'overview'" in source
     assert "detailTab === 'explore'" in source
@@ -457,12 +469,14 @@ def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
 
 
 def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
-    source = Path("frontend/capabilities/src/views/KnowledgeProcessingConfigView.vue").read_text(encoding="utf-8")
+    source = Path("frontend/capabilities/src/views/knowledge/KnowledgeProcessingConfigView.vue").read_text(encoding="utf-8")
 
     assert "定时任务管理" in source
     assert "code_sync_cron" in source
     assert "doc_sync_cron" in source
     assert "知识同步" in source
+    assert "最近进度" in source
+    assert "当前执行" in source
 
 
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:

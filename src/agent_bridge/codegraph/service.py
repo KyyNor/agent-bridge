@@ -158,6 +158,7 @@ class CodeGraphService:
             raise ValidationError(f"codegraph sync failed: {message}") from exc
 
     def search_code(self, actor: str, repo_key: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if self.client.is_available():
             local_path = self._local_path(repo_key)
@@ -169,6 +170,7 @@ class CodeGraphService:
         ]
 
     def get_file(self, actor: str, repo_key: str, path: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if self.client.is_available():
             local_path = self._local_path(repo_key).resolve()
@@ -200,6 +202,7 @@ class CodeGraphService:
         }
 
     def find_symbol(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if self.client.is_available():
             local_path = self._local_path(repo_key)
@@ -211,6 +214,7 @@ class CodeGraphService:
         ]
 
     def repository_overview(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
         repo = self._require_repository(repo_key)
         if self.client.is_available():
             local_path = self._local_path(repo_key)
@@ -235,6 +239,7 @@ class CodeGraphService:
         }
 
     def callers(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if not self.client.is_available():
             return []
@@ -243,6 +248,7 @@ class CodeGraphService:
         return [self._codegraph_node_payload(n) for n in nodes[:limit]]
 
     def callees(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if not self.client.is_available():
             return []
@@ -251,6 +257,7 @@ class CodeGraphService:
         return [self._codegraph_node_payload(n) for n in nodes[:limit]]
 
     def impact(self, actor: str, repo_key: str, symbol: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if not self.client.is_available():
             return []
@@ -259,6 +266,7 @@ class CodeGraphService:
         return [self._codegraph_node_payload(n) for n in nodes]
 
     def list_files(self, actor: str, repo_key: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if not self.client.is_available():
             return []
@@ -266,6 +274,7 @@ class CodeGraphService:
         return self.client.files(local_path)
 
     async def explore(self, actor: str, repo_key: str, query: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         if not local_path.is_dir():

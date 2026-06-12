@@ -13,49 +13,10 @@ from agent_bridge.cli.app import app
 runner = CliRunner()
 
 
-def test_kb_list_calls_client(monkeypatch) -> None:
-    calls = []
-
-    class FakeClient:
-        def list_kbs(self):
-            calls.append("list_kbs")
-            return [{"slug": "frontend-docs", "role": "contributor"}]
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "kb", "list"])
-    assert result.exit_code == 0
-    assert "frontend-docs" in result.stdout
-    assert calls == ["list_kbs"]
-
-
-def test_add_command_sends_file_and_kbs(monkeypatch, tmp_path: Path) -> None:
-    source = tmp_path / "Guide.pdf"
-    source.write_bytes(b"one")
-    captured = {}
-
-    class FakeClient:
-        def add_document(self, source, kb_slugs, later):
-            captured["source"] = source
-            captured["kb_slugs"] = kb_slugs
-            captured["later"] = later
-            return {"slug": "guide", "current_version_no": 1}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "add", str(source), "--kb", "frontend-docs", "--later"])
-    assert result.exit_code == 0
-    assert "guide" in result.stdout
-    assert captured == {"source": source, "kb_slugs": ["frontend-docs"], "later": True}
-
-
-def test_sync_command_prints_processed_count(monkeypatch) -> None:
-    class FakeClient:
-        def sync(self, all_users, backend=None):
-            return {"processed": 2}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "sync"])
-    assert result.exit_code == 0
-    assert "已处理: 2" in result.stdout
+def test_wiki_cli_commands_are_not_registered() -> None:
+    result = runner.invoke(app, ["wiki"])
+    assert result.exit_code == 2
+    assert "No such command" in result.output
 
 
 def test_client_init_system_posts_admin_init(monkeypatch) -> None:
@@ -119,26 +80,6 @@ def test_server_init_calls_client(monkeypatch) -> None:
     assert calls == ["init_system"]
 
 
-def test_status_reports_service_unavailable_cleanly(monkeypatch) -> None:
-    class FakeClient:
-        def status(self, backend=None):
-            raise httpx.ConnectError("boom")
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "status"])
-    output = f"{result.stdout}{result.stderr}"
-    assert result.exit_code == 1
-    assert "服务不可用" in result.stderr or "boom" in result.stderr
-    assert "Traceback" not in output
-
-
-def test_add_missing_file_reports_clean_cli_error() -> None:
-    result = runner.invoke(app, ["wiki", "add", "missing.pdf", "--kb", "frontend-docs"])
-    output = f"{result.stdout}{result.stderr}"
-    assert result.exit_code != 0
-    assert "Traceback" not in output
-
-
 def test_server_status_command(monkeypatch) -> None:
     monkeypatch.setattr("agent_bridge.cli.app.server_status", lambda: {"running": True, "pid": 123})
     result = runner.invoke(app, ["server", "status"])
@@ -172,100 +113,6 @@ def test_server_start_reports_errors_cleanly(monkeypatch) -> None:
     assert "服务错误" in result.stderr
     assert "permission denied" in result.stderr
     assert "Traceback" not in output
-
-
-def test_purge_without_yes_exits_without_calling_client(monkeypatch) -> None:
-    calls = []
-
-    class FakeClient:
-        def purge_document(self, doc_slug, confirm):
-            calls.append((doc_slug, confirm))
-            return {"slug": doc_slug, "status": "purged"}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "purge", "guide"])
-    output = f"{result.stdout}{result.stderr}"
-    assert result.exit_code == 1
-    assert "需要 --yes 确认" in output
-    assert "Traceback" not in output
-    assert calls == []
-
-
-def test_purge_with_yes_calls_client(monkeypatch) -> None:
-    calls = []
-
-    class FakeClient:
-        def purge_document(self, doc_slug, confirm):
-            calls.append((doc_slug, confirm))
-            return {"slug": doc_slug, "status": "purged"}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "purge", "guide", "--yes"])
-    assert result.exit_code == 0
-    assert "purged" in result.stdout
-    assert calls == [("guide", True)]
-
-
-def test_list_backends(monkeypatch) -> None:
-    class FakeClient:
-        def list_backends(self):
-            return [{"slug": "local-gpt", "type": "openai"}]
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "backends"])
-    assert result.exit_code == 0
-    assert "local-gpt" in result.stdout
-    assert "openai" in result.stdout
-
-
-def test_search_command_calls_client(monkeypatch) -> None:
-    calls = []
-
-    class FakeClient:
-        def search(self, kb_slug, question, backend=None, top_k=6):
-            calls.append({"kb": kb_slug, "q": question, "backend": backend, "top_k": top_k})
-            return {
-                "results": [
-                    {
-                        "document_name": "auth.md",
-                        "similarity": 0.93,
-                        "content": "OAuth2 flow description",
-                    }
-                ]
-            }
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "search", "how does auth work", "--kb", "frontend-docs"])
-    assert result.exit_code == 0
-    assert "auth.md" in result.stdout
-    assert calls == [{"kb": "frontend-docs", "q": "how does auth work", "backend": None, "top_k": 6}]
-
-
-def test_search_command_no_results(monkeypatch) -> None:
-    class FakeClient:
-        def search(self, kb_slug, question, backend=None, top_k=6):
-            return {"results": []}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "search", "nonexistent", "--kb", "test-kb"])
-    assert result.exit_code == 0
-    assert "无结果" in result.stdout
-
-
-def test_ask_command_calls_client(monkeypatch) -> None:
-    calls = []
-
-    class FakeClient:
-        def ask(self, kb_slug, question, backend=None, session_id=None):
-            calls.append({"kb": kb_slug, "q": question, "backend": backend, "session_id": session_id})
-            return {"answer": "OAuth2 uses tokens.", "session_id": "abc123"}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["wiki", "ask", "how does auth work", "--kb", "frontend-docs"])
-    assert result.exit_code == 0
-    assert "OAuth2 uses tokens." in result.stdout
-    assert "session: abc123" in result.stdout
-    assert calls == [{"kb": "frontend-docs", "q": "how does auth work", "backend": None, "session_id": None}]
 
 
 def test_client_search_sends_get(monkeypatch) -> None:

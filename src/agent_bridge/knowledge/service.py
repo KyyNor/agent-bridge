@@ -7,7 +7,7 @@ import mimetypes
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-from typing import Any
+from typing import Any, Callable
 
 from agent_bridge.knowledge.archive import ArchiveStorage
 from agent_bridge.capabilities.governance import CapabilityGovernanceService
@@ -17,10 +17,10 @@ from agent_bridge.codegraph.service import CodeGraphService
 from agent_bridge.codegraph.understand_scheduler import UnderstandingScheduler
 from agent_bridge.knowledge.doc_sync_scheduler import DocSyncScheduler
 from agent_bridge.core.config import AgentBridgePaths, BackendConfig, ensure_directories, migrate_toml_backends_to_db
+from agent_bridge.capabilities.models import ProfileResourceType
 from agent_bridge.core.domain import (
     AccessDenied,
     AskResult,
-    KbRole,
     NotFound,
     Operation,
     RetrievalResult,
@@ -28,8 +28,6 @@ from agent_bridge.core.domain import (
     SyncJobStatus,
     SyncStateStatus,
     ValidationError,
-    can_manage_kb,
-    can_write_own_doc,
     require_admin_user,
 )
 from agent_bridge.knowledge.backends.mock import MockBackend
@@ -81,7 +79,6 @@ class AgentBridgeService:
         service.store.init_schema()
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
-        service.ensure_weknora_agents()
         return service
 
     def init_system(self) -> None:
@@ -102,7 +99,6 @@ class AgentBridgeService:
     def create_kb(self, actor: str, slug: str, name: str, description: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         kb = self.store.create_kb(slug=slug, name=name, description=description, created_by=actor)
-        self.store.grant_member(kb["id"], actor, KbRole.admin)
         if self.registry:
             for backend_slug in self.registry.list_slugs():
                 adapter = self.registry.get(backend_slug)
@@ -115,21 +111,12 @@ class AgentBridgeService:
                         self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
         return kb
 
-    def grant_kb_member(self, actor: str, kb_slug: str, linux_user: str, role: KbRole) -> dict[str, str]:
-        kb = self.store.get_kb_by_slug(kb_slug)
-        if kb is None:
-            raise NotFound("knowledge base not found")
-        if actor not in self.admins and not can_manage_kb(self.store.get_member_role(kb["id"], actor)):
-            raise AccessDenied("knowledge base admin permission required")
-        self.store.grant_member(kb["id"], linux_user, role)
-        return {"kb_slug": kb_slug, "linux_user": linux_user, "role": role.value}
+    def grant_kb_member(self, actor: str, kb_slug: str, linux_user: str, role: Any) -> dict[str, str]:
+        raise ValidationError("knowledge base member roles are no longer supported; use capability profiles")
 
     def list_kbs(self, actor: str) -> list[dict[str, Any]]:
-        kbs = self.store.list_kbs_for_user_or_admin(actor, self.admins)
-        if actor in self.admins:
-            for kb in kbs:
-                kb["role"] = kb["role"] or KbRole.admin.value
-        return kbs
+        require_admin_user(actor, self.admins)
+        return self.store.list_kbs()
 
     def list_kb_status_summaries(self, actor: str) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []
@@ -149,10 +136,10 @@ class AgentBridgeService:
         return summaries
 
     def list_kb_members(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
-        kb = self._require_kb_visible(actor, kb_slug)
-        if actor not in self.admins and not can_manage_kb(self.store.get_member_role(kb["id"], actor)):
-            raise AccessDenied("knowledge base admin permission required")
-        return self.store.list_members(kb["id"])
+        require_admin_user(actor, self.admins)
+        if self.store.get_kb_by_slug(kb_slug) is None:
+            raise NotFound("knowledge base not found")
+        return []
 
     def add_document(
         self,
@@ -164,10 +151,9 @@ class AgentBridgeService:
     ) -> dict[str, Any]:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
+        require_admin_user(actor, self.admins)
         self._validate_source(source)
-        kbs = [self._require_kb_visible(actor, kb_slug) for kb_slug in kb_slugs]
-        for kb in kbs:
-            self._require_kb_write(actor, kb)
+        kbs = [self._require_kb_admin_visible(actor, kb_slug) for kb_slug in kb_slugs]
 
         display_name = original_filename or source.name
         slug = unique_slug(make_slug(display_name), self.store.list_document_slugs())
@@ -206,7 +192,8 @@ class AgentBridgeService:
         later: bool,
         original_filename: str | None = None,
     ) -> dict[str, Any]:
-        doc = self._require_doc_edit(actor, doc_slug)
+        require_admin_user(actor, self.admins)
+        doc = self._require_doc_admin_visible(actor, doc_slug)
         self._validate_source(source)
         kbs = self.store.get_document_kbs(doc["id"])
         display_name = original_filename or source.name
@@ -234,11 +221,11 @@ class AgentBridgeService:
         return doc
 
     def list_docs(self, actor: str, kb_slug: str, backend: str | None = None) -> list[dict[str, Any]]:
-        kb = self._require_kb_visible(actor, kb_slug)
+        kb = self._require_kb_admin_visible(actor, kb_slug)
         return self.store.list_docs_for_kb(kb["id"])
 
     def get_doc(self, actor: str, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
-        doc = self._require_doc_visible(actor, doc_slug)
+        doc = self._require_doc_admin_visible(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"])
         versions = self.store.list_versions(doc["id"])
         for version in versions:
@@ -252,8 +239,26 @@ class AgentBridgeService:
         doc["sync_states"] = sync_states
         return doc
 
+    def get_doc_for_kb(self, actor: str, kb_slug: str, doc_slug: str, *, profile_key: str | None = None) -> dict[str, Any]:
+        kb = self._require_kb_runtime_allowed(actor, kb_slug, profile_key)
+        doc = self.store.get_document_by_slug(doc_slug)
+        if doc is None:
+            raise NotFound("document not found")
+        kbs = self.store.get_document_kbs(doc["id"])
+        if not any(item["id"] == kb["id"] for item in kbs):
+            raise NotFound("document not found")
+        versions = self.store.list_versions(doc["id"])
+        for version in versions:
+            version.pop("archive_path", None)
+        doc["kbs"] = kbs
+        doc["versions"] = versions
+        doc["kb_slugs"] = [item["slug"] for item in kbs]
+        doc["sync_states"] = self.store.list_sync_states_for_doc(doc["id"])
+        return doc
+
     def delete_document(self, actor: str, doc_slug: str, later: bool = True) -> dict[str, str]:
-        doc = self._require_doc_edit(actor, doc_slug)
+        require_admin_user(actor, self.admins)
+        doc = self._require_doc_admin_visible(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"])
         for kb in kbs:
             targets = self.store.list_backend_targets(kb["id"])
@@ -268,24 +273,51 @@ class AgentBridgeService:
             self.sync(actor=actor, all_users=False)
         return {"slug": doc_slug, "status": "deleted"}
 
-    def sync(self, actor: str, all_users: bool, backend: str | None = None) -> dict[str, int]:
-        if all_users:
-            require_admin_user(actor, self.admins)
+    def sync(
+        self,
+        actor: str,
+        all_users: bool,
+        backend: str | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, int]:
+        require_admin_user(actor, self.admins)
         jobs = self.store.list_runnable_jobs(
-            actor=None if all_users or actor in self.admins else actor,
+            actor=None,
             backend_slug=backend,
         )
         logger.info("文档同步: %d 个待处理任务", len(jobs))
         succeeded = 0
         failed = 0
-        for job in jobs:
+        if progress_callback:
+            progress_callback({"event": "start", "total": len(jobs), "processed": 0, "succeeded": 0, "failed": 0})
+        for index, job in enumerate(jobs, start=1):
+            if progress_callback:
+                progress_callback({
+                    "event": "job_start",
+                    "total": len(jobs),
+                    "processed": index - 1,
+                    "succeeded": succeeded,
+                    "failed": failed,
+                    "current_job": self._sync_job_progress_payload(job),
+                })
             ok = self._run_job(job)
             if ok:
                 succeeded += 1
             else:
                 failed += 1
+            if progress_callback:
+                progress_callback({
+                    "event": "job_done",
+                    "total": len(jobs),
+                    "processed": index,
+                    "succeeded": succeeded,
+                    "failed": failed,
+                    "current_job": self._sync_job_progress_payload(job),
+                })
         logger.info("文档同步完成: %d 成功, %d 失败", succeeded, failed)
-        return {"processed": len(jobs)}
+        if progress_callback:
+            progress_callback({"event": "finish", "total": len(jobs), "processed": len(jobs), "succeeded": succeeded, "failed": failed})
+        return {"processed": len(jobs), "succeeded": succeeded, "failed": failed}
 
     # -- Code repo categories --
 
@@ -324,19 +356,17 @@ class AgentBridgeService:
         }
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
-        if actor in self.admins:
-            jobs = self.store.list_all_jobs(backend_slug=backend)
-        else:
-            jobs = self.store.list_jobs_for_user(actor, backend_slug=backend)
-        return {"jobs": jobs}
+        require_admin_user(actor, self.admins)
+        return {"jobs": self.store.list_all_jobs(backend_slug=backend)}
 
     def search_all(self, actor: str, question: str, *,
                    profile_key: str | None = None,
                    top_k: int = 6) -> list[dict[str, Any]]:
         from agent_bridge.capabilities.models import ProfileResourceType
 
-        kbs = self.list_kbs(actor)
-        if profile_key:
+        kbs = self.store.list_kbs()
+        if actor not in self.admins or profile_key:
+            self._require_profile_key(profile_key)
             allowed = set(
                 self.governance.filter_resource_keys(
                     actor=actor,
@@ -366,8 +396,9 @@ class AgentBridgeService:
 
     def search(self, actor: str, kb_slug: str, question: str, *,
                backend_slug: str | None = None,
+               profile_key: str | None = None,
                top_k: int = 6) -> list[RetrievalResult]:
-        kb = self._require_kb_visible(actor, kb_slug)
+        kb = self._require_kb_runtime_allowed(actor, kb_slug, profile_key)
         target = self._resolve_retrieval_target(kb, backend_slug)
         adapter = self._get_adapter(target["slug"])
         return adapter.retrieve(target["backend_kb_id"], question, top_k)
@@ -420,6 +451,7 @@ class AgentBridgeService:
             backend_slug: str | None = None,
             session_id: str | None = None,
             profile_key: str | None = None) -> AskResult:
+        self._require_kb_runtime_allowed(actor, kb_slug, profile_key)
         kb, strategy = self.resolve_retrieval_strategy(kb_slug, profile_key)
         resolved_backend = backend_slug or strategy.backend_slug
         target = self._resolve_retrieval_target(kb, resolved_backend)
@@ -553,7 +585,10 @@ class AgentBridgeService:
             return False
 
     def purge_document(self, actor: str, doc_slug: str, confirm: bool = False) -> dict[str, str]:
-        doc = self._require_doc_edit(actor, doc_slug, include_deleted=True)
+        require_admin_user(actor, self.admins)
+        doc = self.store.get_document_by_slug(doc_slug, include_deleted=True)
+        if doc is None:
+            raise NotFound("document not found")
         if not confirm:
             raise ValidationError("purge requires confirmation")
         archive_paths = self.store.purge_document(doc["id"])
@@ -609,10 +644,12 @@ class AgentBridgeService:
                                 pass
                         self.store.set_backend_target_status(kb["id"], backend_slug, "active")
 
-    def list_backends(self) -> list[dict[str, Any]]:
+    def list_backends(self, actor: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
         rows = self.store.list_backends()
         for row in rows:
             row["api_key_set"] = bool(row.get("api_key"))
+            row.pop("api_key", None)
             # Determine runtime status
             if self.registry and row["slug"] in self.registry.backends:
                 row["runtime_status"] = "active"
@@ -640,6 +677,7 @@ class AgentBridgeService:
             self.registry.add_backend(config)
             self.align_backends()
         row["api_key_set"] = bool(api_key)
+        row.pop("api_key", None)
         row["runtime_status"] = "active"
         return row
 
@@ -671,6 +709,7 @@ class AgentBridgeService:
             self.registry.update_backend(config)
             self.align_backends()
         row["api_key_set"] = bool(resolved_key)
+        row.pop("api_key", None)
         row["runtime_status"] = "active"
         return row
 
@@ -687,23 +726,33 @@ class AgentBridgeService:
                 self.store.set_backend_target_status(kb["id"], slug, "inactive")
         return {"slug": slug, "status": "removed"}
 
-    def _require_kb_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
+    def _require_kb_admin_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
         kb = self.store.get_kb_by_slug(kb_slug)
         if kb is None:
             raise NotFound("knowledge base not found")
-        if actor in self.admins:
-            return kb
-        if self.store.get_member_role(kb["id"], actor) is None:
-            raise NotFound("knowledge base not found")
         return kb
 
-    def _require_kb_write(self, actor: str, kb: dict[str, Any]) -> KbRole:
-        if actor in self.admins:
-            return KbRole.admin
-        role = self.store.get_member_role(kb["id"], actor)
-        if not can_write_own_doc(role):
-            raise AccessDenied("contributor permission required")
-        return role
+    def _require_kb_runtime_allowed(self, actor: str, kb_slug: str, profile_key: str | None) -> dict[str, Any]:
+        kb = self.store.get_kb_by_slug(kb_slug)
+        if kb is None:
+            raise NotFound("knowledge base not found")
+        if actor in self.admins and not profile_key:
+            return kb
+        self._require_profile_key(profile_key)
+        if not self.governance.is_resource_allowed(
+            actor,
+            profile_key,
+            ProfileResourceType.wiki_kb.value,
+            kb_slug,
+        ):
+            raise AccessDenied("resource is blocked by profile policy")
+        return kb
+
+    @staticmethod
+    def _require_profile_key(profile_key: str | None) -> None:
+        if not profile_key:
+            raise AccessDenied("capability profile is required")
 
     def _validate_source(self, source: Path) -> None:
         if not source.is_file():
@@ -711,30 +760,23 @@ class AgentBridgeService:
         if source.suffix.lower() not in ALLOWED_EXTENSIONS:
             raise ValidationError("unsupported file type")
 
-    def _require_doc_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:
+    def _require_doc_admin_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
         doc = self.store.get_document_by_slug(doc_slug)
         if doc is None:
             raise NotFound("document not found")
-        if actor in self.admins or self._actor_can_access_doc(actor, doc):
-            return doc
-        raise NotFound("document not found")
+        return doc
 
-    def _require_doc_edit(self, actor: str, doc_slug: str, include_deleted: bool = False) -> dict[str, Any]:
-        doc = self.store.get_document_by_slug(doc_slug, include_deleted=include_deleted)
-        if doc is None:
-            raise NotFound("document not found")
-        if actor in self.admins or doc["owner_user"] == actor or self._actor_admin_for_document(actor, doc):
-            return doc
-        if not self._actor_can_access_doc(actor, doc):
-            raise NotFound("document not found")
-        raise AccessDenied("document owner or knowledge base admin permission required")
-
-    def _actor_can_access_doc(self, actor: str, doc: dict[str, Any]) -> bool:
-        return any(self.store.get_member_role(kb["id"], actor) is not None for kb in self.store.get_document_kbs(doc["id"]))
-
-    def _actor_admin_for_document(self, actor: str, doc: dict[str, Any]) -> bool:
-        kbs = self.store.get_document_kbs(doc["id"])
-        return bool(kbs) and all(can_manage_kb(self.store.get_member_role(kb["id"], actor)) for kb in kbs)
+    @staticmethod
+    def _sync_job_progress_payload(job: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": job.get("id"),
+            "operation": job.get("operation"),
+            "backend_slug": job.get("backend_slug"),
+            "kb_slug": job.get("kb_slug"),
+            "doc_slug": job.get("doc_slug"),
+            "doc_title": job.get("doc_title"),
+        }
 
     @staticmethod
     def _mime_type(filename: str) -> str:
