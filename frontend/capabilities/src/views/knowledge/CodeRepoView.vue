@@ -644,10 +644,7 @@ watch(showDetail, (open) => {
     <Dialog :open="showDetail" @update:open="showDetail = $event">
       <DialogContent
         :show-close-button="!dashboardMaximized"
-        :class="[
-          'sm:max-w-[900px] max-h-[85vh] overflow-y-auto overflow-x-hidden',
-          dashboardMaximized && '!fixed !inset-0 !top-0 !left-0 !z-[9999] !h-screen !max-h-none !w-screen !max-w-none !translate-x-0 !translate-y-0 !rounded-none !p-0 !ring-0 !overflow-hidden',
-        ]"
+        class="sm:max-w-[900px] max-h-[85vh] overflow-y-auto overflow-x-hidden"
         @pointer-down-outside="preventDashboardOutsideClose"
         @interact-outside="preventDashboardOutsideClose"
       >
@@ -901,6 +898,8 @@ watch(showDetail, (open) => {
         <DialogFooter v-if="!dashboardMaximized">
           <DialogClose as-child><Button variant="outline">关闭</Button></DialogClose>
         </DialogFooter>
+      </DialogContent>
+      <Teleport to="body">
         <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[10000] flex flex-col bg-background">
           <div class="flex items-center justify-between gap-2 px-4 py-2 bg-secondary/50 border-b border-border shrink-0">
             <span class="text-sm font-medium text-muted-foreground">Dashboard</span>
@@ -910,7 +909,7 @@ watch(showDetail, (open) => {
           </div>
           <iframe :src="dashboardSrc" class="flex-1 border-0 w-full" />
         </div>
-      </DialogContent>
+      </Teleport>
     </Dialog>
   </div>
 </template>
