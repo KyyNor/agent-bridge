@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -38,9 +37,26 @@ def _pointer_paths(scope: str) -> tuple[Path, Path]:
 
 def _replace_agent_bridge_block(path: Path, block: str) -> None:
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    pattern = rf"\n?{re.escape(_POINTER_START)}\n.*?\n{re.escape(_POINTER_END)}\n?"
-    updated = re.sub(pattern, "\n", existing, flags=re.DOTALL).rstrip()
-    next_text = f"{updated}\n\n{block.rstrip()}\n" if updated else f"{block.rstrip()}\n"
+    lines = existing.splitlines(keepends=True)
+    kept_lines: list[str] = []
+    in_agent_bridge_block = False
+    for line in lines:
+        marker = line.strip()
+        if marker == _POINTER_START:
+            in_agent_bridge_block = True
+            continue
+        if in_agent_bridge_block:
+            if marker == _POINTER_END:
+                in_agent_bridge_block = False
+            continue
+        kept_lines.append(line)
+
+    prefix = "".join(kept_lines)
+    if prefix and not prefix.endswith("\n"):
+        prefix += "\n"
+    if prefix and not prefix.endswith("\n\n"):
+        prefix += "\n"
+    next_text = f"{prefix}{block.rstrip()}\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(next_text, encoding="utf-8")
 
@@ -135,10 +151,6 @@ def profile_use(
         path = _claude_config_path(resolved_scope)
         existing = _load_json_file(path)
         _confirm_overwrite(existing, yes)
-        path.write_text(
-            json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
         rendered = _run_client(lambda client: client.render_profile_doc(profile))
         markdown = rendered.get("markdown")
         if not isinstance(markdown, str):
@@ -153,6 +165,11 @@ def profile_use(
                 "Read the active Agent Bridge profile before using agent-bridge capabilities: "
                 f"{resolved_profile_path}"
             ),
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)

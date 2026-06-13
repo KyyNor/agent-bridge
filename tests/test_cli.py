@@ -279,6 +279,87 @@ def test_profile_use_writes_agent_bridge_server_and_profile_files(monkeypatch, t
     assert str(profile_file.resolve()) in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
 
 
+def test_profile_use_render_failure_does_not_write_project_config(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            raise RuntimeError("render failed")
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project"])
+
+    assert result.exit_code == 1
+    assert "render failed" in result.stderr
+    assert not (tmp_path / ".mcp.json").exists()
+
+
+def test_profile_use_render_failure_does_not_overwrite_project_config(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / ".mcp.json"
+    original = {"mcpServers": {"existing": {"command": "node"}}}
+    config.write_text(json.dumps(original), encoding="utf-8")
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            raise RuntimeError("render failed")
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project"])
+
+    assert result.exit_code == 1
+    assert json.loads(config.read_text(encoding="utf-8")) == original
+
+
+def test_profile_use_writes_user_scope_profile_files(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": "# User Safe\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "user"])
+
+    assert result.exit_code == 0
+    data = json.loads((home / ".mcp.json").read_text(encoding="utf-8"))
+    assert "agent-bridge" in data["mcpServers"]
+    profile_file = home / ".agent-bridge" / "profiles" / "safe.md"
+    assert profile_file.read_text(encoding="utf-8") == "# User Safe\n"
+    assert f"@{profile_file.resolve()}" in (home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert str(profile_file.resolve()) in (home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / ".mcp.json"
+    config.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "existing": {"command": "node"},
+                    "agent-capability-hub": {"url": "old"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": "# Safe\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project", "--yes"])
+
+    data = json.loads(config.read_text(encoding="utf-8"))
+    assert result.exit_code == 0
+    assert "existing" in data["mcpServers"]
+    assert "agent-bridge" in data["mcpServers"]
+    assert "agent-capability-hub" not in data["mcpServers"]
+
+
 def test_profile_use_replaces_existing_pointer_block(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "CLAUDE.md").write_text(
