@@ -311,7 +311,7 @@ async function saveConfig() {
     await api.replaceProfileRules(configProfile.value.profile_key, pendingRules.value)
     await api.replaceProfileResources(configProfile.value.profile_key, pendingResources.value)
     if (pinsLoaded.value) await savePins(true)
-    await refreshProfileDoc()
+    await refreshProfileDoc(true)
     configRules.value = [...pendingRules.value]
     configResources.value = [...pendingResources.value]
     profiles.value = await api.listProfiles()
