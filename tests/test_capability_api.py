@@ -338,6 +338,16 @@ def test_profile_pin_api_round_trip(wm_paths) -> None:
         json={"status": "enabled"},
         headers={"X-Agent-Bridge-User": "root"},
     )
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_users",
+        display_name="Query Users",
+        description="",
+        input_schema={},
+        tool_type="search",
+        tags=[],
+        examples=[],
+    )
     store.replace_profile_source_rules(
         "safe",
         [{"source_type": SourceType.mcp_service.value, "source_key": "mysql", "effect": "allow"}],
@@ -360,12 +370,19 @@ def test_profile_pin_api_round_trip(wm_paths) -> None:
     fetched = client.get("/capability-profiles/safe/pins", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200
-    assert saved.json()["groups"] == []
+    assert [(group["service_key"], group["tool_type"], group["source"]) for group in saved.json()["groups"]] == [
+        ("mysql", "search", "manual")
+    ]
+    assert [tool["generated_tool_name"] for tool in saved.json()["tools"]] == ["pin_mysql_query_users"]
     assert settings.status_code == 200
     assert settings.json()["settings"]["mode"] == "count"
     assert refreshed.status_code == 200
     assert refreshed.json()["profile_key"] == "safe"
     assert fetched.status_code == 200
+    assert [(group["service_key"], group["tool_type"], group["source"]) for group in fetched.json()["groups"]] == [
+        ("mysql", "search", "manual")
+    ]
+    assert [tool["generated_tool_name"] for tool in fetched.json()["tools"]] == ["pin_mysql_query_users"]
 
 
 def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
