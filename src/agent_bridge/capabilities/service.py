@@ -237,13 +237,13 @@ class CapabilityService:
         preview = self.governance.profile_pin_preview(actor, profile_key)
         specs = []
         for item in preview.get("tools", []):
-            tool_payload = self.store.get_mcp_tool(item["service_key"], item["tool_name"])
-            if tool_payload is None:
-                continue
+            input_schema = item.get("input_schema")
+            if not isinstance(input_schema, dict):
+                input_schema = {}
             specs.append(
                 {
                     **item,
-                    "input_schema": _json_loads(tool_payload.get("input_schema_json"), {}),
+                    "input_schema": input_schema,
                     "description": (
                         f"Direct pinned Agent Bridge tool for service {item['service_name']} "
                         f"({item['service_key']}), tool {item['tool_name']}, level {item['tool_type']}, "

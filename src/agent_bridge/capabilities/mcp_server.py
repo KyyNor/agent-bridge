@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import keyword
 import logging
 import time
 from contextvars import ContextVar
@@ -41,6 +42,21 @@ def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:
     return Any
 
 
+def _is_safe_schema_property_name(name: str) -> bool:
+    return name.isidentifier() and not keyword.iskeyword(name)
+
+
+def _invalid_json_schema_property_names(schema: dict[str, Any]) -> list[str]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    return [
+        name
+        for name in properties
+        if not isinstance(name, str) or not _is_safe_schema_property_name(name)
+    ]
+
+
 def _signature_from_json_schema(schema: dict[str, Any]) -> inspect.Signature:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
@@ -49,7 +65,7 @@ def _signature_from_json_schema(schema: dict[str, Any]) -> inspect.Signature:
     required_names = set(required if isinstance(required, list) else [])
     parameters = []
     for name, definition in properties.items():
-        if not isinstance(name, str) or not name.isidentifier():
+        if not isinstance(name, str) or not _is_safe_schema_property_name(name):
             continue
         if not isinstance(definition, dict):
             definition = {}
@@ -139,6 +155,14 @@ def create_mcp_server(service: AgentBridgeService, profile_key: str | None = Non
             if name in registered_names:
                 continue
             registered_names.add(name)
+            invalid_parameter_names = _invalid_json_schema_property_names(spec.get("input_schema") or {})
+            if invalid_parameter_names:
+                logger.warning(
+                    "跳过 pinned MCP tool name=%s invalid_schema_fields=%s",
+                    name,
+                    invalid_parameter_names,
+                )
+                continue
 
             async def pinned_tool(_spec: dict[str, Any] = spec, **kwargs: Any) -> dict[str, Any]:
                 active_profile = _request_profile.get() or profile_key

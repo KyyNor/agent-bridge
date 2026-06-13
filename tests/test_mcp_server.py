@@ -89,6 +89,96 @@ def test_mcp_execute_tool_calls_capability_service():
     assert structured == returned
 
 
+def test_mcp_pinned_tool_calls_original_service_tool():
+    from agent_bridge.capabilities.mcp_server import create_mcp_server
+
+    returned = {"success": True, "result": {"rows": []}, "service": "mysql", "tool": "query_users"}
+    calls = []
+
+    class FakeCapabilities:
+        def pinned_tool_specs(self, actor, profile_key):
+            assert profile_key == "safe-readonly"
+            return [
+                {
+                    "generated_tool_name": "pin_mysql_query_users",
+                    "service_key": "mysql",
+                    "service_name": "MySQL",
+                    "tool_name": "query_users",
+                    "tool_type": "search",
+                    "source": "manual",
+                    "description": "Pinned query users",
+                    "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}},
+                }
+            ]
+
+        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
+            calls.append(
+                {
+                    "service": service,
+                    "tool": tool,
+                    "arguments": arguments,
+                    "profile_key": profile_key,
+                }
+            )
+            return returned
+
+    class FakeService:
+        capabilities = FakeCapabilities()
+
+    mcp = create_mcp_server(FakeService(), profile_key="safe-readonly")
+    content, structured = asyncio.run(mcp.call_tool("pin_mysql_query_users", {"q": "alice"}))
+
+    assert structured == returned
+    assert calls == [
+        {
+            "service": "mysql",
+            "tool": "query_users",
+            "arguments": {"q": "alice"},
+            "profile_key": "safe-readonly",
+        }
+    ]
+
+
+def test_mcp_skips_pinned_tool_with_invalid_schema_field(caplog):
+    from agent_bridge.capabilities.mcp_server import create_mcp_server
+
+    class FakeCapabilities:
+        def pinned_tool_specs(self, actor, profile_key):
+            return [
+                {
+                    "generated_tool_name": "pin_mysql_query_users",
+                    "service_key": "mysql",
+                    "service_name": "MySQL",
+                    "tool_name": "query_users",
+                    "tool_type": "search",
+                    "source": "manual",
+                    "description": "Pinned query users",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "class": {"type": "string"},
+                            "user-id": {"type": "string"},
+                        },
+                    },
+                }
+            ]
+
+        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
+            raise AssertionError("invalid pinned tool should not be registered")
+
+    class FakeService:
+        capabilities = FakeCapabilities()
+
+    caplog.set_level("WARNING", logger="agent_bridge.mcp")
+    mcp = create_mcp_server(FakeService(), profile_key="safe-readonly")
+    tools = asyncio.run(mcp.list_tools())
+
+    assert [tool.name for tool in tools] == ["search", "execute"]
+    assert "pin_mysql_query_users" in caplog.text
+    assert "class" in caplog.text
+    assert "user-id" in caplog.text
+
+
 def test_mcp_search_with_default_service_initializes_schema(wm_paths):
     from agent_bridge.capabilities.mcp_server import create_mcp_server
     from agent_bridge.knowledge.service import AgentBridgeService
