@@ -22,6 +22,27 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     )
     store.update_mcp_service_status("mysql", "enabled")
     store.replace_profile_source_rules("safe", [{"source_type": "mcp_service", "source_key": "mysql", "effect": "allow"}])
+    store.upsert_code_repository(
+        repo_key="agent-bridge",
+        name="Agent Bridge",
+        git_url="https://example.test/agent-bridge.git",
+        branch="main",
+        auth_ref="",
+        description="",
+        tags=[],
+        category_key="",
+        sync_interval_minutes=60,
+        auto_understand=False,
+        status="active",
+    )
+    store.create_kb("frontend-docs", "Frontend Docs", "", "root")
+    store.replace_profile_resource_rules(
+        "safe",
+        [
+            {"resource_type": "code_repo", "resource_key": "agent-bridge"},
+            {"resource_type": "wiki_kb", "resource_key": "frontend-docs"},
+        ],
+    )
     governance = CapabilityGovernanceService(store=store, admins={"root"})
     governance.update_profile_manual_notes("root", "safe", "## Manual Notes\nUse read-only queries only.")
 
@@ -31,6 +52,8 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     assert "search" in rendered["markdown"]
     assert "execute" in rendered["markdown"]
     assert "- MySQL (`mysql`)" in rendered["markdown"]
+    assert "- Agent Bridge (`agent-bridge`)" in rendered["markdown"]
+    assert "- Frontend Docs (`frontend-docs`)" in rendered["markdown"]
     assert "Use read-only queries only." in rendered["markdown"]
     assert "https://mysql.test/mcp" not in rendered["markdown"]
     assert "pin_mysql" not in rendered["markdown"]
