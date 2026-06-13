@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent_bridge.capabilities.models import CallLogStatus, SourceType
+from agent_bridge.capabilities.models import CallLogStatus, SourceType, ToolType
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -47,3 +47,59 @@ def test_call_log_stats_group_by_profile_service_and_tool(wm_paths: AgentBridgeP
     assert mysql["avg_duration_ms"] == 55
     assert mysql["max_duration_ms"] == 100
     assert hive["blocked"] == 1
+
+
+def test_call_stats_group_by_service_and_tool_type(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="https://mysql.test/mcp",
+        headers={},
+        description="",
+        tags=[],
+        created_by="root",
+    )
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_sql",
+        display_name="Query SQL",
+        description="Run readonly SQL",
+        input_schema={"type": "object"},
+        tool_type=ToolType.search.value,
+        tags=[],
+        examples=[],
+    )
+    store.create_tool_call_log(
+        log_id="call_1",
+        actor="root",
+        profile_key="safe",
+        entrypoint="metamcp_execute",
+        source_type=SourceType.mcp_service.value,
+        source_key="mysql",
+        tool_name="query_sql",
+        request={},
+        response={},
+        status=CallLogStatus.success.value,
+    )
+
+    stats = store.aggregate_tool_call_stats(
+        dimensions=["source_key", "tool_type"],
+        created_from=None,
+        created_to=None,
+        bucket=None,
+    )
+
+    assert stats == [
+        {
+            "source_key": "mysql",
+            "tool_type": "search",
+            "calls": 1,
+            "success": 1,
+            "error": 0,
+            "blocked": 0,
+            "avg_duration_ms": 0.0,
+            "max_duration_ms": None,
+        }
+    ]

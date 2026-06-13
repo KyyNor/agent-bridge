@@ -400,6 +400,9 @@ class SQLiteStore:
     ) -> list[dict[str, Any]]:
         return self.governance.aggregate_tool_call_stats(dimensions=dimensions, created_from=created_from, created_to=created_to, bucket=bucket)
 
+    def aggregate_pin_group_usage(self, *, profile_key: str, created_from: str) -> list[dict[str, Any]]:
+        return self.governance.aggregate_pin_group_usage(profile_key=profile_key, created_from=created_from)
+
     def get_tool_call_log(self, log_id: str) -> dict[str, Any] | None:
         return self.governance.get_tool_call_log(log_id=log_id)
 

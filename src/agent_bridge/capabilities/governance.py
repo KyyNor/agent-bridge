@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from typing import Any
 
 from agent_bridge.capabilities.models import (
@@ -18,6 +19,7 @@ from agent_bridge.capabilities.models import (
 from agent_bridge.capabilities.profile_pins import (
     PINNABLE_TOOL_TYPES,
     PinnedGroup,
+    ratio_target,
     tool_payload_to_pin_tool,
 )
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
@@ -227,6 +229,13 @@ class CapabilityGovernanceService:
             for rule in self.store.list_profile_pin_rules(profile_key)
             if (rule["service_key"], rule["tool_type"]) in candidate_group_keys
         ]
+        settings = self.store.get_profile_pin_settings(profile_key) or {
+            "mode": "disabled",
+            "ratio_percent": None,
+            "count": None,
+            "auto_cache_json": None,
+            "auto_cache_computed_at": None,
+        }
         groups = [
             {
                 "service_key": group.service_key,
@@ -235,6 +244,54 @@ class CapabilityGovernanceService:
             }
             for group in sorted(manual_groups, key=lambda group: (group.service_key, group.tool_type))
         ]
+        mode = settings.get("mode") or "disabled"
+        if mode != "disabled":
+            if mode == "ratio":
+                target = ratio_target(len(candidate_group_keys), int(settings.get("ratio_percent") or 0))
+            else:
+                target = int(settings.get("count") or 0)
+
+            if target > len(groups):
+                cached_groups = self._get_valid_pin_auto_cache(settings)
+                if cached_groups is None:
+                    now = datetime.utcnow()
+                    created_from = (now - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+                    cached_groups = [
+                        {
+                            "service_key": row["service_key"],
+                            "tool_type": row["tool_type"],
+                            "source": "auto",
+                            "calls": int(row["calls"]),
+                        }
+                        for row in self.store.aggregate_pin_group_usage(
+                            profile_key=profile_key,
+                            created_from=created_from,
+                        )
+                    ]
+                    settings = self.store.upsert_profile_pin_settings(
+                        profile_key=profile_key,
+                        mode=mode,
+                        ratio_percent=settings.get("ratio_percent"),
+                        count=settings.get("count"),
+                        auto_cache={"groups": cached_groups},
+                    )
+
+                selected_keys = {(group["service_key"], group["tool_type"]) for group in groups}
+                for auto_group in cached_groups:
+                    key = (auto_group.get("service_key"), auto_group.get("tool_type"))
+                    if key in selected_keys or key not in candidate_group_keys:
+                        continue
+                    groups.append(
+                        {
+                            "service_key": auto_group["service_key"],
+                            "tool_type": auto_group["tool_type"],
+                            "source": "auto",
+                            "calls": int(auto_group.get("calls") or 0),
+                        }
+                    )
+                    selected_keys.add(key)
+                    if len(groups) >= target:
+                        break
 
         selected_group_sources = {
             (group["service_key"], group["tool_type"]): group["source"]
@@ -261,19 +318,29 @@ class CapabilityGovernanceService:
             generated_tool_names.add(generated_tool_name)
             tools.append(pin_tool)
 
-        settings = self.store.get_profile_pin_settings(profile_key) or {
-            "mode": "disabled",
-            "ratio_percent": None,
-            "count": None,
-            "auto_cache_json": None,
-            "auto_cache_computed_at": None,
-        }
         return {
             "profile_key": profile_key,
             "settings": dict(settings),
             "groups": groups,
             "tools": tools,
         }
+
+    def _get_valid_pin_auto_cache(self, settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+        cache_json = settings.get("auto_cache_json")
+        computed_at = settings.get("auto_cache_computed_at")
+        if not cache_json or not computed_at:
+            return None
+        try:
+            computed = datetime.strptime(str(computed_at), "%Y-%m-%d %H:%M:%S")
+            if datetime.utcnow() - computed >= timedelta(hours=24):
+                return None
+            cache = json.loads(cache_json) if isinstance(cache_json, str) else cache_json
+            groups = cache.get("groups") if isinstance(cache, dict) else None
+            if not isinstance(groups, list):
+                return None
+            return [group for group in groups if isinstance(group, dict)]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
 
     def filter_source_keys(
         self,

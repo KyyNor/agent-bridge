@@ -137,6 +137,48 @@ def test_compute_profile_pin_preview_filters_to_allowed_readonly_tools(wm_paths:
     assert [tool["generated_tool_name"] for tool in preview["tools"]] == ["pin_mysql_query_users"]
 
 
+def test_auto_pin_count_adds_highest_called_group_without_trimming_manual(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _profile(store)
+    _service_with_tools(store, "mysql")
+    _service_with_tools(store, "jira")
+    store.replace_profile_source_rules(
+        "safe-readonly",
+        [
+            {"source_type": SourceType.mcp_service.value, "source_key": "mysql", "effect": "allow"},
+            {"source_type": SourceType.mcp_service.value, "source_key": "jira", "effect": "allow"},
+        ],
+    )
+    store.create_tool_call_log(
+        log_id="call_jira_1",
+        actor="root",
+        profile_key="safe-readonly",
+        entrypoint="metamcp_execute",
+        source_type=SourceType.mcp_service.value,
+        source_key="jira",
+        tool_name="query_users",
+        request={},
+        response={},
+        status="success",
+    )
+    governance = CapabilityGovernanceService(store=store, admins={"root"})
+    governance.replace_profile_pins(
+        "root",
+        "safe-readonly",
+        [{"service_key": "mysql", "tool_type": ToolType.search.value}],
+    )
+    governance.update_profile_pin_settings("root", "safe-readonly", mode="count", ratio_percent=None, count=2)
+
+    preview = governance.profile_pin_preview("root", "safe-readonly")
+
+    assert [(g["service_key"], g["tool_type"], g["source"]) for g in preview["groups"]] == [
+        ("mysql", "search", "manual"),
+        ("jira", "search", "auto"),
+    ]
+    assert store.get_profile_pin_settings("safe-readonly")["auto_cache_json"] is not None
+
+
 def test_governance_accepts_profile_pin_setting_aliases(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()

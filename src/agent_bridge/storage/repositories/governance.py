@@ -469,6 +469,7 @@ class GovernanceRepository:
             "source_type",
             "source_key",
             "tool_name",
+            "tool_type",
             "status",
             "failure_stage",
             "failure_owner",
@@ -480,45 +481,92 @@ class GovernanceRepository:
         if invalid:
             raise ValueError(f"invalid stats dimension: {invalid[0]}")
 
-        selected = list(dimensions)
+        dimension_expressions = {
+            "profile_key": "tool_call_logs.profile_key",
+            "entrypoint": "tool_call_logs.entrypoint",
+            "source_type": "tool_call_logs.source_type",
+            "source_key": "tool_call_logs.source_key",
+            "tool_name": "tool_call_logs.tool_name",
+            "tool_type": "mcp_tools.tool_type",
+            "status": "tool_call_logs.status",
+            "failure_stage": "tool_call_logs.failure_stage",
+            "failure_owner": "tool_call_logs.failure_owner",
+            "error_type": "tool_call_logs.error_type",
+            "resource_type": "tool_call_logs.resource_type",
+            "resource_key": "tool_call_logs.resource_key",
+        }
+        selected = [f"{dimension_expressions[dimension]} AS {dimension}" for dimension in dimensions]
         if bucket:
             if bucket == "hour":
-                selected.insert(0, "strftime('%Y-%m-%d %H:00:00', created_at) AS bucket")
+                selected.insert(0, "strftime('%Y-%m-%d %H:00:00', tool_call_logs.created_at) AS bucket")
             elif bucket == "day":
-                selected.insert(0, "date(created_at) AS bucket")
+                selected.insert(0, "date(tool_call_logs.created_at) AS bucket")
             else:
                 raise ValueError("invalid stats bucket")
 
         group_columns = ["bucket"] if bucket else []
-        group_columns.extend(dimensions)
+        group_columns.extend(dimension_expressions[dimension] for dimension in dimensions)
         select_clause = ", ".join(selected) if selected else "'all' AS scope"
         group_clause = f"GROUP BY {', '.join(group_columns)}" if group_columns else ""
         filters: list[str] = []
         params: list[Any] = []
         if created_from is not None:
-            filters.append("created_at >= ?")
+            filters.append("tool_call_logs.created_at >= ?")
             params.append(created_from)
         if created_to is not None:
-            filters.append("created_at < ?")
+            filters.append("tool_call_logs.created_at < ?")
             params.append(created_to)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        join_clause = (
+            """
+                LEFT JOIN mcp_tools
+                  ON mcp_tools.service_key = tool_call_logs.source_key
+                 AND mcp_tools.tool_name = tool_call_logs.tool_name
+            """
+            if "tool_type" in dimensions
+            else ""
+        )
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
                 SELECT
                   {select_clause},
                   COUNT(*) AS calls,
-                  SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
-                  SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
-                  SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
-                  ROUND(AVG(COALESCE(duration_ms, 0)), 0) AS avg_duration_ms,
-                  MAX(duration_ms) AS max_duration_ms
+                  SUM(CASE WHEN tool_call_logs.status = 'success' THEN 1 ELSE 0 END) AS success,
+                  SUM(CASE WHEN tool_call_logs.status = 'error' THEN 1 ELSE 0 END) AS error,
+                  SUM(CASE WHEN tool_call_logs.status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+                  ROUND(AVG(COALESCE(tool_call_logs.duration_ms, 0)), 0) AS avg_duration_ms,
+                  MAX(tool_call_logs.duration_ms) AS max_duration_ms
                 FROM tool_call_logs
+                {join_clause}
                 {where_clause}
                 {group_clause}
                 ORDER BY calls DESC
                 """,
                 params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def aggregate_pin_group_usage(self, *, profile_key: str, created_from: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  logs.source_key AS service_key,
+                  tools.tool_type AS tool_type,
+                  COUNT(*) AS calls
+                FROM tool_call_logs logs
+                JOIN mcp_tools tools
+                  ON tools.service_key = logs.source_key
+                 AND tools.tool_name = logs.tool_name
+                WHERE logs.profile_key = ?
+                  AND logs.entrypoint = 'metamcp_execute'
+                  AND logs.status = 'success'
+                  AND logs.created_at >= ?
+                GROUP BY logs.source_key, tools.tool_type
+                ORDER BY calls DESC, logs.source_key, tools.tool_type
+                """,
+                (profile_key, created_from),
             ).fetchall()
             return [dict(row) for row in rows]
 
