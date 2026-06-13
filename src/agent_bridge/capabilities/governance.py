@@ -89,6 +89,7 @@ class CapabilityGovernanceService:
             raise NotFound("profile not found")
         normalized = [self._validate_rule(rule) for rule in rules]
         self.store.replace_profile_source_rules(profile_key, normalized)
+        self.store.clear_profile_pin_auto_cache(profile_key)
         return self.get_profile(actor, profile_key)
 
     def replace_profile_resource_rules(

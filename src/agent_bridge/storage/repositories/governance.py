@@ -522,6 +522,7 @@ class GovernanceRepository:
                 LEFT JOIN mcp_tools
                   ON mcp_tools.service_key = tool_call_logs.source_key
                  AND mcp_tools.tool_name = tool_call_logs.tool_name
+                 AND tool_call_logs.source_type = 'mcp_service'
             """
             if "tool_type" in dimensions
             else ""
@@ -560,6 +561,7 @@ class GovernanceRepository:
                   ON tools.service_key = logs.source_key
                  AND tools.tool_name = logs.tool_name
                 WHERE logs.profile_key = ?
+                  AND logs.source_type = 'mcp_service'
                   AND logs.entrypoint = 'metamcp_execute'
                   AND logs.status = 'success'
                   AND logs.created_at >= ?

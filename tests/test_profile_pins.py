@@ -179,6 +179,50 @@ def test_auto_pin_count_adds_highest_called_group_without_trimming_manual(wm_pat
     assert store.get_profile_pin_settings("safe-readonly")["auto_cache_json"] is not None
 
 
+def test_replace_profile_rules_clears_auto_pin_cache(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _profile(store)
+    _service_with_tools(store, "mysql")
+    _service_with_tools(store, "jira")
+    store.replace_profile_source_rules(
+        "safe-readonly",
+        [
+            {"source_type": SourceType.mcp_service.value, "source_key": "mysql", "effect": "allow"},
+            {"source_type": SourceType.mcp_service.value, "source_key": "jira", "effect": "allow"},
+        ],
+    )
+    store.create_tool_call_log(
+        log_id="call_jira_1",
+        actor="root",
+        profile_key="safe-readonly",
+        entrypoint="metamcp_execute",
+        source_type=SourceType.mcp_service.value,
+        source_key="jira",
+        tool_name="query_users",
+        request={},
+        response={},
+        status="success",
+    )
+    governance = CapabilityGovernanceService(store=store, admins={"root"})
+    governance.update_profile_pin_settings("root", "safe-readonly", mode="count", count=1)
+    assert store.get_profile_pin_settings("safe-readonly")["auto_cache_json"] is not None
+
+    governance.replace_profile_rules(
+        "root",
+        "safe-readonly",
+        [
+            {
+                "source_type": SourceType.mcp_service.value,
+                "source_key": "mysql",
+                "effect": ProfileRuleEffect.allow.value,
+            }
+        ],
+    )
+
+    assert store.get_profile_pin_settings("safe-readonly")["auto_cache_json"] is None
+
+
 def test_governance_accepts_profile_pin_setting_aliases(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()

@@ -103,3 +103,55 @@ def test_call_stats_group_by_service_and_tool_type(wm_paths: AgentBridgePaths) -
             "max_duration_ms": None,
         }
     ]
+
+
+def test_call_stats_tool_type_only_joins_mcp_service_logs(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="https://mysql.test/mcp",
+        headers={},
+        description="",
+        tags=[],
+        created_by="root",
+    )
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_sql",
+        display_name="Query SQL",
+        description="Run readonly SQL",
+        input_schema={"type": "object"},
+        tool_type=ToolType.search.value,
+        tags=[],
+        examples=[],
+    )
+    for log_id, source_type in [
+        ("call_mcp", SourceType.mcp_service.value),
+        ("call_builtin", SourceType.builtin.value),
+    ]:
+        store.create_tool_call_log(
+            log_id=log_id,
+            actor="root",
+            profile_key="safe",
+            entrypoint="metamcp_execute",
+            source_type=source_type,
+            source_key="mysql",
+            tool_name="query_sql",
+            request={},
+            response={},
+            status=CallLogStatus.success.value,
+        )
+
+    stats = store.aggregate_tool_call_stats(
+        dimensions=["source_type", "tool_type"],
+        created_from=None,
+        created_to=None,
+        bucket=None,
+    )
+
+    rows = {(row["source_type"], row["tool_type"]): row for row in stats}
+    assert rows[(SourceType.mcp_service.value, ToolType.search.value)]["calls"] == 1
+    assert rows[(SourceType.builtin.value, None)]["calls"] == 1
+    assert (SourceType.builtin.value, ToolType.search.value) not in rows
