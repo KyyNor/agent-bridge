@@ -18,7 +18,6 @@ from agent_bridge.capabilities.models import (
 from agent_bridge.capabilities.profile_pins import (
     PINNABLE_TOOL_TYPES,
     PinnedGroup,
-    safe_pin_tool_name,
     tool_payload_to_pin_tool,
 )
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
@@ -242,6 +241,7 @@ class CapabilityGovernanceService:
             for group in groups
         }
         tools = []
+        generated_tool_names = set()
         for tool in sorted(
             self.store.list_mcp_tools(),
             key=lambda item: (item["service_key"], item["tool_type"], item["tool_name"]),
@@ -255,7 +255,10 @@ class CapabilityGovernanceService:
                 service_name=candidate_services[tool["service_key"]].get("name") or tool["service_key"],
                 source=selected_group_sources[(tool["service_key"], tool["tool_type"])],
             )
-            pin_tool["generated_tool_name"] = safe_pin_tool_name(tool["service_key"], tool["tool_name"])
+            generated_tool_name = pin_tool["generated_tool_name"]
+            if generated_tool_name in generated_tool_names:
+                raise ValidationError(f"pinned tool name collision: {generated_tool_name}")
+            generated_tool_names.add(generated_tool_name)
             tools.append(pin_tool)
 
         settings = self.store.get_profile_pin_settings(profile_key) or {

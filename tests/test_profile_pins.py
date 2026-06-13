@@ -153,3 +153,37 @@ def test_governance_accepts_profile_pin_setting_aliases(wm_paths: AgentBridgePat
     assert preview["settings"]["mode"] == "count"
     assert preview["settings"]["count"] == 2
     assert preview["settings"]["ratio_percent"] is None
+
+
+def test_profile_pin_preview_rejects_generated_tool_name_collision(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _profile(store)
+    _service_with_tools(store, "foo-bar")
+    _service_with_tools(store, "foo_bar")
+    store.replace_profile_source_rules(
+        "safe-readonly",
+        [
+            {
+                "source_type": SourceType.mcp_service.value,
+                "source_key": "foo-bar",
+                "effect": ProfileRuleEffect.allow.value,
+            },
+            {
+                "source_type": SourceType.mcp_service.value,
+                "source_key": "foo_bar",
+                "effect": ProfileRuleEffect.allow.value,
+            },
+        ],
+    )
+    store.replace_profile_pin_rules(
+        "safe-readonly",
+        [
+            {"service_key": "foo-bar", "tool_type": ToolType.search.value, "created_by": "root"},
+            {"service_key": "foo_bar", "tool_type": ToolType.search.value, "created_by": "root"},
+        ],
+    )
+    governance = CapabilityGovernanceService(store=store, admins={"root"})
+
+    with pytest.raises(ValidationError, match="pinned tool name collision: pin_foo_bar_query_users"):
+        governance.profile_pin_preview("root", "safe-readonly")
