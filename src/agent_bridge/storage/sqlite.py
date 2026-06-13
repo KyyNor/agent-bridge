@@ -308,6 +308,35 @@ class SQLiteStore:
     def list_profile_resource_rules(self, profile_key: str) -> list[dict[str, Any]]:
         return self.governance.list_profile_resource_rules(profile_key=profile_key)
 
+    def replace_profile_pin_rules(self, profile_key: str, rules: list[dict[str, Any]]) -> None:
+        return self.governance.replace_profile_pin_rules(profile_key=profile_key, rules=rules)
+
+    def list_profile_pin_rules(self, profile_key: str) -> list[dict[str, Any]]:
+        return self.governance.list_profile_pin_rules(profile_key=profile_key)
+
+    def upsert_profile_pin_settings(
+        self,
+        *,
+        profile_key: str,
+        mode: str,
+        ratio_percent: int | None,
+        count: int | None,
+        auto_cache: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return self.governance.upsert_profile_pin_settings(
+            profile_key=profile_key,
+            mode=mode,
+            ratio_percent=ratio_percent,
+            count=count,
+            auto_cache=auto_cache,
+        )
+
+    def get_profile_pin_settings(self, profile_key: str) -> dict[str, Any] | None:
+        return self.governance.get_profile_pin_settings(profile_key=profile_key)
+
+    def clear_profile_pin_auto_cache(self, profile_key: str) -> None:
+        return self.governance.clear_profile_pin_auto_cache(profile_key=profile_key)
+
     def list_resource_rule_profiles(self, resource_type: str, resource_key: str) -> list[dict[str, Any]]:
         return self.governance.list_resource_rule_profiles(resource_type=resource_type, resource_key=resource_key)
 

@@ -165,6 +165,28 @@ CREATE TABLE IF NOT EXISTS profile_resource_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_profile_resource_rules_profile ON profile_resource_rules(profile_key);
 CREATE INDEX IF NOT EXISTS idx_profile_resource_rules_resource ON profile_resource_rules(resource_type, resource_key);
+CREATE TABLE IF NOT EXISTS profile_pin_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+  service_key TEXT NOT NULL,
+  tool_type TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (profile_key, service_key, tool_type)
+);
+CREATE INDEX IF NOT EXISTS idx_profile_pin_rules_profile ON profile_pin_rules(profile_key);
+CREATE INDEX IF NOT EXISTS idx_profile_pin_rules_service_type ON profile_pin_rules(service_key, tool_type);
+CREATE TABLE IF NOT EXISTS profile_pin_settings (
+  profile_key TEXT PRIMARY KEY REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+  mode TEXT NOT NULL DEFAULT 'disabled',
+  ratio_percent INTEGER,
+  count INTEGER,
+  auto_cache_json TEXT,
+  auto_cache_computed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS tool_call_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   log_id TEXT NOT NULL UNIQUE,

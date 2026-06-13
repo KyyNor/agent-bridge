@@ -199,6 +199,88 @@ class GovernanceRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def replace_profile_pin_rules(self, profile_key: str, rules: list[dict[str, Any]]) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM profile_pin_rules WHERE profile_key = ?", (profile_key,))
+            for rule in rules:
+                conn.execute(
+                    """
+                    INSERT INTO profile_pin_rules (profile_key, service_key, tool_type, created_by)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (profile_key, rule["service_key"], rule["tool_type"], rule["created_by"]),
+                )
+
+    def list_profile_pin_rules(self, profile_key: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM profile_pin_rules
+                WHERE profile_key = ?
+                ORDER BY service_key, tool_type
+                """,
+                (profile_key,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def upsert_profile_pin_settings(
+        self,
+        *,
+        profile_key: str,
+        mode: str,
+        ratio_percent: int | None,
+        count: int | None,
+        auto_cache: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        cache_json = json.dumps(auto_cache, ensure_ascii=False, default=str) if auto_cache is not None else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO profile_pin_settings (
+                  profile_key, mode, ratio_percent, count, auto_cache_json, auto_cache_computed_at
+                )
+                VALUES (?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
+                ON CONFLICT(profile_key) DO UPDATE SET
+                  mode = excluded.mode,
+                  ratio_percent = excluded.ratio_percent,
+                  count = excluded.count,
+                  auto_cache_json = excluded.auto_cache_json,
+                  auto_cache_computed_at = excluded.auto_cache_computed_at,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (profile_key, mode, ratio_percent, count, cache_json, cache_json),
+            )
+            row = conn.execute(
+                "SELECT * FROM profile_pin_settings WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            settings = row_to_dict(row)
+            if settings is None:
+                raise KeyError(f"profile pin settings not found: {profile_key}")
+            return settings
+
+    def get_profile_pin_settings(self, profile_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM profile_pin_settings WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def clear_profile_pin_auto_cache(self, profile_key: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE profile_pin_settings
+                SET auto_cache_json = NULL,
+                    auto_cache_computed_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE profile_key = ?
+                """,
+                (profile_key,),
+            )
+
     def list_resource_rule_profiles(
         self, resource_type: str, resource_key: str
     ) -> list[dict[str, Any]]:
