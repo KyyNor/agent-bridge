@@ -189,6 +189,13 @@ class CapabilityGovernanceService:
         )
         return self.profile_pin_preview(actor, profile_key)
 
+    def refresh_profile_pin_cache(self, actor: str, profile_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_project_profile(profile_key) is None:
+            raise NotFound("profile not found")
+        self.store.clear_profile_pin_auto_cache(profile_key)
+        return self.profile_pin_preview(actor, profile_key)
+
     def profile_pin_preview(self, actor: str, profile_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:

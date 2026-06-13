@@ -316,6 +316,58 @@ def test_profile_resource_rules_api(wm_paths) -> None:
     assert detail.json()["resource_rules"][0]["resource_type"] == "wiki_kb"
 
 
+def test_profile_pin_api_round_trip(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(
+        profile_key="safe",
+        name="Safe",
+        description="",
+        status="active",
+        created_by="root",
+    )
+    client.post(
+        "/capabilities/mcp-services",
+        json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    client.post(
+        "/capabilities/mcp-services/mysql/status",
+        json={"status": "enabled"},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    store.replace_profile_source_rules(
+        "safe",
+        [{"source_type": SourceType.mcp_service.value, "source_key": "mysql", "effect": "allow"}],
+    )
+
+    saved = client.put(
+        "/capability-profiles/safe/pins",
+        json={"pins": [{"service_key": "mysql", "tool_type": "search"}]},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    settings = client.put(
+        "/capability-profiles/safe/pins/settings",
+        json={"mode": "count", "count": 2},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    refreshed = client.post(
+        "/capability-profiles/safe/pins/refresh",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    fetched = client.get("/capability-profiles/safe/pins", headers={"X-Agent-Bridge-User": "root"})
+
+    assert saved.status_code == 200
+    assert saved.json()["groups"] == []
+    assert settings.status_code == 200
+    assert settings.json()["settings"]["mode"] == "count"
+    assert refreshed.status_code == 200
+    assert refreshed.json()["profile_key"] == "safe"
+    assert fetched.status_code == 200
+
+
 def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

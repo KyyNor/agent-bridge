@@ -60,6 +60,21 @@ class ProfileRulesRequest(BaseModel):
     rules: list[ProfileSourceRuleRequest] = Field(default_factory=list)
 
 
+class ProfilePinRuleRequest(BaseModel):
+    service_key: str
+    tool_type: str
+
+
+class ProfilePinsRequest(BaseModel):
+    pins: list[ProfilePinRuleRequest] = Field(default_factory=list)
+
+
+class ProfilePinSettingsRequest(BaseModel):
+    mode: str
+    ratio_percent: int | None = None
+    count: int | None = None
+
+
 class ProfileResourceRuleRequest(BaseModel):
     resource_type: str
     resource_key: str

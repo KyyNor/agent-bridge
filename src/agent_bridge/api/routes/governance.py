@@ -4,6 +4,8 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from agent_bridge.api.schemas import (
+    ProfilePinSettingsRequest,
+    ProfilePinsRequest,
     ProfileResourceRuleRequest,
     ProfileResourcesRequest,
     ProfileRulesRequest,
@@ -38,6 +40,33 @@ def create_governance_routes(service, actor, call_safely, ensure_capability_sche
         ensure_capability_schema()
         rules = [rule.model_dump() for rule in payload.rules]
         return call_safely(lambda: service.governance.replace_profile_rules(current_actor, profile_key, rules))
+
+    @router.get("/capability-profiles/{profile_key}/pins")
+    def get_profile_pins(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.profile_pin_preview(current_actor, profile_key))
+
+    @router.put("/capability-profiles/{profile_key}/pins")
+    def replace_profile_pins(profile_key: str, payload: ProfilePinsRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        pins = [pin.model_dump() for pin in payload.pins]
+        return call_safely(lambda: service.governance.replace_profile_pins(current_actor, profile_key, pins))
+
+    @router.put("/capability-profiles/{profile_key}/pins/settings")
+    def update_profile_pin_settings(profile_key: str, payload: ProfilePinSettingsRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.update_profile_pin_settings(
+            current_actor,
+            profile_key,
+            mode=payload.mode,
+            ratio_percent=payload.ratio_percent,
+            count=payload.count,
+        ))
+
+    @router.post("/capability-profiles/{profile_key}/pins/refresh")
+    def refresh_profile_pins(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.refresh_profile_pin_cache(current_actor, profile_key))
 
     @router.put("/capability-profiles/{profile_key}/resources")
     def replace_capability_profile_resources(profile_key: str, payload: ProfileResourcesRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
