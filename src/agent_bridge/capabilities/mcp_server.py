@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import time
@@ -21,7 +22,50 @@ logger = logging.getLogger("agent_bridge.mcp")
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 
 
-def create_mcp_server(service: AgentBridgeService) -> FastMCP:
+def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:
+    value_type = definition.get("type")
+    if isinstance(value_type, list):
+        value_type = next((item for item in value_type if item != "null"), None)
+    if value_type == "string":
+        return str
+    if value_type == "integer":
+        return int
+    if value_type == "number":
+        return float
+    if value_type == "boolean":
+        return bool
+    if value_type == "array":
+        return list
+    if value_type == "object":
+        return dict
+    return Any
+
+
+def _signature_from_json_schema(schema: dict[str, Any]) -> inspect.Signature:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+    required = schema.get("required")
+    required_names = set(required if isinstance(required, list) else [])
+    parameters = []
+    for name, definition in properties.items():
+        if not isinstance(name, str) or not name.isidentifier():
+            continue
+        if not isinstance(definition, dict):
+            definition = {}
+        default = inspect._empty if name in required_names else definition.get("default", None)
+        parameters.append(
+            inspect.Parameter(
+                name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=_annotation_from_json_schema(definition),
+            )
+        )
+    return inspect.Signature(parameters=parameters, return_annotation=dict[str, Any])
+
+
+def create_mcp_server(service: AgentBridgeService, profile_key: str | None = None) -> FastMCP:
     mcp = FastMCP(
         name="agent-bridge",
         instructions=(
@@ -44,8 +88,8 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
         query: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        profile_key = _request_profile.get()
-        logger.info("搜索 profile=%s path=%s query=%s limit=%s", profile_key, path, query, limit)
+        active_profile = _request_profile.get() or profile_key
+        logger.info("搜索 profile=%s path=%s query=%s limit=%s", active_profile, path, query, limit)
         started = time.monotonic()
         try:
             result = service.capabilities.search(
@@ -53,12 +97,12 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
                 path=path,
                 query=query,
                 limit=limit,
-                profile_key=profile_key,
+                profile_key=active_profile,
             )
-            logger.info("搜索完成 profile=%s 耗时=%.0fms 结果数=%d", profile_key, (time.monotonic() - started) * 1000, len(result.get("items", [])))
+            logger.info("搜索完成 profile=%s 耗时=%.0fms 结果数=%d", active_profile, (time.monotonic() - started) * 1000, len(result.get("items", [])))
             return result
         except Exception as exc:
-            logger.error("搜索失败 profile=%s 耗时=%.0fms 错误=%s", profile_key, (time.monotonic() - started) * 1000, exc)
+            logger.error("搜索失败 profile=%s 耗时=%.0fms 错误=%s", active_profile, (time.monotonic() - started) * 1000, exc)
             raise
 
     @mcp.tool(
@@ -69,8 +113,8 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
         tool: str,
         arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        profile_key = _request_profile.get()
-        logger.info("执行 profile=%s service=%s tool=%s args=%s", profile_key, service_key, tool, json.dumps(arguments or {}, ensure_ascii=False))
+        active_profile = _request_profile.get() or profile_key
+        logger.info("执行 profile=%s service=%s tool=%s args=%s", active_profile, service_key, tool, json.dumps(arguments or {}, ensure_ascii=False))
         started = time.monotonic()
         try:
             result = await service.capabilities.execute(
@@ -78,26 +122,51 @@ def create_mcp_server(service: AgentBridgeService) -> FastMCP:
                 service=service_key,
                 tool=tool,
                 arguments=arguments or {},
-                profile_key=profile_key,
+                profile_key=active_profile,
             )
-            logger.info("执行完成 profile=%s service=%s tool=%s 耗时=%.0fms success=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, result.get("success"))
+            logger.info("执行完成 profile=%s service=%s tool=%s 耗时=%.0fms success=%s", active_profile, service_key, tool, (time.monotonic() - started) * 1000, result.get("success"))
             return result
         except Exception as exc:
-            logger.error("执行失败 profile=%s service=%s tool=%s 耗时=%.0fms 错误=%s", profile_key, service_key, tool, (time.monotonic() - started) * 1000, exc)
+            logger.error("执行失败 profile=%s service=%s tool=%s 耗时=%.0fms 错误=%s", active_profile, service_key, tool, (time.monotonic() - started) * 1000, exc)
             raise
+
+    def register_pinned_tools() -> None:
+        if profile_key is None or not hasattr(service.capabilities, "pinned_tool_specs"):
+            return
+        registered_names = {"search", "execute"}
+        for spec in service.capabilities.pinned_tool_specs(default_user(), profile_key):
+            name = spec["generated_tool_name"]
+            if name in registered_names:
+                continue
+            registered_names.add(name)
+
+            async def pinned_tool(_spec: dict[str, Any] = spec, **kwargs: Any) -> dict[str, Any]:
+                active_profile = _request_profile.get() or profile_key
+                return await service.capabilities.execute(
+                    actor=default_user(),
+                    service=_spec["service_key"],
+                    tool=_spec["tool_name"],
+                    arguments=kwargs,
+                    profile_key=active_profile,
+                )
+
+            pinned_tool.__signature__ = _signature_from_json_schema(spec.get("input_schema") or {})  # type: ignore[attr-defined]
+            mcp.tool(name=name, description=spec["description"])(pinned_tool)
+
+    register_pinned_tools()
 
     return mcp
 
 
 def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
     """Register MCP streamable HTTP endpoint on a FastAPI app."""
-    mcp = create_mcp_server(service)
     router = APIRouter()
 
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
         profile = request.headers.get("x-agent-bridge-metamcp-profile")
         logger.info("MCP 请求 method=%s profile=%s", request.method, profile)
+        mcp = create_mcp_server(service, profile_key=profile)
         token = _request_profile.set(profile)
         try:
             response = await _dispatch_mcp(mcp, request)

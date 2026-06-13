@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_bridge.capabilities.models import ProfileResourceType, ProfileRuleEffect, SourceType
+from agent_bridge.capabilities.models import ProfileResourceType, ProfileRuleEffect, SourceType, ToolType
 from agent_bridge.capabilities.mcp_server import _request_profile, create_mcp_server
 from agent_bridge.knowledge.service import AgentBridgeService
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -106,3 +106,61 @@ def test_mcp_search_filters_by_query(wm_paths) -> None:
     mcp = create_mcp_server(svc)
     _, structured = asyncio.run(mcp.call_tool("search", {"query": "my"}))
     assert [item["service"] for item in structured["items"]] == ["mysql"]
+
+
+def test_mcp_exposes_profile_pinned_tools(wm_paths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="https://mysql.test/mcp",
+        headers={},
+        description="",
+        tags=[],
+        created_by="root",
+    )
+    store.update_mcp_service_status("mysql", "enabled")
+    store.upsert_mcp_tool(
+        service_key="mysql",
+        tool_name="query_users",
+        display_name="Query Users",
+        description="Find users",
+        input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+        tool_type=ToolType.search.value,
+        tags=[],
+        examples=[],
+    )
+    store.upsert_project_profile(
+        profile_key="safe-readonly",
+        name="Safe Readonly",
+        description="",
+        status="active",
+        created_by="root",
+    )
+    store.replace_profile_source_rules(
+        "safe-readonly",
+        [
+            {
+                "source_type": SourceType.mcp_service.value,
+                "source_key": "mysql",
+                "effect": ProfileRuleEffect.allow.value,
+            }
+        ],
+    )
+    store.replace_profile_pin_rules(
+        "safe-readonly",
+        [{"service_key": "mysql", "tool_type": ToolType.search.value, "created_by": "root"}],
+    )
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    mcp = create_mcp_server(svc, profile_key="safe-readonly")
+    token = _request_profile.set("safe-readonly")
+    try:
+        tools = asyncio.run(mcp.list_tools())
+    finally:
+        _request_profile.reset(token)
+
+    pinned_tool = next(tool for tool in tools if tool.name == "pin_mysql_query_users")
+    assert pinned_tool.inputSchema["properties"]["q"]["type"] == "string"

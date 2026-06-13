@@ -231,6 +231,29 @@ class CapabilityService:
         self._require_enabled_service(service_key)
         return [self._tool_payload(tool) for tool in self._active_tools(service_key)]
 
+    def pinned_tool_specs(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
+        if profile_key is None:
+            return []
+        preview = self.governance.profile_pin_preview(actor, profile_key)
+        specs = []
+        for item in preview.get("tools", []):
+            tool_payload = self.store.get_mcp_tool(item["service_key"], item["tool_name"])
+            if tool_payload is None:
+                continue
+            specs.append(
+                {
+                    **item,
+                    "input_schema": _json_loads(tool_payload.get("input_schema_json"), {}),
+                    "description": (
+                        f"Direct pinned Agent Bridge tool for service {item['service_name']} "
+                        f"({item['service_key']}), tool {item['tool_name']}, level {item['tool_type']}, "
+                        f"source {item['source']}. Use search(path='{item['service_key']}') "
+                        "to inspect the full service directory."
+                    ),
+                }
+            )
+        return specs
+
     def search(
         self,
         actor: str,
