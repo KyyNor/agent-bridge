@@ -69,6 +69,10 @@ class ProfilePinsRequest(BaseModel):
     pins: list[ProfilePinRuleRequest] = Field(default_factory=list)
 
 
+class ProfileManualNotesRequest(BaseModel):
+    manual_notes: str = ""
+
+
 class ProfilePinSettingsRequest(BaseModel):
     mode: str
     ratio_percent: int | None = None

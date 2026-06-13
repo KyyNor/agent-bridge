@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from agent_bridge.api.schemas import (
+    ProfileManualNotesRequest,
     ProfilePinSettingsRequest,
     ProfilePinsRequest,
     ProfileResourceRuleRequest,
@@ -67,6 +68,16 @@ def create_governance_routes(service, actor, call_safely, ensure_capability_sche
     def refresh_profile_pins(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
         return call_safely(lambda: service.governance.refresh_profile_pin_cache(current_actor, profile_key))
+
+    @router.post("/capability-profiles/{profile_key}/doc/render")
+    def render_profile_doc(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.render_profile_markdown(current_actor, profile_key))
+
+    @router.put("/capability-profiles/{profile_key}/doc/manual-notes")
+    def update_profile_manual_notes(profile_key: str, payload: ProfileManualNotesRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.governance.update_profile_manual_notes(current_actor, profile_key, payload.manual_notes))
 
     @router.put("/capability-profiles/{profile_key}/resources")
     def replace_capability_profile_resources(profile_key: str, payload: ProfileResourcesRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:

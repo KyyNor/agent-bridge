@@ -385,6 +385,29 @@ def test_profile_pin_api_round_trip(wm_paths) -> None:
     assert [tool["generated_tool_name"] for tool in fetched.json()["tools"]] == ["pin_mysql_query_users"]
 
 
+def test_profile_doc_api_render_and_notes(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="safe", name="Safe", description="", status="active", created_by="root")
+
+    notes = client.put(
+        "/capability-profiles/safe/doc/manual-notes",
+        json={"manual_notes": "Manual policy"},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert notes.status_code == 200
+    assert "Manual policy" in notes.json()["markdown"]
+
+    rendered = client.post(
+        "/capability-profiles/safe/doc/render",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert rendered.status_code == 200
+    assert "# Agent Bridge Profile: Safe" in rendered.json()["markdown"]
+
+
 def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
