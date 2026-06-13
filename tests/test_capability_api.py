@@ -406,6 +406,7 @@ def test_profile_doc_api_render_and_notes(wm_paths) -> None:
     )
     assert rendered.status_code == 200
     assert "# Agent Bridge Profile: Safe" in rendered.json()["markdown"]
+    assert "Manual policy" in rendered.json()["markdown"]
 
 
 def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
