@@ -198,6 +198,12 @@ def test_profile_rules_calls_client(monkeypatch) -> None:
 
 def test_profile_use_writes_project_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         [
@@ -225,6 +231,11 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
         encoding="utf-8",
     )
 
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         [
@@ -241,7 +252,63 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
     data = json.loads(config.read_text(encoding="utf-8"))
     assert result.exit_code == 0
     assert "existing" in data["mcpServers"]
-    assert "agent-capability-hub" in data["mcpServers"]
+    assert "agent-bridge" in data["mcpServers"]
+    assert "agent-capability-hub" not in data["mcpServers"]
+
+
+def test_profile_use_writes_agent_bridge_server_and_profile_files(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": "# Agent Bridge Profile: Safe\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(
+        app,
+        ["profile", "use", "safe", "--scope", "project", "--url", "http://127.0.0.1:8765/mcp"],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    assert "agent-bridge" in data["mcpServers"]
+    assert "agent-capability-hub" not in data["mcpServers"]
+    profile_file = tmp_path / ".agent-bridge" / "profiles" / "safe.md"
+    assert profile_file.read_text(encoding="utf-8") == "# Agent Bridge Profile: Safe\n"
+    assert f"@{profile_file.resolve()}" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert str(profile_file.resolve()) in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_profile_use_replaces_existing_pointer_block(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "CLAUDE.md").write_text(
+        "keep me\n<!-- agent-bridge:profile-pointer start -->\n@/old/profile.md\n"
+        "<!-- agent-bridge:profile-pointer end -->\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "AGENTS.md").write_text(
+        "keep agents\n<!-- agent-bridge:profile-pointer start -->\nold pointer\n"
+        "<!-- agent-bridge:profile-pointer end -->\n",
+        encoding="utf-8",
+    )
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": "# New Profile\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["profile", "use", "new-profile", "--scope", "project", "--yes"])
+
+    assert result.exit_code == 0
+    profile_file = tmp_path / ".agent-bridge" / "profiles" / "new-profile.md"
+    claude = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "keep me" in claude
+    assert "@/old/profile.md" not in claude
+    assert f"@{profile_file.resolve()}" in claude
+    assert "keep agents" in agents
+    assert "old pointer" not in agents
+    assert str(profile_file.resolve()) in agents
 
 
 def test_profile_use_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path) -> None:
@@ -249,6 +316,12 @@ def test_profile_use_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
     monkeypatch.setattr("agent_bridge.cli.app._stdin_is_interactive", lambda: True)
     monkeypatch.setattr("questionary.select", lambda *args, **kwargs: type("Prompt", (), {"ask": lambda self: "project"})())
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
 
     result = runner.invoke(
         app,
@@ -282,6 +355,31 @@ def test_profile_use_requires_scope_in_non_interactive_mode(monkeypatch, tmp_pat
 def test_profile_use_confirms_overwrite(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".mcp.json").write_text(
+        '{"mcpServers":{"agent-bridge":{"url":"old"}}}',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "profile",
+            "use",
+            "safe-readonly",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+        ],
+        input="n\n",
+    )
+
+    assert result.exit_code == 1
+    assert "已取消" in result.stderr
+
+
+def test_profile_use_confirms_legacy_server_migration(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".mcp.json").write_text(
         '{"mcpServers":{"agent-capability-hub":{"url":"old"}}}',
         encoding="utf-8",
     )
@@ -302,3 +400,75 @@ def test_profile_use_confirms_overwrite(monkeypatch, tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "已取消" in result.stderr
+
+
+def test_profile_refresh_writes_profile_file(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": "# Refreshed\n", "rendered_hash": "abc"}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["profile", "refresh", "safe", "--scope", "project"])
+
+    profile_file = tmp_path / ".agent-bridge" / "profiles" / "safe.md"
+    assert result.exit_code == 0
+    assert profile_file.read_text(encoding="utf-8") == "# Refreshed\n"
+    assert f"已刷新: {profile_file}" in result.stdout
+
+
+def test_profile_pins_refresh_calls_client(monkeypatch) -> None:
+    calls = []
+
+    class FakeClient:
+        def refresh_profile_pin_cache(self, profile_key):
+            calls.append(profile_key)
+            return {"profile_key": profile_key}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(app, ["profile", "pins", "refresh", "safe"])
+
+    assert result.exit_code == 0
+    assert calls == ["safe"]
+    assert "profile: safe 自动 Pin 缓存已清理" in result.stdout
+
+
+def test_client_render_profile_doc_posts_render_endpoint(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, headers, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return httpx.Response(200, json={"markdown": "# Safe\n"})
+
+    monkeypatch.setattr("agent_bridge.client.httpx.post", fake_post)
+    result = AgentBridgeClient("http://example.test/", "root").render_profile_doc("safe")
+
+    assert result == {"markdown": "# Safe\n"}
+    assert captured == {
+        "url": "http://example.test/capability-profiles/safe/doc/render",
+        "headers": {"X-Agent-Bridge-User": "root"},
+        "timeout": 10.0,
+    }
+
+
+def test_client_refresh_profile_pin_cache_posts_refresh_endpoint(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, headers, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return httpx.Response(200, json={"profile_key": "safe"})
+
+    monkeypatch.setattr("agent_bridge.client.httpx.post", fake_post)
+    result = AgentBridgeClient("http://example.test/", "root").refresh_profile_pin_cache("safe")
+
+    assert result == {"profile_key": "safe"}
+    assert captured == {
+        "url": "http://example.test/capability-profiles/safe/pins/refresh",
+        "headers": {"X-Agent-Bridge-User": "root"},
+        "timeout": 10.0,
+    }

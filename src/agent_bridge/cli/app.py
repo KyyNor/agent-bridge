@@ -99,7 +99,10 @@ def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> di
     servers = config.get("mcpServers")
     if not isinstance(servers, dict):
         servers = {}
-    servers["agent-capability-hub"] = {
+    else:
+        servers = dict(servers)
+    servers.pop("agent-capability-hub", None)
+    servers["agent-bridge"] = {
         "type": "http",
         "url": url,
         "headers": {"X-Agent-Bridge-MetaMCP-Profile": profile},
@@ -134,11 +137,14 @@ def _resolve_metamcp_scope(scope: str | None) -> str:
 
 def _confirm_overwrite(existing: dict[str, Any], yes: bool) -> None:
     servers = existing.get("mcpServers")
-    if not isinstance(servers, dict) or "agent-capability-hub" not in servers:
+    if not isinstance(servers, dict):
+        return
+    existing_names = [name for name in ("agent-bridge", "agent-capability-hub") if name in servers]
+    if not existing_names:
         return
     if yes:
         return
-    if not typer.confirm("agent-capability-hub 已存在，是否覆盖？", default=False):
+    if not typer.confirm(f"{' / '.join(existing_names)} 已存在，是否覆盖/迁移？", default=False):
         raise RuntimeError("已取消")
 
 

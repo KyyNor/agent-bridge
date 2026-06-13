@@ -201,6 +201,24 @@ class AgentBridgeClient:
         self._raise(response)
         return response.json()
 
+    def render_profile_doc(self, profile_key: str) -> dict[str, Any]:
+        response = httpx.post(
+            f"{self.base_url}/capability-profiles/{profile_key}/doc/render",
+            headers=self._headers(),
+            timeout=10.0,
+        )
+        self._raise(response)
+        return response.json()
+
+    def refresh_profile_pin_cache(self, profile_key: str) -> dict[str, Any]:
+        response = httpx.post(
+            f"{self.base_url}/capability-profiles/{profile_key}/pins/refresh",
+            headers=self._headers(),
+            timeout=10.0,
+        )
+        self._raise(response)
+        return response.json()
+
     def replace_profile_rules(self, profile_key: str, rules: list[dict[str, str]]) -> dict[str, Any]:
         response = httpx.put(
             f"{self.base_url}/capability-profiles/{profile_key}/rules",

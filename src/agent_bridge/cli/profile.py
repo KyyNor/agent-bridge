@@ -1,17 +1,59 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
 profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
+pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=True)
+profile_app.add_typer(pins_app, name="pins")
+
+_POINTER_START = "<!-- agent-bridge:profile-pointer start -->"
+_POINTER_END = "<!-- agent-bridge:profile-pointer end -->"
 
 
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
     parts = [f"{key}: {data[key]}" for key in keys if key in data]
     typer.echo(", ".join(parts) if parts else data)
+
+
+def _profile_doc_path(scope: str, profile: str) -> Path:
+    if scope == "project":
+        return Path.cwd() / ".agent-bridge" / "profiles" / f"{profile}.md"
+    if scope == "user":
+        return Path.home() / ".agent-bridge" / "profiles" / f"{profile}.md"
+    raise ValueError("scope 必须是 project 或 user")
+
+
+def _pointer_paths(scope: str) -> tuple[Path, Path]:
+    if scope == "project":
+        return Path.cwd() / "CLAUDE.md", Path.cwd() / "AGENTS.md"
+    if scope == "user":
+        return Path.home() / ".claude" / "CLAUDE.md", Path.home() / ".codex" / "AGENTS.md"
+    raise ValueError("scope 必须是 project 或 user")
+
+
+def _replace_agent_bridge_block(path: Path, block: str) -> None:
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    pattern = rf"\n?{re.escape(_POINTER_START)}\n.*?\n{re.escape(_POINTER_END)}\n?"
+    updated = re.sub(pattern, "\n", existing, flags=re.DOTALL).rstrip()
+    next_text = f"{updated}\n\n{block.rstrip()}\n" if updated else f"{block.rstrip()}\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(next_text, encoding="utf-8")
+
+
+def _pointer_block(content: str) -> str:
+    return f"{_POINTER_START}\n{content}\n{_POINTER_END}"
+
+
+def _write_profile_doc(scope: str, profile: str, markdown: str) -> Path:
+    profile_path = _profile_doc_path(scope, profile)
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(markdown, encoding="utf-8")
+    return profile_path
 
 
 @profile_app.command("create")
@@ -83,6 +125,7 @@ def profile_use(
         _claude_config_path,
         _confirm_overwrite,
         _load_json_file,
+        _run_client,
         _resolve_metamcp_scope,
         _with_metamcp_config,
     )
@@ -96,10 +139,55 @@ def profile_use(
             json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        rendered = _run_client(lambda client: client.render_profile_doc(profile))
+        markdown = rendered.get("markdown")
+        if not isinstance(markdown, str):
+            raise RuntimeError("Profile 文档渲染结果缺少 markdown")
+        profile_path = _write_profile_doc(resolved_scope, profile, markdown)
+        claude_path, agents_path = _pointer_paths(resolved_scope)
+        resolved_profile_path = profile_path.resolve()
+        _replace_agent_bridge_block(claude_path, _pointer_block(f"@{resolved_profile_path}"))
+        _replace_agent_bridge_block(
+            agents_path,
+            _pointer_block(
+                "Read the active Agent Bridge profile before using agent-bridge capabilities: "
+                f"{resolved_profile_path}"
+            ),
+        )
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)
         raise typer.Exit(1) from None
     typer.echo(f"已写入: {path}")
+    typer.echo(f"已写入: {profile_path}")
+
+
+@profile_app.command("refresh")
+def profile_refresh(
+    profile: Annotated[str, typer.Argument(help="要刷新的 Profile 标识")],
+    scope: Annotated[str, typer.Option("--scope", help="配置范围: project 或 user")] = "project",
+) -> None:
+    """刷新本地 Profile Markdown 文档"""
+    from agent_bridge.cli.app import _run_client
+
+    try:
+        rendered = _run_client(lambda client: client.render_profile_doc(profile))
+        markdown = rendered.get("markdown")
+        if not isinstance(markdown, str):
+            raise RuntimeError("Profile 文档渲染结果缺少 markdown")
+        profile_path = _write_profile_doc(scope, profile, markdown)
+    except (OSError, ValueError, RuntimeError) as exc:
+        typer.echo(f"配置错误: {exc}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"已刷新: {profile_path}")
+
+
+@pins_app.command("refresh")
+def profile_pins_refresh(profile: Annotated[str, typer.Argument(help="要清理自动 Pin 缓存的 Profile 标识")]) -> None:
+    """清理 Profile 自动 Pin 缓存"""
+    from agent_bridge.cli.app import _run_client
+
+    result = _run_client(lambda client: client.refresh_profile_pin_cache(profile))
+    typer.echo(f"profile: {result.get('profile_key', profile)} 自动 Pin 缓存已清理")
 
 
 @profile_app.command("config")
