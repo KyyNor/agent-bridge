@@ -142,37 +142,47 @@ class CapabilityGovernanceService:
         actor: str,
         profile_key: str,
         *,
-        auto_mode: str,
+        auto_mode: str | None = None,
+        mode: str | None = None,
         ratio_percent: int | None = None,
         count_limit: int | None = None,
+        count: int | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise NotFound("profile not found")
 
-        mode = str(auto_mode or "").strip()
-        if mode not in VALID_PROFILE_PIN_AUTO_MODES:
+        normalized_auto_mode = str(auto_mode or "").strip()
+        normalized_mode = str(mode or "").strip()
+        if normalized_auto_mode and normalized_mode and normalized_auto_mode != normalized_mode:
+            raise ValidationError("profile pin mode aliases conflict")
+        effective_mode = normalized_auto_mode or normalized_mode
+        if effective_mode not in VALID_PROFILE_PIN_AUTO_MODES:
             raise ValidationError("invalid profile pin auto mode")
 
-        if mode == "disabled":
+        if count_limit is not None and count is not None and count_limit != count:
+            raise ValidationError("profile pin count aliases conflict")
+        effective_count = count_limit if count_limit is not None else count
+
+        if effective_mode == "disabled":
             ratio_percent = None
-            count_limit = None
-        elif mode == "ratio":
-            if count_limit is not None:
+            effective_count = None
+        elif effective_mode == "ratio":
+            if effective_count is not None:
                 raise ValidationError("profile pin settings are mutually exclusive")
             if ratio_percent is None or ratio_percent < 1 or ratio_percent > 100:
                 raise ValidationError("ratio_percent must be between 1 and 100")
-        elif mode == "count":
+        elif effective_mode == "count":
             if ratio_percent is not None:
                 raise ValidationError("profile pin settings are mutually exclusive")
-            if count_limit is None or count_limit < 1:
+            if effective_count is None or effective_count < 1:
                 raise ValidationError("count_limit must be at least 1")
 
         self.store.upsert_profile_pin_settings(
             profile_key=profile_key,
-            mode=mode,
+            mode=effective_mode,
             ratio_percent=ratio_percent,
-            count=count_limit,
+            count=effective_count,
             auto_cache=None,
         )
         return self.profile_pin_preview(actor, profile_key)

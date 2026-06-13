@@ -135,3 +135,21 @@ def test_compute_profile_pin_preview_filters_to_allowed_readonly_tools(wm_paths:
         ("mysql", "search", "manual")
     ]
     assert [tool["generated_tool_name"] for tool in preview["tools"]] == ["pin_mysql_query_users"]
+
+
+def test_governance_accepts_profile_pin_setting_aliases(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _profile(store)
+    governance = CapabilityGovernanceService(store=store, admins={"root"})
+
+    preview = governance.update_profile_pin_settings(
+        "root",
+        "safe-readonly",
+        mode="count",
+        count=2,
+    )
+
+    assert preview["settings"]["mode"] == "count"
+    assert preview["settings"]["count"] == 2
+    assert preview["settings"]["ratio_percent"] is None
