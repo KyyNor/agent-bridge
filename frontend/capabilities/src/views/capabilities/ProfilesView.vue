@@ -39,15 +39,20 @@ const allServices = ref<McpService[]>([])
 const allKbs = ref<KnowledgeBaseSummary[]>([])
 const allRepos = ref<CodeRepository[]>([])
 const configSaving = ref(false)
+const configError = ref('')
+const saveError = ref('')
 const pinPreview = ref<ProfilePinPreview | null>(null)
 const pendingPins = ref<ProfilePinRule[]>([])
 const pinMode = ref<'disabled' | 'ratio' | 'count'>('disabled')
 const pinRatio = ref(10)
 const pinCount = ref(3)
 const pinSaving = ref(false)
+const pinsLoaded = ref(false)
+const pinError = ref('')
 const profileMarkdown = ref('')
 const manualNotes = ref('')
 const docSaving = ref(false)
+const docError = ref('')
 
 const copied = ref('')
 const pinToolTypes = ['overview', 'search', 'detail']
@@ -90,6 +95,10 @@ const manualPinGroups = computed(() =>
     ...pin,
     service_name: serviceName(pin.service_key),
   }))
+)
+
+const canSaveConfig = computed(() =>
+  !configLoading.value && !configSaving.value && !pinSaving.value && !docSaving.value && !configError.value
 )
 
 async function createProfile() {
@@ -147,14 +156,13 @@ async function openConfig(p: ProjectProfile) {
   configProfile.value = p
   showConfig.value = true
   configLoading.value = true
+  resetConfigState()
   try {
-    const [services, kbs, repos, full, pins, doc] = await Promise.all([
+    const [services, kbs, repos, full] = await Promise.all([
       api.listServices(),
       api.listWikiKbs(),
       api.listCodeRepos(),
       api.getProfile(p.profile_key),
-      api.getProfilePins(p.profile_key),
-      api.renderProfileDoc(p.profile_key),
     ])
     allServices.value = services
     allKbs.value = kbs
@@ -163,23 +171,70 @@ async function openConfig(p: ProjectProfile) {
     configResources.value = full.resource_rules || []
     pendingRules.value = [...configRules.value]
     pendingResources.value = [...configResources.value]
-    applyPinPreview(pins)
-    applyProfileDoc(doc)
-    manualNotes.value = ''
-  } catch {
-    configRules.value = []
-    configResources.value = []
-    pendingRules.value = []
-    pendingResources.value = []
-    pinPreview.value = null
-    pendingPins.value = []
-    pinMode.value = 'disabled'
-    pinRatio.value = 10
-    pinCount.value = 3
-    profileMarkdown.value = ''
-    manualNotes.value = ''
+  } catch (e: unknown) {
+    configError.value = `加载 Profile 核心配置失败：${errorMessage(e)}`
+    configLoading.value = false
+    return
   }
   configLoading.value = false
+  void loadProfilePins(p.profile_key)
+  void loadProfileDoc(p.profile_key)
+}
+
+function resetConfigState() {
+  configError.value = ''
+  saveError.value = ''
+  pinError.value = ''
+  docError.value = ''
+  configRules.value = []
+  configResources.value = []
+  pendingRules.value = []
+  pendingResources.value = []
+  pinPreview.value = null
+  pendingPins.value = []
+  pinMode.value = 'disabled'
+  pinRatio.value = 10
+  pinCount.value = 3
+  pinsLoaded.value = false
+  profileMarkdown.value = ''
+  manualNotes.value = ''
+}
+
+function errorMessage(e: unknown) {
+  return e instanceof Error ? e.message : '未知错误'
+}
+
+async function loadProfilePins(profileKey: string) {
+  pinSaving.value = true
+  pinError.value = ''
+  try {
+    const pins = await api.getProfilePins(profileKey)
+    if (configProfile.value?.profile_key !== profileKey) return
+    applyPinPreview(pins)
+    pinsLoaded.value = true
+  } catch (e: unknown) {
+    if (configProfile.value?.profile_key === profileKey) {
+      pinError.value = `加载 Pin 预览失败：${errorMessage(e)}`
+    }
+  } finally {
+    if (configProfile.value?.profile_key === profileKey) pinSaving.value = false
+  }
+}
+
+async function loadProfileDoc(profileKey: string) {
+  docSaving.value = true
+  docError.value = ''
+  try {
+    const doc = await api.renderProfileDoc(profileKey)
+    if (configProfile.value?.profile_key !== profileKey) return
+    applyProfileDoc(doc)
+  } catch (e: unknown) {
+    if (configProfile.value?.profile_key === profileKey) {
+      docError.value = `加载 Profile 文档失败：${errorMessage(e)}`
+    }
+  } finally {
+    if (configProfile.value?.profile_key === profileKey) docSaving.value = false
+  }
 }
 
 function applyPinPreview(pins: ProfilePinPreview) {
@@ -249,24 +304,28 @@ function toggleResource(type: string, key: string) {
 }
 
 async function saveConfig() {
-  if (!configProfile.value) return
+  if (!configProfile.value || configLoading.value || configError.value) return
   configSaving.value = true
+  saveError.value = ''
   try {
     await api.replaceProfileRules(configProfile.value.profile_key, pendingRules.value)
     await api.replaceProfileResources(configProfile.value.profile_key, pendingResources.value)
-    await savePins()
+    if (pinsLoaded.value) await savePins(true)
     await refreshProfileDoc()
     configRules.value = [...pendingRules.value]
     configResources.value = [...pendingResources.value]
     profiles.value = await api.listProfiles()
     showConfig.value = false
-  } catch { /* ignore */ }
+  } catch (e: unknown) {
+    saveError.value = `保存配置失败：${errorMessage(e)}`
+  }
   configSaving.value = false
 }
 
-async function savePins() {
-  if (!configProfile.value) return
+async function savePins(raiseError = false) {
+  if (!configProfile.value || !pinsLoaded.value) return
   pinSaving.value = true
+  pinError.value = ''
   try {
     await api.replaceProfilePins(configProfile.value.profile_key, pendingPins.value)
     const pins = await api.updateProfilePinSettings(configProfile.value.profile_key, {
@@ -275,6 +334,10 @@ async function savePins() {
       count: pinMode.value === 'count' ? pinCount.value : null,
     })
     applyPinPreview(pins)
+    pinsLoaded.value = true
+  } catch (e: unknown) {
+    pinError.value = `保存 Pin 配置失败：${errorMessage(e)}`
+    if (raiseError) throw e
   } finally {
     pinSaving.value = false
   }
@@ -283,30 +346,41 @@ async function savePins() {
 async function refreshPins() {
   if (!configProfile.value) return
   pinSaving.value = true
+  pinError.value = ''
   try {
     const pins = await api.refreshProfilePins(configProfile.value.profile_key)
     applyPinPreview(pins)
-  } catch { /* ignore */ }
+    pinsLoaded.value = true
+  } catch (e: unknown) {
+    pinError.value = `重新计算自动 Pin 失败：${errorMessage(e)}`
+  }
   pinSaving.value = false
 }
 
 async function saveManualNotes() {
   if (!configProfile.value) return
   docSaving.value = true
+  docError.value = ''
   try {
     const doc = await api.updateProfileManualNotes(configProfile.value.profile_key, manualNotes.value)
     applyProfileDoc(doc)
     manualNotes.value = ''
-  } catch { /* ignore */ }
+  } catch (e: unknown) {
+    docError.value = `保存手动补充失败：${errorMessage(e)}`
+  }
   docSaving.value = false
 }
 
-async function refreshProfileDoc() {
+async function refreshProfileDoc(raiseError = false) {
   if (!configProfile.value) return
   docSaving.value = true
+  docError.value = ''
   try {
     const doc = await api.renderProfileDoc(configProfile.value.profile_key)
     applyProfileDoc(doc)
+  } catch (e: unknown) {
+    docError.value = `生成 Profile 文档失败：${errorMessage(e)}`
+    if (raiseError) throw e
   } finally {
     docSaving.value = false
   }
@@ -357,9 +431,9 @@ async function refreshProfileDoc() {
           </thead>
           <tbody>
             <tr v-for="p in filtered" :key="p.profile_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-              <td class="px-4 py-3">
-                <span class="text-[13px] font-medium text-foreground">{{ p.profile_key }}</span>
-                <div class="mt-0.5 text-xs text-muted-foreground">{{ p.name }}</div>
+              <td class="min-w-0 px-4 py-3">
+                <span class="block break-all text-[13px] font-medium text-foreground">{{ p.profile_key }}</span>
+                <div class="mt-0.5 break-all text-xs text-muted-foreground">{{ p.name }}</div>
               </td>
               <td class="px-4 py-3">
                 <Badge v-if="p.status === 'active'" variant="secondary" class="bg-green-50 text-green-700">启用</Badge>
@@ -425,12 +499,19 @@ async function refreshProfileDoc() {
           <DialogTitle>{{ configProfile?.name || configProfile?.profile_key }} — 配置</DialogTitle>
         </DialogHeader>
         <div v-if="configLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
+        <div v-else-if="configError" class="rounded-lg bg-red-50 p-4 text-sm text-destructive">
+          {{ configError }}
+        </div>
         <div v-else class="space-y-5">
+          <div v-if="saveError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">
+            {{ saveError }}
+          </div>
+
           <!-- Copy Command -->
           <div>
             <div class="mb-2 text-sm font-medium">接入命令</div>
-            <div class="flex items-center gap-2 rounded-lg bg-secondary px-4 py-2.5">
-              <code class="flex-1 font-mono text-sm text-foreground">{{ configProfile ? getProfileCommand(configProfile) : '' }}</code>
+            <div class="flex min-w-0 items-center gap-2 rounded-lg bg-secondary px-4 py-2.5">
+              <code class="min-w-0 flex-1 break-all font-mono text-sm text-foreground">{{ configProfile ? getProfileCommand(configProfile) : '' }}</code>
               <Button variant="ghost" size="sm" @click="configProfile && copyCommand(configProfile)">
                 {{ copied === configProfile?.profile_key ? '已复制' : '复制' }}
               </Button>
@@ -454,9 +535,9 @@ async function refreshProfileDoc() {
                   @change="toggleServiceAllow(svc.service_key)"
                   class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                 />
-                <div class="flex-1">
-                  <div class="text-sm font-medium">{{ svc.name || svc.service_key }}</div>
-                  <div class="text-xs text-muted-foreground">{{ svc.service_key }}</div>
+                <div class="min-w-0 flex-1">
+                  <div class="break-all text-sm font-medium">{{ svc.name || svc.service_key }}</div>
+                  <div class="break-all text-xs text-muted-foreground">{{ svc.service_key }}</div>
                 </div>
                 <Badge v-if="svc.status === 'enabled'" variant="secondary" class="bg-green-50 text-green-700 text-[11px]">已启用</Badge>
                 <Badge v-else-if="svc.status === 'error'" variant="destructive" class="text-[11px]">异常</Badge>
@@ -472,16 +553,20 @@ async function refreshProfileDoc() {
                 <div class="text-sm font-medium">Pinned Tools</div>
                 <div class="mt-1 text-xs text-muted-foreground">
                   当前会暴露 {{ pinPreview?.tools.length || 0 }} 个 pin_* 工具
+                  <span class="ml-1">未保存的手动 Pin 需保存后刷新预览。</span>
                 </div>
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" :disabled="pinSaving" @click="refreshPins">
                   {{ pinSaving ? '处理中...' : '重新计算自动 Pin' }}
                 </Button>
-                <Button size="sm" :disabled="pinSaving" @click="savePins">
+                <Button size="sm" :disabled="pinSaving || !pinsLoaded" @click="savePins()">
                   {{ pinSaving ? '保存中...' : '保存 Pin' }}
                 </Button>
               </div>
+            </div>
+            <div v-if="pinError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
+              {{ pinError }}
             </div>
 
             <div class="grid gap-3 sm:grid-cols-[160px_1fr_1fr]">
@@ -489,6 +574,7 @@ async function refreshProfileDoc() {
                 <span class="text-xs font-medium text-muted-foreground">自动 Pin 模式</span>
                 <select
                   v-model="pinMode"
+                  :disabled="!pinsLoaded"
                   class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="disabled">关闭</option>
@@ -498,11 +584,11 @@ async function refreshProfileDoc() {
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium text-muted-foreground">比例百分比</span>
-                <Input v-model.number="pinRatio" type="number" min="1" max="100" :disabled="pinMode !== 'ratio'" />
+                <Input v-model.number="pinRatio" type="number" min="1" max="100" :disabled="!pinsLoaded || pinMode !== 'ratio'" />
               </label>
               <label class="space-y-1">
                 <span class="text-xs font-medium text-muted-foreground">数量</span>
-                <Input v-model.number="pinCount" type="number" min="1" :disabled="pinMode !== 'count'" />
+                <Input v-model.number="pinCount" type="number" min="1" :disabled="!pinsLoaded || pinMode !== 'count'" />
               </label>
             </div>
 
@@ -515,10 +601,10 @@ async function refreshProfileDoc() {
                 <span
                   v-for="pin in manualPinGroups"
                   :key="`${pin.service_key}:${pin.tool_type}`"
-                  class="inline-flex items-center gap-2 rounded-md bg-secondary px-2.5 py-1 text-xs"
+                  class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md bg-secondary px-2.5 py-1 text-xs"
                 >
-                  <span class="font-medium text-foreground">{{ pin.service_name }}</span>
-                  <span class="text-muted-foreground">{{ pin.service_key }} / {{ typeLabel(pin.tool_type) }}</span>
+                  <span class="min-w-0 break-all font-medium text-foreground">{{ pin.service_name }}</span>
+                  <span class="min-w-0 break-all text-muted-foreground">{{ pin.service_key }} / {{ typeLabel(pin.tool_type) }}</span>
                   <button class="text-muted-foreground hover:text-destructive" type="button" @click="toggleManualPin(pin.service_key, pin.tool_type)">移除</button>
                 </span>
               </div>
@@ -535,18 +621,22 @@ async function refreshProfileDoc() {
                   :key="`pin-${svc.service_key}`"
                   class="flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2"
                 >
-                  <div class="min-w-[180px] flex-1">
+                  <div class="min-w-[180px] flex-1 break-all">
                     <div class="text-sm font-medium">{{ svc.name || svc.service_key }}</div>
                     <div class="text-xs text-muted-foreground">{{ svc.service_key }}</div>
                   </div>
                   <label
                     v-for="toolType in pinToolTypes"
                     :key="`${svc.service_key}-${toolType}`"
-                    class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-background"
+                    :class="[
+                      'inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors',
+                      pinsLoaded ? 'cursor-pointer hover:bg-background' : 'cursor-not-allowed opacity-60'
+                    ]"
                   >
                     <input
                       type="checkbox"
                       :checked="manualPinExists(svc.service_key, toolType)"
+                      :disabled="!pinsLoaded"
                       @change="toggleManualPin(svc.service_key, toolType)"
                       class="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
                     />
@@ -562,7 +652,7 @@ async function refreshProfileDoc() {
                 <span
                   v-for="pin in autoPinGroups.slice(0, 12)"
                   :key="`auto-${pin.service_key}-${pin.tool_type}`"
-                  class="rounded bg-background px-2 py-1 text-xs text-muted-foreground"
+                  class="max-w-full break-all rounded bg-background px-2 py-1 text-xs text-muted-foreground"
                 >
                   {{ serviceName(pin.service_key) }} / {{ typeLabel(pin.tool_type) }}{{ pin.calls ? ` · ${pin.calls} 次` : '' }}
                 </span>
@@ -590,9 +680,9 @@ async function refreshProfileDoc() {
                   @change="toggleResource('wiki_kb', kb.slug)"
                   class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                 />
-                <div class="flex-1">
-                  <div class="text-sm font-medium">{{ kb.name }}</div>
-                  <div class="text-xs text-muted-foreground">{{ kb.slug }} · {{ kb.document_count }} 文档</div>
+                <div class="min-w-0 flex-1">
+                  <div class="break-all text-sm font-medium">{{ kb.name }}</div>
+                  <div class="break-all text-xs text-muted-foreground">{{ kb.slug }} · {{ kb.document_count }} 文档</div>
                 </div>
               </label>
             </div>
@@ -615,9 +705,9 @@ async function refreshProfileDoc() {
                   @change="toggleResource('code_repo', repo.repo_key)"
                   class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                 />
-                <div class="flex-1">
-                  <div class="text-sm font-medium">{{ repo.name }}</div>
-                  <div class="text-xs text-muted-foreground">{{ repo.repo_key }}</div>
+                <div class="min-w-0 flex-1">
+                  <div class="break-all text-sm font-medium">{{ repo.name }}</div>
+                  <div class="break-all text-xs text-muted-foreground">{{ repo.repo_key }}</div>
                 </div>
               </label>
             </div>
@@ -633,6 +723,9 @@ async function refreshProfileDoc() {
               <Button variant="outline" size="sm" :disabled="docSaving" @click="refreshProfileDoc">
                 {{ docSaving ? '生成中...' : '重新生成/预览' }}
               </Button>
+            </div>
+            <div v-if="docError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
+              {{ docError }}
             </div>
             <div class="space-y-2">
               <label class="text-xs font-medium text-muted-foreground">手动补充 Notes</label>
@@ -653,7 +746,7 @@ async function refreshProfileDoc() {
         </div>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
-          <Button @click="saveConfig" :disabled="configSaving || pinSaving || docSaving">{{ configSaving ? '保存中...' : '确认' }}</Button>
+          <Button @click="saveConfig" :disabled="!canSaveConfig">{{ configSaving ? '保存中...' : '确认' }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -15,7 +15,7 @@ import type {
   ProfileDocRender,
   ProfilePinPreview,
   ProfilePinRule,
-  ProfilePinSettings,
+  ProfilePinSettingsUpdate,
   ProfileSourceRule,
   ProfileResourceRule,
   RepoOverview,
@@ -101,7 +101,7 @@ export const api = {
   getProfilePins: (key: string) => get<ProfilePinPreview>(`/capability-profiles/${key}/pins`),
   replaceProfilePins: (key: string, pins: ProfilePinRule[]) =>
     put<ProfilePinPreview>(`/capability-profiles/${key}/pins`, { pins }),
-  updateProfilePinSettings: (key: string, settings: Partial<ProfilePinSettings>) =>
+  updateProfilePinSettings: (key: string, settings: ProfilePinSettingsUpdate) =>
     put<ProfilePinPreview>(`/capability-profiles/${key}/pins/settings`, settings),
   refreshProfilePins: (key: string) =>
     post<ProfilePinPreview>(`/capability-profiles/${key}/pins/refresh`),

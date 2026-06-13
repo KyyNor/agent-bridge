@@ -69,6 +69,12 @@ export interface ProfilePinSettings {
   auto_cache_computed_at?: string | null
 }
 
+export interface ProfilePinSettingsUpdate {
+  mode: 'disabled' | 'ratio' | 'count'
+  ratio_percent: number | null
+  count: number | null
+}
+
 export interface ProfilePinnedTool {
   generated_tool_name: string
   service_key: string
