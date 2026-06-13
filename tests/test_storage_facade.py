@@ -34,6 +34,19 @@ def test_init_schema_creates_all_tables(store: SQLiteStore) -> None:
     assert expected <= tables
 
 
+def test_migrate_phase2_creates_profile_doc_cache_for_existing_db(store: SQLiteStore) -> None:
+    with store.connect() as conn:
+        conn.execute("DROP TABLE profile_doc_cache")
+
+    store.migrate_phase2()
+
+    with store.connect() as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='profile_doc_cache'"
+        ).fetchone()
+    assert table is not None
+
+
 def test_facade_exposes_repository_properties(store: SQLiteStore) -> None:
     from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
     from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
