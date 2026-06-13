@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+import json
+
+from agent_bridge.capabilities.governance import CapabilityGovernanceService
+from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.storage.sqlite import SQLiteStore
+
+
+def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="safe", name="Safe Profile", description="", status="active", created_by="root")
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="https://mysql.test/mcp",
+        headers={},
+        description="",
+        tags=[],
+        created_by="root",
+    )
+    store.update_mcp_service_status("mysql", "enabled")
+    store.replace_profile_source_rules("safe", [{"source_type": "mcp_service", "source_key": "mysql", "effect": "allow"}])
+    governance = CapabilityGovernanceService(store=store, admins={"root"})
+    governance.update_profile_manual_notes("root", "safe", "## Manual Notes\nUse read-only queries only.")
+
+    rendered = governance.render_profile_markdown("root", "safe")
+
+    assert "# Agent Bridge Profile: Safe Profile" in rendered["markdown"]
+    assert "search" in rendered["markdown"]
+    assert "execute" in rendered["markdown"]
+    assert "- MySQL (`mysql`)" in rendered["markdown"]
+    assert "Use read-only queries only." in rendered["markdown"]
+    assert "https://mysql.test/mcp" not in rendered["markdown"]
+    assert "pin_mysql" not in rendered["markdown"]
+
+    cache = store.get_profile_doc_cache("safe")
+    assert cache is not None
+    assert cache["manual_notes"] == "## Manual Notes\nUse read-only queries only."
+    assert cache["last_rendered_markdown"] == rendered["markdown"]
+    assert cache["rendered_hash"] == rendered["rendered_hash"]
+    assert json.loads(cache["auto_summary_json"])["services"] == [{"service_key": "mysql", "name": "MySQL"}]
+    assert "https://mysql.test/mcp" not in cache["auto_summary_json"]

@@ -337,6 +337,33 @@ class SQLiteStore:
     def clear_profile_pin_auto_cache(self, profile_key: str) -> None:
         return self.governance.clear_profile_pin_auto_cache(profile_key=profile_key)
 
+    def get_profile_doc_cache(self, profile_key: str) -> dict[str, Any] | None:
+        return self.governance.get_profile_doc_cache(profile_key=profile_key)
+
+    def upsert_profile_manual_notes(self, profile_key: str, manual_notes: str) -> dict[str, Any]:
+        return self.governance.upsert_profile_manual_notes(profile_key=profile_key, manual_notes=manual_notes)
+
+    def upsert_profile_rendered_doc(
+        self,
+        *,
+        profile_key: str,
+        manual_notes: str,
+        auto_summary: dict[str, Any],
+        auto_summary_hash: str,
+        rendered_hash: str,
+        markdown: str,
+        mark_written: bool,
+    ) -> dict[str, Any]:
+        return self.governance.upsert_profile_rendered_doc(
+            profile_key=profile_key,
+            manual_notes=manual_notes,
+            auto_summary=auto_summary,
+            auto_summary_hash=auto_summary_hash,
+            rendered_hash=rendered_hash,
+            markdown=markdown,
+            mark_written=mark_written,
+        )
+
     def list_resource_rule_profiles(self, resource_type: str, resource_key: str) -> list[dict[str, Any]]:
         return self.governance.list_resource_rule_profiles(resource_type=resource_type, resource_key=resource_key)
 

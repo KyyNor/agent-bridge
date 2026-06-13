@@ -187,6 +187,17 @@ CREATE TABLE IF NOT EXISTS profile_pin_settings (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS profile_doc_cache (
+  profile_key TEXT PRIMARY KEY REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+  manual_notes TEXT NOT NULL DEFAULT '',
+  auto_summary_json TEXT NOT NULL DEFAULT '{}',
+  auto_summary_hash TEXT NOT NULL DEFAULT '',
+  rendered_hash TEXT NOT NULL DEFAULT '',
+  last_rendered_markdown TEXT NOT NULL DEFAULT '',
+  last_written_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS tool_call_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   log_id TEXT NOT NULL UNIQUE,

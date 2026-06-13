@@ -281,6 +281,92 @@ class GovernanceRepository:
                 (profile_key,),
             )
 
+    def get_profile_doc_cache(self, profile_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM profile_doc_cache WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def upsert_profile_manual_notes(self, profile_key: str, manual_notes: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO profile_doc_cache (profile_key, manual_notes)
+                VALUES (?, ?)
+                ON CONFLICT(profile_key) DO UPDATE SET
+                  manual_notes = excluded.manual_notes,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (profile_key, manual_notes),
+            )
+            row = conn.execute(
+                "SELECT * FROM profile_doc_cache WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            cache = row_to_dict(row)
+            if cache is None:
+                raise KeyError(f"profile doc cache not found: {profile_key}")
+            return cache
+
+    def upsert_profile_rendered_doc(
+        self,
+        *,
+        profile_key: str,
+        manual_notes: str,
+        auto_summary: dict[str, Any],
+        auto_summary_hash: str,
+        rendered_hash: str,
+        markdown: str,
+        mark_written: bool,
+    ) -> dict[str, Any]:
+        auto_summary_json = json.dumps(auto_summary, ensure_ascii=False, default=str)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO profile_doc_cache (
+                  profile_key,
+                  manual_notes,
+                  auto_summary_json,
+                  auto_summary_hash,
+                  rendered_hash,
+                  last_rendered_markdown,
+                  last_written_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
+                ON CONFLICT(profile_key) DO UPDATE SET
+                  manual_notes = excluded.manual_notes,
+                  auto_summary_json = excluded.auto_summary_json,
+                  auto_summary_hash = excluded.auto_summary_hash,
+                  rendered_hash = excluded.rendered_hash,
+                  last_rendered_markdown = excluded.last_rendered_markdown,
+                  last_written_at = CASE
+                    WHEN ? THEN CURRENT_TIMESTAMP
+                    ELSE profile_doc_cache.last_written_at
+                  END,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    profile_key,
+                    manual_notes,
+                    auto_summary_json,
+                    auto_summary_hash,
+                    rendered_hash,
+                    markdown,
+                    int(mark_written),
+                    int(mark_written),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM profile_doc_cache WHERE profile_key = ?",
+                (profile_key,),
+            ).fetchone()
+            cache = row_to_dict(row)
+            if cache is None:
+                raise KeyError(f"profile doc cache not found: {profile_key}")
+            return cache
+
     def list_resource_rule_profiles(
         self, resource_type: str, resource_key: str
     ) -> list[dict[str, Any]]:

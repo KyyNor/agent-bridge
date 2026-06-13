@@ -22,6 +22,10 @@ from agent_bridge.capabilities.profile_pins import (
     ratio_target,
     tool_payload_to_pin_tool,
 )
+from agent_bridge.capabilities.profile_docs import (
+    render_profile_markdown as render_profile_doc_markdown,
+    stable_hash,
+)
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -195,6 +199,93 @@ class CapabilityGovernanceService:
             raise NotFound("profile not found")
         self.store.clear_profile_pin_auto_cache(profile_key)
         return self.profile_pin_preview(actor, profile_key)
+
+    def update_profile_manual_notes(self, actor: str, profile_key: str, manual_notes: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_project_profile(profile_key) is None:
+            raise NotFound("profile not found")
+        self.store.upsert_profile_manual_notes(profile_key, manual_notes)
+        return self.render_profile_markdown(actor, profile_key)
+
+    def render_profile_markdown(self, actor: str, profile_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None:
+            raise NotFound("profile not found")
+
+        services = [
+            service
+            for service in self.store.list_mcp_services()
+            if service.get("status") == "enabled"
+        ]
+        service_keys = [service["service_key"] for service in services]
+        allowed_service_keys = set(
+            self.filter_source_keys(
+                actor=actor,
+                profile_key=profile_key,
+                source_type=SourceType.mcp_service.value,
+                source_keys=service_keys,
+            )
+        )
+        allowed_services = [
+            {
+                "service_key": service["service_key"],
+                "name": service.get("name") or service["service_key"],
+            }
+            for service in services
+            if service["service_key"] in allowed_service_keys
+        ]
+
+        resource_rules = self.store.list_profile_resource_rules(profile_key)
+        allowed_repo_keys = {
+            rule["resource_key"]
+            for rule in resource_rules
+            if rule["resource_type"] == ProfileResourceType.code_repo.value
+        }
+        allowed_kb_slugs = {
+            rule["resource_key"]
+            for rule in resource_rules
+            if rule["resource_type"] == ProfileResourceType.wiki_kb.value
+        }
+        repositories = [
+            {
+                "repo_key": repository["repo_key"],
+                "name": repository.get("name") or repository["repo_key"],
+            }
+            for repository in self.store.list_code_repositories()
+            if repository["repo_key"] in allowed_repo_keys
+        ]
+        knowledge_bases = [
+            {
+                "slug": kb["slug"],
+                "name": kb.get("name") or kb["slug"],
+            }
+            for kb in self.store.list_kbs()
+            if kb["slug"] in allowed_kb_slugs
+        ]
+
+        cache = self.store.get_profile_doc_cache(profile_key) or {}
+        manual_notes = str(cache.get("manual_notes") or "")
+        summary = {
+            "profile_key": profile_key,
+            "profile_name": profile.get("name") or profile_key,
+            "services": allowed_services,
+            "code_repositories": repositories,
+            "knowledge_bases": knowledge_bases,
+        }
+        markdown = render_profile_doc_markdown(summary, manual_notes)
+        auto_summary_hash = stable_hash(summary)
+        rendered_hash = stable_hash({"summary": summary, "manual_notes": manual_notes, "markdown": markdown})
+        self.store.upsert_profile_rendered_doc(
+            profile_key=profile_key,
+            manual_notes=manual_notes,
+            auto_summary=summary,
+            auto_summary_hash=auto_summary_hash,
+            rendered_hash=rendered_hash,
+            markdown=markdown,
+            mark_written=False,
+        )
+        return {"profile_key": profile_key, "markdown": markdown, "rendered_hash": rendered_hash}
 
     def profile_pin_preview(self, actor: str, profile_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
