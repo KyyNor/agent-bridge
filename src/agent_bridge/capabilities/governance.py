@@ -15,11 +15,18 @@ from agent_bridge.capabilities.models import (
     ProfileRuleEffect,
     SourceType,
 )
+from agent_bridge.capabilities.profile_pins import (
+    PINNABLE_TOOL_TYPES,
+    PinnedGroup,
+    safe_pin_tool_name,
+    tool_payload_to_pin_tool,
+)
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
 VALID_PROFILE_STATUSES = {"active", "disabled"}
+VALID_PROFILE_PIN_AUTO_MODES = {"disabled", "ratio", "count"}
 
 
 def make_log_id() -> str:
@@ -95,6 +102,165 @@ class CapabilityGovernanceService:
         normalized = [self._validate_resource_rule(rule) for rule in rules]
         self.store.replace_profile_resource_rules(profile_key, normalized)
         return self.get_profile(actor, profile_key)
+
+    def replace_profile_pins(
+        self,
+        actor: str,
+        profile_key: str,
+        pins: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_project_profile(profile_key) is None:
+            raise NotFound("profile not found")
+
+        normalized = []
+        for pin in pins:
+            service_key = str(pin.get("service_key") or "").strip()
+            if not service_key:
+                raise ValidationError("service_key is required")
+            tool_type = str(pin.get("tool_type") or "").strip()
+            if not tool_type:
+                raise ValidationError("tool_type is required")
+            if tool_type not in PINNABLE_TOOL_TYPES:
+                raise ValidationError("tool_type is not pinnable")
+            if self.store.get_mcp_service(service_key) is None:
+                raise NotFound("service not found")
+            normalized.append(
+                {
+                    "service_key": service_key,
+                    "tool_type": tool_type,
+                    "created_by": actor,
+                }
+            )
+
+        self.store.replace_profile_pin_rules(profile_key, normalized)
+        self.store.clear_profile_pin_auto_cache(profile_key)
+        return self.profile_pin_preview(actor, profile_key)
+
+    def update_profile_pin_settings(
+        self,
+        actor: str,
+        profile_key: str,
+        *,
+        auto_mode: str,
+        ratio_percent: int | None = None,
+        count_limit: int | None = None,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_project_profile(profile_key) is None:
+            raise NotFound("profile not found")
+
+        mode = str(auto_mode or "").strip()
+        if mode not in VALID_PROFILE_PIN_AUTO_MODES:
+            raise ValidationError("invalid profile pin auto mode")
+
+        if mode == "disabled":
+            ratio_percent = None
+            count_limit = None
+        elif mode == "ratio":
+            if count_limit is not None:
+                raise ValidationError("profile pin settings are mutually exclusive")
+            if ratio_percent is None or ratio_percent < 1 or ratio_percent > 100:
+                raise ValidationError("ratio_percent must be between 1 and 100")
+        elif mode == "count":
+            if ratio_percent is not None:
+                raise ValidationError("profile pin settings are mutually exclusive")
+            if count_limit is None or count_limit < 1:
+                raise ValidationError("count_limit must be at least 1")
+
+        self.store.upsert_profile_pin_settings(
+            profile_key=profile_key,
+            mode=mode,
+            ratio_percent=ratio_percent,
+            count=count_limit,
+            auto_cache=None,
+        )
+        return self.profile_pin_preview(actor, profile_key)
+
+    def profile_pin_preview(self, actor: str, profile_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_project_profile(profile_key) is None:
+            raise NotFound("profile not found")
+
+        services = [
+            service
+            for service in self.store.list_mcp_services()
+            if service.get("status") == "enabled"
+        ]
+        service_keys = [service["service_key"] for service in services]
+        allowed_service_keys = set(
+            self.filter_source_keys(
+                actor=actor,
+                profile_key=profile_key,
+                source_type=SourceType.mcp_service.value,
+                source_keys=service_keys,
+            )
+        )
+        candidate_services = {
+            service["service_key"]: service
+            for service in services
+            if service["service_key"] in allowed_service_keys
+        }
+
+        candidate_group_keys = {
+            (tool["service_key"], tool["tool_type"])
+            for tool in self.store.list_mcp_tools()
+            if tool.get("status") == "active"
+            and tool.get("service_key") in candidate_services
+            and tool.get("tool_type") in PINNABLE_TOOL_TYPES
+        }
+        manual_groups = [
+            PinnedGroup(
+                service_key=rule["service_key"],
+                tool_type=rule["tool_type"],
+                source="manual",
+            )
+            for rule in self.store.list_profile_pin_rules(profile_key)
+            if (rule["service_key"], rule["tool_type"]) in candidate_group_keys
+        ]
+        groups = [
+            {
+                "service_key": group.service_key,
+                "tool_type": group.tool_type,
+                "source": group.source,
+            }
+            for group in sorted(manual_groups, key=lambda group: (group.service_key, group.tool_type))
+        ]
+
+        selected_group_sources = {
+            (group["service_key"], group["tool_type"]): group["source"]
+            for group in groups
+        }
+        tools = []
+        for tool in sorted(
+            self.store.list_mcp_tools(),
+            key=lambda item: (item["service_key"], item["tool_type"], item["tool_name"]),
+        ):
+            if tool.get("status") != "active":
+                continue
+            if (tool.get("service_key"), tool.get("tool_type")) not in selected_group_sources:
+                continue
+            pin_tool = tool_payload_to_pin_tool(
+                tool=tool,
+                service_name=candidate_services[tool["service_key"]].get("name") or tool["service_key"],
+                source=selected_group_sources[(tool["service_key"], tool["tool_type"])],
+            )
+            pin_tool["generated_tool_name"] = safe_pin_tool_name(tool["service_key"], tool["tool_name"])
+            tools.append(pin_tool)
+
+        settings = self.store.get_profile_pin_settings(profile_key) or {
+            "mode": "disabled",
+            "ratio_percent": None,
+            "count": None,
+            "auto_cache_json": None,
+            "auto_cache_computed_at": None,
+        }
+        return {
+            "profile_key": profile_key,
+            "settings": dict(settings),
+            "groups": groups,
+            "tools": tools,
+        }
 
     def filter_source_keys(
         self,
