@@ -12,6 +12,10 @@ import type {
   McpService,
   McpTool,
   ProjectProfile,
+  ProfileDocRender,
+  ProfilePinPreview,
+  ProfilePinRule,
+  ProfilePinSettings,
   ProfileSourceRule,
   ProfileResourceRule,
   RepoOverview,
@@ -94,6 +98,17 @@ export const api = {
     put(`/capability-profiles/${key}/rules`, { rules }),
   replaceProfileResources: (key: string, resources: ProfileResourceRule[]) =>
     put(`/capability-profiles/${key}/resources`, { resources }),
+  getProfilePins: (key: string) => get<ProfilePinPreview>(`/capability-profiles/${key}/pins`),
+  replaceProfilePins: (key: string, pins: ProfilePinRule[]) =>
+    put<ProfilePinPreview>(`/capability-profiles/${key}/pins`, { pins }),
+  updateProfilePinSettings: (key: string, settings: Partial<ProfilePinSettings>) =>
+    put<ProfilePinPreview>(`/capability-profiles/${key}/pins/settings`, settings),
+  refreshProfilePins: (key: string) =>
+    post<ProfilePinPreview>(`/capability-profiles/${key}/pins/refresh`),
+  renderProfileDoc: (key: string) =>
+    post<ProfileDocRender>(`/capability-profiles/${key}/doc/render`),
+  updateProfileManualNotes: (key: string, manual_notes: string) =>
+    put<ProfileDocRender>(`/capability-profiles/${key}/doc/manual-notes`, { manual_notes }),
 
   // Logs
   listLogs: (params: Record<string, string | number> = {}) => {

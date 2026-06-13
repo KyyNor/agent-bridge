@@ -55,6 +55,42 @@ export interface ProfileResourceRule {
   resource_key: string
 }
 
+export interface ProfilePinRule {
+  service_key: string
+  tool_type: string
+  source?: 'manual' | 'auto'
+  calls?: number
+}
+
+export interface ProfilePinSettings {
+  mode: 'disabled' | 'ratio' | 'count'
+  ratio_percent: number | null
+  count: number | null
+  auto_cache_computed_at?: string | null
+}
+
+export interface ProfilePinnedTool {
+  generated_tool_name: string
+  service_key: string
+  service_name: string
+  tool_name: string
+  tool_type: string
+  source: 'manual' | 'auto'
+}
+
+export interface ProfilePinPreview {
+  profile_key: string
+  settings: ProfilePinSettings
+  groups: ProfilePinRule[]
+  tools: ProfilePinnedTool[]
+}
+
+export interface ProfileDocRender {
+  profile_key: string
+  markdown: string
+  rendered_hash: string
+}
+
 export interface ToolCallLog {
   id: number
   log_id: string
