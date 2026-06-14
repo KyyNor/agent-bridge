@@ -10,9 +10,10 @@ const dimension = ref('profile_key,source_key,tool_name')
 
 const dimensions = [
   { key: 'profile_key,source_key,tool_name', label: '全部维度' },
+  { key: 'source_key', label: '按服务' },
+  { key: 'source_key,tool_type', label: '按服务+层级' },
+  { key: 'source_key,tool_name', label: '按工具' },
   { key: 'profile_key', label: '按 Profile' },
-  { key: 'source_key', label: '按来源' },
-  { key: 'tool_name', label: '按工具' },
 ]
 
 onMounted(() => loadStats())
@@ -38,7 +39,8 @@ const columns = computed(() => {
 
 const columnLabels: Record<string, string> = {
   profile_key: 'Profile',
-  source_key: '来源',
+  source_key: '服务',
+  tool_type: '层级',
   tool_name: '工具',
   calls: '调用次数',
   success: '成功',

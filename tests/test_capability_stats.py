@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from agent_bridge.capabilities.governance import CapabilityGovernanceService
 from agent_bridge.capabilities.models import CallLogStatus, SourceType, ToolType
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -155,3 +156,20 @@ def test_call_stats_tool_type_only_joins_mcp_service_logs(wm_paths: AgentBridgeP
     assert rows[(SourceType.mcp_service.value, ToolType.search.value)]["calls"] == 1
     assert rows[(SourceType.builtin.value, None)]["calls"] == 1
     assert (SourceType.builtin.value, ToolType.search.value) not in rows
+
+
+def test_governance_stats_accepts_tool_type_dimension(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CapabilityGovernanceService(store=store, admins={"root"})
+
+    result = service.stats(
+        actor="root",
+        dimensions=["source_key", "tool_type"],
+        created_from=None,
+        created_to=None,
+        bucket=None,
+    )
+
+    assert result["dimensions"] == ["source_key", "tool_type"]
+    assert result["items"] == []
