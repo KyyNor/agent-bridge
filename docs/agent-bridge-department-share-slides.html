@@ -1,0 +1,1617 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Bridge 部门分享放映稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fc;
+      --paper: #ffffff;
+      --paper-2: #f9fbff;
+      --ink: #152033;
+      --muted: #607089;
+      --faint: #8d99aa;
+      --line: #d8e0ec;
+      --line-strong: #b9c7dc;
+      --accent: #2563eb;
+      --accent-2: #0f766e;
+      --accent-3: #d97706;
+      --accent-soft: #eaf1ff;
+      --teal-soft: #e5f7f4;
+      --amber-soft: #fff4df;
+      --red: #c2410c;
+      --red-soft: #fff0e7;
+      --shadow: 0 24px 60px rgba(30, 47, 74, 0.12);
+      --radius: 18px;
+      --slide-pad: clamp(28px, 4vw, 58px);
+      --sidebar-width: 292px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+    }
+
+    body {
+      overflow: hidden;
+    }
+
+    button,
+    a {
+      font: inherit;
+    }
+
+    .deck {
+      position: relative;
+      height: 100dvh;
+      overflow: hidden;
+      background:
+        linear-gradient(120deg, rgba(37, 99, 235, 0.09), transparent 36%),
+        radial-gradient(circle at 84% 18%, rgba(15, 118, 110, 0.11), transparent 34%),
+        var(--bg);
+    }
+
+    .slides {
+      height: 100dvh;
+      display: flex;
+      transition: transform 520ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      will-change: transform;
+    }
+
+    .slide {
+      position: relative;
+      flex: 0 0 100vw;
+      height: 100dvh;
+      padding: var(--slide-pad);
+      display: grid;
+      align-items: stretch;
+      overflow: hidden;
+    }
+
+    .slide::before {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border: 1px solid rgba(216, 224, 236, 0.86);
+      border-radius: 26px;
+      pointer-events: none;
+    }
+
+    .slide-inner {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: clamp(18px, 2.4vw, 34px);
+      min-height: 0;
+    }
+
+    .slide.compact-title h2 {
+      max-width: 1120px;
+      font-size: clamp(32px, 4.5vw, 62px);
+    }
+
+    .slide.compact-title .slide-inner {
+      gap: clamp(14px, 1.8vw, 24px);
+    }
+
+    .kicker {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 820;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .kicker::before {
+      content: "";
+      width: 28px;
+      height: 3px;
+      border-radius: 99px;
+      background: var(--accent);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 950px;
+      font-size: clamp(48px, 7.8vw, 104px);
+      line-height: 0.94;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      max-width: 980px;
+      font-size: clamp(34px, 5.2vw, 72px);
+      line-height: 1;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      font-size: clamp(18px, 1.8vw, 26px);
+      line-height: 1.18;
+      font-weight: 840;
+    }
+
+    .lead {
+      max-width: 760px;
+      color: var(--muted);
+      font-size: clamp(18px, 2vw, 25px);
+      line-height: 1.56;
+    }
+
+    .body-text {
+      color: var(--muted);
+      font-size: clamp(16px, 1.45vw, 20px);
+      line-height: 1.72;
+    }
+
+    .hero-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.06fr) minmax(360px, 0.84fr);
+      gap: clamp(28px, 5vw, 68px);
+      align-items: center;
+      min-height: 0;
+    }
+
+    .hero-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    .mini-map {
+      display: grid;
+      gap: 10px;
+    }
+
+    .mini-row {
+      display: grid;
+      grid-template-columns: 76px 1fr;
+      gap: 10px;
+      align-items: center;
+      min-height: 56px;
+    }
+
+    .mini-label {
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 780;
+      text-transform: uppercase;
+    }
+
+    .mini-pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      color: var(--ink);
+      padding: 10px 14px;
+      font-size: 15px;
+      font-weight: 760;
+    }
+
+    .mini-pill.main {
+      border-color: rgba(37, 99, 235, 0.42);
+      background: var(--accent-soft);
+      color: #1d4ed8;
+      box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+    }
+
+    .slide-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      color: var(--faint);
+      font-size: 13px;
+    }
+
+    .hint {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.72);
+      padding: 8px 11px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      gap: clamp(20px, 4vw, 56px);
+      align-items: center;
+      min-height: 0;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 18px 42px rgba(30, 47, 74, 0.08);
+      padding: clamp(18px, 2vw, 28px);
+    }
+
+    .soft-panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper-2);
+      padding: clamp(18px, 2vw, 28px);
+    }
+
+    .problem-list,
+    .plain-list {
+      display: grid;
+      gap: 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .problem-list li,
+    .plain-list li {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper);
+      padding: 14px 16px 14px 42px;
+      color: var(--muted);
+      font-size: clamp(15px, 1.35vw, 18px);
+      line-height: 1.48;
+    }
+
+    .problem-list li::before,
+    .plain-list li::before {
+      content: "";
+      position: absolute;
+      left: 18px;
+      top: 22px;
+      width: 8px;
+      height: 8px;
+      border-radius: 99px;
+      background: var(--accent);
+    }
+
+    .problem-list li::before {
+      background: var(--red);
+    }
+
+    .quote {
+      position: relative;
+      border-left: 6px solid var(--accent);
+      border-radius: var(--radius);
+      background: var(--accent-soft);
+      color: #183c91;
+      padding: clamp(20px, 2.8vw, 34px);
+      font-size: clamp(25px, 3.2vw, 44px);
+      line-height: 1.22;
+      font-weight: 860;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.86);
+      padding: clamp(17px, 2vw, 24px);
+      min-height: 180px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      box-shadow: 0 14px 34px rgba(30, 47, 74, 0.06);
+    }
+
+    .card small {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .card p {
+      color: var(--muted);
+      font-size: clamp(14px, 1.25vw, 17px);
+      line-height: 1.55;
+    }
+
+    .story-board {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .story-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      padding: 24px;
+      min-height: 340px;
+      box-shadow: 0 18px 42px rgba(30, 47, 74, 0.08);
+    }
+
+    .story-card::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 6px;
+      background: var(--accent);
+    }
+
+    .story-card:nth-child(2)::after {
+      background: var(--accent-3);
+    }
+
+    .story-card:nth-child(3)::after {
+      background: var(--accent-2);
+    }
+
+    .story-number {
+      display: inline-grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 900;
+      margin-bottom: 18px;
+    }
+
+    .story-card p {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: clamp(15px, 1.35vw, 18px);
+      line-height: 1.58;
+    }
+
+    .demo-strip {
+      display: grid;
+      gap: 12px;
+    }
+
+    .demo-step {
+      display: grid;
+      grid-template-columns: 92px 1fr auto;
+      gap: 16px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--paper);
+      padding: 16px 18px;
+      box-shadow: 0 12px 28px rgba(30, 47, 74, 0.06);
+    }
+
+    .demo-step code {
+      border-radius: 999px;
+      background: var(--slate-soft, #eef2f7);
+      color: #2f3a4f;
+      padding: 6px 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .demo-step strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 17px;
+    }
+
+    .demo-step span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .demo-step em {
+      color: var(--accent);
+      font-style: normal;
+      font-size: 13px;
+      font-weight: 830;
+      white-space: nowrap;
+    }
+
+    .architecture {
+      position: relative;
+      min-height: min(62vh, 610px);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(249, 251, 255, 0.95)),
+        repeating-linear-gradient(90deg, rgba(96, 112, 137, 0.08) 0 1px, transparent 1px 60px);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      padding: clamp(22px, 2.4vw, 34px);
+    }
+
+    .architecture::before,
+    .architecture::after {
+      content: "";
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--line-strong), transparent);
+    }
+
+    .architecture::before {
+      top: 32%;
+    }
+
+    .architecture::after {
+      bottom: 30%;
+    }
+
+    .arch-band {
+      position: absolute;
+      left: 26px;
+      color: var(--faint);
+      font-size: 12px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .arch-band.top {
+      top: 25px;
+    }
+
+    .arch-band.mid {
+      top: 41%;
+    }
+
+    .arch-band.bottom {
+      bottom: 25px;
+    }
+
+    .arch-node {
+      position: absolute;
+      z-index: 2;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--paper);
+      box-shadow: 0 16px 36px rgba(30, 47, 74, 0.1);
+      padding: 14px 16px;
+      text-align: center;
+      min-width: 154px;
+    }
+
+    .arch-node strong {
+      display: block;
+      color: var(--ink);
+      font-size: clamp(14px, 1.2vw, 17px);
+      line-height: 1.16;
+    }
+
+    .arch-node span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .arch-node.user {
+      left: 8%;
+      top: 11%;
+    }
+
+    .arch-node.agent {
+      left: 38%;
+      top: 10%;
+      min-width: 206px;
+    }
+
+    .arch-node.admin {
+      right: 8%;
+      top: 11%;
+    }
+
+    .arch-node.bridge {
+      left: 50%;
+      top: 42%;
+      transform: translate(-50%, -50%);
+      width: min(420px, 36vw);
+      min-height: 146px;
+      display: grid;
+      place-items: center;
+      border: 2px solid rgba(37, 99, 235, 0.75);
+      background:
+        linear-gradient(135deg, rgba(234, 241, 255, 0.96), rgba(255, 255, 255, 0.96));
+      box-shadow:
+        0 30px 80px rgba(37, 99, 235, 0.2),
+        inset 0 0 0 1px rgba(37, 99, 235, 0.12);
+    }
+
+    .arch-node.bridge strong {
+      color: #1d4ed8;
+      font-size: clamp(30px, 3.5vw, 48px);
+      letter-spacing: 0;
+    }
+
+    .arch-node.bridge span {
+      color: #335aa5;
+      font-size: clamp(13px, 1.2vw, 16px);
+      font-weight: 760;
+    }
+
+    .bridge-ring {
+      position: absolute;
+      z-index: 1;
+      left: 50%;
+      top: 42%;
+      width: min(520px, 44vw);
+      aspect-ratio: 1.8;
+      border: 1px solid rgba(37, 99, 235, 0.28);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(37, 99, 235, 0.04);
+    }
+
+    .arch-node.wiki {
+      left: 9%;
+      bottom: 12%;
+    }
+
+    .arch-node.code {
+      left: 31%;
+      bottom: 8%;
+    }
+
+    .arch-node.mcp {
+      right: 31%;
+      bottom: 8%;
+    }
+
+    .arch-node.model {
+      right: 8%;
+      bottom: 12%;
+      min-width: 190px;
+    }
+
+    .connector {
+      position: absolute;
+      z-index: 0;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(37, 99, 235, 0), rgba(37, 99, 235, 0.5), rgba(37, 99, 235, 0));
+      transform-origin: left center;
+    }
+
+    .connector.c1 {
+      left: 23%;
+      top: 20%;
+      width: 17%;
+      transform: rotate(1deg);
+    }
+
+    .connector.c2 {
+      left: 49%;
+      top: 23%;
+      width: 14%;
+      transform: rotate(25deg);
+    }
+
+    .connector.c3 {
+      left: 24%;
+      top: 62%;
+      width: 19%;
+      transform: rotate(-18deg);
+    }
+
+    .connector.c4 {
+      left: 40%;
+      top: 68%;
+      width: 16%;
+      transform: rotate(34deg);
+    }
+
+    .connector.c5 {
+      right: 21%;
+      top: 61%;
+      width: 23%;
+      transform: rotate(198deg);
+    }
+
+    .connector.c6 {
+      right: 14%;
+      top: 54%;
+      width: 22%;
+      transform: rotate(164deg);
+    }
+
+    .arch-caption {
+      display: none;
+    }
+
+    .arch-caption span {
+      border: 1px solid rgba(37, 99, 235, 0.24);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.84);
+      color: #2d4f93;
+      padding: 8px 13px;
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .value-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .value {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      padding: 26px;
+      min-height: 260px;
+      display: grid;
+      align-content: space-between;
+      box-shadow: 0 16px 38px rgba(30, 47, 74, 0.07);
+    }
+
+    .value strong {
+      display: block;
+      color: var(--accent);
+      font-size: clamp(34px, 5vw, 76px);
+      line-height: 0.9;
+      font-weight: 920;
+    }
+
+    .value h3 {
+      margin-top: 18px;
+    }
+
+    .value p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: clamp(15px, 1.35vw, 18px);
+      line-height: 1.56;
+    }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .road {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      padding: 22px;
+      min-height: 230px;
+      box-shadow: 0 16px 38px rgba(30, 47, 74, 0.07);
+    }
+
+    .road b {
+      display: inline-flex;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 6px 10px;
+      font-size: 12px;
+      margin-bottom: 16px;
+    }
+
+    .road p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.52;
+    }
+
+    .toc-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .toc-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.86);
+      padding: 18px;
+      min-height: 116px;
+      cursor: pointer;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+
+    .toc-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(37, 99, 235, 0.5);
+      box-shadow: 0 16px 34px rgba(37, 99, 235, 0.1);
+    }
+
+    .toc-card small {
+      color: var(--accent);
+      font-weight: 850;
+    }
+
+    .toc-card h3 {
+      margin-top: 8px;
+      font-size: 21px;
+    }
+
+    .toc-card p {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .ending {
+      display: grid;
+      align-content: center;
+      gap: 30px;
+      max-width: 1080px;
+    }
+
+    .ending h2 {
+      font-size: clamp(40px, 6.6vw, 88px);
+    }
+
+    .ending .lead {
+      max-width: 900px;
+    }
+
+    .nav-shell {
+      position: fixed;
+      z-index: 20;
+      left: 18px;
+      right: 18px;
+      bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+    }
+
+    .nav-group {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .nav-btn,
+    .toc-toggle {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--ink);
+      box-shadow: 0 10px 26px rgba(30, 47, 74, 0.09);
+      min-width: 42px;
+      height: 42px;
+      padding: 0 14px;
+      cursor: pointer;
+      font-weight: 820;
+      transition: transform 160ms ease, border-color 160ms ease;
+    }
+
+    .nav-btn:hover,
+    .toc-toggle:hover {
+      transform: translateY(-1px);
+      border-color: rgba(37, 99, 235, 0.44);
+    }
+
+    .progress {
+      pointer-events: auto;
+      min-width: 124px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--muted);
+      display: grid;
+      place-items: center;
+      font-size: 13px;
+      font-weight: 850;
+      box-shadow: 0 10px 26px rgba(30, 47, 74, 0.09);
+    }
+
+    .progress-bar {
+      position: fixed;
+      z-index: 22;
+      top: 0;
+      left: 0;
+      height: 4px;
+      width: 100%;
+      background: rgba(216, 224, 236, 0.9);
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 400ms ease;
+    }
+
+    .drawer {
+      position: fixed;
+      z-index: 30;
+      top: 14px;
+      bottom: 14px;
+      left: 14px;
+      width: var(--sidebar-width);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: var(--shadow);
+      transform: translateX(calc(-100% - 28px));
+      transition: transform 240ms ease;
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 14px;
+    }
+
+    .drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .drawer-head strong {
+      color: var(--ink);
+      font-size: 16px;
+    }
+
+    .drawer-head button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      font-weight: 900;
+    }
+
+    .drawer-list {
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      overflow: auto;
+      padding-right: 3px;
+    }
+
+    .drawer-list button {
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--paper);
+      color: var(--muted);
+      padding: 10px 11px;
+      text-align: left;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .drawer-list button.active {
+      border-color: rgba(37, 99, 235, 0.44);
+      background: var(--accent-soft);
+      color: #1d4ed8;
+      font-weight: 820;
+    }
+
+    .speaker-note {
+      border: 1px dashed rgba(37, 99, 235, 0.4);
+      border-radius: 14px;
+      background: rgba(234, 241, 255, 0.64);
+      color: #2b4a88;
+      padding: 12px 14px;
+      font-size: 14px;
+      line-height: 1.46;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .slides,
+      .drawer,
+      .progress-fill,
+      .nav-btn,
+      .toc-card {
+        transition: none;
+      }
+    }
+
+    @media (max-width: 980px) {
+      body {
+        overflow: auto;
+      }
+
+      .deck,
+      .slides,
+      .slide {
+        height: auto;
+        min-height: 100dvh;
+      }
+
+      .slides {
+        display: block;
+        transform: none !important;
+      }
+
+      .slide {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .hero-layout,
+      .split,
+      .cards,
+      .story-board,
+      .value-grid,
+      .roadmap,
+      .toc-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .architecture {
+        min-height: 820px;
+      }
+
+      .arch-node {
+        left: 50% !important;
+        right: auto !important;
+        transform: translateX(-50%) !important;
+        width: min(82vw, 360px) !important;
+      }
+
+      .arch-node.user {
+        top: 7%;
+      }
+
+      .arch-node.agent {
+        top: 18%;
+      }
+
+      .arch-node.admin {
+        top: 29%;
+      }
+
+      .arch-node.bridge {
+        top: 46%;
+        transform: translate(-50%, -50%) !important;
+      }
+
+      .arch-node.wiki {
+        bottom: 29%;
+      }
+
+      .arch-node.code {
+        bottom: 20%;
+      }
+
+      .arch-node.mcp {
+        bottom: 11%;
+      }
+
+      .arch-node.model {
+        bottom: 2%;
+      }
+
+      .connector,
+      .bridge-ring,
+      .arch-band,
+      .arch-caption {
+        display: none;
+      }
+
+      .nav-shell,
+      .progress-bar {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck" id="deck">
+    <div class="progress-bar" aria-hidden="true">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+
+    <aside class="drawer" id="drawer" aria-label="目录">
+      <div class="drawer-head">
+        <strong>目录</strong>
+        <button type="button" id="closeDrawer" aria-label="关闭目录">×</button>
+      </div>
+      <div class="drawer-list" id="drawerList"></div>
+    </aside>
+
+    <div class="slides" id="slides">
+      <section class="slide" data-title="封面">
+        <div class="slide-inner">
+          <div class="kicker">Department Share</div>
+          <div class="hero-layout">
+            <div>
+              <h1>从“我去哪里找”到“Agent 知道去哪里找”</h1>
+              <p class="lead" style="margin-top: 24px;">
+                Agent Bridge 的目标不是再做一个工具页面，而是把部门文档、代码、接口和模型基础设施组织成可组合、可复用、可治理的能力平面。
+              </p>
+            </div>
+            <div class="hero-card">
+              <div class="mini-map">
+                <div class="mini-row">
+                  <div class="mini-label">User</div>
+                  <div class="mini-pill">部门同事 / 项目成员</div>
+                </div>
+                <div class="mini-row">
+                  <div class="mini-label">Agent</div>
+                  <div class="mini-pill">Claude Code</div>
+                </div>
+                <div class="mini-row">
+                  <div class="mini-label">Bridge</div>
+                  <div class="mini-pill main">Agent Bridge</div>
+                </div>
+                <div class="mini-row">
+                  <div class="mini-label">Assets</div>
+                  <div class="mini-pill">Wiki / CodeGraph / MCP / Models</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span class="hint">按方向键或空格翻页</span>
+            <span>Agent Bridge 部门分享初版</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="目录">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Agenda</div>
+            <h2 style="margin-top: 14px;">今天不按功能清单讲，按一个故事讲</h2>
+          </div>
+          <div class="toc-grid">
+            <button class="toc-card" type="button" data-goto="2">
+              <small>01</small>
+              <h3>一个普通问题</h3>
+              <p>为什么大家找知识、找接口、找代码时总会绕一圈。</p>
+            </button>
+            <button class="toc-card" type="button" data-goto="4">
+              <small>02</small>
+              <h3>关键转折</h3>
+              <p>从知识库思路转到 Agent 能力平面思路。</p>
+            </button>
+            <button class="toc-card" type="button" data-goto="5">
+              <small>03</small>
+              <h3>现场演示</h3>
+              <p>用一个任务串起能力发现、知识检索、代码查询和审计。</p>
+            </button>
+            <button class="toc-card" type="button" data-goto="7">
+              <small>04</small>
+              <h3>架构揭秘</h3>
+              <p>看清 Claude Code、Agent Bridge、MCP、Wiki、CodeGraph 和模型基础设施的位置。</p>
+            </button>
+            <button class="toc-card" type="button" data-goto="9">
+              <small>05</small>
+              <h3>部门价值</h3>
+              <p>对个人、项目和部门分别意味着什么。</p>
+            </button>
+            <button class="toc-card" type="button" data-goto="10">
+              <small>06</small>
+              <h3>下一步</h3>
+              <p>如何把更多知识、代码和工具纳入平台。</p>
+            </button>
+          </div>
+          <div class="slide-footer">
+            <span class="speaker-note">开场建议：先告诉大家这不是一次系统操作培训，而是一次“以后我们怎么把经验交给 Agent 使用”的讨论。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="普通问题">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Act 1 · The Pain</div>
+            <h2 style="margin-top: 14px;">先从一个普通问题开始</h2>
+          </div>
+          <div class="split">
+            <div>
+              <p class="lead">如果明天一个新同事接手一个项目，他想搞清楚一个接口怎么用、相关文档在哪、代码里谁调用了它，现在会怎么做？</p>
+            </div>
+            <div class="panel">
+              <ul class="problem-list">
+                <li>先问群里有没有文档，得到几个不同链接。</li>
+                <li>翻 Wiki、README、历史方案，发现版本不一定一致。</li>
+                <li>去代码仓库里搜索关键词，再问熟悉的人确认。</li>
+                <li>想让 Agent 帮忙，但 Agent 并不知道这些内部资料在哪。</li>
+                <li>最后问题解决了，路径却没有沉淀，下次还要再来一遍。</li>
+              </ul>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span class="speaker-note">这里可以现场问一句：大家现在找部门知识，第一反应是去哪里？让大家说几个入口，制造共鸣。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="问题本质">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">What Is Broken</div>
+            <h2 style="margin-top: 14px;">我们不是没有知识，而是没有把知识组织成能力</h2>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <small>Fragmented</small>
+              <h3>入口分散</h3>
+              <p>文档、接口、代码、工具、模型各有入口，靠人记忆串起来。</p>
+            </div>
+            <div class="card">
+              <small>Repeated</small>
+              <h3>重复接入</h3>
+              <p>不同项目、不同 Agent 反复写配置、接服务、维护说明。</p>
+            </div>
+            <div class="card">
+              <small>Unclear</small>
+              <h3>边界不清</h3>
+              <p>谁能看哪个知识库，哪个项目能用哪个工具，没有统一规则。</p>
+            </div>
+            <div class="card">
+              <small>Invisible</small>
+              <h3>过程不可见</h3>
+              <p>调用失败后，不知道是权限、工具、知识库、模型还是平台问题。</p>
+            </div>
+          </div>
+          <div class="quote">
+            真正的问题不是“知识在哪里”，而是“Agent 能不能稳定、合规、可复用地使用这些知识和工具”。
+          </div>
+          <div class="slide-footer">
+            <span>从知识管理问题，升级为 Agent 能力治理问题。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="关键转折">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Act 2 · The Turn</div>
+            <h2 style="margin-top: 14px;">关键转折：不要只做知识库，要做能力平面</h2>
+          </div>
+          <div class="story-board">
+            <div class="story-card">
+              <div class="story-number">1</div>
+              <h3>文档型知识进入知识库</h3>
+              <p>制度、手册、方案、PDF、历史资料适合通过 Embedding、Rerank 和 RAG 检索。</p>
+            </div>
+            <div class="story-card">
+              <div class="story-number">2</div>
+              <h3>结构化能力保留接口</h3>
+              <p>服务目录、接口契约、SQL、数据血缘、项目元数据，应该通过 MCP 保留可查询、可约束、可执行的形态。</p>
+            </div>
+            <div class="story-card">
+              <div class="story-number">3</div>
+              <h3>代码知识交给 CodeGraph</h3>
+              <p>代码仓库、文件、符号、调用链、影响面分析，需要结构化索引，而不是只把代码文档化。</p>
+            </div>
+          </div>
+          <div class="quote">
+            知识库负责“读懂文档”，MCP / CodeGraph 负责“查准结构和执行约束”，Agent Bridge 负责统一入口、治理和编排。
+          </div>
+          <div class="slide-footer">
+            <span>这页是整场汇报的立论。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="演示总览">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Act 3 · Live Demo</div>
+            <h2 style="margin-top: 14px;">现场演示只演一个闭环</h2>
+          </div>
+          <div class="split">
+            <div>
+              <p class="lead">不要把演示做成“功能逐个点”。用一个任务贯穿：发现能力、查文档、查代码、调用工具、看审计。</p>
+            </div>
+            <div class="panel">
+              <div class="demo-strip">
+                <div class="demo-step">
+                  <code>search</code>
+                  <div>
+                    <strong>当前项目有哪些可用能力？</strong>
+                    <span>让 Claude Code 通过 MetaMCP 浏览能力目录。</span>
+                  </div>
+                  <em>发现</em>
+                </div>
+                <div class="demo-step">
+                  <code>wiki</code>
+                  <div>
+                    <strong>相关文档和历史方案在哪里？</strong>
+                    <span>在授权 KB 内做检索或问答。</span>
+                  </div>
+                  <em>知识</em>
+                </div>
+                <div class="demo-step">
+                  <code>codegraph</code>
+                  <div>
+                    <strong>代码里哪里实现，谁调用了它？</strong>
+                    <span>查询仓库、文件、符号、调用关系和影响面。</span>
+                  </div>
+                  <em>代码</em>
+                </div>
+                <div class="demo-step">
+                  <code>profile</code>
+                  <div>
+                    <strong>这个项目能不能用这些能力？</strong>
+                    <span>切换或展示 Project Profile 的可见范围。</span>
+                  </div>
+                  <em>治理</em>
+                </div>
+                <div class="demo-step">
+                  <code>logs</code>
+                  <div>
+                    <strong>刚才发生了什么？</strong>
+                    <span>查看调用日志、耗时、成功失败和失败归因。</span>
+                  </div>
+                  <em>审计</em>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span class="speaker-note">建议准备录屏兜底。现场实时演示优先，如果网络或模型不稳定，立刻切到录屏，不影响节奏。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="演示台词">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Demo Script</div>
+            <h2 style="margin-top: 14px;">演示台词可以这样设计</h2>
+          </div>
+          <div class="panel">
+            <ul class="plain-list">
+              <li>“我现在不是去翻文档，而是先问 Agent：这个项目有哪些可用能力？”</li>
+              <li>“Agent 不需要知道每个系统在哪里，它只需要连接 Agent Bridge。”</li>
+              <li>“它先查知识库，拿到文档证据；再查 CodeGraph，定位代码实现和调用关系。”</li>
+              <li>“注意这里不是所有项目都能看到所有资源，Profile 会做项目级隔离。”</li>
+              <li>“最后看日志：刚才的每一次能力发现、调用、失败或成功，平台都能审计。”</li>
+            </ul>
+          </div>
+          <div class="quote">
+            这个反差要让大家看到：我们不是让 Agent 更会聊天，而是让 Agent 接上了部门能力。
+          </div>
+          <div class="slide-footer">
+            <span>演示目标：让非技术同事也能看懂“统一入口”的价值。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide compact-title" data-title="架构图">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Architecture Reveal</div>
+            <h2 style="margin-top: 14px;">刚才的演示背后，是这张能力平面</h2>
+          </div>
+          <div class="architecture" aria-label="Agent Bridge 架构图">
+            <div class="arch-band top">Interaction</div>
+            <div class="arch-band mid">Capability Plane</div>
+            <div class="arch-band bottom">Knowledge · Tools · Model Infra</div>
+
+            <div class="connector c1"></div>
+            <div class="connector c2"></div>
+            <div class="connector c3"></div>
+            <div class="connector c4"></div>
+            <div class="connector c5"></div>
+            <div class="connector c6"></div>
+            <div class="bridge-ring"></div>
+
+            <div class="arch-node user">
+              <strong>部门同事</strong>
+              <span>问题、任务、项目上下文</span>
+            </div>
+            <div class="arch-node agent">
+              <strong>Claude Code</strong>
+              <span>用户实际交互的 Agent</span>
+            </div>
+            <div class="arch-node admin">
+              <strong>管理控制台</strong>
+              <span>注册、授权、观测</span>
+            </div>
+
+            <div class="arch-node bridge">
+              <strong>Agent Bridge</strong>
+              <span>MetaMCP 网关 · 能力目录 · Project Profile · 调用审计</span>
+            </div>
+
+            <div class="arch-node wiki">
+              <strong>Wiki / KB</strong>
+              <span>文档上传、检索、问答</span>
+            </div>
+            <div class="arch-node code">
+              <strong>CodeGraph</strong>
+              <span>仓库、文件、符号、调用链</span>
+            </div>
+            <div class="arch-node mcp">
+              <strong>外部 MCP</strong>
+              <span>数据库、API、业务工具</span>
+            </div>
+            <div class="arch-node model">
+              <strong>vLLM / LiteLLM / TEI</strong>
+              <span>推理、路由、Embedding、Rerank</span>
+            </div>
+            <div class="arch-caption">
+              <span>Agent Bridge 是中间层：不替代已有系统，而是把已有系统组织成 Agent 可使用的能力。</span>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>建议讲法：先从 Claude Code 入口讲，再解释 Agent Bridge 为什么在中间。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="Agent Bridge 做什么">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">What It Does</div>
+            <h2 style="margin-top: 14px;">Agent Bridge 把松散系统变成可治理资产</h2>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <small>Register</small>
+              <h3>能力注册</h3>
+              <p>登记外部 MCP 服务、Wiki 知识库、CodeGraph 仓库，形成统一目录。</p>
+            </div>
+            <div class="card">
+              <small>Discover</small>
+              <h3>能力发现</h3>
+              <p>通过 MetaMCP search，让 Agent 先知道当前项目能用什么。</p>
+            </div>
+            <div class="card">
+              <small>Govern</small>
+              <h3>项目治理</h3>
+              <p>通过 Project Profile 控制不同项目可见的工具、知识库和代码仓库。</p>
+            </div>
+            <div class="card">
+              <small>Observe</small>
+              <h3>调用审计</h3>
+              <p>记录每次调用的结果、耗时、失败阶段和责任方，便于排障和运营。</p>
+            </div>
+          </div>
+          <div class="quote">
+            它不是知识库本身，也不是模型本身，而是部门 Agent 能力的连接层和治理层。
+          </div>
+          <div class="slide-footer">
+            <span>这里可以回扣标题：从“人去找”变成“Agent 通过能力平面去找”。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="部门价值">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Why It Matters</div>
+            <h2 style="margin-top: 14px;">对不同角色，价值不一样</h2>
+          </div>
+          <div class="value-grid">
+            <div class="value">
+              <div>
+                <strong>01</strong>
+                <h3>对个人</h3>
+                <p>少翻文档、少问人、少重复配置。Agent 能直接从授权范围内找知识、查代码、调用工具。</p>
+              </div>
+            </div>
+            <div class="value">
+              <div>
+                <strong>02</strong>
+                <h3>对项目</h3>
+                <p>能力按项目 Profile 管理，项目需要的知识库、代码仓库和工具可以组合复用。</p>
+              </div>
+            </div>
+            <div class="value">
+              <div>
+                <strong>03</strong>
+                <h3>对部门</h3>
+                <p>把文档、代码、接口、模型和工具沉淀成可运营资产，能治理、能审计、能演进。</p>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>领导关注治理与复用，同事关注效率与少走弯路，这页两边都能接住。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="下一步">
+        <div class="slide-inner">
+          <div>
+            <div class="kicker">Next Step</div>
+            <h2 style="margin-top: 14px;">后续不是继续堆功能，而是进入能力运营</h2>
+          </div>
+          <div class="roadmap">
+            <div class="road">
+              <b>Step 1</b>
+              <h3>补知识资产</h3>
+              <p>把高频文档、FAQ、接口说明、项目资料整理进知识库，并明确归属。</p>
+            </div>
+            <div class="road">
+              <b>Step 2</b>
+              <h3>接代码仓库</h3>
+              <p>选择试点项目进入 CodeGraph，先覆盖仓库概览、文件查询、符号定位和影响分析。</p>
+            </div>
+            <div class="road">
+              <b>Step 3</b>
+              <h3>接外部能力</h3>
+              <p>把稳定的数据库查询、公共服务接口、内部 API 以 MCP 形式纳入统一目录。</p>
+            </div>
+            <div class="road">
+              <b>Step 4</b>
+              <h3>做评估运营</h3>
+              <p>看哪些能力被频繁调用、哪些知识命中不好、哪些工具容易失败，再持续优化。</p>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span class="speaker-note">结尾可以邀请大家提供试点：一个知识库、一个代码仓库、一个高频工具，就能组成下一轮演示素材。</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="结尾">
+        <div class="slide-inner">
+          <div class="ending">
+            <div class="kicker">Closing</div>
+            <h2>让经验不只留在人和文档里，也能成为 Agent 可以调用的部门能力</h2>
+            <p class="lead">
+              Agent Bridge 要解决的不是“多一个系统”，而是让部门已有的知识、工具、代码和模型基础设施被更稳定地发现、复用、治理和演进。
+            </p>
+            <div class="quote">
+              从今天开始，我们可以把“我知道在哪里”逐步变成“平台知道在哪里，Agent 能按规则使用”。
+            </div>
+          </div>
+          <div></div>
+          <div class="slide-footer">
+            <span>Q&A</span>
+            <span>谢谢</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="nav-shell">
+      <div class="nav-group">
+        <button class="toc-toggle" type="button" id="openDrawer">目录</button>
+      </div>
+      <div class="progress" id="progressText">1 / 12</div>
+      <div class="nav-group">
+        <button class="nav-btn" type="button" id="prevBtn" aria-label="上一页">←</button>
+        <button class="nav-btn" type="button" id="nextBtn" aria-label="下一页">→</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const slidesEl = document.getElementById("slides");
+    const slideEls = Array.from(document.querySelectorAll(".slide"));
+    const progressText = document.getElementById("progressText");
+    const progressFill = document.getElementById("progressFill");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const drawer = document.getElementById("drawer");
+    const drawerList = document.getElementById("drawerList");
+    const openDrawer = document.getElementById("openDrawer");
+    const closeDrawer = document.getElementById("closeDrawer");
+    const total = slideEls.length;
+    let current = 0;
+
+    function clampIndex(index) {
+      return Math.max(0, Math.min(total - 1, index));
+    }
+
+    function setSlide(index, shouldUpdateHash = true) {
+      current = clampIndex(index);
+      slidesEl.style.transform = `translateX(${-current * 100}vw)`;
+      progressText.textContent = `${current + 1} / ${total}`;
+      progressFill.style.width = `${((current + 1) / total) * 100}%`;
+      prevBtn.disabled = current === 0;
+      nextBtn.disabled = current === total - 1;
+      Array.from(drawerList.children).forEach((button, idx) => {
+        button.classList.toggle("active", idx === current);
+      });
+      if (shouldUpdateHash) {
+        history.replaceState(null, "", `#${current + 1}`);
+      }
+    }
+
+    function next() {
+      setSlide(current + 1);
+    }
+
+    function prev() {
+      setSlide(current - 1);
+    }
+
+    slideEls.forEach((slide, index) => {
+      const button = document.createElement("button");
+      const title = slide.dataset.title || `第 ${index + 1} 页`;
+      button.type = "button";
+      button.textContent = `${String(index + 1).padStart(2, "0")} · ${title}`;
+      button.addEventListener("click", () => {
+        setSlide(index);
+        drawer.classList.remove("open");
+      });
+      drawerList.appendChild(button);
+    });
+
+    document.querySelectorAll("[data-goto]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setSlide(Number(button.dataset.goto));
+      });
+    });
+
+    prevBtn.addEventListener("click", prev);
+    nextBtn.addEventListener("click", next);
+    openDrawer.addEventListener("click", () => drawer.classList.add("open"));
+    closeDrawer.addEventListener("click", () => drawer.classList.remove("open"));
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+        event.preventDefault();
+        next();
+      }
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        prev();
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        setSlide(0);
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        setSlide(total - 1);
+      }
+      if (event.key.toLowerCase() === "m") {
+        drawer.classList.toggle("open");
+      }
+      if (event.key === "Escape") {
+        drawer.classList.remove("open");
+      }
+    });
+
+    const hashIndex = Number(window.location.hash.replace("#", "")) - 1;
+    setSlide(Number.isFinite(hashIndex) ? hashIndex : 0, false);
+  </script>
+</body>
+</html>

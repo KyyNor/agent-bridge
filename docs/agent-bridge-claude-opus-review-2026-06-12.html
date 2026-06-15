@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Bridge Claude Opus 4.7 变更 Review</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --ink: #15202b;
+      --muted: #5f6f80;
+      --line: #d9e1ea;
+      --red: #b42318;
+      --red-bg: #fff0ed;
+      --amber: #986000;
+      --amber-bg: #fff7df;
+      --blue: #1f5fbf;
+      --blue-bg: #eef5ff;
+      --green: #087443;
+      --green-bg: #eaf8f0;
+      --code: #eef2f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.65;
+    }
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 32px 0 72px;
+    }
+    header, section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 12px 32px rgba(21, 32, 43, 0.07);
+    }
+    header {
+      padding: 34px;
+      background: linear-gradient(135deg, #ffffff 0%, #eef5ff 100%);
+    }
+    section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 10px; font-size: 30px; line-height: 1.25; }
+    h2 { margin-bottom: 16px; font-size: 21px; }
+    h3 { margin-bottom: 8px; font-size: 16px; }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .metric {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+    .metric strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .finding {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-left-width: 5px;
+      border-radius: 8px;
+      margin: 12px 0;
+      background: #fff;
+    }
+    .p0 { border-left-color: var(--red); background: var(--red-bg); }
+    .p1 { border-left-color: var(--amber); background: var(--amber-bg); }
+    .p2 { border-left-color: var(--blue); background: var(--blue-bg); }
+    .ok { border-left-color: var(--green); background: var(--green-bg); }
+    .tag {
+      display: inline-block;
+      margin-right: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.74);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 14px;
+      border-radius: 8px;
+      background: #101923;
+      color: #edf5ff;
+      line-height: 1.45;
+    }
+    ul { padding-left: 22px; }
+    li + li { margin-top: 6px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-size: 12px; }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      header, section { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Agent Bridge Claude Opus 4.7 变更 Review</h1>
+    <p>Review 范围：从 <code>db3e2b0edb40986e01f665b7ac50e62900c95bee</code> 到当前 <code>HEAD</code>。重点覆盖带 <code>Co-Authored-By: Claude Opus 4.7</code> 的提交，同时把同一批次的后续日志、本地化和视图重组提交纳入影响面。</p>
+    <div class="meta">
+      <span class="pill">日期：2026-06-12</span>
+      <span class="pill">提交数：100</span>
+      <span class="pill">Claude Opus 4.7 提交：95</span>
+      <span class="pill">文件：112</span>
+      <span class="pill">变更：+12,593 / -1,358</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>总体结论</h2>
+    <div class="grid">
+      <div class="metric"><strong>2</strong><span>P0 安全/权限问题</span></div>
+      <div class="metric"><strong>2</strong><span>P1 权限/测试阻断</span></div>
+      <div class="metric"><strong>3</strong><span>P2 配置和契约风险</span></div>
+      <div class="metric"><strong>294</strong><span>本地非集成测试通过</span></div>
+    </div>
+    <p style="margin-top:16px;">这批开发推进了很多有价值能力：CodeGraph/UA 集成、知识库 Web 管理、后端 CRUD、定时同步、Weknora agent 与检索策略、前端结构重组等。但当前不建议直接上线或合并到稳定分支，主要原因是管理 API 密钥泄露、知识库问答绕过成员权限、代码仓库读取接口缺少管理员校验，以及测试套件没有跟上新的白名单契约和前端目录结构。</p>
+  </section>
+
+  <section>
+    <h2>阻断发现</h2>
+
+    <article class="finding p0">
+      <h3><span class="tag">P0</span><code>GET /backends</code> 无管理员校验且返回 <code>api_key</code> 明文</h3>
+      <p>证据：<code>src/agent_bridge/api/routes/knowledge.py:23-25</code> 的路由没有 <code>Depends(actor)</code>；<code>src/agent_bridge/knowledge/service.py:612-621</code> 的 <code>list_backends()</code> 不接收 actor、不做 <code>require_admin_user</code>；<code>src/agent_bridge/storage/repositories/knowledge.py:576-579</code> 直接 <code>SELECT *</code> 返回 <code>api_key</code>。本地测试 <code>test_backend_list_reports_weknora_type</code> 也实际看到了响应包含 <code>"api_key": "test-key"</code>。</p>
+      <p>影响：任何能构造 <code>X-Agent-Bridge-User</code> 或访问该 API 的调用方都可能枚举知识后端配置并拿到 RagFlow/Weknora 密钥。前端编辑后端时已经使用“留空保持不变”的交互，不需要明文密钥。</p>
+      <p>建议：路由注入 <code>current_actor</code>，service 层强制 admin；列表和增改响应都只返回 <code>api_key_set</code>，不要返回 <code>api_key</code>；补 API 测试断言非 admin 403 且响应不含 <code>api_key</code>。</p>
+    </article>
+
+    <article class="finding p0">
+      <h3><span class="tag">P0</span><code>AgentBridgeService.ask()</code> 绕过 KB 成员可见性</h3>
+      <p>证据：<code>src/agent_bridge/knowledge/service.py:419-444</code> 调用 <code>resolve_retrieval_strategy()</code>，后者在 <code>src/agent_bridge/knowledge/service.py:390-410</code> 只按 slug 读 KB 和策略，不检查 actor 是否是管理员或 KB 成员。相比之下 <code>search()</code> 会先调用 <code>_require_kb_visible(actor, kb_slug)</code>。</p>
+      <p>影响：非成员只要知道 KB slug，就可能通过普通 <code>/ask</code> 接口读取回答和引用内容。builtin wiki 路径有 profile resource 检查，但底层 service 和 HTTP <code>/ask</code> 路径仍然缺口明显。</p>
+      <p>建议：<code>ask()</code> 入口先调用 <code>_require_kb_visible(actor, kb_slug)</code>；如果 <code>profile_key</code> 存在，还应明确校验该 profile 是否允许访问该 KB，再解析 retrieval override。补非成员问答禁止、profile 未授权问答禁止、管理员仍可问答的测试。</p>
+    </article>
+
+    <article class="finding p1">
+      <h3><span class="tag">P1</span>代码仓库读取/探索接口缺少管理员校验</h3>
+      <p>证据：<code>src/agent_bridge/api/routes/builtins.py:50-83</code> 将 actor 传给 overview/files/query/explore/callers/callees/impact；但 <code>src/agent_bridge/codegraph/service.py:160-281</code> 对这些读取类方法没有 <code>require_admin_user</code>，只检查 repo 是否存在且 active。列表、创建、同步、UA 操作都有管理员校验，模型不一致。</p>
+      <p>影响：非管理员可能读取代码索引、文件内容、调用图和 explore 结果。对私有仓库或凭据 clone 的仓库，这相当于代码泄露面。</p>
+      <p>建议：如果这些是管理台接口，应在 route 或 service 统一 admin 校验；如果未来要对 agent 开放，应走 profile resource governance，而不是裸 API。补每个读取入口的非 admin 禁止测试。</p>
+    </article>
+
+    <article class="finding p1">
+      <h3><span class="tag">P1</span>测试套件当前红灯，且有多处旧契约未同步</h3>
+      <p>验证命令 <code>uv run pytest -q tests -m 'not ragflow and not weknora'</code> 结果：<code>11 failed, 294 passed, 8 deselected</code>。其中本仓库内主要失败来自：前端视图重组后测试仍读旧路径；新增 <code>search_all</code> 后 builtin wiki <code>tool_count</code> 断言未更新；白名单模式改变后旧的 deny-only 默认允许测试未更新；后端列表响应契约变化未重新定义。</p>
+      <p>建议：先修安全问题，再统一更新测试契约。对视图重组类测试，应改读 <code>views/monitoring/StatsView.vue</code>、<code>views/knowledge/KnowledgeView.vue</code>、<code>views/knowledge/CodeRepoView.vue</code>、<code>views/knowledge/KnowledgeProcessingConfigView.vue</code> 等新路径。</p>
+    </article>
+  </section>
+
+  <section>
+    <h2>其他风险</h2>
+    <article class="finding p2">
+      <h3><span class="tag">P2</span>未知 backend 类型被静默忽略</h3>
+      <p><code>src/agent_bridge/knowledge/backends/registry.py:26-45</code> 对未知 <code>backend_type</code> 返回 <code>None</code>，构造 registry 时静默跳过。旧测试 <code>tests/test_registry.py::test_registry_unknown_backend_type</code> 期望抛 <code>ValueError</code>。静默忽略会让配置错误表现为“后端消失”，排障困难，也可能让 KB target 状态错判。</p>
+    </article>
+
+    <article class="finding p2">
+      <h3><span class="tag">P2</span>默认 <code>pytest -q</code> 会跑 live integration</h3>
+      <p><code>pyproject.toml</code> 只有 marker 声明，没有默认排除 <code>ragflow/weknora</code>。直接运行 <code>uv run pytest -q</code> 会尝试连接本机 RagFlow，当前结果为 <code>18 failed, 295 passed</code>，其中 7 个是 RagFlow 环境连接失败。建议给本地默认命令加 <code>addopts = -m "not ragflow and not weknora"</code>，并把 live 集成测试放到单独 CI job 或文档命令里。</p>
+    </article>
+
+    <article class="finding p2">
+      <h3><span class="tag">P2</span>Weknora agent eager ensure 会在 app 创建时打外部网络</h3>
+      <p><code>AgentBridgeService.create()</code> 里直接调用 <code>ensure_weknora_agents()</code>。测试中只要 TOML/DB 有 Weknora 后端，<code>create_app()</code> 就会请求 <code>/api/v1/agents</code>，虽然异常被 catch，但会拖慢启动并污染测试日志。建议延迟到首次使用、后台任务，或在配置上允许关闭启动期 ensure。</p>
+    </article>
+  </section>
+
+  <section>
+    <h2>需要补的测试</h2>
+    <table>
+      <thead>
+        <tr><th>优先级</th><th>测试内容</th><th>建议位置</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>P0</td><td>非 admin 调 <code>GET /backends</code> 被拒；admin 响应不包含 <code>api_key</code> 明文，只含 <code>api_key_set</code>。</td><td><code>tests/test_capability_api.py</code></td></tr>
+        <tr><td>P0</td><td>非 KB 成员调用 <code>service.ask()</code> 或 HTTP <code>/ask</code> 返回 NotFound/AccessDenied，不触发 adapter。</td><td><code>tests/test_services.py</code>、API 测试</td></tr>
+        <tr><td>P0</td><td>传入 <code>profile_key</code> 时，未授权 KB 的 <code>/ask</code> 被 profile policy block；已授权 KB 可使用 retrieval override。</td><td><code>tests/test_retrieval_strategy.py</code>、<code>tests/test_builtin_wiki.py</code></td></tr>
+        <tr><td>P1</td><td>非 admin 访问 code-repo overview/files/query/callers/callees/impact/explore 均被拒。</td><td><code>tests/test_capability_api.py</code>、<code>tests/test_codegraph_service.py</code></td></tr>
+        <tr><td>P1</td><td>白名单模式契约：无 allow 规则时外部 MCP 服务不可见；有 allow 时只显示 allow 且 deny 优先。</td><td><code>tests/test_capability_governance.py</code>、<code>tests/test_metamcp_http_gateway.py</code></td></tr>
+        <tr><td>P1</td><td>前端重组后的静态断言读新路径；builtin wiki <code>tool_count</code> 更新为 5。</td><td><code>tests/test_capability_api.py</code>、<code>tests/test_mcp_server.py</code></td></tr>
+        <tr><td>P2</td><td>无效 cron 通过 API 保存时的行为：拒绝保存，或明确保存但 scheduler 状态显示 invalid。</td><td><code>tests/test_capability_api.py</code>、scheduler 单测</td></tr>
+        <tr><td>P2</td><td>未知 backend type 行为：要么抛清晰错误，要么测试确认跳过并产生可观测告警。</td><td><code>tests/test_registry.py</code></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>验证记录</h2>
+    <pre>npm run build
+结果：通过。Vite 仅提示 chunk 超过 500KB 的常规警告。
+
+uv run pytest -q tests -m 'not ragflow and not weknora'
+结果：11 failed, 294 passed, 8 deselected, 1 warning。
+
+uv run pytest -q
+结果：18 failed, 295 passed, 1 warning。
+说明：额外失败主要来自 live RagFlow 集成测试在本机无服务。
+
+git diff --check db3e2b0edb40986e01f665b7ac50e62900c95bee..HEAD
+结果：通过，无空白错误。</pre>
+  </section>
+
+  <section>
+    <h2>建议修复顺序</h2>
+    <ol>
+      <li>先修 <code>/backends</code> 权限和密钥脱敏，这是最高风险。</li>
+      <li>修 <code>ask()</code> 的 KB 可见性和 profile resource 校验。</li>
+      <li>统一 code-repo 读取接口的权限模型。</li>
+      <li>更新测试契约，让本地非集成测试恢复绿色。</li>
+      <li>整理默认 pytest 配置，把 live integration 从默认验证路径中移走。</li>
+      <li>最后处理 registry 未知 backend、启动期 Weknora ensure、cron API 校验等韧性问题。</li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>

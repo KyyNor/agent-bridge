@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Bridge 汇报材料基础版</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --paper: #ffffff;
+      --paper-soft: #f9fafc;
+      --ink: #17202a;
+      --muted: #627084;
+      --line: #dce3ec;
+      --blue: #2456d6;
+      --blue-soft: #e9efff;
+      --green: #0f8a5f;
+      --green-soft: #e7f6ef;
+      --orange: #b86412;
+      --orange-soft: #fff1df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --slate: #263348;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 48px rgba(38, 51, 72, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(36, 86, 214, 0.09), transparent 280px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.68;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 34px 0 76px;
+    }
+
+    header,
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(38, 51, 72, 0.07);
+    }
+
+    header {
+      padding: 36px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(233, 239, 255, 0.82)),
+        var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin-top: 12px;
+      max-width: 900px;
+      font-size: clamp(34px, 5vw, 58px);
+      font-weight: 900;
+    }
+
+    h2 {
+      font-size: 25px;
+      font-weight: 880;
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 840;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .lead {
+      max-width: 900px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--slate);
+      padding: 11px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 820;
+    }
+
+    nav a:hover {
+      border-color: var(--blue);
+      color: var(--blue);
+    }
+
+    section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      max-width: 720px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 840;
+      white-space: nowrap;
+    }
+
+    .tag.blue {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .tag.green {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .tag.orange {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .tag.red {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.four {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper-soft);
+      padding: 16px;
+    }
+
+    .card h3 {
+      margin-bottom: 8px;
+    }
+
+    .card p,
+    li {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    .statement {
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: var(--blue-soft);
+      padding: 18px 20px;
+      color: #1b347a;
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .before-after {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--line);
+    }
+
+    .side {
+      background: var(--paper);
+      padding: 20px;
+    }
+
+    .side.before {
+      background: linear-gradient(135deg, #fff, rgba(180, 35, 24, 0.04));
+    }
+
+    .side.after {
+      background: linear-gradient(135deg, rgba(36, 86, 214, 0.05), #fff);
+    }
+
+    .side h3 {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+      font-size: 16px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--blue);
+    }
+
+    .before .dot {
+      background: var(--red);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .step {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 16px;
+      min-height: 128px;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--slate);
+      font-size: 15px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .layer {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 14px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper-soft);
+      padding: 16px;
+    }
+
+    .layer strong {
+      color: var(--slate);
+    }
+
+    .layer p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--slate-soft);
+      color: var(--slate);
+      font-weight: 840;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 18px;
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+    }
+
+    .callout p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    footer {
+      margin-top: 24px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 13px;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        width: min(100% - 24px, 1180px);
+      }
+
+      header,
+      section {
+        padding: 22px;
+      }
+
+      .section-head,
+      .before-after,
+      .grid,
+      .grid.two,
+      .grid.four,
+      .flow,
+      .layer {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Agent Bridge Report Draft</div>
+      <h1>从分散知识管理到统一 Agent 能力平面</h1>
+      <p class="lead">
+        本材料用于说明 Agent Bridge 的建设逻辑：不是再做一个孤立知识库，也不是简单聚合几个工具，
+        而是把部门已有的模型基础设施、知识库、代码资产和 MCP 工具组织成可组合、可复用、可治理的能力平面，
+        让 Claude Code 等 Agent 可以通过统一入口安全稳定地使用部门能力。
+      </p>
+      <div class="meta">
+        <span class="pill">定位：Agent 能力平面</span>
+        <span class="pill">入口：Claude Code / MetaMCP</span>
+        <span class="pill">基础设施：vLLM / LiteLLM / TEI</span>
+        <span class="pill">内置能力：Wiki / CodeGraph</span>
+      </div>
+    </header>
+
+    <nav>
+      <a href="#problem">建设背景</a>
+      <a href="#judgement">核心判断</a>
+      <a href="#architecture">总体架构</a>
+      <a href="#bridge">Agent Bridge</a>
+      <a href="#flow">使用流程</a>
+      <a href="#value">建设价值</a>
+      <a href="#roadmap">后续规划</a>
+      <a href="#talking">汇报口径</a>
+    </nav>
+
+    <section id="problem">
+      <div class="section-head">
+        <div>
+          <h2>1. 建设背景：部门不是缺知识，而是缺统一组织方式</h2>
+          <p>过去的知识、工具、文档和项目经验都存在，但它们分布在不同系统和个人流程中，难以稳定复用。</p>
+        </div>
+        <span class="tag red">Problem</span>
+      </div>
+
+      <div class="before-after">
+        <div class="side before">
+          <h3><span class="dot"></span>过去的状态</h3>
+          <ul>
+            <li>文档、接口说明、项目经验散落在不同位置。</li>
+            <li>数据库、API、代码仓库、知识库各自维护。</li>
+            <li>每个 Agent 或项目都需要重复手写接入配置。</li>
+            <li>能力可见范围、调用日志和失败归因缺少统一治理。</li>
+            <li>结构化知识容易被文档化，失去实时性和可执行性。</li>
+          </ul>
+        </div>
+        <div class="side after">
+          <h3><span class="dot"></span>目标状态</h3>
+          <ul>
+            <li>所有能力进入统一目录，可注册、可搜索、可调用。</li>
+            <li>Agent 只接入一个统一 MetaMCP 网关。</li>
+            <li>按项目 Profile 控制可见能力和资源范围。</li>
+            <li>知识库、代码图谱、外部 MCP 工具统一治理。</li>
+            <li>调用全链路可审计、可统计、可定位问题。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="judgement">
+      <div class="section-head">
+        <div>
+          <h2>2. 核心判断：单纯建设知识库不够，需要能力平面</h2>
+          <p>Agent 需要的不只是“能检索文档”，还需要准确调用结构化接口、理解代码、访问项目授权范围内的工具。</p>
+        </div>
+        <span class="tag blue">Judgement</span>
+      </div>
+
+      <div class="statement">
+        知识库负责“读懂文档”，MCP / CodeGraph 负责“查准结构和执行约束”，Agent Bridge 负责统一入口、治理和编排。
+      </div>
+
+      <div class="grid four" style="margin-top: 14px;">
+        <div class="card">
+          <h3>文档型知识</h3>
+          <p>制度、手册、方案、PDF、历史材料，适合进入知识库，通过 Embedding、Rerank 和 RAG 召回。</p>
+        </div>
+        <div class="card">
+          <h3>结构化知识</h3>
+          <p>服务目录、接口契约、SQL、数据血缘、项目元数据，适合通过 MCP 保留参数化查询能力。</p>
+        </div>
+        <div class="card">
+          <h3>代码知识</h3>
+          <p>仓库、模块、文件、符号、调用链和影响面，适合通过 CodeGraph 暴露给 Agent。</p>
+        </div>
+        <div class="card">
+          <h3>执行型能力</h3>
+          <p>查询、分析、同步、检查、生成等能力，需要统一注册、风险分级、权限控制和调用审计。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <div class="section-head">
+        <div>
+          <h2>3. 总体架构：四层组织 Agent 基础设施</h2>
+          <p>把用户交互、能力治理、知识工具和模型基础设施解耦，各层职责清晰。</p>
+        </div>
+        <span class="tag green">Architecture</span>
+      </div>
+
+      <div class="stack">
+        <div class="layer">
+          <strong>用户交互层</strong>
+          <p>Claude Code 是用户实际交互的 Agent。用户在项目中提出问题或任务，不需要理解背后的模型、知识库和工具分布。</p>
+        </div>
+        <div class="layer">
+          <strong>能力平面层</strong>
+          <p>Agent Bridge 提供统一 MetaMCP 网关、能力注册中心、Project Profile、调用日志和管理控制台。</p>
+        </div>
+        <div class="layer">
+          <strong>知识与工具层</strong>
+          <p>Wiki 知识库、CodeGraph 代码图谱、外部 MCP 服务、业务 API、数据库查询工具等都被抽象为能力来源。</p>
+        </div>
+        <div class="layer">
+          <strong>模型基础设施层</strong>
+          <p>vLLM 提供推理服务，LiteLLM 提供模型统一路由，TEI 提供 Embedding 和 Rerank 能力，支撑知识检索和问答效果。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="bridge">
+      <div class="section-head">
+        <div>
+          <h2>4. Agent Bridge 做什么：把能力变成可治理资产</h2>
+          <p>Agent Bridge 的重点不是替代已有系统，而是把已有系统纳入统一能力目录和治理闭环。</p>
+        </div>
+        <span class="tag blue">Capability Plane</span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>能力注册</h3>
+          <p>登记外部 MCP 服务、Wiki 知识库、CodeGraph 仓库，形成统一能力目录。</p>
+        </div>
+        <div class="card">
+          <h3>能力发现</h3>
+          <p>通过 MetaMCP search 让 Agent 像浏览目录一样发现当前项目可用能力。</p>
+        </div>
+        <div class="card">
+          <h3>能力调用</h3>
+          <p>通过 MetaMCP execute 执行只读类工具，保留参数、Schema、返回结果和错误信息。</p>
+        </div>
+        <div class="card">
+          <h3>项目治理</h3>
+          <p>通过 Project Profile 控制不同项目可见的 MCP 服务、KB 和代码仓库。</p>
+        </div>
+        <div class="card">
+          <h3>审计观测</h3>
+          <p>记录谁在什么时候调用了什么能力，是否成功，失败发生在哪个阶段。</p>
+        </div>
+        <div class="card">
+          <h3>内置能力</h3>
+          <p>Wiki 和 CodeGraph 作为平台固有能力，不再以临时工具方式分散接入。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="flow">
+      <div class="section-head">
+        <div>
+          <h2>5. 典型使用流程：从项目接入到能力调用</h2>
+          <p>目标是让 Agent 使用能力的过程变得稳定、可控、可复用。</p>
+        </div>
+        <span class="tag orange">Workflow</span>
+      </div>
+
+      <div class="flow">
+        <div class="step">
+          <strong>1. 管理员注册能力</strong>
+          <span>登记 MCP 服务、知识库、代码仓库，并同步工具清单或索引状态。</span>
+        </div>
+        <div class="step">
+          <strong>2. 创建项目 Profile</strong>
+          <span>按项目配置可访问的服务、KB、Repo 和资源范围。</span>
+        </div>
+        <div class="step">
+          <strong>3. Claude Code 接入</strong>
+          <span>项目只配置一个 Agent Bridge MetaMCP 地址，并携带对应 Profile。</span>
+        </div>
+        <div class="step">
+          <strong>4. Agent 搜索与调用</strong>
+          <span>Agent 先 search 发现能力，再 execute 调用授权范围内的工具。</span>
+        </div>
+        <div class="step">
+          <strong>5. 平台记录审计</strong>
+          <span>记录调用日志、耗时、结果、失败阶段和责任方，支撑排障和运营。</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="value">
+      <div class="section-head">
+        <div>
+          <h2>6. 建设价值：从一次性接入变成长期运营</h2>
+          <p>平台价值不是“多一个入口”，而是把知识和工具变成可以沉淀、复用、度量和治理的部门资产。</p>
+        </div>
+        <span class="tag green">Value</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>价值方向</th>
+            <th>解决的问题</th>
+            <th>带来的变化</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>统一入口</td>
+            <td>各 Agent 分别配置工具、知识库和模型能力。</td>
+            <td>Claude Code 等 Agent 只接入 Agent Bridge，一次接入，多处复用。</td>
+          </tr>
+          <tr>
+            <td>统一资产</td>
+            <td>文档、接口、代码、工具分散，无法形成能力目录。</td>
+            <td>所有能力都可以注册、分类、搜索、调用，成为可运营资产。</td>
+          </tr>
+          <tr>
+            <td>统一治理</td>
+            <td>项目之间缺少清晰的能力边界和数据边界。</td>
+            <td>通过 Profile 控制不同项目能看什么、能用什么。</td>
+          </tr>
+          <tr>
+            <td>统一观测</td>
+            <td>调用失败后难以判断是 Agent、平台、权限、MCP 还是后端问题。</td>
+            <td>通过日志、统计、失败归因定位问题责任方。</td>
+          </tr>
+          <tr>
+            <td>统一演进</td>
+            <td>每次新增模型、知识库或工具都要重复接入。</td>
+            <td>新增能力只需要纳入平台，已有 Agent 和项目可以按治理规则复用。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="roadmap">
+      <div class="section-head">
+        <div>
+          <h2>7. 后续规划：从能力目录走向能力运营</h2>
+          <p>基础能力打通后，下一步重点是提升检索效果、治理深度和运营可见性。</p>
+        </div>
+        <span class="tag orange">Roadmap</span>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <h3>检索策略运营</h3>
+          <p>完善 KB 默认后端、Embedding / Rerank 策略、Profile 级检索覆盖配置，让知识效果可配置、可评估。</p>
+        </div>
+        <div class="card">
+          <h3>观测与报表</h3>
+          <p>增强调用统计、时间趋势、慢调用分析、失败归因和审计导出，支持平台运营。</p>
+        </div>
+        <div class="card">
+          <h3>Action 工具治理</h3>
+          <p>对有副作用的工具引入风险分级、确认、审批、dry-run 和回滚策略。</p>
+        </div>
+        <div class="card">
+          <h3>工作流编排</h3>
+          <p>把文档入库、代码同步、质量检查、能力评测等流程沉淀成可复用工作流。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="talking">
+      <div class="section-head">
+        <div>
+          <h2>8. 汇报口径：一句话与三句话</h2>
+          <p>用于开场、结尾或向领导解释项目定位。</p>
+        </div>
+        <span class="tag blue">Talking Points</span>
+      </div>
+
+      <div class="grid two">
+        <div class="callout">
+          <strong>一句话定位</strong>
+          <p>
+            Agent Bridge 是部门面向 Agent 的统一能力平面，把模型、知识库、代码仓库、MCP 工具和项目权限组织起来，
+            让 Claude Code 等 Agent 能够按项目安全、稳定、可审计地复用部门能力。
+          </p>
+        </div>
+        <div class="callout">
+          <strong>三句话说明</strong>
+          <p>
+            第一，部门过去的问题不是没有知识，而是知识和工具没有统一沉淀为可复用能力。
+            第二，单纯做知识库无法覆盖接口、代码、结构化数据和执行工具，所以需要能力平面。
+            第三，Agent Bridge 通过统一注册、发现、调用、治理和审计，让 Agent 能力建设从零散接入变成长期运营。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      Agent Bridge 汇报材料基础版，可继续扩展为正式 HTML 汇报页或 PPT 大纲。
+    </footer>
+  </main>
+</body>
+</html>
