@@ -546,123 +546,6 @@ async function refreshProfileDoc(raiseError = false) {
             </div>
           </div>
 
-          <!-- Pinned Tools -->
-          <div class="space-y-3 rounded-lg border border-border p-4">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div class="text-sm font-medium">Pinned Tools</div>
-                <div class="mt-1 text-xs text-muted-foreground">
-                  当前会暴露 {{ pinPreview?.tools.length || 0 }} 个 pin_* 工具
-                  <span class="ml-1">未保存的手动 Pin 需保存后刷新预览。</span>
-                </div>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" :disabled="pinSaving" @click="refreshPins">
-                  {{ pinSaving ? '处理中...' : '重新计算自动 Pin' }}
-                </Button>
-                <Button size="sm" :disabled="pinSaving || !pinsLoaded" @click="savePins()">
-                  {{ pinSaving ? '保存中...' : '保存 Pin' }}
-                </Button>
-              </div>
-            </div>
-            <div v-if="pinError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
-              {{ pinError }}
-            </div>
-
-            <div class="grid gap-3 sm:grid-cols-[160px_1fr_1fr]">
-              <label class="space-y-1">
-                <span class="text-xs font-medium text-muted-foreground">自动 Pin 模式</span>
-                <select
-                  v-model="pinMode"
-                  :disabled="!pinsLoaded"
-                  class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="disabled">关闭</option>
-                  <option value="ratio">按比例</option>
-                  <option value="count">按数量</option>
-                </select>
-              </label>
-              <label class="space-y-1">
-                <span class="text-xs font-medium text-muted-foreground">比例百分比</span>
-                <Input v-model.number="pinRatio" type="number" min="1" max="100" :disabled="!pinsLoaded || pinMode !== 'ratio'" />
-              </label>
-              <label class="space-y-1">
-                <span class="text-xs font-medium text-muted-foreground">数量</span>
-                <Input v-model.number="pinCount" type="number" min="1" :disabled="!pinsLoaded || pinMode !== 'count'" />
-              </label>
-            </div>
-
-            <div>
-              <div class="mb-2 text-xs font-medium text-muted-foreground">手动 Pin</div>
-              <div v-if="manualPinGroups.length === 0" class="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                暂无手动 pin；可在下方按服务选择概览、搜索或详情。
-              </div>
-              <div v-else class="flex flex-wrap gap-2">
-                <span
-                  v-for="pin in manualPinGroups"
-                  :key="`${pin.service_key}:${pin.tool_type}`"
-                  class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md bg-secondary px-2.5 py-1 text-xs"
-                >
-                  <span class="min-w-0 break-all font-medium text-foreground">{{ pin.service_name }}</span>
-                  <span class="min-w-0 break-all text-muted-foreground">{{ pin.service_key }} / {{ typeLabel(pin.tool_type) }}</span>
-                  <button class="text-muted-foreground hover:text-destructive" type="button" @click="toggleManualPin(pin.service_key, pin.tool_type)">移除</button>
-                </span>
-              </div>
-            </div>
-
-            <div>
-              <div class="mb-2 text-xs font-medium text-muted-foreground">按已允许服务选择 Pin Level</div>
-              <div v-if="allowedServices.length === 0" class="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                请先在上方允许至少一个服务。
-              </div>
-              <div v-else class="max-h-[220px] space-y-2 overflow-y-auto">
-                <div
-                  v-for="svc in allowedServices"
-                  :key="`pin-${svc.service_key}`"
-                  class="flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2"
-                >
-                  <div class="min-w-[180px] flex-1 break-all">
-                    <div class="text-sm font-medium">{{ svc.name || svc.service_key }}</div>
-                    <div class="text-xs text-muted-foreground">{{ svc.service_key }}</div>
-                  </div>
-                  <label
-                    v-for="toolType in pinToolTypes"
-                    :key="`${svc.service_key}-${toolType}`"
-                    :class="[
-                      'inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors',
-                      pinsLoaded ? 'cursor-pointer hover:bg-background' : 'cursor-not-allowed opacity-60'
-                    ]"
-                  >
-                    <input
-                      type="checkbox"
-                      :checked="manualPinExists(svc.service_key, toolType)"
-                      :disabled="!pinsLoaded"
-                      @change="toggleManualPin(svc.service_key, toolType)"
-                      class="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
-                    />
-                    {{ typeLabel(toolType) }}
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="autoPinGroups.length > 0" class="rounded-md bg-secondary px-3 py-2">
-              <div class="mb-1 text-xs font-medium text-muted-foreground">自动 Pin 预览</div>
-              <div class="flex flex-wrap gap-2">
-                <span
-                  v-for="pin in autoPinGroups.slice(0, 12)"
-                  :key="`auto-${pin.service_key}-${pin.tool_type}`"
-                  class="max-w-full break-all rounded bg-background px-2 py-1 text-xs text-muted-foreground"
-                >
-                  {{ serviceName(pin.service_key) }} / {{ typeLabel(pin.tool_type) }}{{ pin.calls ? ` · ${pin.calls} 次` : '' }}
-                </span>
-                <span v-if="autoPinGroups.length > 12" class="px-2 py-1 text-xs text-muted-foreground">
-                  另 {{ autoPinGroups.length - 12 }} 项
-                </span>
-              </div>
-            </div>
-          </div>
-
           <!-- KB Resources -->
           <div>
             <div class="mb-2 text-sm font-medium">允许访问的文档知识</div>
@@ -713,36 +596,161 @@ async function refreshProfileDoc(raiseError = false) {
             </div>
           </div>
 
-          <!-- Profile Doc -->
-          <div class="space-y-3 rounded-lg border border-border p-4">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div class="text-sm font-medium">Profile 文档</div>
-                <div class="mt-1 text-xs text-muted-foreground">手动补充保存后会写入 profile 文档。</div>
+          <!-- 高级选项 -->
+          <details class="rounded-lg border border-border">
+            <summary class="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">
+              高级选项
+            </summary>
+            <div class="space-y-4 border-t border-border p-4">
+              <!-- 工作置顶 -->
+              <div class="space-y-3 rounded-lg border border-border p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-sm font-medium">工作置顶</div>
+                    <div class="mt-1 text-xs text-muted-foreground">
+                      当前会暴露 {{ pinPreview?.tools.length || 0 }} 个 pin_* 工具
+                      <span class="ml-1">未保存的手动 Pin 需保存后刷新预览。</span>
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" :disabled="pinSaving" @click="refreshPins">
+                      {{ pinSaving ? '处理中...' : '重新计算自动 Pin' }}
+                    </Button>
+                    <Button size="sm" :disabled="pinSaving || !pinsLoaded" @click="savePins()">
+                      {{ pinSaving ? '保存中...' : '保存 Pin' }}
+                    </Button>
+                  </div>
+                </div>
+                <div v-if="pinError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
+                  {{ pinError }}
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-[160px_1fr_1fr]">
+                  <label class="space-y-1">
+                    <span class="text-xs font-medium text-muted-foreground">自动 Pin 模式</span>
+                    <select
+                      v-model="pinMode"
+                      :disabled="!pinsLoaded"
+                      class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="disabled">关闭</option>
+                      <option value="ratio">按比例</option>
+                      <option value="count">按数量</option>
+                    </select>
+                  </label>
+                  <label class="space-y-1">
+                    <span class="text-xs font-medium text-muted-foreground">比例百分比</span>
+                    <Input v-model.number="pinRatio" type="number" min="1" max="100" :disabled="!pinsLoaded || pinMode !== 'ratio'" />
+                  </label>
+                  <label class="space-y-1">
+                    <span class="text-xs font-medium text-muted-foreground">数量</span>
+                    <Input v-model.number="pinCount" type="number" min="1" :disabled="!pinsLoaded || pinMode !== 'count'" />
+                  </label>
+                </div>
+
+                <div>
+                  <div class="mb-2 text-xs font-medium text-muted-foreground">手动 Pin</div>
+                  <div v-if="manualPinGroups.length === 0" class="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                    暂无手动 pin；可在下方按服务选择概览、搜索或详情。
+                  </div>
+                  <div v-else class="flex flex-wrap gap-2">
+                    <span
+                      v-for="pin in manualPinGroups"
+                      :key="`${pin.service_key}:${pin.tool_type}`"
+                      class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md bg-secondary px-2.5 py-1 text-xs"
+                    >
+                      <span class="min-w-0 break-all font-medium text-foreground">{{ pin.service_name }}</span>
+                      <span class="min-w-0 break-all text-muted-foreground">{{ pin.service_key }} / {{ typeLabel(pin.tool_type) }}</span>
+                      <button class="text-muted-foreground hover:text-destructive" type="button" @click="toggleManualPin(pin.service_key, pin.tool_type)">移除</button>
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="mb-2 text-xs font-medium text-muted-foreground">按已允许服务选择 Pin Level</div>
+                  <div v-if="allowedServices.length === 0" class="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                    请先在上方允许至少一个服务。
+                  </div>
+                  <div v-else class="max-h-[220px] space-y-2 overflow-y-auto">
+                    <div
+                      v-for="svc in allowedServices"
+                      :key="`pin-${svc.service_key}`"
+                      class="flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2"
+                    >
+                      <div class="min-w-[180px] flex-1 break-all">
+                        <div class="text-sm font-medium">{{ svc.name || svc.service_key }}</div>
+                        <div class="text-xs text-muted-foreground">{{ svc.service_key }}</div>
+                      </div>
+                      <label
+                        v-for="toolType in pinToolTypes"
+                        :key="`${svc.service_key}-${toolType}`"
+                        :class="[
+                          'inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors',
+                          pinsLoaded ? 'cursor-pointer hover:bg-background' : 'cursor-not-allowed opacity-60'
+                        ]"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="manualPinExists(svc.service_key, toolType)"
+                          :disabled="!pinsLoaded"
+                          @change="toggleManualPin(svc.service_key, toolType)"
+                          class="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                        />
+                        {{ typeLabel(toolType) }}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="autoPinGroups.length > 0" class="rounded-md bg-secondary px-3 py-2">
+                  <div class="mb-1 text-xs font-medium text-muted-foreground">自动 Pin 预览</div>
+                  <div class="flex flex-wrap gap-2">
+                    <span
+                      v-for="pin in autoPinGroups.slice(0, 12)"
+                      :key="`auto-${pin.service_key}-${pin.tool_type}`"
+                      class="max-w-full break-all rounded bg-background px-2 py-1 text-xs text-muted-foreground"
+                    >
+                      {{ serviceName(pin.service_key) }} / {{ typeLabel(pin.tool_type) }}{{ pin.calls ? ` · ${pin.calls} 次` : '' }}
+                    </span>
+                    <span v-if="autoPinGroups.length > 12" class="px-2 py-1 text-xs text-muted-foreground">
+                      另 {{ autoPinGroups.length - 12 }} 项
+                    </span>
+                  </div>
+                </div>
               </div>
-              <Button variant="outline" size="sm" :disabled="docSaving" @click="refreshProfileDoc">
-                {{ docSaving ? '生成中...' : '重新生成/预览' }}
-              </Button>
+
+              <!-- 能力平面提示词 -->
+              <div class="space-y-3 rounded-lg border border-border p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-sm font-medium">能力平面提示词</div>
+                    <div class="mt-1 text-xs text-muted-foreground">手动补充保存后会写入 profile 文档。</div>
+                  </div>
+                  <Button variant="outline" size="sm" :disabled="docSaving" @click="refreshProfileDoc">
+                    {{ docSaving ? '生成中...' : '重新生成/预览' }}
+                  </Button>
+                </div>
+                <div v-if="docError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
+                  {{ docError }}
+                </div>
+                <div class="space-y-2">
+                  <label class="text-xs font-medium text-muted-foreground">手动补充 Notes</label>
+                  <textarea
+                    v-model="manualNotes"
+                    class="min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    placeholder="补充该 profile 的使用边界、注意事项或协作约定..."
+                  />
+                  <Button size="sm" :disabled="docSaving || manualNotes.trim().length === 0" @click="saveManualNotes">
+                    {{ docSaving ? '保存中...' : '保存手动补充' }}
+                  </Button>
+                </div>
+                <div>
+                  <div class="mb-2 text-xs font-medium text-muted-foreground">Markdown 预览</div>
+                  <pre class="max-h-[260px] overflow-y-auto whitespace-pre-wrap rounded-md bg-secondary p-3 text-xs leading-relaxed text-foreground">{{ profileMarkdown || '暂无 profile 文档预览' }}</pre>
+                </div>
+              </div>
             </div>
-            <div v-if="docError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
-              {{ docError }}
-            </div>
-            <div class="space-y-2">
-              <label class="text-xs font-medium text-muted-foreground">手动补充 Notes</label>
-              <textarea
-                v-model="manualNotes"
-                class="min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="补充该 profile 的使用边界、注意事项或协作约定..."
-              />
-              <Button size="sm" :disabled="docSaving || manualNotes.trim().length === 0" @click="saveManualNotes">
-                {{ docSaving ? '保存中...' : '保存手动补充' }}
-              </Button>
-            </div>
-            <div>
-              <div class="mb-2 text-xs font-medium text-muted-foreground">Markdown 预览</div>
-              <pre class="max-h-[260px] overflow-y-auto whitespace-pre-wrap rounded-md bg-secondary p-3 text-xs leading-relaxed text-foreground">{{ profileMarkdown || '暂无 profile 文档预览' }}</pre>
-            </div>
-          </div>
+          </details>
         </div>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
