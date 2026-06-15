@@ -9,6 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from agent_bridge.codegraph.client import CodeGraphClient
 from agent_bridge.codegraph.dashboard_urls import external_dashboard_url
@@ -418,6 +419,21 @@ class CodeGraphService:
             return None
         url = dash.get("url")
         return str(url) if url else None
+
+    def dashboard_repo_by_token(self, token: str) -> str | None:
+        if not token:
+            return None
+        for repo in self.store.list_code_repositories():
+            repo_key = str(repo.get("repo_key") or "")
+            if not repo_key or repo.get("status") != "active":
+                continue
+            dash = self.ua_client.dashboard_status(self._local_path(repo_key))
+            if not dash.get("running"):
+                continue
+            url = str(dash.get("url") or "")
+            if parse_qs(urlsplit(url).query).get("token", [None])[0] == token:
+                return repo_key
+        return None
 
     def _external_dashboard_payload(self, repo_key: str, payload: dict[str, Any]) -> dict[str, Any]:
         if "url" not in payload:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 import httpx
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -36,9 +36,11 @@ class DashboardProxyMiddleware:
         self,
         app: ASGIApp,
         target_resolver: Callable[[str], str | None],
+        token_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
         self.app = app
         self.target_resolver = target_resolver
+        self.token_resolver = token_resolver
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -50,6 +52,8 @@ class DashboardProxyMiddleware:
         upstream_path = _upstream_path(repo_key, suffix) if repo_key else ""
         if repo_key is None and path in DASHBOARD_ROOT_ENDPOINTS:
             repo_key = _repo_key_from_referer(scope.get("headers", []))
+            if repo_key is None and self.token_resolver is not None:
+                repo_key = _repo_key_from_token(scope.get("query_string", b""), self.token_resolver)
             upstream_path = path
         if repo_key is None:
             await self.app(scope, receive, send)
@@ -129,6 +133,17 @@ def _repo_key_from_referer(raw_headers: Any) -> str | None:
         repo_key, _ = _match_dashboard_path(urlsplit(referer).path)
         return repo_key
     return None
+
+
+def _repo_key_from_token(
+    query_string: bytes | str,
+    token_resolver: Callable[[str], str | None],
+) -> str | None:
+    query = query_string.decode("latin-1") if isinstance(query_string, bytes) else query_string
+    token = parse_qs(query, keep_blank_values=False).get("token", [None])[0]
+    if not token:
+        return None
+    return token_resolver(token)
 
 
 async def _read_body(receive: Receive) -> bytes:

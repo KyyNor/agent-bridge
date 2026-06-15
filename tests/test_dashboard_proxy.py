@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from agent_bridge.api.dashboard_proxy import _match_dashboard_path, _repo_key_from_referer, _rewrite_location, _upstream_path
+import asyncio
+
+from agent_bridge.api.dashboard_proxy import (
+    DashboardProxyMiddleware,
+    _match_dashboard_path,
+    _repo_key_from_referer,
+    _repo_key_from_token,
+    _rewrite_location,
+    _upstream_path,
+)
 from agent_bridge.codegraph.dashboard_urls import external_dashboard_url
 
 
@@ -51,3 +60,45 @@ def test_dashboard_proxy_can_route_root_data_endpoints_from_referer() -> None:
     headers = [(b"referer", b"http://127.0.0.1:8765/dashboard/headroom/?token=abc&theme=dark")]
 
     assert _repo_key_from_referer(headers) == "headroom"
+
+
+def test_dashboard_proxy_can_route_root_data_endpoints_from_token_without_referer() -> None:
+    assert _repo_key_from_token(b"token=abc", {"abc": "headroom"}.get) == "headroom"
+
+
+def test_dashboard_proxy_uses_token_resolver_for_root_data_endpoint_without_referer(monkeypatch) -> None:
+    app_called = False
+    calls = []
+
+    async def app(scope, receive, send):
+        nonlocal app_called
+        app_called = True
+
+    async def fake_proxy_http(self, scope, receive, send, repo_key, upstream_path, target):
+        calls.append((repo_key, upstream_path, target))
+
+    monkeypatch.setattr(DashboardProxyMiddleware, "_proxy_http", fake_proxy_http)
+    middleware = DashboardProxyMiddleware(
+        app,
+        target_resolver={"headroom": "http://127.0.0.1:48000/?token=abc"}.get,
+        token_resolver={"abc": "headroom"}.get,
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/knowledge-graph.json",
+        "query_string": b"token=abc",
+        "headers": [],
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        pass
+
+    asyncio.run(middleware(scope, receive, send))
+
+    assert app_called is False
+    assert calls == [("headroom", "/knowledge-graph.json", "http://127.0.0.1:48000/?token=abc")]

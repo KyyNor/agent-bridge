@@ -157,6 +157,39 @@ def test_codegraph_sync_advances_existing_clone(tmp_path: Path, wm_paths: AgentB
     assert "NEW_UPSTREAM_CONTENT" in files[0]["snippet"]
 
 
+def test_dashboard_repo_by_token_matches_running_dashboard_url(
+    tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CodeGraphService(paths=wm_paths, store=store, admins={"root"})
+    for repo_key in ("first", "second"):
+        service.upsert_repository(
+            actor="root",
+            repo_key=repo_key,
+            name=repo_key.title(),
+            git_url=str(tmp_path / repo_key),
+            branch="master",
+            auth_ref="",
+            description="",
+            tags=[],
+            category_key="",
+            sync_interval_minutes=60,
+            auto_understand=False,
+            status="active",
+        )
+
+    def fake_dashboard_status(project_dir: Path) -> dict[str, object]:
+        token = "first-token" if project_dir.name == "first" else "second-token"
+        return {"running": True, "url": f"http://127.0.0.1:48000/?token={token}"}
+
+    monkeypatch.setattr(service.ua_client, "dashboard_status", fake_dashboard_status)
+
+    assert service.dashboard_repo_by_token("first-token") == "first"
+    assert service.dashboard_repo_by_token("second-token") == "second"
+    assert service.dashboard_repo_by_token("missing-token") is None
+
+
 def test_codegraph_index_skips_symlinks(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     external = tmp_path / "external.txt"
