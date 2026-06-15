@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile } from '../../api/types'
+import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -54,14 +54,28 @@ const allProfiles = ref<ProjectProfile[]>([])
 const selectedProfileKeys = ref<string[]>([])
 const pendingProfileKeys = ref<string[]>([])
 const planeSaving = ref(false)
+// Per-profile retrieval backend overrides: profileKey -> backendSlug (empty string = auto)
+const profileBackendOverrides = ref<Record<string, string>>({})
+
+// Backends
+const backends = ref<BackendInfo[]>([])
+
+// Default backend editing in detail dialog
+const editingDefaultBackend = ref(false)
+const defaultBackendSlug = ref<string>('')
+const savingDefaultBackend = ref(false)
 
 onMounted(async () => {
-  await loadKbs()
+  await Promise.all([loadKbs(), loadBackends()])
   loading.value = false
 })
 
 async function loadKbs() {
   try { kbs.value = await api.listWikiKbs() } catch { kbs.value = [] }
+}
+
+async function loadBackends() {
+  try { backends.value = await api.listBackends() } catch { backends.value = [] }
 }
 
 async function createKb() {
@@ -93,6 +107,8 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   detailKb.value = kb
   showDetail.value = true
   detailTab.value = 'docs'
+  editingDefaultBackend.value = false
+  defaultBackendSlug.value = kb.default_backend_slug || ''
   detailLoading.value = true
   searchResults.value = []
   askAnswer.value = ''
@@ -152,6 +168,19 @@ async function doAsk() {
     askSessionId.value = result.session_id
   } catch { askAnswer.value = '问答失败'; askChunks.value = [] }
   asking.value = false
+}
+
+async function saveDefaultBackend() {
+  if (!detailKb.value) return
+  savingDefaultBackend.value = true
+  try {
+    const slug = defaultBackendSlug.value || null
+    await api.updateKbDefaults(detailKb.value.slug, { default_backend_slug: slug })
+    detailKb.value.default_backend_slug = slug
+    editingDefaultBackend.value = false
+    await loadKbs()
+  } catch { /* ignore */ }
+  savingDefaultBackend.value = false
 }
 
 function onUploadFilesSelected(e: Event) {
@@ -252,6 +281,7 @@ async function openPlaneDialog(k: KnowledgeBaseSummary) {
   selectedProfileKeys.value = []
   pendingProfileKeys.value = []
   allProfiles.value = []
+  profileBackendOverrides.value = {}
   try {
     const [profiles, rules] = await Promise.all([
       api.listProfiles(),
@@ -260,6 +290,11 @@ async function openPlaneDialog(k: KnowledgeBaseSummary) {
     allProfiles.value = profiles
     selectedProfileKeys.value = rules.map((rule: any) => rule.profile_key)
     pendingProfileKeys.value = [...selectedProfileKeys.value]
+    for (const rule of rules as any[]) {
+      if (rule.retrieval_backend_slug) {
+        profileBackendOverrides.value[rule.profile_key] = rule.retrieval_backend_slug
+      }
+    }
   } catch { /* ignore */ }
   showPlaneDialog.value = true
 }
@@ -268,8 +303,12 @@ function togglePlaneProfile(profileKey: string) {
   const idx = pendingProfileKeys.value.indexOf(profileKey)
   if (idx >= 0) {
     pendingProfileKeys.value.splice(idx, 1)
+    delete profileBackendOverrides.value[profileKey]
   } else {
     pendingProfileKeys.value.push(profileKey)
+    if (!(profileKey in profileBackendOverrides.value)) {
+      profileBackendOverrides.value[profileKey] = ''
+    }
   }
 }
 
@@ -277,7 +316,14 @@ async function savePlaneProfiles() {
   if (!planeKb.value) return
   planeSaving.value = true
   try {
-    await api.setResourceProfiles('wiki_kb', planeKb.value.slug, [...pendingProfileKeys.value])
+    const overrides: Record<string, { retrieval_backend_slug: string | null }> = {}
+    for (const pk of pendingProfileKeys.value) {
+      const slug = profileBackendOverrides.value[pk]
+      if (slug !== undefined) {
+        overrides[pk] = { retrieval_backend_slug: slug || null }
+      }
+    }
+    await api.setResourceProfiles('wiki_kb', planeKb.value.slug, [...pendingProfileKeys.value], Object.keys(overrides).length > 0 ? overrides : undefined)
     selectedProfileKeys.value = [...pendingProfileKeys.value]
     showPlaneDialog.value = false
   } catch { /* ignore */ }
@@ -373,24 +419,33 @@ async function savePlaneProfiles() {
 
     <!-- Plane Assignment Dialog -->
     <Dialog :open="showPlaneDialog" @update:open="showPlaneDialog = $event">
-      <DialogContent class="sm:max-w-[420px]">
+      <DialogContent class="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>{{ planeKb?.name || '' }} — 归属能力平面</DialogTitle>
         </DialogHeader>
         <div class="space-y-2">
-          <div class="text-xs text-muted-foreground">选择此知识库归属于哪些能力平面。</div>
+          <div class="text-xs text-muted-foreground">选择此知识库归属于哪些能力平面，可为每个平面单独指定检索后端。</div>
           <div v-if="allProfiles.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无能力平面</div>
-          <div v-else class="max-h-[320px] space-y-1 overflow-y-auto rounded-lg border border-border p-1">
-            <label v-for="p in allProfiles" :key="p.profile_key"
-              class="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-muted/50"
+          <div v-else class="max-h-[400px] space-y-1 overflow-y-auto rounded-lg border border-border p-1">
+            <div v-for="p in allProfiles" :key="p.profile_key"
+              class="rounded-md px-3 py-2 transition-colors hover:bg-muted/50"
             >
-              <input type="checkbox" :value="p.profile_key" :checked="pendingProfileKeys.includes(p.profile_key)"
-                @change="togglePlaneProfile(p.profile_key)" class="size-4 rounded" />
-              <div class="flex-1 min-w-0">
-                <div class="text-sm font-medium truncate">{{ p.name || p.profile_key }}</div>
-                <div class="text-xs text-muted-foreground">{{ p.profile_key }}</div>
+              <label class="flex cursor-pointer items-center gap-3">
+                <input type="checkbox" :value="p.profile_key" :checked="pendingProfileKeys.includes(p.profile_key)"
+                  @change="togglePlaneProfile(p.profile_key)" class="size-4 rounded" />
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-medium truncate">{{ p.name || p.profile_key }}</div>
+                  <div class="text-xs text-muted-foreground">{{ p.profile_key }}</div>
+                </div>
+              </label>
+              <div v-if="pendingProfileKeys.includes(p.profile_key) && backends.length > 0" class="mt-2 ml-7 flex items-center gap-2">
+                <span class="text-xs text-muted-foreground shrink-0">检索后端</span>
+                <select v-model="profileBackendOverrides[p.profile_key]" class="h-7 rounded border border-border bg-background px-2 text-xs flex-1">
+                  <option value="">跟随默认</option>
+                  <option v-for="b in backends" :key="b.slug" :value="b.slug">{{ b.slug }} ({{ b.backend_type }})</option>
+                </select>
               </div>
-            </label>
+            </div>
           </div>
         </div>
         <DialogFooter>
@@ -408,6 +463,24 @@ async function savePlaneProfiles() {
         </DialogHeader>
         <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
         <div v-else class="space-y-4">
+          <!-- Default Backend -->
+          <div class="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
+            <span class="text-xs text-muted-foreground shrink-0">默认检索后端</span>
+            <template v-if="!editingDefaultBackend">
+              <span class="text-sm font-medium">{{ detailKb?.default_backend_slug || '自动（跟随系统）' }}</span>
+              <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="editingDefaultBackend = true">修改</Button>
+            </template>
+            <template v-else>
+              <select v-model="defaultBackendSlug" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1">
+                <option value="">自动（跟随系统）</option>
+                <option v-for="b in backends" :key="b.slug" :value="b.slug">{{ b.slug }} ({{ b.backend_type }})</option>
+              </select>
+              <Button variant="ghost" size="sm" class="h-6 text-xs" @click="editingDefaultBackend = false">取消</Button>
+              <Button size="sm" class="h-6 text-xs" @click="saveDefaultBackend" :disabled="savingDefaultBackend">
+                {{ savingDefaultBackend ? '保存中...' : '保存' }}
+              </Button>
+            </template>
+          </div>
           <!-- Tabs -->
           <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
             <button v-for="t in [

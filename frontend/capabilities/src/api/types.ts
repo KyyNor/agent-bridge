@@ -53,6 +53,8 @@ export interface ProfileSourceRule {
 export interface ProfileResourceRule {
   resource_type: string
   resource_key: string
+  retrieval_backend_slug?: string | null
+  retrieval_agent_id?: string | null
 }
 
 export interface ToolCallLog {
@@ -113,6 +115,8 @@ export interface KnowledgeBaseSummary {
   created_at: string
   updated_at: string
   role?: string
+  default_backend_slug?: string | null
+  default_agent_id?: string | null
   backend_targets: { id: number; kb_id: number; slug: string; backend_type: string; backend_kb_id: string | null; config_json: string; status: string; created_at: string; updated_at: string }[]
   document_count: number
   sync_failed_count: number

@@ -122,10 +122,10 @@ export const api = {
   // Resource-Profile 双向关联
   getResourceProfiles: (resourceType: string, resourceKey: string) =>
     get<ProfileResourceRule[]>(`/resource-profiles/${resourceType}/${resourceKey}`),
-  setResourceProfiles: (resourceType: string, resourceKey: string, profileKeys: string[]) =>
+  setResourceProfiles: (resourceType: string, resourceKey: string, profileKeys: string[], overrides?: Record<string, { retrieval_backend_slug?: string | null; retrieval_agent_id?: string | null }>) =>
     put<{ resource_type: string; resource_key: string; profile_keys: string[] }>(
       `/resource-profiles/${resourceType}/${resourceKey}`,
-      { profile_keys: profileKeys }
+      { profile_keys: profileKeys, overrides }
     ),
 
   // Code Repos
@@ -177,6 +177,8 @@ export const api = {
   listKbs: () => get<KnowledgeBase[]>('/kbs'),
   createKb: (data: { slug: string; name: string; description?: string }) =>
     post<KnowledgeBase>('/kbs', data),
+  updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null }) =>
+    put<{ ok: boolean }>(`/kbs/${kbSlug}/defaults`, data),
 
   // Documents
   listDocs: (kb: string, backend?: string) => {
