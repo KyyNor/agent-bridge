@@ -330,7 +330,7 @@ class UnderstandAnythingClient:
         started = time.perf_counter()
         try:
             proc = subprocess.run(
-                ["claude", "-p", "--dangerously-skip-permissions", prompt],
+                ["claude", "-p", "--permission-mode", "auto", prompt],
                 cwd=str(project_dir),
                 capture_output=True, text=True, timeout=timeout,
             )
