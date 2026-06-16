@@ -6,6 +6,7 @@ import pytest
 
 from agent_bridge.core.config import BackendConfig, AgentBridgePaths
 from agent_bridge.knowledge.backends.mock import MockBackend
+from agent_bridge.knowledge.backends.pageindex import PageIndexBackend
 from agent_bridge.knowledge.backends.ragflow import RagFlowBackend
 from agent_bridge.knowledge.backends.registry import BackendRegistry, create_registry
 from agent_bridge.knowledge.backends.weknora import WeknoraBackend
@@ -75,3 +76,24 @@ def test_registry_with_weknora_config(tmp_path: Path):
     assert isinstance(adapter, WeknoraBackend)
     assert adapter.embedding_model_id == "emb-1"
     assert adapter.summary_model_id == "chat-1"
+
+
+def test_registry_with_pageindex_config(tmp_path: Path):
+    config = BackendConfig(
+        slug="pageindex-main",
+        backend_type="pageindex",
+        base_url="http://litellm.internal/v1",
+        api_key="internal-key",
+        timeout=30,
+        embedding_model_id="openai/local-chat",
+        summary_model_id="openai/local-chat",
+    )
+    registry = BackendRegistry({"pageindex-main": config}, paths=tmp_path)
+    adapter = registry.get("pageindex-main")
+    assert adapter is not None
+    assert isinstance(adapter, PageIndexBackend)
+    assert adapter.root == tmp_path / "data" / "backend" / "pageindex" / "pageindex-main"
+    assert adapter.base_url == "http://litellm.internal/v1"
+    assert adapter.api_key == "internal-key"
+    assert adapter.model == "openai/local-chat"
+    assert adapter.retrieve_model == "openai/local-chat"

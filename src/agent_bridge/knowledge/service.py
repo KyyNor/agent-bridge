@@ -38,6 +38,7 @@ from agent_bridge.storage.sqlite import SQLiteStore
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md"}
+SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
 
 
 class AgentBridgeService:
@@ -661,7 +662,7 @@ class AgentBridgeService:
                     api_key: str | None = None, timeout: int = 120,
                     embedding_model_id: str | None = None, summary_model_id: str | None = None) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        if backend_type not in ("mock", "ragflow", "weknora"):
+        if backend_type not in SUPPORTED_BACKEND_TYPES:
             raise ValidationError(f"unsupported backend type: {backend_type}")
         row = self.store.upsert_backend(
             slug=slug, backend_type=backend_type, base_url=base_url,
@@ -690,6 +691,8 @@ class AgentBridgeService:
         if existing is None:
             raise NotFound(f"backend '{slug}' not found")
         resolved_type = backend_type or existing["backend_type"]
+        if resolved_type not in SUPPORTED_BACKEND_TYPES:
+            raise ValidationError(f"unsupported backend type: {resolved_type}")
         # Keep existing api_key if not provided (empty string means clear, None means keep)
         resolved_key = existing.get("api_key") if api_key is None else (api_key or None)
         row = self.store.upsert_backend(
