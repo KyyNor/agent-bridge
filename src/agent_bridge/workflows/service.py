@@ -5,6 +5,7 @@ from typing import Any
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.workflows.models import WorkflowArtifactFormat, WorkflowStatus, require_manifest
+from agent_bridge.workflows.result_parser import ParsedWorkflowResult
 
 
 def _snippet(content: str, query: str | None, size: int = 220) -> str:
@@ -192,6 +193,40 @@ class WorkflowService:
             content=content,
             metadata=metadata,
         )
+
+    def ingest_parsed_result(
+        self,
+        *,
+        workflow_key: str,
+        profile_key: str,
+        run_id: str,
+        parsed: ParsedWorkflowResult,
+    ) -> dict[str, Any]:
+        self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
+        if parsed.status == "no_executable_task":
+            return {"status": "no_task", "artifact_count": 0}
+        if parsed.status != "completed" or not parsed.task_key:
+            raise ValidationError("parsed workflow result is not ingestible")
+        saved = [
+            self.save_artifact(
+                workflow_key=workflow_key,
+                profile_key=profile_key,
+                run_id=run_id,
+                task_key=parsed.task_key,
+                title=artifact.title,
+                path=artifact.path,
+                tags=artifact.tags,
+                format=artifact.format,
+                summary=artifact.summary,
+                content=artifact.content,
+                metadata=artifact.metadata,
+            )
+            for artifact in parsed.artifacts
+        ]
+        completed = self.store.complete_workflow_task(workflow_key, parsed.task_key, run_id=run_id)
+        if not completed:
+            raise ValidationError("workflow task lease mismatch")
+        return {"status": "completed", "artifact_count": len(saved), "artifacts": saved}
 
     def search_artifacts(
         self,
