@@ -458,18 +458,25 @@ class KnowledgeRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_synced_docs_for_target(self, kb_id: int, backend_slug: str) -> list[dict[str, Any]]:
+    def list_synced_doc_ids(self, kb_id: int) -> list[int]:
+        """Doc ids in this KB that are synced to *any* backend.
+
+        Used to backfill existing documents into a newly-added backend. Keyed by
+        KB rather than by backend: sync_states are per-backend, so a brand-new
+        backend has no states yet and must be backfilled from docs already synced
+        elsewhere.
+        """
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT DISTINCT s.doc_id
                 FROM sync_states s
                 JOIN document_kbs dk ON dk.doc_id = s.doc_id AND dk.kb_id = s.kb_id
-                WHERE s.kb_id = ? AND s.backend_slug = ? AND s.status = ?
+                WHERE s.kb_id = ? AND s.status = ?
                 """,
-                (kb_id, backend_slug, SyncStateStatus.synced.value),
+                (kb_id, SyncStateStatus.synced.value),
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [row[0] for row in rows]
 
     def list_docs_for_kb(self, kb_id: int) -> list[dict[str, Any]]:
         with self._connect() as conn:

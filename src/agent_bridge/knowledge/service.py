@@ -649,13 +649,13 @@ class AgentBridgeService:
                     except Exception:
                         self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
 
-                    # Create pending sync jobs for existing synced docs
-                    synced = self.store.list_synced_docs_for_target(kb["id"], backend_slug)
-                    for row in synced:
-                        versions = self.store.list_versions(row["doc_id"])
+                    # Create pending sync jobs for docs already synced to any
+                    # backend, so a newly-added backend catches up on history.
+                    for doc_id in self.store.list_synced_doc_ids(kb["id"]):
+                        versions = self.store.list_versions(doc_id)
                         version_id = versions[-1]["id"] if versions else None
                         self.store.create_sync_job(
-                            row["doc_id"], kb["id"], Operation.create, version_id,
+                            doc_id, kb["id"], Operation.create, version_id,
                             backend_slug=backend_slug,
                         )
 

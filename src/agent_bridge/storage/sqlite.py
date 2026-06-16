@@ -688,8 +688,8 @@ class SQLiteStore:
     def list_sync_states_for_doc(self, doc_id: int) -> list[dict[str, Any]]:
         return self.knowledge.list_sync_states_for_doc(doc_id=doc_id)
 
-    def list_synced_docs_for_target(self, kb_id: int, backend_slug: str) -> list[dict[str, Any]]:
-        return self.knowledge.list_synced_docs_for_target(kb_id=kb_id, backend_slug=backend_slug)
+    def list_synced_doc_ids(self, kb_id: int) -> list[int]:
+        return self.knowledge.list_synced_doc_ids(kb_id=kb_id)
 
     def list_kbs(self) -> list[dict[str, Any]]:
         return self.knowledge.list_kbs()
