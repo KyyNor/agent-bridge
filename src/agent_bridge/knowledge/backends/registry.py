@@ -11,6 +11,7 @@ ADAPTER_CLASSES: dict[str, type] = {
     "mock": MockBackend,
     "ragflow": type("RagFlowBackend", (), {}),  # placeholder; real class used via lazy import
     "weknora": type("WeknoraBackend", (), {}),  # placeholder; real class used via lazy import
+    "pageindex": type("PageIndexBackend", (), {}),  # placeholder; real class used via lazy import
 }
 
 
@@ -41,6 +42,15 @@ class BackendRegistry:
                 timeout=config.timeout,
                 embedding_model_id=config.embedding_model_id,
                 summary_model_id=config.summary_model_id,
+            )
+        elif config.backend_type == "pageindex":
+            from agent_bridge.knowledge.backends.pageindex import PageIndexBackend
+            return PageIndexBackend(
+                root=self._paths / "data" / "backend" / "pageindex" / config.slug,
+                base_url=config.base_url,
+                api_key=config.api_key,
+                model=config.embedding_model_id,
+                retrieve_model=config.summary_model_id or config.embedding_model_id,
             )
         raise ValueError(f"unknown backend type: {config.backend_type}")
 

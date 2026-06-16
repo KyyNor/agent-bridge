@@ -9,10 +9,13 @@ dependencies = [
     "cryptography>=48.0.0",
     "fastapi>=0.124.0",
     "httpx>=0.28.0",
+    "litellm>=1.89.0",
+    "markitdown[all]>=0.1.6",
     "mcp>=1.27.2",
+    "pageindex>=0.2.8",
     "python-multipart>=0.0.20",
     "questionary>=2.1.1",
-    "typer>=0.26.2",
+    "typer>=0.25.1",
     "uvicorn>=0.38.0",
 ]
 
@@ -31,6 +34,9 @@ markers = [
     "ragflow: integration tests requiring a live RagFlow server",
     "weknora: integration tests requiring a live Weknora server",
 ]
+
+[tool.uv]
+prerelease = "allow"
 
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12.0"]

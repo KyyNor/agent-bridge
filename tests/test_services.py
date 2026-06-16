@@ -344,6 +344,27 @@ def test_align_backends_no_registry_is_noop(wm_paths):
     service.align_backends()
 
 
+def test_admin_can_add_pageindex_backend(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+
+    row = service.add_backend(
+        "root",
+        "pageindex-main",
+        "pageindex",
+        base_url="http://litellm.internal/v1",
+        api_key="internal-key",
+        embedding_model_id="openai/local-chat",
+        summary_model_id="openai/local-chat",
+    )
+
+    assert row["slug"] == "pageindex-main"
+    assert row["backend_type"] == "pageindex"
+    assert row["api_key_set"] is True
+    assert row["runtime_status"] == "active"
+    assert service.registry is not None
+    assert service.registry.get("pageindex-main") is not None
+
+
 def test_search_with_default_backend(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")

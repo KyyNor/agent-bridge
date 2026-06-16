@@ -38,11 +38,14 @@ const editingBackend = ref(false)
 const backendTypes = [
   { value: 'ragflow', label: 'RagFlow' },
   { value: 'weknora', label: 'Weknora' },
+  { value: 'pageindex', label: 'PageIndex (内置)' },
   { value: 'mock', label: 'Mock (测试)' },
 ]
 
-const isRagflowOrWeknora = computed(() => backendForm.value.backend_type === 'ragflow' || backendForm.value.backend_type === 'weknora')
+const needsBackendConnection = computed(() => ['ragflow', 'weknora', 'pageindex'].includes(backendForm.value.backend_type))
 const isWeknora = computed(() => backendForm.value.backend_type === 'weknora')
+const isPageIndex = computed(() => backendForm.value.backend_type === 'pageindex')
+const supportsModelConfig = computed(() => isWeknora.value || isPageIndex.value)
 
 onMounted(async () => {
   await Promise.all([loadSyncConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
@@ -197,11 +200,11 @@ async function saveBackend() {
       backend_type: backendForm.value.backend_type,
       timeout: backendForm.value.timeout,
     }
-    if (isRagflowOrWeknora.value) {
+    if (needsBackendConnection.value) {
       data.base_url = backendForm.value.base_url || null
       if (backendForm.value.api_key) data.api_key = backendForm.value.api_key
     }
-    if (isWeknora.value) {
+    if (supportsModelConfig.value) {
       data.embedding_model_id = backendForm.value.embedding_model_id || null
       data.summary_model_id = backendForm.value.summary_model_id || null
     }
@@ -478,21 +481,21 @@ async function deleteBackend(slug: string) {
               <option v-for="t in backendTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
             </select>
           </div>
-          <div v-if="isRagflowOrWeknora" class="space-y-2">
-            <label class="text-sm font-medium">Base URL <span class="text-destructive">*</span></label>
-            <Input v-model="backendForm.base_url" placeholder="http://localhost:9380" />
+          <div v-if="needsBackendConnection" class="space-y-2">
+            <label class="text-sm font-medium">{{ isPageIndex ? 'LiteLLM Base URL' : 'Base URL' }} <span class="text-destructive">*</span></label>
+            <Input v-model="backendForm.base_url" :placeholder="isPageIndex ? 'http://litellm.internal:4000/v1' : 'http://localhost:9380'" />
           </div>
-          <div v-if="isRagflowOrWeknora" class="space-y-2">
+          <div v-if="needsBackendConnection" class="space-y-2">
             <label class="text-sm font-medium">API Key{{ editingBackend ? '（留空保持不变）' : '' }}</label>
-            <Input v-model="backendForm.api_key" type="password" placeholder="ragflow-xxxx" />
+            <Input v-model="backendForm.api_key" type="password" :placeholder="isPageIndex ? 'internal-litellm-key' : 'ragflow-xxxx'" />
           </div>
-          <div v-if="isWeknora" class="space-y-2">
-            <label class="text-sm font-medium">Embedding Model ID</label>
-            <Input v-model="backendForm.embedding_model_id" placeholder="emb-1" />
+          <div v-if="supportsModelConfig" class="space-y-2">
+            <label class="text-sm font-medium">{{ isPageIndex ? 'Index Model' : 'Embedding Model ID' }}</label>
+            <Input v-model="backendForm.embedding_model_id" :placeholder="isPageIndex ? 'openai/qwen-long' : 'emb-1'" />
           </div>
-          <div v-if="isWeknora" class="space-y-2">
-            <label class="text-sm font-medium">Summary Model ID</label>
-            <Input v-model="backendForm.summary_model_id" placeholder="chat-1" />
+          <div v-if="supportsModelConfig" class="space-y-2">
+            <label class="text-sm font-medium">{{ isPageIndex ? 'Retrieve / Ask Model' : 'Summary Model ID' }}</label>
+            <Input v-model="backendForm.summary_model_id" :placeholder="isPageIndex ? 'openai/qwen-long' : 'chat-1'" />
           </div>
           <div class="space-y-2">
             <label class="text-sm font-medium">超时（秒）</label>

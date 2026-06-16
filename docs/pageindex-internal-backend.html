@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PageIndex 内置后端部署说明</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #17202a; background: #f7f8fa; }
+    main { max-width: 980px; margin: 0 auto; padding: 40px 24px 64px; }
+    h1 { margin: 0 0 12px; font-size: 34px; letter-spacing: 0; }
+    h2 { margin-top: 32px; font-size: 20px; }
+    p, li { line-height: 1.7; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    pre { overflow: auto; padding: 16px; border: 1px solid #dfe3e8; background: #fff; border-radius: 8px; }
+    .panel { padding: 20px; border: 1px solid #dfe3e8; background: #fff; border-radius: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .tag { display: inline-block; margin-right: 8px; padding: 3px 8px; border: 1px solid #cfd6dd; border-radius: 999px; background: #fff; font-size: 12px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>PageIndex 内置后端部署说明</h1>
+  <p>本方案把 PageIndex 作为 Agent Bridge 的内置知识后端运行。选择 <code>backend_type = pageindex</code> 后，Agent Bridge 不调用外部 PageIndex API，而是在本进程内调用 PageIndex SDK，并通过内网 LiteLLM 网关访问模型。</p>
+
+  <section class="grid">
+    <div class="panel">
+      <h2>首期支持格式</h2>
+      <p><span class="tag">PDF</span><span class="tag">Markdown</span><span class="tag">MarkItDown 支持格式</span></p>
+      <p>其中 <code>.docx</code> 会通过 MarkItDown 转为 Markdown 后索引。老式 <code>.doc</code> 暂不支持，需要后续增加 LibreOffice 转换链路。</p>
+    </div>
+    <div class="panel">
+      <h2>存储位置</h2>
+      <p>索引与转换产物保存在：</p>
+      <pre>/root/agent-bridge/data/backend/pageindex/{backend_slug}/{kb_slug}/</pre>
+    </div>
+  </section>
+
+  <h2>离线依赖准备</h2>
+  <p>PageIndex、MarkItDown 全量可选依赖和 LiteLLM 已作为 Agent Bridge 主依赖安装。普通 <code>uv sync</code> 会直接带上 PageIndex 内置后端所需依赖；离线部署时，在有网构建机上按主依赖解析并打包 wheel 或镜像层，再拷贝到内网环境。</p>
+  <pre>uv sync
+uv export --format requirements-txt > requirements-pageindex.txt
+pip download -r requirements-pageindex.txt -d offline-wheels/</pre>
+  <p>内网服务器可以使用离线 wheel 安装：</p>
+  <pre>pip install --no-index --find-links offline-wheels -r requirements-pageindex.txt</pre>
+
+  <h2>LiteLLM 网关配置</h2>
+  <p>在管理页面新增 PageIndex 后端时填写：</p>
+  <ul>
+    <li><strong>LiteLLM Base URL</strong>：内网 OpenAI-compatible 地址，例如 <code>http://litellm.internal:4000/v1</code></li>
+    <li><strong>API Key</strong>：内网 LiteLLM key</li>
+    <li><strong>Index Model</strong>：PageIndex 建索引用模型，例如 <code>openai/qwen-long</code></li>
+    <li><strong>Retrieve / Ask Model</strong>：检索和问答模型；留空时复用 Index Model</li>
+  </ul>
+
+  <h2>运行行为</h2>
+  <p>文档上传仍走 Agent Bridge 现有同步任务。PageIndex 后端在同步任务中完成转换、索引和本地元数据记录。检索首期采用本地 PageIndex 结构内容的关键词匹配返回片段；问答会把检索片段作为上下文发给 LiteLLM。</p>
+
+  <h2>后续增强</h2>
+  <ul>
+    <li>增加 OpenAI Agents SDK 风格的 PageIndex tree-search 问答。</li>
+    <li>增加 <code>.doc</code> 经 LibreOffice headless 转 <code>.docx</code> 的兼容链路。</li>
+    <li>将长耗时索引任务进一步拆成独立 worker 或进程池。</li>
+  </ul>
+</main>
+</body>
+</html>
