@@ -13,7 +13,13 @@ import { Badge } from '../../components/ui/badge'
 const loading = ref(true)
 
 // Sync config
-const syncConfig = ref<KnowledgeSyncConfig>({ code_sync_cron: '0 * * * *', ua_git_url: '', understand_cron: '0 2 * * *', doc_sync_cron: '*/30 * * * *' })
+const syncConfig = ref<KnowledgeSyncConfig>({
+  code_sync_cron: '0 * * * *',
+  ua_git_url: '',
+  understand_cron: '0 2 * * *',
+  doc_sync_cron: '*/30 * * * *',
+  workflow_cron: '0 22 * * *',
+})
 const configSaving = ref(false)
 const cronError = ref('')
 
@@ -92,7 +98,13 @@ function formatNextRuns(expr: string): string | null {
 const codeSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.code_sync_cron))
 const understandNextRuns = computed(() => formatNextRuns(syncConfig.value.understand_cron))
 const docSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.doc_sync_cron || '*/30 * * * *'))
-const cronValid = computed(() => codeSyncNextRuns.value !== null && understandNextRuns.value !== null && docSyncNextRuns.value !== null)
+const workflowNextRuns = computed(() => formatNextRuns(syncConfig.value.workflow_cron || '0 22 * * *'))
+const cronValid = computed(() =>
+  codeSyncNextRuns.value !== null
+  && understandNextRuns.value !== null
+  && docSyncNextRuns.value !== null
+  && workflowNextRuns.value !== null
+)
 
 function runBadgeClass(status?: string | null): string {
   if (status === 'succeeded') return 'bg-green-50 text-green-700'
@@ -238,22 +250,28 @@ async function deleteBackend(slug: string) {
       <CardContent class="space-y-4 p-5">
         <div class="text-sm font-medium">定时任务管理</div>
 
-        <div class="grid grid-cols-[auto_minmax(0,10rem)_1fr] items-center gap-6">
+        <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">代码同步 <span class="text-xs text-muted-foreground">(CodeGraph)</span></div>
           <Input v-model="syncConfig.code_sync_cron" placeholder="0 * * * *" class="w-40 font-mono text-xs" />
           <span v-if="codeSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ codeSyncNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
-        <div class="grid grid-cols-[auto_minmax(0,10rem)_1fr] items-center gap-6">
+        <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">代码理解 <span class="text-xs text-muted-foreground">(Understand Anything)</span></div>
           <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
           <span v-if="understandNextRuns" class="text-xs text-muted-foreground font-mono">{{ understandNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
-        <div class="grid grid-cols-[auto_minmax(0,10rem)_1fr] items-center gap-6">
+        <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">知识同步 <span class="text-xs text-muted-foreground">(文档知识同步)</span></div>
           <Input v-model="syncConfig.doc_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
           <span v-if="docSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ docSyncNextRuns }}</span>
+          <span v-else class="text-xs text-destructive">表达式无效</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">工作流调度 <span class="text-xs text-muted-foreground">(Workflow)</span></div>
+          <Input v-model="syncConfig.workflow_cron" placeholder="0 22 * * *" class="w-40 font-mono text-xs" />
+          <span v-if="workflowNextRuns" class="text-xs text-muted-foreground font-mono">{{ workflowNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
 
@@ -364,6 +382,21 @@ async function deleteBackend(slug: string) {
                     {{ formatLocalDatetime(schedulerStatus.doc_sync.last_run.finished_at) }}
                   </span>
                 </div>
+              </div>
+            </div>
+            <div>
+              <div class="mb-2 flex items-center gap-3">
+                <span class="text-xs text-muted-foreground">工作流调度</span>
+                <Badge :variant="schedulerStatus.workflow?.running ? 'secondary' : 'outline'" :class="schedulerStatus.workflow?.running ? 'bg-green-50 text-green-700' : ''">
+                  {{ schedulerStatus.workflow?.running ? '运行中' : '已暂停' }}
+                </Badge>
+                <span v-if="schedulerStatus.workflow?.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.workflow.cron }}</span>
+                <span class="text-xs text-muted-foreground">最多并发 {{ schedulerStatus.workflow?.max_concurrent_workflows || 2 }} 个工作流</span>
+              </div>
+              <div class="space-y-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                <div>正在执行：{{ schedulerStatus.workflow?.running_workflows?.length ? schedulerStatus.workflow.running_workflows.join(', ') : '无' }}</div>
+                <div>今日结束：{{ schedulerStatus.workflow?.finished_today?.length ? schedulerStatus.workflow.finished_today.join(', ') : '无' }}</div>
+                <div v-if="schedulerStatus.workflow?.jobs?.[0]?.next_run_at">下次执行：{{ formatLocalDatetime(schedulerStatus.workflow.jobs[0].next_run_at) }}</div>
               </div>
             </div>
           </div>

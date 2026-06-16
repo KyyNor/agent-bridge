@@ -80,3 +80,28 @@ def test_scheduler_respects_cross_midnight_schedule_window(wm_paths):
     assert scheduler.schedule_allows_start(schedule, now=datetime(2026, 6, 16, 23, 30))
     assert scheduler.schedule_allows_start(schedule, now=datetime(2026, 6, 17, 6, 30))
     assert not scheduler.schedule_allows_start(schedule, now=datetime(2026, 6, 17, 12, 0))
+
+
+def test_scheduler_uses_shared_workflow_cron_from_system_config(wm_paths):
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.save_sync_config(
+        code_sync_cron="0 * * * *",
+        understand_cron="0 2 * * *",
+        doc_sync_cron="*/30 * * * *",
+        workflow_cron="15 23 * * *",
+    )
+    scheduler = WorkflowScheduler(service=svc.workflows, store=svc.store, admins={"root"}, runner=FakeWorkflowRunner())
+
+    scheduler.start()
+    try:
+        status = scheduler.get_status()
+    finally:
+        scheduler.stop()
+
+    assert status["cron"] == "15 23 * * *"
+    assert [job["repo_key"] for job in status["jobs"]] == ["workflow_tick"]

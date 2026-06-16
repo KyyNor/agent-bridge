@@ -349,12 +349,28 @@ class AgentBridgeService:
         require_admin_user(actor, self.admins)
         return self.store.get_sync_config()
 
-    def save_sync_config(self, actor: str, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *", doc_sync_cron: str = "*/30 * * * *") -> dict[str, Any]:
+    def save_sync_config(
+        self,
+        actor: str,
+        *,
+        code_sync_cron: str,
+        ua_git_url: str = "",
+        understand_cron: str = "0 2 * * *",
+        doc_sync_cron: str = "*/30 * * * *",
+        workflow_cron: str = "0 22 * * *",
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        result = self.store.save_sync_config(code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron, doc_sync_cron=doc_sync_cron)
+        result = self.store.save_sync_config(
+            code_sync_cron=code_sync_cron,
+            ua_git_url=ua_git_url,
+            understand_cron=understand_cron,
+            doc_sync_cron=doc_sync_cron,
+            workflow_cron=workflow_cron,
+        )
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()
         self.doc_sync_scheduler.refresh()
+        self.workflow_scheduler.refresh()
         return result
 
     def get_scheduler_status(self, actor: str) -> dict[str, Any]:
@@ -363,6 +379,7 @@ class AgentBridgeService:
             "code_sync": self.codegraph_scheduler.get_status(),
             "understand": self.understand_scheduler.get_status(),
             "doc_sync": self.doc_sync_scheduler.get_status(),
+            "workflow": self.workflow_scheduler.get_status(),
         }
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:

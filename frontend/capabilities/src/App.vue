@@ -38,7 +38,6 @@ const navGroups: NavGroup[] = [
     items: [
       { key: 'knowledge', label: '文档知识', description: '管理文档知识库和文档' },
       { key: 'code-repos', label: '代码知识', description: '管理代码仓库和知识图谱' },
-      { key: 'knowledge-config', label: '知识处理配置', description: '配置同步计划和仓库分类' },
     ],
   },
   {
@@ -52,6 +51,12 @@ const navGroups: NavGroup[] = [
     items: [
       { key: 'logs', label: '调用日志', description: '查看和分析工具调用记录' },
       { key: 'stats', label: '调用统计', description: '查看工具调用统计和趋势' },
+    ],
+  },
+  {
+    label: '系统配置',
+    items: [
+      { key: 'system-config', label: '系统配置', description: '配置调度计划、仓库分类和知识后端' },
     ],
   },
 ]
@@ -76,7 +81,7 @@ const view = computed(() => hash.value)
         <ProfilesView v-else-if="view === 'profiles'" />
         <CodeRepoView v-else-if="view === 'code-repos'" />
         <KnowledgeView v-else-if="view === 'knowledge'" />
-        <KnowledgeProcessingConfigView v-else-if="view === 'knowledge-config'" />
+        <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
         <WorkflowView v-else-if="view === 'workflow'" />
         <LogsView v-else-if="view === 'logs'" />
         <StatsView v-else-if="view === 'stats'" />

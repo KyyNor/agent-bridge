@@ -527,14 +527,15 @@ def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None
     assert "label: '资源管理'" not in source
     assert "key: 'knowledge', label: '文档知识'" in source
     assert "key: 'code-repos', label: '代码知识'" in source
-    assert "key: 'knowledge-config', label: '知识处理配置'" in source
+    assert "key: 'system-config', label: '系统配置'" in source
     assert "KnowledgeProcessingConfigView" in source
     assert "CodeRepoView" in source
-    assert "view === 'knowledge-config'" in source
+    assert "view === 'system-config'" in source
     assert "view === 'code-repos'" in source
     assert "BuiltinsView" not in source
     assert "view === 'builtins'" not in source
     assert source.count("label: '知识管理'") == 1
+    assert source.index("label: '调用观测'") < source.index("label: '系统配置'")
 
 
 def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> None:
@@ -577,9 +578,12 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
     assert "定时任务管理" in source
     assert "code_sync_cron" in source
     assert "doc_sync_cron" in source
+    assert "workflow_cron" in source
     assert "知识同步" in source
+    assert "工作流调度" in source
     assert "最近进度" in source
     assert "当前执行" in source
+    assert "grid-cols-[12rem_minmax(0,10rem)_1fr]" in source
 
 
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
@@ -896,3 +900,9 @@ def test_frontend_workflow_view_exposes_workflow_management() -> None:
     assert "artifacts_search" in source
     assert "manifest" in source
     assert "workflow_js" in source
+    assert "Claude Code 工作流" in source
+    assert "工作流结构定义" in source
+    assert "输出验收要求" in source
+    assert "no_executable_task" in source
+    assert "启用" in source
+    assert "停用" in source

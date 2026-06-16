@@ -285,6 +285,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   ua_git_url TEXT NOT NULL DEFAULT '',
   understand_cron TEXT NOT NULL DEFAULT '0 2 * * *',
   doc_sync_cron TEXT NOT NULL DEFAULT '*/30 * * * *',
+  workflow_cron TEXT NOT NULL DEFAULT '0 22 * * *',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

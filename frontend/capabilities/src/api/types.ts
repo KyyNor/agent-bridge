@@ -354,6 +354,7 @@ export interface KnowledgeSyncConfig {
   ua_git_url: string
   understand_cron: string
   doc_sync_cron: string
+  workflow_cron: string
 }
 
 export interface SingleSchedulerStatus {
@@ -392,6 +393,11 @@ export interface SchedulerStatus {
   code_sync: SingleSchedulerStatus
   understand: SingleSchedulerStatus
   doc_sync: SingleSchedulerStatus
+  workflow: SingleSchedulerStatus & {
+    running_workflows?: string[]
+    finished_today?: string[]
+    max_concurrent_workflows?: number
+  }
 }
 
 export interface UAStatus {

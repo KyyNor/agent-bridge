@@ -776,7 +776,7 @@ watch(showDetail, (open) => {
               <template v-else>
                 <div v-if="uaAvailability && !uaAvailability.ua_skill_available && !uaAvailability.ua_git_url_configured" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
                   <div class="font-medium">Understand Anything 不可用</div>
-                  <div class="mt-1">请在「知识处理配置」页面填写 UA Git URL 以启用自动安装。</div>
+                  <div class="mt-1">请在「系统配置」页面填写 UA Git URL 以启用自动安装。</div>
                 </div>
                 <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 flex items-center justify-between">
                   <span>UA 技能未安装，将在运行分析时自动安装</span>

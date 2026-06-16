@@ -123,6 +123,7 @@ class KnowledgeSyncConfigRequest(BaseModel):
     ua_git_url: str = ""
     understand_cron: str = "0 2 * * *"
     doc_sync_cron: str = "*/30 * * * *"
+    workflow_cron: str = "0 22 * * *"
 
 
 class WorkflowDefinitionRequest(BaseModel):

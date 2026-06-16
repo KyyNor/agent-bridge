@@ -193,6 +193,12 @@ function edgeTitle(edge: Record<string, unknown>) {
   return from && to ? `${from} -> ${to}` : JSON.stringify(edge)
 }
 
+function statusLabel(status: string) {
+  if (status === 'active') return '启用'
+  if (status === 'disabled') return '停用'
+  return status
+}
+
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
 }
@@ -230,7 +236,7 @@ function errorMessage(e: unknown) {
           >
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
-              <Badge variant="outline">{{ item.status }}</Badge>
+              <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
             </div>
             <div class="mt-1 truncate text-xs text-muted-foreground">{{ item.workflow_key }}</div>
             <div class="mt-2 text-xs text-muted-foreground">{{ profileName(item.profile_key) }}</div>
@@ -354,23 +360,19 @@ function errorMessage(e: unknown) {
     </div>
 
     <Dialog v-model:open="showEditor">
-      <DialogContent class="max-w-5xl">
+      <DialogContent class="w-[96vw] max-w-[1600px]">
         <DialogHeader>
           <DialogTitle>{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</DialogTitle>
         </DialogHeader>
-        <div class="grid max-h-[72vh] gap-4 overflow-auto pr-1 lg:grid-cols-2">
-          <div class="space-y-3">
-            <div>
+        <div class="max-h-[78vh] space-y-5 overflow-auto pr-1">
+          <div class="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_0.7fr]">
+            <div class="lg:col-span-1">
               <label class="mb-1 block text-xs text-muted-foreground">workflow_key</label>
               <Input v-model="form.workflow_key" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
             </div>
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">名称</label>
               <Input v-model="form.name" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">描述</label>
-              <Input v-model="form.description" />
             </div>
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">关联 profile_key</label>
@@ -383,23 +385,36 @@ function errorMessage(e: unknown) {
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">状态</label>
               <select v-model="form.status" class="h-10 w-full rounded-md border bg-background px-3 text-sm">
-                <option value="active">active</option>
-                <option value="disabled">disabled</option>
+                <option value="active">启用</option>
+                <option value="disabled">停用</option>
               </select>
             </div>
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">schedule JSON</label>
-              <textarea v-model="form.scheduleText" class="min-h-32 w-full rounded-md border bg-background p-3 font-mono text-xs" />
+            <div class="lg:col-span-4">
+              <label class="mb-1 block text-xs text-muted-foreground">描述</label>
+              <Input v-model="form.description" />
             </div>
           </div>
-          <div class="space-y-3">
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">manifest JSON</label>
-              <textarea v-model="form.manifestText" class="min-h-48 w-full rounded-md border bg-background p-3 font-mono text-xs" />
+
+          <div class="grid gap-4 xl:grid-cols-[1.15fr_1fr_1.35fr]">
+            <div class="space-y-3">
+              <label class="block text-xs text-muted-foreground">调度窗口 JSON</label>
+              <textarea v-model="form.scheduleText" class="min-h-32 w-full rounded-md border bg-background p-3 font-mono text-xs" />
+              <div class="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+                <div class="font-medium text-foreground">输出验收要求</div>
+                <div>Workflow 必须在运行目录写入 <span class="font-mono">out/result.json</span>。</div>
+                <div class="mt-2 font-mono">
+                  {"status":"completed","task_key":"page:a","artifacts":[{"title":"...","path":"reports/a.md","tags":[],"format":"markdown","file":"out/artifacts/a.md","summary":"..."}]}
+                </div>
+                <div class="mt-2">没有可执行任务时输出 <span class="font-mono">{"status":"no_executable_task","reason":"..."}</span>。artifact 文件必须在运行目录内，当前只接受 Markdown。</div>
+              </div>
             </div>
             <div>
-              <label class="mb-1 block text-xs text-muted-foreground">workflow_js</label>
-              <textarea v-model="form.workflow_js" class="min-h-64 w-full rounded-md border bg-background p-3 font-mono text-xs" />
+              <label class="mb-1 block text-xs text-muted-foreground">工作流结构定义</label>
+              <textarea v-model="form.manifestText" class="min-h-[28rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-muted-foreground">Claude Code 工作流</label>
+              <textarea v-model="form.workflow_js" class="min-h-[28rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
             </div>
           </div>
         </div>

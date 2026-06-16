@@ -8,13 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.workflows.result_parser import parse_workflow_result
 from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunner, WorkflowRunSpec
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_WORKFLOW_CRON = "0 22 * * *"
 
 
 class WorkflowScheduler:
@@ -37,6 +39,7 @@ class WorkflowScheduler:
         self._mcp_url = mcp_url
         self._max_concurrent = max_concurrent_workflows
         self._scheduler: BackgroundScheduler | None = None
+        self._current_cron = _DEFAULT_WORKFLOW_CRON
         self._cursor = 0
         self._running: set[str] = set()
         self.finished_today: set[str] = set()
@@ -44,12 +47,12 @@ class WorkflowScheduler:
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        if self._scheduler is not None:
-            return
-        self._scheduler = BackgroundScheduler()
-        self._scheduler.add_job(self.tick, trigger=IntervalTrigger(seconds=30), id="workflow_tick")
+        config = self._store.get_sync_config()
+        self._current_cron = config.get("workflow_cron") or _DEFAULT_WORKFLOW_CRON
+        self._ensure_scheduler()
+        self._refresh_jobs()
         self._scheduler.start()
-        logger.info("Workflow 调度器已启动")
+        logger.info("Workflow 调度器已启动 cron: %s", self._current_cron)
 
     def stop(self) -> None:
         if self._scheduler:
@@ -57,13 +60,45 @@ class WorkflowScheduler:
             self._scheduler = None
             logger.info("Workflow 调度器已停止")
 
+    def refresh(self) -> None:
+        config = self._store.get_sync_config()
+        self._current_cron = config.get("workflow_cron") or _DEFAULT_WORKFLOW_CRON
+        self._ensure_scheduler()
+        if not self._scheduler.running:
+            self._scheduler.start()
+            logger.info("Workflow 调度器已启动 cron: %s", self._current_cron)
+        self._refresh_jobs()
+
     def get_status(self) -> dict[str, Any]:
         return {
             "running": self._scheduler is not None and self._scheduler.running,
+            "cron": self._current_cron,
+            "jobs": [
+                {
+                    "repo_key": job.id,
+                    "next_run_at": str(job.next_run_time.isoformat()) if job.next_run_time else None,
+                }
+                for job in self._scheduler.get_jobs()
+            ] if self._scheduler and self._scheduler.running else [],
             "running_workflows": sorted(self._running),
             "finished_today": sorted(self.finished_today),
             "max_concurrent_workflows": self._max_concurrent,
         }
+
+    def _ensure_scheduler(self) -> None:
+        if self._scheduler is None:
+            self._scheduler = BackgroundScheduler()
+
+    def _refresh_jobs(self) -> None:
+        if not self._scheduler:
+            return
+        self._scheduler.remove_all_jobs()
+        try:
+            trigger = CronTrigger.from_crontab(self._current_cron)
+        except (ValueError, TypeError) as exc:
+            logger.error("无效的 Workflow cron 表达式 '%s': %s", self._current_cron, exc)
+            return
+        self._scheduler.add_job(self.tick, trigger=trigger, id="workflow_tick")
 
     def next_workflow_batch(self, candidates: set[str], running: set[str]) -> list[str]:
         ordered = sorted(candidates)

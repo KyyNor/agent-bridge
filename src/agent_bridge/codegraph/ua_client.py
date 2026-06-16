@@ -236,7 +236,7 @@ class UnderstandAnythingClient:
         return UAAvailability(
             claude_installed=True,
             ua_skill_available=False,
-            message="Understand Anything 技能未安装，且未配置自动安装地址。请在「知识处理配置」中填写 UA Git URL。",
+            message="Understand Anything 技能未安装，且未配置自动安装地址。请在「系统配置」中填写 UA Git URL。",
         )
 
     def check_availability_with_config(
