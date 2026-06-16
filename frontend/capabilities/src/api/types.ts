@@ -44,6 +44,46 @@ export interface ProjectProfile {
   resource_rules?: ProfileResourceRule[]
 }
 
+export interface WorkflowDefinition {
+  workflow_key: string
+  name: string
+  description: string
+  profile_key: string
+  workflow_js: string
+  manifest: {
+    name: string
+    nodes: Record<string, unknown>[]
+    edges: Record<string, unknown>[]
+    schemas: Record<string, unknown>
+    [key: string]: unknown
+  }
+  schedule: Record<string, unknown>
+  status: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkflowArtifact {
+  artifact_id: string
+  workflow_key: string
+  profile_key: string
+  run_id: string
+  task_key: string | null
+  title: string
+  path: string
+  tags: string[]
+  format: string
+  summary: string
+  snippet: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkflowArtifactSearchResult {
+  items: WorkflowArtifact[]
+}
+
 export interface ProfileSourceRule {
   source_type: string
   source_key: string
