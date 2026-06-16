@@ -238,19 +238,19 @@ async function deleteBackend(slug: string) {
       <CardContent class="space-y-4 p-5">
         <div class="text-sm font-medium">定时任务管理</div>
 
-        <div class="flex items-center gap-6">
+        <div class="grid grid-cols-[auto_minmax(0,10rem)_1fr] items-center gap-6">
           <div class="text-sm shrink-0 whitespace-nowrap">代码同步 <span class="text-xs text-muted-foreground">(CodeGraph)</span></div>
           <Input v-model="syncConfig.code_sync_cron" placeholder="0 * * * *" class="w-40 font-mono text-xs" />
           <span v-if="codeSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ codeSyncNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
-        <div class="flex items-center gap-6">
+        <div class="grid grid-cols-[auto_minmax(0,10rem)_1fr] items-center gap-6">
           <div class="text-sm shrink-0 whitespace-nowrap">代码理解 <span class="text-xs text-muted-foreground">(Understand Anything)</span></div>
           <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
           <span v-if="understandNextRuns" class="text-xs text-muted-foreground font-mono">{{ understandNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
-        <div class="flex items-center gap-6">
+        <div class="grid grid-cols-[auto_minmax(0,10rem)_1fr] items-center gap-6">
           <div class="text-sm shrink-0 whitespace-nowrap">知识同步 <span class="text-xs text-muted-foreground">(文档知识同步)</span></div>
           <Input v-model="syncConfig.doc_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
           <span v-if="docSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ docSyncNextRuns }}</span>
