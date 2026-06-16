@@ -33,7 +33,6 @@ const form = ref({
   status: 'active',
   workflow_js: '',
   manifestText: '{\n  "name": "Page Report",\n  "nodes": [],\n  "edges": [],\n  "schemas": {}\n}',
-  scheduleText: '{\n  "enabled": true,\n  "start_time": "22:00",\n  "stop_time": "07:00"\n}',
 })
 
 const selectedWorkflow = computed(() =>
@@ -107,7 +106,6 @@ function openCreate() {
     status: 'active',
     workflow_js: '',
     manifestText: '{\n  "name": "Page Report",\n  "nodes": [],\n  "edges": [],\n  "schemas": {}\n}',
-    scheduleText: '{\n  "enabled": true,\n  "start_time": "22:00",\n  "stop_time": "07:00"\n}',
   }
   formError.value = ''
   showEditor.value = true
@@ -122,7 +120,6 @@ function openEdit(item: WorkflowDefinition) {
     status: item.status,
     workflow_js: item.workflow_js,
     manifestText: JSON.stringify(item.manifest, null, 2),
-    scheduleText: JSON.stringify(item.schedule, null, 2),
   }
   formError.value = ''
   showEditor.value = true
@@ -135,12 +132,10 @@ async function saveWorkflow() {
     return
   }
   let manifest: Record<string, unknown>
-  let schedule: Record<string, unknown>
   try {
     manifest = JSON.parse(form.value.manifestText)
-    schedule = JSON.parse(form.value.scheduleText)
   } catch {
-    formError.value = 'Manifest 或调度配置不是合法 JSON'
+    formError.value = 'Manifest 不是合法 JSON'
     return
   }
   if (!isWorkflowManifest(manifest)) {
@@ -157,7 +152,6 @@ async function saveWorkflow() {
       status: form.value.status,
       workflow_js: form.value.workflow_js,
       manifest,
-      schedule,
     })
     selectedKey.value = saved.workflow_key
     showEditor.value = false
@@ -257,16 +251,10 @@ function errorMessage(e: unknown) {
               </div>
               <Button variant="outline" @click="openEdit(selectedWorkflow)">编辑</Button>
             </div>
-            <div class="grid gap-3 md:grid-cols-3">
+            <div class="grid gap-3 md:grid-cols-2">
               <div class="rounded-md border px-3 py-2">
                 <div class="text-xs text-muted-foreground">profile_key</div>
                 <div class="mt-1 truncate text-sm font-medium">{{ selectedProfileName }}</div>
-              </div>
-              <div class="rounded-md border px-3 py-2">
-                <div class="text-xs text-muted-foreground">调度</div>
-                <div class="mt-1 text-sm font-medium">
-                  {{ selectedWorkflow.schedule.start_time || '--' }} - {{ selectedWorkflow.schedule.stop_time || '--' }}
-                </div>
               </div>
               <div class="rounded-md border px-3 py-2">
                 <div class="text-xs text-muted-foreground">产物工具</div>
@@ -360,7 +348,7 @@ function errorMessage(e: unknown) {
     </div>
 
     <Dialog v-model:open="showEditor">
-      <DialogContent class="w-[96vw] max-w-[1600px]">
+      <DialogContent class="w-[96vw] max-w-[1700px]">
         <DialogHeader>
           <DialogTitle>{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</DialogTitle>
         </DialogHeader>
@@ -395,27 +383,24 @@ function errorMessage(e: unknown) {
             </div>
           </div>
 
-          <div class="grid gap-4 xl:grid-cols-[1.15fr_1fr_1.35fr]">
-            <div class="space-y-3">
-              <label class="block text-xs text-muted-foreground">调度窗口 JSON</label>
-              <textarea v-model="form.scheduleText" class="min-h-32 w-full rounded-md border bg-background p-3 font-mono text-xs" />
-              <div class="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
-                <div class="font-medium text-foreground">输出验收要求</div>
-                <div>Workflow 必须在运行目录写入 <span class="font-mono">out/result.json</span>。</div>
-                <div class="mt-2 font-mono">
-                  {"status":"completed","task_key":"page:a","artifacts":[{"title":"...","path":"reports/a.md","tags":[],"format":"markdown","file":"out/artifacts/a.md","summary":"..."}]}
-                </div>
-                <div class="mt-2">没有可执行任务时输出 <span class="font-mono">{"status":"no_executable_task","reason":"..."}</span>。artifact 文件必须在运行目录内，当前只接受 Markdown。</div>
-              </div>
-            </div>
+          <div class="grid gap-4 xl:grid-cols-2">
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">工作流结构定义</label>
-              <textarea v-model="form.manifestText" class="min-h-[28rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
+              <textarea v-model="form.manifestText" class="min-h-[34rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
             </div>
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">Claude Code 工作流</label>
-              <textarea v-model="form.workflow_js" class="min-h-[28rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
+              <textarea v-model="form.workflow_js" class="min-h-[34rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
             </div>
+          </div>
+
+          <div class="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+            <div class="font-medium text-foreground">输出验收要求</div>
+            <div>Workflow 必须在运行目录写入 <span class="font-mono">out/result.json</span>。</div>
+            <div class="mt-2 font-mono">
+              {"status":"completed","task_key":"page:a","artifacts":[{"title":"...","path":"reports/a.md","tags":[],"format":"markdown","file":"out/artifacts/a.md","summary":"..."}]}
+            </div>
+            <div class="mt-2">没有可执行任务时输出 <span class="font-mono">{"status":"no_executable_task","reason":"..."}</span>。artifact 文件必须在运行目录内，当前只接受 Markdown。调度窗口由系统配置统一管理。</div>
           </div>
         </div>
         <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">

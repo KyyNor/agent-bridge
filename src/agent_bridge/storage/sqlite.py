@@ -110,9 +110,15 @@ class SQLiteStore:
                     "code_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
                     "understand_cron": "TEXT NOT NULL DEFAULT '0 2 * * *'",
                     "doc_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
-                    "workflow_cron": "TEXT NOT NULL DEFAULT '0 22 * * *'",
+                    "workflow_start_time": "TEXT NOT NULL DEFAULT '22:00'",
+                    "workflow_stop_time": "TEXT NOT NULL DEFAULT '07:00'",
                 },
             )
+            # Workflow scheduling moved from a single global cron to a daily
+            # window (start/stop). Drop the legacy per-workflow schedule column
+            # and the superseded workflow_cron config column on existing DBs.
+            self._drop_column(conn, "knowledge_sync_config", "workflow_cron")
+            self._drop_column(conn, "workflow_definitions", "schedule_json")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS profile_doc_cache (
@@ -144,6 +150,15 @@ class SQLiteStore:
         for name, definition in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+    def _drop_column(self, conn: sqlite3.Connection, table: str, column: str) -> None:
+        """Drop a column if present. Uses native DROP COLUMN (SQLite >= 3.35);
+        on older engines the column is left in place (harmless, just unused)."""
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            return
+        if sqlite3.sqlite_version_info >= (3, 35, 0):
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
 
     def _migrate_tool_call_logs_nullable_profile(self, conn: sqlite3.Connection) -> None:
         return self.governance._migrate_tool_call_logs_nullable_profile(conn=conn)
@@ -244,14 +259,16 @@ class SQLiteStore:
         ua_git_url: str = "",
         understand_cron: str = "0 2 * * *",
         doc_sync_cron: str = "*/30 * * * *",
-        workflow_cron: str = "0 22 * * *",
+        workflow_start_time: str = "22:00",
+        workflow_stop_time: str = "07:00",
     ) -> dict[str, Any]:
         return self.codegraph.save_sync_config(
             code_sync_cron=code_sync_cron,
             ua_git_url=ua_git_url,
             understand_cron=understand_cron,
             doc_sync_cron=doc_sync_cron,
-            workflow_cron=workflow_cron,
+            workflow_start_time=workflow_start_time,
+            workflow_stop_time=workflow_stop_time,
         )
 
     def upsert_workflow_definition(
@@ -263,7 +280,6 @@ class SQLiteStore:
         profile_key: str,
         workflow_js: str,
         manifest: dict[str, Any],
-        schedule: dict[str, Any],
         status: str,
         created_by: str,
     ) -> dict[str, Any]:
@@ -274,7 +290,6 @@ class SQLiteStore:
             profile_key=profile_key,
             workflow_js=workflow_js,
             manifest=manifest,
-            schedule=schedule,
             status=status,
             created_by=created_by,
         )

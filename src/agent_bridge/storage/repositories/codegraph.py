@@ -323,12 +323,13 @@ class CodeGraphRepository:
             "ua_git_url": "",
             "understand_cron": "0 2 * * *",
             "doc_sync_cron": "*/30 * * * *",
-            "workflow_cron": "0 22 * * *",
+            "workflow_start_time": "22:00",
+            "workflow_stop_time": "07:00",
         }
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_cron
+                SELECT code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time
                 FROM knowledge_sync_config
                 WHERE id = 1
                 """
@@ -340,7 +341,8 @@ class CodeGraphRepository:
                 "ua_git_url": row[1] or "",
                 "understand_cron": row[2] or defaults["understand_cron"],
                 "doc_sync_cron": row[3] if len(row) > 3 and row[3] else defaults["doc_sync_cron"],
-                "workflow_cron": row[4] if len(row) > 4 and row[4] else defaults["workflow_cron"],
+                "workflow_start_time": row[4] if len(row) > 4 and row[4] else defaults["workflow_start_time"],
+                "workflow_stop_time": row[5] if len(row) > 5 and row[5] else defaults["workflow_stop_time"],
             }
             return result
 
@@ -351,27 +353,30 @@ class CodeGraphRepository:
         ua_git_url: str = "",
         understand_cron: str = "0 2 * * *",
         doc_sync_cron: str = "*/30 * * * *",
-        workflow_cron: str = "0 22 * * *",
+        workflow_start_time: str = "22:00",
+        workflow_stop_time: str = "07:00",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_cron)
-                VALUES (1, ?, ?, ?, ?, ?)
+                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_cron = excluded.code_sync_cron,
                   ua_git_url = excluded.ua_git_url,
                   understand_cron = excluded.understand_cron,
                   doc_sync_cron = excluded.doc_sync_cron,
-                  workflow_cron = excluded.workflow_cron,
+                  workflow_start_time = excluded.workflow_start_time,
+                  workflow_stop_time = excluded.workflow_stop_time,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_cron),
+                (code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time),
             )
             return {
                 "code_sync_cron": code_sync_cron,
                 "ua_git_url": ua_git_url,
                 "understand_cron": understand_cron,
                 "doc_sync_cron": doc_sync_cron,
-                "workflow_cron": workflow_cron,
+                "workflow_start_time": workflow_start_time,
+                "workflow_stop_time": workflow_stop_time,
             }

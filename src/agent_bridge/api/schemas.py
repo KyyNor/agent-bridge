@@ -123,7 +123,8 @@ class KnowledgeSyncConfigRequest(BaseModel):
     ua_git_url: str = ""
     understand_cron: str = "0 2 * * *"
     doc_sync_cron: str = "*/30 * * * *"
-    workflow_cron: str = "0 22 * * *"
+    workflow_start_time: str = "22:00"
+    workflow_stop_time: str = "07:00"
 
 
 class WorkflowDefinitionRequest(BaseModel):
@@ -133,7 +134,6 @@ class WorkflowDefinitionRequest(BaseModel):
     profile_key: str
     workflow_js: str = ""
     manifest: dict[str, Any]
-    schedule: dict[str, Any]
     status: str = "active"
 
 

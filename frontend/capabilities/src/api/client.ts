@@ -120,7 +120,6 @@ export const api = {
     name: string
     profile_key: string
     manifest: Record<string, unknown>
-    schedule: Record<string, unknown>
   }) => post<WorkflowDefinition>('/workflows', { status: 'active', ...w }),
   searchWorkflowArtifacts: (params: {
     profile_key?: string

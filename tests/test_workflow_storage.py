@@ -32,13 +32,12 @@ def test_workflow_definition_requires_profile_reference(wm_paths):
             profile_key="missing-profile",
             workflow_js="export const manifest = {};",
             manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-            schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
             status="active",
             created_by="root",
         )
 
 
-def test_workflow_definition_round_trips_with_manifest_and_schedule(wm_paths):
+def test_workflow_definition_round_trips_with_manifest(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 
     store = SQLiteStore(wm_paths.db_path)
@@ -58,7 +57,6 @@ def test_workflow_definition_round_trips_with_manifest_and_schedule(wm_paths):
         profile_key="report-plane",
         workflow_js="export const manifest = { name: 'Page Report' };",
         manifest={"name": "Page Report", "nodes": [{"id": "get_task"}], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
         created_by="root",
     )
@@ -66,7 +64,7 @@ def test_workflow_definition_round_trips_with_manifest_and_schedule(wm_paths):
     assert created["workflow_key"] == "page-report"
     assert created["profile_key"] == "report-plane"
     assert created["manifest"]["nodes"] == [{"id": "get_task"}]
-    assert created["schedule"]["stop_time"] == "07:00"
+    assert "schedule" not in created
 
     listed = store.list_workflow_definitions()
     assert [item["workflow_key"] for item in listed] == ["page-report"]
@@ -85,7 +83,6 @@ def test_workflow_task_upsert_is_idempotent_and_does_not_replace_completed(wm_pa
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
         created_by="root",
     )
@@ -126,7 +123,6 @@ def test_workflow_task_lease_is_exclusive_and_expired_leases_are_reclaimed(wm_pa
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
         created_by="root",
     )
@@ -156,7 +152,6 @@ def test_workflow_task_upsert_does_not_release_active_lease(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
         created_by="root",
     )
@@ -191,7 +186,6 @@ def test_workflow_task_upsert_reopens_expired_running_task(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
         created_by="root",
     )
@@ -226,7 +220,6 @@ def test_workflow_task_complete_requires_current_lease_owner(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
         created_by="root",
     )
@@ -260,7 +253,6 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
         created_by="root",
     )

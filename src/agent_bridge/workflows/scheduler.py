@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.workflows.result_parser import parse_workflow_result
@@ -16,7 +16,9 @@ from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunner, 
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_WORKFLOW_CRON = "0 22 * * *"
+_DEFAULT_START_TIME = "22:00"
+_DEFAULT_STOP_TIME = "07:00"
+_TICK_INTERVAL_SECONDS = 60
 
 
 class WorkflowScheduler:
@@ -39,20 +41,27 @@ class WorkflowScheduler:
         self._mcp_url = mcp_url
         self._max_concurrent = max_concurrent_workflows
         self._scheduler: BackgroundScheduler | None = None
-        self._current_cron = _DEFAULT_WORKFLOW_CRON
+        # Daily execution window [start, stop]; blank start+stop means always-on.
+        self._start_time_str = _DEFAULT_START_TIME
+        self._stop_time_str = _DEFAULT_STOP_TIME
+        self._start_time: time | None = _parse_hhmm(_DEFAULT_START_TIME)
+        self._stop_time: time | None = _parse_hhmm(_DEFAULT_STOP_TIME)
+        self._window_marker: date | None = None
         self._cursor = 0
         self._running: set[str] = set()
         self.finished_today: set[str] = set()
-        self._finished_date = datetime.now().date()
         self._lock = threading.Lock()
 
     def start(self) -> None:
-        config = self._store.get_sync_config()
-        self._current_cron = config.get("workflow_cron") or _DEFAULT_WORKFLOW_CRON
+        self._load_window()
         self._ensure_scheduler()
         self._refresh_jobs()
         self._scheduler.start()
-        logger.info("Workflow 调度器已启动 cron: %s", self._current_cron)
+        logger.info(
+            "Workflow 调度器已启动 窗口: %s - %s",
+            self._start_time_str,
+            self._stop_time_str,
+        )
 
     def stop(self) -> None:
         if self._scheduler:
@@ -61,18 +70,23 @@ class WorkflowScheduler:
             logger.info("Workflow 调度器已停止")
 
     def refresh(self) -> None:
-        config = self._store.get_sync_config()
-        self._current_cron = config.get("workflow_cron") or _DEFAULT_WORKFLOW_CRON
+        self._load_window()
         self._ensure_scheduler()
         if not self._scheduler.running:
             self._scheduler.start()
-            logger.info("Workflow 调度器已启动 cron: %s", self._current_cron)
+            logger.info(
+                "Workflow 调度器已启动 窗口: %s - %s",
+                self._start_time_str,
+                self._stop_time_str,
+            )
         self._refresh_jobs()
 
     def get_status(self) -> dict[str, Any]:
         return {
             "running": self._scheduler is not None and self._scheduler.running,
-            "cron": self._current_cron,
+            "start_time": self._start_time_str,
+            "stop_time": self._stop_time_str,
+            "in_window": self._window_anchor(datetime.now()) is not None,
             "jobs": [
                 {
                     "repo_key": job.id,
@@ -89,16 +103,22 @@ class WorkflowScheduler:
         if self._scheduler is None:
             self._scheduler = BackgroundScheduler()
 
+    def _load_window(self) -> None:
+        config = self._store.get_sync_config()
+        self._start_time_str = config.get("workflow_start_time") or _DEFAULT_START_TIME
+        self._stop_time_str = config.get("workflow_stop_time") or _DEFAULT_STOP_TIME
+        self._start_time = _parse_hhmm(self._start_time_str)
+        self._stop_time = _parse_hhmm(self._stop_time_str)
+
     def _refresh_jobs(self) -> None:
         if not self._scheduler:
             return
         self._scheduler.remove_all_jobs()
-        try:
-            trigger = CronTrigger.from_crontab(self._current_cron)
-        except (ValueError, TypeError) as exc:
-            logger.error("无效的 Workflow cron 表达式 '%s': %s", self._current_cron, exc)
-            return
-        self._scheduler.add_job(self.tick, trigger=trigger, id="workflow_tick")
+        self._scheduler.add_job(
+            self.tick,
+            trigger=IntervalTrigger(seconds=_TICK_INTERVAL_SECONDS),
+            id="workflow_tick",
+        )
 
     def next_workflow_batch(self, candidates: set[str], running: set[str]) -> list[str]:
         ordered = sorted(candidates)
@@ -115,29 +135,48 @@ class WorkflowScheduler:
         self._cursor = (self._cursor + attempts) % len(ordered)
         return selected
 
-    def schedule_allows_start(self, schedule: dict[str, Any], *, now: datetime | None = None) -> bool:
-        if not schedule.get("enabled", True):
-            return False
-        current = (now or datetime.now()).time()
-        start = _parse_hhmm(schedule.get("start_time"))
-        stop = _parse_hhmm(schedule.get("stop_time"))
+    def _window_anchor(self, now: datetime) -> date | None:
+        """Date identifying the currently-open window, or None if outside it.
+
+        Uniquely identifies a window so the scheduler can reset per-window state
+        (finished_today / in-flight slots) exactly once when a new window opens,
+        including overnight windows that span midnight.
+        """
+        current = now.time()
+        start = self._start_time
+        stop = self._stop_time
         if start is None and stop is None:
-            return True
+            return now.date()  # always-on: reset daily
         if start is None:
-            return current < stop
+            return now.date() if current < stop else None
         if stop is None:
-            return current >= start
+            return now.date() if current >= start else None
         if start <= stop:
-            return start <= current < stop
-        return current >= start or current < stop
+            return now.date() if start <= current < stop else None
+        # Overnight window (start > stop): spans midnight.
+        if current >= start:
+            return now.date()
+        if current < stop:
+            return now.date() - timedelta(days=1)
+        return None
 
     def tick(self) -> None:
         with self._lock:
-            self._reset_finished_today()
+            now = datetime.now()
+            anchor = self._window_anchor(now)
+            if anchor is not None and anchor != self._window_marker:
+                # A new window just opened: clear per-window finished state so
+                # workflows can run again. (_running self-maintains via the
+                # release callback; never cleared here, to avoid double-launching
+                # a workflow whose previous run is still in flight.)
+                self.finished_today.clear()
+                self._window_marker = anchor
+            if anchor is None:
+                return  # outside the daily window; no new runs
             workflows = [
                 item
                 for item in self._store.list_workflow_definitions()
-                if item.get("status") == "active" and self.schedule_allows_start(item.get("schedule") or {})
+                if item.get("status") == "active"
             ]
             candidates = {item["workflow_key"] for item in workflows} - self.finished_today
             available = self._max_concurrent - len(self._running)
@@ -148,12 +187,6 @@ class WorkflowScheduler:
                 self._running.add(workflow_key)
                 thread = threading.Thread(target=self._run_and_release, args=(workflow_key,), daemon=True)
                 thread.start()
-
-    def _reset_finished_today(self) -> None:
-        today = datetime.now().date()
-        if today != self._finished_date:
-            self.finished_today.clear()
-            self._finished_date = today
 
     def _run_and_release(self, workflow_key: str) -> None:
         try:

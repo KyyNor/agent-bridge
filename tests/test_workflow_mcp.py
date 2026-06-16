@@ -21,7 +21,6 @@ def _create_service_with_workflow(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     return svc
@@ -140,7 +139,6 @@ def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Other Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     _create_run(svc, run_id="run_other", workflow_key="other-report")

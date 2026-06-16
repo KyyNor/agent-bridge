@@ -41,7 +41,6 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     for source, target, default in [
         ("manifest_json", "manifest", {}),
-        ("schedule_json", "schedule", {}),
         ("payload_json", "payload", {}),
         ("tags_json", "tags", []),
         ("metadata_json", "metadata", {}),
@@ -65,7 +64,6 @@ class WorkflowsRepository:
         profile_key: str,
         workflow_js: str,
         manifest: dict[str, Any],
-        schedule: dict[str, Any],
         status: str,
         created_by: str,
     ) -> dict[str, Any]:
@@ -75,16 +73,15 @@ class WorkflowsRepository:
                 """
                 INSERT INTO workflow_definitions (
                   workflow_key, name, description, profile_key, workflow_js,
-                  manifest_json, schedule_json, status, created_by
+                  manifest_json, status, created_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
                   profile_key = excluded.profile_key,
                   workflow_js = excluded.workflow_js,
                   manifest_json = excluded.manifest_json,
-                  schedule_json = excluded.schedule_json,
                   status = excluded.status,
                   updated_at = CURRENT_TIMESTAMP
                 """,
@@ -95,7 +92,6 @@ class WorkflowsRepository:
                     profile_key,
                     workflow_js,
                     _json_dumps(manifest),
-                    _json_dumps(schedule),
                     status,
                     created_by,
                 ),

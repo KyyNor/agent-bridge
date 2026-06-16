@@ -50,7 +50,6 @@ def test_workflow_api_lists_artifacts(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -91,7 +90,6 @@ def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     svc.workflows.save_artifact(

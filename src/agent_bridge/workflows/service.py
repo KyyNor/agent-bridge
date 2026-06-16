@@ -34,7 +34,6 @@ class WorkflowService:
         profile_key: str,
         workflow_js: str,
         manifest: dict[str, Any],
-        schedule: dict[str, Any],
         status: str,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -52,7 +51,6 @@ class WorkflowService:
             profile_key=profile_key,
             workflow_js=workflow_js,
             manifest=manifest,
-            schedule=schedule,
             status=next_status,
             created_by=actor,
         )

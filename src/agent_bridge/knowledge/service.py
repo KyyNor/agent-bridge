@@ -356,8 +356,9 @@ class AgentBridgeService:
         code_sync_cron: str,
         ua_git_url: str = "",
         understand_cron: str = "0 2 * * *",
-        doc_sync_cron: str = "*/30 * * * *",
-        workflow_cron: str = "0 22 * * *",
+        doc_sync_cron: str = "*/30 * * *",
+        workflow_start_time: str = "22:00",
+        workflow_stop_time: str = "07:00",
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         result = self.store.save_sync_config(
@@ -365,7 +366,8 @@ class AgentBridgeService:
             ua_git_url=ua_git_url,
             understand_cron=understand_cron,
             doc_sync_cron=doc_sync_cron,
-            workflow_cron=workflow_cron,
+            workflow_start_time=workflow_start_time,
+            workflow_stop_time=workflow_stop_time,
         )
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()

@@ -21,7 +21,6 @@ def test_workflow_service_creates_definition_with_existing_profile(wm_paths):
         profile_key="report-plane",
         workflow_js="export const manifest = {};",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
 
@@ -43,7 +42,6 @@ def test_workflow_service_rejects_missing_profile(wm_paths):
             profile_key="missing",
             workflow_js="",
             manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-            schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
             status="active",
         )
     except ValidationError as exc:
@@ -62,7 +60,6 @@ def test_workflow_service_appends_run_log(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     svc.store.create_workflow_run(
@@ -99,7 +96,6 @@ def test_workflow_service_saves_and_searches_artifacts(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
 
@@ -141,7 +137,6 @@ def test_workflow_service_allows_non_admin_profile_artifact_search(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -218,7 +213,6 @@ def test_workflow_service_artifact_search_applies_tags_before_limit(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     for index in range(3):
@@ -272,7 +266,6 @@ def test_workflow_service_artifact_search_matches_literal_tag_wildcards(wm_paths
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -356,7 +349,6 @@ def test_workflow_service_rejects_artifact_profile_mismatch(wm_paths):
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
 
@@ -390,7 +382,6 @@ def test_workflow_service_artifact_upsert_keeps_id_and_updates_hash_and_metadata
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
 

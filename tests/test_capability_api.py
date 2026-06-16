@@ -578,7 +578,8 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
     assert "定时任务管理" in source
     assert "code_sync_cron" in source
     assert "doc_sync_cron" in source
-    assert "workflow_cron" in source
+    assert "workflow_start_time" in source
+    assert "workflow_stop_time" in source
     assert "知识同步" in source
     assert "工作流调度" in source
     assert "最近进度" in source

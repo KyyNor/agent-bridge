@@ -285,7 +285,8 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   ua_git_url TEXT NOT NULL DEFAULT '',
   understand_cron TEXT NOT NULL DEFAULT '0 2 * * *',
   doc_sync_cron TEXT NOT NULL DEFAULT '*/30 * * * *',
-  workflow_cron TEXT NOT NULL DEFAULT '0 22 * * *',
+  workflow_start_time TEXT NOT NULL DEFAULT '22:00',
+  workflow_stop_time TEXT NOT NULL DEFAULT '07:00',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -299,7 +300,6 @@ CREATE TABLE IF NOT EXISTS workflow_definitions (
   profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE RESTRICT,
   workflow_js TEXT NOT NULL DEFAULT '',
   manifest_json TEXT NOT NULL DEFAULT '{}',
-  schedule_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

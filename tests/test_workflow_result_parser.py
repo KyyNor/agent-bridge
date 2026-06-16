@@ -102,7 +102,6 @@ def test_ingest_parsed_result_saves_artifacts_and_completes_task(wm_paths, tmp_p
         profile_key="report-plane",
         workflow_js="",
         manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
-        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
         status="active",
     )
     svc.store.upsert_workflow_tasks("page-report", [{"task_key": "page:a", "payload": {"page": "a"}}])

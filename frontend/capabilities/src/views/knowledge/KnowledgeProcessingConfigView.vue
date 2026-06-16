@@ -18,7 +18,8 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   ua_git_url: '',
   understand_cron: '0 2 * * *',
   doc_sync_cron: '*/30 * * * *',
-  workflow_cron: '0 22 * * *',
+  workflow_start_time: '22:00',
+  workflow_stop_time: '07:00',
 })
 const configSaving = ref(false)
 const cronError = ref('')
@@ -98,12 +99,16 @@ function formatNextRuns(expr: string): string | null {
 const codeSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.code_sync_cron))
 const understandNextRuns = computed(() => formatNextRuns(syncConfig.value.understand_cron))
 const docSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.doc_sync_cron || '*/30 * * * *'))
-const workflowNextRuns = computed(() => formatNextRuns(syncConfig.value.workflow_cron || '0 22 * * *'))
+const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/
+const workflowTimesValid = computed(() =>
+  HHMM.test(syncConfig.value.workflow_start_time.trim())
+  && HHMM.test(syncConfig.value.workflow_stop_time.trim()),
+)
 const cronValid = computed(() =>
   codeSyncNextRuns.value !== null
   && understandNextRuns.value !== null
   && docSyncNextRuns.value !== null
-  && workflowNextRuns.value !== null
+  && workflowTimesValid.value,
 )
 
 function runBadgeClass(status?: string | null): string {
@@ -268,11 +273,16 @@ async function deleteBackend(slug: string) {
           <span v-if="docSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ docSyncNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
-        <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
+        <div class="grid grid-cols-[12rem_minmax(0,7rem)_minmax(0,7rem)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">工作流调度 <span class="text-xs text-muted-foreground">(Workflow)</span></div>
-          <Input v-model="syncConfig.workflow_cron" placeholder="0 22 * * *" class="w-40 font-mono text-xs" />
-          <span v-if="workflowNextRuns" class="text-xs text-muted-foreground font-mono">{{ workflowNextRuns }}</span>
-          <span v-else class="text-xs text-destructive">表达式无效</span>
+          <div class="flex items-center gap-2">
+            <Input v-model="syncConfig.workflow_start_time" placeholder="22:00" class="w-28 font-mono text-xs" />
+            <span class="text-xs text-muted-foreground">→</span>
+            <Input v-model="syncConfig.workflow_stop_time" placeholder="07:00" class="w-28 font-mono text-xs" />
+          </div>
+          <span></span>
+          <span v-if="workflowTimesValid" class="text-xs text-muted-foreground">每日窗口内持续轮转，跨夜自动续跑</span>
+          <span v-else class="text-xs text-destructive">请输入 HH:MM 时间</span>
         </div>
 
         <div class="flex items-center gap-3">
@@ -390,13 +400,15 @@ async function deleteBackend(slug: string) {
                 <Badge :variant="schedulerStatus.workflow?.running ? 'secondary' : 'outline'" :class="schedulerStatus.workflow?.running ? 'bg-green-50 text-green-700' : ''">
                   {{ schedulerStatus.workflow?.running ? '运行中' : '已暂停' }}
                 </Badge>
-                <span v-if="schedulerStatus.workflow?.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.workflow.cron }}</span>
+                <span class="font-mono text-xs text-muted-foreground">
+                  每日 {{ schedulerStatus.workflow?.start_time || '--' }} → {{ schedulerStatus.workflow?.stop_time || '--' }}
+                </span>
+                <Badge v-if="schedulerStatus.workflow?.in_window" variant="secondary" class="bg-blue-50 text-blue-700">窗口内</Badge>
                 <span class="text-xs text-muted-foreground">最多并发 {{ schedulerStatus.workflow?.max_concurrent_workflows || 2 }} 个工作流</span>
               </div>
               <div class="space-y-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
                 <div>正在执行：{{ schedulerStatus.workflow?.running_workflows?.length ? schedulerStatus.workflow.running_workflows.join(', ') : '无' }}</div>
                 <div>今日结束：{{ schedulerStatus.workflow?.finished_today?.length ? schedulerStatus.workflow.finished_today.join(', ') : '无' }}</div>
-                <div v-if="schedulerStatus.workflow?.jobs?.[0]?.next_run_at">下次执行：{{ formatLocalDatetime(schedulerStatus.workflow.jobs[0].next_run_at) }}</div>
               </div>
             </div>
           </div>

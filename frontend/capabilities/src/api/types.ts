@@ -57,7 +57,6 @@ export interface WorkflowDefinition {
     schemas: Record<string, unknown>
     [key: string]: unknown
   }
-  schedule: Record<string, unknown>
   status: string
   created_by: string
   created_at: string
@@ -354,7 +353,8 @@ export interface KnowledgeSyncConfig {
   ua_git_url: string
   understand_cron: string
   doc_sync_cron: string
-  workflow_cron: string
+  workflow_start_time: string
+  workflow_stop_time: string
 }
 
 export interface SingleSchedulerStatus {
@@ -393,7 +393,10 @@ export interface SchedulerStatus {
   code_sync: SingleSchedulerStatus
   understand: SingleSchedulerStatus
   doc_sync: SingleSchedulerStatus
-  workflow: SingleSchedulerStatus & {
+  workflow: Omit<SingleSchedulerStatus, 'cron'> & {
+    start_time: string
+    stop_time: string
+    in_window: boolean
     running_workflows?: string[]
     finished_today?: string[]
     max_concurrent_workflows?: number
