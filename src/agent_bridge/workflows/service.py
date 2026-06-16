@@ -92,6 +92,49 @@ class WorkflowService:
         require_admin_user(actor, self.admins)
         return self.store.list_workflow_run_logs(run_id)
 
+    def require_workflow_context(
+        self,
+        *,
+        profile_key: str | None,
+        workflow_key: str | None,
+    ) -> dict[str, Any]:
+        if not workflow_key:
+            raise ValidationError("workflow context is required")
+        workflow = self.store.get_workflow_definition(workflow_key)
+        if workflow is None:
+            raise NotFound("workflow not found")
+        if profile_key and workflow["profile_key"] != profile_key:
+            raise ValidationError("workflow profile mismatch")
+        return workflow
+
+    def get_task_for_agent(self, *, profile_key: str | None, workflow_key: str, run_id: str) -> dict[str, Any]:
+        self.require_workflow_context(profile_key=profile_key, workflow_key=workflow_key)
+        if not run_id:
+            raise ValidationError("workflow run id is required")
+        task = self.store.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=7200)
+        return {"task": task}
+
+    def set_tasks_for_agent(
+        self,
+        *,
+        profile_key: str | None,
+        workflow_key: str,
+        tasks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        self.require_workflow_context(profile_key=profile_key, workflow_key=workflow_key)
+        normalized = []
+        for task in tasks:
+            task_key = str(task.get("task_key") or "").strip()
+            if not task_key:
+                raise ValidationError("task_key is required")
+            payload = task.get("payload")
+            if payload is None:
+                payload = {}
+            if not isinstance(payload, dict):
+                raise ValidationError("task payload must be an object")
+            normalized.append({"task_key": task_key, "payload": payload})
+        return self.store.upsert_workflow_tasks(workflow_key, normalized)
+
     def save_artifact(
         self,
         *,

@@ -13,7 +13,7 @@ def test_mcp_server_exposes_search_and_execute_tools():
     mcp = create_mcp_server(FakeService())
     tools = asyncio.run(mcp.list_tools())
     tool_names = [tool.name for tool in tools]
-    assert tool_names == ["search", "execute"]
+    assert tool_names == ["search", "execute", "artifacts_search"]
 
 
 def test_mcp_search_tool_has_path_query_schema():
@@ -173,7 +173,7 @@ def test_mcp_skips_pinned_tool_with_invalid_schema_field(caplog):
     mcp = create_mcp_server(FakeService(), profile_key="safe-readonly")
     tools = asyncio.run(mcp.list_tools())
 
-    assert [tool.name for tool in tools] == ["search", "execute"]
+    assert [tool.name for tool in tools] == ["search", "execute", "artifacts_search"]
     assert "pin_mysql_query_users" in caplog.text
     assert "class" in caplog.text
     assert "user-id" in caplog.text
