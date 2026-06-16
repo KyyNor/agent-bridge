@@ -33,8 +33,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.codegraph_scheduler.start()
         service.understand_scheduler.start()
         service.doc_sync_scheduler.start()
+        service.workflow_scheduler.start()
         yield
         service.codegraph.ua_client.stop_all_dashboards()
+        service.workflow_scheduler.stop()
         service.doc_sync_scheduler.stop()
         service.understand_scheduler.stop()
         service.codegraph_scheduler.stop()
@@ -47,7 +49,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         token_resolver=service.codegraph.dashboard_repo_by_token,
     )
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
-    app.mount("/static/capabilities", StaticFiles(directory=static_dir), name="capabilities-static")
+    app.mount("/static/capabilities", StaticFiles(directory=static_dir, check_dir=False), name="capabilities-static")
 
     @app.get("/")
     def root() -> RedirectResponse:
@@ -63,6 +65,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
                 service.capabilities.admins = service.admins
                 service.governance.admins = service.admins
                 service.codegraph.admins = service.admins
+                service.workflows.admins = service.admins
             return call()
         except AgentBridgeError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -74,6 +77,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
                 service.capabilities.admins = service.admins
                 service.governance.admins = service.admins
                 service.codegraph.admins = service.admins
+                service.workflows.admins = service.admins
             return await call()
         except AgentBridgeError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -134,6 +138,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     from agent_bridge.api.routes.builtins import create_builtin_routes
     app.include_router(create_builtin_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema))
+
+    from agent_bridge.api.routes.workflows import create_workflow_routes
+    app.include_router(create_workflow_routes(service, actor, call_safely, ensure_capability_schema))
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capabilities.mcp_server import setup_mcp_route

@@ -1,0 +1,470 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from agent_bridge.storage.types import row_to_dict
+from agent_bridge.workflows.models import WorkflowTaskStatus, require_manifest
+
+
+def _json_loads(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return json.loads(value) if value else default
+    return value
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _artifact_id() -> str:
+    return f"artifact_{uuid.uuid4().hex}"
+
+
+def _content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    item = row_to_dict(row)
+    if item is None:
+        return None
+    for source, target, default in [
+        ("manifest_json", "manifest", {}),
+        ("schedule_json", "schedule", {}),
+        ("payload_json", "payload", {}),
+        ("tags_json", "tags", []),
+        ("metadata_json", "metadata", {}),
+    ]:
+        if source in item:
+            item[target] = _json_loads(item[source], default)
+    return item
+
+
+class WorkflowsRepository:
+    def __init__(self, db_path, connect):
+        self._db_path = db_path
+        self._connect = connect
+
+    def upsert_workflow_definition(
+        self,
+        *,
+        workflow_key: str,
+        name: str,
+        description: str,
+        profile_key: str,
+        workflow_js: str,
+        manifest: dict[str, Any],
+        schedule: dict[str, Any],
+        status: str,
+        created_by: str,
+    ) -> dict[str, Any]:
+        require_manifest(manifest)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO workflow_definitions (
+                  workflow_key, name, description, profile_key, workflow_js,
+                  manifest_json, schedule_json, status, created_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workflow_key) DO UPDATE SET
+                  name = excluded.name,
+                  description = excluded.description,
+                  profile_key = excluded.profile_key,
+                  workflow_js = excluded.workflow_js,
+                  manifest_json = excluded.manifest_json,
+                  schedule_json = excluded.schedule_json,
+                  status = excluded.status,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    workflow_key,
+                    name,
+                    description,
+                    profile_key,
+                    workflow_js,
+                    _json_dumps(manifest),
+                    _json_dumps(schedule),
+                    status,
+                    created_by,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM workflow_definitions WHERE workflow_key = ?",
+                (workflow_key,),
+            ).fetchone()
+            result = _row_payload(row)
+            if result is None:
+                raise KeyError(f"workflow not found: {workflow_key}")
+            return result
+
+    def get_workflow_definition(self, workflow_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return _row_payload(
+                conn.execute(
+                    "SELECT * FROM workflow_definitions WHERE workflow_key = ?",
+                    (workflow_key,),
+                ).fetchone()
+            )
+
+    def list_workflow_definitions(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM workflow_definitions ORDER BY workflow_key"
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]) -> dict[str, int]:
+        created = 0
+        updated = 0
+        skipped_completed = 0
+        skipped_running = 0
+        now = _now_iso()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for task in tasks:
+                task_key = str(task["task_key"])
+                payload = task.get("payload") or {}
+                existing = conn.execute(
+                    """
+                    SELECT status, lease_expires_at
+                    FROM workflow_tasks
+                    WHERE workflow_key = ? AND task_key = ?
+                    """,
+                    (workflow_key, task_key),
+                ).fetchone()
+                if existing is None:
+                    conn.execute(
+                        """
+                        INSERT INTO workflow_tasks (workflow_key, task_key, payload_json, status)
+                        VALUES (?, ?, ?, 'pending')
+                        """,
+                        (workflow_key, task_key, _json_dumps(payload)),
+                    )
+                    created += 1
+                elif existing["status"] == WorkflowTaskStatus.completed.value:
+                    skipped_completed += 1
+                elif (
+                    existing["status"] == WorkflowTaskStatus.running.value
+                    and (existing["lease_expires_at"] is None or existing["lease_expires_at"] >= now)
+                ):
+                    skipped_running += 1
+                else:
+                    conn.execute(
+                        """
+                        UPDATE workflow_tasks
+                        SET payload_json = ?,
+                            status = 'pending',
+                            lease_run_id = NULL,
+                            lease_expires_at = NULL,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE workflow_key = ? AND task_key = ?
+                        """,
+                        (_json_dumps(payload), workflow_key, task_key),
+                    )
+                    updated += 1
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped_completed": skipped_completed,
+            "skipped_running": skipped_running,
+        }
+
+    def get_workflow_task(self, workflow_key: str, task_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return _row_payload(
+                conn.execute(
+                    "SELECT * FROM workflow_tasks WHERE workflow_key = ? AND task_key = ?",
+                    (workflow_key, task_key),
+                ).fetchone()
+            )
+
+    def lease_workflow_task(self, workflow_key: str, *, run_id: str, lease_seconds: int) -> dict[str, Any] | None:
+        now = _now_iso()
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT * FROM workflow_tasks
+                WHERE workflow_key = ?
+                  AND (
+                    status = 'pending'
+                    OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
+                  )
+                ORDER BY id
+                LIMIT 1
+                """,
+                (workflow_key, now),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET status = 'running',
+                    lease_run_id = ?,
+                    lease_expires_at = ?,
+                    attempt_count = attempt_count + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (run_id, expires_at, row["id"]),
+            )
+            leased = conn.execute("SELECT * FROM workflow_tasks WHERE id = ?", (row["id"],)).fetchone()
+            return _row_payload(leased)
+
+    def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET status = 'completed',
+                    completed_at = CURRENT_TIMESTAMP,
+                    lease_run_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE workflow_key = ?
+                  AND task_key = ?
+                  AND status = 'running'
+                  AND lease_run_id = ?
+                """,
+                (run_id, workflow_key, task_key, run_id),
+            )
+            return cursor.rowcount > 0
+
+    def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET lease_expires_at = ?
+                WHERE workflow_key = ? AND task_key = ?
+                """,
+                (expires_at, workflow_key, task_key),
+            )
+
+    def create_workflow_run(
+        self,
+        *,
+        run_id: str,
+        workflow_key: str,
+        profile_key: str,
+        task_key: str | None,
+        status: str,
+        temp_dir: str,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO workflow_runs (run_id, workflow_key, profile_key, task_key, status, temp_dir)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, workflow_key, profile_key, task_key, status, temp_dir),
+            )
+            result = _row_payload(
+                conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
+            )
+            if result is None:
+                raise KeyError(f"workflow run not found: {run_id}")
+            return result
+
+    def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return _row_payload(conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone())
+
+    def finish_workflow_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        exit_code: int | None,
+        stdout_path: str | None,
+        stderr_path: str | None,
+        error: str | None,
+        duration_ms: int | None,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE workflow_runs
+                SET status = ?,
+                    exit_code = ?,
+                    stdout_path = ?,
+                    stderr_path = ?,
+                    error = ?,
+                    duration_ms = ?,
+                    finished_at = CURRENT_TIMESTAMP
+                WHERE run_id = ?
+                """,
+                (status, exit_code, stdout_path, stderr_path, error, duration_ms, run_id),
+            )
+            result = _row_payload(
+                conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
+            )
+            if result is None:
+                raise KeyError(f"workflow run not found: {run_id}")
+            return result
+
+    def append_workflow_run_log(
+        self,
+        *,
+        run_id: str,
+        workflow_key: str,
+        task_key: str | None,
+        level: str,
+        stage: str,
+        message: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO workflow_run_logs (
+                  run_id, workflow_key, task_key, level, stage, message, payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, workflow_key, task_key, level, stage, message, _json_dumps(payload)),
+            )
+            result = _row_payload(
+                conn.execute("SELECT * FROM workflow_run_logs WHERE id = ?", (cursor.lastrowid,)).fetchone()
+            )
+            if result is None:
+                raise KeyError("workflow run log not found")
+            return result
+
+    def list_workflow_run_logs(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM workflow_run_logs WHERE run_id = ? ORDER BY id",
+                (run_id,),
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def upsert_workflow_artifact(
+        self,
+        *,
+        workflow_key: str,
+        profile_key: str,
+        run_id: str,
+        task_key: str | None,
+        title: str,
+        path: str,
+        tags: list[str],
+        format: str,
+        summary: str,
+        content: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        content_hash = _content_hash(content)
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT artifact_id FROM workflow_artifacts WHERE workflow_key = ? AND path = ?",
+                (workflow_key, path),
+            ).fetchone()
+            artifact_id = existing["artifact_id"] if existing else _artifact_id()
+            conn.execute(
+                """
+                INSERT INTO workflow_artifacts (
+                  artifact_id, workflow_key, profile_key, run_id, task_key, title, path,
+                  tags_json, format, summary, content, content_hash, metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workflow_key, path) DO UPDATE SET
+                  profile_key = excluded.profile_key,
+                  run_id = excluded.run_id,
+                  task_key = excluded.task_key,
+                  title = excluded.title,
+                  tags_json = excluded.tags_json,
+                  format = excluded.format,
+                  summary = excluded.summary,
+                  content = excluded.content,
+                  content_hash = excluded.content_hash,
+                  metadata_json = excluded.metadata_json,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    artifact_id,
+                    workflow_key,
+                    profile_key,
+                    run_id,
+                    task_key,
+                    title,
+                    path,
+                    _json_dumps(tags),
+                    format,
+                    summary,
+                    content,
+                    content_hash,
+                    _json_dumps(metadata),
+                ),
+            )
+            result = _row_payload(
+                conn.execute(
+                    "SELECT * FROM workflow_artifacts WHERE artifact_id = ?",
+                    (artifact_id,),
+                ).fetchone()
+            )
+            if result is None:
+                raise KeyError(f"workflow artifact not found: {artifact_id}")
+            return result
+
+    def search_workflow_artifacts(
+        self,
+        *,
+        profile_key: str | None,
+        query: str | None,
+        tags: list[str],
+        path: str | None,
+        workflow_key: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        clauses = []
+        params: list[Any] = []
+        if profile_key:
+            clauses.append("profile_key = ?")
+            params.append(profile_key)
+        if workflow_key:
+            clauses.append("workflow_key = ?")
+            params.append(workflow_key)
+        if path:
+            clauses.append("path LIKE ?")
+            params.append(f"{path}%")
+        for tag in tags:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM json_each(workflow_artifacts.tags_json) WHERE json_each.value = ?)"
+            )
+            params.append(str(tag))
+        if query:
+            lowered = f"%{query.lower()}%"
+            clauses.append(
+                "(lower(title) LIKE ? OR lower(summary) LIKE ? OR lower(content) LIKE ? OR lower(path) LIKE ?)"
+            )
+            params.extend([lowered, lowered, lowered, lowered])
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM workflow_artifacts
+                {where}
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+        items = [item for row in rows if (item := _row_payload(row)) is not None]
+        if tags:
+            required = set(tags)
+            items = [item for item in items if required.issubset(set(item.get("tags", [])))]
+        return items

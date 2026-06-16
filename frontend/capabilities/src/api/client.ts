@@ -32,6 +32,8 @@ import type {
   UAAnalyzeResult,
   UADashboardStatus,
   TestCloneResult,
+  WorkflowArtifactSearchResult,
+  WorkflowDefinition,
 } from './types'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
@@ -109,6 +111,34 @@ export const api = {
     post<ProfileDocRender>(`/capability-profiles/${key}/doc/render`),
   updateProfileManualNotes: (key: string, manual_notes: string) =>
     put<ProfileDocRender>(`/capability-profiles/${key}/doc/manual-notes`, { manual_notes }),
+
+  // Workflows
+  listWorkflows: () => get<WorkflowDefinition[]>('/workflows'),
+  getWorkflow: (key: string) => get<WorkflowDefinition>(`/workflows/${key}`),
+  upsertWorkflow: (w: Partial<WorkflowDefinition> & {
+    workflow_key: string
+    name: string
+    profile_key: string
+    manifest: Record<string, unknown>
+    schedule: Record<string, unknown>
+  }) => post<WorkflowDefinition>('/workflows', { status: 'active', ...w }),
+  searchWorkflowArtifacts: (params: {
+    profile_key?: string
+    workflow_key?: string
+    query?: string
+    path?: string
+    tags?: string[]
+    limit?: number
+  } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.profile_key) qs.set('profile_key', params.profile_key)
+    if (params.workflow_key) qs.set('workflow_key', params.workflow_key)
+    if (params.query) qs.set('query', params.query)
+    if (params.path) qs.set('path', params.path)
+    if (params.limit) qs.set('limit', String(params.limit))
+    ;(params.tags || []).forEach(tag => qs.append('tags', tag))
+    return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)
+  },
 
   // Logs
   listLogs: (params: Record<string, string | number> = {}) => {

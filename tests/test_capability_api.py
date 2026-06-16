@@ -886,3 +886,13 @@ def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths)
     )
 
     assert response.status_code == 403
+
+
+def test_frontend_workflow_view_exposes_workflow_management() -> None:
+    source = Path("frontend/capabilities/src/views/workflow/WorkflowView.vue").read_text(encoding="utf-8")
+
+    assert "workflow_key" in source
+    assert "profile_key" in source
+    assert "artifacts_search" in source
+    assert "manifest" in source
+    assert "workflow_js" in source

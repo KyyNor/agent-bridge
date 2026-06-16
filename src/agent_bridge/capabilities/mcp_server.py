@@ -21,6 +21,7 @@ from agent_bridge.knowledge.service import AgentBridgeService
 logger = logging.getLogger("agent_bridge.mcp")
 
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
+_request_workflow_context: ContextVar[dict[str, Any] | None] = ContextVar("_request_workflow_context", default=None)
 
 
 def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:
@@ -81,7 +82,17 @@ def _signature_from_json_schema(schema: dict[str, Any]) -> inspect.Signature:
     return inspect.Signature(parameters=parameters, return_annotation=dict[str, Any])
 
 
-def create_mcp_server(service: AgentBridgeService, profile_key: str | None = None) -> FastMCP:
+def _has_complete_workflow_context(context: dict[str, Any] | None) -> bool:
+    if not context or not context.get("workflow"):
+        return False
+    return bool(context.get("workflow_key")) and bool(context.get("run_id"))
+
+
+def create_mcp_server(
+    service: AgentBridgeService,
+    profile_key: str | None = None,
+    workflow_context: dict[str, Any] | None = None,
+) -> FastMCP:
     mcp = FastMCP(
         name="agent-bridge",
         instructions=(
@@ -146,10 +157,82 @@ def create_mcp_server(service: AgentBridgeService, profile_key: str | None = Non
             logger.error("执行失败 profile=%s service=%s tool=%s 耗时=%.0fms 错误=%s", active_profile, service_key, tool, (time.monotonic() - started) * 1000, exc)
             raise
 
+    @mcp.tool(description="Search workflow artifacts visible to the active Agent Bridge profile.")
+    def artifacts_search(
+        query: str | None = None,
+        tags: list[str] | None = None,
+        path: str | None = None,
+        workflow_key: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        active_profile = _request_profile.get() or profile_key
+        return service.workflows.search_artifacts(
+            actor=default_user(),
+            profile_key=active_profile,
+            query=query,
+            tags=tags or [],
+            path=path,
+            workflow_key=workflow_key,
+            limit=limit,
+            trusted_profile_context=True,
+        )
+
+    active_workflow_context = workflow_context or _request_workflow_context.get()
+    if _has_complete_workflow_context(active_workflow_context):
+
+        @mcp.tool(description="Lease one pending task for the current workflow run.")
+        def workflow_get_task() -> dict[str, Any]:
+            active_profile = _request_profile.get() or profile_key
+            current = _request_workflow_context.get() or active_workflow_context or {}
+            return service.workflows.get_task_for_agent(
+                profile_key=active_profile,
+                workflow_key=str(current.get("workflow_key") or ""),
+                run_id=str(current.get("run_id") or ""),
+            )
+
+        @mcp.tool(description="Create or refresh pending tasks for the current workflow.")
+        def workflow_set_task(tasks: list[dict[str, Any]]) -> dict[str, Any]:
+            active_profile = _request_profile.get() or profile_key
+            current = _request_workflow_context.get() or active_workflow_context or {}
+            return service.workflows.set_tasks_for_agent(
+                profile_key=active_profile,
+                workflow_key=str(current.get("workflow_key") or ""),
+                run_id=str(current.get("run_id") or ""),
+                tasks=tasks,
+            )
+
+        @mcp.tool(description="Append a workflow run log entry.")
+        def workflow_run_log(
+            level: str = "info",
+            stage: str = "",
+            message: str = "",
+            task_key: str | None = None,
+            payload: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            active_profile = _request_profile.get() or profile_key
+            current = _request_workflow_context.get() or active_workflow_context or {}
+            workflow_key = str(current.get("workflow_key") or "")
+            run_id = str(current.get("run_id") or "")
+            service.workflows.require_workflow_run_context(
+                profile_key=active_profile,
+                workflow_key=workflow_key,
+                run_id=run_id,
+            )
+            service.workflows.append_run_log(
+                workflow_key=workflow_key,
+                run_id=run_id,
+                task_key=task_key,
+                level=level,
+                stage=stage,
+                message=message,
+                payload=payload or {},
+            )
+            return {"ok": True}
+
     def register_pinned_tools() -> None:
         if profile_key is None or not hasattr(service.capabilities, "pinned_tool_specs"):
             return
-        registered_names = {"search", "execute"}
+        registered_names = {"search", "execute", "artifacts_search"}
         for spec in service.capabilities.pinned_tool_specs(default_user(), profile_key):
             name = spec["generated_tool_name"]
             if name in registered_names:
@@ -189,9 +272,18 @@ def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
         profile = request.headers.get("x-agent-bridge-metamcp-profile")
-        logger.info("MCP 请求 method=%s profile=%s", request.method, profile)
-        mcp = create_mcp_server(service, profile_key=profile)
+        workflow_header = request.headers.get("x-agent-bridge-workflow")
+        workflow_key = request.headers.get("x-agent-bridge-workflow-key")
+        workflow_run_id = request.headers.get("x-agent-bridge-workflow-run-id")
+        workflow_context = (
+            {"workflow": True, "workflow_key": workflow_key, "run_id": workflow_run_id}
+            if workflow_header == "true" and workflow_key and workflow_run_id
+            else None
+        )
+        logger.info("MCP 请求 method=%s profile=%s workflow=%s", request.method, profile, bool(workflow_context))
+        mcp = create_mcp_server(service, profile_key=profile, workflow_context=workflow_context)
         token = _request_profile.set(profile)
+        workflow_token = _request_workflow_context.set(workflow_context)
         try:
             response = await _dispatch_mcp(mcp, request)
             logger.info("MCP 响应 status=%d profile=%s", response.status_code, profile)
@@ -200,6 +292,7 @@ def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
             logger.error("MCP 错误 profile=%s 错误=%s", profile, exc)
             raise
         finally:
+            _request_workflow_context.reset(workflow_token)
             _request_profile.reset(token)
 
     app.include_router(router)
