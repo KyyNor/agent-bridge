@@ -64,6 +64,15 @@ class SQLiteStore:
                 if col not in existing:
                     conn.execute(f"ALTER TABLE sync_states ADD COLUMN {col} {col_type}")
 
+            self._ensure_columns(
+                conn,
+                "knowledge_bases",
+                {
+                    "default_backend_slug": "TEXT",
+                    "default_agent_id": "TEXT",
+                },
+            )
+
             self.governance._migrate_tool_call_logs_nullable_profile(conn)
             self._ensure_columns(
                 conn,
