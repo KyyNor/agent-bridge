@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Code 动态工作流知识沉淀设计</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #667085;
+      --line: #d9e1ec;
+      --line-strong: #b7c3d3;
+      --blue: #2456d6;
+      --blue-soft: #e9efff;
+      --green: #0f7d5b;
+      --green-soft: #e6f6ef;
+      --orange: #b65f0d;
+      --orange-soft: #fff1df;
+      --red: #b42318;
+      --red-soft: #ffe8e5;
+      --slate: #263244;
+      --slate-soft: #eef2f7;
+      --shadow: 0 18px 46px rgba(38, 50, 68, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(36, 86, 214, 0.08), transparent 260px),
+        var(--bg);
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.68;
+    }
+    main {
+      width: min(1220px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 34px 0 76px;
+    }
+    header,
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 12px 32px rgba(38, 50, 68, 0.07);
+    }
+    header {
+      padding: 36px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(233, 239, 255, 0.84)),
+        var(--paper);
+      box-shadow: var(--shadow);
+    }
+    section {
+      margin-top: 18px;
+      padding: 26px;
+    }
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    h1 {
+      margin-top: 10px;
+      max-width: 1000px;
+      font-size: clamp(32px, 4.8vw, 54px);
+      font-weight: 900;
+    }
+    h2 { font-size: 25px; font-weight: 880; }
+    h3 { font-size: 18px; font-weight: 840; }
+    p { margin: 0; }
+    ul, ol { margin: 10px 0 0; padding-left: 20px; }
+    li + li { margin-top: 6px; }
+    li, td, .card p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f4f7fb;
+      color: #13284f;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      margin: 12px 0 0;
+      overflow: auto;
+      border: 1px solid #172033;
+      border-radius: 8px;
+      background: #111827;
+      color: #e5edf9;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--slate-soft);
+      color: var(--slate);
+      font-weight: 860;
+    }
+    tr:last-child td { border-bottom: 0; }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+    nav a {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--slate);
+      padding: 11px 12px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 820;
+    }
+    nav a:hover { border-color: var(--blue); color: var(--blue); }
+    .eyebrow {
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .lead {
+      max-width: 980px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--slate);
+      padding: 6px 11px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+    .section-head p {
+      max-width: 780px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 820;
+    }
+    .tag.blue { background: var(--blue-soft); color: var(--blue); }
+    .tag.green { background: var(--green-soft); color: var(--green); }
+    .tag.orange { background: var(--orange-soft); color: var(--orange); }
+    .tag.red { background: var(--red-soft); color: var(--red); }
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 18px;
+    }
+    .card h3 { margin-bottom: 8px; }
+    .callout {
+      border: 1px solid var(--line-strong);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #fbfdff;
+      color: var(--slate);
+      padding: 14px 16px;
+      font-size: 14px;
+    }
+    .callout.green { border-left-color: var(--green); background: #fbfffd; }
+    .callout.orange { border-left-color: var(--orange); background: #fffaf5; }
+    .callout.red { border-left-color: var(--red); background: #fffafa; }
+    .muted { color: var(--muted); }
+    .diagram {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 16px;
+      overflow: auto;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 13px;
+      color: #243044;
+      white-space: pre;
+    }
+    @media (max-width: 820px) {
+      main { width: min(100vw - 24px, 1220px); padding-top: 18px; }
+      header, section { padding: 20px; }
+      .section-head { flex-direction: column; }
+      .grid.two, .grid.three { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Agent Bridge / Workflow Knowledge Accumulation</div>
+    <h1>Claude Code 动态工作流知识沉淀设计</h1>
+    <p class="lead">
+      本设计定义 Agent Bridge 如何保存和调度 Claude Code 动态工作流，并通过受控 MCP 工具提供任务领取、任务回填、运行日志和产出物检索能力。工作流内部逻辑由 Claude Code workflow JavaScript 负责，Agent Bridge 负责生命周期、权限、状态和产出物接管。
+    </p>
+    <div class="meta">
+      <span class="pill">日期：2026-06-16</span>
+      <span class="pill">状态：设计规格</span>
+      <span class="pill">范围：后端 + MCP + 调度 + 控制台展示</span>
+      <span class="pill">不含：拖拽式可视化编排</span>
+    </div>
+  </header>
+
+  <nav>
+    <a href="#goals">目标</a>
+    <a href="#responsibility">职责边界</a>
+    <a href="#model">数据模型</a>
+    <a href="#mcp">MCP 工具</a>
+    <a href="#scheduler">调度模型</a>
+    <a href="#claude">Claude 启动</a>
+    <a href="#artifacts">产出物</a>
+    <a href="#ui">页面展示</a>
+    <a href="#testing">测试</a>
+  </nav>
+
+  <section id="goals">
+    <div class="section-head">
+      <div>
+        <h2>目标与非目标</h2>
+        <p>第一版聚焦把“反复查询一次页面知识”的过程变成可调度、可续跑、可沉淀、可检索的批处理工作流。</p>
+      </div>
+      <span class="tag blue">Scope</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>目标</h3>
+        <ul>
+          <li>允许管理员创建 workflow，粘贴 Claude Code 动态工作流 JavaScript，并强制绑定一个 <code>profile_key</code>。</li>
+          <li>页面根据 workflow manifest 展示节点、流转关系、输入输出结构和最近运行情况。</li>
+          <li>使用统一调度器在每日开始时间和停止时间之间循环执行 workflow。</li>
+          <li>通过 MCP 为 workflow agent 提供任务领取、任务回填和运行日志能力。</li>
+          <li>单独管理产出物，不与现有 KB 绑定，支持 <code>tags</code>、<code>path</code>、标题、摘要和全文检索。</li>
+          <li>向普通 profile agent 暴露产出物检索工具 <code>artifacts_search</code>。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>非目标</h3>
+        <ul>
+          <li>不在第一版实现拖拽式工作流编辑器。</li>
+          <li>不让 Agent Bridge 解析或执行 workflow 内部业务步骤。</li>
+          <li>不把产出物自动同步到现有知识库系统。</li>
+          <li>不实现复杂 DAG 调度；实际分支、循环和子 agent 编排由 Claude Code workflow JavaScript 管理。</li>
+          <li>不在第一版提供人工审核流；产出物只按协议校验后入库。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="responsibility">
+    <div class="section-head">
+      <div>
+        <h2>职责边界</h2>
+        <p>这条边界是本功能最重要的设计约束：Agent Bridge 管平台态，Claude Code workflow 管业务探索。</p>
+      </div>
+      <span class="tag green">Boundary</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>职责</th>
+          <th>Agent Bridge</th>
+          <th>Claude Code Workflow</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>定义保存</td>
+          <td>保存 workflow 名称、绑定 profile、调度配置、manifest、JS 源码。</td>
+          <td>JS 源码表达真实流程、节点含义、任务发现方式和最终输出格式。</td>
+        </tr>
+        <tr>
+          <td>权限</td>
+          <td>按请求头和 profile 控制 MCP 工具可见性。</td>
+          <td>通过注入的 MCP 配置调用允许的工具。</td>
+        </tr>
+        <tr>
+          <td>任务状态</td>
+          <td>存储 pending/running/completed/failed/abandoned 及租约。</td>
+          <td>调用 <code>workflow_get_task</code>、<code>workflow_set_task</code> 和 <code>workflow_run_log</code>。</td>
+        </tr>
+        <tr>
+          <td>调度</td>
+          <td>按全局并发与公平队列启动 <code>claude -p</code>。</td>
+          <td>一次启动处理一个任务，或返回没有可执行任务。</td>
+        </tr>
+        <tr>
+          <td>产出</td>
+          <td>校验 <code>out/result.json</code>，保存 artifact，完成 task。</td>
+          <td>生成标准化 <code>result.json</code> 和 Markdown 文件。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="model">
+    <div class="section-head">
+      <div>
+        <h2>数据模型</h2>
+        <p>模型保持平台态清晰，同时让 workflow JavaScript 自己决定任务 payload 的业务结构。</p>
+      </div>
+      <span class="tag blue">Storage</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>workflow_definitions</h3>
+        <ul>
+          <li><code>workflow_key</code>：唯一键。</li>
+          <li><code>name</code>、<code>description</code>、<code>status</code>。</li>
+          <li><code>profile_key</code>：必填，关联 project profile。</li>
+          <li><code>workflow_js</code>：Claude Code workflow JavaScript。</li>
+          <li><code>manifest_json</code>：节点、边、schema、展示信息。</li>
+          <li><code>schedule_json</code>：开始时间、结束时间、启用状态。</li>
+          <li><code>created_by</code>、<code>created_at</code>、<code>updated_at</code>。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>workflow_tasks</h3>
+        <ul>
+          <li><code>workflow_key</code>、<code>task_key</code>：联合唯一，用于幂等 upsert。</li>
+          <li><code>status</code>：pending、running、completed、failed、abandoned。</li>
+          <li><code>payload_json</code>：由 workflow 定义。</li>
+          <li><code>lease_run_id</code>、<code>lease_expires_at</code>：避免并发重复领取。</li>
+          <li><code>attempt_count</code>、<code>last_error</code>。</li>
+          <li><code>created_at</code>、<code>updated_at</code>、<code>completed_at</code>。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>workflow_runs</h3>
+        <ul>
+          <li><code>run_id</code>：每次 <code>claude -p</code> 启动生成。</li>
+          <li><code>workflow_key</code>、<code>profile_key</code>、<code>task_key</code>。</li>
+          <li><code>status</code>：running、completed、no_task、failed、stopped。</li>
+          <li><code>temp_dir</code>、<code>exit_code</code>、<code>stdout_path</code>、<code>stderr_path</code>。</li>
+          <li><code>started_at</code>、<code>finished_at</code>、<code>duration_ms</code>。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>workflow_artifacts</h3>
+        <ul>
+          <li><code>artifact_id</code>、<code>workflow_key</code>、<code>run_id</code>、<code>task_key</code>。</li>
+          <li><code>title</code>、<code>path</code>、<code>tags_json</code>、<code>summary</code>。</li>
+          <li><code>format</code>：第一版支持 markdown。</li>
+          <li><code>content</code>、<code>content_hash</code>。</li>
+          <li><code>metadata_json</code>、<code>created_at</code>。</li>
+        </ul>
+      </div>
+    </div>
+    <p class="callout orange" style="margin-top:14px;">
+      任务写入必须幂等。<code>workflow_set_task</code> 对同一个 <code>workflow_key + task_key</code> 只更新仍未完成的任务，不覆盖 completed 任务，避免任务发现重复导致产出物反复生成。
+    </p>
+  </section>
+
+  <section id="mcp">
+    <div class="section-head">
+      <div>
+        <h2>MCP 工具与可见性</h2>
+        <p>工具按请求头区分普通 agent 和 workflow agent。普通 agent 只看到产出物检索；workflow agent 额外看到任务与日志工具。</p>
+      </div>
+      <span class="tag green">MCP</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>工具</th>
+          <th>可见对象</th>
+          <th>行为</th>
+          <th>返回</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>artifacts_search</code></td>
+          <td>普通 profile agent、workflow agent</td>
+          <td>按 profile 可见范围、query、tags、path、workflow_key 检索产出物。</td>
+          <td>artifact 清单，包含标题、路径、标签、摘要、片段和详情读取所需标识。</td>
+        </tr>
+        <tr>
+          <td><code>workflow_get_task</code></td>
+          <td>workflow agent</td>
+          <td>返回一个可执行 pending task，并原子设置为 running 与租约。</td>
+          <td>有任务时返回 task；无任务时返回 <code>{ "task": null }</code>。</td>
+        </tr>
+        <tr>
+          <td><code>workflow_set_task</code></td>
+          <td>workflow agent</td>
+          <td>批量 upsert pending task，任务状态均为未完成。</td>
+          <td>写入数量、跳过数量、已存在数量。</td>
+        </tr>
+        <tr>
+          <td><code>workflow_run_log</code></td>
+          <td>workflow agent</td>
+          <td>追加运行日志，包含 stage、level、message、payload。</td>
+          <td><code>{ "ok": true }</code>。不参与业务判断。</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="callout" style="margin-top:14px;">
+      MCP 可见性由 HTTP 请求头决定。推荐使用 <code>X-Agent-Bridge-MetaMCP-Profile</code> 指定 profile，并新增 <code>X-Agent-Bridge-Workflow: true</code> 与 <code>X-Agent-Bridge-Workflow-Key</code> 标记 workflow agent 身份。
+    </p>
+  </section>
+
+  <section id="scheduler">
+    <div class="section-head">
+      <div>
+        <h2>调度模型</h2>
+        <p>所有 workflow 共用一个调度器，采用公平队列与小批次运行，避免大 workflow 长时间占满队列。</p>
+      </div>
+      <span class="tag orange">Scheduler</span>
+    </div>
+    <div class="diagram">每日窗口开始
+  |
+  v
+加载 active workflow -> 标记今日可运行
+  |
+  v
+while 当前时间 &lt; stop_time:
+  找到可用并发槽位，最多 2 个 workflow run
+  按 round-robin 选择不同 workflow
+  为每个 workflow 启动一次 claude -p
+  run 结束后解析 out/result.json
+  - completed: 保存产出物，完成 task
+  - no_executable_task: 标记该 workflow 今日结束
+  - failed: 记录失败，释放或重试 task
+  继续填充空槽位，不等待整轮全部完成
+  |
+  v
+到 stop_time 或所有 workflow 今日结束 -> 停止启动新 run</div>
+    <div class="grid three" style="margin-top:14px;">
+      <div class="card">
+        <h3>并发</h3>
+        <p>全局同时最多 2 个不同 workflow run。第一版不允许同一个 workflow 同时运行多个 run，以降低重复领取任务和输出冲突风险。</p>
+      </div>
+      <div class="card">
+        <h3>公平</h3>
+        <p>调度器维护 workflow 轮转游标。某个 workflow 完成一次 run 后排到队尾，空槽位出现时立即补位，不等待上一组全部完成。</p>
+      </div>
+      <div class="card">
+        <h3>结束</h3>
+        <p>workflow 返回 <code>no_executable_task</code> 后，当日不再调度；到达 stop time 后不再启动新 run，正在运行的 run 可按配置优雅等待或终止。</p>
+      </div>
+    </div>
+    <p class="callout green" style="margin-top:14px;">
+      用户示例中的 A/B/C/D 会自然交错：A 第一次返回无任务后当日结束，B/C/D 按空槽位轮转领取任务，直到所有 workflow 无任务或到达停止时间。
+    </p>
+  </section>
+
+  <section id="claude">
+    <div class="section-head">
+      <div>
+        <h2>Claude Code 启动方式</h2>
+        <p>Agent Bridge 只负责启动 Claude Code，并提供运行目录、MCP 配置、workflow 源码和固定提示词。</p>
+      </div>
+      <span class="tag blue">Runtime</span>
+    </div>
+    <ol>
+      <li>调度器创建随机临时目录，例如 <code>&lt;data&gt;/workflow-runs/&lt;run_id&gt;</code>。</li>
+      <li>写入 <code>workflow.js</code>、<code>prompt.md</code>、<code>.mcp.json</code> 和输出目录 <code>out/</code>。</li>
+      <li><code>.mcp.json</code> 指向 Agent Bridge MCP endpoint，并注入 profile 与 workflow 请求头。</li>
+      <li>使用 <code>claude -p</code> 运行固定 prompt，要求执行当前目录的 workflow 并最终写入 <code>out/result.json</code>。</li>
+      <li>捕获 stdout/stderr、退出码、耗时和 debug 信息。</li>
+      <li>进程结束后由 Agent Bridge 校验 result，并更新 run、task、artifact 状态。</li>
+    </ol>
+    <pre><code>claude -p \
+  --mcp-config ./.mcp.json \
+  --append-system-prompt-file ./workflow-system-prompt.md \
+  "Run the workflow defined in ./workflow.js and write the final result to ./out/result.json."</code></pre>
+    <p class="callout red" style="margin-top:14px;">
+      第一版不依赖 Claude Code 交互式确认。workflow 运行所需 MCP 工具必须通过 profile 和请求头预先暴露；如果 Claude Code 因权限或配置失败退出，Agent Bridge 只记录失败并按任务策略释放或标记失败。
+    </p>
+  </section>
+
+  <section id="artifacts">
+    <div class="section-head">
+      <div>
+        <h2>产出物协议</h2>
+        <p>产出物由 workflow 生成，Agent Bridge 只认标准化结果文件。第一版主格式为 Markdown。</p>
+      </div>
+      <span class="tag green">Artifacts</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>完成任务</h3>
+        <pre><code>{
+  "status": "completed",
+  "task_key": "page:finance/report-a",
+  "artifacts": [
+    {
+      "title": "报表 A 页面知识报告",
+      "path": "reports/finance/report-a/index.md",
+      "tags": ["report", "finance", "etl"],
+      "format": "markdown",
+      "file": "out/artifacts/report.md",
+      "summary": "页面使用表、加工逻辑、访问人群和数据来源汇总",
+      "metadata": {
+        "page_key": "finance/report-a"
+      }
+    }
+  ]
+}</code></pre>
+      </div>
+      <div class="card">
+        <h3>无任务可执行</h3>
+        <pre><code>{
+  "status": "no_executable_task",
+  "reason": "task discovery finished and no pending task remains"
+}</code></pre>
+      </div>
+    </div>
+    <ul>
+      <li><code>completed</code> 必须包含当前 <code>task_key</code>，并至少包含一个 artifact。</li>
+      <li><code>file</code> 必须位于本次临时目录内，禁止读取临时目录外路径。</li>
+      <li><code>path</code> 用于页面树形组织和检索过滤，不代表本地文件路径。</li>
+      <li>同一 <code>workflow_key + path</code> 默认保留最新版本，同时记录历史版本可作为后续增强。</li>
+      <li>解析失败、文件缺失、格式不支持会使 run 失败，task 不会标记 completed。</li>
+    </ul>
+  </section>
+
+  <section id="ui">
+    <div class="section-head">
+      <div>
+        <h2>控制台页面</h2>
+        <p>页面展示流程信息，而不是实现拖拽编辑器。工作流作者通过 manifest 让平台稳定渲染节点和数据结构。</p>
+      </div>
+      <span class="tag blue">Frontend</span>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h3>创建/编辑 Workflow</h3>
+        <ul>
+          <li>基础信息：key、name、description、status。</li>
+          <li>必选关联 profile。</li>
+          <li>粘贴 Claude Code workflow JavaScript。</li>
+          <li>从源码顶部或单独输入框保存 manifest JSON。</li>
+          <li>配置每日开始时间、停止时间和是否启用。</li>
+          <li>校验 manifest 必须包含 nodes、edges、schemas。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>查看 Workflow</h3>
+        <ul>
+          <li>节点清单：id、name、description、inputs、outputs。</li>
+          <li>流转关系：edge 起点和终点。</li>
+          <li>数据结构：task、artifact、关键中间结构。</li>
+          <li>运行状态：今日是否结束、当前 run、最近失败、任务统计。</li>
+          <li>产出物树：按 path 分层展示，支持 tags 和全文搜索。</li>
+          <li>日志：按 run 和 task 查看 <code>workflow_run_log</code>。</li>
+        </ul>
+      </div>
+    </div>
+    <pre><code>export const manifest = {
+  name: "页面知识沉淀",
+  nodes: [
+    { id: "get_task", name: "领取任务", outputs: ["task"] },
+    { id: "discover_tasks", name: "发现任务", outputs: ["tasks"] },
+    { id: "analyze_page", name: "分析页面", inputs: ["task"], outputs: ["report"] },
+    { id: "emit_artifact", name: "输出产物", inputs: ["report"], outputs: ["artifact"] }
+  ],
+  edges: [
+    ["get_task", "analyze_page"],
+    ["get_task", "discover_tasks"],
+    ["discover_tasks", "get_task"],
+    ["analyze_page", "emit_artifact"]
+  ],
+  schemas: {
+    task: { task_key: "string", payload: "object" },
+    artifact: { title: "string", path: "string", tags: "string[]" }
+  }
+};</code></pre>
+  </section>
+
+  <section id="errors">
+    <div class="section-head">
+      <div>
+        <h2>失败处理与租约</h2>
+        <p>任务领取必须具备原子租约，否则两个 Claude 进程可能处理同一个 task。</p>
+      </div>
+      <span class="tag red">Reliability</span>
+    </div>
+    <ul>
+      <li><code>workflow_get_task</code> 使用数据库事务选取最早 pending task，并立即写入 <code>running</code>、<code>lease_run_id</code>、<code>lease_expires_at</code>。</li>
+      <li>默认租约 2 小时。租约过期的 running task 可被下一次领取前回收为 pending，并增加 attempt_count。</li>
+      <li>run 正常完成且 result 为 completed 后，Agent Bridge 将 task 标记为 completed。</li>
+      <li>run 失败、result 缺失或 artifact 校验失败时，task 标记为 failed 或释放为 pending，具体取决于 attempt_count 是否超过阈值。</li>
+      <li>workflow 返回 no_executable_task 只结束该 workflow 当日运行，不删除历史任务和产出物。</li>
+      <li>到达 stop time 后不再启动新 run。正在运行的 run 第一版默认允许完成；后续可增加强制终止策略。</li>
+    </ul>
+  </section>
+
+  <section id="testing">
+    <div class="section-head">
+      <div>
+        <h2>测试策略</h2>
+        <p>第一版要重点验证权限隔离、调度公平性和产出物接管协议。</p>
+      </div>
+      <span class="tag green">Verification</span>
+    </div>
+    <div class="grid three">
+      <div class="card">
+        <h3>存储与服务测试</h3>
+        <ul>
+          <li>创建 workflow 必须绑定存在的 profile。</li>
+          <li>task upsert 幂等，不覆盖 completed。</li>
+          <li>task lease 原子领取，租约过期可回收。</li>
+          <li>artifact path/tags/query 可检索。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>MCP 测试</h3>
+        <ul>
+          <li>普通 profile 只能看到 artifacts_search。</li>
+          <li>workflow header 下可看到四个工具。</li>
+          <li>workflow agent 不能访问非本 workflow 的任务工具。</li>
+          <li>artifacts_search 只返回 profile 可见产出物。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>调度测试</h3>
+        <ul>
+          <li>A/B/C/D 示例按 round-robin 交错执行。</li>
+          <li>全局并发不超过 2。</li>
+          <li>no_executable_task 使 workflow 当日结束。</li>
+          <li>stop time 后不再启动新 run。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="rollout">
+    <div class="section-head">
+      <div>
+        <h2>实施顺序</h2>
+        <p>为了降低风险，先把平台态和协议跑通，再逐步补齐 UI 和真实 Claude 调度。</p>
+      </div>
+      <span class="tag orange">Plan Seed</span>
+    </div>
+    <ol>
+      <li>新增 workflow 存储 schema、repository、service 和 API。</li>
+      <li>实现 MCP 工具可见性和四个工具。</li>
+      <li>实现产出物保存与检索服务。</li>
+      <li>实现调度器核心，不直接依赖真实 Claude，先用 fake runner 测公平性。</li>
+      <li>接入真实 <code>claude -p</code> runner，完成临时目录、MCP 配置和结果接管。</li>
+      <li>实现控制台 Workflow 页面和 Artifacts 页面。</li>
+      <li>补充端到端 smoke test：一个 fake workflow 发现任务、处理任务、生成 Markdown。</li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>
