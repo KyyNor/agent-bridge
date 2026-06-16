@@ -437,6 +437,9 @@ class WorkflowsRepository:
         if path:
             clauses.append("path LIKE ?")
             params.append(f"{path}%")
+        for tag in tags:
+            clauses.append("tags_json LIKE ?")
+            params.append(f"%{json.dumps(str(tag), ensure_ascii=False)}%")
         if query:
             lowered = f"%{query.lower()}%"
             clauses.append(

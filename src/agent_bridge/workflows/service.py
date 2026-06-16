@@ -107,6 +107,11 @@ class WorkflowService:
         content: str,
         metadata: dict[str, Any],
     ) -> dict[str, Any]:
+        workflow = self.store.get_workflow_definition(workflow_key)
+        if workflow is None:
+            raise NotFound("workflow not found")
+        if workflow["profile_key"] != profile_key:
+            raise ValidationError("workflow profile mismatch")
         try:
             artifact_format = WorkflowArtifactFormat(format).value
         except ValueError as exc:
@@ -142,6 +147,12 @@ class WorkflowService:
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
             raise ValidationError("profile_key is required")
+        if profile_key:
+            profile = self.store.get_project_profile(profile_key)
+            if profile is None:
+                raise NotFound("profile not found")
+            if profile.get("status") != "active":
+                raise ValidationError("profile is disabled")
         if limit < 1:
             raise ValidationError("limit must be positive")
         bounded_limit = min(limit, 50)

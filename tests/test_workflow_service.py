@@ -190,3 +190,168 @@ def test_workflow_service_rejects_non_admin_artifact_search_without_profile(wm_p
         assert "profile_key is required" in exc.message
     else:
         raise AssertionError("non-admin artifact search without profile should fail")
+
+
+def test_workflow_service_artifact_search_applies_tags_before_limit(wm_paths):
+    svc = _service(wm_paths)
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
+        status="active",
+    )
+    for index in range(3):
+        svc.workflows.save_artifact(
+            workflow_key="page-report",
+            profile_key="report-plane",
+            run_id=f"run_{index}",
+            task_key=f"page:new-{index}",
+            title=f"New Report {index}",
+            path=f"reports/new-{index}/index.md",
+            tags=["recent"],
+            format="markdown",
+            summary="Recent report",
+            content="recent content",
+            metadata={},
+        )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_old",
+        task_key="page:old",
+        title="Older Finance Report",
+        path="reports/older-finance/index.md",
+        tags=["finance"],
+        format="markdown",
+        summary="Older finance report",
+        content="older finance content",
+        metadata={},
+    )
+
+    results = svc.workflows.search_artifacts(
+        actor="root",
+        profile_key="report-plane",
+        query=None,
+        tags=["finance"],
+        path=None,
+        workflow_key=None,
+        limit=1,
+    )
+
+    assert [item["title"] for item in results["items"]] == ["Older Finance Report"]
+
+
+def test_workflow_service_rejects_disabled_profile_artifact_search(wm_paths):
+    from agent_bridge.core.domain import ValidationError
+
+    svc = _service(wm_paths)
+    svc.store.upsert_project_profile(
+        profile_key="disabled-plane",
+        name="Disabled Plane",
+        status="disabled",
+        created_by="root",
+    )
+
+    try:
+        svc.workflows.search_artifacts(
+            actor="alice",
+            profile_key="disabled-plane",
+            query=None,
+            tags=[],
+            path=None,
+            workflow_key=None,
+            limit=10,
+        )
+    except ValidationError as exc:
+        assert "profile is disabled" in exc.message
+    else:
+        raise AssertionError("disabled profile should not search artifacts")
+
+
+def test_workflow_service_rejects_artifact_profile_mismatch(wm_paths):
+    from agent_bridge.core.domain import ValidationError
+
+    svc = _service(wm_paths)
+    svc.store.upsert_project_profile(profile_key="other-plane", name="Other Plane", created_by="root")
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
+        status="active",
+    )
+
+    try:
+        svc.workflows.save_artifact(
+            workflow_key="page-report",
+            profile_key="other-plane",
+            run_id="run_1",
+            task_key="page:a",
+            title="Page A Report",
+            path="reports/page-a/index.md",
+            tags=["report"],
+            format="markdown",
+            summary="",
+            content="# Page A",
+            metadata={},
+        )
+    except ValidationError as exc:
+        assert "workflow profile mismatch" in exc.message
+    else:
+        raise AssertionError("artifact profile mismatch should fail")
+
+
+def test_workflow_service_artifact_upsert_keeps_id_and_updates_hash_and_metadata(wm_paths):
+    svc = _service(wm_paths)
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
+        status="active",
+    )
+
+    first = svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        title="Page A Report",
+        path="reports/page-a/index.md",
+        tags=["report"],
+        format="markdown",
+        summary="first",
+        content="# First",
+        metadata={"version": 1},
+    )
+    second = svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="page:a",
+        title="Page A Report",
+        path="reports/page-a/index.md",
+        tags=["report", "updated"],
+        format="markdown",
+        summary="second",
+        content="# Second",
+        metadata={"version": 2},
+    )
+
+    assert second["artifact_id"] == first["artifact_id"]
+    assert second["content_hash"] != first["content_hash"]
+    assert second["metadata"]["version"] == 2
+    assert second["tags"] == ["report", "updated"]
