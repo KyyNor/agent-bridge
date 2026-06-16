@@ -197,6 +197,7 @@ def create_mcp_server(
             return service.workflows.set_tasks_for_agent(
                 profile_key=active_profile,
                 workflow_key=str(current.get("workflow_key") or ""),
+                run_id=str(current.get("run_id") or ""),
                 tasks=tasks,
             )
 
@@ -211,10 +212,15 @@ def create_mcp_server(
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}
             workflow_key = str(current.get("workflow_key") or "")
-            service.workflows.require_workflow_context(profile_key=active_profile, workflow_key=workflow_key)
+            run_id = str(current.get("run_id") or "")
+            service.workflows.require_workflow_run_context(
+                profile_key=active_profile,
+                workflow_key=workflow_key,
+                run_id=run_id,
+            )
             service.workflows.append_run_log(
                 workflow_key=workflow_key,
-                run_id=str(current.get("run_id") or ""),
+                run_id=run_id,
                 task_key=task_key,
                 level=level,
                 stage=stage,

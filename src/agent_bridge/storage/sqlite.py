@@ -301,6 +301,9 @@ class SQLiteStore:
             temp_dir=temp_dir,
         )
 
+    def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
+        return self.workflows.get_workflow_run(run_id)
+
     def finish_workflow_run(
         self,
         run_id: str,

@@ -107,10 +107,25 @@ class WorkflowService:
             raise ValidationError("workflow profile mismatch")
         return workflow
 
-    def get_task_for_agent(self, *, profile_key: str | None, workflow_key: str, run_id: str) -> dict[str, Any]:
-        self.require_workflow_context(profile_key=profile_key, workflow_key=workflow_key)
+    def require_workflow_run_context(
+        self,
+        *,
+        profile_key: str | None,
+        workflow_key: str | None,
+        run_id: str | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        workflow = self.require_workflow_context(profile_key=profile_key, workflow_key=workflow_key)
         if not run_id:
             raise ValidationError("workflow run id is required")
+        run = self.store.get_workflow_run(run_id)
+        if run is None:
+            raise NotFound("workflow run not found")
+        if run["workflow_key"] != workflow["workflow_key"] or run["profile_key"] != workflow["profile_key"]:
+            raise ValidationError("workflow run context mismatch")
+        return workflow, run
+
+    def get_task_for_agent(self, *, profile_key: str | None, workflow_key: str, run_id: str) -> dict[str, Any]:
+        self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
         task = self.store.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=7200)
         return {"task": task}
 
@@ -119,9 +134,10 @@ class WorkflowService:
         *,
         profile_key: str | None,
         workflow_key: str,
+        run_id: str,
         tasks: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        self.require_workflow_context(profile_key=profile_key, workflow_key=workflow_key)
+        self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
         normalized = []
         for task in tasks:
             task_key = str(task.get("task_key") or "").strip()

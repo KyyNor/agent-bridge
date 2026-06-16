@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 
 def _create_service_with_workflow(wm_paths):
@@ -24,6 +25,17 @@ def _create_service_with_workflow(wm_paths):
         status="active",
     )
     return svc
+
+
+def _create_run(svc, *, run_id: str = "run_1", workflow_key: str = "page-report", profile_key: str = "report-plane"):
+    return svc.store.create_workflow_run(
+        run_id=run_id,
+        workflow_key=workflow_key,
+        profile_key=profile_key,
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/workflow-run",
+    )
 
 
 def test_normal_mcp_profile_sees_artifacts_search_but_not_workflow_task_tools(wm_paths):
@@ -86,6 +98,7 @@ def test_workflow_mcp_set_get_and_run_log(wm_paths):
     from agent_bridge.capabilities.mcp_server import create_mcp_server
 
     svc = _create_service_with_workflow(wm_paths)
+    _create_run(svc)
 
     mcp = create_mcp_server(
         svc,
@@ -113,6 +126,49 @@ def test_workflow_mcp_set_get_and_run_log(wm_paths):
     assert log_result == {"ok": True}
     logs = svc.workflows.list_run_logs("root", "run_1")
     assert logs[0]["message"] == "leased task"
+
+
+def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):
+    from agent_bridge.capabilities.mcp_server import create_mcp_server
+
+    svc = _create_service_with_workflow(wm_paths)
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="other-report",
+        name="Other Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Other Report", "nodes": [], "edges": [], "schemas": {}},
+        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
+        status="active",
+    )
+    _create_run(svc, run_id="run_other", workflow_key="other-report")
+
+    mcp = create_mcp_server(
+        svc,
+        profile_key="report-plane",
+        workflow_context={"workflow": True, "workflow_key": "page-report", "run_id": "run_other"},
+    )
+
+    with pytest.raises(Exception, match="workflow run context mismatch"):
+        asyncio.run(
+            mcp.call_tool(
+                "workflow_set_task",
+                {"tasks": [{"task_key": "page:a", "payload": {"page": "a"}}]},
+            )
+        )
+    with pytest.raises(Exception, match="workflow run context mismatch"):
+        asyncio.run(mcp.call_tool("workflow_get_task", {}))
+    with pytest.raises(Exception, match="workflow run context mismatch"):
+        asyncio.run(
+            mcp.call_tool(
+                "workflow_run_log",
+                {"level": "info", "stage": "lease", "message": "should not log"},
+            )
+        )
+
+    assert svc.workflows.list_run_logs("root", "run_other") == []
 
 
 def test_artifacts_search_tool_returns_profile_artifacts(wm_paths):

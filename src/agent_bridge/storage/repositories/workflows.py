@@ -279,6 +279,10 @@ class WorkflowsRepository:
                 raise KeyError(f"workflow run not found: {run_id}")
             return result
 
+    def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return _row_payload(conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone())
+
     def finish_workflow_run(
         self,
         run_id: str,
