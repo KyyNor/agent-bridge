@@ -282,6 +282,118 @@ class SQLiteStore:
     def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str) -> None:
         return self.workflows.force_workflow_task_lease_expiry(workflow_key, task_key, expires_at)
 
+    def create_workflow_run(
+        self,
+        *,
+        run_id: str,
+        workflow_key: str,
+        profile_key: str,
+        task_key: str | None,
+        status: str,
+        temp_dir: str,
+    ) -> dict[str, Any]:
+        return self.workflows.create_workflow_run(
+            run_id=run_id,
+            workflow_key=workflow_key,
+            profile_key=profile_key,
+            task_key=task_key,
+            status=status,
+            temp_dir=temp_dir,
+        )
+
+    def finish_workflow_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        exit_code: int | None,
+        stdout_path: str | None,
+        stderr_path: str | None,
+        error: str | None,
+        duration_ms: int | None,
+    ) -> dict[str, Any]:
+        return self.workflows.finish_workflow_run(
+            run_id,
+            status=status,
+            exit_code=exit_code,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            error=error,
+            duration_ms=duration_ms,
+        )
+
+    def append_workflow_run_log(
+        self,
+        *,
+        run_id: str,
+        workflow_key: str,
+        task_key: str | None,
+        level: str,
+        stage: str,
+        message: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.workflows.append_workflow_run_log(
+            run_id=run_id,
+            workflow_key=workflow_key,
+            task_key=task_key,
+            level=level,
+            stage=stage,
+            message=message,
+            payload=payload,
+        )
+
+    def list_workflow_run_logs(self, run_id: str) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_run_logs(run_id)
+
+    def upsert_workflow_artifact(
+        self,
+        *,
+        workflow_key: str,
+        profile_key: str,
+        run_id: str,
+        task_key: str | None,
+        title: str,
+        path: str,
+        tags: list[str],
+        format: str,
+        summary: str,
+        content: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.workflows.upsert_workflow_artifact(
+            workflow_key=workflow_key,
+            profile_key=profile_key,
+            run_id=run_id,
+            task_key=task_key,
+            title=title,
+            path=path,
+            tags=tags,
+            format=format,
+            summary=summary,
+            content=content,
+            metadata=metadata,
+        )
+
+    def search_workflow_artifacts(
+        self,
+        *,
+        profile_key: str | None,
+        query: str | None,
+        tags: list[str],
+        path: str | None,
+        workflow_key: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        return self.workflows.search_workflow_artifacts(
+            profile_key=profile_key,
+            query=query,
+            tags=tags,
+            path=path,
+            workflow_key=workflow_key,
+            limit=limit,
+        )
+
     def create_mcp_service(
         self,
         *,

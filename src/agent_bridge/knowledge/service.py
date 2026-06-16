@@ -35,6 +35,7 @@ from agent_bridge.knowledge.backends.registry import BackendRegistry, create_reg
 from agent_bridge.knowledge.backends.weknora import WeknoraBackend
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.storage.sqlite import SQLiteStore
+from agent_bridge.workflows.service import WorkflowService
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md"}
@@ -62,6 +63,7 @@ class AgentBridgeService:
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
+        self.workflows = WorkflowService(store=store, admins=admins)
         from agent_bridge.capabilities.builtin_codegraph import CodeGraphBuiltinProvider
         from agent_bridge.capabilities.builtin_wiki import WikiBuiltinProvider
 

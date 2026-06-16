@@ -125,6 +125,17 @@ class KnowledgeSyncConfigRequest(BaseModel):
     doc_sync_cron: str = "*/30 * * * *"
 
 
+class WorkflowDefinitionRequest(BaseModel):
+    workflow_key: str
+    name: str
+    description: str = ""
+    profile_key: str
+    workflow_js: str = ""
+    manifest: dict[str, Any]
+    schedule: dict[str, Any]
+    status: str = "active"
+
+
 class UpsertBackendRequest(BaseModel):
     slug: str
     backend_type: str
