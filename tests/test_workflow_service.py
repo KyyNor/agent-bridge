@@ -166,13 +166,14 @@ def test_workflow_service_allows_non_admin_profile_artifact_search(wm_paths):
         path=None,
         workflow_key=None,
         limit=10,
+        trusted_profile_context=True,
     )
 
     assert [item["title"] for item in results["items"]] == ["Page A Report"]
 
 
-def test_workflow_service_rejects_non_admin_artifact_search_without_profile(wm_paths):
-    from agent_bridge.core.domain import ValidationError
+def test_workflow_service_rejects_non_admin_untrusted_artifact_search(wm_paths):
+    from agent_bridge.core.domain import AccessDenied
 
     svc = _service(wm_paths)
 
@@ -186,10 +187,25 @@ def test_workflow_service_rejects_non_admin_artifact_search_without_profile(wm_p
             workflow_key=None,
             limit=10,
         )
-    except ValidationError as exc:
-        assert "profile_key is required" in exc.message
+    except AccessDenied as exc:
+        assert "capability profile is required" in exc.message
     else:
         raise AssertionError("non-admin artifact search without profile should fail")
+
+    try:
+        svc.workflows.search_artifacts(
+            actor="alice",
+            profile_key="report-plane",
+            query="anything",
+            tags=[],
+            path=None,
+            workflow_key=None,
+            limit=10,
+        )
+    except AccessDenied as exc:
+        assert "profile context is not trusted" in exc.message
+    else:
+        raise AssertionError("non-admin untrusted artifact search with profile should fail")
 
 
 def test_workflow_service_artifact_search_applies_tags_before_limit(wm_paths):
@@ -246,6 +262,59 @@ def test_workflow_service_artifact_search_applies_tags_before_limit(wm_paths):
     assert [item["title"] for item in results["items"]] == ["Older Finance Report"]
 
 
+def test_workflow_service_artifact_search_matches_literal_tag_wildcards(wm_paths):
+    svc = _service(wm_paths)
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        schedule={"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
+        status="active",
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:percent",
+        title="Percent Tag Report",
+        path="reports/percent/index.md",
+        tags=["%"],
+        format="markdown",
+        summary="Percent tag",
+        content="percent tag",
+        metadata={},
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="page:abc",
+        title="ABC Tag Report",
+        path="reports/abc/index.md",
+        tags=["abc"],
+        format="markdown",
+        summary="ABC tag",
+        content="abc tag",
+        metadata={},
+    )
+
+    results = svc.workflows.search_artifacts(
+        actor="root",
+        profile_key="report-plane",
+        query=None,
+        tags=["%"],
+        path=None,
+        workflow_key=None,
+        limit=1,
+    )
+
+    assert [item["title"] for item in results["items"]] == ["Percent Tag Report"]
+
+
 def test_workflow_service_rejects_disabled_profile_artifact_search(wm_paths):
     from agent_bridge.core.domain import ValidationError
 
@@ -266,6 +335,7 @@ def test_workflow_service_rejects_disabled_profile_artifact_search(wm_paths):
             path=None,
             workflow_key=None,
             limit=10,
+            trusted_profile_context=True,
         )
     except ValidationError as exc:
         assert "profile is disabled" in exc.message

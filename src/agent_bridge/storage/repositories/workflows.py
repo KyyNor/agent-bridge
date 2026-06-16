@@ -438,8 +438,10 @@ class WorkflowsRepository:
             clauses.append("path LIKE ?")
             params.append(f"{path}%")
         for tag in tags:
-            clauses.append("tags_json LIKE ?")
-            params.append(f"%{json.dumps(str(tag), ensure_ascii=False)}%")
+            clauses.append(
+                "EXISTS (SELECT 1 FROM json_each(workflow_artifacts.tags_json) WHERE json_each.value = ?)"
+            )
+            params.append(str(tag))
         if query:
             lowered = f"%{query.lower()}%"
             clauses.append(

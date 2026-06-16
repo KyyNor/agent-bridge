@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.workflows.models import WorkflowArtifactFormat, WorkflowStatus, require_manifest
 
@@ -144,9 +144,12 @@ class WorkflowService:
         path: str | None,
         workflow_key: str | None,
         limit: int,
+        trusted_profile_context: bool = False,
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
-            raise ValidationError("profile_key is required")
+            raise AccessDenied("capability profile is required")
+        if actor not in self.admins and profile_key and not trusted_profile_context:
+            raise AccessDenied("profile context is not trusted")
         if profile_key:
             profile = self.store.get_project_profile(profile_key)
             if profile is None:
