@@ -122,6 +122,7 @@ class WorkflowsRepository:
         skipped_running = 0
         now = _now_iso()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             for task in tasks:
                 task_key = str(task["task_key"])
                 payload = task.get("payload") or {}
