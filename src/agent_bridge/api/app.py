@@ -33,8 +33,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.codegraph_scheduler.start()
         service.understand_scheduler.start()
         service.doc_sync_scheduler.start()
+        service.workflow_scheduler.start()
         yield
         service.codegraph.ua_client.stop_all_dashboards()
+        service.workflow_scheduler.stop()
         service.doc_sync_scheduler.stop()
         service.understand_scheduler.stop()
         service.codegraph_scheduler.stop()
