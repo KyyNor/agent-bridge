@@ -288,3 +288,92 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
+
+WORKFLOW_SCHEMA = """
+CREATE TABLE IF NOT EXISTS workflow_definitions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE RESTRICT,
+  workflow_js TEXT NOT NULL DEFAULT '',
+  manifest_json TEXT NOT NULL DEFAULT '{}',
+  schedule_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_definitions_profile ON workflow_definitions(profile_key);
+
+CREATE TABLE IF NOT EXISTS workflow_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+  task_key TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending',
+  lease_run_id TEXT,
+  lease_expires_at TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT,
+  UNIQUE (workflow_key, task_key)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_tasks_pick
+  ON workflow_tasks(workflow_key, status, lease_expires_at, id);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL UNIQUE,
+  workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+  profile_key TEXT NOT NULL,
+  task_key TEXT,
+  status TEXT NOT NULL,
+  temp_dir TEXT NOT NULL DEFAULT '',
+  exit_code INTEGER,
+  stdout_path TEXT,
+  stderr_path TEXT,
+  error TEXT,
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  duration_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_key, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_run_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  workflow_key TEXT NOT NULL,
+  task_key TEXT,
+  level TEXT NOT NULL DEFAULT 'info',
+  stage TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_logs_run ON workflow_run_logs(run_id, id);
+
+CREATE TABLE IF NOT EXISTS workflow_artifacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  artifact_id TEXT NOT NULL UNIQUE,
+  workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+  profile_key TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  task_key TEXT,
+  title TEXT NOT NULL,
+  path TEXT NOT NULL,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  format TEXT NOT NULL DEFAULT 'markdown',
+  summary TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (workflow_key, path)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_profile ON workflow_artifacts(profile_key);
+CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_path ON workflow_artifacts(path);
+"""

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA
+from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEMA
 
 
 class SQLiteStore:
@@ -18,11 +18,13 @@ class SQLiteStore:
         from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
         from agent_bridge.storage.repositories.governance import GovernanceRepository
         from agent_bridge.storage.repositories.knowledge import KnowledgeRepository
+        from agent_bridge.storage.repositories.workflows import WorkflowsRepository
 
         self.knowledge = KnowledgeRepository(db_path, self.connect)
         self.capabilities = CapabilitiesRepository(db_path, self.connect)
         self.governance = GovernanceRepository(db_path, self.connect)
         self.codegraph = CodeGraphRepository(db_path, self.connect)
+        self.workflows = WorkflowsRepository(db_path, self.connect)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -43,6 +45,7 @@ class SQLiteStore:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
             conn.executescript(CODEGRAPH_SCHEMA)
+            conn.executescript(WORKFLOW_SCHEMA)
         self.migrate_phase2()
 
     def migrate_phase2(self) -> None:
@@ -124,6 +127,7 @@ class SQLiteStore:
                 "ON tool_call_logs(resource_type, resource_key)"
             )
             conn.executescript(CODEGRAPH_SCHEMA)
+            conn.executescript(WORKFLOW_SCHEMA)
 
     def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -225,6 +229,30 @@ class SQLiteStore:
 
     def save_sync_config(self, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *", doc_sync_cron: str = "*/30 * * * *") -> dict[str, Any]:
         return self.codegraph.save_sync_config(code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron, doc_sync_cron=doc_sync_cron)
+
+    def upsert_workflow_definition(self, **kwargs):
+        return self.workflows.upsert_workflow_definition(**kwargs)
+
+    def get_workflow_definition(self, workflow_key: str):
+        return self.workflows.get_workflow_definition(workflow_key)
+
+    def list_workflow_definitions(self):
+        return self.workflows.list_workflow_definitions()
+
+    def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]):
+        return self.workflows.upsert_workflow_tasks(workflow_key, tasks)
+
+    def get_workflow_task(self, workflow_key: str, task_key: str):
+        return self.workflows.get_workflow_task(workflow_key, task_key)
+
+    def lease_workflow_task(self, workflow_key: str, *, run_id: str, lease_seconds: int = 7200):
+        return self.workflows.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=lease_seconds)
+
+    def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str):
+        return self.workflows.complete_workflow_task(workflow_key, task_key, run_id=run_id)
+
+    def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str):
+        return self.workflows.force_workflow_task_lease_expiry(workflow_key, task_key, expires_at)
 
     def create_mcp_service(
         self,
