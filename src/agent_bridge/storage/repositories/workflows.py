@@ -119,12 +119,18 @@ class WorkflowsRepository:
         created = 0
         updated = 0
         skipped_completed = 0
+        skipped_running = 0
+        now = _now_iso()
         with self._connect() as conn:
             for task in tasks:
                 task_key = str(task["task_key"])
                 payload = task.get("payload") or {}
                 existing = conn.execute(
-                    "SELECT status FROM workflow_tasks WHERE workflow_key = ? AND task_key = ?",
+                    """
+                    SELECT status, lease_expires_at
+                    FROM workflow_tasks
+                    WHERE workflow_key = ? AND task_key = ?
+                    """,
                     (workflow_key, task_key),
                 ).fetchone()
                 if existing is None:
@@ -138,6 +144,11 @@ class WorkflowsRepository:
                     created += 1
                 elif existing["status"] == WorkflowTaskStatus.completed.value:
                     skipped_completed += 1
+                elif (
+                    existing["status"] == WorkflowTaskStatus.running.value
+                    and (existing["lease_expires_at"] is None or existing["lease_expires_at"] >= now)
+                ):
+                    skipped_running += 1
                 else:
                     conn.execute(
                         """
@@ -152,7 +163,12 @@ class WorkflowsRepository:
                         (_json_dumps(payload), workflow_key, task_key),
                     )
                     updated += 1
-        return {"created": created, "updated": updated, "skipped_completed": skipped_completed}
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped_completed": skipped_completed,
+            "skipped_running": skipped_running,
+        }
 
     def get_workflow_task(self, workflow_key: str, task_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -198,19 +214,23 @@ class WorkflowsRepository:
             leased = conn.execute("SELECT * FROM workflow_tasks WHERE id = ?", (row["id"],)).fetchone()
             return _row_payload(leased)
 
-    def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str) -> None:
+    def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str) -> bool:
         with self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE workflow_tasks
                 SET status = 'completed',
                     completed_at = CURRENT_TIMESTAMP,
                     lease_run_id = ?,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE workflow_key = ? AND task_key = ?
+                WHERE workflow_key = ?
+                  AND task_key = ?
+                  AND status = 'running'
+                  AND lease_run_id = ?
                 """,
-                (run_id, workflow_key, task_key),
+                (run_id, workflow_key, task_key, run_id),
             )
+            return cursor.rowcount > 0
 
     def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str) -> None:
         with self._connect() as conn:

@@ -230,28 +230,56 @@ class SQLiteStore:
     def save_sync_config(self, *, code_sync_cron: str, ua_git_url: str = "", understand_cron: str = "0 2 * * *", doc_sync_cron: str = "*/30 * * * *") -> dict[str, Any]:
         return self.codegraph.save_sync_config(code_sync_cron=code_sync_cron, ua_git_url=ua_git_url, understand_cron=understand_cron, doc_sync_cron=doc_sync_cron)
 
-    def upsert_workflow_definition(self, **kwargs):
-        return self.workflows.upsert_workflow_definition(**kwargs)
+    def upsert_workflow_definition(
+        self,
+        *,
+        workflow_key: str,
+        name: str,
+        description: str,
+        profile_key: str,
+        workflow_js: str,
+        manifest: dict[str, Any],
+        schedule: dict[str, Any],
+        status: str,
+        created_by: str,
+    ) -> dict[str, Any]:
+        return self.workflows.upsert_workflow_definition(
+            workflow_key=workflow_key,
+            name=name,
+            description=description,
+            profile_key=profile_key,
+            workflow_js=workflow_js,
+            manifest=manifest,
+            schedule=schedule,
+            status=status,
+            created_by=created_by,
+        )
 
-    def get_workflow_definition(self, workflow_key: str):
+    def get_workflow_definition(self, workflow_key: str) -> dict[str, Any] | None:
         return self.workflows.get_workflow_definition(workflow_key)
 
-    def list_workflow_definitions(self):
+    def list_workflow_definitions(self) -> list[dict[str, Any]]:
         return self.workflows.list_workflow_definitions()
 
-    def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]):
+    def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]) -> dict[str, int]:
         return self.workflows.upsert_workflow_tasks(workflow_key, tasks)
 
-    def get_workflow_task(self, workflow_key: str, task_key: str):
+    def get_workflow_task(self, workflow_key: str, task_key: str) -> dict[str, Any] | None:
         return self.workflows.get_workflow_task(workflow_key, task_key)
 
-    def lease_workflow_task(self, workflow_key: str, *, run_id: str, lease_seconds: int = 7200):
+    def lease_workflow_task(
+        self,
+        workflow_key: str,
+        *,
+        run_id: str,
+        lease_seconds: int = 7200,
+    ) -> dict[str, Any] | None:
         return self.workflows.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=lease_seconds)
 
-    def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str):
+    def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str) -> bool:
         return self.workflows.complete_workflow_task(workflow_key, task_key, run_id=run_id)
 
-    def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str):
+    def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str) -> None:
         return self.workflows.force_workflow_task_lease_expiry(workflow_key, task_key, expires_at)
 
     def create_mcp_service(
