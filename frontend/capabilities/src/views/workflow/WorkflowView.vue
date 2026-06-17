@@ -419,7 +419,7 @@ async function deleteCurrent() {
             </div>
             <div class="grid gap-3 md:grid-cols-2">
               <div class="rounded-md border px-3 py-2">
-                <div class="text-xs text-muted-foreground">profile_key</div>
+                <div class="text-xs text-muted-foreground">profile</div>
                 <div class="mt-1 truncate text-sm font-medium">{{ selectedProfileName }}</div>
               </div>
               <div class="rounded-md border px-3 py-2">
@@ -569,16 +569,16 @@ async function deleteCurrent() {
         <div class="max-h-[78vh] space-y-5 overflow-auto pr-1">
           <div class="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_0.7fr]">
             <div class="lg:col-span-1">
-              <label class="mb-1 block text-xs text-muted-foreground">workflow_key</label>
-              <Input v-model="form.workflow_key" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
+              <label class="mb-1 block text-xs text-muted-foreground">workflow_id</label>
+              <Input v-model="form.workflow_key" class="h-9" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
             </div>
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">名称</label>
-              <Input v-model="form.name" />
+              <Input v-model="form.name" class="h-9" />
             </div>
             <div>
-              <label class="mb-1 block text-xs text-muted-foreground">关联 profile_key</label>
-              <select v-model="form.profile_key" class="h-10 w-full rounded-md border bg-background px-3 text-sm">
+              <label class="mb-1 block text-xs text-muted-foreground">关联 profile</label>
+              <select v-model="form.profile_key" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
                 <option v-for="profile in profiles" :key="profile.profile_key" :value="profile.profile_key">
                   {{ profile.name }} / {{ profile.profile_key }}
                 </option>
@@ -586,14 +586,14 @@ async function deleteCurrent() {
             </div>
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">状态</label>
-              <select v-model="form.status" class="h-10 w-full rounded-md border bg-background px-3 text-sm">
+              <select v-model="form.status" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
                 <option value="active">启用</option>
                 <option value="disabled">停用</option>
               </select>
             </div>
             <div class="lg:col-span-4">
               <label class="mb-1 block text-xs text-muted-foreground">描述</label>
-              <Input v-model="form.description" />
+              <Input v-model="form.description" class="h-9" />
             </div>
           </div>
 
