@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition, WorkflowRun, WorkflowRunLog } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -31,6 +31,7 @@ const showArtifact = ref(false)
 const runs = ref<WorkflowRun[]>([])
 const runsLoading = ref(false)
 const selectedRunId = ref('')
+const runEvents = ref<WorkflowRunEvent[]>([])
 const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
 const testing = ref(false)
@@ -297,6 +298,31 @@ function logLevelClass(level: string) {
   return 'border-border'
 }
 
+function eventKindLabel(event: WorkflowRunEvent) {
+  if (event.kind === 'agent_message') return event.agent_name || 'agent'
+  if (event.kind === 'tool_call') return '工具调用'
+  if (event.kind === 'tool_result') return event.status === 'failed' ? '工具失败' : '工具完成'
+  if (event.kind === 'result') return event.status === 'failed' ? '运行失败' : '运行结果'
+  if (event.kind === 'error') return '异常'
+  if (event.kind === 'status') return '状态'
+  return event.kind
+}
+
+function eventMessage(event: WorkflowRunEvent) {
+  if (event.message) return event.message
+  if (event.tool_name && event.kind === 'tool_call') return `调用工具 ${event.tool_name}`
+  if (event.tool_name && event.kind === 'tool_result') return `工具 ${event.tool_name} 调用${event.status === 'failed' ? '失败' : '成功'}`
+  return event.status || ''
+}
+
+function eventClass(event: WorkflowRunEvent) {
+  if (event.kind === 'error' || event.status === 'failed') return 'border-red-400'
+  if (event.kind === 'tool_call') return 'border-blue-400'
+  if (event.kind === 'tool_result') return 'border-green-400'
+  if (event.kind === 'result') return 'border-foreground/40'
+  return 'border-border'
+}
+
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
 }
@@ -342,13 +368,20 @@ async function loadRuns() {
 async function loadLogs() {
   if (!selectedRunId.value) {
     runLogs.value = []
+    runEvents.value = []
     return
   }
   logsLoading.value = true
   try {
-    runLogs.value = await api.getWorkflowRunLogs(selectedRunId.value)
+    const [logs, events] = await Promise.all([
+      api.getWorkflowRunLogs(selectedRunId.value),
+      api.getWorkflowRunEvents(selectedRunId.value),
+    ])
+    runLogs.value = logs
+    runEvents.value = events
   } catch (e: unknown) {
     runLogs.value = []
+    runEvents.value = []
   } finally {
     logsLoading.value = false
   }
@@ -381,7 +414,7 @@ async function runTest() {
       await loadRuns()
       await loadLogs()
       stopTestPolling()
-      testPoll = setInterval(pollTestRun, 5000)
+      testPoll = setInterval(pollTestRun, 1500)
     } else {
       testing.value = false
     }
@@ -616,11 +649,38 @@ async function deleteCurrent() {
               <div class="rounded-md border bg-muted/20 p-3">
                 <div v-if="logsLoading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
                 <div v-else-if="!selectedRunId" class="py-4 text-center text-sm text-muted-foreground">选择左侧某次运行查看日志</div>
-                <div v-else-if="!runLogs.length" class="py-4 text-center text-sm text-muted-foreground">该运行暂无日志</div>
-                <div v-else class="max-h-80 space-y-2 overflow-auto font-mono text-xs">
-                  <div v-for="(log, idx) in runLogs" :key="idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
-                    <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
-                    <span class="ml-1">{{ log.message }}</span>
+                <div v-else class="space-y-4">
+                  <div>
+                    <div class="mb-2 flex items-center justify-between gap-2">
+                      <div class="text-xs font-semibold text-foreground">Agent 输出</div>
+                      <Badge variant="outline">{{ runEvents.length }}</Badge>
+                    </div>
+                    <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无 agent 输出</div>
+                    <div v-else class="max-h-80 space-y-2 overflow-auto rounded-md border bg-background p-3 text-xs">
+                      <div v-for="(event, idx) in runEvents" :key="idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                          <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
+                          <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                          <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                        </div>
+                        <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="mb-2 flex items-center justify-between gap-2">
+                      <div class="text-xs font-semibold text-foreground">业务日志</div>
+                      <Badge variant="outline">{{ runLogs.length }}</Badge>
+                    </div>
+                    <div v-if="!runLogs.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无业务日志</div>
+                    <div v-else class="max-h-80 space-y-2 overflow-auto rounded-md border bg-background p-3 font-mono text-xs">
+                      <div v-for="(log, idx) in runLogs" :key="idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
+                        <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
+                        <span class="ml-1">{{ log.message }}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

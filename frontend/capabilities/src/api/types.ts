@@ -117,6 +117,21 @@ export interface WorkflowRunLog {
   created_at: string
 }
 
+export interface WorkflowRunEvent {
+  created_at?: string
+  agent_name?: string
+  source?: string
+  kind: string
+  status?: string
+  message?: string
+  tool_name?: string
+  tool_use_id?: string
+  session_id?: string
+  total_cost_usd?: number
+  num_turns?: number
+  [key: string]: unknown
+}
+
 export interface WorkflowArtifactDetail {
   artifact_id: string
   workflow_key: string

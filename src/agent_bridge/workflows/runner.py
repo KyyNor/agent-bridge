@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, TextIO
 
@@ -89,7 +90,96 @@ def _message_log_record(message: Any) -> dict[str, Any]:
     return record
 
 
-async def _run_claude_agent_sdk(run_dir: Path, stdout: TextIO, stderr: TextIO) -> None:
+def _event_record(kind: str, **values: Any) -> dict[str, Any]:
+    return {
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "agent_name": "claude",
+        "source": "claude_agent_sdk",
+        "kind": kind,
+        **{key: _json_safe(value) for key, value in values.items() if value is not None},
+    }
+
+
+def _write_event(events: TextIO, record: dict[str, Any]) -> None:
+    events.write(json.dumps(record, ensure_ascii=False) + "\n")
+    events.flush()
+
+
+def _message_events(message: Any, tool_names: dict[str, str]) -> list[dict[str, Any]]:
+    session_id = getattr(message, "session_id", None)
+    message_type = type(message).__name__
+    if message_type == "ResultMessage":
+        status = "failed" if getattr(message, "is_error", False) else "success"
+        result = getattr(message, "result", None) or getattr(message, "subtype", "")
+        return [
+            _event_record(
+                "result",
+                status=status,
+                message=result,
+                session_id=session_id,
+                total_cost_usd=getattr(message, "total_cost_usd", None),
+                num_turns=getattr(message, "num_turns", None),
+            )
+        ]
+
+    records: list[dict[str, Any]] = []
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            block_type = type(block).__name__
+            if block_type == "TextBlock":
+                text = str(getattr(block, "text", "")).strip()
+                if text:
+                    records.append(_event_record("agent_message", message=text, session_id=session_id))
+            elif block_type in {"ToolUseBlock", "ServerToolUseBlock"}:
+                tool_id = str(getattr(block, "id", "") or getattr(block, "tool_use_id", ""))
+                tool_name = str(getattr(block, "name", "") or "unknown")
+                if tool_id:
+                    tool_names[tool_id] = tool_name
+                records.append(
+                    _event_record(
+                        "tool_call",
+                        status="started",
+                        tool_name=tool_name,
+                        tool_use_id=tool_id,
+                        message=f"调用工具 {tool_name}",
+                        session_id=session_id,
+                    )
+                )
+            elif block_type in {"ToolResultBlock", "ServerToolResultBlock"}:
+                tool_id = str(getattr(block, "tool_use_id", "") or "")
+                tool_name = tool_names.get(tool_id, tool_id or "unknown")
+                status = "failed" if getattr(block, "is_error", False) else "success"
+                records.append(
+                    _event_record(
+                        "tool_result",
+                        status=status,
+                        tool_name=tool_name,
+                        tool_use_id=tool_id,
+                        message=f"工具 {tool_name} 调用{'失败' if status == 'failed' else '成功'}",
+                        session_id=session_id,
+                    )
+                )
+    elif isinstance(content, str) and content.strip():
+        records.append(_event_record("agent_message", message=content.strip(), session_id=session_id))
+
+    if records:
+        return records
+
+    subtype = getattr(message, "subtype", None)
+    if subtype:
+        return [
+            _event_record(
+                "status",
+                status=str(subtype),
+                message=str(subtype),
+                session_id=session_id,
+            )
+        ]
+    return []
+
+
+async def _run_claude_agent_sdk(run_dir: Path, stdout: TextIO, stderr: TextIO, events: TextIO) -> None:
     def write_stderr(chunk: str) -> None:
         stderr.write(chunk)
         stderr.flush()
@@ -110,9 +200,12 @@ async def _run_claude_agent_sdk(run_dir: Path, stdout: TextIO, stderr: TextIO) -
         include_partial_messages=True,
         stderr=write_stderr,
     )
+    tool_names: dict[str, str] = {}
     async for message in claude_query(prompt=WORKFLOW_PROMPT, options=options):
         stdout.write(json.dumps(_message_log_record(message), ensure_ascii=False) + "\n")
         stdout.flush()
+        for record in _message_events(message, tool_names):
+            _write_event(events, record)
 
 
 class ClaudeWorkflowRunner:
@@ -120,14 +213,21 @@ class ClaudeWorkflowRunner:
         run_dir = prepare_run_directory(base_dir, spec)
         stdout_path = run_dir / "stdout.log"
         stderr_path = run_dir / "stderr.log"
+        events_path = run_dir / "events.jsonl"
         started = time.monotonic()
-        with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
+        with (
+            stdout_path.open("w", encoding="utf-8") as stdout,
+            stderr_path.open("w", encoding="utf-8") as stderr,
+            events_path.open("w", encoding="utf-8") as events,
+        ):
             try:
-                asyncio.run(_run_claude_agent_sdk(run_dir, stdout, stderr))
+                asyncio.run(_run_claude_agent_sdk(run_dir, stdout, stderr, events))
                 exit_code = 0
             except Exception as exc:
                 exit_code = 1
-                stderr.write(f"{type(exc).__name__}: {exc}\n")
+                error_message = f"{type(exc).__name__}: {exc}"
+                stderr.write(f"{error_message}\n")
+                _write_event(events, _event_record("error", status="failed", message=error_message))
         return WorkflowProcessResult(
             run_dir=run_dir,
             exit_code=exit_code,

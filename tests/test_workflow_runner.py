@@ -42,7 +42,10 @@ def test_fake_runner_writes_no_task_result(tmp_path):
 
 
 def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkeypatch):
+    import json
     from types import SimpleNamespace
+
+    from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 
     from agent_bridge.workflows import runner as runner_module
     from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
@@ -57,7 +60,25 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkey
         captured["prompt"] = prompt
         captured["options_object"] = options
         yield SimpleNamespace(subtype="init", session_id="session_1")
-        yield SimpleNamespace(subtype="success", result="workflow complete", session_id="session_1", total_cost_usd=0.01)
+        yield AssistantMessage(
+            content=[
+                TextBlock("Reading workflow.js"),
+                ToolUseBlock(id="toolu_1", name="workflow_claim_task", input={"hidden": True}),
+            ],
+            model="test-model",
+            session_id="session_1",
+        )
+        yield UserMessage(content=[ToolResultBlock(tool_use_id="toolu_1", content="hidden result", is_error=False)])
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=12,
+            duration_api_ms=10,
+            is_error=False,
+            num_turns=1,
+            session_id="session_1",
+            result="workflow complete",
+            total_cost_usd=0.01,
+        )
 
     monkeypatch.setattr(runner_module, "ClaudeAgentOptions", FakeOptions)
     monkeypatch.setattr(runner_module, "claude_query", fake_query)
@@ -90,9 +111,31 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkey
     stdout = result.stdout_path.read_text(encoding="utf-8")
     assert "session_1" in stdout
     assert "workflow complete" in stdout
+    events = [
+        json.loads(line)
+        for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["kind"] for event in events] == [
+        "status",
+        "agent_message",
+        "tool_call",
+        "tool_result",
+        "result",
+    ]
+    assert events[1]["message"] == "Reading workflow.js"
+    assert events[1]["agent_name"] == "claude"
+    assert events[1]["source"] == "claude_agent_sdk"
+    assert events[2]["tool_name"] == "workflow_claim_task"
+    assert events[2]["status"] == "started"
+    assert events[3]["tool_name"] == "workflow_claim_task"
+    assert events[3]["status"] == "success"
+    assert events[3]["message"] == "工具 workflow_claim_task 调用成功"
+    assert events[4]["message"] == "workflow complete"
+    assert events[4]["total_cost_usd"] == 0.01
 
 
 def test_claude_runner_returns_failure_when_sdk_raises(tmp_path, monkeypatch):
+    import json
     from types import SimpleNamespace
 
     from agent_bridge.workflows import runner as runner_module
@@ -125,3 +168,9 @@ def test_claude_runner_returns_failure_when_sdk_raises(tmp_path, monkeypatch):
     stderr = result.stderr_path.read_text(encoding="utf-8")
     assert "RuntimeError" in stderr
     assert "sdk failed" in stderr
+    events = [
+        json.loads(line)
+        for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[-1]["kind"] == "error"
+    assert events[-1]["message"] == "RuntimeError: sdk failed"

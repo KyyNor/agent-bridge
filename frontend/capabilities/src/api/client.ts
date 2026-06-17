@@ -38,6 +38,7 @@ import type {
   WorkflowArtifactDetail,
   WorkflowDefinition,
   WorkflowRun,
+  WorkflowRunEvent,
   WorkflowRunLog,
 } from './types'
 
@@ -126,6 +127,7 @@ export const api = {
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
   },
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
+  getWorkflowRunEvents: (runId: string) => get<WorkflowRunEvent[]>(`/workflow-runs/${runId}/events`),
   upsertWorkflow: (w: Partial<WorkflowDefinition> & {
     workflow_key: string
     name: string
