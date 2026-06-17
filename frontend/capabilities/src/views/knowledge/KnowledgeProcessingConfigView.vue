@@ -273,14 +273,13 @@ async function deleteBackend(slug: string) {
           <span v-if="docSyncNextRuns" class="text-xs text-muted-foreground font-mono">{{ docSyncNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
-        <div class="grid grid-cols-[12rem_minmax(0,7rem)_minmax(0,7rem)_1fr] items-center gap-4">
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">工作流调度 <span class="text-xs text-muted-foreground">(Workflow)</span></div>
           <div class="flex items-center gap-2">
-            <Input v-model="syncConfig.workflow_start_time" placeholder="22:00" class="w-28 font-mono text-xs" />
-            <span class="text-xs text-muted-foreground">→</span>
-            <Input v-model="syncConfig.workflow_stop_time" placeholder="07:00" class="w-28 font-mono text-xs" />
+            <Input v-model="syncConfig.workflow_start_time" placeholder="22:00" class="w-32 font-mono text-sm" />
+            <span class="text-muted-foreground">→</span>
+            <Input v-model="syncConfig.workflow_stop_time" placeholder="07:00" class="w-32 font-mono text-sm" />
           </div>
-          <span></span>
           <span v-if="workflowTimesValid" class="text-xs text-muted-foreground">每日窗口内持续轮转，跨夜自动续跑</span>
           <span v-else class="text-xs text-destructive">请输入 HH:MM 时间</span>
         </div>

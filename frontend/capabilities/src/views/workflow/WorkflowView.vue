@@ -348,7 +348,7 @@ function errorMessage(e: unknown) {
     </div>
 
     <Dialog v-model:open="showEditor">
-      <DialogContent class="w-[96vw] max-w-[1700px]">
+      <DialogContent class="w-[96vw] max-w-[1400px] sm:max-w-[1400px]">
         <DialogHeader>
           <DialogTitle>{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</DialogTitle>
         </DialogHeader>
