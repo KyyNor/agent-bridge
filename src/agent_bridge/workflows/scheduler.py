@@ -10,6 +10,7 @@ from typing import Any
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from agent_bridge.core.domain import ConflictError, NotFound
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.workflows.result_parser import parse_workflow_result
 from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunner, WorkflowRunSpec
@@ -189,31 +190,63 @@ class WorkflowScheduler:
                 thread = threading.Thread(target=self._run_and_release, args=(workflow_key,), daemon=True)
                 thread.start()
 
-    def _run_and_release(self, workflow_key: str) -> None:
+    def _run_and_release(self, workflow_key: str, run_id: str | None = None) -> None:
         try:
-            self.run_one_workflow(workflow_key)
+            self.run_one_workflow(workflow_key, run_id=run_id)
         except Exception:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
         finally:
             with self._lock:
                 self._running.discard(workflow_key)
 
-    def run_one_workflow(self, workflow_key: str) -> dict[str, Any]:
+    def run_workflow_now(self, workflow_key: str) -> dict[str, Any]:
+        """Launch a single on-demand run immediately — a "test run".
+
+        Bypasses the daily window and the active/disabled status check (those
+        live only in tick()). Shares the in-memory _running guard with the
+        scheduler so a workflow cannot run twice concurrently. The run row is
+        created synchronously so callers can poll it immediately.
+        """
+        with self._lock:
+            if workflow_key in self._running:
+                raise ConflictError("workflow is already running")
+            workflow = self._store.get_workflow_definition(workflow_key)
+            if workflow is None:
+                raise NotFound("workflow not found")
+            run_id = f"run_{uuid.uuid4().hex}"
+            base_dir = self._base_run_dir or Path("workflow-runs")
+            self._store.create_workflow_run(
+                run_id=run_id,
+                workflow_key=workflow_key,
+                profile_key=workflow["profile_key"],
+                task_key=None,
+                status="running",
+                temp_dir=str(base_dir / run_id),
+            )
+            self._running.add(workflow_key)
+        thread = threading.Thread(
+            target=self._run_and_release, args=(workflow_key, run_id), daemon=True
+        )
+        thread.start()
+        return {"status": "started", "run_id": run_id}
+
+    def run_one_workflow(self, workflow_key: str, run_id: str | None = None) -> dict[str, Any]:
         workflow = self._store.get_workflow_definition(workflow_key)
         if workflow is None:
             self.finished_today.add(workflow_key)
             return {"status": "missing"}
 
-        run_id = f"run_{uuid.uuid4().hex}"
         base_dir = self._base_run_dir or Path("workflow-runs")
-        run = self._store.create_workflow_run(
-            run_id=run_id,
-            workflow_key=workflow_key,
-            profile_key=workflow["profile_key"],
-            task_key=None,
-            status="running",
-            temp_dir=str(base_dir / run_id),
-        )
+        if run_id is None:
+            run_id = f"run_{uuid.uuid4().hex}"
+            self._store.create_workflow_run(
+                run_id=run_id,
+                workflow_key=workflow_key,
+                profile_key=workflow["profile_key"],
+                task_key=None,
+                status="running",
+                temp_dir=str(base_dir / run_id),
+            )
         process_result = None
         try:
             process_result = self._runner.run(
@@ -254,7 +287,7 @@ class WorkflowScheduler:
             stderr_path = str(process_result.stderr_path) if process_result else None
             duration_ms = process_result.duration_ms if process_result else None
             self._store.finish_workflow_run(
-                run["run_id"],
+                run_id,
                 status="failed",
                 exit_code=process_result.exit_code if process_result else None,
                 stdout_path=stdout_path,

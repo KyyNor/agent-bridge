@@ -216,3 +216,95 @@ def test_failed_run_releases_leased_task_for_retry(wm_paths, tmp_path):
     assert task["status"] == "pending"  # released for fast retry instead of waiting out the lease
     assert task["lease_run_id"] is None
     assert task["last_error"]
+
+
+def test_run_workflow_now_runs_once_and_creates_run_row(wm_paths, tmp_path):
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _create_workflow(svc.store, "A")
+
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        runner=FakeWorkflowRunner(status="no_executable_task"),
+        base_run_dir=tmp_path,
+        max_concurrent_workflows=2,
+    )
+
+    result = scheduler.run_workflow_now("A")
+    assert result["status"] == "started"
+    assert result["run_id"].startswith("run_")
+
+    _wait_runs_done(scheduler)
+    run = svc.store.get_workflow_run(result["run_id"])
+    assert run is not None
+    assert run["status"] == "no_task"
+
+
+def test_run_workflow_now_rejects_when_already_running(wm_paths, tmp_path):
+    import pytest
+    from agent_bridge.core.domain import ConflictError
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _create_workflow(svc.store, "A")
+
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        runner=FakeWorkflowRunner(),
+        base_run_dir=tmp_path,
+    )
+    scheduler._running.add("A")  # simulate an in-flight run
+
+    with pytest.raises(ConflictError):
+        scheduler.run_workflow_now("A")
+
+
+def test_run_workflow_now_missing_workflow_raises_not_found(wm_paths, tmp_path):
+    import pytest
+    from agent_bridge.core.domain import NotFound
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    scheduler = WorkflowScheduler(
+        service=svc.workflows, store=svc.store, admins={"root"}, base_run_dir=tmp_path,
+    )
+
+    with pytest.raises(NotFound):
+        scheduler.run_workflow_now("does-not-exist")
+
+
+def test_run_workflow_now_bypasses_disabled_status(wm_paths, tmp_path):
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    svc.store.upsert_workflow_definition(
+        workflow_key="A", name="A", description="", profile_key="report-plane",
+        workflow_js="", manifest={"name": "A", "nodes": [], "edges": [], "schemas": {}},
+        status="disabled", created_by="root",
+    )
+
+    scheduler = WorkflowScheduler(
+        service=svc.workflows, store=svc.store, admins={"root"},
+        runner=FakeWorkflowRunner(status="no_executable_task"), base_run_dir=tmp_path,
+    )
+
+    result = scheduler.run_workflow_now("A")  # disabled, yet runnable for a test
+    assert result["status"] == "started"
