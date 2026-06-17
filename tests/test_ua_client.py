@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +8,9 @@ import pytest
 from agent_bridge.codegraph.ua_client import UA_DIR, UAAvailability, UnderstandAnythingClient
 
 
-def test_analyze_uses_auto_permission_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_uses_agent_sdk_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_bridge.codegraph import ua_client as ua_module
+
     client = UnderstandAnythingClient()
     project_dir = tmp_path / "repo"
     graph_dir = project_dir / UA_DIR
@@ -23,15 +24,29 @@ def test_analyze_uses_auto_permission_mode(tmp_path: Path, monkeypatch: pytest.M
         lambda project_dir: UAAvailability(claude_installed=True, ua_skill_available=True),
     )
 
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["kwargs"] = kwargs
-        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+    class FakeOptions:
+        def __init__(self, **kwargs):
+            captured["options"] = kwargs
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    async def fake_query(*, prompt, options):
+        captured["prompt"] = prompt
+        captured["options_object"] = options
+        yield SimpleNamespace(subtype="success", result="ok", session_id="session_1")
+
+    monkeypatch.setattr(ua_module, "ClaudeAgentOptions", FakeOptions)
+    monkeypatch.setattr(ua_module, "claude_query", fake_query)
+    monkeypatch.setattr(ua_module, "claude_settings_env", lambda: {"ANTHROPIC_BASE_URL": "https://example.test"})
 
     result = client.analyze(project_dir)
 
     assert result.success is True
-    assert captured["cmd"][:4] == ["claude", "-p", "--permission-mode", "auto"]
-    assert "--dangerously-skip-permissions" not in captured["cmd"]
+    assert str(project_dir) in captured["prompt"]
+    options = captured["options"]
+    assert options["cwd"] == project_dir
+    assert options["tools"] == {"type": "preset", "preset": "claude_code"}
+    assert options["permission_mode"] == "bypassPermissions"
+    assert options["env"] == {"ANTHROPIC_BASE_URL": "https://example.test"}
+    assert options["setting_sources"] == ["user", "project"]
+    assert options["skills"] == ["understand"]
+    assert options["include_partial_messages"] is True
+    assert "session_1" in (result.output or "")

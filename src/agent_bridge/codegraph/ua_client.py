@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import atexit
+import asyncio
 import json
 import logging
 import os
 import re
-import shutil
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
+
+from agent_bridge.claude_agent import claude_settings_env
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,12 @@ Requirements:
 - Prefer incremental update if the graph already exists
 - Do not modify source code
 - Report only final status, graph path, node count, edge count, and errors
+"""
+
+UA_SYSTEM_PROMPT = """\
+You are running an Agent Bridge Understand Anything analysis.
+Use the configured Understand Anything skill.
+Do not modify repository source code.
 """
 
 
@@ -204,6 +214,45 @@ class DashboardPool:
             return False
 
 
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return str(value)
+
+
+def _sdk_message_log_record(message: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {"type": type(message).__name__}
+    for attr in ("subtype", "session_id", "uuid", "result", "total_cost_usd", "duration_ms", "num_turns"):
+        if hasattr(message, attr):
+            record[attr] = _json_safe(getattr(message, attr))
+    if hasattr(message, "content"):
+        record["content"] = _json_safe(getattr(message, "content"))
+    return record
+
+
+async def _run_ua_analysis_agent(project_dir: Path, prompt: str, output_lines: list[str]) -> None:
+    options = ClaudeAgentOptions(
+        tools={"type": "preset", "preset": "claude_code"},
+        cwd=project_dir,
+        permission_mode="bypassPermissions",
+        env=claude_settings_env(),
+        setting_sources=["user", "project"],
+        skills=["understand"],
+        system_prompt={
+            "type": "preset",
+            "preset": "claude_code",
+            "append": UA_SYSTEM_PROMPT,
+        },
+        include_partial_messages=True,
+    )
+    async for message in claude_query(prompt=prompt, options=options):
+        output_lines.append(json.dumps(_sdk_message_log_record(message), ensure_ascii=False))
+
+
 class UnderstandAnythingClient:
 
     def __init__(self, root: Path | None = None) -> None:
@@ -219,14 +268,6 @@ class UnderstandAnythingClient:
         return self._ua_repo_dir() / "understand-anything-plugin" / "skills"
 
     def check_availability(self, *, project_dir: Path | None = None) -> UAAvailability:
-        claude_path = shutil.which("claude")
-        if not claude_path:
-            return UAAvailability(
-                claude_installed=False,
-                ua_skill_available=False,
-                message="claude CLI 未安装。请先安装 Claude Code: npm install -g @anthropic-ai/claude-code",
-            )
-
         if project_dir:
             skill_dir = project_dir / SKILL_DIR_NAME
             understand_link = skill_dir / "understand"
@@ -328,28 +369,19 @@ class UnderstandAnythingClient:
         # Step 3: Run analysis
         prompt = ANALYZE_PROMPT.format(project_dir=str(project_dir))
         started = time.perf_counter()
+        output_lines: list[str] = []
         try:
-            proc = subprocess.run(
-                ["claude", "-p", "--permission-mode", "auto", prompt],
-                cwd=str(project_dir),
-                capture_output=True, text=True, timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
+            asyncio.run(asyncio.wait_for(_run_ua_analysis_agent(project_dir, prompt, output_lines), timeout=timeout))
+        except TimeoutError:
             duration_ms = int((time.perf_counter() - started) * 1000)
             return UAAnalyzeResult(success=False, error=f"分析超时（{timeout}s）", duration_ms=duration_ms)
-        except (FileNotFoundError, OSError) as exc:
-            return UAAnalyzeResult(success=False, error=str(exc))
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            output = "\n".join(output_lines)[-4000:]
+            return UAAnalyzeResult(success=False, error=f"{type(exc).__name__}: {exc}", output=output, duration_ms=duration_ms)
 
         duration_ms = int((time.perf_counter() - started) * 1000)
-        output = (proc.stdout or "")[-4000:]
-
-        if proc.returncode != 0:
-            return UAAnalyzeResult(
-                success=False,
-                error=(proc.stderr or "")[:2000] or f"claude -p exited with code {proc.returncode}",
-                output=output,
-                duration_ms=duration_ms,
-            )
+        output = "\n".join(output_lines)[-4000:]
 
         graph_path = project_dir / UA_DIR / GRAPH_FILE
         if not graph_path.is_file():

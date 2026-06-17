@@ -41,22 +41,29 @@ def test_fake_runner_writes_no_task_result(tmp_path):
     assert (result.run_dir / "out" / "result.json").exists()
 
 
-def test_claude_runner_uses_auto_permission_mode(tmp_path, monkeypatch):
-    import subprocess
+def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
+    from agent_bridge.workflows import runner as runner_module
     from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
 
     captured: dict[str, object] = {}
 
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    class FakeOptions:
+        def __init__(self, **kwargs):
+            captured["options"] = kwargs
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    async def fake_query(*, prompt, options):
+        captured["prompt"] = prompt
+        captured["options_object"] = options
+        yield SimpleNamespace(subtype="init", session_id="session_1")
+        yield SimpleNamespace(subtype="success", result="workflow complete", session_id="session_1", total_cost_usd=0.01)
 
-    runner = ClaudeWorkflowRunner()
-    runner.run(
+    monkeypatch.setattr(runner_module, "ClaudeAgentOptions", FakeOptions)
+    monkeypatch.setattr(runner_module, "claude_query", fake_query)
+    monkeypatch.setattr(runner_module, "claude_settings_env", lambda: {"ANTHROPIC_BASE_URL": "https://example.test"})
+
+    result = ClaudeWorkflowRunner().run(
         tmp_path,
         WorkflowRunSpec(
             run_id="run_1",
@@ -67,8 +74,54 @@ def test_claude_runner_uses_auto_permission_mode(tmp_path, monkeypatch):
         ),
     )
 
-    cmd = captured["cmd"]
-    assert cmd[:2] == ["claude", "-p"]
-    assert "--permission-mode" in cmd
-    assert cmd[cmd.index("--permission-mode") + 1] == "auto"
-    assert "--dangerously-skip-permissions" not in cmd
+    options = captured["options"]
+    assert captured["prompt"] == "Run the workflow defined in ./workflow.js and write the final result to ./out/result.json."
+    assert options["cwd"] == result.run_dir
+    assert options["tools"] == {"type": "preset", "preset": "claude_code"}
+    assert options["mcp_servers"] == result.run_dir / ".mcp.json"
+    assert options["strict_mcp_config"] is True
+    assert options["permission_mode"] == "bypassPermissions"
+    assert "ANTHROPIC_BASE_URL" in options["env"]
+    assert options["setting_sources"] == []
+    assert options["include_partial_messages"] is True
+    assert options["system_prompt"]["type"] == "preset"
+    assert options["system_prompt"]["preset"] == "claude_code"
+    assert "Agent Bridge workflow" in options["system_prompt"]["append"]
+    stdout = result.stdout_path.read_text(encoding="utf-8")
+    assert "session_1" in stdout
+    assert "workflow complete" in stdout
+
+
+def test_claude_runner_returns_failure_when_sdk_raises(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from agent_bridge.workflows import runner as runner_module
+    from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
+
+    class FakeOptions:
+        def __init__(self, **kwargs):
+            pass
+
+    async def fake_query(*, prompt, options):
+        yield SimpleNamespace(subtype="init", session_id="session_1")
+        raise RuntimeError("sdk failed")
+
+    monkeypatch.setattr(runner_module, "ClaudeAgentOptions", FakeOptions)
+    monkeypatch.setattr(runner_module, "claude_query", fake_query)
+
+    result = ClaudeWorkflowRunner().run(
+        tmp_path,
+        WorkflowRunSpec(
+            run_id="run_1",
+            workflow_key="github-summary",
+            profile_key="dev-plane",
+            workflow_js="export const manifest = {};",
+            mcp_url="http://127.0.0.1:8765/mcp",
+        ),
+    )
+
+    assert result.exit_code == 1
+    assert "session_1" in result.stdout_path.read_text(encoding="utf-8")
+    stderr = result.stderr_path.read_text(encoding="utf-8")
+    assert "RuntimeError" in stderr
+    assert "sdk failed" in stderr
