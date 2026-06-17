@@ -534,6 +534,66 @@ class AgentBridgeService:
                 return adapter
         return self.mock_backend
 
+    # -- Backend agents (Weknora) --
+
+    def list_backend_agents(self, actor: str, slug: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        adapter = self._get_adapter(slug)
+        if not isinstance(adapter, WeknoraBackend):
+            return []
+        try:
+            agents = adapter.list_agents()
+        except Exception:
+            logger.warning("列出后端 '%s' 的 agent 失败", slug, exc_info=True)
+            return []
+        return [self._normalize_agent(a) for a in agents if isinstance(a, dict) and a.get("id")]
+
+    def list_backend_agent_types(self, actor: str, slug: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        adapter = self._get_adapter(slug)
+        if not isinstance(adapter, WeknoraBackend):
+            return []
+        try:
+            presets = adapter.get_type_presets()
+        except Exception:
+            logger.warning("列出后端 '%s' 的 agent 类型预设失败", slug, exc_info=True)
+            return []
+        return [self._normalize_agent_preset(p) for p in presets if isinstance(p, dict) and p.get("id")]
+
+    def create_backend_agent(self, actor: str, slug: str, name: str, preset_id: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        adapter = self._get_adapter(slug)
+        if not isinstance(adapter, WeknoraBackend):
+            raise ValidationError(f"backend '{slug}' does not support agents")
+        presets = adapter.get_type_presets()
+        preset = next((p for p in presets if isinstance(p, dict) and p.get("id") == preset_id), None)
+        if preset is None:
+            raise NotFound(f"agent type preset '{preset_id}' not found in backend '{slug}'")
+        created = adapter.create_agent(name, preset)
+        return self._normalize_agent(created) if isinstance(created, dict) else {"agent_id": None, "name": name, "agent_type": preset_id, "is_builtin": False}
+
+    @staticmethod
+    def _normalize_agent(agent: dict[str, Any]) -> dict[str, Any]:
+        """Project Weknora's raw agent payload into a stable contract for the frontend."""
+        config = agent.get("config") or {}
+        return {
+            "agent_id": agent.get("id"),
+            "name": agent.get("name") or agent.get("id") or "",
+            "agent_type": config.get("agent_type") or config.get("system_prompt_id"),
+            "is_builtin": bool(agent.get("is_builtin", False)),
+        }
+
+    @staticmethod
+    def _normalize_agent_preset(preset: dict[str, Any]) -> dict[str, Any]:
+        i18n = preset.get("i18n") or {}
+        zh_cn = i18n.get("zh-CN") if isinstance(i18n, dict) else {}
+        description = zh_cn.get("description") if isinstance(zh_cn, dict) else None
+        return {
+            "preset_id": preset.get("id"),
+            "description": description or preset.get("id") or "",
+            "config": preset.get("config") or {},
+        }
+
     @staticmethod
     def _is_kb_gone(exc: Exception) -> bool:
         msg = str(exc).lower()

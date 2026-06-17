@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo } from '../../api/types'
+import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -64,6 +64,20 @@ const backends = ref<BackendInfo[]>([])
 const editingDefaultBackend = ref(false)
 const defaultBackendSlug = ref<string>('')
 const savingDefaultBackend = ref(false)
+// Default agent editing (KB detail) — only meaningful for weknora backends
+const defaultAgentId = ref<string>('')
+const detailAgents = ref<BackendAgent[]>([])
+const detailAgentsLoading = ref(false)
+const detailAgentLabel = computed(() => {
+  const id = detailKb.value?.default_agent_id
+  if (!id) return ''
+  const found = detailAgents.value.find(a => a.agent_id === id)
+  return found ? `${found.name}${found.agent_type ? ' · ' + found.agent_type : ''}` : id
+})
+// Per-profile agent overrides (capability plane): profileKey -> agentId
+const profileAgentOverrides = ref<Record<string, string>>({})
+// Agent list cache by backend slug (populated lazily for weknora backends)
+const agentsByBackend = ref<Record<string, BackendAgent[]>>({})
 
 onMounted(async () => {
   await Promise.all([loadKbs(), loadBackends()])
@@ -76,6 +90,25 @@ async function loadKbs() {
 
 async function loadBackends() {
   try { backends.value = await api.listBackends() } catch { backends.value = [] }
+}
+
+function isWeknoraBackend(slug: string | null | undefined): boolean {
+  if (!slug) return false
+  const b = backends.value.find(x => x.slug === slug)
+  return !!b && b.backend_type === 'weknora'
+}
+
+async function loadAgentsForBackend(slug: string): Promise<BackendAgent[]> {
+  if (!slug || !isWeknoraBackend(slug)) return []
+  if (slug in agentsByBackend.value) return agentsByBackend.value[slug]
+  try {
+    const list = await api.listBackendAgents(slug)
+    agentsByBackend.value = { ...agentsByBackend.value, [slug]: list }
+    return list
+  } catch {
+    agentsByBackend.value = { ...agentsByBackend.value, [slug]: [] }
+    return []
+  }
 }
 
 async function createKb() {
@@ -109,6 +142,8 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   detailTab.value = 'docs'
   editingDefaultBackend.value = false
   defaultBackendSlug.value = kb.default_backend_slug || ''
+  defaultAgentId.value = kb.default_agent_id || ''
+  detailAgents.value = []
   detailLoading.value = true
   searchResults.value = []
   askAnswer.value = ''
@@ -120,6 +155,9 @@ async function openDetail(kb: KnowledgeBaseSummary) {
     ])
     detailDocs.value = docs.status === 'fulfilled' ? docs.value : []
     detailSyncJobs.value = syncStatus.status === 'fulfilled' ? syncStatus.value.jobs.filter((j: SyncJob) => j.kb_slug === kb.slug) : []
+    if (isWeknoraBackend(kb.default_backend_slug)) {
+      detailAgents.value = await loadAgentsForBackend(kb.default_backend_slug as string)
+    }
   } catch { /* ignore */ }
   detailLoading.value = false
 }
@@ -170,13 +208,28 @@ async function doAsk() {
   asking.value = false
 }
 
+async function onDetailBackendChange() {
+  // Backend switched in edit mode: reload its agents, drop an agent that no longer applies.
+  detailAgents.value = []
+  defaultAgentId.value = ''
+  const slug = defaultBackendSlug.value
+  if (slug && isWeknoraBackend(slug)) {
+    detailAgentsLoading.value = true
+    detailAgents.value = await loadAgentsForBackend(slug)
+    detailAgentsLoading.value = false
+  }
+}
+
 async function saveDefaultBackend() {
   if (!detailKb.value) return
   savingDefaultBackend.value = true
   try {
     const slug = defaultBackendSlug.value || null
-    await api.updateKbDefaults(detailKb.value.slug, { default_backend_slug: slug })
+    // agent_id only applies when the chosen backend is weknora
+    const agent = isWeknoraBackend(defaultBackendSlug.value) ? (defaultAgentId.value || null) : null
+    await api.updateKbDefaults(detailKb.value.slug, { default_backend_slug: slug, default_agent_id: agent })
     detailKb.value.default_backend_slug = slug
+    detailKb.value.default_agent_id = agent
     editingDefaultBackend.value = false
     await loadKbs()
   } catch { /* ignore */ }
@@ -282,6 +335,8 @@ async function openPlaneDialog(k: KnowledgeBaseSummary) {
   pendingProfileKeys.value = []
   allProfiles.value = []
   profileBackendOverrides.value = {}
+  profileAgentOverrides.value = {}
+  agentsByBackend.value = {}
   try {
     const [profiles, rules] = await Promise.all([
       api.listProfiles(),
@@ -291,10 +346,16 @@ async function openPlaneDialog(k: KnowledgeBaseSummary) {
     selectedProfileKeys.value = rules.map((rule: any) => rule.profile_key)
     pendingProfileKeys.value = [...selectedProfileKeys.value]
     for (const rule of rules as any[]) {
-      if (rule.retrieval_backend_slug) {
-        profileBackendOverrides.value[rule.profile_key] = rule.retrieval_backend_slug
-      }
+      profileBackendOverrides.value[rule.profile_key] = rule.retrieval_backend_slug || ''
+      profileAgentOverrides.value[rule.profile_key] = rule.retrieval_agent_id || ''
     }
+    // Preload agent lists for weknora backends already referenced by an override
+    const weknoraSlugs = new Set<string>()
+    for (const pk of pendingProfileKeys.value) {
+      const slug = profileBackendOverrides.value[pk]
+      if (slug && isWeknoraBackend(slug)) weknoraSlugs.add(slug)
+    }
+    await Promise.all([...weknoraSlugs].map(s => loadAgentsForBackend(s)))
   } catch { /* ignore */ }
   showPlaneDialog.value = true
 }
@@ -304,11 +365,25 @@ function togglePlaneProfile(profileKey: string) {
   if (idx >= 0) {
     pendingProfileKeys.value.splice(idx, 1)
     delete profileBackendOverrides.value[profileKey]
+    delete profileAgentOverrides.value[profileKey]
   } else {
     pendingProfileKeys.value.push(profileKey)
     if (!(profileKey in profileBackendOverrides.value)) {
       profileBackendOverrides.value[profileKey] = ''
     }
+    if (!(profileKey in profileAgentOverrides.value)) {
+      profileAgentOverrides.value[profileKey] = ''
+    }
+  }
+}
+
+async function onProfileBackendChange(profileKey: string) {
+  // Backend switched for a profile: load its agents, clear agent override if backend is not weknora.
+  const slug = profileBackendOverrides.value[profileKey]
+  if (slug && isWeknoraBackend(slug)) {
+    await loadAgentsForBackend(slug)
+  } else {
+    profileAgentOverrides.value[profileKey] = ''
   }
 }
 
@@ -316,12 +391,12 @@ async function savePlaneProfiles() {
   if (!planeKb.value) return
   planeSaving.value = true
   try {
-    const overrides: Record<string, { retrieval_backend_slug: string | null }> = {}
+    const overrides: Record<string, { retrieval_backend_slug: string | null; retrieval_agent_id: string | null }> = {}
     for (const pk of pendingProfileKeys.value) {
-      const slug = profileBackendOverrides.value[pk]
-      if (slug !== undefined) {
-        overrides[pk] = { retrieval_backend_slug: slug || null }
-      }
+      const slug = profileBackendOverrides.value[pk] ?? ''
+      // agent_id only persists when the profile targets a weknora backend
+      const agent = slug && isWeknoraBackend(slug) ? (profileAgentOverrides.value[pk] || null) : null
+      overrides[pk] = { retrieval_backend_slug: slug || null, retrieval_agent_id: agent }
     }
     await api.setResourceProfiles('wiki_kb', planeKb.value.slug, [...pendingProfileKeys.value], Object.keys(overrides).length > 0 ? overrides : undefined)
     selectedProfileKeys.value = [...pendingProfileKeys.value]
@@ -438,12 +513,21 @@ async function savePlaneProfiles() {
                   <div class="text-xs text-muted-foreground">{{ p.profile_key }}</div>
                 </div>
               </label>
-              <div v-if="pendingProfileKeys.includes(p.profile_key) && backends.length > 0" class="mt-2 ml-7 flex items-center gap-2">
-                <span class="text-xs text-muted-foreground shrink-0">检索后端</span>
-                <select v-model="profileBackendOverrides[p.profile_key]" class="h-7 rounded border border-border bg-background px-2 text-xs flex-1">
-                  <option value="">跟随默认</option>
-                  <option v-for="b in backends" :key="b.slug" :value="b.slug">{{ b.slug }} ({{ b.backend_type }})</option>
-                </select>
+              <div v-if="pendingProfileKeys.includes(p.profile_key) && backends.length > 0" class="mt-2 ml-7 space-y-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-muted-foreground shrink-0 w-14">检索后端</span>
+                  <select v-model="profileBackendOverrides[p.profile_key]" @change="onProfileBackendChange(p.profile_key)" class="h-7 rounded border border-border bg-background px-2 text-xs flex-1">
+                    <option value="">跟随默认</option>
+                    <option v-for="b in backends" :key="b.slug" :value="b.slug">{{ b.slug }} ({{ b.backend_type }})</option>
+                  </select>
+                </div>
+                <div v-if="isWeknoraBackend(profileBackendOverrides[p.profile_key])" class="flex items-center gap-2">
+                  <span class="text-xs text-muted-foreground shrink-0 w-14">Agent</span>
+                  <select v-model="profileAgentOverrides[p.profile_key]" class="h-7 rounded border border-border bg-background px-2 text-xs flex-1">
+                    <option value="">跟随默认</option>
+                    <option v-for="a in (agentsByBackend[profileBackendOverrides[p.profile_key]] || [])" :key="a.agent_id" :value="a.agent_id">{{ a.name }}{{ a.agent_type ? ' · ' + a.agent_type : '' }}</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>
@@ -463,17 +547,25 @@ async function savePlaneProfiles() {
         </DialogHeader>
         <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
         <div v-else class="space-y-4">
-          <!-- Default Backend -->
-          <div class="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
+          <!-- Default Backend & Agent -->
+          <div class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
             <span class="text-xs text-muted-foreground shrink-0">默认检索后端</span>
             <template v-if="!editingDefaultBackend">
               <span class="text-sm font-medium">{{ detailKb?.default_backend_slug || '自动（跟随系统）' }}</span>
+              <template v-if="detailKb?.default_agent_id">
+                <span class="text-xs text-muted-foreground">· 默认 Agent:</span>
+                <span class="text-sm font-medium">{{ detailAgentLabel }}</span>
+              </template>
               <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="editingDefaultBackend = true">修改</Button>
             </template>
             <template v-else>
-              <select v-model="defaultBackendSlug" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1">
+              <select v-model="defaultBackendSlug" @change="onDetailBackendChange" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
                 <option value="">自动（跟随系统）</option>
                 <option v-for="b in backends" :key="b.slug" :value="b.slug">{{ b.slug }} ({{ b.backend_type }})</option>
+              </select>
+              <select v-if="isWeknoraBackend(defaultBackendSlug)" v-model="defaultAgentId" :disabled="detailAgentsLoading" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
+                <option value="">无（使用后端默认问答）</option>
+                <option v-for="a in detailAgents" :key="a.agent_id" :value="a.agent_id">{{ a.name }}{{ a.agent_type ? ' · ' + a.agent_type : '' }}</option>
               </select>
               <Button variant="ghost" size="sm" class="h-6 text-xs" @click="editingDefaultBackend = false">取消</Button>
               <Button size="sm" class="h-6 text-xs" @click="saveDefaultBackend" :disabled="savingDefaultBackend">

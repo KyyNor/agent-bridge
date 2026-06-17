@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from agent_bridge.api.schemas import (
     AskRequest,
+    CreateAgentRequest,
     CreateKbRequest,
     PurgeRequest,
     SyncRequest,
@@ -45,6 +46,18 @@ def create_knowledge_routes(service, actor, call_safely, save_upload, upload_fil
     @router.post("/backends/{slug}/delete")
     def delete_backend(slug: str, current_actor: str = Depends(actor)) -> dict[str, str]:
         return call_safely(lambda: service.remove_backend(current_actor, slug))
+
+    @router.get("/backends/{slug}/agents")
+    def list_backend_agents(slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return call_safely(lambda: service.list_backend_agents(current_actor, slug))
+
+    @router.get("/backends/{slug}/agent-types")
+    def list_backend_agent_types(slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return call_safely(lambda: service.list_backend_agent_types(current_actor, slug))
+
+    @router.post("/backends/{slug}/agents")
+    def create_backend_agent(slug: str, payload: CreateAgentRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return call_safely(lambda: service.create_backend_agent(current_actor, slug, payload.name, payload.preset_id))
 
     @router.post("/admin/init")
     def init_system(current_actor: str = Depends(actor)) -> None:

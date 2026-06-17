@@ -354,6 +354,19 @@ export interface BackendInfo {
   runtime_status: string
 }
 
+export interface BackendAgent {
+  agent_id: string
+  name: string
+  agent_type: string | null
+  is_builtin: boolean
+}
+
+export interface BackendAgentPreset {
+  preset_id: string
+  description: string
+  config: Record<string, unknown>
+}
+
 export interface CodeGraphStatus {
   codegraph_installed: boolean
   message: string | null

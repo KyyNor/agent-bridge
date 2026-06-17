@@ -1,5 +1,7 @@
 import type {
   BackendInfo,
+  BackendAgent,
+  BackendAgentPreset,
   CatalogSource,
   CodeGraphStatus,
   CodeGraphNode,
@@ -297,4 +299,10 @@ export const api = {
     put<BackendInfo>(`/backends/${slug}`, data),
   deleteBackend: (slug: string) =>
     post<{ slug: string; status: string }>(`/backends/${slug}/delete`),
+
+  // Backend Agents (Weknora)
+  listBackendAgents: (slug: string) => get<BackendAgent[]>(`/backends/${slug}/agents`),
+  listBackendAgentTypes: (slug: string) => get<BackendAgentPreset[]>(`/backends/${slug}/agent-types`),
+  createBackendAgent: (slug: string, name: string, presetId: string) =>
+    post<BackendAgent>(`/backends/${slug}/agents`, { name, preset_id: presetId }),
 }

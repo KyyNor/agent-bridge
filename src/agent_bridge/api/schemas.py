@@ -98,6 +98,11 @@ class UpdateKbDefaultsRequest(BaseModel):
     default_agent_id: str | None = None
 
 
+class CreateAgentRequest(BaseModel):
+    name: str
+    preset_id: str
+
+
 class CodeRepositoryRequest(BaseModel):
     repo_key: str
     name: str
