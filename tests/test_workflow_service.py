@@ -127,6 +127,48 @@ def test_workflow_service_saves_and_searches_artifacts(wm_paths):
     assert "finance_orders" in results["items"][0]["snippet"]
 
 
+def test_workflow_service_search_returns_full_content_only_for_exact_path(wm_paths):
+    svc = _service(wm_paths)
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        title="Page A",
+        path="reports/page-a/index.md",
+        tags=[],
+        format="markdown",
+        summary="summary",
+        content="# Page A\n\nFULL BODY",
+        metadata={},
+    )
+
+    exact = svc.workflows.search_artifacts(
+        actor="root", profile_key="report-plane", query=None, tags=[],
+        path="reports/page-a/index.md", workflow_key=None, limit=10,
+    )
+    assert exact["items"][0]["content"] == "# Page A\n\nFULL BODY"
+    assert "snippet" in exact["items"][0]  # snippet still present alongside content
+
+    prefix = svc.workflows.search_artifacts(
+        actor="root", profile_key="report-plane", query=None, tags=[],
+        path="reports/", workflow_key=None, limit=10,
+    )
+    assert prefix["items"][0]["path"] == "reports/page-a/index.md"
+    assert "content" not in prefix["items"][0]  # prefix match -> snippet only
+    assert "snippet" in prefix["items"][0]
+
+
 def test_workflow_service_allows_non_admin_profile_artifact_search(wm_paths):
     svc = _service(wm_paths)
     svc.workflows.upsert_definition(

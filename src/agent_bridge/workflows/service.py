@@ -306,23 +306,26 @@ class WorkflowService:
             workflow_key=workflow_key,
             limit=bounded_limit,
         )
-        return {
-            "items": [
-                {
-                    "artifact_id": item["artifact_id"],
-                    "workflow_key": item["workflow_key"],
-                    "profile_key": item["profile_key"],
-                    "run_id": item["run_id"],
-                    "task_key": item["task_key"],
-                    "title": item["title"],
-                    "path": item["path"],
-                    "tags": item["tags"],
-                    "format": item["format"],
-                    "summary": item["summary"],
-                    "snippet": _snippet(item["content"], query),
-                    "created_at": item["created_at"],
-                    "updated_at": item["updated_at"],
-                }
-                for item in items
-            ]
-        }
+        def _entry(item: dict[str, Any]) -> dict[str, Any]:
+            entry = {
+                "artifact_id": item["artifact_id"],
+                "workflow_key": item["workflow_key"],
+                "profile_key": item["profile_key"],
+                "run_id": item["run_id"],
+                "task_key": item["task_key"],
+                "title": item["title"],
+                "path": item["path"],
+                "tags": item["tags"],
+                "format": item["format"],
+                "summary": item["summary"],
+                "snippet": _snippet(item["content"], query),
+                "created_at": item["created_at"],
+                "updated_at": item["updated_at"],
+            }
+            # Exact-path lookup is a "fetch this one" request: return the full
+            # body, not just a snippet. Prefix matches keep snippet-only.
+            if path and item["path"] == path:
+                entry["content"] = item["content"]
+            return entry
+
+        return {"items": [_entry(item) for item in items]}
