@@ -76,6 +76,8 @@ class ClaudeWorkflowRunner:
                 [
                     "claude",
                     "-p",
+                    "--permission-mode",
+                    "auto",
                     "--mcp-config",
                     "./.mcp.json",
                     "--append-system-prompt-file",
