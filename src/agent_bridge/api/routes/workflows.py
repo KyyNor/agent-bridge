@@ -83,4 +83,14 @@ def create_workflow_routes(service, actor, call_safely, ensure_capability_schema
             )
         )
 
+    @router.post("/workflows/{workflow_key}/run")
+    def run_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.workflow_scheduler.run_workflow_now(workflow_key))
+
+    @router.get("/workflow-runs/{run_id}")
+    def get_run(run_id: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.workflows.get_run(current_actor, run_id))
+
     return router

@@ -78,6 +78,13 @@ class WorkflowService:
         bounded = min(max(limit, 1), 50)
         return self.store.list_workflow_runs(workflow_key, limit=bounded)
 
+    def get_run(self, actor: str, run_id: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        run = self.store.get_workflow_run(run_id)
+        if run is None:
+            raise NotFound("workflow run not found")
+        return run
+
     def append_run_log(
         self,
         *,
