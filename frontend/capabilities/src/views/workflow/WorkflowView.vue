@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition, WorkflowRun, WorkflowRunLog } from '../../api/types'
@@ -33,6 +33,10 @@ const runsLoading = ref(false)
 const selectedRunId = ref('')
 const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
+const testing = ref(false)
+const testingRunId = ref('')
+const testError = ref('')
+let testPoll: ReturnType<typeof setInterval> | null = null
 
 const artifactHtml = computed(() =>
   artifactDetail.value ? marked.parse(artifactDetail.value.content, { async: false }) as string : '',
@@ -124,6 +128,15 @@ const artifactRows = computed<ArtifactTreeRow[]>(() => {
 onMounted(async () => {
   await loadAll()
 })
+
+watch(selectedKey, () => {
+  stopTestPolling()
+  testing.value = false
+  testingRunId.value = ''
+  testError.value = ''
+})
+
+onUnmounted(() => stopTestPolling())
 
 async function loadAll() {
   loading.value = true
@@ -346,6 +359,58 @@ async function selectRun(runId: string) {
   await loadLogs()
 }
 
+const hasRunningRun = computed(() => runs.value.some(r => r.status === 'running'))
+
+function stopTestPolling() {
+  if (testPoll) {
+    clearInterval(testPoll)
+    testPoll = null
+  }
+}
+
+async function runTest() {
+  const wf = selectedWorkflow.value
+  if (!wf || testing.value) return
+  testError.value = ''
+  testing.value = true
+  try {
+    const res = await api.runWorkflow(wf.workflow_key)
+    if (res.status === 'started' && res.run_id) {
+      testingRunId.value = res.run_id
+      selectedRunId.value = res.run_id
+      await loadRuns()
+      await loadLogs()
+      stopTestPolling()
+      testPoll = setInterval(pollTestRun, 5000)
+    } else {
+      testing.value = false
+    }
+  } catch (e: unknown) {
+    testing.value = false
+    testError.value = errorMessage(e)
+  }
+}
+
+async function pollTestRun() {
+  const runId = testingRunId.value
+  if (!runId) return
+  try {
+    const run = await api.getWorkflowRun(runId)
+    await loadLogs()
+    if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) {
+      stopTestPolling()
+      testing.value = false
+      testingRunId.value = ''
+      await loadRuns()
+      if (run.status === 'completed' || run.status === 'no_task') {
+        await searchArtifacts()
+      }
+    }
+  } catch {
+    // transient poll error: keep polling
+  }
+}
+
 async function deleteCurrent() {
   const wf = selectedWorkflow.value
   if (!wf) return
@@ -412,9 +477,13 @@ async function deleteCurrent() {
                 </div>
                 <p class="mt-1 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
               </div>
-              <div class="flex gap-2">
-                <Button variant="outline" @click="openEdit(selectedWorkflow)">编辑</Button>
-                <Button variant="ghost" class="text-destructive" @click="deleteCurrent">删除</Button>
+              <div class="flex flex-col items-end gap-1">
+                <div class="flex gap-2">
+                  <Button variant="outline" :disabled="testing || hasRunningRun" @click="runTest">{{ testing ? '运行中…' : '测试运行' }}</Button>
+                  <Button variant="outline" @click="openEdit(selectedWorkflow)">编辑</Button>
+                  <Button variant="ghost" class="text-destructive" @click="deleteCurrent">删除</Button>
+                </div>
+                <div v-if="testError" class="text-xs text-destructive">{{ testError }}</div>
               </div>
             </div>
             <div class="grid gap-3 md:grid-cols-2">

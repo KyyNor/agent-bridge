@@ -155,6 +155,8 @@ export const api = {
     const tail = qs.toString() ? `?${qs}` : ''
     return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`)
   },
+  runWorkflow: (key: string) => post<{ status: string; run_id?: string }>(`/workflows/${key}/run`),
+  getWorkflowRun: (runId: string) => get<WorkflowRun>(`/workflow-runs/${runId}`),
 
   // Logs
   listLogs: (params: Record<string, string | number> = {}) => {
