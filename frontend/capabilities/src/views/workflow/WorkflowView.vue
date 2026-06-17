@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
-import type { ProjectProfile, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition } from '../../api/types'
+import type { ProjectProfile, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition, WorkflowRun, WorkflowRunLog } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -28,6 +28,11 @@ const artifactTags = ref('')
 const artifactDetail = ref<WorkflowArtifactDetail | null>(null)
 const detailLoading = ref(false)
 const showArtifact = ref(false)
+const runs = ref<WorkflowRun[]>([])
+const runsLoading = ref(false)
+const selectedRunId = ref('')
+const runLogs = ref<WorkflowRunLog[]>([])
+const logsLoading = ref(false)
 
 const artifactHtml = computed(() =>
   artifactDetail.value ? marked.parse(artifactDetail.value.content, { async: false }) as string : '',
@@ -77,7 +82,7 @@ async function loadAll() {
     workflows.value = workflowList
     profiles.value = profileList
     selectedKey.value = selectedKey.value || workflowList[0]?.workflow_key || ''
-    await searchArtifacts()
+    await Promise.all([searchArtifacts(), loadRuns()])
   } catch (e: unknown) {
     error.value = errorMessage(e)
   } finally {
@@ -201,6 +206,30 @@ function statusLabel(status: string) {
   return status
 }
 
+function runStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    running: '执行中',
+    completed: '成功',
+    no_task: '无任务',
+    failed: '失败',
+    stopped: '已停止',
+  }
+  return map[status] || status
+}
+
+function runBadgeClass(status: string) {
+  if (status === 'completed') return 'bg-green-50 text-green-700'
+  if (status === 'failed') return 'bg-red-50 text-red-700'
+  if (status === 'running') return 'bg-blue-50 text-blue-700'
+  return ''
+}
+
+function logLevelClass(level: string) {
+  if (level === 'error') return 'border-red-400'
+  if (level === 'warning' || level === 'warn') return 'border-yellow-400'
+  return 'border-border'
+}
+
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
 }
@@ -220,6 +249,60 @@ async function openArtifact(item: WorkflowArtifact) {
     artifactError.value = errorMessage(e)
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function loadRuns() {
+  const key = selectedWorkflow.value?.workflow_key
+  if (!key) {
+    runs.value = []
+    return
+  }
+  runsLoading.value = true
+  try {
+    runs.value = await api.listWorkflowRuns(key, 20)
+    if (!runs.value.some(r => r.run_id === selectedRunId.value)) {
+      selectedRunId.value = runs.value[0]?.run_id || ''
+      await loadLogs()
+    }
+  } catch (e: unknown) {
+    error.value = errorMessage(e)
+  } finally {
+    runsLoading.value = false
+  }
+}
+
+async function loadLogs() {
+  if (!selectedRunId.value) {
+    runLogs.value = []
+    return
+  }
+  logsLoading.value = true
+  try {
+    runLogs.value = await api.getWorkflowRunLogs(selectedRunId.value)
+  } catch (e: unknown) {
+    runLogs.value = []
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+async function selectRun(runId: string) {
+  selectedRunId.value = runId
+  await loadLogs()
+}
+
+async function deleteCurrent() {
+  const wf = selectedWorkflow.value
+  if (!wf) return
+  if (!confirm(`确定删除工作流「${wf.name}」？其运行记录与产物将一并清除。`)) return
+  try {
+    await api.deleteWorkflow(wf.workflow_key)
+    workflows.value = await api.listWorkflows()
+    selectedKey.value = workflows.value[0]?.workflow_key || ''
+    await loadAll()
+  } catch (e: unknown) {
+    error.value = errorMessage(e)
   }
 }
 </script>
@@ -252,7 +335,7 @@ async function openArtifact(item: WorkflowArtifact) {
             :key="item.workflow_key"
             class="block w-full border-b px-4 py-3 text-left transition hover:bg-muted/50"
             :class="selectedWorkflow?.workflow_key === item.workflow_key ? 'bg-muted' : ''"
-            @click="selectedKey = item.workflow_key; searchArtifacts()"
+            @click="selectedKey = item.workflow_key; searchArtifacts(); loadRuns()"
           >
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
@@ -275,7 +358,10 @@ async function openArtifact(item: WorkflowArtifact) {
                 </div>
                 <p class="mt-1 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
               </div>
-              <Button variant="outline" @click="openEdit(selectedWorkflow)">编辑</Button>
+              <div class="flex gap-2">
+                <Button variant="outline" @click="openEdit(selectedWorkflow)">编辑</Button>
+                <Button variant="ghost" class="text-destructive" @click="deleteCurrent">删除</Button>
+              </div>
             </div>
             <div class="grid gap-3 md:grid-cols-2">
               <div class="rounded-md border px-3 py-2">
@@ -366,6 +452,45 @@ async function openArtifact(item: WorkflowArtifact) {
                   </div>
                   <p class="mt-2 text-sm text-muted-foreground">{{ item.summary || item.snippet }}</p>
                   <pre v-if="item.snippet" class="mt-2 max-h-28 overflow-auto rounded bg-muted p-2 text-xs">{{ item.snippet }}</pre>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent class="space-y-4 p-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold">运行与日志</h3>
+              <Button variant="outline" size="sm" @click="loadRuns">刷新</Button>
+            </div>
+            <div v-if="runsLoading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
+            <div v-else-if="!runs.length" class="rounded-md border px-4 py-6 text-sm text-muted-foreground">暂无运行记录</div>
+            <div v-else class="grid gap-4 lg:grid-cols-[320px_1fr]">
+              <div class="space-y-1">
+                <button
+                  v-for="run in runs"
+                  :key="run.run_id"
+                  class="block w-full rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
+                  :class="selectedRunId === run.run_id ? 'border-foreground/30 bg-muted' : ''"
+                  @click="selectRun(run.run_id)"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="truncate font-mono text-xs">{{ run.run_id }}</span>
+                    <Badge :variant="run.status === 'completed' ? 'secondary' : 'outline'" :class="runBadgeClass(run.status)">{{ runStatusLabel(run.status) }}</Badge>
+                  </div>
+                  <div class="mt-1 text-xs text-muted-foreground">{{ run.started_at }}</div>
+                </button>
+              </div>
+              <div class="rounded-md border bg-muted/20 p-3">
+                <div v-if="logsLoading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
+                <div v-else-if="!selectedRunId" class="py-4 text-center text-sm text-muted-foreground">选择左侧某次运行查看日志</div>
+                <div v-else-if="!runLogs.length" class="py-4 text-center text-sm text-muted-foreground">该运行暂无日志</div>
+                <div v-else class="max-h-80 space-y-2 overflow-auto font-mono text-xs">
+                  <div v-for="(log, idx) in runLogs" :key="idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
+                    <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
+                    <span class="ml-1">{{ log.message }}</span>
+                  </div>
                 </div>
               </div>
             </div>

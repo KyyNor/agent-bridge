@@ -300,6 +300,9 @@ class SQLiteStore:
     def list_workflow_definitions(self) -> list[dict[str, Any]]:
         return self.workflows.list_workflow_definitions()
 
+    def delete_workflow_definition(self, workflow_key: str) -> bool:
+        return self.workflows.delete_workflow_definition(workflow_key)
+
     def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]) -> dict[str, int]:
         return self.workflows.upsert_workflow_tasks(workflow_key, tasks)
 
@@ -342,6 +345,9 @@ class SQLiteStore:
 
     def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
         return self.workflows.get_workflow_run(run_id)
+
+    def list_workflow_runs(self, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_runs(workflow_key, limit=limit)
 
     def finish_workflow_run(
         self,

@@ -83,6 +83,33 @@ export interface WorkflowArtifactSearchResult {
   items: WorkflowArtifact[]
 }
 
+export interface WorkflowRun {
+  run_id: string
+  workflow_key: string
+  profile_key: string
+  task_key: string | null
+  status: string
+  temp_dir: string
+  exit_code: number | null
+  stdout_path: string | null
+  stderr_path: string | null
+  error: string | null
+  started_at: string
+  finished_at: string | null
+  duration_ms: number | null
+}
+
+export interface WorkflowRunLog {
+  run_id: string
+  workflow_key: string
+  task_key: string | null
+  level: string
+  stage: string
+  message: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
 export interface WorkflowArtifactDetail {
   artifact_id: string
   workflow_key: string

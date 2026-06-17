@@ -279,6 +279,27 @@ class WorkflowsRepository:
         with self._connect() as conn:
             return _row_payload(conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone())
 
+    def list_workflow_runs(self, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM workflow_runs
+                WHERE workflow_key = ?
+                ORDER BY started_at DESC, id DESC
+                LIMIT ?
+                """,
+                (workflow_key, limit),
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def delete_workflow_definition(self, workflow_key: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM workflow_definitions WHERE workflow_key = ?",
+                (workflow_key,),
+            )
+            return cursor.rowcount > 0
+
     def finish_workflow_run(
         self,
         run_id: str,

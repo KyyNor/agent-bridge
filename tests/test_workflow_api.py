@@ -197,3 +197,71 @@ def test_workflow_api_artifact_detail_404_for_unknown_id(wm_paths):
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert response.status_code == 404
+
+
+def _seed_workflow(svc, key: str = "page-report") -> None:
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key=key,
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+    )
+
+
+def test_workflow_api_lists_runs_for_workflow(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    svc.store.create_workflow_run(
+        run_id="run_1", workflow_key="page-report", profile_key="report-plane",
+        task_key=None, status="completed", temp_dir="/tmp/run_1",
+    )
+    svc.store.create_workflow_run(
+        run_id="run_2", workflow_key="page-report", profile_key="report-plane",
+        task_key=None, status="failed", temp_dir="/tmp/run_2",
+    )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.get("/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"})
+
+    assert response.status_code == 200, response.text
+    runs = response.json()
+    assert [r["run_id"] for r in runs] == ["run_2", "run_1"]  # newest first
+    assert runs[0]["status"] == "failed"
+    assert runs[1]["status"] == "completed"
+
+
+def test_workflow_api_deletes_workflow_and_cascades(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    svc.store.create_workflow_run(
+        run_id="run_1", workflow_key="page-report", profile_key="report-plane",
+        task_key=None, status="completed", temp_dir="/tmp/run_1",
+    )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    deleted = client.post("/workflows/page-report/delete", headers={"X-Agent-Bridge-User": "root"})
+    assert deleted.status_code == 200, deleted.text
+
+    listed = client.get("/workflows", headers={"X-Agent-Bridge-User": "root"})
+    assert listed.json() == []
+
+    gone = client.get("/workflows/page-report", headers={"X-Agent-Bridge-User": "root"})
+    assert gone.status_code == 404
+
+    runs = client.get("/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"})
+    assert runs.status_code == 200
+    assert runs.json() == []  # runs cascaded away

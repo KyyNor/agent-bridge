@@ -66,6 +66,18 @@ class WorkflowService:
             raise NotFound("workflow not found")
         return workflow
 
+    def delete_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        self.store.delete_workflow_definition(workflow_key)
+        return {"workflow_key": workflow_key, "deleted": True}
+
+    def list_runs(self, actor: str, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        bounded = min(max(limit, 1), 50)
+        return self.store.list_workflow_runs(workflow_key, limit=bounded)
+
     def append_run_log(
         self,
         *,
