@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_START_TIME = "22:00"
 _DEFAULT_STOP_TIME = "07:00"
 _TICK_INTERVAL_SECONDS = 60
+_MAX_TASK_ATTEMPTS = 3
 
 
 class WorkflowScheduler:
@@ -226,7 +227,7 @@ class WorkflowScheduler:
                 ),
             )
             if process_result.exit_code != 0:
-                return self._finish_failed(run_id, process_result, "claude workflow runner failed")
+                return self._finish_failed(workflow_key, run_id, process_result, "claude workflow runner failed")
             parsed = parse_workflow_result(process_result.run_dir)
             ingested = self._service.ingest_parsed_result(
                 workflow_key=workflow_key,
@@ -261,9 +262,23 @@ class WorkflowScheduler:
                 error=str(exc),
                 duration_ms=duration_ms,
             )
+            self._release_leased_tasks(workflow_key, run_id, str(exc))
             return {"status": "failed", "error": str(exc)}
 
-    def _finish_failed(self, run_id: str, result: Any, error: str) -> dict[str, Any]:
+    def _release_leased_tasks(self, workflow_key: str, run_id: str, error: str) -> None:
+        """On a failed run, release the task it leased for fast retry, or
+        abandon it once retries are exhausted."""
+        try:
+            self._store.release_or_abandon_tasks_for_run(
+                workflow_key,
+                run_id,
+                max_attempts=_MAX_TASK_ATTEMPTS,
+                error_message=error,
+            )
+        except Exception:
+            logger.exception("释放工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
+
+    def _finish_failed(self, workflow_key: str, run_id: str, result: Any, error: str) -> dict[str, Any]:
         self._store.finish_workflow_run(
             run_id,
             status="failed",
@@ -273,6 +288,7 @@ class WorkflowScheduler:
             error=error,
             duration_ms=result.duration_ms,
         )
+        self._release_leased_tasks(workflow_key, run_id, error)
         return {"status": "failed", "error": error}
 
 

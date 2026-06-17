@@ -239,6 +239,58 @@ class WorkflowsRepository:
             )
             return cursor.rowcount > 0
 
+    def release_or_abandon_tasks_for_run(
+        self,
+        workflow_key: str,
+        run_id: str,
+        *,
+        max_attempts: int,
+        error_message: str,
+    ) -> dict[str, int]:
+        """Release or abandon tasks leased by a failed run.
+
+        Tasks still running under this run's lease are either returned to
+        pending (fast retry) when within the attempt budget, or marked
+        abandoned once attempt_count exceeds the threshold. last_error is
+        always recorded.
+        """
+        released = 0
+        abandoned = 0
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, attempt_count FROM workflow_tasks
+                WHERE workflow_key = ? AND lease_run_id = ? AND status = 'running'
+                """,
+                (workflow_key, run_id),
+            ).fetchall()
+            for row in rows:
+                if row["attempt_count"] > max_attempts:
+                    conn.execute(
+                        """
+                        UPDATE workflow_tasks
+                        SET status = 'abandoned', last_error = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (error_message, row["id"]),
+                    )
+                    abandoned += 1
+                else:
+                    conn.execute(
+                        """
+                        UPDATE workflow_tasks
+                        SET status = 'pending',
+                            lease_run_id = NULL,
+                            lease_expires_at = NULL,
+                            last_error = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (error_message, row["id"]),
+                    )
+                    released += 1
+        return {"released": released, "abandoned": abandoned}
+
     def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str) -> None:
         with self._connect() as conn:
             conn.execute(

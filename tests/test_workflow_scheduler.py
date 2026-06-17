@@ -175,3 +175,44 @@ def test_scheduler_tick_runs_inside_window_and_skips_outside(wm_paths, tmp_path)
     out_window.tick()
     assert not out_window._running
     assert "A" not in out_window.finished_today
+
+
+def test_failed_run_releases_leased_task_for_retry(wm_paths, tmp_path):
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.runner import WorkflowProcessResult, prepare_run_directory
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _create_workflow(svc.store, "A")
+    svc.store.upsert_workflow_tasks("A", [{"task_key": "page:a", "payload": {}}])
+
+    class _LeasingFailingRunner:
+        def run(self, base_dir, spec):
+            run_dir = prepare_run_directory(base_dir, spec)
+            # Simulate the agent leasing a task, then the claude run failing.
+            svc.store.lease_workflow_task(spec.workflow_key, run_id=spec.run_id, lease_seconds=7200)
+            return WorkflowProcessResult(
+                run_dir=run_dir,
+                exit_code=1,
+                stdout_path=run_dir / "stdout.log",
+                stderr_path=run_dir / "stderr.log",
+                duration_ms=1,
+            )
+
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        runner=_LeasingFailingRunner(),
+        base_run_dir=tmp_path,
+        max_concurrent_workflows=2,
+    )
+    result = scheduler.run_one_workflow("A")
+
+    assert result["status"] == "failed"
+    task = svc.store.get_workflow_task("A", "page:a")
+    assert task["status"] == "pending"  # released for fast retry instead of waiting out the lease
+    assert task["lease_run_id"] is None
+    assert task["last_error"]

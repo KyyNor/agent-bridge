@@ -321,6 +321,21 @@ class SQLiteStore:
     def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str) -> bool:
         return self.workflows.complete_workflow_task(workflow_key, task_key, run_id=run_id)
 
+    def release_or_abandon_tasks_for_run(
+        self,
+        workflow_key: str,
+        run_id: str,
+        *,
+        max_attempts: int,
+        error_message: str,
+    ) -> dict[str, int]:
+        return self.workflows.release_or_abandon_tasks_for_run(
+            workflow_key,
+            run_id,
+            max_attempts=max_attempts,
+            error_message=error_message,
+        )
+
     def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str) -> None:
         return self.workflows.force_workflow_task_lease_expiry(workflow_key, task_key, expires_at)
 

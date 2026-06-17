@@ -283,3 +283,66 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
     assert result == {"created": 0, "updated": 1, "skipped_completed": 0, "skipped_running": 0}
     assert statements[0] == "BEGIN IMMEDIATE"
     assert statements[1].startswith("SELECT STATUS, LEASE_EXPIRES_AT")
+
+
+def _seed_workflow_with_task(store, workflow_key: str = "w", task_key: str = "page:a") -> None:
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key=workflow_key,
+        name=workflow_key,
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": workflow_key, "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+        created_by="root",
+    )
+    store.upsert_workflow_tasks(workflow_key, [{"task_key": task_key, "payload": {}}])
+
+
+def test_release_or_abandon_releases_running_task_below_threshold(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed_workflow_with_task(store)
+    store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)  # attempt_count -> 1
+
+    result = store.release_or_abandon_tasks_for_run(
+        "w", "run_1", max_attempts=3, error_message="boom"
+    )
+
+    assert result == {"released": 1, "abandoned": 0}
+    task = store.get_workflow_task("w", "page:a")
+    assert task["status"] == "pending"
+    assert task["lease_run_id"] is None
+    assert task["lease_expires_at"] is None
+    assert task["last_error"] == "boom"
+    assert task["attempt_count"] == 1
+
+
+def test_release_or_abandon_abandons_task_above_threshold(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed_workflow_with_task(store)
+    # Bump attempt_count to 4 via repeated lease/release cycles.
+    for _ in range(4):
+        store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
+        store.release_or_abandon_tasks_for_run("w", "run_1", max_attempts=99, error_message="retry")
+
+    task = store.get_workflow_task("w", "page:a")
+    assert task["attempt_count"] == 4
+    assert task["status"] == "pending"
+
+    # One more lease (attempt_count -> 5), then abandon at threshold 3.
+    store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
+    result = store.release_or_abandon_tasks_for_run(
+        "w", "run_1", max_attempts=3, error_message="final"
+    )
+
+    assert result == {"released": 0, "abandoned": 1}
+    task = store.get_workflow_task("w", "page:a")
+    assert task["status"] == "abandoned"
+    assert task["last_error"] == "final"
