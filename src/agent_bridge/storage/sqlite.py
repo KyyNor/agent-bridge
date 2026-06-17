@@ -417,6 +417,9 @@ class SQLiteStore:
             metadata=metadata,
         )
 
+    def get_workflow_artifact(self, artifact_id: str) -> dict[str, Any] | None:
+        return self.workflows.get_workflow_artifact(artifact_id)
+
     def search_workflow_artifacts(
         self,
         *,

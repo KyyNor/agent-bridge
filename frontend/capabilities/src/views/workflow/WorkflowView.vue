@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { marked } from 'marked'
 import { api } from '../../api/client'
-import type { ProjectProfile, WorkflowArtifact, WorkflowDefinition } from '../../api/types'
+import type { ProjectProfile, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -24,6 +25,13 @@ const formError = ref('')
 const artifactQuery = ref('')
 const artifactPath = ref('')
 const artifactTags = ref('')
+const artifactDetail = ref<WorkflowArtifactDetail | null>(null)
+const detailLoading = ref(false)
+const showArtifact = ref(false)
+
+const artifactHtml = computed(() =>
+  artifactDetail.value ? marked.parse(artifactDetail.value.content, { async: false }) as string : '',
+)
 
 const form = ref({
   workflow_key: '',
@@ -196,6 +204,24 @@ function statusLabel(status: string) {
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
 }
+
+async function openArtifact(item: WorkflowArtifact) {
+  detailLoading.value = true
+  showArtifact.value = true
+  artifactDetail.value = null
+  try {
+    artifactDetail.value = await api.getWorkflowArtifact(
+      item.artifact_id,
+      selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
+    )
+  } catch (e: unknown) {
+    artifactDetail.value = null
+    showArtifact.value = false
+    artifactError.value = errorMessage(e)
+  } finally {
+    detailLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -333,8 +359,9 @@ function errorMessage(e: unknown) {
                       <div class="text-sm font-medium text-foreground">{{ item.title }}</div>
                       <div class="mt-1 text-xs text-muted-foreground">{{ item.path }}</div>
                     </div>
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex flex-wrap items-center gap-1">
                       <Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge>
+                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openArtifact(item)">查看</Button>
                     </div>
                   </div>
                   <p class="mt-2 text-sm text-muted-foreground">{{ item.summary || item.snippet }}</p>
@@ -409,6 +436,29 @@ function errorMessage(e: unknown) {
         <DialogFooter>
           <Button variant="outline" @click="showEditor = false">取消</Button>
           <Button :disabled="saving" @click="saveWorkflow">{{ saving ? '保存中' : '保存' }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showArtifact">
+      <DialogContent class="max-w-[900px] sm:max-w-[900px]">
+        <DialogHeader>
+          <DialogTitle>{{ artifactDetail?.title || '产物详情' }}</DialogTitle>
+        </DialogHeader>
+        <div class="max-h-[74vh] space-y-3 overflow-auto pr-1">
+          <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
+          <template v-else-if="artifactDetail">
+            <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline">{{ artifactDetail.path }}</Badge>
+              <Badge v-for="tag in artifactDetail.tags" :key="tag" variant="outline">{{ tag }}</Badge>
+            </div>
+            <p v-if="artifactDetail.summary" class="text-sm text-muted-foreground">{{ artifactDetail.summary }}</p>
+            <div class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="artifactHtml"></div>
+          </template>
+          <div v-else class="py-8 text-center text-sm text-muted-foreground">无内容</div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showArtifact = false">关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

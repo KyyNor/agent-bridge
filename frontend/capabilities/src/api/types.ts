@@ -83,6 +83,23 @@ export interface WorkflowArtifactSearchResult {
   items: WorkflowArtifact[]
 }
 
+export interface WorkflowArtifactDetail {
+  artifact_id: string
+  workflow_key: string
+  profile_key: string
+  run_id: string
+  task_key: string | null
+  title: string
+  path: string
+  tags: string[]
+  format: string
+  summary: string
+  content: string
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
 export interface ProfileSourceRule {
   source_type: string
   source_key: string

@@ -226,6 +226,41 @@ class WorkflowService:
             raise ValidationError("workflow task lease mismatch")
         return {"status": "completed", "artifact_count": len(saved), "artifacts": saved}
 
+    def get_artifact(
+        self,
+        *,
+        actor: str,
+        artifact_id: str,
+        profile_key: str | None = None,
+        trusted_profile_context: bool = False,
+    ) -> dict[str, Any]:
+        item = self.store.get_workflow_artifact(artifact_id)
+        if item is None:
+            raise NotFound("workflow artifact not found")
+        if actor not in self.admins:
+            if not profile_key:
+                raise AccessDenied("capability profile is required")
+            if not trusted_profile_context:
+                raise AccessDenied("profile context is not trusted")
+            if item["profile_key"] != profile_key:
+                raise NotFound("workflow artifact not found")
+        return {
+            "artifact_id": item["artifact_id"],
+            "workflow_key": item["workflow_key"],
+            "profile_key": item["profile_key"],
+            "run_id": item["run_id"],
+            "task_key": item["task_key"],
+            "title": item["title"],
+            "path": item["path"],
+            "tags": item["tags"],
+            "format": item["format"],
+            "summary": item["summary"],
+            "content": item["content"],
+            "metadata": item["metadata"],
+            "created_at": item["created_at"],
+            "updated_at": item["updated_at"],
+        }
+
     def search_artifacts(
         self,
         *,

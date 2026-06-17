@@ -114,3 +114,86 @@ def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
 
     assert response.status_code == 403
     assert "profile context is not trusted" in response.text
+
+
+def _seed_artifact(svc, content: str = "# Page A\n\nFull body") -> str:
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+    )
+    saved = svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        title="Page A",
+        path="reports/page-a/index.md",
+        tags=["finance"],
+        format="markdown",
+        summary="Finance report",
+        content=content,
+        metadata={},
+    )
+    return saved["artifact_id"]
+
+
+def test_workflow_api_returns_full_artifact_content(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    artifact_id = _seed_artifact(svc)
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.get(
+        f"/workflow-artifacts/{artifact_id}",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["artifact_id"] == artifact_id
+    assert body["title"] == "Page A"
+    assert body["path"] == "reports/page-a/index.md"
+    assert body["content"] == "# Page A\n\nFull body"
+    assert body["tags"] == ["finance"]
+
+
+def test_workflow_api_rejects_non_admin_artifact_detail_without_trusted_profile(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    artifact_id = _seed_artifact(svc)
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.get(
+        f"/workflow-artifacts/{artifact_id}?profile_key=report-plane",
+        headers={"X-Agent-Bridge-User": "alice"},
+    )
+
+    assert response.status_code == 403
+    assert "profile context is not trusted" in response.text
+
+
+def test_workflow_api_artifact_detail_404_for_unknown_id(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.get(
+        "/workflow-artifacts/artifact_does_not_exist",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert response.status_code == 404

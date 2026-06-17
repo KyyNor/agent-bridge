@@ -54,4 +54,19 @@ def create_workflow_routes(service, actor, call_safely, ensure_capability_schema
             )
         )
 
+    @router.get("/workflow-artifacts/{artifact_id}")
+    def get_artifact(
+        artifact_id: str,
+        profile_key: str | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.workflows.get_artifact(
+                actor=current_actor,
+                artifact_id=artifact_id,
+                profile_key=profile_key,
+            )
+        )
+
     return router

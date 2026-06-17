@@ -33,6 +33,7 @@ import type {
   UADashboardStatus,
   TestCloneResult,
   WorkflowArtifactSearchResult,
+  WorkflowArtifactDetail,
   WorkflowDefinition,
 } from './types'
 
@@ -137,6 +138,12 @@ export const api = {
     if (params.limit) qs.set('limit', String(params.limit))
     ;(params.tags || []).forEach(tag => qs.append('tags', tag))
     return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)
+  },
+  getWorkflowArtifact: (artifactId: string, profileKey?: string) => {
+    const qs = new URLSearchParams()
+    if (profileKey) qs.set('profile_key', profileKey)
+    const tail = qs.toString() ? `?${qs}` : ''
+    return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`)
   },
 
   // Logs

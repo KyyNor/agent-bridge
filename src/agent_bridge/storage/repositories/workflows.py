@@ -416,6 +416,15 @@ class WorkflowsRepository:
                 raise KeyError(f"workflow artifact not found: {artifact_id}")
             return result
 
+    def get_workflow_artifact(self, artifact_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return _row_payload(
+                conn.execute(
+                    "SELECT * FROM workflow_artifacts WHERE artifact_id = ?",
+                    (artifact_id,),
+                ).fetchone()
+            )
+
     def search_workflow_artifacts(
         self,
         *,
