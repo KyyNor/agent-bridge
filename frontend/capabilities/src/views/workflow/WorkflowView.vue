@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
-import type { ProjectProfile, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition, WorkflowRun, WorkflowRunLog } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition, WorkflowRun, WorkflowRunLog } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -57,14 +57,68 @@ const manifestEdges = computed(() => selectedWorkflow.value?.manifest?.edges || 
 const manifestSchemas = computed(() => selectedWorkflow.value?.manifest?.schemas || {})
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 
-const groupedArtifacts = computed(() => {
-  const groups: Record<string, WorkflowArtifact[]> = {}
+const collapsedPaths = ref<Set<string>>(new Set())
+
+function togglePath(path: string) {
+  const next = new Set(collapsedPaths.value)
+  if (next.has(path)) next.delete(path)
+  else next.add(path)
+  collapsedPaths.value = next
+}
+
+function countArtifacts(node: ArtifactTreeNode): number {
+  return node.artifacts.length + node.children.reduce((sum, child) => sum + countArtifacts(child), 0)
+}
+
+const artifactTree = computed<ArtifactTreeNode[]>(() => {
+  const root: ArtifactTreeNode[] = []
   for (const item of artifacts.value) {
-    const group = item.path.split('/')[0] || 'root'
-    groups[group] = groups[group] || []
-    groups[group].push(item)
+    const segments = item.path.split('/').filter(Boolean)
+    let nodes = root
+    let acc = ''
+    segments.forEach((segment, index) => {
+      acc = acc ? `${acc}/${segment}` : segment
+      let node = nodes.find(child => child.segment === segment)
+      if (!node) {
+        node = { segment, path: acc, children: [], artifacts: [] }
+        nodes.push(node)
+      }
+      if (index === segments.length - 1) node.artifacts.push(item)
+      nodes = node.children
+    })
   }
-  return Object.entries(groups).map(([path, items]) => ({ path, items }))
+  const sortNodes = (nodes: ArtifactTreeNode[]) => {
+    nodes.sort((a, b) => a.segment.localeCompare(b.segment))
+    nodes.forEach(child => sortNodes(child.children))
+  }
+  sortNodes(root)
+  return root
+})
+
+interface ArtifactTreeRow {
+  type: 'folder' | 'artifact'
+  depth: number
+  path: string
+  segment?: string
+  count?: number
+  artifact?: WorkflowArtifact
+}
+
+const artifactRows = computed<ArtifactTreeRow[]>(() => {
+  const rows: ArtifactTreeRow[] = []
+  const walk = (nodes: ArtifactTreeNode[], depth: number) => {
+    for (const node of nodes) {
+      rows.push({ type: 'folder', depth, path: node.path, segment: node.segment, count: countArtifacts(node) })
+      if (!collapsedPaths.value.has(node.path)) {
+        for (const item of node.artifacts) {
+          rows.push({ type: 'artifact', depth: depth + 1, path: item.path, artifact: item })
+        }
+        walk(node.children, depth + 1)
+      }
+    }
+  }
+  walk(artifactTree.value, 0)
+  return rows
 })
 
 onMounted(async () => {
@@ -435,25 +489,33 @@ async function deleteCurrent() {
             <div v-if="artifactError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {{ artifactError }}
             </div>
-            <div v-if="!groupedArtifacts.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无产物</div>
-            <div v-for="group in groupedArtifacts" :key="group.path" class="space-y-2">
-              <div class="text-xs font-semibold uppercase text-muted-foreground">{{ group.path }}</div>
-              <div class="grid gap-2">
-                <div v-for="item in group.items" :key="item.artifact_id" class="rounded-md border p-3">
+            <div v-if="!artifactRows.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无产物</div>
+            <div class="space-y-1.5">
+              <template v-for="row in artifactRows" :key="row.type + ':' + row.path">
+                <button
+                  v-if="row.type === 'folder'"
+                  class="flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-semibold uppercase text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+                  :style="{ paddingLeft: `${row.depth * 16 + 8}px` }"
+                  @click="togglePath(row.path)"
+                >
+                  <span>{{ collapsedPaths.has(row.path) ? '▸' : '▾' }}</span>
+                  <span>{{ row.segment }}/</span>
+                  <span class="font-normal normal-case text-muted-foreground/70">({{ row.count }})</span>
+                </button>
+                <div v-else class="rounded-md border p-3" :style="{ marginLeft: `${row.depth * 16}px` }">
                   <div class="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <div class="text-sm font-medium text-foreground">{{ item.title }}</div>
-                      <div class="mt-1 text-xs text-muted-foreground">{{ item.path }}</div>
+                      <div class="text-sm font-medium text-foreground">{{ row.artifact?.title }}</div>
+                      <div class="mt-1 text-xs text-muted-foreground">{{ row.artifact?.path }}</div>
                     </div>
                     <div class="flex flex-wrap items-center gap-1">
-                      <Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge>
-                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openArtifact(item)">查看</Button>
+                      <Badge v-for="tag in row.artifact?.tags || []" :key="tag" variant="outline">{{ tag }}</Badge>
+                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="row.artifact && openArtifact(row.artifact)">查看</Button>
                     </div>
                   </div>
-                  <p class="mt-2 text-sm text-muted-foreground">{{ item.summary || item.snippet }}</p>
-                  <pre v-if="item.snippet" class="mt-2 max-h-28 overflow-auto rounded bg-muted p-2 text-xs">{{ item.snippet }}</pre>
+                  <p class="mt-2 text-sm text-muted-foreground">{{ row.artifact?.summary || row.artifact?.snippet }}</p>
                 </div>
-              </div>
+              </template>
             </div>
           </CardContent>
         </Card>

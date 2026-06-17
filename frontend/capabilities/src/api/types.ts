@@ -83,6 +83,13 @@ export interface WorkflowArtifactSearchResult {
   items: WorkflowArtifact[]
 }
 
+export interface ArtifactTreeNode {
+  segment: string
+  path: string
+  children: ArtifactTreeNode[]
+  artifacts: WorkflowArtifact[]
+}
+
 export interface WorkflowRun {
   run_id: string
   workflow_key: string
