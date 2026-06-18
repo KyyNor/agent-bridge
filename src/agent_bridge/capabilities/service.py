@@ -541,19 +541,23 @@ class CapabilityService:
         for tool in self.store.list_mcp_tools():
             if tool.get("status") == "active":
                 tools_by_service[tool["service_key"]] = tools_by_service.get(tool["service_key"], 0) + 1
-        builtin_items = [
-            {
-                "kind": "builtin",
-                "service": provider.source_key,
-                "name": provider.name,
-                "description": provider.description,
-                "tags": provider.tags,
-                "tool_count": len(provider.list_tools(actor, profile_key)),
-                "status": "enabled",
-                "resources": provider.list_resources(actor, profile_key),
-            }
-            for provider in self.builtin_providers.values()
-        ]
+        builtin_items = []
+        for provider in self.builtin_providers.values():
+            provider_tools = provider.list_tools(actor, profile_key)
+            if not provider_tools:
+                continue
+            builtin_items.append(
+                {
+                    "kind": "builtin",
+                    "service": provider.source_key,
+                    "name": provider.name,
+                    "description": provider.description,
+                    "tags": provider.tags,
+                    "tool_count": len(provider_tools),
+                    "status": "enabled",
+                    "resources": provider.list_resources(actor, profile_key),
+                }
+            )
         external_items = [
             {
                 "kind": "service",

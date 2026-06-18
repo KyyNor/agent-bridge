@@ -188,12 +188,13 @@ class WorkflowService:
             if not task_key:
                 raise ValidationError("task_key is required")
             task_version = str(task.get("task_version") or "")
+            task_type = str(task.get("type") or "")
             payload = task.get("payload")
             if payload is None:
                 payload = {}
             if not isinstance(payload, dict):
                 raise ValidationError("task payload must be an object")
-            normalized.append({"task_key": task_key, "task_version": task_version, "payload": payload})
+            normalized.append({"task_key": task_key, "task_version": task_version, "type": task_type, "payload": payload})
         return self.store.upsert_workflow_tasks(workflow_key, normalized)
 
     def save_artifact(

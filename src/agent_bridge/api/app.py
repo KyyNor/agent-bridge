@@ -66,6 +66,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
                 service.governance.admins = service.admins
                 service.codegraph.admins = service.admins
                 service.workflows.admins = service.admins
+                service.skills.admins = service.admins
             return call()
         except AgentBridgeError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -78,6 +79,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
                 service.governance.admins = service.admins
                 service.codegraph.admins = service.admins
                 service.workflows.admins = service.admins
+                service.skills.admins = service.admins
             return await call()
         except AgentBridgeError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc

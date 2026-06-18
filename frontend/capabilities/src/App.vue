@@ -10,6 +10,7 @@ import CodeRepoView from './views/knowledge/CodeRepoView.vue'
 import KnowledgeView from './views/knowledge/KnowledgeView.vue'
 import KnowledgeProcessingConfigView from './views/knowledge/KnowledgeProcessingConfigView.vue'
 import WorkflowView from './views/workflow/WorkflowView.vue'
+import SkillManagementView from './views/system/SkillManagementView.vue'
 import LogsView from './views/monitoring/LogsView.vue'
 import StatsView from './views/monitoring/StatsView.vue'
 
@@ -57,6 +58,7 @@ const navGroups: NavGroup[] = [
     label: '系统配置',
     items: [
       { key: 'system-config', label: '系统配置', description: '配置调度计划、仓库分类和知识后端' },
+      { key: 'skills', label: 'Skill 管理', description: '维护内置技能提示词' },
     ],
   },
 ]
@@ -82,6 +84,7 @@ const view = computed(() => hash.value)
         <CodeRepoView v-else-if="view === 'code-repos'" />
         <KnowledgeView v-else-if="view === 'knowledge'" />
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
+        <SkillManagementView v-else-if="view === 'skills'" />
         <WorkflowView v-else-if="view === 'workflow'" />
         <LogsView v-else-if="view === 'logs'" />
         <StatsView v-else-if="view === 'stats'" />

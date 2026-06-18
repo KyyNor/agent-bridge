@@ -26,6 +26,7 @@ import type {
   CodeRepoCategory,
   KnowledgeSyncConfig,
   SchedulerStatus,
+  SkillPrompt,
   ToolCallLog,
   ToolCallStats,
   UAStatus,
@@ -257,6 +258,12 @@ export const api = {
   getSyncConfig: () => get<KnowledgeSyncConfig>('/sync-config'),
   saveSyncConfig: (config: KnowledgeSyncConfig) => post<KnowledgeSyncConfig>('/sync-config', config),
   getSchedulerStatus: () => get<SchedulerStatus>('/sync-config/scheduler-status'),
+
+  // Skills
+  listSkills: () => get<SkillPrompt[]>('/skills'),
+  getSkill: (skillName: string) => get<SkillPrompt>(`/skills/${skillName}`),
+  saveSkill: (skillName: string, prompt: string) => post<SkillPrompt>(`/skills/${skillName}`, { prompt }),
+  resetSkill: (skillName: string) => post<SkillPrompt>(`/skills/${skillName}/reset`),
 
   // Knowledge Bases
   listKbs: () => get<KnowledgeBase[]>('/kbs'),

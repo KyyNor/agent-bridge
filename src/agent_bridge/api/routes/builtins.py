@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from agent_bridge.api.schemas import CodeRepoCategoryRequest, CodeRepositoryRequest, KnowledgeSyncConfigRequest
+from agent_bridge.api.schemas import CodeRepoCategoryRequest, CodeRepositoryRequest, KnowledgeSyncConfigRequest, SkillPromptRequest
 
 
 class _CodeGraphQueryRequest(BaseModel):
@@ -162,5 +162,31 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
     def get_scheduler_status(current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
         return call_safely(lambda: service.get_scheduler_status(current_actor))
+
+    # -- Skills --
+
+    @router.get("/skills")
+    def list_skills(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.skills.list_skills(current_actor))
+
+    @router.get("/skills/{skill_name}")
+    def get_skill(skill_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.skills.get_skill(current_actor, skill_name))
+
+    @router.post("/skills/{skill_name}")
+    def save_skill(
+        skill_name: str,
+        payload: SkillPromptRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.skills.save_skill(current_actor, skill_name, payload.prompt))
+
+    @router.post("/skills/{skill_name}/reset")
+    def reset_skill(skill_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.skills.reset_skill(current_actor, skill_name))
 
     return router

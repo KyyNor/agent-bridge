@@ -134,6 +134,7 @@ class WorkflowsRepository:
             for task in tasks:
                 task_key = str(task["task_key"])
                 task_version = str(task.get("task_version") or "")
+                task_type = str(task.get("type") or "")
                 payload = task.get("payload") or {}
                 existing = conn.execute(
                     """
@@ -146,10 +147,10 @@ class WorkflowsRepository:
                 if existing is None:
                     conn.execute(
                         """
-                        INSERT INTO workflow_tasks (workflow_key, task_key, task_version, payload_json, status)
-                        VALUES (?, ?, ?, ?, 'pending')
+                        INSERT INTO workflow_tasks (workflow_key, task_key, task_version, type, payload_json, status)
+                        VALUES (?, ?, ?, ?, ?, 'pending')
                         """,
-                        (workflow_key, task_key, task_version, _json_dumps(payload)),
+                        (workflow_key, task_key, task_version, task_type, _json_dumps(payload)),
                     )
                     created += 1
                 elif existing["status"] == WorkflowTaskStatus.completed.value:
@@ -163,7 +164,8 @@ class WorkflowsRepository:
                     conn.execute(
                         """
                         UPDATE workflow_tasks
-                        SET payload_json = ?,
+                        SET type = ?,
+                            payload_json = ?,
                             status = 'pending',
                             lease_run_id = NULL,
                             lease_expires_at = NULL,
@@ -171,7 +173,7 @@ class WorkflowsRepository:
                         WHERE workflow_key = ? AND task_key = ?
                           AND task_version = ?
                         """,
-                        (_json_dumps(payload), workflow_key, task_key, task_version),
+                        (task_type, _json_dumps(payload), workflow_key, task_key, task_version),
                     )
                     updated += 1
         return {

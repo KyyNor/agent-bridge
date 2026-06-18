@@ -143,6 +143,10 @@ class WorkflowDefinitionRequest(BaseModel):
     status: str = "active"
 
 
+class SkillPromptRequest(BaseModel):
+    prompt: str
+
+
 class UpsertBackendRequest(BaseModel):
     slug: str
     backend_type: str

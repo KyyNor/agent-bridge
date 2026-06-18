@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+
+def test_skill_prompt_override_and_reset(wm_paths):
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    default_item = svc.skills.get_skill("root", "design_workflow")
+
+    assert default_item["skill_name"] == "design_workflow"
+    assert default_item["source"] == "default"
+    assert "workflow.js" in default_item["prompt"]
+
+    saved = svc.skills.save_skill("root", "design_workflow", "custom workflow prompt")
+
+    assert saved["source"] == "database"
+    assert saved["prompt"] == "custom workflow prompt"
+    assert svc.skills.get_skill("root", "design_workflow")["prompt"] == "custom workflow prompt"
+
+    reset = svc.skills.reset_skill("root", "design_workflow")
+
+    assert reset["source"] == "default"
+    assert reset["prompt"] == default_item["prompt"]
+
+
+def test_skill_management_only_allows_known_skills(wm_paths):
+    from agent_bridge.core.domain import NotFound
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+
+    try:
+        svc.skills.save_skill("root", "unknown", "prompt")
+    except NotFound as exc:
+        assert "skill not found" in str(exc)
+    else:
+        raise AssertionError("unknown skill should be rejected")

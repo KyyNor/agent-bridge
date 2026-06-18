@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
+import { HelpCircle } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -33,6 +34,7 @@ const historyLoading = ref(false)
 const showArtifact = ref(false)
 const showArtifactHistory = ref(false)
 const showDetail = ref(false)
+const showGuide = ref(false)
 const showProgress = ref(false)
 const progressWorkflowKey = ref('')
 const progressRunId = ref('')
@@ -578,12 +580,97 @@ async function deleteWorkflow(item: WorkflowDefinition) {
         <h2 class="text-xl font-semibold text-foreground">工作流管理</h2>
         <p class="text-sm text-muted-foreground">Claude Code 动态工作流、运行产物与能力平面绑定</p>
       </div>
-      <Button @click="openCreate">新建工作流</Button>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" @click="showGuide = true">
+          <HelpCircle class="mr-1.5 h-4 w-4" />
+          使用指引
+        </Button>
+        <Button @click="openCreate">新建工作流</Button>
+      </div>
     </div>
 
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {{ error }}
     </div>
+
+    <Dialog v-model:open="showGuide">
+      <DialogContent class="w-[96vw] max-w-[980px] sm:max-w-[980px]">
+        <DialogHeader>
+          <DialogTitle>工作流使用指引</DialogTitle>
+        </DialogHeader>
+        <div class="max-h-[74vh] space-y-4 overflow-auto pr-1 text-sm leading-6 text-muted-foreground">
+          <section class="rounded-md border p-4">
+            <h3 class="mb-2 text-sm font-semibold text-foreground">workflow.js</h3>
+            <p>脚本在一次独立运行目录中执行，负责领取任务、创建任务、记录日志，并在结束时写入 <span class="font-mono text-foreground">out/result.json</span>。</p>
+            <div class="mt-3 grid gap-3 md:grid-cols-3">
+              <div class="rounded-md bg-muted/50 p-3">
+                <div class="font-mono text-xs text-foreground">workflow_get_task</div>
+                <p class="mt-1 text-xs">领取当前运行的一条待处理任务。</p>
+              </div>
+              <div class="rounded-md bg-muted/50 p-3">
+                <div class="font-mono text-xs text-foreground">workflow_set_task</div>
+                <p class="mt-1 text-xs">写入任务列表，任务可带 <span class="font-mono">type</span> 供脚本分支。</p>
+              </div>
+              <div class="rounded-md bg-muted/50 p-3">
+                <div class="font-mono text-xs text-foreground">workflow_run_log</div>
+                <p class="mt-1 text-xs">记录运行过程中的业务日志。</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="rounded-md border p-4">
+            <h3 class="mb-2 text-sm font-semibold text-foreground">返回格式</h3>
+            <pre class="overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">{
+  "status": "completed",
+  "task_key": "page:a",
+  "task_version": "v1",
+  "artifacts": [
+    {
+      "title": "Page A",
+      "path": "reports/page-a.md",
+      "tags": ["page"],
+      "format": "markdown",
+      "file": "out/artifacts/page-a.md",
+      "summary": "summary"
+    }
+  ]
+}</pre>
+            <p class="mt-2">没有任务时输出 <span class="font-mono text-foreground">{"status":"no_executable_task","reason":"..."}</span>。如果任务带 <span class="font-mono text-foreground">task_version</span>，结果里必须原样写回。</p>
+          </section>
+
+          <section class="rounded-md border p-4">
+            <h3 class="mb-2 text-sm font-semibold text-foreground">工作流结构定义</h3>
+            <p>结构定义是 JSON manifest，页面用它展示流程节点、流转关系和数据结构。必须包含 <span class="font-mono text-foreground">name</span>、<span class="font-mono text-foreground">nodes</span>、<span class="font-mono text-foreground">edges</span>、<span class="font-mono text-foreground">schemas</span>。</p>
+            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">{
+  "name": "Page Report",
+  "nodes": [{ "id": "process", "label": "处理任务", "type": "task_worker" }],
+  "edges": [],
+  "schemas": {
+    "task": {
+      "type": "object",
+      "properties": {
+        "task_key": { "type": "string" },
+        "task_version": { "type": "string" },
+        "type": { "type": "string" },
+        "payload": { "type": "object" }
+      }
+    }
+  }
+}</pre>
+          </section>
+
+          <section class="rounded-md border p-4">
+            <h3 class="mb-2 text-sm font-semibold text-foreground">让智能体协助编写</h3>
+            <p>先让智能体读取内置技能，再基于用户需求生成 <span class="font-mono text-foreground">workflow.js</span> 和 manifest。</p>
+            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">execute service='built-in' tool='load_skill' arguments={"skill_name":"design_workflow"}</pre>
+            <p class="mt-2">随后要求智能体参照技能内容完成开发，并检查任务类型分支、日志、产物路径和 <span class="font-mono text-foreground">out/result.json</span>。</p>
+          </section>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showGuide = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Card>
       <CardContent class="p-0">

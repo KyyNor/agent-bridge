@@ -63,6 +63,18 @@ export interface WorkflowDefinition {
   updated_at: string
 }
 
+export interface SkillPrompt {
+  skill_name: string
+  name: string
+  description: string
+  source: 'default' | 'database'
+  prompt?: string
+  default_prompt?: string
+  prompt_preview?: string
+  updated_at: string | null
+  updated_by: string | null
+}
+
 export interface WorkflowArtifact {
   artifact_id: string
   workflow_key: string

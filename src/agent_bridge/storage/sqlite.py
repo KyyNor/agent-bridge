@@ -51,6 +51,7 @@ class SQLiteStore:
                 "workflow_tasks",
                 {
                     "task_version": "TEXT NOT NULL DEFAULT ''",
+                    "type": "TEXT NOT NULL DEFAULT ''",
                 },
             )
             self._ensure_columns(
@@ -168,6 +169,18 @@ class SQLiteStore:
             )
             conn.executescript(CODEGRAPH_SCHEMA)
             conn.executescript(WORKFLOW_SCHEMA)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_prompts (
+                  skill_name TEXT PRIMARY KEY,
+                  prompt TEXT NOT NULL,
+                  updated_by TEXT NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            self._ensure_columns(conn, "workflow_tasks", {"type": "TEXT NOT NULL DEFAULT ''"})
 
     def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -207,6 +220,7 @@ class SQLiteStore:
               workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
               task_key TEXT NOT NULL,
               task_version TEXT NOT NULL DEFAULT '',
+              type TEXT NOT NULL DEFAULT '',
               payload_json TEXT NOT NULL DEFAULT '{}',
               status TEXT NOT NULL DEFAULT 'pending',
               lease_run_id TEXT,
@@ -223,12 +237,12 @@ class SQLiteStore:
         conn.execute(
             """
             INSERT INTO workflow_tasks_new (
-              id, workflow_key, task_key, task_version, payload_json, status,
+              id, workflow_key, task_key, task_version, type, payload_json, status,
               lease_run_id, lease_expires_at, attempt_count, last_error,
               created_at, updated_at, completed_at
             )
             SELECT
-              id, workflow_key, task_key, task_version, payload_json, status,
+              id, workflow_key, task_key, task_version, type, payload_json, status,
               lease_run_id, lease_expires_at, attempt_count, last_error,
               created_at, updated_at, completed_at
             FROM workflow_tasks
@@ -293,6 +307,39 @@ class SQLiteStore:
 
     def _migrate_tool_call_logs_nullable_profile(self, conn: sqlite3.Connection) -> None:
         return self.governance._migrate_tool_call_logs_nullable_profile(conn=conn)
+
+    def get_skill_prompt_override(self, skill_name: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM skill_prompts WHERE skill_name = ?", (skill_name,)).fetchone()
+            return dict(row) if row is not None else None
+
+    def list_skill_prompt_overrides(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM skill_prompts ORDER BY skill_name").fetchall()
+            return [dict(row) for row in rows]
+
+    def upsert_skill_prompt_override(self, *, skill_name: str, prompt: str, updated_by: str) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO skill_prompts (skill_name, prompt, updated_by)
+                VALUES (?, ?, ?)
+                ON CONFLICT(skill_name) DO UPDATE SET
+                  prompt = excluded.prompt,
+                  updated_by = excluded.updated_by,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (skill_name, prompt, updated_by),
+            )
+            row = conn.execute("SELECT * FROM skill_prompts WHERE skill_name = ?", (skill_name,)).fetchone()
+            if row is None:
+                raise KeyError(f"skill not found: {skill_name}")
+            return dict(row)
+
+    def delete_skill_prompt_override(self, skill_name: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute("DELETE FROM skill_prompts WHERE skill_name = ?", (skill_name,))
+            return cursor.rowcount > 0
 
     def upsert_code_repository(
         self,

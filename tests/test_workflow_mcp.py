@@ -127,6 +127,48 @@ def test_workflow_mcp_set_get_and_run_log(wm_paths):
     assert logs[0]["message"] == "leased task"
 
 
+def test_workflow_mcp_task_type_round_trips(wm_paths):
+    from agent_bridge.capabilities.mcp_server import create_mcp_server
+
+    svc = _create_service_with_workflow(wm_paths)
+    _create_run(svc)
+
+    mcp = create_mcp_server(
+        svc,
+        profile_key="report-plane",
+        workflow_context={"workflow": True, "workflow_key": "page-report", "run_id": "run_1"},
+    )
+    asyncio.run(
+        mcp.call_tool(
+            "workflow_set_task",
+            {"tasks": [{"task_key": "page:a", "type": "page_summary", "payload": {"page": "a"}}]},
+        )
+    )
+
+    _, get_result = asyncio.run(mcp.call_tool("workflow_get_task", {}))
+
+    assert get_result["task"]["type"] == "page_summary"
+
+
+def test_execute_builtin_load_skill_returns_design_workflow_prompt(wm_paths):
+    svc = _create_service_with_workflow(wm_paths)
+
+    result = asyncio.run(
+        svc.capabilities.execute(
+            actor="root",
+            service="built-in",
+            tool="load_skill",
+            arguments={"skill_name": "design_workflow"},
+            profile_key="report-plane",
+        )
+    )
+
+    assert result["success"] is True
+    assert result["result"]["skill_name"] == "design_workflow"
+    assert "workflow_get_task" in result["result"]["prompt"]
+    assert "workflow_set_task" in result["result"]["prompt"]
+
+
 def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):
     from agent_bridge.capabilities.mcp_server import create_mcp_server
 

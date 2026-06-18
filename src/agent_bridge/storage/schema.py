@@ -224,6 +224,13 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
 CREATE INDEX IF NOT EXISTS idx_tool_call_logs_created_at ON tool_call_logs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_call_logs_profile ON tool_call_logs(profile_key);
 CREATE INDEX IF NOT EXISTS idx_tool_call_logs_source ON tool_call_logs(source_type, source_key);
+CREATE TABLE IF NOT EXISTS skill_prompts (
+  skill_name TEXT PRIMARY KEY,
+  prompt TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 CODEGRAPH_SCHEMA = """
@@ -313,6 +320,7 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
   task_key TEXT NOT NULL,
   task_version TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT '',
   payload_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'pending',
   lease_run_id TEXT,

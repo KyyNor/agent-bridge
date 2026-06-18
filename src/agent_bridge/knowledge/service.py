@@ -35,6 +35,7 @@ from agent_bridge.knowledge.backends.registry import BackendRegistry, create_reg
 from agent_bridge.knowledge.backends.weknora import WeknoraBackend
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.storage.sqlite import SQLiteStore
+from agent_bridge.skills.service import SkillService
 from agent_bridge.workflows.scheduler import WorkflowScheduler
 from agent_bridge.workflows.service import WorkflowService
 
@@ -65,6 +66,7 @@ class AgentBridgeService:
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
         self.workflows = WorkflowService(store=store, admins=admins)
+        self.skills = SkillService(store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,
@@ -72,8 +74,10 @@ class AgentBridgeService:
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capabilities.builtin_codegraph import CodeGraphBuiltinProvider
+        from agent_bridge.capabilities.builtin_platform import PlatformBuiltinProvider
         from agent_bridge.capabilities.builtin_wiki import WikiBuiltinProvider
 
+        self.capabilities.register_builtin_provider(PlatformBuiltinProvider(self))
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
         self.capabilities.register_builtin_provider(CodeGraphBuiltinProvider(self.codegraph, self.governance))
 
