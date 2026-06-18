@@ -53,7 +53,7 @@ def test_mcp_search_lists_registered_services(wm_paths) -> None:
     svc.store.init_schema()
     mcp = create_mcp_server(svc)
     _, structured = asyncio.run(mcp.call_tool("search", {}))
-    assert [item["service"] for item in structured["items"]] == ["wiki", "codegraph", "hive", "mysql"]
+    assert [item["service"] for item in structured["items"]] == ["built-in", "wiki", "codegraph", "hive", "mysql"]
     assert structured["log_id"].startswith("call_")
 
 

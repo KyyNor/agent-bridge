@@ -11,7 +11,7 @@ Features:
 - Capability governance (project profiles with allow/deny rules)
 - Tool call logging and statistics
 - MetaMCP `search` for registry browsing with `path` and `query`
-- MetaMCP `execute` for read-only tool execution
+- MetaMCP `execute` for governed tool execution
 - Built-in Wiki knowledge base management
 - Built-in CodeGraph repository indexing
 - Vue 3 capability console at `/admin/capabilities`
@@ -81,8 +81,8 @@ MetaMCP `execute` example:
 ```json
 {
   "service": "mysql",
-  "tool": "query_sql",
-  "arguments": {
+  "tool_name": "query_sql",
+  "params": {
     "db": "whjcbb",
     "sql": "select abc from aaa",
     "limit": 10

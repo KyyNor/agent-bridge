@@ -33,7 +33,7 @@ def test_mcp_search_tool_has_path_query_schema():
     assert "no arguments" in search_tool.description
 
 
-def test_mcp_execute_tool_has_service_key_tool_arguments_schema():
+def test_mcp_execute_tool_has_service_tool_name_params_schema():
     from agent_bridge.capabilities.mcp_server import create_mcp_server
 
     class FakeService:
@@ -44,9 +44,9 @@ def test_mcp_execute_tool_has_service_key_tool_arguments_schema():
     tools_by_name = {t.name: t for t in tools}
     execute_tool = tools_by_name["execute"]
     schema = execute_tool.inputSchema
-    assert "service_key" in schema["properties"]
-    assert "tool" in schema["properties"]
-    assert "arguments" in schema["properties"]
+    assert "service" in schema["properties"]
+    assert "tool_name" in schema["properties"]
+    assert "params" in schema["properties"]
 
 
 def test_mcp_search_tool_calls_capability_service():
@@ -72,27 +72,27 @@ def test_mcp_search_tool_calls_capability_service():
 def test_mcp_execute_tool_calls_capability_service():
     from agent_bridge.capabilities.mcp_server import create_mcp_server
 
-    returned = {"success": True, "result": {}, "service": "svc-1", "tool": "read", "log_id": "call_1"}
+    returned = {"success": True, "result": {}, "service": "svc-1", "tool_name": "read", "log_id": "call_1"}
 
     class FakeCapabilities:
-        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None):
             assert service == "svc-1"
-            assert tool == "read"
-            assert arguments == {"path": "/docs"}
+            assert tool_name == "read"
+            assert params == {"path": "/docs"}
             return returned
 
     class FakeService:
         capabilities = FakeCapabilities()
 
     mcp = create_mcp_server(FakeService())
-    content, structured = asyncio.run(mcp.call_tool("execute", {"service_key": "svc-1", "tool": "read", "arguments": {"path": "/docs"}}))
+    content, structured = asyncio.run(mcp.call_tool("execute", {"service": "svc-1", "tool_name": "read", "params": {"path": "/docs"}}))
     assert structured == returned
 
 
 def test_mcp_pinned_tool_calls_original_service_tool():
     from agent_bridge.capabilities.mcp_server import create_mcp_server
 
-    returned = {"success": True, "result": {"rows": []}, "service": "mysql", "tool": "query_users"}
+    returned = {"success": True, "result": {"rows": []}, "service": "mysql", "tool_name": "query_users"}
     calls = []
 
     class FakeCapabilities:
@@ -111,12 +111,12 @@ def test_mcp_pinned_tool_calls_original_service_tool():
                 }
             ]
 
-        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None):
             calls.append(
                 {
                     "service": service,
-                    "tool": tool,
-                    "arguments": arguments,
+                    "tool_name": tool_name,
+                    "params": params,
                     "profile_key": profile_key,
                 }
             )
@@ -132,8 +132,8 @@ def test_mcp_pinned_tool_calls_original_service_tool():
     assert calls == [
         {
             "service": "mysql",
-            "tool": "query_users",
-            "arguments": {"q": "alice"},
+            "tool_name": "query_users",
+            "params": {"q": "alice"},
             "profile_key": "safe-readonly",
         }
     ]
@@ -163,7 +163,7 @@ def test_mcp_skips_pinned_tool_with_invalid_schema_field(caplog):
                 }
             ]
 
-        async def execute(self, *, actor, service, tool, arguments, profile_key=None):
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None):
             raise AssertionError("invalid pinned tool should not be registered")
 
     class FakeService:
@@ -189,6 +189,16 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
     content, structured = asyncio.run(mcp.call_tool("search", {}))
     assert structured["path"] == "/"
     assert structured["items"] == [
+        {
+            "kind": "builtin",
+            "service": "built-in",
+            "name": "Built-in",
+            "description": "平台内置辅助工具",
+            "tags": ["builtin", "platform"],
+            "tool_count": 2,
+            "status": "enabled",
+            "resources": [],
+        },
         {
             "kind": "builtin",
             "service": "wiki",

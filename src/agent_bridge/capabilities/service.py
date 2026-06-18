@@ -342,20 +342,20 @@ class CapabilityService:
         self,
         actor: str,
         service: str,
-        tool: str,
-        arguments: dict[str, Any],
+        tool_name: str,
+        params: dict[str, Any],
         profile_key: str | None = None,
     ) -> dict[str, Any]:
         started = monotonic_ms()
-        request = {"service": service, "tool": tool, "arguments": arguments, "profile_key": profile_key}
+        request = {"service": service, "tool_name": tool_name, "params": params, "profile_key": profile_key}
         source_type = SourceType.builtin.value if service in self.builtin_providers else SourceType.mcp_service.value
         resource_type = None
         resource_key = None
         try:
             if service in self.builtin_providers:
-                resource = self.builtin_providers[service].resource_from_arguments(tool, arguments)
+                resource = self.builtin_providers[service].resource_from_arguments(tool_name, params)
                 resource_type, resource_key = self._builtin_resource_tuple(resource)
-                result = await self._execute_builtin(actor, service, tool, arguments, profile_key)
+                result = await self._execute_builtin(actor, service, tool_name, params, profile_key)
             elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
                 raise _mark_call_log_failure(
                     _mark_call_log_status(
@@ -367,14 +367,14 @@ class CapabilityService:
                     error_type="profile_policy_blocked",
                 )
             else:
-                result = await self._execute_without_log(actor, service, tool, arguments)
+                result = await self._execute_without_log(actor, service, tool_name, params)
             log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
                 entrypoint="metamcp_execute",
                 source_type=source_type,
                 source_key=service,
-                tool_name=tool,
+                tool_name=tool_name,
                 request=request,
                 response=result,
                 status=CallLogStatus.success.value,
@@ -394,7 +394,7 @@ class CapabilityService:
                 entrypoint="metamcp_execute",
                 source_type=source_type,
                 source_key=service,
-                tool_name=tool,
+                tool_name=tool_name,
                 request=request,
                 response={"error": str(exc)},
                 status=_call_log_status(exc),
@@ -413,16 +413,16 @@ class CapabilityService:
         self,
         actor: str,
         service: str,
-        tool: str,
-        arguments: dict[str, Any],
+        tool_name: str,
+        params: dict[str, Any],
         profile_key: str | None,
     ) -> dict[str, Any]:
         provider = self.builtin_providers[service]
         try:
-            result = await provider.execute(actor, tool, arguments, profile_key)
+            result = await provider.execute(actor, tool_name, params, profile_key)
         except ValidationError as exc:
             if str(exc) == "resource is blocked by profile policy":
-                resource = provider.resource_from_arguments(tool, arguments)
+                resource = provider.resource_from_arguments(tool_name, params)
                 raise mark_builtin_failure(
                     _mark_call_log_status(exc, CallLogStatus.blocked.value),
                     stage=FailureStage.profile_policy.value,
@@ -434,7 +434,8 @@ class CapabilityService:
             raise
         return {
             "service": service,
-            "tool": tool,
+            "tool": tool_name,
+            "tool_name": tool_name,
             "success": True,
             "result": result,
         }
@@ -448,11 +449,11 @@ class CapabilityService:
         self,
         actor: str,
         service: str,
-        tool: str,
-        arguments: dict[str, Any],
+        tool_name: str,
+        params: dict[str, Any],
     ) -> dict[str, Any]:
         service_payload = self._require_enabled_service(service)
-        tool_payload = self.store.get_mcp_tool(service, tool)
+        tool_payload = self.store.get_mcp_tool(service, tool_name)
         if tool_payload is None or tool_payload.get("status") != "active":
             raise _mark_call_log_failure(
                 NotFound("tool not found"),
@@ -486,8 +487,8 @@ class CapabilityService:
             result = await self.mcp_client.call_tool(
                 service_payload["endpoint_url"],
                 headers,
-                tool,
-                arguments,
+                tool_name,
+                params,
             )
         except Exception as exc:
             raise _mark_call_log_failure(
@@ -498,7 +499,8 @@ class CapabilityService:
             ) from exc
         return {
             "service": service,
-            "tool": tool,
+            "tool": tool_name,
+            "tool_name": tool_name,
             "success": not bool(result.get("is_error")) if isinstance(result, dict) else True,
             "result": result,
         }

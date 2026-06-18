@@ -266,7 +266,7 @@ await agent(
 如果用户要求智能体协助编写工作流，应提示智能体先读取本技能：
 
 ```text
-请执行 execute service='built-in' tool='load_skill' arguments={"skill_name":"design_workflow"} 读取技能，
+请执行 execute service='built-in' tool_name='load_skill' params={"skill_name":"design_workflow"} 读取技能，
 然后参照技能内容与我的需求，完成 workflow.js 与 manifest.json。
 ```
 

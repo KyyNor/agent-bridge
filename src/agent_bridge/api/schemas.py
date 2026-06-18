@@ -43,6 +43,13 @@ class UpdateMcpToolTypeRequest(BaseModel):
     tool_type: str
 
 
+class ExecuteCapabilityRequest(BaseModel):
+    service: str
+    tool_name: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    profile_key: str | None = None
+
+
 class ProjectProfileRequest(BaseModel):
     profile_key: str
     name: str
@@ -146,6 +153,23 @@ class WorkflowDefinitionRequest(BaseModel):
 
 class SkillPromptRequest(BaseModel):
     prompt: str
+
+
+class ScriptRequest(BaseModel):
+    script_key: str
+    name: str
+    description: str = ""
+    language: str = "python"
+    code: str
+    status: str = "active"
+    owner_type: str = "system"
+    owner_key: str = ""
+
+
+class ScriptTestRunRequest(BaseModel):
+    script_params: dict[str, Any] = Field(default_factory=dict)
+    timeout_seconds: int | None = None
+    profile_key: str | None = None
 
 
 class UpsertBackendRequest(BaseModel):

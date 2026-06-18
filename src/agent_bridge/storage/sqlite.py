@@ -18,6 +18,7 @@ class SQLiteStore:
         from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
         from agent_bridge.storage.repositories.governance import GovernanceRepository
         from agent_bridge.storage.repositories.knowledge import KnowledgeRepository
+        from agent_bridge.storage.repositories.scripts import ScriptsRepository
         from agent_bridge.storage.repositories.workflows import WorkflowsRepository
 
         self.knowledge = KnowledgeRepository(db_path, self.connect)
@@ -25,6 +26,7 @@ class SQLiteStore:
         self.governance = GovernanceRepository(db_path, self.connect)
         self.codegraph = CodeGraphRepository(db_path, self.connect)
         self.workflows = WorkflowsRepository(db_path, self.connect)
+        self.scripts = ScriptsRepository(db_path, self.connect)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -182,6 +184,46 @@ class SQLiteStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scripts (
+                  script_key TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  description TEXT NOT NULL DEFAULT '',
+                  language TEXT NOT NULL DEFAULT 'python',
+                  code TEXT NOT NULL,
+                  status TEXT NOT NULL DEFAULT 'active',
+                  owner_type TEXT NOT NULL DEFAULT 'system',
+                  owner_key TEXT NOT NULL DEFAULT '',
+                  content_hash TEXT NOT NULL DEFAULT '',
+                  created_by TEXT NOT NULL,
+                  updated_by TEXT NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_scripts_owner ON scripts(owner_type, owner_key)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS script_runs (
+                  run_id TEXT PRIMARY KEY,
+                  script_key TEXT NOT NULL REFERENCES scripts(script_key) ON DELETE CASCADE,
+                  run_type TEXT NOT NULL,
+                  params_json TEXT NOT NULL DEFAULT '{}',
+                  result_json TEXT NOT NULL DEFAULT '{}',
+                  stdout TEXT NOT NULL DEFAULT '',
+                  stderr TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL,
+                  exit_code INTEGER,
+                  error_message TEXT,
+                  duration_ms INTEGER NOT NULL DEFAULT 0,
+                  created_by TEXT NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_key, created_at DESC)")
             self._ensure_columns(conn, "workflow_tasks", {"type": "TEXT NOT NULL DEFAULT ''"})
 
     def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:

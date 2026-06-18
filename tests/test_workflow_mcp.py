@@ -157,8 +157,8 @@ def test_execute_builtin_load_skill_returns_design_workflow_prompt(wm_paths):
         svc.capabilities.execute(
             actor="root",
             service="built-in",
-            tool="load_skill",
-            arguments={"skill_name": "design_workflow"},
+            tool_name="load_skill",
+            params={"skill_name": "design_workflow"},
             profile_key="report-plane",
         )
     )

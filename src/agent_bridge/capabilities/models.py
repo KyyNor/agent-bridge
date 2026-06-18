@@ -84,14 +84,14 @@ class SearchRequest:
 @dataclass(frozen=True)
 class ExecuteRequest:
     service: str
-    tool: str
-    arguments: dict[str, Any]
+    tool_name: str
+    params: dict[str, Any]
 
 
 @dataclass(frozen=True)
 class ExecuteResult:
     service: str
-    tool: str
+    tool_name: str
     success: bool
     result: Any
     error: str | None = None

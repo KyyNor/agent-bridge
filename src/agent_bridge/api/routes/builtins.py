@@ -4,7 +4,14 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from agent_bridge.api.schemas import CodeRepoCategoryRequest, CodeRepositoryRequest, KnowledgeSyncConfigRequest, SkillPromptRequest
+from agent_bridge.api.schemas import (
+    CodeRepoCategoryRequest,
+    CodeRepositoryRequest,
+    KnowledgeSyncConfigRequest,
+    ScriptRequest,
+    ScriptTestRunRequest,
+    SkillPromptRequest,
+)
 
 
 class _CodeGraphQueryRequest(BaseModel):
@@ -188,5 +195,58 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
     def reset_skill(skill_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
         return call_safely(lambda: service.skills.reset_skill(current_actor, skill_name))
+
+    # -- Scripts --
+
+    @router.get("/scripts")
+    def list_scripts(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.scripts.list_scripts(current_actor))
+
+    @router.post("/scripts")
+    def upsert_script(payload: ScriptRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.scripts.upsert_script(actor=current_actor, **payload.model_dump()))
+
+    @router.get("/scripts/{script_key}")
+    def get_script(script_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.scripts.get_script(current_actor, script_key))
+
+    @router.post("/scripts/{script_key}/delete")
+    def delete_script(script_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.scripts.delete_script(current_actor, script_key))
+
+    @router.post("/scripts/{script_key}/test")
+    def test_script(
+        script_key: str,
+        payload: ScriptTestRunRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.scripts.test_script(
+                actor=current_actor,
+                script_key=script_key,
+                script_params=payload.script_params,
+                timeout_seconds=payload.timeout_seconds,
+                profile_key=payload.profile_key,
+            )
+        )
+
+    @router.get("/scripts/{script_key}/runs")
+    def list_script_runs(
+        script_key: str,
+        limit: int = 20,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.scripts.list_runs(current_actor, script_key, limit=limit))
+
+    @router.get("/script-runs/{run_id}")
+    def get_script_run(run_id: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.scripts.get_run(current_actor, run_id))
 
     return router

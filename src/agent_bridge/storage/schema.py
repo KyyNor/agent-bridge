@@ -231,6 +231,38 @@ CREATE TABLE IF NOT EXISTS skill_prompts (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS scripts (
+  script_key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  language TEXT NOT NULL DEFAULT 'python',
+  code TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  owner_type TEXT NOT NULL DEFAULT 'system',
+  owner_key TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL DEFAULT '',
+  created_by TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_scripts_owner ON scripts(owner_type, owner_key);
+CREATE TABLE IF NOT EXISTS script_runs (
+  run_id TEXT PRIMARY KEY,
+  script_key TEXT NOT NULL REFERENCES scripts(script_key) ON DELETE CASCADE,
+  run_type TEXT NOT NULL,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  stdout TEXT NOT NULL DEFAULT '',
+  stderr TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  exit_code INTEGER,
+  error_message TEXT,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_key, created_at DESC);
 """
 
 CODEGRAPH_SCHEMA = """

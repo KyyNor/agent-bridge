@@ -893,6 +893,26 @@ def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths)
     assert response.status_code == 403
 
 
+def test_execute_capability_api_uses_service_tool_name_params(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.post(
+        "/capabilities/execute",
+        json={
+            "service": "built-in",
+            "tool_name": "load_skill",
+            "params": {"skill_name": "design_workflow"},
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["service"] == "built-in"
+    assert response.json()["tool_name"] == "load_skill"
+    assert response.json()["result"]["skill_name"] == "design_workflow"
+
+
 def test_frontend_workflow_view_exposes_workflow_management() -> None:
     source = Path("frontend/capabilities/src/views/workflow/WorkflowView.vue").read_text(encoding="utf-8")
 

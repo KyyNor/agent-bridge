@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from agent_bridge.api.schemas import (
+    ExecuteCapabilityRequest,
     RegisterMcpServiceRequest,
     UpdateMcpServiceStatusRequest,
     UpdateMcpToolTypeRequest,
@@ -44,6 +45,19 @@ def create_capability_routes(service, actor, call_safely, call_safely_async, ens
     def update_mcp_tool_type(service_key: str, tool_name: str, payload: UpdateMcpToolTypeRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
         return call_safely(lambda: service.capabilities.set_tool_type(current_actor, service_key, tool_name, payload.tool_type))
+
+    @router.post("/capabilities/execute")
+    async def execute_capability(payload: ExecuteCapabilityRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return await call_safely_async(
+            lambda: service.capabilities.execute(
+                actor=current_actor,
+                service=payload.service,
+                tool_name=payload.tool_name,
+                params=payload.params,
+                profile_key=payload.profile_key,
+            )
+        )
 
     @router.get("/capability-catalog")
     def capability_catalog(profile_key: str | None = None, query: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:

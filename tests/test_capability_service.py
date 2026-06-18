@@ -64,7 +64,7 @@ class FakeMcpClient:
                 "endpoint_url": endpoint_url,
                 "headers": headers,
                 "tool_name": tool_name,
-                "arguments": arguments,
+                "params": arguments,
             }
         )
         return self.call_result
@@ -260,8 +260,8 @@ def test_disabled_or_error_service_blocks_direct_tool_visibility_and_execute(
     assert execute_log["tool_name"] == "search_docs"
     assert json.loads(execute_log["request_json"]) == {
         "service": "docs-api",
-        "tool": "search_docs",
-        "arguments": {"query": "hello"},
+        "tool_name": "search_docs",
+        "params": {"query": "hello"},
         "profile_key": None,
     }
     assert json.loads(execute_log["response_json"])["error"] == "MCP service is not enabled"
@@ -333,8 +333,8 @@ def test_execute_rejects_unconfigured_tool(wm_paths: AgentBridgePaths) -> None:
     assert logs[0]["tool_name"] == "delete_doc"
     assert json.loads(logs[0]["request_json"]) == {
         "service": "docs-api",
-        "tool": "delete_doc",
-        "arguments": {"doc_id": "1"},
+        "tool_name": "delete_doc",
+        "params": {"doc_id": "1"},
         "profile_key": None,
     }
     expected_error = "工具类型未配置，请联系管理员在 Agent Bridge 中配置工具类型"
@@ -438,7 +438,7 @@ def test_execute_calls_readonly_tool(wm_paths: AgentBridgePaths) -> None:
             "endpoint_url": "https://example.test/mcp",
             "headers": {"Authorization": "Bearer token"},
             "tool_name": "search_docs",
-            "arguments": {"query": "hello"},
+            "params": {"query": "hello"},
         }
     ]
 
@@ -523,8 +523,8 @@ def test_execute_blocked_by_profile_writes_log_and_does_not_call_client(wm_paths
     assert logs[0]["tool_name"] == "query_sql"
     assert json.loads(logs[0]["request_json"]) == {
         "service": "hive",
-        "tool": "query_sql",
-        "arguments": {"sql": "select 1"},
+        "tool_name": "query_sql",
+        "params": {"sql": "select 1"},
         "profile_key": "safe-readonly",
     }
 
@@ -546,8 +546,8 @@ def test_execute_success_returns_log_id_and_metamcp_execute_log(wm_paths: AgentB
     assert detail["status"] == CallLogStatus.success.value
     assert json.loads(detail["request_json"]) == {
         "service": "mysql",
-        "tool": "query_sql",
-        "arguments": {"sql": "select 1"},
+        "tool_name": "query_sql",
+        "params": {"sql": "select 1"},
         "profile_key": None,
     }
     assert json.loads(detail["response_json"])["result"] == client.call_result
@@ -593,8 +593,8 @@ def test_execute_wraps_mcp_client_failures(wm_paths: AgentBridgePaths) -> None:
     assert logs[0]["tool_name"] == "search_docs"
     assert json.loads(logs[0]["request_json"]) == {
         "service": "docs-api",
-        "tool": "search_docs",
-        "arguments": {"query": "hello"},
+        "tool_name": "search_docs",
+        "params": {"query": "hello"},
         "profile_key": None,
     }
     assert json.loads(logs[0]["response_json"])["error"] == "MCP tool execution failed: transport unavailable"
@@ -618,8 +618,8 @@ def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) 
     assert missing_service_log["tool_name"] == "search_docs"
     assert json.loads(missing_service_log["request_json"]) == {
         "service": "missing",
-        "tool": "search_docs",
-        "arguments": {},
+        "tool_name": "search_docs",
+        "params": {},
         "profile_key": None,
     }
     assert json.loads(missing_service_log["response_json"])["error"] == "service not found"
@@ -629,8 +629,8 @@ def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) 
     assert missing_tool_log["tool_name"] == "missing"
     assert json.loads(missing_tool_log["request_json"]) == {
         "service": "docs-api",
-        "tool": "missing",
-        "arguments": {},
+        "tool_name": "missing",
+        "params": {},
         "profile_key": None,
     }
     assert json.loads(missing_tool_log["response_json"])["error"] == "tool not found"

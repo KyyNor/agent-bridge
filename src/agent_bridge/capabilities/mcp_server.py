@@ -93,6 +93,7 @@ def create_mcp_server(
     profile_key: str | None = None,
     workflow_context: dict[str, Any] | None = None,
 ) -> FastMCP:
+    bridge_service = service
     mcp = FastMCP(
         name="agent-bridge",
         instructions=(
@@ -133,28 +134,28 @@ def create_mcp_server(
             raise
 
     @mcp.tool(
-        description="Execute a registered read-only MCP tool through the Agent Capability Hub gateway.",
+        description="Execute a registered Agent Bridge capability through the Agent Capability Hub gateway.",
     )
     async def execute(
-        service_key: str,
-        tool: str,
-        arguments: dict[str, Any] | None = None,
+        service: str,
+        tool_name: str,
+        params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
-        logger.info("执行 profile=%s service=%s tool=%s args=%s", active_profile, service_key, tool, json.dumps(arguments or {}, ensure_ascii=False))
+        logger.info("执行 profile=%s service=%s tool=%s params=%s", active_profile, service, tool_name, json.dumps(params or {}, ensure_ascii=False))
         started = time.monotonic()
         try:
-            result = await service.capabilities.execute(
+            result = await bridge_service.capabilities.execute(
                 actor=default_user(),
-                service=service_key,
-                tool=tool,
-                arguments=arguments or {},
+                service=service,
+                tool_name=tool_name,
+                params=params or {},
                 profile_key=active_profile,
             )
-            logger.info("执行完成 profile=%s service=%s tool=%s 耗时=%.0fms success=%s", active_profile, service_key, tool, (time.monotonic() - started) * 1000, result.get("success"))
+            logger.info("执行完成 profile=%s service=%s tool=%s 耗时=%.0fms success=%s", active_profile, service, tool_name, (time.monotonic() - started) * 1000, result.get("success"))
             return result
         except Exception as exc:
-            logger.error("执行失败 profile=%s service=%s tool=%s 耗时=%.0fms 错误=%s", active_profile, service_key, tool, (time.monotonic() - started) * 1000, exc)
+            logger.error("执行失败 profile=%s service=%s tool=%s 耗时=%.0fms 错误=%s", active_profile, service, tool_name, (time.monotonic() - started) * 1000, exc)
             raise
 
     @mcp.tool(description="Search workflow artifacts visible to the active Agent Bridge profile.")
@@ -257,8 +258,8 @@ def create_mcp_server(
                 return await service.capabilities.execute(
                     actor=default_user(),
                     service=_spec["service_key"],
-                    tool=_spec["tool_name"],
-                    arguments=kwargs,
+                    tool_name=_spec["tool_name"],
+                    params=kwargs,
                     profile_key=active_profile,
                 )
 
