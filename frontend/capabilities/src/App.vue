@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { defineAsyncComponent, ref, computed } from 'vue'
 import AppShell from './components/AppShell.vue'
 import type { NavGroup } from './components/AppShell.vue'
-import DashboardView from './views/dashboard/DashboardView.vue'
-import ServicesView from './views/capabilities/ServicesView.vue'
-import ToolsView from './views/capabilities/ToolsView.vue'
-import ProfilesView from './views/capabilities/ProfilesView.vue'
-import CodeRepoView from './views/knowledge/CodeRepoView.vue'
-import KnowledgeView from './views/knowledge/KnowledgeView.vue'
-import KnowledgeProcessingConfigView from './views/knowledge/KnowledgeProcessingConfigView.vue'
-import WorkflowView from './views/workflow/WorkflowView.vue'
-import SkillManagementView from './views/system/SkillManagementView.vue'
-import LogsView from './views/monitoring/LogsView.vue'
-import StatsView from './views/monitoring/StatsView.vue'
+
+const DashboardView = defineAsyncComponent(() => import('./views/dashboard/DashboardView.vue'))
+const ServicesView = defineAsyncComponent(() => import('./views/capabilities/ServicesView.vue'))
+const ToolsView = defineAsyncComponent(() => import('./views/capabilities/ToolsView.vue'))
+const ProfilesView = defineAsyncComponent(() => import('./views/capabilities/ProfilesView.vue'))
+const CodeRepoView = defineAsyncComponent(() => import('./views/knowledge/CodeRepoView.vue'))
+const KnowledgeView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeView.vue'))
+const KnowledgeProcessingConfigView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
+const WorkflowView = defineAsyncComponent(() => import('./views/workflow/WorkflowView.vue'))
+const SkillManagementView = defineAsyncComponent(() => import('./views/system/SkillManagementView.vue'))
+const LogsView = defineAsyncComponent(() => import('./views/monitoring/LogsView.vue'))
+const StatsView = defineAsyncComponent(() => import('./views/monitoring/StatsView.vue'))
 
 const hash = ref(window.location.hash.slice(1) || 'dashboard')
 window.addEventListener('hashchange', () => {
