@@ -8,6 +8,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
+import { buildServicePayload, defaultServiceForm, serviceToForm, type ServiceFormMode } from './serviceForm'
 
 const services = ref<McpService[]>([])
 const toolCounts = ref<Record<string, number>>({})
@@ -15,12 +16,13 @@ const loading = ref(true)
 const search = ref('')
 const statusFilter = ref('all')
 
-const showAdd = ref(false)
-const form = ref({ service_key: '', name: '', endpoint_url: '', description: '', tags: '' })
+const showForm = ref(false)
+const formMode = ref<ServiceFormMode>('create')
+const form = ref(defaultServiceForm())
 const saving = ref(false)
 const formError = ref('')
 
-onMounted(async () => {
+async function loadServices() {
   try {
     services.value = await api.listServices()
     const counts: Record<string, number> = {}
@@ -33,6 +35,10 @@ onMounted(async () => {
     )
     toolCounts.value = counts
   } catch { /* empty */ }
+}
+
+onMounted(async () => {
+  await loadServices()
   loading.value = false
 })
 
@@ -60,34 +66,46 @@ const filterTabs = [
   { key: 'error', label: '异常', count: computed(() => services.value.filter(s => s.status === 'error').length) },
 ]
 
-async function register() {
+const dialogTitle = computed(() => formMode.value === 'edit' ? '编辑 MCP 服务' : '新增 MCP 服务')
+const primaryActionLabel = computed(() => saving.value ? '保存中...' : '保存')
+
+function openCreate() {
+  formMode.value = 'create'
+  form.value = defaultServiceForm()
+  formError.value = ''
+  showForm.value = true
+}
+
+function openEdit(service: McpService) {
+  formMode.value = 'edit'
+  form.value = serviceToForm(service)
+  formError.value = ''
+  showForm.value = true
+}
+
+async function saveService() {
   formError.value = ''
   saving.value = true
   try {
-    await api.registerService({
-      service_key: form.value.service_key,
-      name: form.value.name,
-      endpoint_url: form.value.endpoint_url,
-      description: form.value.description,
-      tags: form.value.tags.split(',').map(t => t.trim()).filter(Boolean),
-    })
-    showAdd.value = false
-    services.value = await api.listServices()
+    await api.registerService(buildServicePayload(form.value, formMode.value))
+    showForm.value = false
+    await loadServices()
   } catch (e: any) {
     formError.value = e.message || '注册失败'
+  } finally {
+    saving.value = false
   }
-  saving.value = false
 }
 
 async function toggleStatus(svc: McpService) {
   const newStatus = svc.status === 'enabled' ? 'disabled' : 'enabled'
   await api.updateServiceStatus(svc.service_key, newStatus)
-  services.value = await api.listServices()
+  await loadServices()
 }
 
 async function syncTools(key: string) {
   await api.syncServiceTools(key)
-  services.value = await api.listServices()
+  await loadServices()
 }
 </script>
 
@@ -112,7 +130,7 @@ async function syncTools(key: string) {
           @click="statusFilter = tab.key"
         >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count.value }}</span></button>
       </div>
-      <Button @click="showAdd = true">
+      <Button @click="openCreate">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         新增服务
       </Button>
@@ -155,6 +173,9 @@ async function syncTools(key: string) {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                     同步
                   </Button>
+                  <Button variant="ghost" size="sm" @click="openEdit(s)" class="h-8 text-xs">
+                    编辑
+                  </Button>
                   <Button variant="ghost" size="sm" @click="toggleStatus(s)" class="h-8 text-xs">
                     {{ s.status === 'enabled' ? '停用' : '启用' }}
                   </Button>
@@ -171,17 +192,17 @@ async function syncTools(key: string) {
       <span>共 {{ filtered.length }} 条记录</span>
     </div>
 
-    <!-- Add Dialog -->
-    <Dialog :open="showAdd" @update:open="showAdd = $event">
+    <!-- Service Dialog -->
+    <Dialog :open="showForm" @update:open="showForm = $event">
       <DialogContent class="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>新增 MCP 服务</DialogTitle>
+          <DialogTitle>{{ dialogTitle }}</DialogTitle>
         </DialogHeader>
-        <form @submit.prevent="register" class="space-y-4">
+        <form @submit.prevent="saveService" class="space-y-4">
           <div v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ formError }}</div>
           <div class="space-y-2">
             <label class="text-sm font-medium">服务标识 <span class="text-destructive">*</span></label>
-            <Input v-model="form.service_key" placeholder="mysql-query" required />
+            <Input v-model="form.service_key" placeholder="mysql-query" required :disabled="formMode === 'edit'" />
             <div class="text-xs text-muted-foreground">唯一标识符，仅支持小写字母、数字和连字符</div>
           </div>
           <div class="space-y-2">
@@ -200,10 +221,22 @@ async function syncTools(key: string) {
             <label class="text-sm font-medium">标签</label>
             <Input v-model="form.tags" placeholder="数据库, 查询 (逗号分隔)" />
           </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">请求 Header</label>
+            <textarea
+              v-model="form.headers"
+              placeholder='{"Authorization":"Bearer token","X-Tenant":"docs"}'
+              rows="5"
+              class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+            <div class="text-xs text-muted-foreground">
+              使用 JSON 对象。编辑时留空表示保留已有 Header；填写 <code>{}</code> 可清空 Header。
+            </div>
+          </div>
         </form>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
-          <Button @click="register" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</Button>
+          <Button @click="saveService" :disabled="saving">{{ primaryActionLabel }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

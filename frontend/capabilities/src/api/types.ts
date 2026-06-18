@@ -2,6 +2,7 @@ export interface McpService {
   service_key: string
   name: string
   endpoint_url: string
+  headers?: Record<string, unknown>
   description: string
   tags: string[]
   status: string
