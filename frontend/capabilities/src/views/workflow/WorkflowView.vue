@@ -482,6 +482,16 @@ async function loadRuns(workflowKey = selectedWorkflow.value?.workflow_key || ''
   }
 }
 
+function mergeWorkflowRun(run: WorkflowRun) {
+  const key = run.workflow_key
+  const currentRuns = workflowRuns.value[key] || []
+  const index = currentRuns.findIndex(item => item.run_id === run.run_id)
+  const nextRuns = index >= 0
+    ? currentRuns.map(item => item.run_id === run.run_id ? run : item)
+    : [run, ...currentRuns]
+  workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns.slice(0, 20) }
+}
+
 async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '') {
   const key = workflowKey
   if (!key) return
@@ -498,13 +508,13 @@ async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '
   }
 }
 
-async function loadLogs() {
+async function loadLogs(options: { quiet?: boolean } = {}) {
   if (!selectedRunId.value) {
     runLogs.value = []
     runEvents.value = []
     return
   }
-  logsLoading.value = true
+  if (!options.quiet) logsLoading.value = true
   try {
     const [logs, events] = await Promise.all([
       api.getWorkflowRunLogs(selectedRunId.value),
@@ -513,10 +523,12 @@ async function loadLogs() {
     runLogs.value = logs
     runEvents.value = events
   } catch (e: unknown) {
-    runLogs.value = []
-    runEvents.value = []
+    if (!options.quiet) {
+      runLogs.value = []
+      runEvents.value = []
+    }
   } finally {
-    logsLoading.value = false
+    if (!options.quiet) logsLoading.value = false
   }
 }
 
@@ -650,7 +662,8 @@ async function pollTestRun() {
   if (!runId) return
   try {
     const run = await api.getWorkflowRun(runId)
-    await loadLogs()
+    mergeWorkflowRun(run)
+    await loadLogs({ quiet: true })
     if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) {
       stopTestPolling()
       testing.value = false

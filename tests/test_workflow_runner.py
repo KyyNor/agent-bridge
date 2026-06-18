@@ -11,15 +11,18 @@ def test_message_events_skips_thinking_tokens_partial():
     thinking = SimpleNamespace(subtype="thinking_tokens", session_id="session_1")
     assert _message_events(thinking, tool_names={}) == []
 
-    # Other status subtypes (init, task_progress, ...) are still emitted.
+    # Init remains useful as a lifecycle marker, but high-frequency task progress
+    # partials are internal SDK noise and must not surface in the UI event log.
     init = SimpleNamespace(subtype="init", session_id="session_1")
     init_events = _message_events(init, tool_names={})
     assert len(init_events) == 1
     assert init_events[0]["kind"] == "status"
     assert init_events[0]["status"] == "init"
+    task_progress = SimpleNamespace(subtype="task_progress", session_id="session_1")
+    assert _message_events(task_progress, tool_names={}) == []
 
 
-def test_runner_drops_thinking_tokens_from_all_logs(tmp_path, monkeypatch):
+def test_runner_drops_noisy_partial_messages_from_all_logs(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
 
@@ -35,6 +38,7 @@ def test_runner_drops_thinking_tokens_from_all_logs(tmp_path, monkeypatch):
     async def fake_query(*, prompt, options):
         yield SimpleNamespace(subtype="init", session_id="session_1")
         yield SimpleNamespace(subtype="thinking_tokens", session_id="session_1")
+        yield SimpleNamespace(subtype="task_progress", session_id="session_1")
         yield ResultMessage(
             subtype="success",
             duration_ms=1,
@@ -66,9 +70,11 @@ def test_runner_drops_thinking_tokens_from_all_logs(tmp_path, monkeypatch):
         json.loads(line)
         for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    # thinking_tokens must be absent from both the raw message log and the event stream.
+    # Noisy partials must be absent from both the raw message log and the event stream.
     assert "thinking_tokens" not in stdout_text
+    assert "task_progress" not in stdout_text
     assert all(event.get("status") != "thinking_tokens" for event in events)
+    assert all(event.get("status") != "task_progress" for event in events)
     # Other subtypes still flow through.
     assert any(event.get("status") == "init" for event in events)
 
