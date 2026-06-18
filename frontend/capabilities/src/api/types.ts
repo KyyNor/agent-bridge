@@ -158,6 +158,35 @@ export interface WorkflowRunLog {
   created_at: string
 }
 
+export interface WorkflowTask {
+  workflow_key: string
+  task_key: string
+  task_version: string
+  type: string
+  payload: Record<string, unknown>
+  status: string
+  lease_run_id: string | null
+  lease_expires_at: string | null
+  attempt_count: number
+  last_error: string | null
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+export interface WorkflowTasksResult {
+  tasks: WorkflowTask[]
+}
+
+export interface WorkflowClearResult {
+  workflow_key: string
+  cleared: boolean
+  tasks_deleted: number
+  runs_deleted: number
+  logs_deleted: number
+  artifacts_deleted: number
+}
+
 export interface WorkflowRunEvent {
   created_at?: string
   agent_name?: string

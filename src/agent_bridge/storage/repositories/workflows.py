@@ -212,6 +212,28 @@ class WorkflowsRepository:
                 ).fetchone()
             )
 
+    def list_workflow_tasks(self, workflow_key: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM workflow_tasks
+                WHERE workflow_key = ?
+                ORDER BY
+                  CASE status
+                    WHEN 'running' THEN 0
+                    WHEN 'pending' THEN 1
+                    WHEN 'failed' THEN 2
+                    WHEN 'abandoned' THEN 3
+                    WHEN 'completed' THEN 4
+                    ELSE 5
+                  END,
+                  updated_at DESC,
+                  id DESC
+                """,
+                (workflow_key,),
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
     def lease_workflow_task(self, workflow_key: str, *, run_id: str, lease_seconds: int) -> dict[str, Any] | None:
         now = _now_iso()
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
@@ -413,6 +435,31 @@ class WorkflowsRepository:
                 (workflow_key,),
             )
             return cursor.rowcount > 0
+
+    def clear_workflow_execution_data(self, workflow_key: str) -> dict[str, int]:
+        with self._connect() as conn:
+            logs = conn.execute(
+                "DELETE FROM workflow_run_logs WHERE workflow_key = ?",
+                (workflow_key,),
+            ).rowcount
+            artifacts = conn.execute(
+                "DELETE FROM workflow_artifacts WHERE workflow_key = ?",
+                (workflow_key,),
+            ).rowcount
+            runs = conn.execute(
+                "DELETE FROM workflow_runs WHERE workflow_key = ?",
+                (workflow_key,),
+            ).rowcount
+            tasks = conn.execute(
+                "DELETE FROM workflow_tasks WHERE workflow_key = ?",
+                (workflow_key,),
+            ).rowcount
+        return {
+            "tasks_deleted": tasks,
+            "runs_deleted": runs,
+            "logs_deleted": logs,
+            "artifacts_deleted": artifacts,
+        }
 
     def finish_workflow_run(
         self,

@@ -31,6 +31,11 @@ def create_workflow_routes(service, actor, call_safely, ensure_capability_schema
         ensure_capability_schema()
         return call_safely(lambda: service.workflows.delete_definition(current_actor, workflow_key))
 
+    @router.post("/workflows/{workflow_key}/clear")
+    def clear_workflow_execution_data(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.workflows.clear_execution_data(current_actor, workflow_key))
+
     @router.get("/workflows/{workflow_key}/runs")
     def list_workflow_runs(
         workflow_key: str,
@@ -39,6 +44,11 @@ def create_workflow_routes(service, actor, call_safely, ensure_capability_schema
     ) -> list[dict[str, Any]]:
         ensure_capability_schema()
         return call_safely(lambda: service.workflows.list_runs(current_actor, workflow_key, limit=limit))
+
+    @router.get("/workflows/{workflow_key}/tasks")
+    def list_workflow_tasks(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.workflows.list_tasks(current_actor, workflow_key))
 
     @router.get("/workflow-runs/{run_id}/logs")
     def list_run_logs(run_id: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:

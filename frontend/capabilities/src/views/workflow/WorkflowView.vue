@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { HelpCircle } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowTask } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -36,14 +36,26 @@ const showArtifactHistory = ref(false)
 const showDetail = ref(false)
 const showGuide = ref(false)
 const showProgress = ref(false)
+const showTasks = ref(false)
+const showClearConfirm = ref(false)
 const progressWorkflowKey = ref('')
 const progressRunId = ref('')
+const taskWorkflowKey = ref('')
 const workflowRuns = ref<Record<string, WorkflowRun[]>>({})
+const workflowTasks = ref<Record<string, WorkflowTask[]>>({})
 const runsLoading = ref(false)
+const tasksLoading = ref(false)
 const selectedRunId = ref('')
 const runEvents = ref<WorkflowRunEvent[]>([])
 const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
+const taskError = ref('')
+const clearing = ref(false)
+const clearTarget = ref<WorkflowDefinition | null>(null)
+const expandedTaskIds = ref<Set<string>>(new Set())
+const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
+const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
+const taskLogLoading = ref<Set<string>>(new Set())
 const testing = ref(false)
 const testingRunId = ref('')
 const testError = ref('')
@@ -82,6 +94,15 @@ const hasAnyRunningRun = computed(() =>
 const progressWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === progressWorkflowKey.value) || selectedWorkflow.value
 )
+const taskWorkflow = computed(() =>
+  workflows.value.find(item => item.workflow_key === taskWorkflowKey.value) || selectedWorkflow.value
+)
+const tasks = computed(() => workflowTasks.value[taskWorkflow.value?.workflow_key || ''] || [])
+const taskStats = computed(() => {
+  const stats: Record<string, number> = {}
+  for (const task of tasks.value) stats[task.status] = (stats[task.status] || 0) + 1
+  return stats
+})
 const progressRun = computed(() =>
   (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
 )
@@ -345,6 +366,25 @@ function runBadgeClass(status: string) {
   return ''
 }
 
+function taskStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    pending: '待处理',
+    running: '执行中',
+    completed: '已完成',
+    failed: '失败',
+    abandoned: '已放弃',
+  }
+  return map[status] || status
+}
+
+function taskBadgeClass(status: string) {
+  if (status === 'completed') return 'bg-green-50 text-green-700'
+  if (status === 'failed' || status === 'abandoned') return 'bg-red-50 text-red-700'
+  if (status === 'running') return 'bg-blue-50 text-blue-700'
+  if (status === 'pending') return 'bg-yellow-50 text-yellow-700'
+  return ''
+}
+
 function logLevelClass(level: string) {
   if (level === 'error') return 'border-red-400'
   if (level === 'warning' || level === 'warn') return 'border-yellow-400'
@@ -442,6 +482,22 @@ async function loadRuns(workflowKey = selectedWorkflow.value?.workflow_key || ''
   }
 }
 
+async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '') {
+  const key = workflowKey
+  if (!key) return
+  tasksLoading.value = true
+  taskError.value = ''
+  try {
+    const result = await api.listWorkflowTasks(key)
+    workflowTasks.value = { ...workflowTasks.value, [key]: result.tasks }
+  } catch (e: unknown) {
+    taskError.value = errorMessage(e)
+    workflowTasks.value = { ...workflowTasks.value, [key]: [] }
+  } finally {
+    tasksLoading.value = false
+  }
+}
+
 async function loadLogs() {
   if (!selectedRunId.value) {
     runLogs.value = []
@@ -461,6 +517,64 @@ async function loadLogs() {
     runEvents.value = []
   } finally {
     logsLoading.value = false
+  }
+}
+
+function taskId(task: WorkflowTask) {
+  return `${task.workflow_key}:${task.task_key}:${task.task_version}`
+}
+
+function taskRunLogKey(task: WorkflowTask) {
+  return task.lease_run_id || taskId(task)
+}
+
+function taskLogs(task: WorkflowTask) {
+  if (!task.lease_run_id) return []
+  return (taskRunLogs.value[task.lease_run_id] || []).filter(log => !log.task_key || log.task_key === task.task_key)
+}
+
+function taskEvents(task: WorkflowTask) {
+  return task.lease_run_id ? taskRunEvents.value[task.lease_run_id] || [] : []
+}
+
+function isTaskLogLoading(task: WorkflowTask) {
+  return task.lease_run_id ? taskLogLoading.value.has(task.lease_run_id) : false
+}
+
+async function openTasks(item: WorkflowDefinition) {
+  selectedKey.value = item.workflow_key
+  taskWorkflowKey.value = item.workflow_key
+  showTasks.value = true
+  await loadTasks(item.workflow_key)
+}
+
+async function toggleTaskLogs(task: WorkflowTask) {
+  const id = taskId(task)
+  const next = new Set(expandedTaskIds.value)
+  if (next.has(id)) {
+    next.delete(id)
+    expandedTaskIds.value = next
+    return
+  }
+  next.add(id)
+  expandedTaskIds.value = next
+  if (!task.lease_run_id || taskRunLogs.value[task.lease_run_id]) return
+  const loading = new Set(taskLogLoading.value)
+  loading.add(task.lease_run_id)
+  taskLogLoading.value = loading
+  try {
+    const [logs, events] = await Promise.all([
+      api.getWorkflowRunLogs(task.lease_run_id),
+      api.getWorkflowRunEvents(task.lease_run_id),
+    ])
+    taskRunLogs.value = { ...taskRunLogs.value, [task.lease_run_id]: logs }
+    taskRunEvents.value = { ...taskRunEvents.value, [task.lease_run_id]: events }
+  } catch (e: unknown) {
+    taskError.value = errorMessage(e)
+  } finally {
+    const done = new Set(taskLogLoading.value)
+    done.delete(task.lease_run_id)
+    taskLogLoading.value = done
   }
 }
 
@@ -570,6 +684,44 @@ async function deleteCurrent() {
 async function deleteWorkflow(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
   await deleteCurrent()
+}
+
+function requestClearWorkflow(item: WorkflowDefinition) {
+  clearTarget.value = item
+  showClearConfirm.value = true
+}
+
+async function confirmClearWorkflow() {
+  const wf = clearTarget.value
+  if (!wf) return
+  clearing.value = true
+  error.value = ''
+  try {
+    await api.clearWorkflowExecutionData(wf.workflow_key)
+    artifacts.value = []
+    artifactDetail.value = null
+    artifactHistory.value = []
+    runEvents.value = []
+    runLogs.value = []
+    selectedRunId.value = ''
+    progressRunId.value = ''
+    expandedTaskIds.value = new Set()
+    taskRunLogs.value = {}
+    taskRunEvents.value = {}
+    await Promise.all([
+      loadRunsForWorkflows(),
+      loadTasks(wf.workflow_key),
+    ])
+    if (showDetail.value && selectedWorkflow.value?.workflow_key === wf.workflow_key) {
+      await searchArtifacts()
+    }
+    showClearConfirm.value = false
+    clearTarget.value = null
+  } catch (e: unknown) {
+    error.value = errorMessage(e)
+  } finally {
+    clearing.value = false
+  }
 }
 </script>
 
@@ -720,6 +872,8 @@ async function deleteWorkflow(item: WorkflowDefinition) {
               </Button>
               <Button variant="outline" size="sm" class="h-8 text-xs" @click="openEdit(item)">编辑</Button>
               <Button variant="outline" size="sm" class="h-8 text-xs" @click="openDetail(item)">详情</Button>
+              <Button variant="outline" size="sm" class="h-8 text-xs" @click="openTasks(item)">任务进度</Button>
+              <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" @click="requestClearWorkflow(item)">清空</Button>
               <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" @click="deleteWorkflow(item)">删除</Button>
             </div>
           </div>
@@ -760,7 +914,9 @@ async function deleteWorkflow(item: WorkflowDefinition) {
               >
                 运行
               </Button>
+              <Button variant="outline" size="sm" @click="openTasks(selectedWorkflow)">任务进度</Button>
               <Button variant="outline" size="sm" @click="openEdit(selectedWorkflow)">编辑</Button>
+              <Button variant="ghost" size="sm" class="text-destructive" @click="requestClearWorkflow(selectedWorkflow)">清空</Button>
             </div>
           </div>
 
@@ -898,6 +1054,140 @@ async function deleteWorkflow(item: WorkflowDefinition) {
         <div v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</div>
         <DialogFooter>
           <Button variant="outline" @click="showDetail = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showClearConfirm">
+      <DialogContent class="max-w-[520px] sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>清空工作流执行数据</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-3 text-sm text-muted-foreground">
+          <p>
+            确定清空工作流
+            <span class="font-medium text-foreground">「{{ clearTarget?.name || clearTarget?.workflow_key }}」</span>
+            的执行数据吗？
+          </p>
+          <div class="rounded-md border bg-muted/30 px-3 py-2 text-xs leading-5">
+            将删除该工作流的任务清单、运行记录、业务日志和所有产出物；工作流定义、脚本和关联 profile 会保留。
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" :disabled="clearing" @click="showClearConfirm = false">取消</Button>
+          <Button variant="destructive" :disabled="clearing" @click="confirmClearWorkflow">
+            {{ clearing ? '清空中' : '确认清空' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="showTasks">
+      <DialogContent class="w-[96vw] max-w-[1180px] sm:max-w-[1180px]">
+        <DialogHeader>
+          <DialogTitle>{{ taskWorkflow?.name || '任务进度' }}</DialogTitle>
+        </DialogHeader>
+        <div class="max-h-[78vh] space-y-4 overflow-auto pr-1">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
+            <div class="min-w-0 space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge v-if="taskWorkflow" variant="outline">{{ taskWorkflow.workflow_key }}</Badge>
+                <Badge variant="outline">全部 {{ tasks.length }}</Badge>
+                <Badge v-for="(count, status) in taskStats" :key="status" variant="outline" :class="taskBadgeClass(String(status))">
+                  {{ taskStatusLabel(String(status)) }} {{ count }}
+                </Badge>
+              </div>
+              <div class="text-xs text-muted-foreground">展开任务可查看关联运行的日志；未领取的任务暂无运行日志。</div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              :disabled="tasksLoading || !taskWorkflow"
+              @click="taskWorkflow && loadTasks(taskWorkflow.workflow_key)"
+            >
+              {{ tasksLoading ? '刷新中' : '刷新' }}
+            </Button>
+          </div>
+
+          <div v-if="taskError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {{ taskError }}
+          </div>
+          <div v-if="tasksLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
+          <div v-else-if="!tasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无任务</div>
+          <div v-else class="space-y-2">
+            <div v-for="task in tasks" :key="taskId(task)" class="rounded-md border">
+              <div class="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-mono text-sm font-medium text-foreground">{{ task.task_key }}</span>
+                    <Badge variant="outline" :class="taskBadgeClass(task.status)">{{ taskStatusLabel(task.status) }}</Badge>
+                    <Badge v-if="task.type" variant="outline">{{ task.type }}</Badge>
+                    <Badge v-if="task.task_version" variant="outline">{{ task.task_version }}</Badge>
+                  </div>
+                  <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>尝试 {{ task.attempt_count }}</span>
+                    <span v-if="task.lease_run_id" class="font-mono">run {{ task.lease_run_id }}</span>
+                    <span>更新 {{ task.updated_at }}</span>
+                    <span v-if="task.completed_at">完成 {{ task.completed_at }}</span>
+                  </div>
+                  <div v-if="task.last_error" class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                    {{ task.last_error }}
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" class="h-8 text-xs" @click="toggleTaskLogs(task)">
+                  {{ expandedTaskIds.has(taskId(task)) ? '收起日志' : '展开日志' }}
+                </Button>
+              </div>
+              <div v-if="expandedTaskIds.has(taskId(task))" class="space-y-3 border-t bg-muted/20 px-3 py-3">
+                <div class="rounded-md border bg-background p-3">
+                  <div class="mb-2 text-xs font-semibold text-foreground">任务参数</div>
+                  <pre class="max-h-44 overflow-auto rounded bg-muted p-2 text-xs">{{ JSON.stringify(task.payload, null, 2) }}</pre>
+                </div>
+                <div v-if="!task.lease_run_id" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">
+                  暂无运行日志：该任务还没有被领取执行。
+                </div>
+                <div v-else-if="isTaskLogLoading(task)" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">
+                  日志加载中
+                </div>
+                <div v-else class="grid gap-3 lg:grid-cols-2">
+                  <section class="space-y-2 rounded-md border bg-background p-3">
+                    <div class="flex items-center justify-between">
+                      <div class="text-xs font-semibold text-foreground">Agent 输出</div>
+                      <Badge variant="outline">{{ taskEvents(task).length }}</Badge>
+                    </div>
+                    <div v-if="!taskEvents(task).length" class="text-sm text-muted-foreground">暂无 agent 输出</div>
+                    <div v-else class="max-h-72 space-y-2 overflow-auto text-xs">
+                      <div v-for="(event, idx) in taskEvents(task)" :key="taskRunLogKey(task) + ':event:' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                          <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                          <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                        </div>
+                        <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-2 rounded-md border bg-background p-3">
+                    <div class="flex items-center justify-between">
+                      <div class="text-xs font-semibold text-foreground">业务日志</div>
+                      <Badge variant="outline">{{ taskLogs(task).length }}</Badge>
+                    </div>
+                    <div v-if="!taskLogs(task).length" class="text-sm text-muted-foreground">暂无业务日志</div>
+                    <div v-else class="max-h-72 space-y-2 overflow-auto font-mono text-xs">
+                      <div v-for="(log, idx) in taskLogs(task)" :key="taskRunLogKey(task) + ':log:' + idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
+                        <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
+                        <span class="ml-1">{{ log.message }}</span>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showTasks = false">关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

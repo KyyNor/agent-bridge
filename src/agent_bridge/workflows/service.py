@@ -75,10 +75,23 @@ class WorkflowService:
         self.store.delete_workflow_definition(workflow_key)
         return {"workflow_key": workflow_key, "deleted": True}
 
+    def clear_execution_data(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        counts = self.store.clear_workflow_execution_data(workflow_key)
+        return {"workflow_key": workflow_key, "cleared": True, **counts}
+
     def list_runs(self, actor: str, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         bounded = min(max(limit, 1), 50)
         return self.store.list_workflow_runs(workflow_key, limit=bounded)
+
+    def list_tasks(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        return {"tasks": self.store.list_workflow_tasks(workflow_key)}
 
     def get_run(self, actor: str, run_id: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

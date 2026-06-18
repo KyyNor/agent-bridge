@@ -305,6 +305,111 @@ def test_workflow_api_lists_runs_for_workflow(wm_paths):
     assert runs[1]["status"] == "completed"
 
 
+def test_workflow_api_lists_all_tasks_for_workflow_without_leasing(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    svc.store.upsert_workflow_tasks(
+        "page-report",
+        [
+            {"task_key": "page:a", "task_version": "v1", "type": "page", "payload": {"page": "a"}},
+            {"task_key": "page:b", "task_version": "v1", "type": "page", "payload": {"page": "b"}},
+        ],
+    )
+    svc.store.create_workflow_run(
+        run_id="run_1", workflow_key="page-report", profile_key="report-plane",
+        task_key=None, status="running", temp_dir="/tmp/run_1",
+    )
+    svc.store.lease_workflow_task("page-report", run_id="run_1", lease_seconds=7200)
+    svc.store.append_workflow_run_log(
+        run_id="run_1",
+        workflow_key="page-report",
+        task_key="page:a",
+        level="info",
+        stage="worker",
+        message="processing page a",
+        payload={"step": 1},
+    )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.get("/workflows/page-report/tasks", headers={"X-Agent-Bridge-User": "root"})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [task["task_key"] for task in body["tasks"]] == ["page:a", "page:b"]
+    assert body["tasks"][0]["status"] == "running"
+    assert body["tasks"][0]["lease_run_id"] == "run_1"
+    assert body["tasks"][0]["payload"] == {"page": "a"}
+    assert body["tasks"][1]["status"] == "pending"
+    assert svc.store.get_workflow_task("page-report", "page:b")["status"] == "pending"
+
+
+def test_workflow_api_clears_execution_data_without_deleting_definition(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    svc.store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "type": "page", "payload": {"page": "a"}}],
+    )
+    svc.store.create_workflow_run(
+        run_id="run_1", workflow_key="page-report", profile_key="report-plane",
+        task_key="page:a", status="completed", temp_dir="/tmp/run_1",
+    )
+    svc.store.append_workflow_run_log(
+        run_id="run_1",
+        workflow_key="page-report",
+        task_key="page:a",
+        level="info",
+        stage="worker",
+        message="done",
+        payload={},
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        task_version="v1",
+        title="Page A",
+        path="pages/page-a.md",
+        tags=["page"],
+        format="markdown",
+        summary="Page A",
+        content="# Page A",
+        metadata={},
+    )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.post("/workflows/page-report/clear", headers={"X-Agent-Bridge-User": "root"})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "workflow_key": "page-report",
+        "cleared": True,
+        "tasks_deleted": 1,
+        "runs_deleted": 1,
+        "logs_deleted": 1,
+        "artifacts_deleted": 1,
+    }
+    assert client.get("/workflows/page-report", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.get("/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"}).json() == []
+    assert client.get("/workflows/page-report/tasks", headers={"X-Agent-Bridge-User": "root"}).json() == {"tasks": []}
+    artifacts = client.get(
+        "/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&include_history=true",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert artifacts.json() == {"items": []}
+
+
 def test_workflow_api_deletes_workflow_and_cascades(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.knowledge.service import AgentBridgeService

@@ -38,10 +38,12 @@ import type {
   WorkflowArtifactSearchResult,
   WorkflowArtifactHistoryResult,
   WorkflowArtifactDetail,
+  WorkflowClearResult,
   WorkflowDefinition,
   WorkflowRun,
   WorkflowRunEvent,
   WorkflowRunLog,
+  WorkflowTasksResult,
 } from './types'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
@@ -124,10 +126,13 @@ export const api = {
   listWorkflows: () => get<WorkflowDefinition[]>('/workflows'),
   getWorkflow: (key: string) => get<WorkflowDefinition>(`/workflows/${key}`),
   deleteWorkflow: (key: string) => post<{ workflow_key: string; deleted: boolean }>(`/workflows/${key}/delete`),
+  clearWorkflowExecutionData: (key: string) =>
+    post<WorkflowClearResult>(`/workflows/${key}/clear`),
   listWorkflowRuns: (key: string, limit = 20) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
   },
+  listWorkflowTasks: (key: string) => get<WorkflowTasksResult>(`/workflows/${key}/tasks`),
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
   getWorkflowRunEvents: (runId: string) => get<WorkflowRunEvent[]>(`/workflow-runs/${runId}/events`),
   upsertWorkflow: (w: Partial<WorkflowDefinition> & {
