@@ -46,6 +46,29 @@ class SQLiteStore:
             conn.executescript(SCHEMA)
             conn.executescript(CODEGRAPH_SCHEMA)
             conn.executescript(WORKFLOW_SCHEMA)
+            self._ensure_columns(
+                conn,
+                "workflow_tasks",
+                {
+                    "task_version": "TEXT NOT NULL DEFAULT ''",
+                },
+            )
+            self._ensure_columns(
+                conn,
+                "workflow_artifacts",
+                {
+                    "task_version": "TEXT NOT NULL DEFAULT ''",
+                    "is_current": "INTEGER NOT NULL DEFAULT 1",
+                },
+            )
+            self._rebuild_workflow_tasks_if_needed(conn)
+            self._rebuild_workflow_artifacts_if_needed(conn)
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_current
+                ON workflow_artifacts(workflow_key, task_key, is_current, updated_at DESC)
+                """
+            )
         self.migrate_phase2()
 
     def migrate_phase2(self) -> None:
@@ -160,6 +183,113 @@ class SQLiteStore:
             return
         if sqlite3.sqlite_version_info >= (3, 35, 0):
             conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+
+    def _has_unique_index(self, conn: sqlite3.Connection, table: str, columns: list[str]) -> bool:
+        for index in conn.execute(f"PRAGMA index_list({table})").fetchall():
+            if not index["unique"]:
+                continue
+            actual = [
+                row["name"]
+                for row in conn.execute(f"PRAGMA index_info({index['name']})").fetchall()
+            ]
+            if actual == columns:
+                return True
+        return False
+
+    def _rebuild_workflow_tasks_if_needed(self, conn: sqlite3.Connection) -> None:
+        if self._has_unique_index(conn, "workflow_tasks", ["workflow_key", "task_key", "task_version"]):
+            return
+        conn.execute("DROP TABLE IF EXISTS workflow_tasks_new")
+        conn.execute(
+            """
+            CREATE TABLE workflow_tasks_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+              task_key TEXT NOT NULL,
+              task_version TEXT NOT NULL DEFAULT '',
+              payload_json TEXT NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL DEFAULT 'pending',
+              lease_run_id TEXT,
+              lease_expires_at TEXT,
+              attempt_count INTEGER NOT NULL DEFAULT 0,
+              last_error TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              completed_at TEXT,
+              UNIQUE (workflow_key, task_key, task_version)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO workflow_tasks_new (
+              id, workflow_key, task_key, task_version, payload_json, status,
+              lease_run_id, lease_expires_at, attempt_count, last_error,
+              created_at, updated_at, completed_at
+            )
+            SELECT
+              id, workflow_key, task_key, task_version, payload_json, status,
+              lease_run_id, lease_expires_at, attempt_count, last_error,
+              created_at, updated_at, completed_at
+            FROM workflow_tasks
+            """
+        )
+        conn.execute("DROP TABLE workflow_tasks")
+        conn.execute("ALTER TABLE workflow_tasks_new RENAME TO workflow_tasks")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_workflow_tasks_pick
+            ON workflow_tasks(workflow_key, status, lease_expires_at, id)
+            """
+        )
+
+    def _rebuild_workflow_artifacts_if_needed(self, conn: sqlite3.Connection) -> None:
+        if self._has_unique_index(conn, "workflow_artifacts", ["workflow_key", "task_key", "task_version", "path"]):
+            return
+        conn.execute("DROP TABLE IF EXISTS workflow_artifacts_new")
+        conn.execute(
+            """
+            CREATE TABLE workflow_artifacts_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              artifact_id TEXT NOT NULL UNIQUE,
+              workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+              profile_key TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              task_key TEXT,
+              task_version TEXT NOT NULL DEFAULT '',
+              is_current INTEGER NOT NULL DEFAULT 1,
+              title TEXT NOT NULL,
+              path TEXT NOT NULL,
+              tags_json TEXT NOT NULL DEFAULT '[]',
+              format TEXT NOT NULL DEFAULT 'markdown',
+              summary TEXT NOT NULL DEFAULT '',
+              content TEXT NOT NULL DEFAULT '',
+              content_hash TEXT NOT NULL,
+              metadata_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE (workflow_key, task_key, task_version, path)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO workflow_artifacts_new (
+              id, artifact_id, workflow_key, profile_key, run_id, task_key,
+              task_version, is_current, title, path, tags_json, format, summary,
+              content, content_hash, metadata_json, created_at, updated_at
+            )
+            SELECT
+              id, artifact_id, workflow_key, profile_key, run_id, task_key,
+              task_version, is_current, title, path, tags_json, format, summary,
+              content, content_hash, metadata_json, created_at, updated_at
+            FROM workflow_artifacts
+            """
+        )
+        conn.execute("DROP TABLE workflow_artifacts")
+        conn.execute("ALTER TABLE workflow_artifacts_new RENAME TO workflow_artifacts")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_profile ON workflow_artifacts(profile_key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_path ON workflow_artifacts(path)")
 
     def _migrate_tool_call_logs_nullable_profile(self, conn: sqlite3.Connection) -> None:
         return self.governance._migrate_tool_call_logs_nullable_profile(conn=conn)
@@ -309,8 +439,13 @@ class SQLiteStore:
     def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]) -> dict[str, int]:
         return self.workflows.upsert_workflow_tasks(workflow_key, tasks)
 
-    def get_workflow_task(self, workflow_key: str, task_key: str) -> dict[str, Any] | None:
-        return self.workflows.get_workflow_task(workflow_key, task_key)
+    def get_workflow_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        task_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self.workflows.get_workflow_task(workflow_key, task_key, task_version=task_version)
 
     def lease_workflow_task(
         self,
@@ -321,8 +456,20 @@ class SQLiteStore:
     ) -> dict[str, Any] | None:
         return self.workflows.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=lease_seconds)
 
-    def complete_workflow_task(self, workflow_key: str, task_key: str, *, run_id: str) -> bool:
-        return self.workflows.complete_workflow_task(workflow_key, task_key, run_id=run_id)
+    def complete_workflow_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        *,
+        task_version: str = "",
+        run_id: str,
+    ) -> bool:
+        return self.workflows.complete_workflow_task(
+            workflow_key,
+            task_key,
+            task_version=task_version,
+            run_id=run_id,
+        )
 
     def release_or_abandon_tasks_for_run(
         self,
@@ -339,8 +486,19 @@ class SQLiteStore:
             error_message=error_message,
         )
 
-    def force_workflow_task_lease_expiry(self, workflow_key: str, task_key: str, expires_at: str) -> None:
-        return self.workflows.force_workflow_task_lease_expiry(workflow_key, task_key, expires_at)
+    def force_workflow_task_lease_expiry(
+        self,
+        workflow_key: str,
+        task_key: str,
+        expires_at: str,
+        task_version: str | None = None,
+    ) -> None:
+        return self.workflows.force_workflow_task_lease_expiry(
+            workflow_key,
+            task_key,
+            expires_at,
+            task_version=task_version,
+        )
 
     def create_workflow_run(
         self,
@@ -426,12 +584,14 @@ class SQLiteStore:
         summary: str,
         content: str,
         metadata: dict[str, Any],
+        task_version: str = "",
     ) -> dict[str, Any]:
         return self.workflows.upsert_workflow_artifact(
             workflow_key=workflow_key,
             profile_key=profile_key,
             run_id=run_id,
             task_key=task_key,
+            task_version=task_version,
             title=title,
             path=path,
             tags=tags,
@@ -453,6 +613,9 @@ class SQLiteStore:
         path: str | None,
         workflow_key: str | None,
         limit: int,
+        task_key: str | None = None,
+        task_version: str | None = None,
+        include_history: bool = False,
     ) -> list[dict[str, Any]]:
         return self.workflows.search_workflow_artifacts(
             profile_key=profile_key,
@@ -460,6 +623,9 @@ class SQLiteStore:
             tags=tags,
             path=path,
             workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+            include_history=include_history,
             limit=limit,
         )
 

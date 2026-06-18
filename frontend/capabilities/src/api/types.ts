@@ -69,6 +69,8 @@ export interface WorkflowArtifact {
   profile_key: string
   run_id: string
   task_key: string | null
+  task_version: string
+  is_current: boolean
   title: string
   path: string
   tags: string[]
@@ -81,6 +83,32 @@ export interface WorkflowArtifact {
 
 export interface WorkflowArtifactSearchResult {
   items: WorkflowArtifact[]
+}
+
+export interface WorkflowArtifactHistoryVersion {
+  workflow_key: string
+  task_key: string
+  task_version: string
+  is_current: boolean
+  run_id: string
+  updated_at: string
+  artifacts: WorkflowArtifactHistoryItem[]
+}
+
+export interface WorkflowArtifactHistoryItem {
+  artifact_id: string
+  title: string
+  path: string
+  tags: string[]
+  format: string
+  summary: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkflowArtifactHistoryResult {
+  versions: WorkflowArtifactHistoryVersion[]
 }
 
 export interface ArtifactTreeNode {
@@ -138,6 +166,8 @@ export interface WorkflowArtifactDetail {
   profile_key: string
   run_id: string
   task_key: string | null
+  task_version: string
+  is_current: boolean
   title: string
   path: string
   tags: string[]

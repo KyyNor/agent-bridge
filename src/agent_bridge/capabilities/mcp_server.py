@@ -163,6 +163,8 @@ def create_mcp_server(
         tags: list[str] | None = None,
         path: str | None = None,
         workflow_key: str | None = None,
+        task_key: str | None = None,
+        task_version: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
@@ -173,6 +175,9 @@ def create_mcp_server(
             tags=tags or [],
             path=path,
             workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+            include_history=False,
             limit=limit,
             trusted_profile_context=True,
         )

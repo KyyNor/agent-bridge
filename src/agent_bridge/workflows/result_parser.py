@@ -23,6 +23,7 @@ class ParsedArtifact:
 class ParsedWorkflowResult:
     status: str
     task_key: str | None = None
+    task_version: str = ""
     reason: str | None = None
     artifacts: list[ParsedArtifact] = field(default_factory=list)
 
@@ -55,6 +56,7 @@ def parse_workflow_result(run_dir: Path) -> ParsedWorkflowResult:
     task_key = str(raw.get("task_key") or "").strip()
     if not task_key:
         raise ValidationError("completed workflow result requires task_key")
+    task_version = str(raw.get("task_version") or "")
     artifacts_raw = raw.get("artifacts")
     if not isinstance(artifacts_raw, list) or not artifacts_raw:
         raise ValidationError("completed workflow result requires artifacts")
@@ -85,4 +87,9 @@ def parse_workflow_result(run_dir: Path) -> ParsedWorkflowResult:
                 metadata=metadata,
             )
         )
-    return ParsedWorkflowResult(status=status, task_key=task_key, artifacts=artifacts)
+    return ParsedWorkflowResult(
+        status=status,
+        task_key=task_key,
+        task_version=task_version,
+        artifacts=artifacts,
+    )

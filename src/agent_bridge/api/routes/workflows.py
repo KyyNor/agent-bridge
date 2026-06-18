@@ -56,6 +56,9 @@ def create_workflow_routes(service, actor, call_safely, ensure_capability_schema
         query: str | None = None,
         path: str | None = None,
         workflow_key: str | None = None,
+        task_key: str | None = None,
+        task_version: str | None = None,
+        include_history: bool = False,
         tags: list[str] = Query(default=[]),
         limit: int = 20,
         current_actor: str = Depends(actor),
@@ -69,6 +72,28 @@ def create_workflow_routes(service, actor, call_safely, ensure_capability_schema
                 tags=tags,
                 path=path,
                 workflow_key=workflow_key,
+                task_key=task_key,
+                task_version=task_version,
+                include_history=include_history,
+                limit=limit,
+            )
+        )
+
+    @router.get("/workflow-artifacts/history")
+    def list_artifact_history(
+        profile_key: str | None = None,
+        workflow_key: str = "",
+        task_key: str = "",
+        limit: int = 20,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.workflows.list_artifact_history(
+                actor=current_actor,
+                profile_key=profile_key,
+                workflow_key=workflow_key,
+                task_key=task_key,
                 limit=limit,
             )
         )

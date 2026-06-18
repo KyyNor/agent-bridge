@@ -187,12 +187,13 @@ class WorkflowService:
             task_key = str(task.get("task_key") or "").strip()
             if not task_key:
                 raise ValidationError("task_key is required")
+            task_version = str(task.get("task_version") or "")
             payload = task.get("payload")
             if payload is None:
                 payload = {}
             if not isinstance(payload, dict):
                 raise ValidationError("task payload must be an object")
-            normalized.append({"task_key": task_key, "payload": payload})
+            normalized.append({"task_key": task_key, "task_version": task_version, "payload": payload})
         return self.store.upsert_workflow_tasks(workflow_key, normalized)
 
     def save_artifact(
@@ -209,6 +210,7 @@ class WorkflowService:
         summary: str,
         content: str,
         metadata: dict[str, Any],
+        task_version: str = "",
     ) -> dict[str, Any]:
         workflow = self.store.get_workflow_definition(workflow_key)
         if workflow is None:
@@ -228,6 +230,7 @@ class WorkflowService:
             profile_key=profile_key,
             run_id=run_id,
             task_key=task_key,
+            task_version=task_version,
             title=title,
             path=path,
             tags=tags,
@@ -256,6 +259,7 @@ class WorkflowService:
                 profile_key=profile_key,
                 run_id=run_id,
                 task_key=parsed.task_key,
+                task_version=parsed.task_version,
                 title=artifact.title,
                 path=artifact.path,
                 tags=artifact.tags,
@@ -266,7 +270,12 @@ class WorkflowService:
             )
             for artifact in parsed.artifacts
         ]
-        completed = self.store.complete_workflow_task(workflow_key, parsed.task_key, run_id=run_id)
+        completed = self.store.complete_workflow_task(
+            workflow_key,
+            parsed.task_key,
+            task_version=parsed.task_version,
+            run_id=run_id,
+        )
         if not completed:
             raise ValidationError("workflow task lease mismatch")
         return {"status": "completed", "artifact_count": len(saved), "artifacts": saved}
@@ -295,6 +304,8 @@ class WorkflowService:
             "profile_key": item["profile_key"],
             "run_id": item["run_id"],
             "task_key": item["task_key"],
+            "task_version": item["task_version"],
+            "is_current": item["is_current"],
             "title": item["title"],
             "path": item["path"],
             "tags": item["tags"],
@@ -316,6 +327,9 @@ class WorkflowService:
         path: str | None,
         workflow_key: str | None,
         limit: int,
+        task_key: str | None = None,
+        task_version: str | None = None,
+        include_history: bool = False,
         trusted_profile_context: bool = False,
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
@@ -337,6 +351,9 @@ class WorkflowService:
             tags=tags,
             path=path,
             workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+            include_history=include_history,
             limit=bounded_limit,
         )
         def _entry(item: dict[str, Any]) -> dict[str, Any]:
@@ -346,6 +363,8 @@ class WorkflowService:
                 "profile_key": item["profile_key"],
                 "run_id": item["run_id"],
                 "task_key": item["task_key"],
+                "task_version": item["task_version"],
+                "is_current": item["is_current"],
                 "title": item["title"],
                 "path": item["path"],
                 "tags": item["tags"],
@@ -362,3 +381,73 @@ class WorkflowService:
             return entry
 
         return {"items": [_entry(item) for item in items]}
+
+    def list_artifact_history(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        workflow_key: str,
+        task_key: str,
+        limit: int,
+        trusted_profile_context: bool = False,
+    ) -> dict[str, Any]:
+        if actor not in self.admins and not profile_key:
+            raise AccessDenied("capability profile is required")
+        if actor not in self.admins and profile_key and not trusted_profile_context:
+            raise AccessDenied("profile context is not trusted")
+        if not workflow_key:
+            raise ValidationError("workflow_key is required")
+        if not task_key:
+            raise ValidationError("task_key is required")
+        if limit < 1:
+            raise ValidationError("limit must be positive")
+        bounded_limit = min(limit, 50)
+        items = self.store.search_workflow_artifacts(
+            profile_key=profile_key,
+            query=None,
+            tags=[],
+            path=None,
+            workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=None,
+            include_history=True,
+            limit=200,
+        )
+
+        versions: list[dict[str, Any]] = []
+        by_version: dict[str, dict[str, Any]] = {}
+        for item in items:
+            version = item["task_version"]
+            entry = by_version.get(version)
+            if entry is None:
+                entry = {
+                    "workflow_key": item["workflow_key"],
+                    "task_key": item["task_key"],
+                    "task_version": version,
+                    "is_current": item["is_current"],
+                    "run_id": item["run_id"],
+                    "updated_at": item["updated_at"],
+                    "artifacts": [],
+                }
+                by_version[version] = entry
+                versions.append(entry)
+            entry["is_current"] = bool(entry["is_current"] or item["is_current"])
+            if item["updated_at"] > entry["updated_at"]:
+                entry["updated_at"] = item["updated_at"]
+                entry["run_id"] = item["run_id"]
+            entry["artifacts"].append(
+                {
+                    "artifact_id": item["artifact_id"],
+                    "title": item["title"],
+                    "path": item["path"],
+                    "tags": item["tags"],
+                    "format": item["format"],
+                    "summary": item["summary"],
+                    "content": item["content"],
+                    "created_at": item["created_at"],
+                    "updated_at": item["updated_at"],
+                }
+            )
+
+        return {"versions": versions[:bounded_limit]}

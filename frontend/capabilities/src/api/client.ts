@@ -35,6 +35,7 @@ import type {
   UADashboardStatus,
   TestCloneResult,
   WorkflowArtifactSearchResult,
+  WorkflowArtifactHistoryResult,
   WorkflowArtifactDetail,
   WorkflowDefinition,
   WorkflowRun,
@@ -139,6 +140,9 @@ export const api = {
     workflow_key?: string
     query?: string
     path?: string
+    task_key?: string
+    task_version?: string
+    include_history?: boolean
     tags?: string[]
     limit?: number
   } = {}) => {
@@ -147,9 +151,25 @@ export const api = {
     if (params.workflow_key) qs.set('workflow_key', params.workflow_key)
     if (params.query) qs.set('query', params.query)
     if (params.path) qs.set('path', params.path)
+    if (params.task_key) qs.set('task_key', params.task_key)
+    if (params.task_version) qs.set('task_version', params.task_version)
+    if (params.include_history) qs.set('include_history', 'true')
     if (params.limit) qs.set('limit', String(params.limit))
     ;(params.tags || []).forEach(tag => qs.append('tags', tag))
     return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)
+  },
+  getWorkflowArtifactHistory: (params: {
+    profile_key?: string
+    workflow_key: string
+    task_key: string
+    limit?: number
+  }) => {
+    const qs = new URLSearchParams()
+    if (params.profile_key) qs.set('profile_key', params.profile_key)
+    qs.set('workflow_key', params.workflow_key)
+    qs.set('task_key', params.task_key)
+    if (params.limit) qs.set('limit', String(params.limit))
+    return get<WorkflowArtifactHistoryResult>(`/workflow-artifacts/history?${qs}`)
   },
   getWorkflowArtifact: (artifactId: string, profileKey?: string) => {
     const qs = new URLSearchParams()

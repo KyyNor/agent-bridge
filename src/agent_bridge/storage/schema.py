@@ -312,6 +312,7 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
   task_key TEXT NOT NULL,
+  task_version TEXT NOT NULL DEFAULT '',
   payload_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'pending',
   lease_run_id TEXT,
@@ -321,7 +322,7 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at TEXT,
-  UNIQUE (workflow_key, task_key)
+  UNIQUE (workflow_key, task_key, task_version)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_tasks_pick
   ON workflow_tasks(workflow_key, status, lease_expires_at, id);
@@ -364,6 +365,8 @@ CREATE TABLE IF NOT EXISTS workflow_artifacts (
   profile_key TEXT NOT NULL,
   run_id TEXT NOT NULL,
   task_key TEXT,
+  task_version TEXT NOT NULL DEFAULT '',
+  is_current INTEGER NOT NULL DEFAULT 1,
   title TEXT NOT NULL,
   path TEXT NOT NULL,
   tags_json TEXT NOT NULL DEFAULT '[]',
@@ -374,7 +377,7 @@ CREATE TABLE IF NOT EXISTS workflow_artifacts (
   metadata_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (workflow_key, path)
+  UNIQUE (workflow_key, task_key, task_version, path)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_profile ON workflow_artifacts(profile_key);
 CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_path ON workflow_artifacts(path);

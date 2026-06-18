@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -26,8 +26,12 @@ const artifactQuery = ref('')
 const artifactPath = ref('')
 const artifactTags = ref('')
 const artifactDetail = ref<WorkflowArtifactDetail | null>(null)
+const artifactHistory = ref<WorkflowArtifactHistoryVersion[]>([])
+const artifactHistoryTarget = ref<WorkflowArtifact | null>(null)
 const detailLoading = ref(false)
+const historyLoading = ref(false)
 const showArtifact = ref(false)
+const showArtifactHistory = ref(false)
 const showDetail = ref(false)
 const showProgress = ref(false)
 const progressWorkflowKey = ref('')
@@ -46,6 +50,10 @@ let testPoll: ReturnType<typeof setInterval> | null = null
 const artifactHtml = computed(() =>
   artifactDetail.value ? marked.parse(artifactDetail.value.content, { async: false }) as string : '',
 )
+
+function renderMarkdown(content: string) {
+  return marked.parse(content, { async: false }) as string
+}
 
 const form = ref({
   workflow_key: '',
@@ -385,6 +393,29 @@ async function openArtifact(item: WorkflowArtifact) {
     artifactError.value = errorMessage(e)
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function openArtifactHistory(item: WorkflowArtifact) {
+  if (!item.task_key) return
+  historyLoading.value = true
+  showArtifactHistory.value = true
+  artifactHistoryTarget.value = item
+  artifactHistory.value = []
+  try {
+    const result = await api.getWorkflowArtifactHistory({
+      profile_key: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
+      workflow_key: item.workflow_key,
+      task_key: item.task_key,
+      limit: 20,
+    })
+    artifactHistory.value = result.versions
+  } catch (e: unknown) {
+    artifactHistory.value = []
+    showArtifactHistory.value = false
+    artifactError.value = errorMessage(e)
+  } finally {
+    historyLoading.value = false
   }
 }
 
@@ -729,9 +760,22 @@ async function deleteWorkflow(item: WorkflowDefinition) {
                     <div>
                       <div class="text-sm font-medium text-foreground">{{ row.artifact?.title }}</div>
                       <div class="mt-1 text-xs text-muted-foreground">{{ row.artifact?.path }}</div>
+                      <div v-if="row.artifact?.task_version" class="mt-1 text-xs text-muted-foreground">
+                        version: <span class="font-mono">{{ row.artifact.task_version }}</span>
+                      </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-1">
+                      <Badge v-if="row.artifact?.is_current" variant="outline">current</Badge>
                       <Badge v-for="tag in row.artifact?.tags || []" :key="tag" variant="outline">{{ tag }}</Badge>
+                      <Button
+                        v-if="row.artifact?.task_key"
+                        variant="ghost"
+                        size="sm"
+                        class="h-7 text-xs"
+                        @click="row.artifact && openArtifactHistory(row.artifact)"
+                      >
+                        历史
+                      </Button>
                       <Button variant="ghost" size="sm" class="h-7 text-xs" @click="row.artifact && openArtifact(row.artifact)">查看</Button>
                     </div>
                   </div>
@@ -887,9 +931,9 @@ async function deleteWorkflow(item: WorkflowDefinition) {
             <div class="font-medium text-foreground">输出验收要求</div>
             <div>Workflow 必须在运行目录写入 <span class="font-mono">out/result.json</span>。</div>
             <div class="mt-2 font-mono">
-              {"status":"completed","task_key":"page:a","artifacts":[{"title":"...","path":"reports/a.md","tags":[],"format":"markdown","file":"out/artifacts/a.md","summary":"..."}]}
+              {"status":"completed","task_key":"page:a","task_version":"sha256:...","artifacts":[{"title":"...","path":"reports/a.md","tags":[],"format":"markdown","file":"out/artifacts/a.md","summary":"..."}]}
             </div>
-            <div class="mt-2">没有可执行任务时输出 <span class="font-mono">{"status":"no_executable_task","reason":"..."}</span>。artifact 文件必须在运行目录内，当前只接受 Markdown。调度窗口由系统配置统一管理。</div>
+            <div class="mt-2">没有可执行任务时输出 <span class="font-mono">{"status":"no_executable_task","reason":"..."}</span>。如任务带 task_version，result.json 必须原样写回。artifact 文件必须在运行目录内，当前只接受 Markdown。</div>
           </div>
         </div>
         <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -921,6 +965,45 @@ async function deleteWorkflow(item: WorkflowDefinition) {
         </div>
         <DialogFooter>
           <Button variant="outline" @click="showArtifact = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog v-model:open="showArtifactHistory">
+      <DialogContent class="max-w-[980px] sm:max-w-[980px]">
+        <DialogHeader>
+          <DialogTitle>{{ artifactHistoryTarget?.title || '历史版本' }}</DialogTitle>
+        </DialogHeader>
+        <div class="max-h-[74vh] space-y-3 overflow-auto pr-1">
+          <div v-if="historyLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
+          <div v-else-if="!artifactHistory.length" class="py-8 text-center text-sm text-muted-foreground">暂无历史版本</div>
+          <template v-else>
+            <details
+              v-for="version in artifactHistory"
+              :key="version.task_version"
+              class="rounded-md border p-3"
+              :open="version.is_current"
+            >
+              <summary class="cursor-pointer text-sm font-medium">
+                <span class="font-mono">{{ version.task_version || 'default' }}</span>
+                <Badge v-if="version.is_current" variant="outline" class="ml-2">current</Badge>
+                <span class="ml-2 text-xs font-normal text-muted-foreground">{{ version.updated_at }}</span>
+              </summary>
+              <div class="mt-3 space-y-3">
+                <div v-for="item in version.artifacts" :key="item.artifact_id" class="space-y-2">
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="outline">{{ item.path }}</Badge>
+                    <Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge>
+                  </div>
+                  <div class="text-sm font-medium">{{ item.title }}</div>
+                  <p v-if="item.summary" class="text-sm text-muted-foreground">{{ item.summary }}</p>
+                  <div class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="renderMarkdown(item.content)"></div>
+                </div>
+              </div>
+            </details>
+          </template>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showArtifactHistory = false">关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

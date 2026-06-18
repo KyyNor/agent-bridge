@@ -110,6 +110,52 @@ def test_workflow_task_upsert_is_idempotent_and_does_not_replace_completed(wm_pa
     assert store.get_workflow_task("page-report", "page:a")["payload"]["page"] == "a2"
 
 
+def test_workflow_task_version_allows_same_key_to_run_again(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+        created_by="root",
+    )
+
+    first = store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "a"}}],
+    )
+    assert first == {"created": 1, "updated": 0, "skipped_completed": 0, "skipped_running": 0}
+
+    leased = store.lease_workflow_task("page-report", run_id="run_1", lease_seconds=7200)
+    assert leased["task_key"] == "page:a"
+    assert leased["task_version"] == "v1"
+    assert store.complete_workflow_task("page-report", "page:a", task_version="v1", run_id="run_1") is True
+
+    same_version = store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "a-again"}}],
+    )
+    assert same_version == {"created": 0, "updated": 0, "skipped_completed": 1, "skipped_running": 0}
+
+    next_version = store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v2", "payload": {"page": "a-v2"}}],
+    )
+    assert next_version == {"created": 1, "updated": 0, "skipped_completed": 0, "skipped_running": 0}
+
+    leased_again = store.lease_workflow_task("page-report", run_id="run_2", lease_seconds=7200)
+    assert leased_again["task_key"] == "page:a"
+    assert leased_again["task_version"] == "v2"
+    assert leased_again["payload"]["page"] == "a-v2"
+
+
 def test_workflow_task_lease_is_exclusive_and_expired_leases_are_reclaimed(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -385,3 +431,200 @@ def test_release_or_abandon_abandons_task_above_threshold(wm_paths):
     task = store.get_workflow_task("w", "page:a")
     assert task["status"] == "abandoned"
     assert task["last_error"] == "final"
+
+
+def test_workflow_artifacts_keep_history_and_mark_only_latest_version_current(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+        created_by="root",
+    )
+
+    first = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        task_version="v1",
+        title="Page A v1",
+        path="pages/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="v1 summary",
+        content="# v1",
+        metadata={},
+    )
+    second = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="page:a",
+        task_version="v2",
+        title="Page A v2",
+        path="pages/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="v2 summary",
+        content="# v2",
+        metadata={},
+    )
+
+    assert first["artifact_id"] != second["artifact_id"]
+    assert store.get_workflow_artifact(first["artifact_id"])["is_current"] is False
+    assert store.get_workflow_artifact(second["artifact_id"])["is_current"] is True
+
+    current = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query=None,
+        tags=[],
+        path="pages/page-a.md",
+        workflow_key="page-report",
+        task_key="page:a",
+        include_history=False,
+        limit=10,
+    )
+    assert [item["task_version"] for item in current] == ["v2"]
+    assert current[0]["content"] == "# v2"
+
+    history = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query=None,
+        tags=[],
+        path="pages/page-a.md",
+        workflow_key="page-report",
+        task_key="page:a",
+        include_history=True,
+        limit=10,
+    )
+    assert [item["task_version"] for item in history] == ["v2", "v1"]
+
+
+def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm_paths):
+    from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    with store.connect() as conn:
+        conn.executescript(SCHEMA)
+        conn.executescript(CODEGRAPH_SCHEMA)
+        conn.execute(
+            """
+            CREATE TABLE workflow_definitions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workflow_key TEXT NOT NULL UNIQUE,
+              name TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE RESTRICT,
+              workflow_js TEXT NOT NULL DEFAULT '',
+              manifest_json TEXT NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL DEFAULT 'active',
+              created_by TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE workflow_tasks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+              task_key TEXT NOT NULL,
+              payload_json TEXT NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL DEFAULT 'pending',
+              lease_run_id TEXT,
+              lease_expires_at TEXT,
+              attempt_count INTEGER NOT NULL DEFAULT 0,
+              last_error TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              completed_at TEXT,
+              UNIQUE (workflow_key, task_key)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE workflow_artifacts (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              artifact_id TEXT NOT NULL UNIQUE,
+              workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+              profile_key TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              task_key TEXT,
+              title TEXT NOT NULL,
+              path TEXT NOT NULL,
+              tags_json TEXT NOT NULL DEFAULT '[]',
+              format TEXT NOT NULL DEFAULT 'markdown',
+              summary TEXT NOT NULL DEFAULT '',
+              content TEXT NOT NULL DEFAULT '',
+              content_hash TEXT NOT NULL,
+              metadata_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE (workflow_key, path)
+            )
+            """
+        )
+
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+        created_by="root",
+    )
+
+    assert store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {}}],
+    )["created"] == 1
+    assert store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v2", "payload": {}}],
+    )["created"] == 1
+
+    first = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        task_version="v1",
+        title="Page A v1",
+        path="pages/page-a.md",
+        tags=[],
+        format="markdown",
+        summary="",
+        content="# v1",
+        metadata={},
+    )
+    second = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="page:a",
+        task_version="v2",
+        title="Page A v2",
+        path="pages/page-a.md",
+        tags=[],
+        format="markdown",
+        summary="",
+        content="# v2",
+        metadata={},
+    )
+    assert first["artifact_id"] != second["artifact_id"]

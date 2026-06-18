@@ -75,6 +75,72 @@ def test_workflow_api_lists_artifacts(wm_paths):
     assert response.json()["items"][0]["title"] == "Page A"
 
 
+def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        task_version="v1",
+        title="Page A v1",
+        path="pages/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="v1",
+        content="# v1",
+        metadata={},
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="page:a",
+        task_version="v2",
+        title="Page A v2",
+        path="pages/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="v2",
+        content="# v2",
+        metadata={},
+    )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    current = client.get(
+        "/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert current.status_code == 200, current.text
+    assert [item["task_version"] for item in current.json()["items"]] == ["v2"]
+    assert current.json()["items"][0]["is_current"] is True
+
+    history = client.get(
+        "/workflow-artifacts/history?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert history.status_code == 200, history.text
+    assert [item["task_version"] for item in history.json()["versions"]] == ["v2", "v1"]
+    assert history.json()["versions"][0]["is_current"] is True
+    assert history.json()["versions"][0]["artifacts"][0]["content"] == "# v2"
+    assert history.json()["versions"][1]["artifacts"][0]["content"] == "# v1"
+
+
 def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.knowledge.service import AgentBridgeService
