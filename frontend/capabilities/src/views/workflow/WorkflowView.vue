@@ -713,7 +713,7 @@ async function deleteWorkflow(item: WorkflowDefinition) {
                 variant="outline"
                 size="sm"
                 class="h-8 text-xs"
-                :disabled="hasAnyRunningRun || item.status !== 'active'"
+                :disabled="hasAnyRunningRun"
                 @click="runWorkflow(item)"
               >
                 运行
@@ -755,7 +755,7 @@ async function deleteWorkflow(item: WorkflowDefinition) {
                 v-else
                 variant="outline"
                 size="sm"
-                :disabled="hasAnyRunningRun || selectedWorkflow.status !== 'active'"
+                :disabled="hasAnyRunningRun"
                 @click="runWorkflow(selectedWorkflow)"
               >
                 运行
