@@ -423,6 +423,27 @@ def test_sync_config_round_trips_workflow_max_runs(wm_paths):
     assert config["workflow_max_runs"] == 10
 
 
+def test_sync_config_round_trips_workflow_task_rerun_days(wm_paths):
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.save_sync_config(
+        actor="root",
+        code_sync_cron="0 * * * *",
+        ua_git_url="",
+        understand_cron="0 2 * * *",
+        doc_sync_cron="*/30 * * * *",
+        workflow_start_time="22:00",
+        workflow_stop_time="07:00",
+        workflow_max_runs=10,
+        workflow_task_rerun_days=45,
+    )
+
+    config = svc.store.get_sync_config()
+    assert config["workflow_task_rerun_days"] == 45
+
+
 def test_scheduler_reads_workflow_max_runs_from_config(wm_paths):
     from agent_bridge.knowledge.service import AgentBridgeService
     from agent_bridge.workflows.runner import FakeWorkflowRunner

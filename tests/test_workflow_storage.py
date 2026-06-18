@@ -8,6 +8,21 @@ from typing import Iterator
 import pytest
 
 
+TASK_COUNTS_EMPTY = {
+    "created": 0,
+    "updated": 0,
+    "skipped_completed": 0,
+    "skipped_running": 0,
+    "reopened_expired": 0,
+}
+
+
+def task_counts(**overrides):
+    result = dict(TASK_COUNTS_EMPTY)
+    result.update(overrides)
+    return result
+
+
 class _RecordingConnection:
     def __init__(self, conn: sqlite3.Connection, statements: list[str]) -> None:
         self._conn = conn
@@ -95,8 +110,8 @@ def test_workflow_task_upsert_is_idempotent_and_does_not_replace_completed(wm_pa
         "page-report",
         [{"task_key": "page:a", "payload": {"page": "a2"}}],
     )
-    assert first == {"created": 1, "updated": 0, "skipped_completed": 0, "skipped_running": 0}
-    assert second == {"created": 0, "updated": 1, "skipped_completed": 0, "skipped_running": 0}
+    assert first == task_counts(created=1)
+    assert second == task_counts(updated=1)
 
     task = store.lease_workflow_task("page-report", run_id="run_1", lease_seconds=7200)
     assert task is not None
@@ -106,7 +121,7 @@ def test_workflow_task_upsert_is_idempotent_and_does_not_replace_completed(wm_pa
         "page-report",
         [{"task_key": "page:a", "payload": {"page": "a3"}}],
     )
-    assert third == {"created": 0, "updated": 0, "skipped_completed": 1, "skipped_running": 0}
+    assert third == task_counts(skipped_completed=1)
     assert store.get_workflow_task("page-report", "page:a")["payload"]["page"] == "a2"
 
 
@@ -131,7 +146,7 @@ def test_workflow_task_version_allows_same_key_to_run_again(wm_paths):
         "page-report",
         [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "a"}}],
     )
-    assert first == {"created": 1, "updated": 0, "skipped_completed": 0, "skipped_running": 0}
+    assert first == task_counts(created=1)
 
     leased = store.lease_workflow_task("page-report", run_id="run_1", lease_seconds=7200)
     assert leased["task_key"] == "page:a"
@@ -142,18 +157,78 @@ def test_workflow_task_version_allows_same_key_to_run_again(wm_paths):
         "page-report",
         [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "a-again"}}],
     )
-    assert same_version == {"created": 0, "updated": 0, "skipped_completed": 1, "skipped_running": 0}
+    assert same_version == task_counts(skipped_completed=1)
 
     next_version = store.upsert_workflow_tasks(
         "page-report",
         [{"task_key": "page:a", "task_version": "v2", "payload": {"page": "a-v2"}}],
     )
-    assert next_version == {"created": 1, "updated": 0, "skipped_completed": 0, "skipped_running": 0}
+    assert next_version == task_counts(created=1)
 
     leased_again = store.lease_workflow_task("page-report", run_id="run_2", lease_seconds=7200)
     assert leased_again["task_key"] == "page:a"
     assert leased_again["task_version"] == "v2"
     assert leased_again["payload"]["page"] == "a-v2"
+
+
+def test_workflow_task_completed_same_version_reopens_after_configured_rerun_window(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.save_sync_config(code_sync_cron="0 * * * *", workflow_task_rerun_days=30)
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+        created_by="root",
+    )
+
+    assert store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "old"}}],
+    ) == task_counts(created=1)
+    store.create_workflow_run(
+        run_id="run_1",
+        workflow_key="page-report",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/run_1",
+    )
+    leased = store.lease_workflow_task("page-report", run_id="run_1", lease_seconds=7200)
+    assert leased["task_key"] == "page:a"
+    assert store.complete_workflow_task("page-report", "page:a", task_version="v1", run_id="run_1") is True
+
+    old_set_at = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    with store.connect() as conn:
+        conn.execute(
+            """
+            UPDATE workflow_tasks
+            SET set_at = ?
+            WHERE workflow_key = ? AND task_key = ? AND task_version = ?
+            """,
+            (old_set_at, "page-report", "page:a", "v1"),
+        )
+
+    reopened = store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "new"}}],
+    )
+    task = store.get_workflow_task("page-report", "page:a", task_version="v1")
+
+    assert reopened == task_counts(reopened_expired=1)
+    assert task["status"] == "pending"
+    assert task["payload"] == {"page": "new"}
+    assert task["lease_run_id"] is None
+    assert task["lease_expires_at"] is None
+    assert task["completed_at"] is None
+    assert task["set_at"] > old_set_at
 
 
 def test_workflow_task_lease_is_exclusive_and_expired_leases_are_reclaimed(wm_paths):
@@ -249,7 +324,7 @@ def test_workflow_task_upsert_does_not_release_active_lease(wm_paths):
     )
 
     assert leased["lease_run_id"] == "run_1"
-    assert result == {"created": 0, "updated": 0, "skipped_completed": 0, "skipped_running": 1}
+    assert result == task_counts(skipped_running=1)
     task = store.get_workflow_task("page-report", "page:a")
     assert task["status"] == "running"
     assert task["lease_run_id"] == "run_1"
@@ -284,7 +359,7 @@ def test_workflow_task_upsert_reopens_expired_running_task(wm_paths):
         [{"task_key": "page:a", "payload": {"page": "a2"}}],
     )
 
-    assert result == {"created": 0, "updated": 1, "skipped_completed": 0, "skipped_running": 0}
+    assert result == task_counts(updated=1)
     task = store.get_workflow_task("page-report", "page:a")
     assert task["status"] == "pending"
     assert task["lease_run_id"] is None
@@ -365,9 +440,10 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
         [{"task_key": "page:a", "payload": {"page": "a2"}}],
     )
 
-    assert result == {"created": 0, "updated": 1, "skipped_completed": 0, "skipped_running": 0}
+    assert result == task_counts(updated=1)
     assert statements[0] == "BEGIN IMMEDIATE"
-    assert statements[1].startswith("SELECT STATUS, LEASE_EXPIRES_AT")
+    assert statements[1].startswith("SELECT WORKFLOW_TASK_RERUN_DAYS")
+    assert statements[2].startswith("SELECT STATUS, LEASE_EXPIRES_AT, SET_AT")
 
 
 def _seed_workflow_with_task(store, workflow_key: str = "w", task_key: str = "page:a") -> None:
@@ -507,6 +583,73 @@ def test_workflow_artifacts_keep_history_and_mark_only_latest_version_current(wm
         limit=10,
     )
     assert [item["task_version"] for item in history] == ["v2", "v1"]
+
+
+def test_workflow_artifacts_keep_same_version_outputs_for_different_runs(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+        created_by="root",
+    )
+
+    first = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        task_version="v1",
+        title="Page A v1 first",
+        path="pages/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="first",
+        content="# first",
+        metadata={},
+    )
+    second = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="page:a",
+        task_version="v1",
+        title="Page A v1 second",
+        path="pages/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="second",
+        content="# second",
+        metadata={},
+    )
+
+    assert first["artifact_id"] != second["artifact_id"]
+    assert store.get_workflow_artifact(first["artifact_id"])["is_current"] is False
+    assert store.get_workflow_artifact(second["artifact_id"])["is_current"] is True
+
+    history = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query=None,
+        tags=[],
+        path="pages/page-a.md",
+        workflow_key="page-report",
+        task_key="page:a",
+        task_version="v1",
+        include_history=True,
+        limit=10,
+    )
+    assert [(item["run_id"], item["content"]) for item in history] == [
+        ("run_2", "# second"),
+        ("run_1", "# first"),
+    ]
 
 
 def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm_paths):

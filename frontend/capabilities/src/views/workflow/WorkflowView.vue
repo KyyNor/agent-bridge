@@ -1127,6 +1127,7 @@ async function confirmClearWorkflow() {
                   <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>尝试 {{ task.attempt_count }}</span>
                     <span v-if="task.lease_run_id" class="font-mono">run {{ task.lease_run_id }}</span>
+                    <span>set {{ task.set_at }}</span>
                     <span>更新 {{ task.updated_at }}</span>
                     <span v-if="task.completed_at">完成 {{ task.completed_at }}</span>
                   </div>
@@ -1369,6 +1370,8 @@ async function confirmClearWorkflow() {
                 <div v-for="item in version.artifacts" :key="item.artifact_id" class="space-y-2">
                   <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <Badge variant="outline">{{ item.path }}</Badge>
+                    <Badge variant="outline">{{ item.run_id }}</Badge>
+                    <span>{{ item.updated_at }}</span>
                     <Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge>
                   </div>
                   <div class="text-sm font-medium">{{ item.title }}</div>

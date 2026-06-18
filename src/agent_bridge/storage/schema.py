@@ -295,6 +295,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   workflow_start_time TEXT NOT NULL DEFAULT '22:00',
   workflow_stop_time TEXT NOT NULL DEFAULT '07:00',
   workflow_max_runs INTEGER NOT NULL DEFAULT 0,
+  workflow_task_rerun_days INTEGER NOT NULL DEFAULT 30,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -327,6 +328,7 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   lease_expires_at TEXT,
   attempt_count INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
+  set_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at TEXT,
@@ -385,7 +387,7 @@ CREATE TABLE IF NOT EXISTS workflow_artifacts (
   metadata_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (workflow_key, task_key, task_version, path)
+  UNIQUE (workflow_key, task_key, task_version, run_id, path)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_profile ON workflow_artifacts(profile_key);
 CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_path ON workflow_artifacts(path);

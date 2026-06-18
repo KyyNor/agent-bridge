@@ -27,6 +27,21 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _artifact_id() -> str:
     return f"artifact_{uuid.uuid4().hex}"
 
@@ -128,9 +143,16 @@ class WorkflowsRepository:
         updated = 0
         skipped_completed = 0
         skipped_running = 0
+        reopened_expired = 0
         now = _now_iso()
+        now_dt = datetime.now(timezone.utc)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            config = conn.execute(
+                "SELECT workflow_task_rerun_days FROM knowledge_sync_config WHERE id = 1"
+            ).fetchone()
+            rerun_days = int(config["workflow_task_rerun_days"]) if config is not None and config["workflow_task_rerun_days"] is not None else 30
+            rerun_cutoff = now_dt - timedelta(days=max(rerun_days, 0))
             for task in tasks:
                 task_key = str(task["task_key"])
                 task_version = str(task.get("task_version") or "")
@@ -138,7 +160,7 @@ class WorkflowsRepository:
                 payload = task.get("payload") or {}
                 existing = conn.execute(
                     """
-                    SELECT status, lease_expires_at
+                    SELECT status, lease_expires_at, set_at
                     FROM workflow_tasks
                     WHERE workflow_key = ? AND task_key = ? AND task_version = ?
                     """,
@@ -147,14 +169,35 @@ class WorkflowsRepository:
                 if existing is None:
                     conn.execute(
                         """
-                        INSERT INTO workflow_tasks (workflow_key, task_key, task_version, type, payload_json, status)
-                        VALUES (?, ?, ?, ?, ?, 'pending')
+                        INSERT INTO workflow_tasks (workflow_key, task_key, task_version, type, payload_json, status, set_at)
+                        VALUES (?, ?, ?, ?, ?, 'pending', ?)
                         """,
-                        (workflow_key, task_key, task_version, task_type, _json_dumps(payload)),
+                        (workflow_key, task_key, task_version, task_type, _json_dumps(payload), now),
                     )
                     created += 1
                 elif existing["status"] == WorkflowTaskStatus.completed.value:
-                    skipped_completed += 1
+                    set_at = _parse_datetime(existing["set_at"])
+                    if set_at is not None and set_at < rerun_cutoff:
+                        conn.execute(
+                            """
+                            UPDATE workflow_tasks
+                            SET type = ?,
+                                payload_json = ?,
+                                status = 'pending',
+                                lease_run_id = NULL,
+                                lease_expires_at = NULL,
+                                last_error = NULL,
+                                set_at = ?,
+                                updated_at = CURRENT_TIMESTAMP,
+                                completed_at = NULL
+                            WHERE workflow_key = ? AND task_key = ?
+                              AND task_version = ?
+                            """,
+                            (task_type, _json_dumps(payload), now, workflow_key, task_key, task_version),
+                        )
+                        reopened_expired += 1
+                    else:
+                        skipped_completed += 1
                 elif (
                     existing["status"] == WorkflowTaskStatus.running.value
                     and (existing["lease_expires_at"] is None or existing["lease_expires_at"] >= now)
@@ -169,11 +212,12 @@ class WorkflowsRepository:
                             status = 'pending',
                             lease_run_id = NULL,
                             lease_expires_at = NULL,
+                            set_at = ?,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE workflow_key = ? AND task_key = ?
                           AND task_version = ?
                         """,
-                        (task_type, _json_dumps(payload), workflow_key, task_key, task_version),
+                        (task_type, _json_dumps(payload), now, workflow_key, task_key, task_version),
                     )
                     updated += 1
         return {
@@ -181,6 +225,7 @@ class WorkflowsRepository:
             "updated": updated,
             "skipped_completed": skipped_completed,
             "skipped_running": skipped_running,
+            "reopened_expired": reopened_expired,
         }
 
     def get_workflow_task(
@@ -554,16 +599,16 @@ class WorkflowsRepository:
                 SET is_current = 0
                 WHERE workflow_key = ?
                   AND task_key IS ?
-                  AND task_version != ?
+                  AND NOT (task_version = ? AND run_id = ?)
                 """,
-                (workflow_key, task_key, task_version),
+                (workflow_key, task_key, task_version, run_id),
             )
             existing = conn.execute(
                 """
                 SELECT artifact_id FROM workflow_artifacts
-                WHERE workflow_key = ? AND task_key IS ? AND task_version = ? AND path = ?
+                WHERE workflow_key = ? AND task_key IS ? AND task_version = ? AND run_id = ? AND path = ?
                 """,
-                (workflow_key, task_key, task_version, path),
+                (workflow_key, task_key, task_version, run_id, path),
             ).fetchone()
             artifact_id = existing["artifact_id"] if existing else _artifact_id()
             conn.execute(
@@ -574,7 +619,7 @@ class WorkflowsRepository:
                   tags_json, format, summary, content, content_hash, metadata_json
                 )
                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(workflow_key, task_key, task_version, path) DO UPDATE SET
+                ON CONFLICT(workflow_key, task_key, task_version, run_id, path) DO UPDATE SET
                   profile_key = excluded.profile_key,
                   run_id = excluded.run_id,
                   task_key = excluded.task_key,

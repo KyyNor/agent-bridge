@@ -52,6 +52,7 @@ class SQLiteStore:
                 {
                     "task_version": "TEXT NOT NULL DEFAULT ''",
                     "type": "TEXT NOT NULL DEFAULT ''",
+                    "set_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
                 },
             )
             self._ensure_columns(
@@ -137,6 +138,7 @@ class SQLiteStore:
                     "workflow_start_time": "TEXT NOT NULL DEFAULT '22:00'",
                     "workflow_stop_time": "TEXT NOT NULL DEFAULT '07:00'",
                     "workflow_max_runs": "INTEGER NOT NULL DEFAULT 0",
+                    "workflow_task_rerun_days": "INTEGER NOT NULL DEFAULT 30",
                 },
             )
             # Workflow scheduling moved from a single global cron to a daily
@@ -210,7 +212,11 @@ class SQLiteStore:
         return False
 
     def _rebuild_workflow_tasks_if_needed(self, conn: sqlite3.Connection) -> None:
-        if self._has_unique_index(conn, "workflow_tasks", ["workflow_key", "task_key", "task_version"]):
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(workflow_tasks)").fetchall()}
+        if (
+            "set_at" in existing
+            and self._has_unique_index(conn, "workflow_tasks", ["workflow_key", "task_key", "task_version"])
+        ):
             return
         conn.execute("DROP TABLE IF EXISTS workflow_tasks_new")
         conn.execute(
@@ -227,6 +233,7 @@ class SQLiteStore:
               lease_expires_at TEXT,
               attempt_count INTEGER NOT NULL DEFAULT 0,
               last_error TEXT,
+              set_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               completed_at TEXT,
@@ -234,19 +241,21 @@ class SQLiteStore:
             )
             """
         )
+        set_at_expr = "COALESCE(set_at, created_at)" if "set_at" in existing else "created_at"
         conn.execute(
             """
             INSERT INTO workflow_tasks_new (
               id, workflow_key, task_key, task_version, type, payload_json, status,
-              lease_run_id, lease_expires_at, attempt_count, last_error,
+              lease_run_id, lease_expires_at, attempt_count, last_error, set_at,
               created_at, updated_at, completed_at
             )
             SELECT
               id, workflow_key, task_key, task_version, type, payload_json, status,
               lease_run_id, lease_expires_at, attempt_count, last_error,
+              {set_at_expr},
               created_at, updated_at, completed_at
             FROM workflow_tasks
-            """
+            """.format(set_at_expr=set_at_expr)
         )
         conn.execute("DROP TABLE workflow_tasks")
         conn.execute("ALTER TABLE workflow_tasks_new RENAME TO workflow_tasks")
@@ -258,7 +267,7 @@ class SQLiteStore:
         )
 
     def _rebuild_workflow_artifacts_if_needed(self, conn: sqlite3.Connection) -> None:
-        if self._has_unique_index(conn, "workflow_artifacts", ["workflow_key", "task_key", "task_version", "path"]):
+        if self._has_unique_index(conn, "workflow_artifacts", ["workflow_key", "task_key", "task_version", "run_id", "path"]):
             return
         conn.execute("DROP TABLE IF EXISTS workflow_artifacts_new")
         conn.execute(
@@ -282,7 +291,7 @@ class SQLiteStore:
               metadata_json TEXT NOT NULL DEFAULT '{}',
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE (workflow_key, task_key, task_version, path)
+              UNIQUE (workflow_key, task_key, task_version, run_id, path)
             )
             """
         )
@@ -440,6 +449,7 @@ class SQLiteStore:
         workflow_start_time: str = "22:00",
         workflow_stop_time: str = "07:00",
         workflow_max_runs: int = 0,
+        workflow_task_rerun_days: int = 30,
     ) -> dict[str, Any]:
         return self.codegraph.save_sync_config(
             code_sync_cron=code_sync_cron,
@@ -449,6 +459,7 @@ class SQLiteStore:
             workflow_start_time=workflow_start_time,
             workflow_stop_time=workflow_stop_time,
             workflow_max_runs=workflow_max_runs,
+            workflow_task_rerun_days=workflow_task_rerun_days,
         )
 
     def upsert_workflow_definition(

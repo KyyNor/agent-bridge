@@ -110,6 +110,7 @@ export interface WorkflowArtifactHistoryVersion {
 
 export interface WorkflowArtifactHistoryItem {
   artifact_id: string
+  run_id: string
   title: string
   path: string
   tags: string[]
@@ -165,6 +166,7 @@ export interface WorkflowTask {
   type: string
   payload: Record<string, unknown>
   status: string
+  set_at: string
   lease_run_id: string | null
   lease_expires_at: string | null
   attempt_count: number
@@ -507,6 +509,7 @@ export interface KnowledgeSyncConfig {
   workflow_start_time: string
   workflow_stop_time: string
   workflow_max_runs: number
+  workflow_task_rerun_days: number
 }
 
 export interface SingleSchedulerStatus {

@@ -453,6 +453,7 @@ class WorkflowService:
             entry["artifacts"].append(
                 {
                     "artifact_id": item["artifact_id"],
+                    "run_id": item["run_id"],
                     "title": item["title"],
                     "path": item["path"],
                     "tags": item["tags"],

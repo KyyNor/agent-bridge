@@ -364,6 +364,7 @@ class AgentBridgeService:
         workflow_start_time: str = "22:00",
         workflow_stop_time: str = "07:00",
         workflow_max_runs: int = 0,
+        workflow_task_rerun_days: int = 30,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         result = self.store.save_sync_config(
@@ -374,6 +375,7 @@ class AgentBridgeService:
             workflow_start_time=workflow_start_time,
             workflow_stop_time=workflow_stop_time,
             workflow_max_runs=workflow_max_runs,
+            workflow_task_rerun_days=workflow_task_rerun_days,
         )
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()

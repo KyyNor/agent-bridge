@@ -21,6 +21,7 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   workflow_start_time: '22:00',
   workflow_stop_time: '07:00',
   workflow_max_runs: 0,
+  workflow_task_rerun_days: 30,
 })
 const configSaving = ref(false)
 const cronError = ref('')
@@ -108,12 +109,16 @@ const workflowTimesValid = computed(() =>
 const maxRunsValid = computed(() =>
   Number.isInteger(syncConfig.value.workflow_max_runs) && syncConfig.value.workflow_max_runs >= 0,
 )
+const taskRerunDaysValid = computed(() =>
+  Number.isInteger(syncConfig.value.workflow_task_rerun_days) && syncConfig.value.workflow_task_rerun_days >= 0,
+)
 const cronValid = computed(() =>
   codeSyncNextRuns.value !== null
   && understandNextRuns.value !== null
   && docSyncNextRuns.value !== null
   && workflowTimesValid.value
-  && maxRunsValid.value,
+  && maxRunsValid.value
+  && taskRerunDaysValid.value,
 )
 const runCountText = computed(() => {
   const wf = schedulerStatus.value?.workflow
@@ -301,6 +306,12 @@ async function deleteBackend(slug: string) {
           <div class="text-sm shrink-0 whitespace-nowrap">单工作流运行上限 <span class="text-xs text-muted-foreground">(次/窗口)</span></div>
           <Input v-model.number="syncConfig.workflow_max_runs" type="number" min="0" placeholder="0" class="w-32 font-mono text-sm" />
           <span v-if="maxRunsValid" class="text-xs text-muted-foreground">{{ syncConfig.workflow_max_runs > 0 ? `每个工作流每窗口最多自动运行 ${syncConfig.workflow_max_runs} 次（手动测试运行不计入）` : '不限（0）' }}</span>
+          <span v-else class="text-xs text-destructive">请输入非负整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">任务重开期限 <span class="text-xs text-muted-foreground">(天)</span></div>
+          <Input v-model.number="syncConfig.workflow_task_rerun_days" type="number" min="0" placeholder="30" class="w-32 font-mono text-sm" />
+          <span v-if="taskRerunDaysValid" class="text-xs text-muted-foreground">同 workflow/task/version 完成后超过 {{ syncConfig.workflow_task_rerun_days }} 天，set task 会重新置为待处理</span>
           <span v-else class="text-xs text-destructive">请输入非负整数</span>
         </div>
 
