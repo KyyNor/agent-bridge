@@ -1,6 +1,78 @@
 from __future__ import annotations
 
 
+def test_message_events_skips_thinking_tokens_partial():
+    from types import SimpleNamespace
+
+    from agent_bridge.workflows.runner import _message_events
+
+    # Streaming partials carrying the thinking_tokens subtype are noisy and must
+    # not surface in the run event log.
+    thinking = SimpleNamespace(subtype="thinking_tokens", session_id="session_1")
+    assert _message_events(thinking, tool_names={}) == []
+
+    # Other status subtypes (init, task_progress, ...) are still emitted.
+    init = SimpleNamespace(subtype="init", session_id="session_1")
+    init_events = _message_events(init, tool_names={})
+    assert len(init_events) == 1
+    assert init_events[0]["kind"] == "status"
+    assert init_events[0]["status"] == "init"
+
+
+def test_runner_drops_thinking_tokens_from_all_logs(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from claude_agent_sdk import ResultMessage
+
+    from agent_bridge.workflows import runner as runner_module
+    from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
+
+    class FakeOptions:
+        def __init__(self, **kwargs):
+            pass
+
+    async def fake_query(*, prompt, options):
+        yield SimpleNamespace(subtype="init", session_id="session_1")
+        yield SimpleNamespace(subtype="thinking_tokens", session_id="session_1")
+        yield ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="session_1",
+            result="done",
+            total_cost_usd=0.0,
+        )
+
+    monkeypatch.setattr(runner_module, "ClaudeAgentOptions", FakeOptions)
+    monkeypatch.setattr(runner_module, "claude_query", fake_query)
+    monkeypatch.setattr(runner_module, "claude_settings_env", lambda: {})
+
+    result = ClaudeWorkflowRunner().run(
+        tmp_path,
+        WorkflowRunSpec(
+            run_id="run_1",
+            workflow_key="github-summary",
+            profile_key="dev-plane",
+            workflow_js="export const manifest = {};",
+            mcp_url="http://127.0.0.1:8765/mcp",
+        ),
+    )
+
+    stdout_text = result.stdout_path.read_text(encoding="utf-8")
+    events = [
+        json.loads(line)
+        for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    # thinking_tokens must be absent from both the raw message log and the event stream.
+    assert "thinking_tokens" not in stdout_text
+    assert all(event.get("status") != "thinking_tokens" for event in events)
+    # Other subtypes still flow through.
+    assert any(event.get("status") == "init" for event in events)
+
+
 def test_runner_prepares_run_directory_with_workflow_files(tmp_path):
     from agent_bridge.workflows.runner import WorkflowRunSpec, prepare_run_directory
 

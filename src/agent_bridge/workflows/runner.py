@@ -167,6 +167,10 @@ def _message_events(message: Any, tool_names: dict[str, str]) -> list[dict[str, 
         return records
 
     subtype = getattr(message, "subtype", None)
+    if subtype == "thinking_tokens":
+        # Streaming partial for thinking-token counts: noisy and not useful in the
+        # run event log, so drop it instead of recording a status event.
+        return []
     if subtype:
         return [
             _event_record(
@@ -202,6 +206,10 @@ async def _run_claude_agent_sdk(run_dir: Path, stdout: TextIO, stderr: TextIO, e
     )
     tool_names: dict[str, str] = {}
     async for message in claude_query(prompt=WORKFLOW_PROMPT, options=options):
+        if getattr(message, "subtype", None) == "thinking_tokens":
+            # Skip thinking-token streaming partials entirely so they never reach
+            # the run logs (stdout.log) or the event stream (events.jsonl).
+            continue
         stdout.write(json.dumps(_message_log_record(message), ensure_ascii=False) + "\n")
         stdout.flush()
         for record in _message_events(message, tool_names):
