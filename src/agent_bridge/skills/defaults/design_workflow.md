@@ -15,6 +15,8 @@
 
 - ❌ 不要 `import` Node 模块（`fs` / `path` / `process` …），不要写 `async function main()`，不要顶层 `main().catch(...)`。
 - ❌ 不要在脚本里直接 `await workflow_get_task()` 或 `fs.writeFile(...)`——这些工具与能力只能由**子 agent** 调用。
+- ❌ `export const meta` 必须是脚本的**第一条语句**——前面不要写 `'use strict'` 或任何可执行语句（注释可以），否则 harness 编译直接失败（报错 `must be the FIRST statement`）。
+- ❌ 不要用 `new Date()` / `Date.now()` / `Math.random()`——harness 运行时禁用，调用即抛错。需要时间戳/随机数时：通过 `args` 传入，或交给子 agent（子 agent 是普通 agent，可用 Bash `date` 等，不受此限制）。
 - ✅ 一切工具调用（`workflow_get_task` / `workflow_set_task` / `workflow_run_log`，以及 `Write` / `Bash` / `WebFetch` / `WebSearch` …）都包在 `agent('指示子 agent 做什么', { schema })` 里。
 - ✅ 一次 run 只完成一个 task；`out/result.json` 的 `task_key` 必须等于本次 `workflow_get_task` 的租约值。
 - ✅ 产物 `file` 必须在 `./out/` 下、不以 `/` 开头、不含 `..`；`format` 只能 `"markdown"`。
@@ -271,6 +273,7 @@ await agent(
 智能体完成后应检查：
 
 - 是否用 `agent()` 派生子 agent 调用工具/写文件（**而非**直接 `await workflow_get_task()` 或 `fs.writeFile`）？有没有误用 `import fs` / `async function main()`？
+- 顶部是否干净（`export const meta` 是第一条语句，没有 `'use strict'`）？脚本里有没有 `new Date()` / `Date.now()` / `Math.random()`（都必须剔除；时间戳交给子 agent 用 Bash `date` 填）？
 - 一次 run 是否只处理一个 task？`out/result.json` 的 `task_key` 是否用了 `workflow_get_task` 的租约值？
 - 是否为不同 `task.type` 设计了清晰分支？独立的子任务是否用 `parallel([...])` 并行？
 - `artifact.file` 是否在 `./out/` 下、文件名安全（无 `/` / `..`）？`format` 是否为 `"markdown"`？
