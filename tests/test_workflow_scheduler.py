@@ -308,3 +308,149 @@ def test_run_workflow_now_bypasses_disabled_status(wm_paths, tmp_path):
 
     result = scheduler.run_workflow_now("A")  # disabled, yet runnable for a test
     assert result["status"] == "started"
+
+
+class _AlwaysFailingRunner:
+    """Runner that always raises. The run row lands as 'failed' and the workflow
+    never enters finished_today (only a no_task result does), so it can be
+    re-scheduled every tick. Avoids the ingest/backend path entirely, keeping
+    run-count tests focused on scheduling decisions."""
+
+    def run(self, base_dir, spec):
+        raise RuntimeError("boom")
+
+
+def _bootstrap_svc_with_workflow(wm_paths, key="A"):
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _create_workflow(svc.store, key)
+    return svc
+
+
+def _build_in_window_scheduler(svc, tmp_path, runner, max_runs=0):
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    now = datetime.now()
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        runner=runner,
+        base_run_dir=tmp_path,
+        max_concurrent_workflows=2,
+    )
+    scheduler._start_time = (now - timedelta(minutes=1)).time().replace(second=0, microsecond=0)
+    scheduler._stop_time = (now + timedelta(minutes=1)).time().replace(second=0, microsecond=0)
+    scheduler._max_runs = max_runs
+    return scheduler
+
+
+def test_max_runs_zero_does_not_limit_scheduling(wm_paths, tmp_path):
+    svc = _bootstrap_svc_with_workflow(wm_paths)
+    scheduler = _build_in_window_scheduler(svc, tmp_path, _AlwaysFailingRunner(), max_runs=0)
+
+    for _ in range(3):
+        scheduler.tick()
+        _wait_runs_done(scheduler)
+
+    assert len(svc.store.list_workflow_runs("A")) == 3
+    assert scheduler.run_counts == {}
+
+
+def test_max_runs_caps_scheduling_per_window(wm_paths, tmp_path):
+    svc = _bootstrap_svc_with_workflow(wm_paths)
+    scheduler = _build_in_window_scheduler(svc, tmp_path, _AlwaysFailingRunner(), max_runs=2)
+
+    for _ in range(3):
+        scheduler.tick()
+        _wait_runs_done(scheduler)
+
+    assert scheduler.run_counts == {"A": 2}
+    assert len(svc.store.list_workflow_runs("A")) == 2
+
+
+def test_manual_run_does_not_count_and_bypasses_limit(wm_paths, tmp_path):
+    from agent_bridge.workflows.runner import FakeWorkflowRunner
+
+    svc = _bootstrap_svc_with_workflow(wm_paths)
+    scheduler = _build_in_window_scheduler(
+        svc, tmp_path, FakeWorkflowRunner(status="no_executable_task"), max_runs=1
+    )
+
+    scheduler.tick()
+    _wait_runs_done(scheduler)
+    assert scheduler.run_counts == {"A": 1}
+
+    result = scheduler.run_workflow_now("A")
+    assert result["status"] == "started"
+    _wait_runs_done(scheduler)
+    assert scheduler.run_counts == {"A": 1}  # manual run did not increment the cap
+
+
+def test_window_reset_clears_run_counts(wm_paths, tmp_path):
+    svc = _bootstrap_svc_with_workflow(wm_paths)
+    scheduler = _build_in_window_scheduler(svc, tmp_path, _AlwaysFailingRunner(), max_runs=5)
+
+    scheduler.tick()
+    _wait_runs_done(scheduler)
+    scheduler.tick()
+    _wait_runs_done(scheduler)
+    assert scheduler.run_counts == {"A": 2}
+
+    scheduler._window_marker = None  # force the new-window reset branch on next tick
+    scheduler.tick()
+    _wait_runs_done(scheduler)
+    assert scheduler.run_counts == {"A": 1}  # reset to 0, then one fresh scheduled run
+
+
+def test_sync_config_round_trips_workflow_max_runs(wm_paths):
+    from agent_bridge.knowledge.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.save_sync_config(
+        code_sync_cron="0 * * * *",
+        understand_cron="0 2 * * *",
+        doc_sync_cron="*/30 * * * *",
+        workflow_start_time="22:00",
+        workflow_stop_time="07:00",
+        workflow_max_runs=10,
+    )
+    config = svc.store.get_sync_config()
+    assert config["workflow_max_runs"] == 10
+
+
+def test_scheduler_reads_workflow_max_runs_from_config(wm_paths):
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.save_sync_config(
+        code_sync_cron="0 * * * *",
+        understand_cron="0 2 * * *",
+        doc_sync_cron="*/30 * * *",
+        workflow_start_time="22:00",
+        workflow_stop_time="07:00",
+        workflow_max_runs=7,
+    )
+    scheduler = WorkflowScheduler(
+        service=svc.workflows, store=svc.store, admins={"root"}, runner=FakeWorkflowRunner()
+    )
+    scheduler._load_window()
+    assert scheduler._max_runs == 7
+
+
+def test_get_status_exposes_max_runs_and_run_counts(wm_paths, tmp_path):
+    svc = _bootstrap_svc_with_workflow(wm_paths)
+    scheduler = _build_in_window_scheduler(svc, tmp_path, _AlwaysFailingRunner(), max_runs=3)
+    scheduler.tick()
+    _wait_runs_done(scheduler)
+
+    status = scheduler.get_status()
+    assert status["max_runs"] == 3
+    assert status["run_counts"] == {"A": 1}

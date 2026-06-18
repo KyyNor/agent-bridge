@@ -434,6 +434,7 @@ export interface KnowledgeSyncConfig {
   doc_sync_cron: string
   workflow_start_time: string
   workflow_stop_time: string
+  workflow_max_runs: number
 }
 
 export interface SingleSchedulerStatus {
@@ -479,6 +480,8 @@ export interface SchedulerStatus {
     running_workflows?: string[]
     finished_today?: string[]
     max_concurrent_workflows?: number
+    max_runs?: number
+    run_counts?: Record<string, number>
   }
 }
 

@@ -52,6 +52,10 @@ class WorkflowScheduler:
         self._cursor = 0
         self._running: set[str] = set()
         self.finished_today: set[str] = set()
+        # Per-window cap on auto-scheduled runs per workflow. 0 = unlimited.
+        # Manual runs (run_workflow_now) bypass both the cap and the counting.
+        self._max_runs: int = 0
+        self.run_counts: dict[str, int] = {}
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -99,6 +103,8 @@ class WorkflowScheduler:
             "running_workflows": sorted(self._running),
             "finished_today": sorted(self.finished_today),
             "max_concurrent_workflows": self._max_concurrent,
+            "max_runs": self._max_runs,
+            "run_counts": dict(self.run_counts),
         }
 
     def _ensure_scheduler(self) -> None:
@@ -111,6 +117,7 @@ class WorkflowScheduler:
         self._stop_time_str = config.get("workflow_stop_time") or _DEFAULT_STOP_TIME
         self._start_time = _parse_hhmm(self._start_time_str)
         self._stop_time = _parse_hhmm(self._stop_time_str)
+        self._max_runs = int(config.get("workflow_max_runs") or 0)
 
     def _refresh_jobs(self) -> None:
         if not self._scheduler:
@@ -172,6 +179,7 @@ class WorkflowScheduler:
                 # release callback; never cleared here, to avoid double-launching
                 # a workflow whose previous run is still in flight.)
                 self.finished_today.clear()
+                self.run_counts.clear()
                 self._window_marker = anchor
             if anchor is None:
                 return  # outside the daily window; no new runs
@@ -181,12 +189,18 @@ class WorkflowScheduler:
                 if item.get("status") == "active"
             ]
             candidates = {item["workflow_key"] for item in workflows} - self.finished_today
+            if self._max_runs > 0:
+                candidates = {
+                    key for key in candidates if self.run_counts.get(key, 0) < self._max_runs
+                }
             available = self._max_concurrent - len(self._running)
             if available <= 0:
                 return
             batch = self.next_workflow_batch(candidates, self._running)[:available]
             for workflow_key in batch:
                 self._running.add(workflow_key)
+                if self._max_runs > 0:
+                    self.run_counts[workflow_key] = self.run_counts.get(workflow_key, 0) + 1
                 thread = threading.Thread(target=self._run_and_release, args=(workflow_key,), daemon=True)
                 thread.start()
 

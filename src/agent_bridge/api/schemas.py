@@ -130,6 +130,7 @@ class KnowledgeSyncConfigRequest(BaseModel):
     doc_sync_cron: str = "*/30 * * * *"
     workflow_start_time: str = "22:00"
     workflow_stop_time: str = "07:00"
+    workflow_max_runs: int = 0
 
 
 class WorkflowDefinitionRequest(BaseModel):

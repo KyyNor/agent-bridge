@@ -287,6 +287,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   doc_sync_cron TEXT NOT NULL DEFAULT '*/30 * * * *',
   workflow_start_time TEXT NOT NULL DEFAULT '22:00',
   workflow_stop_time TEXT NOT NULL DEFAULT '07:00',
+  workflow_max_runs INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """

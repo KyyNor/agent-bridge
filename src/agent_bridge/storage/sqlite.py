@@ -112,6 +112,7 @@ class SQLiteStore:
                     "doc_sync_cron": "TEXT NOT NULL DEFAULT '*/30 * * * *'",
                     "workflow_start_time": "TEXT NOT NULL DEFAULT '22:00'",
                     "workflow_stop_time": "TEXT NOT NULL DEFAULT '07:00'",
+                    "workflow_max_runs": "INTEGER NOT NULL DEFAULT 0",
                 },
             )
             # Workflow scheduling moved from a single global cron to a daily
@@ -261,6 +262,7 @@ class SQLiteStore:
         doc_sync_cron: str = "*/30 * * * *",
         workflow_start_time: str = "22:00",
         workflow_stop_time: str = "07:00",
+        workflow_max_runs: int = 0,
     ) -> dict[str, Any]:
         return self.codegraph.save_sync_config(
             code_sync_cron=code_sync_cron,
@@ -269,6 +271,7 @@ class SQLiteStore:
             doc_sync_cron=doc_sync_cron,
             workflow_start_time=workflow_start_time,
             workflow_stop_time=workflow_stop_time,
+            workflow_max_runs=workflow_max_runs,
         )
 
     def upsert_workflow_definition(

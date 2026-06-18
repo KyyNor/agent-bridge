@@ -20,6 +20,7 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   doc_sync_cron: '*/30 * * * *',
   workflow_start_time: '22:00',
   workflow_stop_time: '07:00',
+  workflow_max_runs: 0,
 })
 const configSaving = ref(false)
 const cronError = ref('')
@@ -104,12 +105,25 @@ const workflowTimesValid = computed(() =>
   HHMM.test(syncConfig.value.workflow_start_time.trim())
   && HHMM.test(syncConfig.value.workflow_stop_time.trim()),
 )
+const maxRunsValid = computed(() =>
+  Number.isInteger(syncConfig.value.workflow_max_runs) && syncConfig.value.workflow_max_runs >= 0,
+)
 const cronValid = computed(() =>
   codeSyncNextRuns.value !== null
   && understandNextRuns.value !== null
   && docSyncNextRuns.value !== null
-  && workflowTimesValid.value,
+  && workflowTimesValid.value
+  && maxRunsValid.value,
 )
+const runCountText = computed(() => {
+  const wf = schedulerStatus.value?.workflow
+  if (!wf) return '—'
+  const cap = wf.max_runs ?? 0
+  if (cap <= 0) return '不限'
+  const entries = Object.entries(wf.run_counts ?? {})
+  if (!entries.length) return `0/${cap}（暂无运行）`
+  return entries.map(([k, v]) => `${k} ${v}/${cap}`).join('、')
+})
 
 function runBadgeClass(status?: string | null): string {
   if (status === 'succeeded') return 'bg-green-50 text-green-700'
@@ -283,6 +297,12 @@ async function deleteBackend(slug: string) {
           <span v-if="workflowTimesValid" class="text-xs text-muted-foreground">每日窗口内持续轮转，跨夜自动续跑</span>
           <span v-else class="text-xs text-destructive">请输入 HH:MM 时间</span>
         </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">单工作流运行上限 <span class="text-xs text-muted-foreground">(次/窗口)</span></div>
+          <Input v-model.number="syncConfig.workflow_max_runs" type="number" min="0" placeholder="0" class="w-32 font-mono text-sm" />
+          <span v-if="maxRunsValid" class="text-xs text-muted-foreground">{{ syncConfig.workflow_max_runs > 0 ? `每个工作流每窗口最多自动运行 ${syncConfig.workflow_max_runs} 次（手动测试运行不计入）` : '不限（0）' }}</span>
+          <span v-else class="text-xs text-destructive">请输入非负整数</span>
+        </div>
 
         <div class="flex items-center gap-3">
           <Button @click="saveSyncConfig()" :disabled="configSaving || !cronValid" size="sm">
@@ -408,6 +428,7 @@ async function deleteBackend(slug: string) {
               <div class="space-y-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
                 <div>正在执行：{{ schedulerStatus.workflow?.running_workflows?.length ? schedulerStatus.workflow.running_workflows.join(', ') : '无' }}</div>
                 <div>今日结束：{{ schedulerStatus.workflow?.finished_today?.length ? schedulerStatus.workflow.finished_today.join(', ') : '无' }}</div>
+                <div>运行计数：{{ runCountText }}</div>
               </div>
             </div>
           </div>
