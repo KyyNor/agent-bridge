@@ -28,7 +28,11 @@ const artifactTags = ref('')
 const artifactDetail = ref<WorkflowArtifactDetail | null>(null)
 const detailLoading = ref(false)
 const showArtifact = ref(false)
-const runs = ref<WorkflowRun[]>([])
+const showDetail = ref(false)
+const showProgress = ref(false)
+const progressWorkflowKey = ref('')
+const progressRunId = ref('')
+const workflowRuns = ref<Record<string, WorkflowRun[]>>({})
 const runsLoading = ref(false)
 const selectedRunId = ref('')
 const runEvents = ref<WorkflowRunEvent[]>([])
@@ -61,6 +65,16 @@ const manifestNodes = computed(() => selectedWorkflow.value?.manifest?.nodes || 
 const manifestEdges = computed(() => selectedWorkflow.value?.manifest?.edges || [])
 const manifestSchemas = computed(() => selectedWorkflow.value?.manifest?.schemas || {})
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
+const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
+const hasAnyRunningRun = computed(() =>
+  Object.values(workflowRuns.value).some(items => items.some(run => run.status === 'running')),
+)
+const progressWorkflow = computed(() =>
+  workflows.value.find(item => item.workflow_key === progressWorkflowKey.value) || selectedWorkflow.value
+)
+const progressRun = computed(() =>
+  (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
+)
 
 const collapsedPaths = ref<Set<string>>(new Set())
 
@@ -131,9 +145,6 @@ onMounted(async () => {
 })
 
 watch(selectedKey, () => {
-  stopTestPolling()
-  testing.value = false
-  testingRunId.value = ''
   testError.value = ''
 })
 
@@ -150,11 +161,36 @@ async function loadAll() {
     workflows.value = workflowList
     profiles.value = profileList
     selectedKey.value = selectedKey.value || workflowList[0]?.workflow_key || ''
-    await Promise.all([searchArtifacts(), loadRuns()])
+    await loadRunsForWorkflows(workflowList)
   } catch (e: unknown) {
     error.value = errorMessage(e)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadRunsForWorkflows(items = workflows.value) {
+  runsLoading.value = true
+  try {
+    const entries = await Promise.all(
+      items.map(async item => [item.workflow_key, await api.listWorkflowRuns(item.workflow_key, 20)] as const),
+    )
+    workflowRuns.value = Object.fromEntries(entries)
+    const runningEntry = entries.find(([, runList]) => runList.some(run => run.status === 'running'))
+    const running = runningEntry?.[1].find(run => run.status === 'running')
+    if (running && runningEntry) {
+      testing.value = true
+      testingRunId.value = running.run_id
+      progressWorkflowKey.value = progressWorkflowKey.value || runningEntry[0]
+    } else {
+      testing.value = false
+      testingRunId.value = ''
+      stopTestPolling()
+    }
+  } catch (e: unknown) {
+    error.value = errorMessage(e)
+  } finally {
+    runsLoading.value = false
   }
 }
 
@@ -237,12 +273,19 @@ async function saveWorkflow() {
     selectedKey.value = saved.workflow_key
     showEditor.value = false
     workflows.value = await api.listWorkflows()
-    await searchArtifacts()
+    await loadRunsForWorkflows()
+    if (showDetail.value) await searchArtifacts()
   } catch (e: unknown) {
     formError.value = errorMessage(e)
   } finally {
     saving.value = false
   }
+}
+
+async function openDetail(item: WorkflowDefinition) {
+  selectedKey.value = item.workflow_key
+  showDetail.value = true
+  await Promise.all([searchArtifacts(), loadRuns(item.workflow_key)])
 }
 
 function isWorkflowManifest(value: Record<string, unknown>): value is WorkflowDefinition['manifest'] {
@@ -345,17 +388,18 @@ async function openArtifact(item: WorkflowArtifact) {
   }
 }
 
-async function loadRuns() {
-  const key = selectedWorkflow.value?.workflow_key
+async function loadRuns(workflowKey = selectedWorkflow.value?.workflow_key || '') {
+  const key = workflowKey
   if (!key) {
-    runs.value = []
+    workflowRuns.value = { ...workflowRuns.value }
     return
   }
   runsLoading.value = true
   try {
-    runs.value = await api.listWorkflowRuns(key, 20)
-    if (!runs.value.some(r => r.run_id === selectedRunId.value)) {
-      selectedRunId.value = runs.value[0]?.run_id || ''
+    const nextRuns = await api.listWorkflowRuns(key, 20)
+    workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns }
+    if (key === selectedWorkflow.value?.workflow_key && !nextRuns.some(r => r.run_id === selectedRunId.value)) {
+      selectedRunId.value = nextRuns[0]?.run_id || ''
       await loadLogs()
     }
   } catch (e: unknown) {
@@ -392,7 +436,9 @@ async function selectRun(runId: string) {
   await loadLogs()
 }
 
-const hasRunningRun = computed(() => runs.value.some(r => r.status === 'running'))
+function runningRunFor(workflowKey: string) {
+  return (workflowRuns.value[workflowKey] || []).find(run => run.status === 'running') || null
+}
 
 function stopTestPolling() {
   if (testPoll) {
@@ -401,8 +447,8 @@ function stopTestPolling() {
   }
 }
 
-async function runTest() {
-  const wf = selectedWorkflow.value
+async function runWorkflow(item: WorkflowDefinition) {
+  const wf = item
   if (!wf || testing.value) return
   testError.value = ''
   testing.value = true
@@ -410,8 +456,12 @@ async function runTest() {
     const res = await api.runWorkflow(wf.workflow_key)
     if (res.status === 'started' && res.run_id) {
       testingRunId.value = res.run_id
+      progressWorkflowKey.value = wf.workflow_key
+      progressRunId.value = res.run_id
+      showProgress.value = true
+      selectedKey.value = wf.workflow_key
       selectedRunId.value = res.run_id
-      await loadRuns()
+      await loadRuns(wf.workflow_key)
       await loadLogs()
       stopTestPolling()
       testPoll = setInterval(pollTestRun, 1500)
@@ -424,6 +474,30 @@ async function runTest() {
   }
 }
 
+async function openProgress(item: WorkflowDefinition, runId?: string) {
+  const run = runId ? (workflowRuns.value[item.workflow_key] || []).find(r => r.run_id === runId) : runningRunFor(item.workflow_key)
+  if (!run) return
+  selectedKey.value = item.workflow_key
+  progressWorkflowKey.value = item.workflow_key
+  progressRunId.value = run.run_id
+  selectedRunId.value = run.run_id
+  showProgress.value = true
+  await loadLogs()
+  if (run.status === 'running') {
+    testing.value = true
+    testingRunId.value = run.run_id
+    stopTestPolling()
+    testPoll = setInterval(pollTestRun, 1500)
+  }
+}
+
+async function refreshProgress() {
+  if (progressWorkflowKey.value) {
+    await loadRuns(progressWorkflowKey.value)
+  }
+  await loadLogs()
+}
+
 async function pollTestRun() {
   const runId = testingRunId.value
   if (!runId) return
@@ -434,7 +508,8 @@ async function pollTestRun() {
       stopTestPolling()
       testing.value = false
       testingRunId.value = ''
-      await loadRuns()
+      const workflowKey = progressWorkflowKey.value || run.workflow_key
+      await loadRuns(workflowKey)
       if (run.status === 'completed' || run.status === 'no_task') {
         await searchArtifacts()
       }
@@ -452,10 +527,16 @@ async function deleteCurrent() {
     await api.deleteWorkflow(wf.workflow_key)
     workflows.value = await api.listWorkflows()
     selectedKey.value = workflows.value[0]?.workflow_key || ''
+    showDetail.value = false
     await loadAll()
   } catch (e: unknown) {
     error.value = errorMessage(e)
   }
+}
+
+async function deleteWorkflow(item: WorkflowDefinition) {
+  selectedKey.value = item.workflow_key
+  await deleteCurrent()
 }
 </script>
 
@@ -473,68 +554,111 @@ async function deleteCurrent() {
       {{ error }}
     </div>
 
-    <div class="grid gap-4 xl:grid-cols-[340px_1fr]">
-      <Card>
-        <CardContent class="p-0">
-          <div class="border-b px-4 py-3">
+    <Card>
+      <CardContent class="p-0">
+        <div class="flex items-center justify-between gap-3 border-b px-4 py-3">
+          <div>
             <div class="text-sm font-medium text-foreground">工作流</div>
             <div class="text-xs text-muted-foreground">{{ workflows.length }} 个定义</div>
           </div>
-          <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
-          <div v-else-if="!workflows.length" class="px-4 py-8 text-sm text-muted-foreground">暂无工作流</div>
-          <button
-            v-for="item in workflows"
-            :key="item.workflow_key"
-            class="block w-full border-b px-4 py-3 text-left transition hover:bg-muted/50"
-            :class="selectedWorkflow?.workflow_key === item.workflow_key ? 'bg-muted' : ''"
-            @click="selectedKey = item.workflow_key; searchArtifacts(); loadRuns()"
-          >
-            <div class="flex items-center justify-between gap-2">
-              <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
-              <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
+          <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRunsForWorkflows()">{{ runsLoading ? '刷新中' : '刷新运行状态' }}</Button>
+        </div>
+        <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
+        <div v-else-if="!workflows.length" class="px-4 py-8 text-sm text-muted-foreground">暂无工作流</div>
+        <div v-else class="divide-y">
+          <div v-for="item in workflows" :key="item.workflow_key" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_220px_340px] lg:items-center">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
+                <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
+                <Badge v-if="runningRunFor(item.workflow_key)" class="bg-blue-50 text-blue-700">运行中</Badge>
+              </div>
+              <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.workflow_key }}</div>
+              <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || '无描述' }}</p>
             </div>
-            <div class="mt-1 truncate text-xs text-muted-foreground">{{ item.workflow_key }}</div>
-            <div class="mt-2 text-xs text-muted-foreground">{{ profileName(item.profile_key) }}</div>
-          </button>
-        </CardContent>
-      </Card>
+            <div class="text-xs text-muted-foreground">
+              <div class="truncate">{{ profileName(item.profile_key) }}</div>
+              <div class="mt-1">{{ (workflowRuns[item.workflow_key] || []).length }} 次运行记录</div>
+            </div>
+            <div class="flex flex-wrap justify-start gap-2 lg:justify-end">
+              <Button
+                v-if="runningRunFor(item.workflow_key)"
+                variant="outline"
+                size="sm"
+                class="h-8 text-xs"
+                @click="openProgress(item, runningRunFor(item.workflow_key)?.run_id)"
+              >
+                运行中...
+              </Button>
+              <Button
+                v-else
+                variant="outline"
+                size="sm"
+                class="h-8 text-xs"
+                :disabled="hasAnyRunningRun || item.status !== 'active'"
+                @click="runWorkflow(item)"
+              >
+                运行
+              </Button>
+              <Button variant="outline" size="sm" class="h-8 text-xs" @click="openEdit(item)">编辑</Button>
+              <Button variant="outline" size="sm" class="h-8 text-xs" @click="openDetail(item)">详情</Button>
+              <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" @click="deleteWorkflow(item)">删除</Button>
+            </div>
+          </div>
+        </div>
+        <div v-if="testError" class="border-t px-4 py-3 text-xs text-destructive">{{ testError }}</div>
+      </CardContent>
+    </Card>
 
-      <div v-if="selectedWorkflow" class="space-y-4">
-        <Card>
-          <CardContent class="space-y-4 p-4">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div class="flex items-center gap-2">
-                  <h3 class="text-lg font-semibold text-foreground">{{ selectedWorkflow.name }}</h3>
-                  <Badge>{{ selectedWorkflow.workflow_key }}</Badge>
-                </div>
-                <p class="mt-1 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
+    <Dialog v-model:open="showDetail">
+      <DialogContent class="w-[96vw] max-w-[1200px] sm:max-w-[1200px]">
+        <DialogHeader>
+          <DialogTitle>{{ selectedWorkflow?.name || '工作流详情' }}</DialogTitle>
+        </DialogHeader>
+        <div v-if="selectedWorkflow" class="max-h-[78vh] space-y-5 overflow-auto pr-1">
+          <div class="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge>{{ selectedWorkflow.workflow_key }}</Badge>
+                <Badge variant="outline">{{ statusLabel(selectedWorkflow.status) }}</Badge>
               </div>
-              <div class="flex flex-col items-end gap-1">
-                <div class="flex gap-2">
-                  <Button variant="outline" :disabled="testing || hasRunningRun" @click="runTest">{{ testing ? '运行中…' : '测试运行' }}</Button>
-                  <Button variant="outline" @click="openEdit(selectedWorkflow)">编辑</Button>
-                  <Button variant="ghost" class="text-destructive" @click="deleteCurrent">删除</Button>
-                </div>
-                <div v-if="testError" class="text-xs text-destructive">{{ testError }}</div>
-              </div>
+              <p class="mt-2 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
             </div>
-            <div class="grid gap-3 md:grid-cols-2">
-              <div class="rounded-md border px-3 py-2">
-                <div class="text-xs text-muted-foreground">profile</div>
-                <div class="mt-1 truncate text-sm font-medium">{{ selectedProfileName }}</div>
-              </div>
-              <div class="rounded-md border px-3 py-2">
-                <div class="text-xs text-muted-foreground">产物工具</div>
-                <div class="mt-1 text-sm font-medium">{{ artifactToolName }}</div>
-              </div>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                v-if="runningRunFor(selectedWorkflow.workflow_key)"
+                variant="outline"
+                size="sm"
+                @click="openProgress(selectedWorkflow, runningRunFor(selectedWorkflow.workflow_key)?.run_id)"
+              >
+                运行中...
+              </Button>
+              <Button
+                v-else
+                variant="outline"
+                size="sm"
+                :disabled="hasAnyRunningRun || selectedWorkflow.status !== 'active'"
+                @click="runWorkflow(selectedWorkflow)"
+              >
+                运行
+              </Button>
+              <Button variant="outline" size="sm" @click="openEdit(selectedWorkflow)">编辑</Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        <div class="grid gap-4 lg:grid-cols-2">
-          <Card>
-            <CardContent class="p-4">
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="rounded-md border px-3 py-2">
+              <div class="text-xs text-muted-foreground">profile</div>
+              <div class="mt-1 truncate text-sm font-medium">{{ selectedProfileName }}</div>
+            </div>
+            <div class="rounded-md border px-3 py-2">
+              <div class="text-xs text-muted-foreground">产物工具</div>
+              <div class="mt-1 text-sm font-medium">{{ artifactToolName }}</div>
+            </div>
+          </div>
+
+          <div class="grid gap-4 lg:grid-cols-2">
+            <section class="rounded-md border p-4">
               <div class="mb-3 flex items-center justify-between">
                 <h3 class="text-sm font-semibold">流程节点</h3>
                 <Badge variant="outline">{{ manifestNodes.length }}</Badge>
@@ -546,11 +670,9 @@ async function deleteCurrent() {
                 </div>
                 <div v-if="!manifestNodes.length" class="text-sm text-muted-foreground">暂无节点</div>
               </div>
-            </CardContent>
-          </Card>
+            </section>
 
-          <Card>
-            <CardContent class="space-y-4 p-4">
+            <section class="space-y-4 rounded-md border p-4">
               <div>
                 <div class="mb-3 flex items-center justify-between">
                   <h3 class="text-sm font-semibold">流转关系</h3>
@@ -567,12 +689,10 @@ async function deleteCurrent() {
                 <h3 class="mb-3 text-sm font-semibold">数据结构</h3>
                 <pre class="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">{{ JSON.stringify(manifestSchemas, null, 2) }}</pre>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            </section>
+          </div>
 
-        <Card>
-          <CardContent class="space-y-4 p-4">
+          <section class="space-y-4 rounded-md border p-4">
             <div class="flex flex-wrap items-end gap-3">
               <div class="min-w-[220px] flex-1">
                 <label class="mb-1 block text-xs text-muted-foreground">检索</label>
@@ -619,76 +739,102 @@ async function deleteCurrent() {
                 </div>
               </template>
             </div>
-          </CardContent>
-        </Card>
+          </section>
 
-        <Card>
-          <CardContent class="space-y-4 p-4">
+          <section class="space-y-4 rounded-md border p-4">
             <div class="flex items-center justify-between">
-              <h3 class="text-sm font-semibold">运行与日志</h3>
-              <Button variant="outline" size="sm" @click="loadRuns">刷新</Button>
+              <h3 class="text-sm font-semibold">运行记录</h3>
+              <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRuns(selectedWorkflow.workflow_key)">{{ runsLoading ? '刷新中' : '刷新' }}</Button>
             </div>
             <div v-if="runsLoading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
             <div v-else-if="!runs.length" class="rounded-md border px-4 py-6 text-sm text-muted-foreground">暂无运行记录</div>
-            <div v-else class="grid gap-4 lg:grid-cols-[320px_1fr]">
-              <div class="space-y-1">
-                <button
-                  v-for="run in runs"
-                  :key="run.run_id"
-                  class="block w-full rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
-                  :class="selectedRunId === run.run_id ? 'border-foreground/30 bg-muted' : ''"
-                  @click="selectRun(run.run_id)"
-                >
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="truncate font-mono text-xs">{{ run.run_id }}</span>
-                    <Badge :variant="run.status === 'completed' ? 'secondary' : 'outline'" :class="runBadgeClass(run.status)">{{ runStatusLabel(run.status) }}</Badge>
-                  </div>
-                  <div class="mt-1 text-xs text-muted-foreground">{{ run.started_at }}</div>
-                </button>
-              </div>
-              <div class="rounded-md border bg-muted/20 p-3">
-                <div v-if="logsLoading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
-                <div v-else-if="!selectedRunId" class="py-4 text-center text-sm text-muted-foreground">选择左侧某次运行查看日志</div>
-                <div v-else class="space-y-4">
-                  <div>
-                    <div class="mb-2 flex items-center justify-between gap-2">
-                      <div class="text-xs font-semibold text-foreground">Agent 输出</div>
-                      <Badge variant="outline">{{ runEvents.length }}</Badge>
-                    </div>
-                    <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无 agent 输出</div>
-                    <div v-else class="max-h-80 space-y-2 overflow-auto rounded-md border bg-background p-3 text-xs">
-                      <div v-for="(event, idx) in runEvents" :key="idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                          <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
-                          <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                          <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
-                        </div>
-                        <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
-                      </div>
-                    </div>
-                  </div>
+            <div v-else class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              <button
+                v-for="run in runs"
+                :key="run.run_id"
+                class="rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
+                @click="openProgress(selectedWorkflow, run.run_id)"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate font-mono text-xs">{{ run.run_id }}</span>
+                  <Badge :variant="run.status === 'completed' ? 'secondary' : 'outline'" :class="runBadgeClass(run.status)">{{ runStatusLabel(run.status) }}</Badge>
+                </div>
+                <div class="mt-1 text-xs text-muted-foreground">{{ run.started_at }}</div>
+              </button>
+            </div>
+          </section>
+        </div>
+        <div v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</div>
+        <DialogFooter>
+          <Button variant="outline" @click="showDetail = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-                  <div>
-                    <div class="mb-2 flex items-center justify-between gap-2">
-                      <div class="text-xs font-semibold text-foreground">业务日志</div>
-                      <Badge variant="outline">{{ runLogs.length }}</Badge>
-                    </div>
-                    <div v-if="!runLogs.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无业务日志</div>
-                    <div v-else class="max-h-80 space-y-2 overflow-auto rounded-md border bg-background p-3 font-mono text-xs">
-                      <div v-for="(log, idx) in runLogs" :key="idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
-                        <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
-                        <span class="ml-1">{{ log.message }}</span>
-                      </div>
-                    </div>
+    <Dialog v-model:open="showProgress">
+      <DialogContent class="w-[96vw] max-w-[1100px] sm:max-w-[1100px]">
+        <DialogHeader>
+          <DialogTitle>{{ progressWorkflow?.name || '运行进度' }}</DialogTitle>
+        </DialogHeader>
+        <div class="max-h-[78vh] space-y-4 overflow-auto pr-1">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
+            <div class="min-w-0 space-y-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge v-if="progressWorkflow" variant="outline">{{ progressWorkflow.workflow_key }}</Badge>
+                <Badge v-if="progressRun" :variant="progressRun.status === 'completed' ? 'secondary' : 'outline'" :class="runBadgeClass(progressRun.status)">
+                  {{ runStatusLabel(progressRun.status) }}
+                </Badge>
+              </div>
+              <div class="truncate font-mono text-xs text-muted-foreground">{{ progressRunId || '暂无运行 ID' }}</div>
+              <div v-if="progressRun?.started_at" class="text-xs text-muted-foreground">{{ progressRun.started_at }}</div>
+            </div>
+            <Button variant="outline" size="sm" :disabled="logsLoading || runsLoading" @click="refreshProgress">
+              {{ logsLoading || runsLoading ? '刷新中' : '刷新' }}
+            </Button>
+          </div>
+
+          <div v-if="logsLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
+          <div v-else-if="!selectedRunId" class="py-8 text-center text-sm text-muted-foreground">暂无运行记录</div>
+          <div v-else class="grid gap-4 lg:grid-cols-2">
+            <section class="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-xs font-semibold text-foreground">Agent 输出</div>
+                <Badge variant="outline">{{ runEvents.length }}</Badge>
+              </div>
+              <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无 agent 输出</div>
+              <div v-else class="max-h-[28rem] space-y-2 overflow-auto rounded-md border bg-background p-3 text-xs">
+                <div v-for="(event, idx) in runEvents" :key="idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                    <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
+                    <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                    <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
                   </div>
+                  <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
                 </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+            </section>
+
+            <section class="space-y-3 rounded-md border bg-muted/20 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-xs font-semibold text-foreground">业务日志</div>
+                <Badge variant="outline">{{ runLogs.length }}</Badge>
+              </div>
+              <div v-if="!runLogs.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无业务日志</div>
+              <div v-else class="max-h-[28rem] space-y-2 overflow-auto rounded-md border bg-background p-3 font-mono text-xs">
+                <div v-for="(log, idx) in runLogs" :key="idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
+                  <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
+                  <span class="ml-1">{{ log.message }}</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showProgress = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog v-model:open="showEditor">
       <DialogContent class="w-[96vw] max-w-[1400px] sm:max-w-[1400px]">
