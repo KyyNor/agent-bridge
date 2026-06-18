@@ -193,7 +193,7 @@ async def _run_claude_agent_sdk(run_dir: Path, stdout: TextIO, stderr: TextIO, e
         cwd=run_dir,
         mcp_servers=run_dir / ".mcp.json",
         strict_mcp_config=True,
-        permission_mode="bypassPermissions",
+        permission_mode="auto",
         env=claude_settings_env(),
         setting_sources=[],
         system_prompt={

@@ -44,7 +44,7 @@ def test_analyze_uses_agent_sdk_options(tmp_path: Path, monkeypatch: pytest.Monk
     options = captured["options"]
     assert options["cwd"] == project_dir
     assert options["tools"] == {"type": "preset", "preset": "claude_code"}
-    assert options["permission_mode"] == "bypassPermissions"
+    assert options["permission_mode"] == "auto"
     assert options["env"] == {"ANTHROPIC_BASE_URL": "https://example.test"}
     assert options["setting_sources"] == ["user", "project"]
     assert options["skills"] == ["understand"]

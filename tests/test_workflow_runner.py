@@ -173,7 +173,7 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkey
     assert options["tools"] == {"type": "preset", "preset": "claude_code"}
     assert options["mcp_servers"] == result.run_dir / ".mcp.json"
     assert options["strict_mcp_config"] is True
-    assert options["permission_mode"] == "bypassPermissions"
+    assert options["permission_mode"] == "auto"
     assert "ANTHROPIC_BASE_URL" in options["env"]
     assert options["setting_sources"] == []
     assert options["include_partial_messages"] is True

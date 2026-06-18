@@ -238,7 +238,7 @@ async def _run_ua_analysis_agent(project_dir: Path, prompt: str, output_lines: l
     options = ClaudeAgentOptions(
         tools={"type": "preset", "preset": "claude_code"},
         cwd=project_dir,
-        permission_mode="bypassPermissions",
+        permission_mode="auto",
         env=claude_settings_env(),
         setting_sources=["user", "project"],
         skills=["understand"],
