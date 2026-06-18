@@ -218,6 +218,18 @@ class WorkflowsRepository:
                 """,
                 (run_id, expires_at, row["id"]),
             )
+            # Back-fill the run->task link. lease_run_id already points the task
+            # at this run; mirror task_key onto workflow_runs (created with
+            # task_key=None by the scheduler) so the run's task is queryable
+            # without a join. Same transaction as the lease -> atomic.
+            conn.execute(
+                """
+                UPDATE workflow_runs
+                SET task_key = ?
+                WHERE run_id = ?
+                """,
+                (row["task_key"], run_id),
+            )
             leased = conn.execute("SELECT * FROM workflow_tasks WHERE id = ?", (row["id"],)).fetchone()
             return _row_payload(leased)
 

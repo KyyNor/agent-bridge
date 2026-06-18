@@ -139,6 +139,45 @@ def test_workflow_task_lease_is_exclusive_and_expired_leases_are_reclaimed(wm_pa
     assert reclaimed["lease_run_id"] == "run_2"
 
 
+def test_workflow_task_lease_backfills_run_task_key(wm_paths):
+    """Leasing a task stamps task_key onto the run's workflow_runs row.
+
+    A run is created with task_key=None (scheduler / on-demand path); the
+    run->task link must become queryable the moment a task is leased, not only
+    the reverse task->run link that lease_run_id already provides.
+    """
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        status="active",
+        created_by="root",
+    )
+    store.upsert_workflow_tasks("page-report", [{"task_key": "page:a", "payload": {}}])
+    store.create_workflow_run(
+        run_id="run_1",
+        workflow_key="page-report",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir="",
+    )
+    assert store.get_workflow_run("run_1")["task_key"] is None
+
+    leased = store.lease_workflow_task("page-report", run_id="run_1", lease_seconds=7200)
+    assert leased["task_key"] == "page:a"
+
+    assert store.get_workflow_run("run_1")["task_key"] == "page:a"
+
+
 def test_workflow_task_upsert_does_not_release_active_lease(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 
