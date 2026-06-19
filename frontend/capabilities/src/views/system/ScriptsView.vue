@@ -6,8 +6,8 @@ import type { ManagedScript, ProjectProfile, ScriptRun, WorkflowDefinition } fro
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
+import CodeMirror from '../../components/CodeMirror.vue'
 import { Input } from '../../components/ui/input'
-import { Textarea } from '../../components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -455,7 +455,7 @@ function errorMessage(e: unknown) {
             </div>
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">代码（Python，stdout 输出 JSON）</label>
-              <Textarea v-model="form.code" class="min-h-[58vh] font-mono text-xs leading-5" spellcheck="false" placeholder="import json&#10;print(json.dumps({'ok': True}))" />
+              <CodeMirror v-model="form.code" />
             </div>
           </template>
         </CardContent>
