@@ -42,6 +42,10 @@ defineProps<{ name: string }>()
       <path d="M8 10h5" />
       <path d="M9 15l1.5 1.5L14 13" />
     </template>
+    <template v-else-if="name === 'scripts'">
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" x2="20" y1="19" y2="19" />
+    </template>
     <template v-else-if="name === 'workflow'">
       <rect x="3" y="3" width="7" height="5" rx="1" />
       <rect x="14" y="3" width="7" height="5" rx="1" />

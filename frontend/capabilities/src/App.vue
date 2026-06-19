@@ -61,7 +61,7 @@ const navGroups: NavGroup[] = [
     items: [
       { key: 'system-config', label: '系统配置', description: '配置调度计划、仓库分类和知识后端' },
       { key: 'skills', label: 'Skill 管理', description: '维护内置技能提示词' },
-      { key: 'scripts', label: '脚本运行时', description: '管理受控脚本并在线测试运行' },
+      { key: 'scripts', label: '脚本管理', description: '管理受控脚本并在线测试运行' },
     ],
   },
 ]

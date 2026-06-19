@@ -278,7 +278,7 @@ function errorMessage(e: unknown) {
   <div class="space-y-5">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h2 class="text-xl font-semibold text-foreground">脚本运行时</h2>
+        <h2 class="text-xl font-semibold text-foreground">脚本管理</h2>
         <p class="text-sm text-muted-foreground">管理受控 Python 脚本，在线测试与查看运行记录</p>
       </div>
       <Button @click="openCreate">
