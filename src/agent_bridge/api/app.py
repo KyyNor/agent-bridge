@@ -140,6 +140,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     from agent_bridge.api.routes.governance import create_governance_routes
     app.include_router(create_governance_routes(service, actor, call_safely, ensure_capability_schema))
 
+    from agent_bridge.api.routes.agent_runs import create_agent_runs_routes
+    app.include_router(create_agent_runs_routes(service, actor, call_safely, ensure_capability_schema))
+
     from agent_bridge.api.routes.builtins import create_builtin_routes
     app.include_router(create_builtin_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema))
 

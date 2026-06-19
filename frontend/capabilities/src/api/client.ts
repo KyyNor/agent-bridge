@@ -29,6 +29,7 @@ import type {
   SkillPrompt,
   ToolCallLog,
   ToolCallStats,
+  AgentRun,
   UAStatus,
   UASummary,
   UAAvailability,
@@ -200,6 +201,14 @@ export const api = {
     const qs = new URLSearchParams(params)
     return get<ToolCallStats>(`/tool-call-stats?${qs}`)
   },
+
+  // Agent runs
+  listAgentRuns: (params: Record<string, string | number | boolean> = {}) => {
+    const qs = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => qs.set(k, String(v)))
+    return get<AgentRun[]>(`/agent-runs?${qs}`)
+  },
+  getAgentRun: (runKey: string) => get<AgentRun>(`/agent-runs/${runKey}`),
 
   // Catalog
   catalog: (profileKey?: string, query?: string) => {

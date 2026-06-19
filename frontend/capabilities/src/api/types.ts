@@ -305,6 +305,44 @@ export interface ToolCallStats {
   items: Record<string, unknown>[]
 }
 
+export interface AgentRunEvent {
+  created_at: string
+  agent_name: string
+  source: string
+  kind: string
+  status?: string
+  message?: string
+  tool_name?: string
+  tool_use_id?: string
+  session_id?: string
+  total_cost_usd?: number
+  num_turns?: number
+  [key: string]: unknown
+}
+
+export interface AgentRun {
+  id: number
+  run_key: string
+  agent_name: string
+  profile_key: string | null
+  workflow_key: string | null
+  workflow_run_id: string | null
+  session_id: string | null
+  cwd: string | null
+  model: string | null
+  ok: boolean
+  error: string | null
+  duration_ms: number | null
+  cost_usd: number | null
+  num_turns: number | null
+  created_at: string
+  // present on detail (get) only
+  prompt?: string
+  result?: unknown
+  output_schema?: Record<string, unknown> | null
+  events?: AgentRunEvent[]
+}
+
 export interface CodeRepository {
   repo_key: string
   name: string

@@ -15,6 +15,7 @@ const SkillManagementView = defineAsyncComponent(() => import('./views/system/Sk
 const ScriptsView = defineAsyncComponent(() => import('./views/system/ScriptsView.vue'))
 const LogsView = defineAsyncComponent(() => import('./views/monitoring/LogsView.vue'))
 const StatsView = defineAsyncComponent(() => import('./views/monitoring/StatsView.vue'))
+const AgentRunsView = defineAsyncComponent(() => import('./views/monitoring/AgentRunsView.vue'))
 
 const hash = ref(window.location.hash.slice(1) || 'dashboard')
 window.addEventListener('hashchange', () => {
@@ -56,10 +57,11 @@ const navGroups: NavGroup[] = [
   },
   {
     label: '调用观测',
-    items: [
-      { key: 'logs', label: '调用日志', description: '查看和分析工具调用记录' },
-      { key: 'stats', label: '调用统计', description: '查看工具调用统计和趋势' },
-    ],
+      items: [
+        { key: 'logs', label: '调用日志', description: '查看和分析工具调用记录' },
+        { key: 'agent-runs', label: 'Agent 运行', description: '查看 Agent 运行记录、Prompt 和事件流' },
+        { key: 'stats', label: '调用统计', description: '查看工具调用统计和趋势' },
+      ],
   },
   {
     label: '系统配置',
@@ -96,6 +98,7 @@ const view = computed(() => activeNavKey.value)
         <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
         <WorkflowView v-else-if="view === 'workflow'" />
         <LogsView v-else-if="view === 'logs'" />
+        <AgentRunsView v-else-if="view === 'agent-runs'" />
         <StatsView v-else-if="view === 'stats'" />
       </div>
     </div>
