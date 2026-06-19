@@ -9,6 +9,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 from typing import Any, Callable
 
+from agent_bridge.agent_service import AgentService
 from agent_bridge.knowledge.archive import ArchiveStorage
 from agent_bridge.capabilities.governance import CapabilityGovernanceService
 from agent_bridge.capabilities.service import CapabilityService
@@ -69,6 +70,7 @@ class AgentBridgeService:
         self.workflows = WorkflowService(store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
+        self.agents = AgentService(paths=paths, store=store, admins=admins, governance=self.governance)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,

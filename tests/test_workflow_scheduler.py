@@ -239,7 +239,7 @@ def test_run_workflow_now_runs_once_and_creates_run_row(wm_paths, tmp_path):
 
     result = scheduler.run_workflow_now("A")
     assert result["status"] == "started"
-    assert result["run_id"].startswith("run_")
+    assert result["run_id"].startswith("A_")  # {workflow_key}_{uuid7hex}
 
     _wait_runs_done(scheduler)
     run = svc.store.get_workflow_run(result["run_id"])

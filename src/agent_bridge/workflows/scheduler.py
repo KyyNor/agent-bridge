@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import uuid
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from agent_bridge.core.domain import ConflictError, NotFound
+from agent_bridge.core.ids import new_run_id
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.workflows.result_parser import parse_workflow_result
 from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunner, WorkflowRunSpec
@@ -227,7 +227,7 @@ class WorkflowScheduler:
             workflow = self._store.get_workflow_definition(workflow_key)
             if workflow is None:
                 raise NotFound("workflow not found")
-            run_id = f"run_{uuid.uuid4().hex}"
+            run_id = new_run_id(workflow_key)
             base_dir = self._base_run_dir or Path("workflow-runs")
             self._store.create_workflow_run(
                 run_id=run_id,
@@ -252,7 +252,7 @@ class WorkflowScheduler:
 
         base_dir = self._base_run_dir or Path("workflow-runs")
         if run_id is None:
-            run_id = f"run_{uuid.uuid4().hex}"
+            run_id = new_run_id(workflow_key)
             self._store.create_workflow_run(
                 run_id=run_id,
                 workflow_key=workflow_key,

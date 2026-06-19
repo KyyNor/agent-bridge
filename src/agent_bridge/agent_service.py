@@ -1,0 +1,256 @@
+"""AgentService: a general-purpose Claude Agent SDK runner.
+
+Wraps ``claude_agent_sdk.query`` with Agent Bridge conventions: an isolated
+per-run working directory, optional profile-driven MCP access and CLAUDE.md
+guidance, optional workflow context, and optional JSON-Schema structured
+output. Results are returned as a uniform :class:`AgentRunResult` envelope —
+failures are reported via ``ok=False`` and never raised.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import shutil
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
+from claude_agent_sdk.types import ResultMessage
+
+from agent_bridge.agent_support import build_agent_bridge_server_config, write_run_mcp_json
+from agent_bridge.capabilities.profile_docs import install_profile_to_cwd
+from agent_bridge.claude_agent import claude_settings_env
+from agent_bridge.core.ids import new_run_id
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MCP_URL = "http://127.0.0.1:8765/mcp"
+DEFAULT_TIMEOUT_SECONDS = 600.0
+
+
+@dataclass
+class AgentRunResult:
+    """Uniform result envelope for :meth:`AgentService.run`.
+
+    ``ok`` distinguishes success from failure; on success ``result`` is either
+    a schema-conforming object (when ``output_schema`` was given) or the final
+    assistant text. Failures populate ``error`` and never raise.
+    """
+
+    ok: bool
+    result: Any | None = None
+    error: str | None = None
+    run_dir: str = ""
+    session_id: str | None = None
+    duration_ms: int = 0
+    cost_usd: float | None = None
+    num_turns: int | None = None
+
+
+class AgentService:
+    """Runs Claude Agent SDK queries with Agent Bridge profile/workflow wiring."""
+
+    def __init__(
+        self,
+        *,
+        paths: Any,
+        store: Any,
+        admins: set[str],
+        governance: Any,
+        mcp_url: str | None = None,
+    ) -> None:
+        self.paths = paths
+        self.store = store
+        self.admins = admins
+        self.governance = governance
+        self.mcp_url = mcp_url or DEFAULT_MCP_URL
+        self.base_run_dir: Path = paths.run_dir / "agent-runs"
+
+    async def run(
+        self,
+        *,
+        prompt: str,
+        agent_name: str,
+        files: list[Path | str] | None = None,
+        profile: str | None = None,
+        workflow_key: str | None = None,
+        run_id: str | None = None,
+        output_schema: dict[str, Any] | None = None,
+        system_prompt_append: str | None = None,
+        actor: str | None = None,
+        model: str | None = None,
+        max_turns: int | None = None,
+        max_budget_usd: float | None = None,
+        timeout: float | None = None,
+    ) -> AgentRunResult:
+        """Run a one-shot Claude agent query and return a uniform result.
+
+        The run executes in an isolated working directory under
+        ``run/agent-runs/{agent_name}_{uuid7}/``. When ``profile`` is set the
+        profile's CLAUDE.md guidance and governed MCP tools are installed into
+        that directory; otherwise the run has no MCP access. Failures (query
+        errors, timeouts, profile-not-found, etc.) return ``ok=False`` rather
+        than raising.
+        """
+        timeout_seconds = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
+        work_dir = self._make_work_dir(agent_name)
+        started = time.monotonic()
+
+        try:
+            self._stage_files(work_dir, files)
+            setting_sources: list[str] = []
+            if profile:
+                rendered = self.governance.render_profile_markdown(
+                    actor or self._default_actor(), profile
+                )
+                install_profile_to_cwd(work_dir, profile, rendered["markdown"])
+                setting_sources = ["project"]
+
+            mcp_config = build_agent_bridge_server_config(
+                self.mcp_url, profile, workflow_key=workflow_key, run_id=run_id
+            )
+            write_run_mcp_json(work_dir / ".mcp.json", mcp_config)
+
+            options = ClaudeAgentOptions(
+                tools={"type": "preset", "preset": "claude_code"},
+                cwd=str(work_dir),
+                mcp_servers=work_dir / ".mcp.json",
+                strict_mcp_config=True,
+                permission_mode="auto",
+                env=claude_settings_env(),
+                setting_sources=setting_sources,
+                system_prompt={
+                    "type": "preset",
+                    "preset": "claude_code",
+                    "append": self._system_prompt_append(output_schema, system_prompt_append),
+                },
+                output_format=(
+                    {"type": "json_schema", "schema": output_schema}
+                    if output_schema
+                    else None
+                ),
+                include_partial_messages=False,
+                model=model,
+                max_turns=max_turns,
+                max_budget_usd=max_budget_usd,
+            )
+            result_msg = await asyncio.wait_for(
+                self._drain_query(prompt, options), timeout=timeout_seconds
+            )
+        except TimeoutError:
+            return self._fail(work_dir, started, f"agent timed out after {timeout_seconds}s")
+        except Exception as exc:
+            logger.exception("AgentService run failed agent=%s", agent_name)
+            return self._fail(work_dir, started, f"{type(exc).__name__}: {exc}")
+
+        return self._finish(work_dir, started, result_msg, output_schema)
+
+    async def _drain_query(self, prompt: str, options: Any) -> ResultMessage | None:
+        last: ResultMessage | None = None
+        async for message in claude_query(prompt=prompt, options=options):
+            if isinstance(message, ResultMessage):
+                last = message
+        return last
+
+    def _finish(
+        self,
+        work_dir: Path,
+        started: float,
+        result_msg: ResultMessage | None,
+        output_schema: dict[str, Any] | None,
+    ) -> AgentRunResult:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        common = {
+            "run_dir": str(work_dir),
+            "duration_ms": duration_ms,
+        }
+        if result_msg is None:
+            return AgentRunResult(
+                ok=False, error="agent produced no result message", **common
+            )
+        meta = {
+            **common,
+            "session_id": result_msg.session_id,
+            "cost_usd": result_msg.total_cost_usd,
+            "num_turns": result_msg.num_turns,
+        }
+        if result_msg.is_error:
+            return AgentRunResult(
+                ok=False, error=result_msg.result or result_msg.subtype, **meta
+            )
+        return AgentRunResult(ok=True, result=_extract_result(result_msg, output_schema), **meta)
+
+    def _make_work_dir(self, agent_name: str) -> Path:
+        work_dir = self.base_run_dir / new_run_id(agent_name)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        return work_dir
+
+    def _stage_files(self, work_dir: Path, files: list[Path | str] | None) -> None:
+        if not files:
+            return
+        for item in files:
+            src = Path(item)
+            if not src.exists():
+                continue
+            dst = work_dir / src.name
+            if src.is_dir():
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+
+    def _system_prompt_append(
+        self, output_schema: dict[str, Any] | None, extra: str | None
+    ) -> str:
+        parts: list[str] = []
+        if extra:
+            parts.append(extra)
+        if output_schema:
+            parts.append(
+                "Produce your final answer as JSON matching this JSON Schema exactly:\n"
+                + json.dumps(output_schema, ensure_ascii=False)
+            )
+        return "\n\n".join(parts)
+
+    def _default_actor(self) -> str:
+        for admin in sorted(self.admins):
+            return admin
+        return "root"
+
+    def _fail(self, work_dir: Path, started: float, error: str) -> AgentRunResult:
+        return AgentRunResult(
+            ok=False,
+            error=error,
+            run_dir=str(work_dir),
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+
+
+def _extract_result(result_msg: ResultMessage, output_schema: dict[str, Any] | None) -> Any:
+    """Extract the final value from a ResultMessage.
+
+    Prefers native ``structured_output``; falls back to parsing JSON out of the
+    result text when a schema was requested; otherwise returns the result text.
+    """
+    if not output_schema:
+        return result_msg.result or ""
+    if result_msg.structured_output is not None:
+        return result_msg.structured_output
+    parsed = _extract_json(result_msg.result or "")
+    return parsed if parsed is not None else (result_msg.result or "")
+
+
+def _extract_json(text: str) -> Any:
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None

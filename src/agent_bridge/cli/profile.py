@@ -10,8 +10,10 @@ profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
 pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=True)
 profile_app.add_typer(pins_app, name="pins")
 
-_POINTER_START = "<!-- agent-bridge:profile-pointer start -->"
-_POINTER_END = "<!-- agent-bridge:profile-pointer end -->"
+from agent_bridge.capabilities.profile_docs import (  # noqa: E402
+    pointer_block as _pointer_block,
+    replace_agent_bridge_block as _replace_agent_bridge_block,
+)
 
 
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
@@ -33,36 +35,6 @@ def _pointer_paths(scope: str) -> tuple[Path, Path]:
     if scope == "user":
         return Path.home() / ".claude" / "CLAUDE.md", Path.home() / ".codex" / "AGENTS.md"
     raise ValueError("scope 必须是 project 或 user")
-
-
-def _replace_agent_bridge_block(path: Path, block: str) -> None:
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    lines = existing.splitlines(keepends=True)
-    kept_lines: list[str] = []
-    in_agent_bridge_block = False
-    for line in lines:
-        marker = line.strip()
-        if marker == _POINTER_START:
-            in_agent_bridge_block = True
-            continue
-        if in_agent_bridge_block:
-            if marker == _POINTER_END:
-                in_agent_bridge_block = False
-            continue
-        kept_lines.append(line)
-
-    prefix = "".join(kept_lines)
-    if prefix and not prefix.endswith("\n"):
-        prefix += "\n"
-    if prefix and not prefix.endswith("\n\n"):
-        prefix += "\n"
-    next_text = f"{prefix}{block.rstrip()}\n"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(next_text, encoding="utf-8")
-
-
-def _pointer_block(content: str) -> str:
-    return f"{_POINTER_START}\n{content}\n{_POINTER_END}"
 
 
 def _write_profile_doc(scope: str, profile: str, markdown: str) -> Path:

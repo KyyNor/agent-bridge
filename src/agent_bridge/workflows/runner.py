@@ -10,6 +10,7 @@ from typing import Any, Protocol, TextIO
 
 from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
 
+from agent_bridge.agent_support import build_agent_bridge_server_config, write_run_mcp_json
 from agent_bridge.claude_agent import claude_settings_env
 
 
@@ -52,21 +53,13 @@ def prepare_run_directory(base_dir: Path, spec: WorkflowRunSpec) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "workflow.js").write_text(spec.workflow_js, encoding="utf-8")
     (run_dir / "workflow-system-prompt.md").write_text(WORKFLOW_SYSTEM_PROMPT, encoding="utf-8")
-    mcp_config = {
-        "mcpServers": {
-            "agent-bridge": {
-                "type": "http",
-                "url": spec.mcp_url,
-                "headers": {
-                    "X-Agent-Bridge-MetaMCP-Profile": spec.profile_key,
-                    "X-Agent-Bridge-Workflow": "true",
-                    "X-Agent-Bridge-Workflow-Key": spec.workflow_key,
-                    "X-Agent-Bridge-Workflow-Run-Id": spec.run_id,
-                },
-            }
-        }
-    }
-    (run_dir / ".mcp.json").write_text(json.dumps(mcp_config, ensure_ascii=False, indent=2), encoding="utf-8")
+    mcp_config = build_agent_bridge_server_config(
+        spec.mcp_url,
+        spec.profile_key,
+        workflow_key=spec.workflow_key,
+        run_id=spec.run_id,
+    )
+    write_run_mcp_json(run_dir / ".mcp.json", mcp_config)
     return run_dir
 
 
