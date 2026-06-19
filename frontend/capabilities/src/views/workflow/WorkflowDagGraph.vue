@@ -90,14 +90,14 @@ const graphElements = computed(() => {
     selectable: false,
     style: {
       strokeWidth: 1.6,
-      stroke: edge.when ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
+      stroke: edge.when ? 'var(--primary)' : 'var(--muted-foreground)',
     },
     labelBgStyle: {
-      fill: 'hsl(var(--background))',
+      fill: 'var(--background)',
       fillOpacity: 0.96,
     },
     labelStyle: {
-      fill: 'hsl(var(--muted-foreground))',
+      fill: 'var(--muted-foreground)',
       fontSize: 11,
     },
   }))
@@ -166,7 +166,7 @@ function miniMapColor(node: Node<WorkflowNodeData>) {
           class="workflow-dag-flow"
           @node-click="onNodeClick"
         >
-          <Background pattern-color="hsl(var(--border))" :gap="18" />
+          <Background pattern-color="var(--border)" :gap="18" />
           <MiniMap pannable zoomable :node-color="miniMapColor" />
           <Controls />
 
@@ -222,12 +222,12 @@ function miniMapColor(node: Node<WorkflowNodeData>) {
 <style scoped>
 .workflow-dag-flow {
   --vf-node-bg: transparent;
-  --vf-node-text: hsl(var(--foreground));
-  --vf-connection-path: hsl(var(--primary));
-  --vf-controls-button-bg: hsl(var(--background));
-  --vf-controls-button-color: hsl(var(--foreground));
-  --vf-controls-button-border-color: hsl(var(--border));
-  --vf-minimap-bg-color: hsl(var(--background));
+  --vf-node-text: var(--foreground);
+  --vf-connection-path: var(--primary);
+  --vf-controls-button-bg: var(--background);
+  --vf-controls-button-color: var(--foreground);
+  --vf-controls-button-border-color: var(--border);
+  --vf-minimap-bg-color: var(--background);
 }
 
 .workflow-dag-node {
