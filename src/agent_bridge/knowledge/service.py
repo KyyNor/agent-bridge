@@ -63,14 +63,14 @@ class AgentBridgeService:
         self.registry: BackendRegistry | None = None
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
-        self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins)
+        self.agents = AgentService(paths=paths, store=store, admins=admins, governance=self.governance)
+        self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins, agent_service=self.agents)
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
         self.workflows = WorkflowService(store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
-        self.agents = AgentService(paths=paths, store=store, admins=admins, governance=self.governance)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,

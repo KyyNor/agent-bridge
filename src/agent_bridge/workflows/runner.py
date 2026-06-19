@@ -215,6 +215,7 @@ class ClaudeWorkflowRunner:
                     prompt=WORKFLOW_PROMPT,
                     agent_name="workflow",
                     cwd=run_dir,
+                    mcp_servers=run_dir / ".mcp.json",
                     system_prompt_append=WORKFLOW_SYSTEM_PROMPT,
                     on_message=on_message,
                     stderr=write_stderr,

@@ -15,10 +15,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
-
-from agent_bridge.claude_agent import claude_settings_env
-
 logger = logging.getLogger(__name__)
 
 UA_DIR = ".understand-anything"
@@ -234,29 +230,11 @@ def _sdk_message_log_record(message: Any) -> dict[str, Any]:
     return record
 
 
-async def _run_ua_analysis_agent(project_dir: Path, prompt: str, output_lines: list[str]) -> None:
-    options = ClaudeAgentOptions(
-        tools={"type": "preset", "preset": "claude_code"},
-        cwd=project_dir,
-        permission_mode="auto",
-        env=claude_settings_env(),
-        setting_sources=["user", "project"],
-        skills=["understand"],
-        system_prompt={
-            "type": "preset",
-            "preset": "claude_code",
-            "append": UA_SYSTEM_PROMPT,
-        },
-        include_partial_messages=True,
-    )
-    async for message in claude_query(prompt=prompt, options=options):
-        output_lines.append(json.dumps(_sdk_message_log_record(message), ensure_ascii=False))
-
-
 class UnderstandAnythingClient:
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, *, agent_service: Any = None) -> None:
         self._root = root
+        self._agent_service = agent_service
         self.pool = DashboardPool(max_sessions=20, idle_timeout=3600)
 
     def _ua_repo_dir(self) -> Path:
@@ -366,22 +344,36 @@ class UnderstandAnythingClient:
             if not avail.ua_skill_available:
                 return UAAnalyzeResult(success=False, error="自动安装 UA 技能后仍未检测到")
 
-        # Step 3: Run analysis
+        # Step 3: Run analysis (delegates the SDK loop to AgentService)
         prompt = ANALYZE_PROMPT.format(project_dir=str(project_dir))
         started = time.perf_counter()
         output_lines: list[str] = []
-        try:
-            asyncio.run(asyncio.wait_for(_run_ua_analysis_agent(project_dir, prompt, output_lines), timeout=timeout))
-        except TimeoutError:
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return UAAnalyzeResult(success=False, error=f"分析超时（{timeout}s）", duration_ms=duration_ms)
-        except Exception as exc:
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            output = "\n".join(output_lines)[-4000:]
-            return UAAnalyzeResult(success=False, error=f"{type(exc).__name__}: {exc}", output=output, duration_ms=duration_ms)
+
+        def on_message(message: Any) -> None:
+            output_lines.append(json.dumps(_sdk_message_log_record(message), ensure_ascii=False))
+
+        res = asyncio.run(
+            self._agent_service.run(
+                prompt=prompt,
+                agent_name="understand-anything",
+                cwd=project_dir,
+                system_prompt_append=UA_SYSTEM_PROMPT,
+                skills=["understand"],
+                setting_sources=["user", "project"],
+                on_message=on_message,
+                include_partial_messages=True,
+                timeout=float(timeout),
+            )
+        )
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         output = "\n".join(output_lines)[-4000:]
+
+        if not res.ok:
+            error = res.error or "unknown error"
+            if "timed out" in error:
+                error = f"分析超时（{timeout}s）"
+            return UAAnalyzeResult(success=False, error=error, output=output, duration_ms=duration_ms)
 
         graph_path = project_dir / UA_DIR / GRAPH_FILE
         if not graph_path.is_file():

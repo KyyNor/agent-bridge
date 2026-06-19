@@ -34,13 +34,14 @@ class CodeGraphService:
         codegraph_client: CodeGraphClient | None = None,
         mcp_client: CodeGraphMcpClient | None = None,
         ua_client: UnderstandAnythingClient | None = None,
+        agent_service: Any = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.client = codegraph_client or CodeGraphClient()
         self.mcp_client = mcp_client or CodeGraphMcpClient()
-        self.ua_client = ua_client or UnderstandAnythingClient(root=paths.root)
+        self.ua_client = ua_client or UnderstandAnythingClient(root=paths.root, agent_service=agent_service)
 
     def upsert_repository(
         self,

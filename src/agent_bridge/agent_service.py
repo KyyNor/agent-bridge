@@ -85,6 +85,7 @@ class AgentService:
         on_message: Callable[[Any], None] | None = None,
         skills: list[str] | None = None,
         setting_sources: list[str] | None = None,
+        mcp_servers: Path | str | dict | None = None,
         stderr: Callable[[str], None] | None = None,
         include_partial_messages: bool = False,
         actor: str | None = None,
@@ -103,9 +104,11 @@ class AgentService:
           CLAUDE.md guidance and governed ``.mcp.json`` are installed.
 
         * **In-place** (``cwd`` given): the caller owns the directory (including
-          any ``.mcp.json`` / CLAUDE.md / staged files); this method just runs
-          the SDK loop against it. Used by the workflow runner and other
-          callers that prepare their own run directory.
+          any CLAUDE.md / staged files); this method just runs the SDK loop
+          against it. Used by the workflow runner and other callers that
+          prepare their own run directory. MCP is opt-in via ``mcp_servers``
+          (defaults to none) so analyzing a repo with its own ``.mcp.json``
+          does not accidentally wire up those servers.
 
         ``on_message`` (if given) is invoked with every streamed SDK message
         before the final result is captured, enabling progress/event logging.
@@ -120,7 +123,7 @@ class AgentService:
             if cwd is not None:
                 work_dir = Path(cwd)
                 effective_setting_sources = setting_sources or []
-                effective_mcp_servers: Any = self._mcp_servers_for(work_dir)
+                effective_mcp_servers: Any = mcp_servers if mcp_servers is not None else {}
             else:
                 work_dir = self._make_work_dir(agent_name or "agent")
                 self._stage_files(work_dir, files)
@@ -136,7 +139,9 @@ class AgentService:
                 effective_setting_sources = setting_sources or (
                     ["project"] if profile else []
                 )
-                effective_mcp_servers = work_dir / ".mcp.json"
+                effective_mcp_servers = (
+                    mcp_servers if mcp_servers is not None else work_dir / ".mcp.json"
+                )
 
             options = ClaudeAgentOptions(
                 tools={"type": "preset", "preset": "claude_code"},
@@ -174,12 +179,6 @@ class AgentService:
             return self._fail(work_dir, started, f"{type(exc).__name__}: {exc}")
 
         return self._finish(work_dir, started, result_msg, output_schema)
-
-    @staticmethod
-    def _mcp_servers_for(work_dir: Path) -> Any:
-        """In-place mode: point at a caller-written .mcp.json if present, else no MCP."""
-        mcp_path = work_dir / ".mcp.json"
-        return mcp_path if mcp_path.exists() else {}
 
     async def _drain_query(
         self,
