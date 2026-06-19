@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { XIcon } from '@lucide/vue';
+import { X } from 'lucide-vue-next';
 
 import type { DialogContentEmits, DialogContentProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
@@ -44,7 +44,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
         as-child
       >
         <Button variant="ghost" class="absolute top-2 right-2" size="icon-sm">
-          <XIcon />
+          <X />
           <span class="sr-only">Close</span>
         </Button>
       </DialogClose>

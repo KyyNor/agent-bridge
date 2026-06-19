@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Search, Plus, RotateCw, Maximize2, Minimize2, Loader2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
@@ -440,7 +441,7 @@ watch(showDetail, (open) => {
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[360px]">
-        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         <Input v-model="searchQuery" placeholder="搜索仓库名称、标识或地址..." class="pl-8" />
       </div>
       <Select v-model="filterCategory">
@@ -453,11 +454,11 @@ watch(showDetail, (open) => {
         </SelectContent>
       </Select>
       <Button @click="openRepoForm('add')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <Plus :size="14" />
         添加仓库
       </Button>
       <Button variant="outline" @click="loadRepos()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        <RotateCw :size="14" class="mr-1.5" />
         刷新
       </Button>
     </div>
@@ -815,15 +816,15 @@ watch(showDetail, (open) => {
               <div v-if="uaStatus?.dashboard_running && dashboardSrc" class="flex flex-col rounded-lg border border-border overflow-hidden" :class="{ '!border-0': dashboardMaximized }" style="min-height: 60vh">
                 <div class="flex items-center justify-between gap-2 px-3 py-1.5 bg-secondary/50 border-b border-border shrink-0">
                   <span class="text-xs font-medium text-muted-foreground">Dashboard</span>
-                  <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="dashboardMaximized ? '还原' : '最大化'" @click="dashboardMaximized = !dashboardMaximized">
-                    <svg v-if="!dashboardMaximized" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-                    <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
+                   <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="dashboardMaximized ? '还原' : '最大化'" @click="dashboardMaximized = !dashboardMaximized">
+                    <Maximize2 v-if="!dashboardMaximized" :size="14" />
+                    <Minimize2 v-else :size="14" />
                   </Button>
                 </div>
                 <iframe v-if="!dashboardMaximized" :src="dashboardSrc" class="flex-1 border-0 w-full" style="min-height: 60vh" />
               </div>
               <div v-else-if="uaDashboardStarting" class="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                <svg class="animate-spin size-4" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                <Loader2 class="animate-spin size-4" />
                 启动 Dashboard...
               </div>
 
@@ -904,7 +905,7 @@ watch(showDetail, (open) => {
           <div class="flex items-center justify-between gap-2 px-4 py-2 bg-secondary/50 border-b border-border shrink-0">
             <span class="text-sm font-medium text-muted-foreground">Dashboard</span>
             <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="还原" @click="dashboardMaximized = false">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 8 4 4 8 4"/><polyline points="20 16 20 20 16 20"/><line x1="4" y1="4" x2="10" y2="10"/><line x1="20" y1="20" x2="14" y2="14"/></svg>
+              <Minimize2 :size="14" />
             </Button>
           </div>
           <iframe :src="dashboardSrc" class="flex-1 border-0 w-full pointer-events-auto" />

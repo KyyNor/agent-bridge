@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckIcon } from '@lucide/vue';
+import { Check } from 'lucide-vue-next';
 
 import type { SelectItemProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
@@ -33,7 +33,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     <span class="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
       <SelectItemIndicator>
         <slot name="indicator-icon">
-          <CheckIcon class="pointer-events-none" />
+          <Check class="pointer-events-none" />
         </slot>
       </SelectItemIndicator>
     </span>

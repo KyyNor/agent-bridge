@@ -65,5 +65,8 @@ defineProps<{ name: string }>()
       <path d="M13 17V5" />
       <path d="M8 17v-3" />
     </template>
+    <template v-else-if="name === 'agent-runs'">
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </template>
   </svg>
 </template>

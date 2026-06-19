@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Plus, RotateCw, Upload, File, Folder } from 'lucide-vue-next'
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api/client'
 import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent } from '../../api/types'
@@ -412,11 +413,11 @@ async function savePlaneProfiles() {
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
       <Button @click="showCreate = true">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <Plus :size="14" />
         创建文档知识
       </Button>
       <Button variant="outline" @click="loadKbs()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        <RotateCw :size="14" class="mr-1.5" />
         刷新
       </Button>
     </div>
@@ -450,7 +451,7 @@ async function savePlaneProfiles() {
               <td class="px-4 py-3">
                 <div class="flex gap-2">
                   <Button size="sm" @click="openUploadDialog(k)" class="h-8 text-xs">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <Upload :size="12" />
                     上传
                   </Button>
                   <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
@@ -707,17 +708,17 @@ async function savePlaneProfiles() {
             @dragleave="handleUploadDragLeave"
             @drop="handleUploadDrop"
           >
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" class="mx-auto mb-3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <Upload :size="40" stroke="#9ca3af" stroke-width="1.5" class="mx-auto mb-3" />
             <div class="text-sm font-medium mb-1">拖拽文件或文件夹到此处</div>
             <div class="text-xs text-muted-foreground mb-4">支持 PDF、Word、Excel、PPT、TXT、Markdown — 上传后将由定时任务自动同步</div>
             <div class="flex items-center justify-center gap-3">
               <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium cursor-pointer hover:bg-primary/80">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <File :size="14" />
                 选择文件
                 <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md" @change="onUploadFilesSelected" />
               </label>
               <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm border border-border bg-background text-sm font-medium cursor-pointer hover:bg-muted">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <Folder :size="14" />
                 选择文件夹
                 <input type="file" multiple webkitdirectory class="hidden" @change="onUploadFilesSelected" />
               </label>
@@ -734,7 +735,7 @@ async function savePlaneProfiles() {
               <div v-for="(f, i) in uploadFiles" :key="i"
                 class="flex items-center gap-2.5 px-3 py-2 rounded border border-border bg-background text-sm"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <File :size="14" stroke="#9ca3af" />
                 <span class="flex-1 truncate">{{ f.name }}</span>
                 <span class="text-xs text-muted-foreground shrink-0">{{ getFileSizeLabel(f.size) }}</span>
               </div>

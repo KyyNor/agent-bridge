@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RotateCw } from 'lucide-vue-next'
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
@@ -95,7 +96,7 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
         >{{ d.label }}</button>
       </div>
       <Button variant="outline" @click="loadStats">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1.5"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        <RotateCw :size="14" class="mr-1.5" />
         刷新
       </Button>
     </div>

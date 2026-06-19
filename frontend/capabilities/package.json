@@ -13,7 +13,6 @@
     "@babel/generator": "^8.0.0",
     "@babel/parser": "^8.0.0",
     "@dagrejs/dagre": "^3.0.0",
-    "@lucide/vue": "^1.17.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/vue-table": "^8.21.3",
     "@vue-flow/background": "^1.3.2",

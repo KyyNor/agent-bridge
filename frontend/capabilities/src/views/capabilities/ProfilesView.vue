@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Search, Plus, Settings } from 'lucide-vue-next'
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import type {
@@ -393,7 +394,7 @@ async function refreshProfileDoc(raiseError = false) {
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[360px]">
-        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         <Input v-model="search" placeholder="搜索能力平面标识或名称..." class="pl-8" />
       </div>
       <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
@@ -409,7 +410,7 @@ async function refreshProfileDoc(raiseError = false) {
         >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
       </div>
       <Button @click="showAdd = true">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <Plus :size="14" />
         添加能力平面
 </Button>
     </div>
@@ -443,7 +444,7 @@ async function refreshProfileDoc(raiseError = false) {
               <td class="px-4 py-3">
                 <div class="flex items-center gap-1.5">
                   <Button variant="ghost" size="sm" @click="openConfig(p)" class="h-8 gap-1.5 text-xs">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <Settings :size="14" />
                     配置
                   </Button>
                   <Button variant="ghost" size="sm" @click="copyCommand(p)" class="h-8 text-xs">
