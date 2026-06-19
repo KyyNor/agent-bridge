@@ -8,10 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, TextIO
 
-from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
-
 from agent_bridge.agent_support import build_agent_bridge_server_config, write_run_mcp_json
-from agent_bridge.claude_agent import claude_settings_env
 
 
 WORKFLOW_PROMPT = "Run the workflow defined in ./workflow.js and write the final result to ./out/result.json."
@@ -180,40 +177,12 @@ def _message_events(message: Any, tool_names: dict[str, str]) -> list[dict[str, 
     return []
 
 
-async def _run_claude_agent_sdk(run_dir: Path, stdout: TextIO, stderr: TextIO, events: TextIO) -> None:
-    def write_stderr(chunk: str) -> None:
-        stderr.write(chunk)
-        stderr.flush()
-
-    options = ClaudeAgentOptions(
-        tools={"type": "preset", "preset": "claude_code"},
-        cwd=run_dir,
-        mcp_servers=run_dir / ".mcp.json",
-        strict_mcp_config=True,
-        permission_mode="auto",
-        env=claude_settings_env(),
-        setting_sources=[],
-        system_prompt={
-            "type": "preset",
-            "preset": "claude_code",
-            "append": WORKFLOW_SYSTEM_PROMPT,
-        },
-        include_partial_messages=True,
-        stderr=write_stderr,
-    )
-    tool_names: dict[str, str] = {}
-    async for message in claude_query(prompt=WORKFLOW_PROMPT, options=options):
-        if _is_noisy_partial_message(message):
-            # Skip noisy streaming partials entirely so they never reach the run
-            # logs (stdout.log) or the event stream (events.jsonl).
-            continue
-        stdout.write(json.dumps(_message_log_record(message), ensure_ascii=False) + "\n")
-        stdout.flush()
-        for record in _message_events(message, tool_names):
-            _write_event(events, record)
-
-
 class ClaudeWorkflowRunner:
+    """Runs a workflow via :class:`AgentService` (the single SDK entry point)."""
+
+    def __init__(self, agent_service: Any) -> None:
+        self._agent_service = agent_service
+
     def run(self, base_dir: Path, spec: WorkflowRunSpec) -> WorkflowProcessResult:
         run_dir = prepare_run_directory(base_dir, spec)
         stdout_path = run_dir / "stdout.log"
@@ -225,12 +194,39 @@ class ClaudeWorkflowRunner:
             stderr_path.open("w", encoding="utf-8") as stderr,
             events_path.open("w", encoding="utf-8") as events,
         ):
-            try:
-                asyncio.run(_run_claude_agent_sdk(run_dir, stdout, stderr, events))
+            tool_names: dict[str, str] = {}
+
+            def on_message(message: Any) -> None:
+                if _is_noisy_partial_message(message):
+                    # Skip noisy streaming partials entirely so they never reach
+                    # the run logs (stdout.log) or event stream (events.jsonl).
+                    return
+                stdout.write(json.dumps(_message_log_record(message), ensure_ascii=False) + "\n")
+                stdout.flush()
+                for record in _message_events(message, tool_names):
+                    _write_event(events, record)
+
+            def write_stderr(chunk: str) -> None:
+                stderr.write(chunk)
+                stderr.flush()
+
+            res = asyncio.run(
+                self._agent_service.run(
+                    prompt=WORKFLOW_PROMPT,
+                    agent_name="workflow",
+                    cwd=run_dir,
+                    system_prompt_append=WORKFLOW_SYSTEM_PROMPT,
+                    on_message=on_message,
+                    stderr=write_stderr,
+                    include_partial_messages=True,
+                    setting_sources=[],
+                )
+            )
+            if res.ok:
                 exit_code = 0
-            except Exception as exc:
+            else:
                 exit_code = 1
-                error_message = f"{type(exc).__name__}: {exc}"
+                error_message = res.error or "unknown error"
                 stderr.write(f"{error_message}\n")
                 _write_event(events, _event_record("error", status="failed", message=error_message))
         return WorkflowProcessResult(

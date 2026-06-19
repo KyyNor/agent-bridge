@@ -1,6 +1,29 @@
 from __future__ import annotations
 
 
+def _patched_runner(wm_paths, monkeypatch, fake_query, *, env=None):
+    """Build a ClaudeWorkflowRunner backed by an AgentService whose SDK calls are faked.
+
+    The workflow runner now delegates all Claude Agent SDK access to
+    AgentService, so tests patch the agent_service module (not the runner).
+    """
+    from agent_bridge import agent_service as agent_service_module
+    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.workflows.runner import ClaudeWorkflowRunner
+
+    class _FakeOptions:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(agent_service_module, "ClaudeAgentOptions", _FakeOptions)
+    monkeypatch.setattr(agent_service_module, "claude_query", fake_query)
+    monkeypatch.setattr(
+        agent_service_module, "claude_settings_env", lambda: env or {}
+    )
+    agents = AgentBridgeService.create(wm_paths, {"root"}).agents
+    return ClaudeWorkflowRunner(agent_service=agents), _FakeOptions
+
+
 def test_message_events_skips_thinking_tokens_partial():
     from types import SimpleNamespace
 
@@ -22,18 +45,13 @@ def test_message_events_skips_thinking_tokens_partial():
     assert _message_events(task_progress, tool_names={}) == []
 
 
-def test_runner_drops_noisy_partial_messages_from_all_logs(tmp_path, monkeypatch):
+def test_runner_drops_noisy_partial_messages_from_all_logs(wm_paths, tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
 
     from claude_agent_sdk import ResultMessage
 
-    from agent_bridge.workflows import runner as runner_module
-    from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
-
-    class FakeOptions:
-        def __init__(self, **kwargs):
-            pass
+    from agent_bridge.workflows.runner import WorkflowRunSpec
 
     async def fake_query(*, prompt, options):
         yield SimpleNamespace(subtype="init", session_id="session_1")
@@ -50,11 +68,9 @@ def test_runner_drops_noisy_partial_messages_from_all_logs(tmp_path, monkeypatch
             total_cost_usd=0.0,
         )
 
-    monkeypatch.setattr(runner_module, "ClaudeAgentOptions", FakeOptions)
-    monkeypatch.setattr(runner_module, "claude_query", fake_query)
-    monkeypatch.setattr(runner_module, "claude_settings_env", lambda: {})
+    runner, _ = _patched_runner(wm_paths, monkeypatch, fake_query)
 
-    result = ClaudeWorkflowRunner().run(
+    result = runner.run(
         tmp_path,
         WorkflowRunSpec(
             run_id="run_1",
@@ -119,20 +135,15 @@ def test_fake_runner_writes_no_task_result(tmp_path):
     assert (result.run_dir / "out" / "result.json").exists()
 
 
-def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkeypatch):
+def test_claude_runner_uses_agent_sdk_options_and_logs_messages(wm_paths, tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
 
     from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 
-    from agent_bridge.workflows import runner as runner_module
-    from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
+    from agent_bridge.workflows.runner import WorkflowRunSpec
 
     captured: dict[str, object] = {}
-
-    class FakeOptions:
-        def __init__(self, **kwargs):
-            captured["options"] = kwargs
 
     async def fake_query(*, prompt, options):
         captured["prompt"] = prompt
@@ -158,11 +169,11 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkey
             total_cost_usd=0.01,
         )
 
-    monkeypatch.setattr(runner_module, "ClaudeAgentOptions", FakeOptions)
-    monkeypatch.setattr(runner_module, "claude_query", fake_query)
-    monkeypatch.setattr(runner_module, "claude_settings_env", lambda: {"ANTHROPIC_BASE_URL": "https://example.test"})
+    runner, FakeOptions = _patched_runner(
+        wm_paths, monkeypatch, fake_query, env={"ANTHROPIC_BASE_URL": "https://example.test"}
+    )
 
-    result = ClaudeWorkflowRunner().run(
+    result = runner.run(
         tmp_path,
         WorkflowRunSpec(
             run_id="run_1",
@@ -173,7 +184,7 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkey
         ),
     )
 
-    options = captured["options"]
+    options = captured["options_object"].kwargs
     assert captured["prompt"] == "Run the workflow defined in ./workflow.js and write the final result to ./out/result.json."
     assert options["cwd"] == result.run_dir
     assert options["tools"] == {"type": "preset", "preset": "claude_code"}
@@ -212,25 +223,19 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(tmp_path, monkey
     assert events[4]["total_cost_usd"] == 0.01
 
 
-def test_claude_runner_returns_failure_when_sdk_raises(tmp_path, monkeypatch):
+def test_claude_runner_returns_failure_when_sdk_raises(wm_paths, tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
 
-    from agent_bridge.workflows import runner as runner_module
-    from agent_bridge.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
-
-    class FakeOptions:
-        def __init__(self, **kwargs):
-            pass
+    from agent_bridge.workflows.runner import WorkflowRunSpec
 
     async def fake_query(*, prompt, options):
         yield SimpleNamespace(subtype="init", session_id="session_1")
         raise RuntimeError("sdk failed")
 
-    monkeypatch.setattr(runner_module, "ClaudeAgentOptions", FakeOptions)
-    monkeypatch.setattr(runner_module, "claude_query", fake_query)
+    runner, _ = _patched_runner(wm_paths, monkeypatch, fake_query)
 
-    result = ClaudeWorkflowRunner().run(
+    result = runner.run(
         tmp_path,
         WorkflowRunSpec(
             run_id="run_1",

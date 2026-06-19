@@ -30,6 +30,7 @@ class WorkflowScheduler:
         service: Any,
         store: SQLiteStore,
         admins: set[str],
+        agent_service: Any = None,
         runner: WorkflowRunner | None = None,
         base_run_dir: Path | None = None,
         mcp_url: str = "http://127.0.0.1:8765/mcp",
@@ -38,7 +39,8 @@ class WorkflowScheduler:
         self._service = service
         self._store = store
         self._admins = admins
-        self._runner = runner or ClaudeWorkflowRunner()
+        self._agent_service = agent_service
+        self._runner = runner or ClaudeWorkflowRunner(agent_service)
         self._base_run_dir = base_run_dir
         self._mcp_url = mcp_url
         self._max_concurrent = max_concurrent_workflows

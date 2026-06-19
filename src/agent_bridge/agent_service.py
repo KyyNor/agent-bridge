@@ -16,7 +16,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
 from claude_agent_sdk.types import ResultMessage
@@ -74,13 +74,19 @@ class AgentService:
         self,
         *,
         prompt: str,
-        agent_name: str,
+        agent_name: str | None = None,
         files: list[Path | str] | None = None,
         profile: str | None = None,
         workflow_key: str | None = None,
         run_id: str | None = None,
         output_schema: dict[str, Any] | None = None,
         system_prompt_append: str | None = None,
+        cwd: Path | str | None = None,
+        on_message: Callable[[Any], None] | None = None,
+        skills: list[str] | None = None,
+        setting_sources: list[str] | None = None,
+        stderr: Callable[[str], None] | None = None,
+        include_partial_messages: bool = False,
         actor: str | None = None,
         model: str | None = None,
         max_turns: int | None = None,
@@ -89,40 +95,57 @@ class AgentService:
     ) -> AgentRunResult:
         """Run a one-shot Claude agent query and return a uniform result.
 
-        The run executes in an isolated working directory under
-        ``run/agent-runs/{agent_name}_{uuid7}/``. When ``profile`` is set the
-        profile's CLAUDE.md guidance and governed MCP tools are installed into
-        that directory; otherwise the run has no MCP access. Failures (query
-        errors, timeouts, profile-not-found, etc.) return ``ok=False`` rather
-        than raising.
+        Two modes:
+
+        * **Managed** (default, ``cwd`` is None): an isolated working directory
+          is created under ``run/agent-runs/{agent_name}_{uuid7}/``, ``files``
+          are staged into it, and — when ``profile`` is set — the profile's
+          CLAUDE.md guidance and governed ``.mcp.json`` are installed.
+
+        * **In-place** (``cwd`` given): the caller owns the directory (including
+          any ``.mcp.json`` / CLAUDE.md / staged files); this method just runs
+          the SDK loop against it. Used by the workflow runner and other
+          callers that prepare their own run directory.
+
+        ``on_message`` (if given) is invoked with every streamed SDK message
+        before the final result is captured, enabling progress/event logging.
+        Failures (query errors, timeouts, profile-not-found, ...) return
+        ``ok=False`` rather than raising.
         """
         timeout_seconds = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
-        work_dir = self._make_work_dir(agent_name)
         started = time.monotonic()
+        work_dir: Path | None = None
 
         try:
-            self._stage_files(work_dir, files)
-            setting_sources: list[str] = []
-            if profile:
-                rendered = self.governance.render_profile_markdown(
-                    actor or self._default_actor(), profile
+            if cwd is not None:
+                work_dir = Path(cwd)
+                effective_setting_sources = setting_sources or []
+                effective_mcp_servers: Any = self._mcp_servers_for(work_dir)
+            else:
+                work_dir = self._make_work_dir(agent_name or "agent")
+                self._stage_files(work_dir, files)
+                if profile:
+                    rendered = self.governance.render_profile_markdown(
+                        actor or self._default_actor(), profile
+                    )
+                    install_profile_to_cwd(work_dir, profile, rendered["markdown"])
+                mcp_config = build_agent_bridge_server_config(
+                    self.mcp_url, profile, workflow_key=workflow_key, run_id=run_id
                 )
-                install_profile_to_cwd(work_dir, profile, rendered["markdown"])
-                setting_sources = ["project"]
-
-            mcp_config = build_agent_bridge_server_config(
-                self.mcp_url, profile, workflow_key=workflow_key, run_id=run_id
-            )
-            write_run_mcp_json(work_dir / ".mcp.json", mcp_config)
+                write_run_mcp_json(work_dir / ".mcp.json", mcp_config)
+                effective_setting_sources = setting_sources or (
+                    ["project"] if profile else []
+                )
+                effective_mcp_servers = work_dir / ".mcp.json"
 
             options = ClaudeAgentOptions(
                 tools={"type": "preset", "preset": "claude_code"},
-                cwd=str(work_dir),
-                mcp_servers=work_dir / ".mcp.json",
+                cwd=work_dir,
+                mcp_servers=effective_mcp_servers,
                 strict_mcp_config=True,
                 permission_mode="auto",
                 env=claude_settings_env(),
-                setting_sources=setting_sources,
+                setting_sources=effective_setting_sources,
                 system_prompt={
                     "type": "preset",
                     "preset": "claude_code",
@@ -133,13 +156,16 @@ class AgentService:
                     if output_schema
                     else None
                 ),
-                include_partial_messages=False,
+                include_partial_messages=include_partial_messages,
+                skills=skills,
+                stderr=stderr,
                 model=model,
                 max_turns=max_turns,
                 max_budget_usd=max_budget_usd,
             )
             result_msg = await asyncio.wait_for(
-                self._drain_query(prompt, options), timeout=timeout_seconds
+                self._drain_query(prompt, options, on_message),
+                timeout=timeout_seconds,
             )
         except TimeoutError:
             return self._fail(work_dir, started, f"agent timed out after {timeout_seconds}s")
@@ -149,9 +175,22 @@ class AgentService:
 
         return self._finish(work_dir, started, result_msg, output_schema)
 
-    async def _drain_query(self, prompt: str, options: Any) -> ResultMessage | None:
+    @staticmethod
+    def _mcp_servers_for(work_dir: Path) -> Any:
+        """In-place mode: point at a caller-written .mcp.json if present, else no MCP."""
+        mcp_path = work_dir / ".mcp.json"
+        return mcp_path if mcp_path.exists() else {}
+
+    async def _drain_query(
+        self,
+        prompt: str,
+        options: Any,
+        on_message: Callable[[Any], None] | None,
+    ) -> ResultMessage | None:
         last: ResultMessage | None = None
         async for message in claude_query(prompt=prompt, options=options):
+            if on_message is not None:
+                on_message(message)
             if isinstance(message, ResultMessage):
                 last = message
         return last
@@ -220,11 +259,11 @@ class AgentService:
             return admin
         return "root"
 
-    def _fail(self, work_dir: Path, started: float, error: str) -> AgentRunResult:
+    def _fail(self, work_dir: Path | None, started: float, error: str) -> AgentRunResult:
         return AgentRunResult(
             ok=False,
             error=error,
-            run_dir=str(work_dir),
+            run_dir=str(work_dir) if work_dir else "",
             duration_ms=int((time.monotonic() - started) * 1000),
         )
 

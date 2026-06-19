@@ -75,6 +75,7 @@ class AgentBridgeService:
             service=self.workflows,
             store=store,
             admins=admins,
+            agent_service=self.agents,
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capabilities.builtin_codegraph import CodeGraphBuiltinProvider
