@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RotateCcw, Save } from 'lucide-vue-next'
+import { marked } from 'marked'
+import { Eye, Pencil, RotateCcw, Save } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { SkillPrompt } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -16,9 +17,11 @@ const detailLoading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const message = ref('')
+const previewTab = ref<'edit' | 'preview'>('preview')
 
 const hasChanges = computed(() => selected.value ? prompt.value !== (selected.value.prompt || '') : false)
 const sourceLabel = computed(() => selected.value?.source === 'database' ? '已自定义' : '默认提示词')
+const previewHtml = computed(() => marked.parse(prompt.value, { async: false }) as string)
 
 onMounted(async () => {
   await loadSkills()
@@ -144,22 +147,48 @@ function errorMessage(e: unknown) {
                 <div class="mt-1 font-mono text-xs text-muted-foreground">{{ selected.skill_name }}</div>
                 <p class="mt-2 text-sm text-muted-foreground">{{ selected.description }}</p>
               </div>
-              <div class="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" :disabled="saving || selected.source === 'default'" @click="resetSkill">
-                  <RotateCcw class="mr-1.5 h-4 w-4" />
-                  恢复默认
-                </Button>
-                <Button size="sm" :disabled="saving || !hasChanges" @click="saveSkill">
-                  <Save class="mr-1.5 h-4 w-4" />
-                  {{ saving ? '保存中' : '保存' }}
-                </Button>
+              <div>
+                <div class="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" :disabled="saving || selected.source === 'default'" @click="resetSkill">
+                    <RotateCcw class="mr-1.5 h-4 w-4" />
+                    恢复默认
+                  </Button>
+                  <Button size="sm" :disabled="saving || !hasChanges" @click="saveSkill">
+                    <Save class="mr-1.5 h-4 w-4" />
+                    {{ saving ? '保存中' : '保存' }}
+                  </Button>
+                </div>
+                <div class="mt-2 flex items-center gap-1">
+                  <button
+                    class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition"
+                    :class="previewTab === 'edit' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+                    @click="previewTab = 'edit'"
+                  >
+                    <Pencil class="h-3.5 w-3.5" />
+                    编辑
+                  </button>
+                  <button
+                    class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition"
+                    :class="previewTab === 'preview' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+                    @click="previewTab = 'preview'"
+                  >
+                    <Eye class="h-3.5 w-3.5" />
+                    预览
+                  </button>
+                </div>
               </div>
             </div>
 
             <textarea
+              v-if="previewTab === 'edit'"
               v-model="prompt"
-              class="min-h-[68vh] w-full rounded-md border bg-background p-3 font-mono text-xs leading-5"
+              class="min-h-[62vh] w-full rounded-md border bg-background p-3 font-mono text-xs leading-5"
               spellcheck="false"
+            />
+            <div
+              v-else
+              class="min-h-[62vh] w-full rounded-md border bg-background p-4 prose prose-sm max-w-none text-sm"
+              v-html="previewHtml"
             />
           </template>
           <div v-else class="py-12 text-center text-sm text-muted-foreground">请选择 Skill</div>
