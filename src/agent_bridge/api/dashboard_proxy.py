@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlsplit, urlunsplit
 import httpx
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from agent_bridge.codegraph.dashboard_urls import external_dashboard_url
+from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import external_dashboard_url
 
 
 HOP_BY_HOP_HEADERS = {

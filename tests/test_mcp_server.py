@@ -5,7 +5,7 @@ import json
 
 
 def test_mcp_server_exposes_search_and_execute_tools():
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     class FakeService:
         capabilities = None
@@ -17,7 +17,7 @@ def test_mcp_server_exposes_search_and_execute_tools():
 
 
 def test_mcp_search_tool_has_path_query_schema():
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     class FakeService:
         capabilities = None
@@ -34,7 +34,7 @@ def test_mcp_search_tool_has_path_query_schema():
 
 
 def test_mcp_execute_tool_has_service_tool_name_params_schema():
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     class FakeService:
         capabilities = None
@@ -50,7 +50,7 @@ def test_mcp_execute_tool_has_service_tool_name_params_schema():
 
 
 def test_mcp_search_tool_calls_capability_service():
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     returned = {"items": [{"service": "svc-1", "tool": "read"}], "path": "/", "log_id": "call_1"}
 
@@ -70,7 +70,7 @@ def test_mcp_search_tool_calls_capability_service():
 
 
 def test_mcp_execute_tool_calls_capability_service():
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     returned = {"success": True, "result": {}, "service": "svc-1", "tool_name": "read", "log_id": "call_1"}
 
@@ -90,7 +90,7 @@ def test_mcp_execute_tool_calls_capability_service():
 
 
 def test_mcp_pinned_tool_calls_original_service_tool():
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     returned = {"success": True, "result": {"rows": []}, "service": "mysql", "tool_name": "query_users"}
     calls = []
@@ -140,7 +140,7 @@ def test_mcp_pinned_tool_calls_original_service_tool():
 
 
 def test_mcp_skips_pinned_tool_with_invalid_schema_field(caplog):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     class FakeCapabilities:
         def pinned_tool_specs(self, actor, profile_key):
@@ -180,8 +180,8 @@ def test_mcp_skips_pinned_tool_with_invalid_schema_field(caplog):
 
 
 def test_mcp_search_with_default_service_initializes_schema(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

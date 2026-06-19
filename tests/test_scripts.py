@@ -6,7 +6,7 @@ import json
 import pytest
 
 from agent_bridge.core.domain import ValidationError
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.app.service import AgentBridgeService
 
 
 SCRIPT_CODE = """

@@ -7,9 +7,9 @@ def _patched_runner(wm_paths, monkeypatch, fake_query, *, env=None):
     The workflow runner now delegates all Claude Agent SDK access to
     AgentService, so tests patch the agent_service module (not the runner).
     """
-    from agent_bridge import agent_service as agent_service_module
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import ClaudeWorkflowRunner
+    from agent_bridge.agent_runtime import service as agent_service_module
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import ClaudeWorkflowRunner
 
     class _FakeOptions:
         def __init__(self, **kwargs):
@@ -27,7 +27,7 @@ def _patched_runner(wm_paths, monkeypatch, fake_query, *, env=None):
 def test_message_events_skips_thinking_tokens_partial():
     from types import SimpleNamespace
 
-    from agent_bridge.workflows.runner import _message_events
+    from agent_bridge.automation.workflows.runner import _message_events
 
     # Streaming partials carrying the thinking_tokens subtype are noisy and must
     # not surface in the run event log.
@@ -51,7 +51,7 @@ def test_runner_drops_noisy_partial_messages_from_all_logs(wm_paths, tmp_path, m
 
     from claude_agent_sdk import ResultMessage
 
-    from agent_bridge.workflows.runner import WorkflowRunSpec
+    from agent_bridge.automation.workflows.runner import WorkflowRunSpec
 
     async def fake_query(*, prompt, options):
         yield SimpleNamespace(subtype="init", session_id="session_1")
@@ -96,7 +96,7 @@ def test_runner_drops_noisy_partial_messages_from_all_logs(wm_paths, tmp_path, m
 
 
 def test_runner_prepares_run_directory_with_workflow_files(tmp_path):
-    from agent_bridge.workflows.runner import WorkflowRunSpec, prepare_run_directory
+    from agent_bridge.automation.workflows.runner import WorkflowRunSpec, prepare_run_directory
 
     spec = WorkflowRunSpec(
         run_id="run_1",
@@ -117,7 +117,7 @@ def test_runner_prepares_run_directory_with_workflow_files(tmp_path):
 
 
 def test_fake_runner_writes_no_task_result(tmp_path):
-    from agent_bridge.workflows.runner import FakeWorkflowRunner, WorkflowRunSpec
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner, WorkflowRunSpec
 
     runner = FakeWorkflowRunner(status="no_executable_task")
     result = runner.run(
@@ -141,7 +141,7 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(wm_paths, tmp_pa
 
     from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
 
-    from agent_bridge.workflows.runner import WorkflowRunSpec
+    from agent_bridge.automation.workflows.runner import WorkflowRunSpec
 
     captured: dict[str, object] = {}
 
@@ -227,7 +227,7 @@ def test_claude_runner_returns_failure_when_sdk_raises(wm_paths, tmp_path, monke
     import json
     from types import SimpleNamespace
 
-    from agent_bridge.workflows.runner import WorkflowRunSpec
+    from agent_bridge.automation.workflows.runner import WorkflowRunSpec
 
     async def fake_query(*, prompt, options):
         yield SimpleNamespace(subtype="init", session_id="session_1")

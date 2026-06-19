@@ -10,7 +10,7 @@ from agent_bridge.api.dashboard_proxy import (
     _rewrite_location,
     _upstream_path,
 )
-from agent_bridge.codegraph.dashboard_urls import external_dashboard_url
+from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import external_dashboard_url
 
 
 def test_external_dashboard_url_keeps_token_without_exposing_vite_port() -> None:

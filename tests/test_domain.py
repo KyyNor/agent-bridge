@@ -20,7 +20,7 @@ from agent_bridge.core.domain import (
     can_write_own_doc,
     require_admin_user,
 )
-from agent_bridge.knowledge.backends.mock import MockBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.mock import MockBackend
 from agent_bridge.core.slug import make_slug, unique_slug
 
 

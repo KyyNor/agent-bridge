@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_bridge.core.config import AgentBridgePaths, ensure_directories
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.app.service import AgentBridgeService
 
 
 def _service(wm_paths: AgentBridgePaths) -> AgentBridgeService:

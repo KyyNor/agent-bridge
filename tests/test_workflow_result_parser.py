@@ -4,7 +4,7 @@ import json
 
 
 def test_parse_completed_result_reads_markdown_artifact(tmp_path):
-    from agent_bridge.workflows.result_parser import parse_workflow_result
+    from agent_bridge.automation.workflows.result_parser import parse_workflow_result
 
     out = tmp_path / "out"
     artifact_dir = out / "artifacts"
@@ -38,7 +38,7 @@ def test_parse_completed_result_reads_markdown_artifact(tmp_path):
 
 
 def test_parse_no_executable_task_result(tmp_path):
-    from agent_bridge.workflows.result_parser import parse_workflow_result
+    from agent_bridge.automation.workflows.result_parser import parse_workflow_result
 
     out = tmp_path / "out"
     out.mkdir()
@@ -55,7 +55,7 @@ def test_parse_no_executable_task_result(tmp_path):
 
 def test_parse_rejects_artifact_path_outside_run_dir(tmp_path):
     from agent_bridge.core.domain import ValidationError
-    from agent_bridge.workflows.result_parser import parse_workflow_result
+    from agent_bridge.automation.workflows.result_parser import parse_workflow_result
 
     out = tmp_path / "out"
     out.mkdir()
@@ -88,8 +88,8 @@ def test_parse_rejects_artifact_path_outside_run_dir(tmp_path):
 
 
 def test_ingest_parsed_result_saves_artifacts_and_completes_task(wm_paths, tmp_path):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.result_parser import parse_workflow_result
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.result_parser import parse_workflow_result
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

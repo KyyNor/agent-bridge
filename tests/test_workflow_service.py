@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 def _service(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

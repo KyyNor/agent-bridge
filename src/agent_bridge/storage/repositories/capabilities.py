@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any
 
-from agent_bridge.capabilities.models import McpServiceStatus, ToolType
+from agent_bridge.capability_hub.models import McpServiceStatus, ToolType
 from agent_bridge.storage.types import enum_value, row_to_dict
 
 

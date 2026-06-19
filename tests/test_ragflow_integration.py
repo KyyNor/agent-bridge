@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.knowledge.backends.ragflow import RagFlowBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.ragflow import RagFlowBackend
 from agent_bridge.core.domain import RetrievalResult, AskResult
 
 # ---------------------------------------------------------------------------

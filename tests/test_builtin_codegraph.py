@@ -7,10 +7,10 @@ from typing import Any
 
 import pytest
 
-from agent_bridge.capabilities.models import ProfileResourceType
+from agent_bridge.capability_hub.models import ProfileResourceType
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import NotFound, ValidationError
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.app.service import AgentBridgeService
 
 
 def _git_repo(path: Path, content: str = "class App:\n    pass\n") -> Path:

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from agent_bridge.capabilities.models import CallLogStatus, SourceType
-from agent_bridge.capabilities.governance import CapabilityGovernanceService
+from agent_bridge.capability_hub.models import CallLogStatus, SourceType
+from agent_bridge.capability_hub.governance import CapabilityGovernanceService
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore

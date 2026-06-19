@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent_bridge.storage.types import row_to_dict
-from agent_bridge.workflows.models import WorkflowTaskStatus, require_manifest
+from agent_bridge.automation.workflows.models import WorkflowTaskStatus, require_manifest
 
 
 def _json_loads(value: Any, default: Any) -> Any:

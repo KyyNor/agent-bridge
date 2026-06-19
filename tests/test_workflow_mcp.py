@@ -8,7 +8,7 @@ import pytest
 
 
 def _create_service_with_workflow(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -38,8 +38,8 @@ def _create_run(svc, *, run_id: str = "run_1", workflow_key: str = "page-report"
 
 
 def test_normal_mcp_profile_sees_artifacts_search_but_not_workflow_task_tools(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -56,7 +56,7 @@ def test_normal_mcp_profile_sees_artifacts_search_but_not_workflow_task_tools(wm
 
 
 def test_workflow_mcp_context_sees_workflow_task_tools(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     svc = _create_service_with_workflow(wm_paths)
 
@@ -75,7 +75,7 @@ def test_workflow_mcp_context_sees_workflow_task_tools(wm_paths):
 
 
 def test_workflow_mcp_context_requires_workflow_key_and_run_id(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     svc = _create_service_with_workflow(wm_paths)
 
@@ -94,7 +94,7 @@ def test_workflow_mcp_context_requires_workflow_key_and_run_id(wm_paths):
 
 
 def test_workflow_mcp_set_get_and_run_log(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     svc = _create_service_with_workflow(wm_paths)
     _create_run(svc)
@@ -128,7 +128,7 @@ def test_workflow_mcp_set_get_and_run_log(wm_paths):
 
 
 def test_workflow_mcp_task_type_round_trips(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     svc = _create_service_with_workflow(wm_paths)
     _create_run(svc)
@@ -170,7 +170,7 @@ def test_execute_builtin_load_skill_returns_design_workflow_prompt(wm_paths):
 
 
 def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     svc = _create_service_with_workflow(wm_paths)
     svc.workflows.upsert_definition(
@@ -212,7 +212,7 @@ def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):
 
 
 def test_artifacts_search_tool_returns_profile_artifacts(wm_paths):
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 
     svc = _create_service_with_workflow(wm_paths)
     svc.workflows.save_artifact(
@@ -235,7 +235,7 @@ def test_artifacts_search_tool_returns_profile_artifacts(wm_paths):
 
 
 def test_mcp_route_exposes_workflow_tools_only_with_complete_workflow_headers(wm_paths):
-    from agent_bridge.capabilities.mcp_server import setup_mcp_route
+    from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
 
     svc = _create_service_with_workflow(wm_paths)
     app = FastAPI()

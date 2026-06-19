@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from agent_bridge.capabilities.governance import CapabilityGovernanceService
-from agent_bridge.capabilities.models import CallLogStatus, SourceType, ToolType
+from agent_bridge.capability_hub.governance import CapabilityGovernanceService
+from agent_bridge.capability_hub.models import CallLogStatus, SourceType, ToolType
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.storage.sqlite import SQLiteStore
 

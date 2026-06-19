@@ -4,7 +4,7 @@ import json
 
 
 def test_claude_settings_env_reads_user_settings_file(tmp_path):
-    from agent_bridge.claude_agent import claude_settings_env
+    from agent_bridge.agent_runtime.claude import claude_settings_env
 
     settings_path = tmp_path / "settings.json"
     settings_path.write_text(
@@ -34,7 +34,7 @@ def test_claude_settings_env_reads_user_settings_file(tmp_path):
 
 
 def test_claude_settings_env_ignores_missing_or_invalid_file(tmp_path):
-    from agent_bridge.claude_agent import claude_settings_env
+    from agent_bridge.agent_runtime.claude import claude_settings_env
 
     assert claude_settings_env(tmp_path / "missing.json") == {}
 

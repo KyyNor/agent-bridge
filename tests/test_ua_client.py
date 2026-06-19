@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from claude_agent_sdk import ResultMessage
 
-from agent_bridge.codegraph.ua_client import UA_DIR, UAAvailability, UnderstandAnythingClient
+from agent_bridge.knowledge_management.code_knowledge.ua_client import UA_DIR, UAAvailability, UnderstandAnythingClient
 
 
 def test_analyze_uses_agent_sdk_options(wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent_bridge import agent_service as agent_service_module
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.agent_runtime import service as agent_service_module
+    from agent_bridge.app.service import AgentBridgeService
 
     # UA analysis now delegates the SDK loop to AgentService, so the SDK is
     # patched on the agent_service module and the client is wired with one.

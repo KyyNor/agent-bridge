@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any
 
-from agent_bridge.capabilities.models import CallLogStatus
+from agent_bridge.capability_hub.models import CallLogStatus
 from agent_bridge.storage.types import enum_value, json_bytes, json_summary, row_to_dict
 
 

@@ -9,8 +9,8 @@ import pytest
 
 from agent_bridge.core.config import AgentBridgePaths, BackendConfig, ensure_directories
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
-from agent_bridge.knowledge.backends.registry import BackendRegistry
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
+from agent_bridge.app.service import AgentBridgeService
 
 
 AGENTS_PAYLOAD = {

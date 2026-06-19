@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 def test_workflow_api_creates_and_lists_workflows(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -37,7 +37,7 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
 
 def test_workflow_api_lists_artifacts(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -77,7 +77,7 @@ def test_workflow_api_lists_artifacts(wm_paths):
 
 def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -143,7 +143,7 @@ def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
 
 def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -211,7 +211,7 @@ def _seed_artifact(svc, content: str = "# Page A\n\nFull body") -> str:
 
 def test_workflow_api_returns_full_artifact_content(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -235,7 +235,7 @@ def test_workflow_api_returns_full_artifact_content(wm_paths):
 
 def test_workflow_api_rejects_non_admin_artifact_detail_without_trusted_profile(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -254,7 +254,7 @@ def test_workflow_api_rejects_non_admin_artifact_detail_without_trusted_profile(
 
 def test_workflow_api_artifact_detail_404_for_unknown_id(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
     client = TestClient(create_app(wm_paths, {"root"}))
@@ -280,7 +280,7 @@ def _seed_workflow(svc, key: str = "page-report") -> None:
 
 def test_workflow_api_lists_runs_for_workflow(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -307,7 +307,7 @@ def test_workflow_api_lists_runs_for_workflow(wm_paths):
 
 def test_workflow_api_lists_all_tasks_for_workflow_without_leasing(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -350,7 +350,7 @@ def test_workflow_api_lists_all_tasks_for_workflow_without_leasing(wm_paths):
 
 def test_workflow_api_clears_execution_data_without_deleting_definition(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -412,7 +412,7 @@ def test_workflow_api_clears_execution_data_without_deleting_definition(wm_paths
 
 def test_workflow_api_deletes_workflow_and_cascades(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -440,7 +440,7 @@ def test_workflow_api_deletes_workflow_and_cascades(wm_paths):
 
 def test_workflow_api_get_run_returns_single_run(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -460,7 +460,7 @@ def test_workflow_api_get_run_returns_single_run(wm_paths):
 
 def test_workflow_api_get_run_404_for_unknown(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
     client = TestClient(create_app(wm_paths, {"root"}))
@@ -472,7 +472,7 @@ def test_workflow_api_returns_run_events_from_run_directory(wm_paths, tmp_path):
     import json
 
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     run_dir = tmp_path / "run_1"
     run_dir.mkdir()
@@ -507,7 +507,7 @@ def test_workflow_api_returns_run_events_from_run_directory(wm_paths, tmp_path):
 
 def test_workflow_api_returns_empty_events_for_missing_event_file(wm_paths, tmp_path):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     run_dir = tmp_path / "run_1"
     run_dir.mkdir()
@@ -530,7 +530,7 @@ def test_workflow_api_returns_empty_events_for_missing_event_file(wm_paths, tmp_
 
 def test_workflow_api_run_returns_409_when_already_running(wm_paths):
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -549,8 +549,8 @@ def test_workflow_api_run_returns_409_when_already_running(wm_paths):
 def test_workflow_api_run_triggers_and_completes(wm_paths, tmp_path):
     import time
     from agent_bridge.api.app import create_app
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

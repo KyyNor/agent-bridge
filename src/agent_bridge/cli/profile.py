@@ -10,7 +10,7 @@ profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
 pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=True)
 profile_app.add_typer(pins_app, name="pins")
 
-from agent_bridge.capabilities.profile_docs import (  # noqa: E402
+from agent_bridge.capability_hub.profiles.docs import (  # noqa: E402
     pointer_block as _pointer_block,
     replace_agent_bridge_block as _replace_agent_bridge_block,
 )

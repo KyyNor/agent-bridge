@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware
 from agent_bridge.core.config import AgentBridgePaths, default_user, load_server_config
 from agent_bridge.core.domain import AgentBridgeError
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.web.pages import capability_admin_page
 
 
@@ -150,7 +150,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     app.include_router(create_workflow_routes(service, actor, call_safely, ensure_capability_schema))
 
     # MCP streamable HTTP endpoint
-    from agent_bridge.capabilities.mcp_server import setup_mcp_route
+    from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
     setup_mcp_route(app, service)
 
     @app.get("/admin/capabilities", response_class=HTMLResponse)
