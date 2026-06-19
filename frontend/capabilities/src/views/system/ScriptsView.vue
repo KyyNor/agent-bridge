@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { Play, Plus, Trash2 } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { ArrowLeft, Play, Plus, RotateCcw, Save, Trash2 } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ManagedScript, ProjectProfile, ScriptRun, WorkflowDefinition } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { Textarea } from '../../components/ui/textarea'
 import {
@@ -17,35 +16,35 @@ import {
   SelectValue,
 } from '../../components/ui/select'
 
+const props = defineProps<{ routeKey: string }>()
+
 const scripts = ref<ManagedScript[]>([])
 const profiles = ref<ProjectProfile[]>([])
 const workflows = ref<WorkflowDefinition[]>([])
-const selectedKey = ref('')
 const loading = ref(true)
 const error = ref('')
 
-const showEditor = ref(false)
-const saving = ref(false)
-const formError = ref('')
+// 编辑模式表单状态
 const form = ref(emptyForm())
+const formError = ref('')
+const formLoading = ref(false)
+const saving = ref(false)
+const scriptNotFound = ref(false)
 
-const showRuns = ref(false)
+// 运行状态
 const runs = ref<ScriptRun[]>([])
 const runsLoading = ref(false)
 const runError = ref('')
-
 const testing = ref(false)
-const testError = ref('')
 const testParams = ref('{\n  "limit": 5\n}')
 const testTimeout = ref<number | undefined>(30)
 const testProfileKey = ref('__default__')
-
 const runDetail = ref<ScriptRun | null>(null)
 const runDetailLoading = ref(false)
 
-const selected = computed(() =>
-  scripts.value.find(item => item.script_key === selectedKey.value) || scripts.value[0] || null,
-)
+const mode = computed<'list' | 'edit'>(() => (props.routeKey ? 'edit' : 'list'))
+const isNew = computed(() => props.routeKey === 'new')
+const editingKey = computed(() => (isNew.value ? '' : props.routeKey))
 
 const ownerKeyOptions = computed(() => {
   if (form.value.owner_type === 'profile') return profiles.value.map(p => ({ value: p.profile_key, label: p.name }))
@@ -53,9 +52,53 @@ const ownerKeyOptions = computed(() => {
   return []
 })
 
+// 当前编辑的脚本（已保存版本，用于判断归属/状态展示）
+const editingScript = computed(() =>
+  editingKey.value ? scripts.value.find(s => s.script_key === editingKey.value) || null : null,
+)
+
 onMounted(async () => {
   await loadAll()
 })
+
+// 进入/切换编辑页时加载脚本
+watch(
+  () => props.routeKey,
+  async (key) => {
+    if (!key) return
+    formError.value = ''
+    scriptNotFound.value = false
+    if (key === 'new') {
+      form.value = emptyForm()
+      runs.value = []
+      runDetail.value = null
+      return
+    }
+    formLoading.value = true
+    try {
+      const detail = await api.getScript(key)
+      form.value = {
+        script_key: detail.script_key,
+        name: detail.name,
+        description: detail.description,
+        language: detail.language,
+        code: detail.code || '',
+        status: detail.status,
+        owner_type: detail.owner_type,
+        owner_key: detail.owner_key,
+      }
+      await loadRuns()
+      runDetail.value = runs.value[0] || null
+    } catch (e: unknown) {
+      scriptNotFound.value = true
+      form.value = emptyForm()
+      formError.value = errorMessage(e)
+    } finally {
+      formLoading.value = false
+    }
+  },
+  { immediate: true },
+)
 
 async function loadAll() {
   loading.value = true
@@ -69,7 +112,6 @@ async function loadAll() {
     scripts.value = scriptList
     profiles.value = profileList
     workflows.value = workflowList
-    selectedKey.value = selectedKey.value || scriptList[0]?.script_key || ''
   } catch (e: unknown) {
     error.value = errorMessage(e)
   } finally {
@@ -94,43 +136,35 @@ function emptyForm() {
   }
 }
 
+function goList() {
+  window.location.hash = 'scripts'
+}
+
 function openCreate() {
-  form.value = emptyForm()
-  formError.value = ''
-  showEditor.value = true
+  window.location.hash = 'scripts/new'
 }
 
 function openEdit(item: ManagedScript) {
-  selectedKey.value = item.script_key
-  form.value = {
-    script_key: item.script_key,
-    name: item.name,
-    description: item.description,
-    language: item.language,
-    code: '',
-    status: item.status,
-    owner_type: item.owner_type,
-    owner_key: item.owner_key,
-  }
-  formError.value = ''
-  showEditor.value = true
-  void loadCode(item.script_key)
+  window.location.hash = 'scripts/' + item.script_key
 }
 
-async function loadCode(scriptKey: string) {
+async function deleteScript(item: ManagedScript) {
+  if (!confirm(`确定删除脚本「${item.name}」？其运行记录将一并清除。`)) return
+  error.value = ''
   try {
-    const detail = await api.getScript(scriptKey)
-    form.value.code = detail.code || ''
+    await api.deleteScript(item.script_key)
+    await reloadScripts()
+    if (editingKey.value === item.script_key) goList()
   } catch (e: unknown) {
-    formError.value = errorMessage(e)
+    error.value = errorMessage(e)
   }
 }
 
-async function saveScript() {
+async function saveScript(): Promise<ManagedScript | null> {
   formError.value = ''
   if (!form.value.script_key || !form.value.name || !form.value.code.trim()) {
     formError.value = '请填写脚本标识、名称和代码'
-    return
+    return null
   }
   saving.value = true
   try {
@@ -144,62 +178,45 @@ async function saveScript() {
       owner_type: form.value.owner_type,
       owner_key: form.value.owner_type === 'system' ? '' : form.value.owner_key,
     })
-    selectedKey.value = saved.script_key
-    showEditor.value = false
     await reloadScripts()
+    // 新建成功后同步 URL，避免再次保存时被当作新建
+    if (isNew.value) {
+      window.location.hash = 'scripts/' + saved.script_key
+    }
+    return saved
   } catch (e: unknown) {
     formError.value = errorMessage(e)
+    return null
   } finally {
     saving.value = false
   }
 }
 
-async function deleteScript(item: ManagedScript) {
-  if (!confirm(`确定删除脚本「${item.name}」？其运行记录将一并清除。`)) return
-  error.value = ''
-  try {
-    await api.deleteScript(item.script_key)
-    await reloadScripts()
-    if (selectedKey.value === item.script_key) selectedKey.value = scripts.value[0]?.script_key || ''
-  } catch (e: unknown) {
-    error.value = errorMessage(e)
+async function runScript() {
+  if (testing.value) return
+  const key = editingKey.value
+  if (!key) {
+    // 新建脚本必须先保存
+    const saved = await saveScript()
+    if (!saved) return
+    await doRun(saved.script_key)
+  } else {
+    await doRun(key)
   }
 }
 
-async function openRuns(item: ManagedScript) {
-  selectedKey.value = item.script_key
-  showRuns.value = true
-  await loadRuns()
-}
-
-async function loadRuns() {
-  if (!selected.value) return
-  runsLoading.value = true
-  runError.value = ''
-  try {
-    const result = await api.listScriptRuns(selected.value.script_key, 20)
-    runs.value = result.runs
-  } catch (e: unknown) {
-    runError.value = errorMessage(e)
-    runs.value = []
-  } finally {
-    runsLoading.value = false
-  }
-}
-
-async function runTest() {
-  if (!selected.value || testing.value) return
+async function doRun(scriptKey: string) {
   let params: Record<string, unknown> = {}
   try {
     params = testParams.value.trim() ? JSON.parse(testParams.value) : {}
   } catch {
-    testError.value = 'script_params 不是合法 JSON'
+    runError.value = 'script_params 不是合法 JSON'
     return
   }
   testing.value = true
-  testError.value = ''
+  runError.value = ''
   try {
-    const run = await api.testScript(selected.value.script_key, {
+    const run = await api.testScript(scriptKey, {
       script_params: params,
       timeout_seconds: testTimeout.value,
       profile_key: testProfileKey.value && testProfileKey.value !== '__default__' ? testProfileKey.value : undefined,
@@ -207,9 +224,25 @@ async function runTest() {
     await loadRuns()
     runDetail.value = run
   } catch (e: unknown) {
-    testError.value = errorMessage(e)
+    runError.value = errorMessage(e)
   } finally {
     testing.value = false
+  }
+}
+
+async function loadRuns() {
+  const key = editingKey.value
+  if (!key) return
+  runsLoading.value = true
+  runError.value = ''
+  try {
+    const result = await api.listScriptRuns(key, 20)
+    runs.value = result.runs
+  } catch (e: unknown) {
+    runError.value = errorMessage(e)
+    runs.value = []
+  } finally {
+    runsLoading.value = false
   }
 }
 
@@ -275,7 +308,8 @@ function errorMessage(e: unknown) {
 </script>
 
 <template>
-  <div class="space-y-5">
+  <!-- 列表模式 -->
+  <div v-if="mode === 'list'" class="space-y-5">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 class="text-xl font-semibold text-foreground">脚本管理</h2>
@@ -302,7 +336,7 @@ function errorMessage(e: unknown) {
         <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
         <div v-else-if="!scripts.length" class="px-4 py-8 text-sm text-muted-foreground">暂无脚本</div>
         <div v-else class="divide-y">
-          <div v-for="item in scripts" :key="item.script_key" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_240px_300px] lg:items-center">
+          <div v-for="item in scripts" :key="item.script_key" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_240px_220px] lg:items-center">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
@@ -317,10 +351,9 @@ function errorMessage(e: unknown) {
               <div class="mt-1">更新 {{ item.updated_at }}</div>
             </div>
             <div class="flex flex-wrap justify-start gap-2 lg:justify-end">
-              <Button variant="outline" size="sm" class="h-8 text-xs" @click="openEdit(item)">编辑</Button>
-              <Button variant="outline" size="sm" class="h-8 text-xs" :disabled="item.status !== 'active'" @click="openRuns(item)">
+              <Button variant="outline" size="sm" class="h-8 text-xs" :disabled="item.status !== 'active'" @click="openEdit(item)">
                 <Play class="mr-1 h-3.5 w-3.5" />
-                运行
+                编辑/运行
               </Button>
               <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" @click="deleteScript(item)">
                 <Trash2 class="mr-1 h-3.5 w-3.5" />
@@ -331,89 +364,120 @@ function errorMessage(e: unknown) {
         </div>
       </CardContent>
     </Card>
+  </div>
 
-    <Dialog v-model:open="showEditor">
-      <DialogContent class="w-[96vw] max-w-[980px] sm:max-w-[980px]">
-        <DialogHeader>
-          <DialogTitle>{{ form.script_key && scripts.some(s => s.script_key === form.script_key) ? '编辑脚本' : '新建脚本' }}</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[78vh] space-y-4 overflow-auto pr-1">
-          <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {{ formError }}
-          </div>
-          <div class="grid gap-3 md:grid-cols-2">
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">脚本标识 script_key</label>
-              <Input v-model="form.script_key" placeholder="my_script" :disabled="scripts.some(s => s.script_key === form.script_key)" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">名称</label>
-              <Input v-model="form.name" placeholder="我的脚本" />
-            </div>
-          </div>
-          <div>
-            <label class="mb-1 block text-xs text-muted-foreground">描述</label>
-            <Input v-model="form.description" placeholder="可选" />
-          </div>
-          <div class="grid gap-3 md:grid-cols-3">
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">状态</label>
-              <Select v-model="form.status">
-                <SelectTrigger class="w-full"><SelectValue placeholder="状态" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">启用</SelectItem>
-                  <SelectItem value="disabled">停用</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">归属类型</label>
-              <Select v-model="form.owner_type">
-                <SelectTrigger class="w-full"><SelectValue placeholder="归属" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="system">系统</SelectItem>
-                  <SelectItem value="profile">能力平面</SelectItem>
-                  <SelectItem value="workflow">工作流</SelectItem>
-                  <SelectItem value="skill">技能</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div v-if="form.owner_type !== 'system'">
-              <label class="mb-1 block text-xs text-muted-foreground">归属 key</label>
-              <Select v-if="ownerKeyOptions.length" v-model="form.owner_key">
-                <SelectTrigger class="w-full"><SelectValue placeholder="选择" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="opt in ownerKeyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input v-else v-model="form.owner_key" placeholder="owner_key" />
-            </div>
-          </div>
-          <div>
-            <label class="mb-1 block text-xs text-muted-foreground">代码（Python，stdout 输出 JSON）</label>
-            <Textarea v-model="form.code" class="min-h-[40vh] font-mono text-xs leading-5" spellcheck="false" placeholder="import json&#10;print(json.dumps({'ok': True}))" />
-          </div>
+  <!-- 编辑/运行二级页面 -->
+  <div v-else class="space-y-4">
+    <!-- 顶栏 -->
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+          <ArrowLeft class="mr-1 h-4 w-4" />
+          返回
+        </Button>
+        <div>
+          <h2 class="text-lg font-semibold text-foreground">
+            {{ isNew ? '新建脚本' : (editingScript?.name || form.name || '编辑脚本') }}
+          </h2>
+          <p class="font-mono text-xs text-muted-foreground">
+            {{ isNew ? '新建后将自动生成 script_key' : editingKey }}
+          </p>
         </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showEditor = false">取消</Button>
-          <Button :disabled="saving" @click="saveScript">{{ saving ? '保存中' : '保存' }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" :disabled="saving" @click="saveScript">
+          <Save class="mr-1.5 h-4 w-4" />
+          {{ saving ? '保存中' : '保存' }}
+        </Button>
+        <Button size="sm" :disabled="testing || form.status !== 'active'" @click="runScript">
+          <Play class="mr-1.5 h-4 w-4" />
+          {{ testing ? '运行中' : (isNew ? '保存并运行' : '运行') }}
+        </Button>
+      </div>
+    </div>
 
-    <Dialog v-model:open="showRuns">
-      <DialogContent class="w-[96vw] max-w-[1100px] sm:max-w-[1100px]">
-        <DialogHeader>
-          <DialogTitle>{{ selected?.name || '脚本运行' }}</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[78vh] space-y-4 overflow-auto pr-1">
-          <section class="rounded-md border p-4">
-            <div class="mb-3 text-sm font-semibold text-foreground">测试运行</div>
-            <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px_200px] md:items-end">
+    <div v-if="scriptNotFound" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+      无法加载该脚本（可能已被删除或不存在）。请<a class="underline" href="#scripts" @click.prevent="goList">返回列表</a>。
+    </div>
+
+    <div v-else class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
+      <!-- 左栏：编辑器 -->
+      <Card>
+        <CardContent class="space-y-4 p-4">
+          <div v-if="formLoading" class="py-16 text-center text-sm text-muted-foreground">加载中</div>
+          <template v-else>
+            <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {{ formError }}
+            </div>
+            <div class="grid gap-3 md:grid-cols-2">
               <div>
-                <label class="mb-1 block text-xs text-muted-foreground">script_params (JSON)</label>
-                <Textarea v-model="testParams" class="min-h-[80px] font-mono text-xs" spellcheck="false" />
+                <label class="mb-1 block text-xs text-muted-foreground">脚本标识 script_key</label>
+                <Input v-model="form.script_key" placeholder="my_script" :disabled="!isNew" />
               </div>
+              <div>
+                <label class="mb-1 block text-xs text-muted-foreground">名称</label>
+                <Input v-model="form.name" placeholder="我的脚本" />
+              </div>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-muted-foreground">描述</label>
+              <Input v-model="form.description" placeholder="可选" />
+            </div>
+            <div class="grid gap-3 md:grid-cols-3">
+              <div>
+                <label class="mb-1 block text-xs text-muted-foreground">状态</label>
+                <Select v-model="form.status">
+                  <SelectTrigger class="w-full"><SelectValue placeholder="状态" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">启用</SelectItem>
+                    <SelectItem value="disabled">停用</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label class="mb-1 block text-xs text-muted-foreground">归属类型</label>
+                <Select v-model="form.owner_type">
+                  <SelectTrigger class="w-full"><SelectValue placeholder="归属" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system">系统</SelectItem>
+                    <SelectItem value="profile">能力平面</SelectItem>
+                    <SelectItem value="workflow">工作流</SelectItem>
+                    <SelectItem value="skill">技能</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div v-if="form.owner_type !== 'system'">
+                <label class="mb-1 block text-xs text-muted-foreground">归属 key</label>
+                <Select v-if="ownerKeyOptions.length" v-model="form.owner_key">
+                  <SelectTrigger class="w-full"><SelectValue placeholder="选择" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in ownerKeyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input v-else v-model="form.owner_key" placeholder="owner_key" />
+              </div>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-muted-foreground">代码（Python，stdout 输出 JSON）</label>
+              <Textarea v-model="form.code" class="min-h-[58vh] font-mono text-xs leading-5" spellcheck="false" placeholder="import json&#10;print(json.dumps({'ok': True}))" />
+            </div>
+          </template>
+        </CardContent>
+      </Card>
+
+      <!-- 右栏：运行 + 结果（sticky） -->
+      <div class="space-y-4 xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pr-1">
+        <Card>
+          <CardContent class="space-y-3 p-4">
+            <div class="text-sm font-semibold text-foreground">测试运行</div>
+            <div v-if="isNew" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              新建脚本：点击「保存并运行」将先保存再执行。
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-muted-foreground">script_params (JSON)</label>
+              <Textarea v-model="testParams" class="min-h-[80px] font-mono text-xs" spellcheck="false" />
+            </div>
+            <div class="grid gap-3 grid-cols-2">
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">超时 (秒)</label>
                 <Input v-model.number="testTimeout" type="number" placeholder="30" />
@@ -429,27 +493,73 @@ function errorMessage(e: unknown) {
                 </Select>
               </div>
             </div>
-            <div class="mt-3 flex items-center gap-3">
-              <Button size="sm" :disabled="testing || selected?.status !== 'active'" @click="runTest">
+            <div class="flex items-center gap-3">
+              <Button size="sm" :disabled="testing || form.status !== 'active'" @click="runScript">
                 <Play class="mr-1.5 h-4 w-4" />
-                {{ testing ? '运行中' : '运行' }}
+                {{ testing ? '运行中' : (isNew ? '保存并运行' : '运行') }}
               </Button>
-              <div v-if="testError" class="text-xs text-destructive">{{ testError }}</div>
+              <div v-if="runError" class="text-xs text-destructive">{{ runError }}</div>
             </div>
-          </section>
+          </CardContent>
+        </Card>
 
-          <section class="space-y-3">
+        <!-- 运行结果（内联，取代弹窗） -->
+        <Card>
+          <CardContent class="space-y-3 p-4">
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-sm font-semibold text-foreground">运行结果</div>
+              <Button v-if="runDetail" variant="ghost" size="sm" class="h-7 px-2 text-xs" @click="runDetail = null">
+                清除
+              </Button>
+            </div>
+            <div v-if="runDetailLoading" class="py-6 text-center text-sm text-muted-foreground">加载中</div>
+            <div v-else-if="!runDetail" class="py-6 text-center text-sm text-muted-foreground">暂无运行结果，点击「运行」或在下方记录中选择</div>
+            <div v-else class="space-y-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" :class="runBadgeClass(runDetail.status)">{{ runStatusLabel(runDetail.status) }}</Badge>
+                <Badge variant="outline">{{ runDetail.run_type }}</Badge>
+                <span class="font-mono text-xs text-muted-foreground">{{ runDetail.run_id }}</span>
+                <span class="text-xs text-muted-foreground">{{ runDetail.duration_ms }} ms</span>
+                <span v-if="runDetail.exit_code !== null" class="text-xs text-muted-foreground">exit {{ runDetail.exit_code }}</span>
+              </div>
+              <div v-if="runDetail.error_message" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {{ runDetail.error_message }}
+              </div>
+              <section class="rounded-md border bg-muted/20 p-3">
+                <div class="mb-2 text-xs font-semibold text-foreground">result</div>
+                <pre class="max-h-48 overflow-auto rounded bg-background p-2 text-xs">{{ prettyJson(runDetail.result) }}</pre>
+              </section>
+              <section class="rounded-md border bg-muted/20 p-3">
+                <div class="mb-2 text-xs font-semibold text-foreground">stdout</div>
+                <pre class="max-h-48 overflow-auto rounded bg-background p-2 text-xs">{{ runDetail.stdout }}</pre>
+              </section>
+              <section class="rounded-md border bg-muted/20 p-3">
+                <div class="mb-2 text-xs font-semibold text-foreground">stderr</div>
+                <pre class="max-h-48 overflow-auto rounded bg-background p-2 text-xs">{{ runDetail.stderr }}</pre>
+              </section>
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- 运行记录 -->
+        <Card>
+          <CardContent class="space-y-3 p-4">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-semibold">运行记录</h3>
-              <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRuns">{{ runsLoading ? '刷新中' : '刷新' }}</Button>
+              <Button variant="outline" size="sm" class="h-7 text-xs" :disabled="runsLoading || isNew" @click="loadRuns">
+                <RotateCcw class="mr-1 h-3 w-3" />
+                {{ runsLoading ? '刷新中' : '刷新' }}
+              </Button>
             </div>
-            <div v-if="runsLoading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
-            <div v-else-if="!runs.length" class="rounded-md border px-4 py-6 text-sm text-muted-foreground">暂无运行记录</div>
-            <div v-else class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            <div v-if="isNew" class="rounded-md border px-3 py-4 text-xs text-muted-foreground">保存脚本后将显示运行记录</div>
+            <div v-else-if="runsLoading && !runs.length" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
+            <div v-else-if="!runs.length" class="rounded-md border px-3 py-4 text-sm text-muted-foreground">暂无运行记录</div>
+            <div v-else class="grid gap-2">
               <button
                 v-for="run in runs"
                 :key="run.run_id"
                 class="rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
+                :class="runDetail?.run_id === run.run_id ? 'border-primary/40 bg-primary/5' : ''"
                 @click="openRunDetail(run.run_id)"
               >
                 <div class="flex items-center justify-between gap-2">
@@ -464,48 +574,9 @@ function errorMessage(e: unknown) {
                 <div class="mt-1 text-xs text-muted-foreground">{{ run.created_at }}</div>
               </button>
             </div>
-          </section>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showRuns = false">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog :open="runDetail !== null" @update:open="(v: boolean) => { if (!v) runDetail = null }">
-      <DialogContent class="w-[96vw] max-w-[980px] sm:max-w-[980px]">
-        <DialogHeader>
-          <DialogTitle>运行详情</DialogTitle>
-        </DialogHeader>
-        <div v-if="runDetailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
-        <div v-else-if="runDetail" class="max-h-[76vh] space-y-4 overflow-auto pr-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" :class="runBadgeClass(runDetail.status)">{{ runStatusLabel(runDetail.status) }}</Badge>
-            <Badge variant="outline">{{ runDetail.run_type }}</Badge>
-            <span class="font-mono text-xs text-muted-foreground">{{ runDetail.run_id }}</span>
-            <span class="text-xs text-muted-foreground">{{ runDetail.duration_ms }} ms</span>
-            <span v-if="runDetail.exit_code !== null" class="text-xs text-muted-foreground">exit {{ runDetail.exit_code }}</span>
-          </div>
-          <div v-if="runDetail.error_message" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {{ runDetail.error_message }}
-          </div>
-          <section class="rounded-md border bg-muted/20 p-3">
-            <div class="mb-2 text-xs font-semibold text-foreground">result</div>
-            <pre class="max-h-60 overflow-auto rounded bg-background p-2 text-xs">{{ prettyJson(runDetail.result) }}</pre>
-          </section>
-          <section class="rounded-md border bg-muted/20 p-3">
-            <div class="mb-2 text-xs font-semibold text-foreground">stdout</div>
-            <pre class="max-h-60 overflow-auto rounded bg-background p-2 text-xs">{{ runDetail.stdout }}</pre>
-          </section>
-          <section class="rounded-md border bg-muted/20 p-3">
-            <div class="mb-2 text-xs font-semibold text-foreground">stderr</div>
-            <pre class="max-h-60 overflow-auto rounded bg-background p-2 text-xs">{{ runDetail.stderr }}</pre>
-          </section>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="runDetail = null">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   </div>
 </template>

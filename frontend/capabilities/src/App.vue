@@ -21,6 +21,11 @@ window.addEventListener('hashchange', () => {
   hash.value = window.location.hash.slice(1) || 'dashboard'
 })
 
+// 复合 hash 支持（如 #scripts/<key>）：取首个段为顶级 nav key，剩余为子路由参数
+const routeSegments = computed(() => hash.value.split('/'))
+const activeNavKey = computed(() => routeSegments.value[0] || 'dashboard')
+const subRoute = computed(() => routeSegments.value.slice(1).join('/'))
+
 const navGroups: NavGroup[] = [
   {
     label: '总览',
@@ -66,12 +71,12 @@ const navGroups: NavGroup[] = [
   },
 ]
 
-const currentNav = computed(() => navGroups.flatMap(g => g.items).find(i => i.key === hash.value))
-const view = computed(() => hash.value)
+const currentNav = computed(() => navGroups.flatMap(g => g.items).find(i => i.key === activeNavKey.value))
+const view = computed(() => activeNavKey.value)
 </script>
 
 <template>
-  <AppShell :nav-groups="navGroups" :active="hash">
+  <AppShell :nav-groups="navGroups" :active="activeNavKey">
     <div class="flex-1 overflow-y-auto">
       <!-- Page Header -->
       <div class="bg-card px-7 py-5">
@@ -88,7 +93,7 @@ const view = computed(() => hash.value)
         <KnowledgeView v-else-if="view === 'knowledge'" />
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
         <SkillManagementView v-else-if="view === 'skills'" />
-        <ScriptsView v-else-if="view === 'scripts'" />
+        <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
         <WorkflowView v-else-if="view === 'workflow'" />
         <LogsView v-else-if="view === 'logs'" />
         <StatsView v-else-if="view === 'stats'" />
