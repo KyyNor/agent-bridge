@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildOpenApiServicePayload,
   buildServicePayload,
   defaultServiceForm,
+  defaultOpenApiServiceForm,
   parseHeadersJson,
+  parseJsonObject,
   serviceToForm,
 } from '../src/views/capabilities/serviceForm.ts'
 
@@ -88,4 +91,67 @@ test('serviceToForm keeps redacted headers out of the editable secret field', ()
 
   assert.equal(form.headers, '')
   assert.equal(form.tags, 'database')
+})
+
+test('parseJsonObject accepts blank and object JSON values with custom labels', () => {
+  assert.equal(parseJsonObject('', '认证配置'), undefined)
+  assert.deepEqual(parseJsonObject('{"type":"bearer","token":"t"}', '认证配置'), {
+    type: 'bearer',
+    token: 't',
+  })
+  assert.throws(() => parseJsonObject('[]', '认证配置'), /认证配置 必须是 JSON 对象/)
+})
+
+test('buildOpenApiServicePayload preserves blank secrets while editing', () => {
+  const payload = buildOpenApiServicePayload(
+    {
+      ...defaultOpenApiServiceForm(),
+      service_key: 'petstore',
+      name: 'Petstore',
+      base_url: 'https://api.example.test',
+      spec_url: 'https://api.example.test/openapi.json',
+      spec_content: '',
+      auth_config: '',
+      headers: '',
+      description: 'Pet API',
+      tags: 'pets, demo',
+    },
+    'edit',
+  )
+
+  assert.deepEqual(payload, {
+    service_key: 'petstore',
+    name: 'Petstore',
+    base_url: 'https://api.example.test',
+    spec_url: 'https://api.example.test/openapi.json',
+    spec_content: '',
+    description: 'Pet API',
+    tags: ['pets', 'demo'],
+  })
+})
+
+test('buildOpenApiServicePayload includes auth and headers when provided', () => {
+  const payload = buildOpenApiServicePayload(
+    {
+      ...defaultOpenApiServiceForm(),
+      service_key: 'crm',
+      name: 'CRM',
+      base_url: 'https://crm.example.test',
+      auth_config: '{"type":"api_key","header":"X-API-Key","value":"secret"}',
+      headers: '{"Accept":"application/json"}',
+    },
+    'create',
+  )
+
+  assert.deepEqual(payload, {
+    service_key: 'crm',
+    name: 'CRM',
+    base_url: 'https://crm.example.test',
+    spec_url: '',
+    spec_content: '',
+    description: '',
+    tags: [],
+    auth_config: { type: 'api_key', header: 'X-API-Key', value: 'secret' },
+    headers: { Accept: 'application/json' },
+  })
 })

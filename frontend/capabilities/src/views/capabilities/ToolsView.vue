@@ -2,18 +2,19 @@
 import { Search } from 'lucide-vue-next'
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
-import type { McpTool, McpService } from '../../api/types'
+import type { CapabilityServiceSource, CapabilityTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Input } from '../../components/ui/input'
 
-interface ToolWithService extends McpTool {
+type ToolWithService = CapabilityTool & {
+  source_type: 'mcp_service' | 'openapi_service'
   service_name: string
 }
 
 const allTools = ref<ToolWithService[]>([])
-const services = ref<McpService[]>([])
+const services = ref<CapabilityServiceSource[]>([])
 const selectedService = ref('__all__')
 const loading = ref(false)
 const search = ref('')
@@ -22,14 +23,20 @@ const typeFilter = ref('')
 onMounted(async () => {
   loading.value = true
   try {
-    services.value = await api.listServices()
+    const [mcpServices, openApiServices] = await Promise.all([api.listServices(), api.listOpenApiServices()])
+    services.value = [
+      ...mcpServices.map(service => ({ ...service, source_type: 'mcp_service' as const })),
+      ...openApiServices.map(service => ({ ...service, source_type: 'openapi_service' as const })),
+    ]
     const active = services.value.filter(s => s.status === 'enabled')
     const results: ToolWithService[] = []
     for (const s of active) {
       try {
-        const tools = await api.listTools(s.service_key)
+        const tools = s.source_type === 'openapi_service'
+          ? await api.listOpenApiTools(s.service_key)
+          : await api.listTools(s.service_key)
         for (const t of tools) {
-          results.push({ ...t, service_name: s.name || s.service_key })
+          results.push({ ...t, source_type: s.source_type, service_name: s.name || s.service_key })
         }
       } catch { /* ignore errors for individual services */ }
     }
@@ -39,14 +46,18 @@ onMounted(async () => {
 })
 
 async function updateType(svc: string, toolName: string, newType: string) {
-  await api.updateToolType(svc, toolName, newType)
   const found = allTools.value.find(x => x.service_key === svc && x.tool_name === toolName)
+  if (found?.source_type === 'openapi_service') await api.updateOpenApiToolType(svc, toolName, newType)
+  else await api.updateToolType(svc, toolName, newType)
   if (found) found.tool_type = newType
 }
 
 const displayTools = computed(() => {
   let list = allTools.value
-  if (selectedService.value && selectedService.value !== '__all__') list = list.filter(t => t.service_key === selectedService.value)
+  if (selectedService.value && selectedService.value !== '__all__') {
+    const [sourceType, serviceKey] = selectedService.value.split(':')
+    list = list.filter(t => t.source_type === sourceType && t.service_key === serviceKey)
+  }
   if (typeFilter.value) list = list.filter(t => t.tool_type === typeFilter.value)
   if (search.value) {
     const q = search.value.toLowerCase()
@@ -103,7 +114,9 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__all__">全部服务</SelectItem>
-          <SelectItem v-for="s in services" :key="s.service_key" :value="s.service_key">{{ s.name }}</SelectItem>
+          <SelectItem v-for="s in services" :key="`${s.source_type}:${s.service_key}`" :value="`${s.source_type}:${s.service_key}`">
+            {{ s.name }} · {{ s.source_type === 'openapi_service' ? 'OpenAPI' : 'MCP' }}
+          </SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -130,7 +143,12 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
               <td class="px-4 py-3">
                 <span class="font-mono text-[13px] font-semibold text-foreground">{{ t.tool_name }}</span>
               </td>
-              <td class="px-4 py-3 text-sm text-muted-foreground">{{ t.service_name }}</td>
+              <td class="px-4 py-3 text-sm text-muted-foreground">
+                {{ t.service_name }}
+                <div v-if="t.source_type === 'openapi_service'" class="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                  {{ 'method' in t ? t.method : '' }} {{ 'path' in t ? t.path : '' }}
+                </div>
+              </td>
               <td class="px-4 py-3">
                 <Badge variant="secondary" :class="typeColor(t.tool_type)">{{ typeLabel(t.tool_type) }}</Badge>
               </td>

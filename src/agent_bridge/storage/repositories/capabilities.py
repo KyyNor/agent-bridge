@@ -260,3 +260,254 @@ class CapabilitiesRepository:
                     """,
                     (service_key,),
                 )
+
+    def create_openapi_service(
+        self,
+        *,
+        service_key: str,
+        name: str,
+        base_url: str,
+        spec_url: str,
+        spec_content: str,
+        auth_config: dict[str, Any],
+        headers: dict[str, Any],
+        description: str,
+        tags: list[str],
+        created_by: str,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO openapi_services (
+                  service_key, name, base_url, spec_url, spec_content,
+                  auth_config_json, headers_json, description, tags_json, created_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    service_key,
+                    name,
+                    base_url,
+                    spec_url,
+                    spec_content,
+                    json.dumps(auth_config, ensure_ascii=False),
+                    json.dumps(headers, ensure_ascii=False),
+                    description,
+                    json.dumps(tags, ensure_ascii=False),
+                    created_by,
+                ),
+            )
+            row = conn.execute("SELECT * FROM openapi_services WHERE service_key = ?", (service_key,)).fetchone()
+            service = row_to_dict(row)
+            if service is None:
+                raise KeyError(f"openapi service not found: {service_key}")
+            return service
+
+    def update_openapi_service(
+        self,
+        service_key: str,
+        *,
+        name: str,
+        base_url: str,
+        spec_url: str,
+        spec_content: str,
+        auth_config: dict[str, Any],
+        headers: dict[str, Any],
+        description: str,
+        tags: list[str],
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE openapi_services
+                SET name = ?,
+                    base_url = ?,
+                    spec_url = ?,
+                    spec_content = ?,
+                    auth_config_json = ?,
+                    headers_json = ?,
+                    description = ?,
+                    tags_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                """,
+                (
+                    name,
+                    base_url,
+                    spec_url,
+                    spec_content,
+                    json.dumps(auth_config, ensure_ascii=False),
+                    json.dumps(headers, ensure_ascii=False),
+                    description,
+                    json.dumps(tags, ensure_ascii=False),
+                    service_key,
+                ),
+            )
+            row = conn.execute("SELECT * FROM openapi_services WHERE service_key = ?", (service_key,)).fetchone()
+            service = row_to_dict(row)
+            if service is None:
+                raise KeyError(f"openapi service not found: {service_key}")
+            return service
+
+    def get_openapi_service(self, service_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM openapi_services WHERE service_key = ?", (service_key,)).fetchone()
+            return row_to_dict(row)
+
+    def list_openapi_services(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM openapi_services ORDER BY service_key").fetchall()
+            return [dict(row) for row in rows]
+
+    def update_openapi_service_status(self, service_key: str, status: McpServiceStatus | str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE openapi_services
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                """,
+                (enum_value(status), service_key),
+            )
+
+    def mark_openapi_service_import(self, service_key: str, *, success: bool, error: str | None = None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE openapi_services
+                SET last_imported_at = CURRENT_TIMESTAMP,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                """,
+                (None if success else error, service_key),
+            )
+
+    def upsert_openapi_tool(
+        self,
+        *,
+        service_key: str,
+        tool_name: str,
+        operation_id: str,
+        method: str,
+        path: str,
+        display_name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        request_mapping: dict[str, Any],
+        response_schema: dict[str, Any],
+        tool_type: ToolType | str,
+        tags: list[str],
+        examples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO openapi_tools (
+                  service_key,
+                  tool_name,
+                  operation_id,
+                  method,
+                  path,
+                  display_name,
+                  description,
+                  input_schema_json,
+                  request_mapping_json,
+                  response_schema_json,
+                  tool_type,
+                  tags_json,
+                  examples_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(service_key, tool_name) DO UPDATE SET
+                  operation_id = excluded.operation_id,
+                  method = excluded.method,
+                  path = excluded.path,
+                  display_name = excluded.display_name,
+                  description = excluded.description,
+                  input_schema_json = excluded.input_schema_json,
+                  request_mapping_json = excluded.request_mapping_json,
+                  response_schema_json = excluded.response_schema_json,
+                  tool_type = excluded.tool_type,
+                  tags_json = excluded.tags_json,
+                  examples_json = excluded.examples_json,
+                  status = 'active',
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    service_key,
+                    tool_name,
+                    operation_id,
+                    method.upper(),
+                    path,
+                    display_name,
+                    description,
+                    json.dumps(input_schema, ensure_ascii=False),
+                    json.dumps(request_mapping, ensure_ascii=False),
+                    json.dumps(response_schema, ensure_ascii=False),
+                    enum_value(tool_type),
+                    json.dumps(tags, ensure_ascii=False),
+                    json.dumps(examples, ensure_ascii=False),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM openapi_tools WHERE service_key = ? AND tool_name = ?",
+                (service_key, tool_name),
+            ).fetchone()
+            tool = row_to_dict(row)
+            if tool is None:
+                raise KeyError(f"openapi tool not found: {service_key}/{tool_name}")
+            return tool
+
+    def list_openapi_tools(self, service_key: str | None = None) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            if service_key is None:
+                rows = conn.execute("SELECT * FROM openapi_tools ORDER BY service_key, tool_name").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM openapi_tools WHERE service_key = ? ORDER BY tool_name",
+                    (service_key,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_openapi_tool(self, service_key: str, tool_name: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM openapi_tools WHERE service_key = ? AND tool_name = ?",
+                (service_key, tool_name),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def update_openapi_tool_type(self, service_key: str, tool_name: str, tool_type: ToolType | str) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE openapi_tools
+                SET tool_type = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                  AND tool_name = ?
+                """,
+                (enum_value(tool_type), service_key, tool_name),
+            )
+            row = conn.execute(
+                "SELECT * FROM openapi_tools WHERE service_key = ? AND tool_name = ?",
+                (service_key, tool_name),
+            ).fetchone()
+            tool = row_to_dict(row)
+            if tool is None:
+                raise KeyError(f"openapi tool not found: {service_key}/{tool_name}")
+            return tool
+
+    def delete_openapi_tool(self, service_key: str, tool_name: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE openapi_tools
+                SET status = 'inactive',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_key = ?
+                  AND tool_name = ?
+                """,
+                (service_key, tool_name),
+            )

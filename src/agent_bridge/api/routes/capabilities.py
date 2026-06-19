@@ -5,9 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from agent_bridge.api.schemas import (
     ExecuteCapabilityRequest,
+    ImportOpenApiOperationsRequest,
+    RegisterOpenApiServiceRequest,
     RegisterMcpServiceRequest,
     UpdateMcpServiceStatusRequest,
     UpdateMcpToolTypeRequest,
+    UpsertOpenApiToolRequest,
 )
 
 
@@ -46,6 +49,62 @@ def create_capability_routes(service, actor, call_safely, call_safely_async, ens
         ensure_capability_schema()
         return call_safely(lambda: service.capabilities.set_tool_type(current_actor, service_key, tool_name, payload.tool_type))
 
+    @router.post("/capabilities/openapi-services")
+    def register_openapi_service(payload: RegisterOpenApiServiceRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(
+            lambda: service.capabilities.register_openapi_service(
+                current_actor,
+                payload.service_key,
+                payload.name,
+                payload.base_url,
+                payload.spec_url,
+                payload.spec_content,
+                payload.auth_config,
+                payload.headers,
+                payload.description,
+                payload.tags,
+            )
+        )
+
+    @router.get("/capabilities/openapi-services")
+    def list_openapi_services(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.list_openapi_services(current_actor))
+
+    @router.post("/capabilities/openapi-services/{service_key}/status")
+    def update_openapi_service_status(service_key: str, payload: UpdateMcpServiceStatusRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.set_openapi_service_status(current_actor, service_key, payload.status))
+
+    @router.post("/capabilities/openapi-services/{service_key}/import")
+    def import_openapi_operations(service_key: str, payload: ImportOpenApiOperationsRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.import_openapi_operations(current_actor, service_key, spec_content=payload.spec_content))
+
+    @router.get("/capabilities/openapi-services/{service_key}/tools")
+    def list_openapi_service_tools(service_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.list_openapi_tools(current_actor, service_key))
+
+    @router.put("/capabilities/openapi-services/{service_key}/tools/{tool_name}")
+    def upsert_openapi_tool(service_key: str, tool_name: str, payload: UpsertOpenApiToolRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        data = payload.model_dump()
+        data["tool_name"] = tool_name
+        return call_safely(lambda: service.capabilities.upsert_openapi_tool(current_actor, service_key, data))
+
+    @router.put("/capabilities/openapi-services/{service_key}/tools/{tool_name}/type")
+    def update_openapi_tool_type(service_key: str, tool_name: str, payload: UpdateMcpToolTypeRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        return call_safely(lambda: service.capabilities.set_openapi_tool_type(current_actor, service_key, tool_name, payload.tool_type))
+
+    @router.delete("/capabilities/openapi-services/{service_key}/tools/{tool_name}")
+    def delete_openapi_tool(service_key: str, tool_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        ensure_capability_schema()
+        call_safely(lambda: service.capabilities.delete_openapi_tool(current_actor, service_key, tool_name))
+        return {"ok": True}
+
     @router.post("/capabilities/execute")
     async def execute_capability(payload: ExecuteCapabilityRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
@@ -67,6 +126,10 @@ def create_capability_routes(service, actor, call_safely, call_safely_async, ens
     @router.get("/capability-catalog/sources/{source_type}/{source_key}")
     def capability_source_detail(source_type: str, source_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
+        if source_type == "openapi_service":
+            service_payload = call_safely(lambda: service.capabilities.get_openapi_service(current_actor, source_key))
+            tools = call_safely(lambda: service.capabilities.list_openapi_tools(current_actor, source_key))
+            return {"source_type": source_type, "source": service_payload, "tools": tools}
         if source_type != "mcp_service":
             raise HTTPException(status_code=404, detail="source not found")
         service_payload = call_safely(lambda: service.capabilities.get_service(current_actor, source_key))
@@ -76,6 +139,13 @@ def create_capability_routes(service, actor, call_safely, call_safely_async, ens
     @router.get("/capability-catalog/sources/{source_type}/{source_key}/tools/{tool_name}")
     def capability_tool_detail(source_type: str, source_key: str, tool_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         ensure_capability_schema()
+        if source_type == "openapi_service":
+            tools = call_safely(lambda: service.capabilities.list_openapi_tools(current_actor, source_key))
+            for tool in tools:
+                if tool["tool"] == tool_name:
+                    logs = call_safely(lambda: service.governance.list_logs(actor=current_actor, source_type=source_type, source_key=source_key, tool_name=tool_name, limit=10))
+                    return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
+            raise HTTPException(status_code=404, detail="tool not found")
         if source_type != "mcp_service":
             raise HTTPException(status_code=404, detail="tool not found")
         tools = call_safely(lambda: service.capabilities.list_tools(current_actor, source_key))

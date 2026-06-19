@@ -9,7 +9,7 @@ import type {
   ProfilePinRule,
   ProfileSourceRule,
   ProfileResourceRule,
-  McpService,
+  CatalogSource,
   KnowledgeBaseSummary,
   CodeRepository,
 } from '../../api/types'
@@ -36,7 +36,7 @@ const configRules = ref<ProfileSourceRule[]>([])
 const configResources = ref<ProfileResourceRule[]>([])
 const pendingRules = ref<ProfileSourceRule[]>([])
 const pendingResources = ref<ProfileResourceRule[]>([])
-const allServices = ref<McpService[]>([])
+const allServices = ref<CatalogSource[]>([])
 const allKbs = ref<KnowledgeBaseSummary[]>([])
 const allRepos = ref<CodeRepository[]>([])
 const configSaving = ref(false)
@@ -61,7 +61,7 @@ const pinToolTypes = ['overview', 'search', 'detail']
 onMounted(async () => {
   try {
     profiles.value = await api.listProfiles()
-    allServices.value = await api.listServices()
+    allServices.value = (await api.catalog()).sources
   } catch { /* empty */ }
   loading.value = false
 })
@@ -84,7 +84,7 @@ const filterTabs = computed(() => [
 ])
 
 const allowedServices = computed(() =>
-  allServices.value.filter(svc => isServiceAllowed(svc.service_key))
+  allServices.value.filter(svc => isServiceAllowed(svc.source_key))
 )
 
 const autoPinGroups = computed(() =>
@@ -159,13 +159,13 @@ async function openConfig(p: ProjectProfile) {
   configLoading.value = true
   resetConfigState()
   try {
-    const [services, kbs, repos, full] = await Promise.all([
-      api.listServices(),
+    const [catalog, kbs, repos, full] = await Promise.all([
+      api.catalog(),
       api.listWikiKbs(),
       api.listCodeRepos(),
       api.getProfile(p.profile_key),
     ])
-    allServices.value = services
+    allServices.value = catalog.sources
     allKbs.value = kbs
     allRepos.value = repos
     configRules.value = full.rules || []
@@ -256,12 +256,13 @@ function isServiceAllowed(key: string) {
   return pendingRules.value.some(r => r.source_key === key && r.effect === 'allow')
 }
 
-function toggleServiceAllow(key: string) {
+function toggleServiceAllow(source: CatalogSource) {
+  const key = source.source_key
   if (isServiceAllowed(key)) {
     pendingRules.value = pendingRules.value.filter(r => !(r.source_key === key && r.effect === 'allow'))
     pendingPins.value = pendingPins.value.filter(pin => pin.service_key !== key)
   } else {
-    pendingRules.value = [...pendingRules.value, { source_type: 'mcp_service', source_key: key, effect: 'allow' as const }]
+    pendingRules.value = [...pendingRules.value, { source_type: source.source_type, source_key: key, effect: 'allow' as const }]
   }
 }
 
@@ -276,7 +277,7 @@ function typeLabel(type: string) {
 }
 
 function serviceName(key: string) {
-  return allServices.value.find(svc => svc.service_key === key)?.name || key
+  return allServices.value.find(svc => svc.source_key === key)?.name || key
 }
 
 function manualPinExists(serviceKey: string, toolType: string) {
@@ -527,18 +528,18 @@ async function refreshProfileDoc(raiseError = false) {
             </div>
             <div v-else class="max-h-[240px] space-y-1 overflow-y-auto">
               <label
-                v-for="svc in allServices" :key="svc.service_key"
+                v-for="svc in allServices" :key="`${svc.source_type}:${svc.source_key}`"
                 class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
               >
                 <input
                   type="checkbox"
-                  :checked="isServiceAllowed(svc.service_key)"
-                  @change="toggleServiceAllow(svc.service_key)"
+                  :checked="isServiceAllowed(svc.source_key)"
+                  @change="toggleServiceAllow(svc)"
                   class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                 />
                 <div class="min-w-0 flex-1">
-                  <div class="break-all text-sm font-medium">{{ svc.name || svc.service_key }}</div>
-                  <div class="break-all text-xs text-muted-foreground">{{ svc.service_key }}</div>
+                  <div class="break-all text-sm font-medium">{{ svc.name || svc.source_key }}</div>
+                  <div class="break-all text-xs text-muted-foreground">{{ svc.source_key }} · {{ svc.source_type === 'openapi_service' ? 'OpenAPI' : 'MCP' }}</div>
                 </div>
                 <Badge v-if="svc.status === 'enabled'" variant="secondary" class="bg-green-50 text-green-700 text-[11px]">已启用</Badge>
                 <Badge v-else-if="svc.status === 'error'" variant="destructive" class="text-[11px]">异常</Badge>
@@ -675,16 +676,16 @@ async function refreshProfileDoc(raiseError = false) {
                   <div v-else class="max-h-[220px] space-y-2 overflow-y-auto">
                     <div
                       v-for="svc in allowedServices"
-                      :key="`pin-${svc.service_key}`"
+                      :key="`pin-${svc.source_type}:${svc.source_key}`"
                       class="flex flex-wrap items-center gap-2 rounded-md bg-muted/50 px-3 py-2"
                     >
                       <div class="min-w-[180px] flex-1 break-all">
-                        <div class="text-sm font-medium">{{ svc.name || svc.service_key }}</div>
-                        <div class="text-xs text-muted-foreground">{{ svc.service_key }}</div>
+                        <div class="text-sm font-medium">{{ svc.name || svc.source_key }}</div>
+                        <div class="text-xs text-muted-foreground">{{ svc.source_key }} · {{ svc.source_type === 'openapi_service' ? 'OpenAPI' : 'MCP' }}</div>
                       </div>
                       <label
                         v-for="toolType in pinToolTypes"
-                        :key="`${svc.service_key}-${toolType}`"
+                        :key="`${svc.source_key}-${toolType}`"
                         :class="[
                           'inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors',
                           pinsLoaded ? 'cursor-pointer hover:bg-background' : 'cursor-not-allowed opacity-60'
@@ -692,9 +693,9 @@ async function refreshProfileDoc(raiseError = false) {
                       >
                         <input
                           type="checkbox"
-                          :checked="manualPinExists(svc.service_key, toolType)"
+                          :checked="manualPinExists(svc.source_key, toolType)"
                           :disabled="!pinsLoaded"
-                          @change="toggleManualPin(svc.service_key, toolType)"
+                          @change="toggleManualPin(svc.source_key, toolType)"
                           class="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         {{ typeLabel(toolType) }}

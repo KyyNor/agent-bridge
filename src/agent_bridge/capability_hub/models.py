@@ -14,6 +14,7 @@ class McpServiceStatus(str, Enum):
 class SourceType(str, Enum):
     builtin = "builtin"
     mcp_service = "mcp_service"
+    openapi_service = "openapi_service"
 
 
 class FailureStage(str, Enum):
@@ -22,6 +23,7 @@ class FailureStage(str, Enum):
     capability_registry = "capability_registry"
     mcp_transport = "mcp_transport"
     mcp_protocol = "mcp_protocol"
+    openapi_transport = "openapi_transport"
     upstream_tool = "upstream_tool"
     builtin_backend = "builtin_backend"
     internal = "internal"
@@ -31,6 +33,7 @@ class FailureOwner(str, Enum):
     platform = "platform"
     policy = "policy"
     upstream_mcp = "upstream_mcp"
+    upstream_openapi = "upstream_openapi"
     builtin_backend = "builtin_backend"
 
 

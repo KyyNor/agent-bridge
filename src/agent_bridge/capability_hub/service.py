@@ -6,6 +6,8 @@ import json
 import re
 from typing import Any
 
+import httpx
+
 from agent_bridge.capability_hub.sources.builtin.base import (
     BuiltinCapabilityProvider,
     BuiltinResourceRef,
@@ -16,6 +18,8 @@ from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, Fail
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService, monotonic_ms
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
+from agent_bridge.capability_hub.sources.openapi.http_client import OpenApiHttpClient
+from agent_bridge.capability_hub.sources.openapi.parser import parse_openapi_operations
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -112,11 +116,13 @@ class CapabilityService:
         store: SQLiteStore,
         admins: set[str],
         mcp_client: McpHttpClient | None = None,
+        openapi_client: OpenApiHttpClient | None = None,
         governance: CapabilityGovernanceService | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
         self.mcp_client = mcp_client or McpHttpClient()
+        self.openapi_client = openapi_client or OpenApiHttpClient()
         self.governance = governance or CapabilityGovernanceService(store=store, admins=admins)
         self.builtin_providers: dict[str, BuiltinCapabilityProvider] = {}
 
@@ -137,6 +143,8 @@ class CapabilityService:
         self._validate_service_key(service_key)
         if service_key in self.builtin_providers:
             raise ValidationError("service_key is reserved for built-in capability")
+        if self.store.get_openapi_service(service_key) is not None:
+            raise ValidationError("service_key is already used by an OpenAPI service")
         existing = self.store.get_mcp_service(service_key)
         if headers is None:
             headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
@@ -160,6 +168,152 @@ class CapabilityService:
                 tags=tags,
             )
         return self._service_payload(service)
+
+    def register_openapi_service(
+        self,
+        actor: str,
+        service_key: str,
+        name: str,
+        base_url: str,
+        spec_url: str,
+        spec_content: str,
+        auth_config: dict[str, Any] | None,
+        headers: dict[str, Any] | None,
+        description: str,
+        tags: list[str],
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._validate_service_key(service_key)
+        if service_key in self.builtin_providers or self.store.get_mcp_service(service_key) is not None:
+            raise ValidationError("service_key is already used by another capability source")
+        if not base_url.strip():
+            raise ValidationError("base_url is required")
+        existing = self.store.get_openapi_service(service_key)
+        if auth_config is None:
+            auth_config = _json_loads(existing.get("auth_config_json"), {}) if existing is not None else {}
+        if headers is None:
+            headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
+        if existing is None:
+            service = self.store.create_openapi_service(
+                service_key=service_key,
+                name=name,
+                base_url=base_url,
+                spec_url=spec_url,
+                spec_content=spec_content,
+                auth_config=auth_config,
+                headers=headers,
+                description=description,
+                tags=tags,
+                created_by=actor,
+            )
+        else:
+            service = self.store.update_openapi_service(
+                service_key,
+                name=name,
+                base_url=base_url,
+                spec_url=spec_url,
+                spec_content=spec_content,
+                auth_config=auth_config,
+                headers=headers,
+                description=description,
+                tags=tags,
+            )
+        return self._openapi_service_payload(service)
+
+    def list_openapi_services(self, actor: str) -> list[dict[str, Any]]:
+        return [
+            self._openapi_service_payload(service, redact_secrets=True)
+            for service in self.store.list_openapi_services()
+        ]
+
+    def get_openapi_service(self, actor: str, service_key: str) -> dict[str, Any]:
+        service = self.store.get_openapi_service(service_key)
+        if service is None:
+            raise NotFound("service not found")
+        return self._openapi_service_payload(service, redact_secrets=True)
+
+    def set_openapi_service_status(self, actor: str, service_key: str, status: McpServiceStatus | str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        try:
+            next_status = McpServiceStatus(status)
+        except ValueError as exc:
+            raise ValidationError("invalid service status") from exc
+        if self.store.get_openapi_service(service_key) is None:
+            raise NotFound("service not found")
+        self.store.update_openapi_service_status(service_key, next_status)
+        updated = self.store.get_openapi_service(service_key)
+        if updated is None:
+            raise NotFound("service not found")
+        return self._openapi_service_payload(updated)
+
+    def import_openapi_operations(
+        self,
+        actor: str,
+        service_key: str,
+        *,
+        spec_content: str | None = None,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        service = self.store.get_openapi_service(service_key)
+        if service is None:
+            raise NotFound("service not found")
+        try:
+            content = spec_content if spec_content is not None else str(service.get("spec_content") or "")
+            if not content.strip():
+                spec_url = str(service.get("spec_url") or "").strip()
+                if not spec_url:
+                    raise ValidationError("OpenAPI spec content or spec_url is required")
+                response = httpx.get(spec_url, headers=_json_loads(service.get("headers_json"), {}), timeout=30.0)
+                response.raise_for_status()
+                content = response.text
+            operations = parse_openapi_operations(content)
+            self.store.mark_openapi_service_import(service_key, success=True)
+            return {"service_key": service_key, "operations": operations}
+        except Exception as exc:
+            self.store.mark_openapi_service_import(service_key, success=False, error=str(exc))
+            raise
+
+    def upsert_openapi_tool(self, actor: str, service_key: str, tool: dict[str, Any]) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_openapi_service(service_key) is None:
+            raise NotFound("service not found")
+        tool_type = self._validate_tool_type(tool.get("tool_type"))
+        saved = self.store.upsert_openapi_tool(
+            service_key=service_key,
+            tool_name=str(tool.get("tool_name") or "").strip(),
+            operation_id=str(tool.get("operation_id") or ""),
+            method=str(tool.get("method") or "GET").upper(),
+            path=str(tool.get("path") or ""),
+            display_name=str(tool.get("display_name") or tool.get("tool_name") or ""),
+            description=str(tool.get("description") or ""),
+            input_schema=tool.get("input_schema") if isinstance(tool.get("input_schema"), dict) else {},
+            request_mapping=tool.get("request_mapping") if isinstance(tool.get("request_mapping"), dict) else {},
+            response_schema=tool.get("response_schema") if isinstance(tool.get("response_schema"), dict) else {},
+            tool_type=tool_type,
+            tags=[str(tag) for tag in tool.get("tags", [])] if isinstance(tool.get("tags"), list) else [],
+            examples=tool.get("examples") if isinstance(tool.get("examples"), list) else [],
+        )
+        return self._openapi_tool_payload(saved)
+
+    def list_openapi_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
+        self._require_enabled_openapi_service(service_key)
+        return [self._openapi_tool_payload(tool) for tool in self._active_openapi_tools(service_key)]
+
+    def set_openapi_tool_type(self, actor: str, service_key: str, tool_name: str, tool_type: ToolType | str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        next_tool_type = self._validate_tool_type(tool_type)
+        if self.store.get_openapi_service(service_key) is None:
+            raise NotFound("service not found")
+        tool = self.store.get_openapi_tool(service_key, tool_name)
+        if tool is None:
+            raise NotFound("tool not found")
+        return self._openapi_tool_payload(self.store.update_openapi_tool_type(service_key, tool_name, next_tool_type))
+
+    def delete_openapi_tool(self, actor: str, service_key: str, tool_name: str) -> None:
+        require_admin_user(actor, self.admins)
+        if self.store.get_openapi_tool(service_key, tool_name) is None:
+            raise NotFound("tool not found")
+        self.store.delete_openapi_tool(service_key, tool_name)
 
     def list_services(self, actor: str) -> list[dict[str, Any]]:
         return [self._service_payload(service, redact_headers=True) for service in self.store.list_mcp_services()]
@@ -321,6 +475,17 @@ class CapabilityService:
                     for tool in provider.list_tools(actor, profile_key)
                 ]
                 response_path = normalized_path
+            elif self.store.get_openapi_service(normalized_path) is not None:
+                if not self.governance.is_source_allowed(
+                    actor,
+                    profile_key,
+                    SourceType.openapi_service.value,
+                    normalized_path,
+                ):
+                    return {"path": normalized_path, "items": []}
+                self._require_enabled_openapi_service(normalized_path)
+                items = [self._openapi_tool_search_item(tool) for tool in self._active_openapi_tools(normalized_path)]
+                response_path = normalized_path
             else:
                 if not self.governance.is_source_allowed(
                     actor,
@@ -348,7 +513,14 @@ class CapabilityService:
     ) -> dict[str, Any]:
         started = monotonic_ms()
         request = {"service": service, "tool_name": tool_name, "params": params, "profile_key": profile_key}
-        source_type = SourceType.builtin.value if service in self.builtin_providers else SourceType.mcp_service.value
+        is_openapi_service = self.store.get_openapi_service(service) is not None
+        source_type = (
+            SourceType.builtin.value
+            if service in self.builtin_providers
+            else SourceType.openapi_service.value
+            if is_openapi_service
+            else SourceType.mcp_service.value
+        )
         resource_type = None
         resource_key = None
         try:
@@ -356,6 +528,18 @@ class CapabilityService:
                 resource = self.builtin_providers[service].resource_from_arguments(tool_name, params)
                 resource_type, resource_key = self._builtin_resource_tuple(resource)
                 result = await self._execute_builtin(actor, service, tool_name, params, profile_key)
+            elif is_openapi_service:
+                if not self.governance.is_source_allowed(actor, profile_key, SourceType.openapi_service.value, service):
+                    raise _mark_call_log_failure(
+                        _mark_call_log_status(
+                            ValidationError("source is blocked by profile policy"),
+                            CallLogStatus.blocked.value,
+                        ),
+                        stage=FailureStage.profile_policy.value,
+                        owner=FailureOwner.policy.value,
+                        error_type="profile_policy_blocked",
+                    )
+                result = self._execute_openapi_without_log(actor, service, tool_name, params)
             elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
                 raise _mark_call_log_failure(
                     _mark_call_log_status(
@@ -505,6 +689,57 @@ class CapabilityService:
             "result": result,
         }
 
+    def _execute_openapi_without_log(
+        self,
+        actor: str,
+        service: str,
+        tool_name: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        service_payload = self._require_enabled_openapi_service(service)
+        tool_payload = self.store.get_openapi_tool(service, tool_name)
+        if tool_payload is None or tool_payload.get("status") != "active":
+            raise _mark_call_log_failure(
+                NotFound("tool not found"),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
+            )
+        if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
+            if tool_payload["tool_type"] == ToolType.unconfigured.value:
+                raise _mark_call_log_failure(
+                    _mark_call_log_status(
+                        ValidationError("工具类型未配置，请联系管理员在 Agent Bridge 中配置工具类型"),
+                        CallLogStatus.blocked.value,
+                    ),
+                    stage=FailureStage.capability_registry.value,
+                    owner=FailureOwner.platform.value,
+                    error_type="capability_registry_error",
+                )
+            raise _mark_call_log_failure(
+                _mark_call_log_status(
+                    ValidationError("tool type is not executable"),
+                    CallLogStatus.blocked.value,
+                ),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
+            )
+        try:
+            result = self.openapi_client.call_tool(
+                self._openapi_service_payload(service_payload),
+                self._openapi_tool_payload(tool_payload),
+                params,
+            )
+        except Exception as exc:
+            raise _mark_call_log_failure(
+                ValidationError(f"OpenAPI tool execution failed: {exc}"),
+                stage=FailureStage.openapi_transport.value,
+                owner=FailureOwner.upstream_openapi.value,
+                error_type="openapi_transport_error",
+            ) from exc
+        return {"service": service, "tool": tool_name, "tool_name": tool_name, "success": True, "result": result}
+
     def _require_enabled_service(self, service_key: str) -> dict[str, Any]:
         service = self.store.get_mcp_service(service_key)
         if service is None:
@@ -517,6 +752,24 @@ class CapabilityService:
         if service["status"] != McpServiceStatus.enabled.value:
             raise _mark_call_log_failure(
                 ValidationError("MCP service is not enabled"),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
+            )
+        return service
+
+    def _require_enabled_openapi_service(self, service_key: str) -> dict[str, Any]:
+        service = self.store.get_openapi_service(service_key)
+        if service is None:
+            raise _mark_call_log_failure(
+                NotFound("service not found"),
+                stage=FailureStage.capability_registry.value,
+                owner=FailureOwner.platform.value,
+                error_type="capability_registry_error",
+            )
+        if service["status"] != McpServiceStatus.enabled.value:
+            raise _mark_call_log_failure(
+                ValidationError("OpenAPI service is not enabled"),
                 stage=FailureStage.capability_registry.value,
                 owner=FailureOwner.platform.value,
                 error_type="capability_registry_error",
@@ -572,10 +825,44 @@ class CapabilityService:
             }
             for service in enabled_services
         ]
-        return builtin_items + external_items
+        openapi_services = [
+            service
+            for service in self.store.list_openapi_services()
+            if service["status"] == McpServiceStatus.enabled.value
+        ]
+        visible_openapi_keys = set(
+            self.governance.filter_source_keys(
+                actor=actor,
+                profile_key=profile_key,
+                source_type=SourceType.openapi_service.value,
+                source_keys=[service["service_key"] for service in openapi_services],
+            )
+        )
+        openapi_tools_by_service: dict[str, int] = {}
+        for tool in self.store.list_openapi_tools():
+            if tool.get("status") == "active":
+                openapi_tools_by_service[tool["service_key"]] = openapi_tools_by_service.get(tool["service_key"], 0) + 1
+        openapi_items = [
+            {
+                "kind": "service",
+                "source_type": SourceType.openapi_service.value,
+                "service": service["service_key"],
+                "name": service["name"],
+                "description": service["description"],
+                "tags": _json_loads(service.get("tags_json"), []),
+                "tool_count": openapi_tools_by_service.get(service["service_key"], 0),
+                "status": service["status"],
+            }
+            for service in openapi_services
+            if service["service_key"] in visible_openapi_keys
+        ]
+        return builtin_items + external_items + openapi_items
 
     def _active_tools(self, service_key: str) -> list[dict[str, Any]]:
         return [tool for tool in self.store.list_mcp_tools(service_key) if tool.get("status") == "active"]
+
+    def _active_openapi_tools(self, service_key: str) -> list[dict[str, Any]]:
+        return [tool for tool in self.store.list_openapi_tools(service_key) if tool.get("status") == "active"]
 
     def _service_payload(self, service: dict[str, Any], *, redact_headers: bool = False) -> dict[str, Any]:
         payload = dict(service)
@@ -599,6 +886,49 @@ class CapabilityService:
             "tool": tool["tool_name"],
             "name": tool["display_name"],
             "input_schema": input_schema,
+            "tool_type": tool["tool_type"],
+            "tags": _json_loads(tool.get("tags_json"), []),
+            "examples": examples,
+            "execute_example": examples[0] if examples else _schema_example(input_schema),
+            "executable": tool["tool_type"] in READONLY_TOOL_TYPES,
+        }
+
+    def _openapi_service_payload(self, service: dict[str, Any], *, redact_secrets: bool = False) -> dict[str, Any]:
+        payload = dict(service)
+        headers = _json_loads(payload.pop("headers_json", None), {})
+        auth_config = _json_loads(payload.pop("auth_config_json", None), {})
+        if redact_secrets:
+            headers = {key: "***" if value else value for key, value in headers.items()}
+            auth_config = {
+                key: "***" if key in {"token", "value", "api_key"} and value else value
+                for key, value in auth_config.items()
+            }
+        payload["headers"] = headers
+        payload["auth_config"] = auth_config
+        payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
+        payload["source_type"] = SourceType.openapi_service.value
+        return payload
+
+    def _openapi_tool_payload(self, tool: dict[str, Any]) -> dict[str, Any]:
+        input_schema = _json_loads(tool.get("input_schema_json"), {})
+        request_mapping = _json_loads(tool.get("request_mapping_json"), {})
+        response_schema = _json_loads(tool.get("response_schema_json"), {})
+        examples = _json_loads(tool.get("examples_json"), [])
+        payload = dict(tool)
+        payload.pop("input_schema_json", None)
+        payload.pop("request_mapping_json", None)
+        payload.pop("response_schema_json", None)
+        payload.pop("tags_json", None)
+        payload.pop("examples_json", None)
+        return {
+            **payload,
+            "source_type": SourceType.openapi_service.value,
+            "service": tool["service_key"],
+            "tool": tool["tool_name"],
+            "name": tool["display_name"],
+            "input_schema": input_schema,
+            "request_mapping": request_mapping,
+            "response_schema": response_schema,
             "tool_type": tool["tool_type"],
             "tags": _json_loads(tool.get("tags_json"), []),
             "examples": examples,
@@ -636,6 +966,24 @@ class CapabilityService:
             "executable": payload["executable"],
         }
 
+    def _openapi_tool_search_item(self, tool: dict[str, Any]) -> dict[str, Any]:
+        payload = self._openapi_tool_payload(tool)
+        return {
+            "kind": "tool",
+            "source_type": SourceType.openapi_service.value,
+            "service": payload["service"],
+            "tool": payload["tool"],
+            "name": payload["name"],
+            "description": payload["description"],
+            "tags": payload["tags"],
+            "tool_type": payload["tool_type"],
+            "input_schema": payload["input_schema"],
+            "execute_example": payload["execute_example"],
+            "executable": payload["executable"],
+            "method": payload["method"],
+            "path": payload["path"],
+        }
+
     def _normalize_synced_tool(self, tool: dict[str, Any]) -> dict[str, Any]:
         tool_name = str(tool.get("name") or "")
         input_schema = tool.get("input_schema")
@@ -669,3 +1017,9 @@ class CapabilityService:
     def _validate_service_key(self, service_key: str) -> None:
         if not SERVICE_KEY_RE.fullmatch(service_key):
             raise ValidationError("service_key may contain only letters, numbers, hyphen, and underscore")
+
+    def _validate_tool_type(self, tool_type: Any) -> ToolType:
+        try:
+            return ToolType(str(tool_type or ToolType.unconfigured.value))
+        except ValueError as exc:
+            raise ValidationError("invalid tool type") from exc

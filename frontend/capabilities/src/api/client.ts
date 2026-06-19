@@ -11,6 +11,9 @@ import type {
   DocumentDetail,
   KnowledgeBase,
   KnowledgeBaseSummary,
+  OpenApiImportResult,
+  OpenApiService,
+  OpenApiTool,
   McpService,
   McpTool,
   ProjectProfile,
@@ -82,6 +85,12 @@ async function put<T>(url: string, body?: unknown): Promise<T> {
   return r.json()
 }
 
+async function del<T>(url: string): Promise<T> {
+  const r = await fetch(url, { method: 'DELETE', headers: headers() })
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  return r.json()
+}
+
 async function postFormData<T>(url: string, formData: FormData): Promise<T> {
   const r = await fetch(url, {
     method: 'POST',
@@ -104,6 +113,22 @@ export const api = {
   listTools: (key: string) => get<McpTool[]>(`/capabilities/mcp-services/${key}/tools`),
   updateToolType: (serviceKey: string, toolName: string, toolType: string) =>
     put(`/capabilities/mcp-services/${serviceKey}/tools/${toolName}/type`, { tool_type: toolType }),
+
+  // OpenAPI Services
+  listOpenApiServices: () => get<OpenApiService[]>('/capabilities/openapi-services'),
+  registerOpenApiService: (s: Partial<OpenApiService> & { service_key: string; name: string; base_url: string }) =>
+    post<OpenApiService>('/capabilities/openapi-services', s),
+  updateOpenApiServiceStatus: (key: string, status: string) =>
+    post(`/capabilities/openapi-services/${key}/status`, { status }),
+  importOpenApiOperations: (key: string, specContent?: string) =>
+    post<OpenApiImportResult>(`/capabilities/openapi-services/${key}/import`, specContent ? { spec_content: specContent } : {}),
+  listOpenApiTools: (key: string) => get<OpenApiTool[]>(`/capabilities/openapi-services/${key}/tools`),
+  upsertOpenApiTool: (serviceKey: string, toolName: string, tool: Partial<OpenApiTool> & { tool_name: string }) =>
+    put<OpenApiTool>(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}`, tool),
+  updateOpenApiToolType: (serviceKey: string, toolName: string, toolType: string) =>
+    put(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}/type`, { tool_type: toolType }),
+  deleteOpenApiTool: (serviceKey: string, toolName: string) =>
+    del<{ ok: boolean }>(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}`),
 
   // Profiles
   listProfiles: () => get<ProjectProfile[]>('/capability-profiles'),

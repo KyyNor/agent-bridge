@@ -35,6 +35,37 @@ class RegisterMcpServiceRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class RegisterOpenApiServiceRequest(BaseModel):
+    service_key: str
+    name: str
+    base_url: str
+    spec_url: str = ""
+    spec_content: str = ""
+    auth_config: dict[str, Any] | None = None
+    headers: dict[str, Any] | None = None
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class ImportOpenApiOperationsRequest(BaseModel):
+    spec_content: str | None = None
+
+
+class UpsertOpenApiToolRequest(BaseModel):
+    tool_name: str
+    operation_id: str = ""
+    method: str
+    path: str
+    display_name: str
+    description: str = ""
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    request_mapping: dict[str, Any] = Field(default_factory=dict)
+    response_schema: dict[str, Any] = Field(default_factory=dict)
+    tool_type: str = "unconfigured"
+    tags: list[str] = Field(default_factory=list)
+    examples: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class UpdateMcpServiceStatusRequest(BaseModel):
     status: str
 

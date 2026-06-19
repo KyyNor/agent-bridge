@@ -804,6 +804,115 @@ class SQLiteStore:
     def deactivate_missing_mcp_tools(self, service_key: str, active_tool_names: set[str]) -> None:
         return self.capabilities.deactivate_missing_mcp_tools(service_key=service_key, active_tool_names=active_tool_names)
 
+    def create_openapi_service(
+        self,
+        *,
+        service_key: str,
+        name: str,
+        base_url: str,
+        spec_url: str,
+        spec_content: str,
+        auth_config: dict[str, Any],
+        headers: dict[str, Any],
+        description: str,
+        tags: list[str],
+        created_by: str,
+    ) -> dict[str, Any]:
+        return self.capabilities.create_openapi_service(
+            service_key=service_key,
+            name=name,
+            base_url=base_url,
+            spec_url=spec_url,
+            spec_content=spec_content,
+            auth_config=auth_config,
+            headers=headers,
+            description=description,
+            tags=tags,
+            created_by=created_by,
+        )
+
+    def update_openapi_service(
+        self,
+        service_key: str,
+        *,
+        name: str,
+        base_url: str,
+        spec_url: str,
+        spec_content: str,
+        auth_config: dict[str, Any],
+        headers: dict[str, Any],
+        description: str,
+        tags: list[str],
+    ) -> dict[str, Any]:
+        return self.capabilities.update_openapi_service(
+            service_key=service_key,
+            name=name,
+            base_url=base_url,
+            spec_url=spec_url,
+            spec_content=spec_content,
+            auth_config=auth_config,
+            headers=headers,
+            description=description,
+            tags=tags,
+        )
+
+    def get_openapi_service(self, service_key: str) -> dict[str, Any] | None:
+        return self.capabilities.get_openapi_service(service_key=service_key)
+
+    def list_openapi_services(self) -> list[dict[str, Any]]:
+        return self.capabilities.list_openapi_services()
+
+    def update_openapi_service_status(self, service_key: str, status: McpServiceStatus | str) -> None:
+        return self.capabilities.update_openapi_service_status(service_key=service_key, status=status)
+
+    def mark_openapi_service_import(self, service_key: str, *, success: bool, error: str | None = None) -> None:
+        return self.capabilities.mark_openapi_service_import(service_key=service_key, success=success, error=error)
+
+    def upsert_openapi_tool(
+        self,
+        *,
+        service_key: str,
+        tool_name: str,
+        operation_id: str,
+        method: str,
+        path: str,
+        display_name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        request_mapping: dict[str, Any],
+        response_schema: dict[str, Any],
+        tool_type: ToolType | str,
+        tags: list[str],
+        examples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self.capabilities.upsert_openapi_tool(
+            service_key=service_key,
+            tool_name=tool_name,
+            operation_id=operation_id,
+            method=method,
+            path=path,
+            display_name=display_name,
+            description=description,
+            input_schema=input_schema,
+            request_mapping=request_mapping,
+            response_schema=response_schema,
+            tool_type=tool_type,
+            tags=tags,
+            examples=examples,
+        )
+
+    def list_openapi_tools(self, service_key: str | None = None) -> list[dict[str, Any]]:
+        return self.capabilities.list_openapi_tools(service_key=service_key)
+
+    def get_openapi_tool(self, service_key: str, tool_name: str) -> dict[str, Any] | None:
+        return self.capabilities.get_openapi_tool(service_key=service_key, tool_name=tool_name)
+
+    def update_openapi_tool_type(self, service_key: str, tool_name: str, tool_type: ToolType | str) -> dict[str, Any]:
+        return self.capabilities.update_openapi_tool_type(service_key=service_key, tool_name=tool_name, tool_type=tool_type)
+
+    def delete_openapi_tool(self, service_key: str, tool_name: str) -> None:
+        return self.capabilities.delete_openapi_tool(service_key=service_key, tool_name=tool_name)
+
     def upsert_project_profile(
         self,
         *,

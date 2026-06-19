@@ -25,6 +25,45 @@ export interface McpTool {
   status: string
 }
 
+export interface OpenApiService {
+  source_type?: 'openapi_service'
+  service_key: string
+  name: string
+  base_url: string
+  spec_url: string
+  spec_content: string
+  auth_config?: Record<string, unknown>
+  headers?: Record<string, unknown>
+  description: string
+  tags: string[]
+  status: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  last_imported_at: string | null
+  last_error: string | null
+}
+
+export interface OpenApiTool extends McpTool {
+  source_type?: 'openapi_service'
+  operation_id: string
+  method: string
+  path: string
+  request_mapping: Record<string, unknown>
+  response_schema: Record<string, unknown>
+}
+
+export type CapabilityServiceSource =
+  | (McpService & { source_type: 'mcp_service' })
+  | (OpenApiService & { source_type: 'openapi_service' })
+
+export type CapabilityTool = McpTool | OpenApiTool
+
+export interface OpenApiImportResult {
+  service_key: string
+  operations: OpenApiTool[]
+}
+
 export interface CatalogSource {
   source_type: string
   source_key: string

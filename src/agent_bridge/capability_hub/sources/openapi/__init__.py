@@ -1,0 +1,1 @@
+"""OpenAPI capability source support."""

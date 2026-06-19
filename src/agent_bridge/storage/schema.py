@@ -134,6 +134,44 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (service_key, tool_name)
 );
+CREATE TABLE IF NOT EXISTS openapi_services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  spec_url TEXT NOT NULL DEFAULT '',
+  spec_content TEXT NOT NULL DEFAULT '',
+  auth_config_json TEXT NOT NULL DEFAULT '{}',
+  headers_json TEXT NOT NULL DEFAULT '{}',
+  description TEXT NOT NULL DEFAULT '',
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'enabled',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_imported_at TEXT,
+  last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS openapi_tools (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_key TEXT NOT NULL REFERENCES openapi_services(service_key) ON DELETE CASCADE,
+  tool_name TEXT NOT NULL,
+  operation_id TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  input_schema_json TEXT NOT NULL DEFAULT '{}',
+  request_mapping_json TEXT NOT NULL DEFAULT '{}',
+  response_schema_json TEXT NOT NULL DEFAULT '{}',
+  tool_type TEXT NOT NULL DEFAULT 'unconfigured',
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  examples_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (service_key, tool_name)
+);
+CREATE INDEX IF NOT EXISTS idx_openapi_tools_service_status ON openapi_tools(service_key, status);
 CREATE TABLE IF NOT EXISTS project_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   profile_key TEXT NOT NULL UNIQUE,

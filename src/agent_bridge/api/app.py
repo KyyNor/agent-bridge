@@ -125,6 +125,23 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             if query and query.lower() not in text:
                 continue
             sources.append({"source_type": "mcp_service", "source_key": item["service_key"], "name": item["name"], "description": item["description"], "status": item["status"], "tags": tags})
+        openapi_source_keys = [item["service_key"] for item in service.store.list_openapi_services()]
+        allowed_openapi_keys = set(
+            service.governance.filter_source_keys(
+                actor=current_actor,
+                profile_key=profile_key,
+                source_type="openapi_service",
+                source_keys=openapi_source_keys,
+            )
+        )
+        for item in service.capabilities.list_openapi_services(current_actor):
+            if item["service_key"] not in allowed_openapi_keys:
+                continue
+            tags = item.get("tags", [])
+            text = f"{item['service_key']} {item['name']} {item.get('description', '')} {' '.join(tags)}".lower()
+            if query and query.lower() not in text:
+                continue
+            sources.append({"source_type": "openapi_service", "source_key": item["service_key"], "name": item["name"], "description": item["description"], "status": item["status"], "tags": tags})
         return sources
 
     # Register route modules
