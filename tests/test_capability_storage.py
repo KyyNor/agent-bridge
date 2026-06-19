@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from agent_bridge.capabilities.models import McpServiceStatus, ToolType
+from agent_bridge.capability_hub.models import McpServiceStatus, ToolType
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.storage.sqlite import SQLiteStore
 

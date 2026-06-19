@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 def test_skill_prompt_override_and_reset(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     default_item = svc.skills.get_skill("root", "design_workflow")
@@ -25,7 +25,7 @@ def test_skill_prompt_override_and_reset(wm_paths):
 
 def test_skill_management_only_allows_known_skills(wm_paths):
     from agent_bridge.core.domain import NotFound
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
 

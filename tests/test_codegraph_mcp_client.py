@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.codegraph.mcp_client import CodeGraphMcpClient
+from agent_bridge.knowledge_management.code_knowledge.mcp_client import CodeGraphMcpClient
 
 
 class FakeToolResult:
@@ -55,8 +55,8 @@ def test_codegraph_mcp_client_calls_codegraph_serve_in_repo_directory(
         recorder["params"] = params
         return FakeStdioContext(recorder)
 
-    monkeypatch.setattr("agent_bridge.codegraph.mcp_client.stdio_client", fake_stdio_client)
-    monkeypatch.setattr("agent_bridge.codegraph.mcp_client.ClientSession", FakeSession)
+    monkeypatch.setattr("agent_bridge.knowledge_management.code_knowledge.mcp_client.stdio_client", fake_stdio_client)
+    monkeypatch.setattr("agent_bridge.knowledge_management.code_knowledge.mcp_client.ClientSession", FakeSession)
 
     result = asyncio.run(
         CodeGraphMcpClient().call_tool(

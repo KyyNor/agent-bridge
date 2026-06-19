@@ -208,8 +208,8 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
 def test_retrieval_strategy_e2e(wm_paths, tmp_path):
     """E2E: KB defaults -> profile override -> strategy resolution."""
     from agent_bridge.core.config import BackendConfig, ensure_directories
-    from agent_bridge.knowledge.backends.registry import BackendRegistry
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
+    from agent_bridge.app.service import AgentBridgeService
 
     ensure_directories(wm_paths)
     svc = AgentBridgeService.create(wm_paths, admins={"root"})

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.codegraph.service import CodeGraphService
+from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphService
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -223,7 +223,7 @@ def test_codegraph_index_skips_symlinks(tmp_path: Path, wm_paths: AgentBridgePat
 def test_codegraph_sync_uses_codegraph_cli_when_available(
     tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent_bridge.codegraph.client import CodeGraphClient
+    from agent_bridge.knowledge_management.code_knowledge.client import CodeGraphClient
 
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)
@@ -264,7 +264,7 @@ def test_codegraph_semantic_methods_require_cli(tmp_path: Path, wm_paths: AgentB
 
 
 def test_codegraph_get_file_rejects_paths_outside_repository(tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch) -> None:
-    from agent_bridge.codegraph.client import CodeGraphClient
+    from agent_bridge.knowledge_management.code_knowledge.client import CodeGraphClient
 
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -286,7 +286,7 @@ def test_codegraph_get_file_rejects_paths_outside_repository(tmp_path: Path, wm_
 def test_codegraph_semantic_methods_delegate_to_client(
     tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent_bridge.codegraph.client import CodeGraphClient
+    from agent_bridge.knowledge_management.code_knowledge.client import CodeGraphClient
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -356,7 +356,7 @@ def test_codegraph_node_payload_unwraps_cli_query_result(wm_paths: AgentBridgePa
 def test_codegraph_overview_falls_back_to_files_when_cli_status_is_empty(
     tmp_path: Path, wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from agent_bridge.codegraph.client import CodeGraphClient
+    from agent_bridge.knowledge_management.code_knowledge.client import CodeGraphClient
 
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)

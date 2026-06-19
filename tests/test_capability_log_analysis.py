@@ -6,8 +6,8 @@ import json
 import pytest
 
 from test_capability_service import FakeMcpClient
-from agent_bridge.capabilities.models import CallLogStatus, FailureOwner, FailureStage, SourceType, ToolType
-from agent_bridge.capabilities.service import CapabilityService
+from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, SourceType, ToolType
+from agent_bridge.capability_hub.service import CapabilityService
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore

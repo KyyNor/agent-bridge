@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from agent_bridge.capabilities.models import FailureOwner, FailureStage, SourceType, ToolType
+from agent_bridge.capability_hub.models import FailureOwner, FailureStage, SourceType, ToolType
 from agent_bridge.api.app import create_app
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -590,8 +590,8 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    from agent_bridge.capabilities.mcp_server import create_mcp_server
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

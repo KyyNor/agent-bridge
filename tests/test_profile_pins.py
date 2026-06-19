@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from agent_bridge.capabilities.governance import CapabilityGovernanceService
-from agent_bridge.capabilities.models import ProfileRuleEffect, SourceType, ToolType
+from agent_bridge.capability_hub.governance import CapabilityGovernanceService
+from agent_bridge.capability_hub.models import ProfileRuleEffect, SourceType, ToolType
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore

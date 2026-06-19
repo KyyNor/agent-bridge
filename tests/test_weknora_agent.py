@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_bridge.knowledge.backends.weknora import WeknoraBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.weknora import WeknoraBackend
 
 
 @pytest.fixture

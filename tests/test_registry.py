@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 
 from agent_bridge.core.config import BackendConfig, AgentBridgePaths
-from agent_bridge.knowledge.backends.mock import MockBackend
-from agent_bridge.knowledge.backends.pageindex import PageIndexBackend
-from agent_bridge.knowledge.backends.ragflow import RagFlowBackend
-from agent_bridge.knowledge.backends.registry import BackendRegistry, create_registry
-from agent_bridge.knowledge.backends.weknora import WeknoraBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.mock import MockBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.pageindex import PageIndexBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.ragflow import RagFlowBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry, create_registry
+from agent_bridge.knowledge_management.docs_knowledge.backends.weknora import WeknoraBackend
 
 
 def test_registry_from_empty_config(tmp_path: Path):

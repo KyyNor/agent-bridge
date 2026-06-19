@@ -8,7 +8,7 @@ import pytest
 import respx
 
 from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
-from agent_bridge.knowledge.backends.ragflow import RagFlowBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.ragflow import RagFlowBackend
 
 
 def test_create_kb(respx_mock):

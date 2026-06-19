@@ -10,7 +10,7 @@ def _client(wm_paths) -> TestClient:
 
 
 def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

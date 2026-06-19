@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 import pytest
 
-from agent_bridge.knowledge.backends.weknora import WeknoraBackend
+from agent_bridge.knowledge_management.docs_knowledge.backends.weknora import WeknoraBackend
 
 
 WEKNORA_URL = os.environ.get("WEKNORA_URL", "http://localhost").rstrip("/")

@@ -6,8 +6,8 @@ import pytest
 
 from agent_bridge.core.config import BackendConfig, AgentBridgePaths, ensure_directories
 from agent_bridge.core.domain import AccessDenied, NotFound, SyncStateStatus, ValidationError
-from agent_bridge.knowledge.backends.registry import BackendRegistry
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
+from agent_bridge.app.service import AgentBridgeService
 
 
 def _service_with_mock_backend(

@@ -26,9 +26,9 @@ def _wait_runs_done(scheduler, timeout: float = 5.0) -> None:
 
 
 def test_scheduler_selects_different_workflows_with_round_robin(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -52,9 +52,9 @@ def test_scheduler_selects_different_workflows_with_round_robin(wm_paths):
 
 
 def test_scheduler_marks_no_task_workflow_finished_for_day(wm_paths, tmp_path):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -77,8 +77,8 @@ def test_scheduler_marks_no_task_workflow_finished_for_day(wm_paths, tmp_path):
 
 
 def test_window_anchor_handles_cross_midnight_and_same_day_windows(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     scheduler = WorkflowScheduler(service=svc.workflows, store=svc.store, admins={"root"})
@@ -109,9 +109,9 @@ def test_window_anchor_handles_cross_midnight_and_same_day_windows(wm_paths):
 
 
 def test_scheduler_reads_workflow_window_from_system_config(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -136,9 +136,9 @@ def test_scheduler_reads_workflow_window_from_system_config(wm_paths):
 
 
 def test_scheduler_tick_runs_inside_window_and_skips_outside(wm_paths, tmp_path):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -178,9 +178,9 @@ def test_scheduler_tick_runs_inside_window_and_skips_outside(wm_paths, tmp_path)
 
 
 def test_failed_run_releases_leased_task_for_retry(wm_paths, tmp_path):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import WorkflowProcessResult, prepare_run_directory
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import WorkflowProcessResult, prepare_run_directory
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -219,9 +219,9 @@ def test_failed_run_releases_leased_task_for_retry(wm_paths, tmp_path):
 
 
 def test_run_workflow_now_runs_once_and_creates_run_row(wm_paths, tmp_path):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -250,9 +250,9 @@ def test_run_workflow_now_runs_once_and_creates_run_row(wm_paths, tmp_path):
 def test_run_workflow_now_rejects_when_already_running(wm_paths, tmp_path):
     import pytest
     from agent_bridge.core.domain import ConflictError
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -275,8 +275,8 @@ def test_run_workflow_now_rejects_when_already_running(wm_paths, tmp_path):
 def test_run_workflow_now_missing_workflow_raises_not_found(wm_paths, tmp_path):
     import pytest
     from agent_bridge.core.domain import NotFound
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     scheduler = WorkflowScheduler(
@@ -288,9 +288,9 @@ def test_run_workflow_now_missing_workflow_raises_not_found(wm_paths, tmp_path):
 
 
 def test_run_workflow_now_bypasses_disabled_status(wm_paths, tmp_path):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -321,7 +321,7 @@ class _AlwaysFailingRunner:
 
 
 def _bootstrap_svc_with_workflow(wm_paths, key="A"):
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -331,7 +331,7 @@ def _bootstrap_svc_with_workflow(wm_paths, key="A"):
 
 
 def _build_in_window_scheduler(svc, tmp_path, runner, max_runs=0):
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     now = datetime.now()
     scheduler = WorkflowScheduler(
@@ -373,7 +373,7 @@ def test_max_runs_caps_scheduling_per_window(wm_paths, tmp_path):
 
 
 def test_manual_run_does_not_count_and_bypasses_limit(wm_paths, tmp_path):
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
 
     svc = _bootstrap_svc_with_workflow(wm_paths)
     scheduler = _build_in_window_scheduler(
@@ -407,7 +407,7 @@ def test_window_reset_clears_run_counts(wm_paths, tmp_path):
 
 
 def test_sync_config_round_trips_workflow_max_runs(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -424,7 +424,7 @@ def test_sync_config_round_trips_workflow_max_runs(wm_paths):
 
 
 def test_sync_config_round_trips_workflow_task_rerun_days(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
+    from agent_bridge.app.service import AgentBridgeService
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
@@ -445,9 +445,9 @@ def test_sync_config_round_trips_workflow_task_rerun_days(wm_paths):
 
 
 def test_scheduler_reads_workflow_max_runs_from_config(wm_paths):
-    from agent_bridge.knowledge.service import AgentBridgeService
-    from agent_bridge.workflows.runner import FakeWorkflowRunner
-    from agent_bridge.workflows.scheduler import WorkflowScheduler
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()

@@ -72,7 +72,7 @@ class FakePageIndexClient:
 
 
 def _backend(tmp_path: Path, **kwargs):
-    from agent_bridge.knowledge.backends.pageindex import PageIndexBackend
+    from agent_bridge.knowledge_management.docs_knowledge.backends.pageindex import PageIndexBackend
 
     return PageIndexBackend(
         root=tmp_path / "pageindex",

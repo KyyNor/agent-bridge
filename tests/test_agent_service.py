@@ -6,11 +6,11 @@ from pathlib import Path
 
 from claude_agent_sdk import ResultMessage
 
-from agent_bridge import agent_service
-from agent_bridge.agent_service import _extract_json, _extract_result
-from agent_bridge.agent_support import build_agent_bridge_server_config, write_run_mcp_json
-from agent_bridge.capabilities.profile_docs import POINTER_START, install_profile_to_cwd, pointer_block
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.agent_runtime import service as agent_service
+from agent_bridge.agent_runtime.service import _extract_json, _extract_result
+from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
+from agent_bridge.capability_hub.profiles.docs import POINTER_START, install_profile_to_cwd, pointer_block
+from agent_bridge.app.service import AgentBridgeService
 
 
 class _FakeOptions:

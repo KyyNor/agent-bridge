@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_bridge.capabilities.models import ProfileResourceType, ProfileRuleEffect, SourceType, ToolType
-from agent_bridge.capabilities.mcp_server import _request_profile, create_mcp_server
-from agent_bridge.knowledge.service import AgentBridgeService
+from agent_bridge.capability_hub.models import ProfileResourceType, ProfileRuleEffect, SourceType, ToolType
+from agent_bridge.capability_hub.gateway.metamcp import _request_profile, create_mcp_server
+from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.storage.sqlite import SQLiteStore
 
 

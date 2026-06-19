@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_bridge.codegraph.scheduler import CodeGraphScheduler
-from agent_bridge.codegraph.understand_scheduler import UnderstandingScheduler
-from agent_bridge.knowledge.doc_sync_scheduler import DocSyncScheduler
+from agent_bridge.knowledge_management.code_knowledge.scheduler import CodeGraphScheduler
+from agent_bridge.knowledge_management.code_knowledge.understand_scheduler import UnderstandingScheduler
+from agent_bridge.knowledge_management.docs_knowledge.doc_sync_scheduler import DocSyncScheduler
 
 
 class _SyncConfigStore:
