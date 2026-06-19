@@ -719,6 +719,24 @@ def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm
             )
             """
         )
+        conn.execute(
+            """
+            INSERT INTO project_profiles (profile_key, name, created_by)
+            VALUES ('report-plane', 'Report Plane', 'root')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO workflow_definitions (workflow_key, name, profile_key, created_by)
+            VALUES ('legacy-report', 'Legacy Report', 'report-plane', 'root')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO workflow_tasks (workflow_key, task_key, payload_json, status)
+            VALUES ('legacy-report', 'page:legacy', '{}', 'pending')
+            """
+        )
 
     store.init_schema()
     store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")

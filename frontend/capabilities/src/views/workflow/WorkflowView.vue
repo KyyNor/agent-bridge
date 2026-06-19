@@ -9,6 +9,8 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
+import WorkflowDagGraph from './WorkflowDagGraph.vue'
+import { parseWorkflowDag } from './workflowDag'
 
 const artifactToolName = 'artifacts_search'
 
@@ -83,9 +85,7 @@ const selectedWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === selectedKey.value) || workflows.value[0] || null
 )
 
-const manifestNodes = computed(() => selectedWorkflow.value?.manifest?.nodes || [])
-const manifestEdges = computed(() => selectedWorkflow.value?.manifest?.edges || [])
-const manifestSchemas = computed(() => selectedWorkflow.value?.manifest?.schemas || {})
+const workflowDag = computed(() => parseWorkflowDag(selectedWorkflow.value?.workflow_js || ''))
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
 const hasAnyRunningRun = computed(() =>
@@ -330,16 +330,6 @@ function isWorkflowManifest(value: Record<string, unknown>): value is WorkflowDe
 function profileName(profileKey: string) {
   const profile = profiles.value.find(item => item.profile_key === profileKey)
   return profile ? `${profile.name} / ${profile.profile_key}` : profileKey
-}
-
-function nodeTitle(node: Record<string, unknown>) {
-  return String(node.label || node.name || node.id || 'node')
-}
-
-function edgeTitle(edge: Record<string, unknown>) {
-  const from = String(edge.from || edge.source || '')
-  const to = String(edge.to || edge.target || '')
-  return from && to ? `${from} -> ${to}` : JSON.stringify(edge)
 }
 
 function statusLabel(status: string) {
@@ -944,40 +934,7 @@ async function confirmClearWorkflow() {
             </div>
           </div>
 
-          <div class="grid gap-4 lg:grid-cols-2">
-            <section class="rounded-md border p-4">
-              <div class="mb-3 flex items-center justify-between">
-                <h3 class="text-sm font-semibold">流程节点</h3>
-                <Badge variant="outline">{{ manifestNodes.length }}</Badge>
-              </div>
-              <div class="space-y-2">
-                <div v-for="node in manifestNodes" :key="String(node.id || nodeTitle(node))" class="rounded-md border p-3">
-                  <div class="text-sm font-medium">{{ nodeTitle(node) }}</div>
-                  <pre class="mt-2 max-h-28 overflow-auto rounded bg-muted p-2 text-xs">{{ JSON.stringify(node, null, 2) }}</pre>
-                </div>
-                <div v-if="!manifestNodes.length" class="text-sm text-muted-foreground">暂无节点</div>
-              </div>
-            </section>
-
-            <section class="space-y-4 rounded-md border p-4">
-              <div>
-                <div class="mb-3 flex items-center justify-between">
-                  <h3 class="text-sm font-semibold">流转关系</h3>
-                  <Badge variant="outline">{{ manifestEdges.length }}</Badge>
-                </div>
-                <div class="space-y-2">
-                  <div v-for="edge in manifestEdges" :key="edgeTitle(edge)" class="rounded-md border px-3 py-2 text-sm">
-                    {{ edgeTitle(edge) }}
-                  </div>
-                  <div v-if="!manifestEdges.length" class="text-sm text-muted-foreground">暂无流转关系</div>
-                </div>
-              </div>
-              <div>
-                <h3 class="mb-3 text-sm font-semibold">数据结构</h3>
-                <pre class="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">{{ JSON.stringify(manifestSchemas, null, 2) }}</pre>
-              </div>
-            </section>
-          </div>
+          <WorkflowDagGraph :dag="workflowDag" />
 
           <section class="space-y-4 rounded-md border p-4">
             <div class="flex flex-wrap items-end gap-3">

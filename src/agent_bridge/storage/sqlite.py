@@ -54,7 +54,6 @@ class SQLiteStore:
                 {
                     "task_version": "TEXT NOT NULL DEFAULT ''",
                     "type": "TEXT NOT NULL DEFAULT ''",
-                    "set_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
                 },
             )
             self._ensure_columns(
