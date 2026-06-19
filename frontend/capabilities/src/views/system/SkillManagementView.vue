@@ -96,11 +96,6 @@ function errorMessage(e: unknown) {
 
 <template>
   <div class="space-y-5">
-    <div>
-      <h2 class="text-xl font-semibold text-foreground">Skill 管理</h2>
-      <p class="text-sm text-muted-foreground">维护内置技能提示词；当前仅允许编辑已有技能</p>
-    </div>
-
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {{ error }}
     </div>

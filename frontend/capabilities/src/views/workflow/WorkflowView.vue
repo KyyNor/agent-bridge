@@ -730,18 +730,12 @@ async function confirmClearWorkflow() {
 
 <template>
   <div class="space-y-5">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 class="text-xl font-semibold text-foreground">工作流管理</h2>
-        <p class="text-sm text-muted-foreground">Claude Code 动态工作流、运行产物与能力平面绑定</p>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <Button variant="outline" @click="showGuide = true">
-          <HelpCircle class="mr-1.5 h-4 w-4" />
-          使用指引
-        </Button>
-        <Button @click="openCreate">新建工作流</Button>
-      </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <Button variant="outline" @click="showGuide = true">
+        <HelpCircle class="mr-1.5 h-4 w-4" />
+        使用指引
+      </Button>
+      <Button @click="openCreate">新建工作流</Button>
     </div>
 
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
