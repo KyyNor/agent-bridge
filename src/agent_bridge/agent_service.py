@@ -21,6 +21,11 @@ from typing import Any, Callable
 from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
 from claude_agent_sdk.types import ResultMessage
 
+from agent_bridge.agent_events import (
+    event_record,
+    is_noisy_partial_message,
+    message_events,
+)
 from agent_bridge.agent_support import build_agent_bridge_server_config, write_run_mcp_json
 from agent_bridge.capabilities.profile_docs import install_profile_to_cwd
 from agent_bridge.claude_agent import claude_settings_env
@@ -118,6 +123,10 @@ class AgentService:
         timeout_seconds = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
         started = time.monotonic()
         work_dir: Path | None = None
+        events: list[dict[str, Any]] = []
+        tool_names: dict[str, str] = {}
+        result_msg: ResultMessage | None = None
+        error: str | None = None
 
         try:
             if cwd is not None:
@@ -169,49 +178,74 @@ class AgentService:
                 max_budget_usd=max_budget_usd,
             )
             result_msg = await asyncio.wait_for(
-                self._drain_query(prompt, options, on_message),
+                self._drain_query(prompt, options, on_message, events, tool_names),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
-            return self._fail(work_dir, started, f"agent timed out after {timeout_seconds}s")
+            error = f"agent timed out after {timeout_seconds}s"
+            events.append(event_record("error", status="failed", message=error))
         except Exception as exc:
             logger.exception("AgentService run failed agent=%s", agent_name)
-            return self._fail(work_dir, started, f"{type(exc).__name__}: {exc}")
+            error = f"{type(exc).__name__}: {exc}"
+            events.append(event_record("error", status="failed", message=error))
 
-        return self._finish(work_dir, started, result_msg, output_schema)
+        result = self._build_result(work_dir, started, result_msg, output_schema, error)
+        self._persist_run(
+            prompt=prompt,
+            output_schema=output_schema,
+            agent_name=agent_name,
+            profile=profile,
+            workflow_key=workflow_key,
+            run_id=run_id,
+            model=model,
+            work_dir=work_dir,
+            result=result,
+            events=events,
+        )
+        return result
 
     async def _drain_query(
         self,
         prompt: str,
         options: Any,
         on_message: Callable[[Any], None] | None,
+        events: list[dict[str, Any]],
+        tool_names: dict[str, str],
     ) -> ResultMessage | None:
         last: ResultMessage | None = None
         async for message in claude_query(prompt=prompt, options=options):
             if on_message is not None:
                 on_message(message)
+            if not is_noisy_partial_message(message):
+                events.extend(message_events(message, tool_names))
             if isinstance(message, ResultMessage):
                 last = message
         return last
 
-    def _finish(
+    def _build_result(
         self,
-        work_dir: Path,
+        work_dir: Path | None,
         started: float,
         result_msg: ResultMessage | None,
         output_schema: dict[str, Any] | None,
+        error: str | None,
     ) -> AgentRunResult:
         duration_ms = int((time.monotonic() - started) * 1000)
-        common = {
-            "run_dir": str(work_dir),
-            "duration_ms": duration_ms,
-        }
+        run_dir = str(work_dir) if work_dir else ""
+        if error is not None:
+            return AgentRunResult(
+                ok=False, error=error, run_dir=run_dir, duration_ms=duration_ms
+            )
         if result_msg is None:
             return AgentRunResult(
-                ok=False, error="agent produced no result message", **common
+                ok=False,
+                error="agent produced no result message",
+                run_dir=run_dir,
+                duration_ms=duration_ms,
             )
         meta = {
-            **common,
+            "run_dir": run_dir,
+            "duration_ms": duration_ms,
             "session_id": result_msg.session_id,
             "cost_usd": result_msg.total_cost_usd,
             "num_turns": result_msg.num_turns,
@@ -220,7 +254,47 @@ class AgentService:
             return AgentRunResult(
                 ok=False, error=result_msg.result or result_msg.subtype, **meta
             )
-        return AgentRunResult(ok=True, result=_extract_result(result_msg, output_schema), **meta)
+        return AgentRunResult(
+            ok=True, result=_extract_result(result_msg, output_schema), **meta
+        )
+
+    def _persist_run(
+        self,
+        *,
+        prompt: str,
+        output_schema: dict[str, Any] | None,
+        agent_name: str | None,
+        profile: str | None,
+        workflow_key: str | None,
+        run_id: str | None,
+        model: str | None,
+        work_dir: Path | None,
+        result: AgentRunResult,
+        events: list[dict[str, Any]],
+    ) -> None:
+        """Record this run in the agent_runs log. Logging failures never break the run."""
+        try:
+            self.store.agent_runs.create(
+                run_key=new_run_id(agent_name or "agent"),
+                agent_name=agent_name or "agent",
+                profile_key=profile,
+                workflow_key=workflow_key or None,
+                workflow_run_id=run_id if workflow_key else None,
+                session_id=result.session_id,
+                cwd=str(work_dir) if work_dir else None,
+                model=model,
+                ok=result.ok,
+                error=result.error,
+                duration_ms=result.duration_ms,
+                cost_usd=result.cost_usd,
+                num_turns=result.num_turns,
+                prompt=prompt,
+                output_schema=output_schema,
+                result=result.result,
+                events=events,
+            )
+        except Exception:
+            logger.exception("Failed to persist agent_run log")
 
     def _make_work_dir(self, agent_name: str) -> Path:
         work_dir = self.base_run_dir / new_run_id(agent_name)
@@ -257,14 +331,6 @@ class AgentService:
         for admin in sorted(self.admins):
             return admin
         return "root"
-
-    def _fail(self, work_dir: Path | None, started: float, error: str) -> AgentRunResult:
-        return AgentRunResult(
-            ok=False,
-            error=error,
-            run_dir=str(work_dir) if work_dir else "",
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
 
 
 def _extract_result(result_msg: ResultMessage, output_schema: dict[str, Any] | None) -> Any:

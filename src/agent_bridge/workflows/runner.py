@@ -4,10 +4,16 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, TextIO
+from typing import Any, Protocol
 
+from agent_bridge.agent_events import (
+    event_record as _event_record,
+    is_noisy_partial_message as _is_noisy_partial_message,
+    message_events as _message_events,
+    message_log_record as _message_log_record,
+    write_event as _write_event,
+)
 from agent_bridge.agent_support import build_agent_bridge_server_config, write_run_mcp_json
 
 
@@ -58,123 +64,6 @@ def prepare_run_directory(base_dir: Path, spec: WorkflowRunSpec) -> Path:
     )
     write_run_mcp_json(run_dir / ".mcp.json", mcp_config)
     return run_dir
-
-
-def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    if isinstance(value, list | tuple):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    return str(value)
-
-
-def _message_log_record(message: Any) -> dict[str, Any]:
-    record: dict[str, Any] = {"type": type(message).__name__}
-    for attr in ("subtype", "session_id", "uuid", "result", "total_cost_usd", "duration_ms", "num_turns"):
-        if hasattr(message, attr):
-            record[attr] = _json_safe(getattr(message, attr))
-    if hasattr(message, "content"):
-        record["content"] = _json_safe(getattr(message, "content"))
-    return record
-
-
-def _event_record(kind: str, **values: Any) -> dict[str, Any]:
-    return {
-        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "agent_name": "claude",
-        "source": "claude_agent_sdk",
-        "kind": kind,
-        **{key: _json_safe(value) for key, value in values.items() if value is not None},
-    }
-
-
-def _write_event(events: TextIO, record: dict[str, Any]) -> None:
-    events.write(json.dumps(record, ensure_ascii=False) + "\n")
-    events.flush()
-
-
-def _is_noisy_partial_message(message: Any) -> bool:
-    return getattr(message, "subtype", None) in {"thinking_tokens", "task_progress"}
-
-
-def _message_events(message: Any, tool_names: dict[str, str]) -> list[dict[str, Any]]:
-    session_id = getattr(message, "session_id", None)
-    message_type = type(message).__name__
-    if message_type == "ResultMessage":
-        status = "failed" if getattr(message, "is_error", False) else "success"
-        result = getattr(message, "result", None) or getattr(message, "subtype", "")
-        return [
-            _event_record(
-                "result",
-                status=status,
-                message=result,
-                session_id=session_id,
-                total_cost_usd=getattr(message, "total_cost_usd", None),
-                num_turns=getattr(message, "num_turns", None),
-            )
-        ]
-
-    records: list[dict[str, Any]] = []
-    content = getattr(message, "content", None)
-    if isinstance(content, list):
-        for block in content:
-            block_type = type(block).__name__
-            if block_type == "TextBlock":
-                text = str(getattr(block, "text", "")).strip()
-                if text:
-                    records.append(_event_record("agent_message", message=text, session_id=session_id))
-            elif block_type in {"ToolUseBlock", "ServerToolUseBlock"}:
-                tool_id = str(getattr(block, "id", "") or getattr(block, "tool_use_id", ""))
-                tool_name = str(getattr(block, "name", "") or "unknown")
-                if tool_id:
-                    tool_names[tool_id] = tool_name
-                records.append(
-                    _event_record(
-                        "tool_call",
-                        status="started",
-                        tool_name=tool_name,
-                        tool_use_id=tool_id,
-                        message=f"调用工具 {tool_name}",
-                        session_id=session_id,
-                    )
-                )
-            elif block_type in {"ToolResultBlock", "ServerToolResultBlock"}:
-                tool_id = str(getattr(block, "tool_use_id", "") or "")
-                tool_name = tool_names.get(tool_id, tool_id or "unknown")
-                status = "failed" if getattr(block, "is_error", False) else "success"
-                records.append(
-                    _event_record(
-                        "tool_result",
-                        status=status,
-                        tool_name=tool_name,
-                        tool_use_id=tool_id,
-                        message=f"工具 {tool_name} 调用{'失败' if status == 'failed' else '成功'}",
-                        session_id=session_id,
-                    )
-                )
-    elif isinstance(content, str) and content.strip():
-        records.append(_event_record("agent_message", message=content.strip(), session_id=session_id))
-
-    if records:
-        return records
-
-    subtype = getattr(message, "subtype", None)
-    if _is_noisy_partial_message(message):
-        # High-frequency SDK partials are noisy and not useful in the run event
-        # log, so drop them instead of recording status events.
-        return []
-    if subtype:
-        return [
-            _event_record(
-                "status",
-                status=str(subtype),
-                message=str(subtype),
-                session_id=session_id,
-            )
-        ]
-    return []
 
 
 class ClaudeWorkflowRunner:

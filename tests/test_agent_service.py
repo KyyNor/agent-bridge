@@ -289,3 +289,116 @@ def test_run_workflow_headers_passed_to_mcp_config(wm_paths, monkeypatch) -> Non
     assert headers["X-Agent-Bridge-Workflow"] == "true"
     assert headers["X-Agent-Bridge-Workflow-Key"] == "report-wf"
     assert headers["X-Agent-Bridge-Workflow-Run-Id"] == "report-wf_019edf"
+
+
+# --- agent_runs logging ---
+
+
+def test_run_logs_success_to_agent_runs(wm_paths, monkeypatch) -> None:
+    async def fake_query(*, prompt, options):
+        yield _result(result="hello")
+
+    _patch_sdk(monkeypatch, fake_query)
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+
+    res = asyncio.run(bundle.agents.run(prompt="hi there", agent_name="greeter"))
+
+    assert res.ok is True
+    rows = bundle.store.agent_runs.list(agent_name="greeter")
+    assert len(rows) == 1
+    assert rows[0]["ok"] is True
+    assert rows[0]["agent_name"] == "greeter"
+    # list view drops heavy columns
+    assert "prompt" not in rows[0]
+    assert "events" not in rows[0]
+
+    full = bundle.store.agent_runs.get(rows[0]["run_key"])
+    assert full["prompt"] == "hi there"
+    assert full["result"] == "hello"
+    assert full["ok"] is True
+    assert any(event["kind"] == "result" for event in full["events"])
+
+
+def test_run_logs_structured_result_and_schema(wm_paths, monkeypatch) -> None:
+    schema = {"type": "object", "properties": {"answer": {"type": "number"}}}
+
+    async def fake_query(*, prompt, options):
+        yield _result(structured_output={"answer": 7})
+
+    _patch_sdk(monkeypatch, fake_query)
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+
+    asyncio.run(
+        bundle.agents.run(prompt="compute", agent_name="calc", output_schema=schema)
+    )
+
+    full = bundle.store.agent_runs.get(bundle.store.agent_runs.list(agent_name="calc")[0]["run_key"])
+    assert full["result"] == {"answer": 7}
+    assert full["output_schema"] == schema
+
+
+def test_run_logs_failure_with_error_event(wm_paths, monkeypatch) -> None:
+    async def fake_query(*, prompt, options):
+        raise RuntimeError("boom")
+        yield  # pragma: no cover
+
+    _patch_sdk(monkeypatch, fake_query)
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+
+    res = asyncio.run(bundle.agents.run(prompt="x", agent_name="failer"))
+
+    assert res.ok is False
+    rows = bundle.store.agent_runs.list(agent_name="failer")
+    assert len(rows) == 1
+    assert rows[0]["ok"] is False
+    full = bundle.store.agent_runs.get(rows[0]["run_key"])
+    assert full["error"] is not None and "boom" in full["error"]
+    assert any(
+        event["kind"] == "error" and "boom" in event["message"]
+        for event in full["events"]
+    )
+
+
+def test_run_logs_workflow_context(wm_paths, monkeypatch, tmp_path) -> None:
+    async def fake_query(*, prompt, options):
+        yield _result()
+
+    _patch_sdk(monkeypatch, fake_query)
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+
+    asyncio.run(
+        bundle.agents.run(
+            prompt="x",
+            agent_name="wf",
+            cwd=tmp_path,
+            workflow_key="report-wf",
+            run_id="report-wf_abc123",
+        )
+    )
+
+    full = bundle.store.agent_runs.get(
+        bundle.store.agent_runs.list(agent_name="wf")[0]["run_key"]
+    )
+    assert full["workflow_key"] == "report-wf"
+    assert full["workflow_run_id"] == "report-wf_abc123"
+
+
+def test_agent_runs_list_filters_by_ok(wm_paths, monkeypatch) -> None:
+    async def good_query(*, prompt, options):
+        yield _result(result="ok")
+
+    async def bad_query(*, prompt, options):
+        raise RuntimeError("nope")
+        yield  # pragma: no cover
+
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    _patch_sdk(monkeypatch, good_query)
+    asyncio.run(bundle.agents.run(prompt="a", agent_name="filt"))
+    _patch_sdk(monkeypatch, bad_query)
+    asyncio.run(bundle.agents.run(prompt="b", agent_name="filt"))
+
+    all_rows = bundle.store.agent_runs.list(agent_name="filt")
+    assert len(all_rows) == 2
+    ok_rows = bundle.store.agent_runs.list(agent_name="filt", ok=True)
+    assert len(ok_rows) == 1
+    assert ok_rows[0]["ok"] is True

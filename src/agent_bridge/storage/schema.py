@@ -224,6 +224,31 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
 CREATE INDEX IF NOT EXISTS idx_tool_call_logs_created_at ON tool_call_logs(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_tool_call_logs_profile ON tool_call_logs(profile_key);
 CREATE INDEX IF NOT EXISTS idx_tool_call_logs_source ON tool_call_logs(source_type, source_key);
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_key TEXT NOT NULL UNIQUE,
+  agent_name TEXT NOT NULL,
+  profile_key TEXT,
+  workflow_key TEXT,
+  workflow_run_id TEXT,
+  session_id TEXT,
+  cwd TEXT,
+  model TEXT,
+  ok INTEGER NOT NULL,
+  error TEXT,
+  duration_ms INTEGER,
+  cost_usd REAL,
+  num_turns INTEGER,
+  prompt TEXT NOT NULL,
+  output_schema_json TEXT,
+  result_json TEXT,
+  events_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_profile ON agent_runs(profile_key);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_name ON agent_runs(agent_name);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_workflow_run_id ON agent_runs(workflow_run_id);
 CREATE TABLE IF NOT EXISTS skill_prompts (
   skill_name TEXT PRIMARY KEY,
   prompt TEXT NOT NULL,

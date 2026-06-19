@@ -14,6 +14,7 @@ class SQLiteStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
 
+        from agent_bridge.storage.repositories.agent_runs import AgentRunsRepository
         from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
         from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
         from agent_bridge.storage.repositories.governance import GovernanceRepository
@@ -27,6 +28,7 @@ class SQLiteStore:
         self.codegraph = CodeGraphRepository(db_path, self.connect)
         self.workflows = WorkflowsRepository(db_path, self.connect)
         self.scripts = ScriptsRepository(db_path, self.connect)
+        self.agent_runs = AgentRunsRepository(db_path, self.connect)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
