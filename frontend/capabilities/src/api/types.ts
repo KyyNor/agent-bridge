@@ -608,3 +608,42 @@ export interface UADashboardStatus {
   pid?: number | null
   started_at?: string | null
 }
+
+export interface ManagedScript {
+  script_key: string
+  name: string
+  description: string
+  language: string
+  status: string
+  owner_type: string
+  owner_key: string
+  content_hash: string
+  created_by: string
+  updated_by: string
+  created_at: string
+  updated_at: string
+  code?: string
+  code_preview?: string
+}
+
+export interface ScriptRun {
+  run_id: string
+  script_key: string
+  run_type: string
+  params: Record<string, unknown>
+  result: Record<string, unknown>
+  stdout?: string
+  stderr?: string
+  stdout_preview?: string
+  stderr_preview?: string
+  status: string
+  exit_code: number | null
+  error_message: string | null
+  duration_ms: number
+  created_by: string
+  created_at: string
+}
+
+export interface ScriptRunListResult {
+  runs: ScriptRun[]
+}

@@ -44,6 +44,9 @@ import type {
   WorkflowRunEvent,
   WorkflowRunLog,
   WorkflowTasksResult,
+  ManagedScript,
+  ScriptRun,
+  ScriptRunListResult,
 } from './types'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
@@ -269,6 +272,20 @@ export const api = {
   getSkill: (skillName: string) => get<SkillPrompt>(`/skills/${skillName}`),
   saveSkill: (skillName: string, prompt: string) => post<SkillPrompt>(`/skills/${skillName}`, { prompt }),
   resetSkill: (skillName: string) => post<SkillPrompt>(`/skills/${skillName}/reset`),
+
+  // Scripts
+  listScripts: () => get<ManagedScript[]>('/scripts'),
+  getScript: (scriptKey: string) => get<ManagedScript>(`/scripts/${scriptKey}`),
+  upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string }) =>
+    post<ManagedScript>('/scripts', { language: 'python', status: 'active', owner_type: 'system', owner_key: '', description: '', ...s }),
+  deleteScript: (scriptKey: string) => post<{ script_key: string; deleted: boolean }>(`/scripts/${scriptKey}/delete`),
+  testScript: (scriptKey: string, body: { script_params?: Record<string, unknown>; timeout_seconds?: number; profile_key?: string }) =>
+    post<ScriptRun>(`/scripts/${scriptKey}/test`, body),
+  listScriptRuns: (scriptKey: string, limit = 20) => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    return get<ScriptRunListResult>(`/scripts/${scriptKey}/runs?${qs}`)
+  },
+  getScriptRun: (runId: string) => get<ScriptRun>(`/script-runs/${runId}`),
 
   // Knowledge Bases
   listKbs: () => get<KnowledgeBase[]>('/kbs'),

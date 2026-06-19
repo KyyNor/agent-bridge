@@ -12,6 +12,7 @@ const KnowledgeView = defineAsyncComponent(() => import('./views/knowledge/Knowl
 const KnowledgeProcessingConfigView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
 const WorkflowView = defineAsyncComponent(() => import('./views/workflow/WorkflowView.vue'))
 const SkillManagementView = defineAsyncComponent(() => import('./views/system/SkillManagementView.vue'))
+const ScriptsView = defineAsyncComponent(() => import('./views/system/ScriptsView.vue'))
 const LogsView = defineAsyncComponent(() => import('./views/monitoring/LogsView.vue'))
 const StatsView = defineAsyncComponent(() => import('./views/monitoring/StatsView.vue'))
 
@@ -60,6 +61,7 @@ const navGroups: NavGroup[] = [
     items: [
       { key: 'system-config', label: '系统配置', description: '配置调度计划、仓库分类和知识后端' },
       { key: 'skills', label: 'Skill 管理', description: '维护内置技能提示词' },
+      { key: 'scripts', label: '脚本运行时', description: '管理受控脚本并在线测试运行' },
     ],
   },
 ]
@@ -86,6 +88,7 @@ const view = computed(() => hash.value)
         <KnowledgeView v-else-if="view === 'knowledge'" />
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
         <SkillManagementView v-else-if="view === 'skills'" />
+        <ScriptsView v-else-if="view === 'scripts'" />
         <WorkflowView v-else-if="view === 'workflow'" />
         <LogsView v-else-if="view === 'logs'" />
         <StatsView v-else-if="view === 'stats'" />
