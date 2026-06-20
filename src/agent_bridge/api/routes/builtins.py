@@ -231,7 +231,7 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
             lambda: service.scripts.test_script(
                 actor=current_actor,
                 script_key=script_key,
-                script_params=payload.script_params,
+                script_params=payload.params,
                 timeout_seconds=payload.timeout_seconds,
                 profile_key=profile_from_headers(request),
                 workflow_context=workflow_context_from_headers(request),

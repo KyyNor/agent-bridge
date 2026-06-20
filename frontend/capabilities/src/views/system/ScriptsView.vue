@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Play, Plus, RotateCcw, Save, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, HelpCircle, Play, Plus, RotateCcw, Save, Trash2 } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ManagedScript, ProjectProfile, ScriptRun, WorkflowDefinition } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import CodeMirror from '../../components/CodeMirror.vue'
 import { Input } from '../../components/ui/input'
+import { Textarea } from '../../components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -39,6 +40,8 @@ const testing = ref(false)
 const testParams = ref('{\n  "limit": 5\n}')
 const testTimeout = ref<number | undefined>(30)
 const testProfileKey = ref('__default__')
+const testWorkflowKey = ref('__none__')
+const testWorkflowRunId = ref('')
 const runDetail = ref<ScriptRun | null>(null)
 const runDetailLoading = ref(false)
 
@@ -208,18 +211,32 @@ async function runScript() {
 async function doRun(scriptKey: string) {
   let params: Record<string, unknown> = {}
   try {
-    params = testParams.value.trim() ? JSON.parse(testParams.value) : {}
+    const parsed = testParams.value.trim() ? JSON.parse(testParams.value) : {}
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      runError.value = 'params 必须是 JSON 对象'
+      return
+    }
+    params = parsed as Record<string, unknown>
   } catch {
-    runError.value = 'script_params 不是合法 JSON'
+    runError.value = 'params 不是合法 JSON'
+    return
+  }
+  const workflowEnabled = testWorkflowKey.value !== '__none__' || !!testWorkflowRunId.value.trim()
+  if (workflowEnabled && (testWorkflowKey.value === '__none__' || !testWorkflowRunId.value.trim())) {
+    runError.value = '启用 workflow header 时必须同时填写 workflow_key 和 run_id'
     return
   }
   testing.value = true
   runError.value = ''
   try {
     const run = await api.testScript(scriptKey, {
-      script_params: params,
+      params,
       timeout_seconds: testTimeout.value,
+    }, {
       profile_key: testProfileKey.value && testProfileKey.value !== '__default__' ? testProfileKey.value : undefined,
+      workflow_enabled: workflowEnabled,
+      workflow_key: testWorkflowKey.value !== '__none__' ? testWorkflowKey.value : undefined,
+      workflow_run_id: testWorkflowRunId.value.trim() || undefined,
     })
     await loadRuns()
     runDetail.value = run
@@ -316,6 +333,96 @@ function errorMessage(e: unknown) {
         新建脚本
       </Button>
     </div>
+
+    <Card>
+      <CardContent class="space-y-4 p-4">
+        <div class="flex items-center gap-2">
+          <HelpCircle class="h-4 w-4 text-muted-foreground" />
+          <div class="text-sm font-semibold text-foreground">使用指引</div>
+        </div>
+        <div class="grid gap-4 xl:grid-cols-2">
+          <section class="rounded-md border bg-muted/20 p-4">
+            <h3 class="text-sm font-semibold text-foreground">入参与出参</h3>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              脚本入口必须实现 <span class="font-mono text-foreground">main(envelope)</span>。页面里的测试运行会把自定义
+              <span class="font-mono text-foreground"> params </span> 作为对象传到
+              <span class="font-mono text-foreground">envelope["script_params"]</span>，并把 profile / workflow 信息放进
+              <span class="font-mono text-foreground">envelope["profile_key"]</span> 与
+              <span class="font-mono text-foreground">envelope["workflow"]</span>。
+            </p>
+            <pre class="mt-3 overflow-auto rounded-md bg-background p-3 text-xs text-foreground">def main(envelope):
+    params = envelope["script_params"]
+    return {
+        "ok": True,
+        "received": params,
+        "profile": envelope["profile_key"],
+        "workflow": envelope["workflow"],
+    }</pre>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              业务结果必须通过 <span class="font-mono text-foreground">return dict</span> 返回；<span class="font-mono text-foreground">print</span>
+              / stdout 只用于日志，不再承担结果协议。
+            </p>
+          </section>
+
+          <section class="rounded-md border bg-muted/20 p-4">
+            <h3 class="text-sm font-semibold text-foreground">execute MCP</h3>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              脚本里调用其他能力时，用 runtime helper 暴露的
+              <span class="font-mono text-foreground">execute(service, tool_name, params)</span>。这里不能手工传
+              <span class="font-mono text-foreground">profile_key</span>，调用一律继承本次执行请求头里的 profile。
+            </p>
+            <pre class="mt-3 overflow-auto rounded-md bg-background p-3 text-xs text-foreground">from agent_bridge_runtime import execute
+
+def main(envelope):
+    result = execute("built-in", "load_skill", {"skill_name": "design_workflow"})
+    return {"skill": result["result"]}</pre>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              这意味着脚本可以复用能力中心的统一权限校验，调用其他 MCP 时仍然按来源 profile 检查可见性与可执行性。
+            </p>
+          </section>
+
+          <section class="rounded-md border bg-muted/20 p-4">
+            <h3 class="text-sm font-semibold text-foreground">workflow MCP</h3>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              如果脚本需要领取任务、写任务或记运行日志，可直接从 helper 引入
+              <span class="font-mono text-foreground">workflow_get_task</span>、
+              <span class="font-mono text-foreground">workflow_set_task</span>、
+              <span class="font-mono text-foreground">workflow_run_log</span>。
+              这些 helper 会把来源 workflow headers 透传给顶级 workflow 工具。
+            </p>
+            <pre class="mt-3 overflow-auto rounded-md bg-background p-3 text-xs text-foreground">from agent_bridge_runtime import workflow_get_task, workflow_run_log
+
+def main(envelope):
+    task = workflow_get_task()
+    workflow_run_log(stage="lease", message="task leased", task_key=task["task"]["task_key"])
+    return {"task": task["task"]}</pre>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              没有完整 workflow context 时，这些 helper 会直接失败并报
+              <span class="font-mono text-foreground">workflow context is required</span>。
+            </p>
+          </section>
+
+          <section class="rounded-md border bg-muted/20 p-4">
+            <h3 class="text-sm font-semibold text-foreground">权限与测试 Header</h3>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              脚本管理页的“测试运行”支持传递 profile 与 workflow 相关 headers。profile 会进入
+              <span class="font-mono text-foreground">X-Agent-Bridge-MetaMCP-Profile</span>；workflow 测试会带上
+              <span class="font-mono text-foreground">X-Agent-Bridge-Workflow</span>、
+              <span class="font-mono text-foreground">X-Agent-Bridge-Workflow-Key</span>、
+              <span class="font-mono text-foreground">X-Agent-Bridge-Workflow-Run-Id</span>。
+            </p>
+            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+              权限控制始终以来源 header 为准，而不是脚本代码内部自报。也就是说：
+            </p>
+            <ul class="mt-2 space-y-1 text-sm leading-6 text-muted-foreground">
+              <li>profile 决定脚本能否调用某个 MCP / tool。</li>
+              <li>workflow headers 决定脚本能否访问当前 workflow 运行上下文。</li>
+              <li>只有 header 完整时，workflow helper 才能成功调用。</li>
+            </ul>
+          </section>
+        </div>
+      </CardContent>
+    </Card>
 
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {{ error }}
@@ -454,8 +561,11 @@ function errorMessage(e: unknown) {
               </div>
             </div>
             <div>
-              <label class="mb-1 block text-xs text-muted-foreground">代码（Python，stdout 输出 JSON）</label>
+              <label class="mb-1 block text-xs text-muted-foreground">代码（Python，main(envelope) -&gt; dict）</label>
               <CodeMirror v-model="form.code" />
+              <p class="mt-2 text-xs leading-5 text-muted-foreground">
+                可直接使用 <span class="font-mono text-foreground">from agent_bridge_runtime import execute, workflow_get_task, workflow_set_task, workflow_run_log</span>。
+              </p>
             </div>
           </template>
         </CardContent>
@@ -470,7 +580,7 @@ function errorMessage(e: unknown) {
               新建脚本：点击「保存并运行」将先保存再执行。
             </div>
             <div>
-              <label class="mb-1 block text-xs text-muted-foreground">script_params (JSON)</label>
+              <label class="mb-1 block text-xs text-muted-foreground">params (JSON 对象)</label>
               <Textarea v-model="testParams" class="min-h-[80px] font-mono text-xs" spellcheck="false" />
             </div>
             <div class="grid gap-3 grid-cols-2">
@@ -488,6 +598,28 @@ function errorMessage(e: unknown) {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div class="rounded-md border bg-muted/20 p-3">
+              <div class="mb-3 text-xs font-semibold tracking-wide text-foreground">Workflow Headers</div>
+              <div class="grid gap-3">
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">workflow_key</label>
+                  <Select v-model="testWorkflowKey">
+                    <SelectTrigger class="w-full"><SelectValue placeholder="不传递" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">不传递</SelectItem>
+                      <SelectItem v-for="w in workflows" :key="w.workflow_key" :value="w.workflow_key">{{ w.name }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">run_id</label>
+                  <Input v-model="testWorkflowRunId" placeholder="例如 run_1" />
+                </div>
+              </div>
+              <p class="mt-2 text-xs leading-5 text-muted-foreground">
+                填写完整后会透传 workflow 运行上下文；仅填写一部分时，页面会先阻止提交。
+              </p>
             </div>
             <div class="flex items-center gap-3">
               <Button size="sm" :disabled="testing || form.status !== 'active'" @click="runScript">

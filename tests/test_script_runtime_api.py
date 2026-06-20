@@ -72,7 +72,7 @@ def test_script_test_route_injects_profile_and_workflow_headers(wm_paths):
             "X-Agent-Bridge-Workflow-Key": "page-report",
             "X-Agent-Bridge-Workflow-Run-Id": "run_1",
         },
-        json={"script_params": {"limit": 3}, "timeout_seconds": 10},
+        json={"params": {"limit": 3}, "timeout_seconds": 10},
     )
 
     assert response.status_code == 200
@@ -155,3 +155,16 @@ def test_runtime_workflow_routes_use_trusted_header_context(wm_paths):
     assert get_response.status_code == 200
     assert get_response.json()["task"]["lease_run_id"] == "run_1"
 
+
+def test_script_test_route_accepts_legacy_script_params_body(wm_paths):
+    client = _create_client(wm_paths)
+    _register_script(client)
+
+    response = client.post(
+        "/scripts/system.ctx_echo/test",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"script_params": {"limit": 3}, "timeout_seconds": 10},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["profile_key"] is None

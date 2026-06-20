@@ -927,3 +927,20 @@ def test_frontend_workflow_view_exposes_workflow_management() -> None:
     assert "no_executable_task" in source
     assert "启用" in source
     assert "停用" in source
+
+
+def test_frontend_scripts_view_exposes_runtime_guide_and_test_headers() -> None:
+    source = Path("frontend/capabilities/src/views/system/ScriptsView.vue").read_text(encoding="utf-8")
+    client_source = Path("frontend/capabilities/src/api/client.ts").read_text(encoding="utf-8")
+
+    assert "使用指引" in source
+    assert "main(envelope)" in source
+    assert "params (JSON 对象)" in source
+    assert "execute(service, tool_name, params)" in source
+    assert "workflow_get_task" in source
+    assert "workflow_run_log" in source
+    assert "Workflow Headers" in source
+    assert "workflow_key" in source
+    assert "run_id" in source
+    assert "X-Agent-Bridge-MetaMCP-Profile" in client_source
+    assert "X-Agent-Bridge-Workflow-Run-Id" in client_source

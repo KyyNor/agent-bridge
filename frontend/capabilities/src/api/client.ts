@@ -65,10 +65,10 @@ async function get<T>(url: string): Promise<T> {
   return r.json()
 }
 
-async function post<T>(url: string, body?: unknown): Promise<T> {
+async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
   const r = await fetch(url, {
     method: 'POST',
-    headers: { ...headers(), 'Content-Type': 'application/json' },
+    headers: { ...headers(), 'Content-Type': 'application/json', ...(extraHeaders || {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
@@ -312,8 +312,26 @@ export const api = {
   upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string }) =>
     post<ManagedScript>('/scripts', { language: 'python', status: 'active', owner_type: 'system', owner_key: '', description: '', ...s }),
   deleteScript: (scriptKey: string) => post<{ script_key: string; deleted: boolean }>(`/scripts/${scriptKey}/delete`),
-  testScript: (scriptKey: string, body: { script_params?: Record<string, unknown>; timeout_seconds?: number; profile_key?: string }) =>
-    post<ScriptRun>(`/scripts/${scriptKey}/test`, body),
+  testScript: (
+    scriptKey: string,
+    body: { params?: Record<string, unknown>; timeout_seconds?: number },
+    runtimeHeaders?: {
+      profile_key?: string
+      workflow_enabled?: boolean
+      workflow_key?: string
+      workflow_run_id?: string
+    },
+  ) =>
+    post<ScriptRun>(
+      `/scripts/${scriptKey}/test`,
+      body,
+      {
+        ...(runtimeHeaders?.profile_key ? { 'X-Agent-Bridge-MetaMCP-Profile': runtimeHeaders.profile_key } : {}),
+        ...(runtimeHeaders?.workflow_enabled ? { 'X-Agent-Bridge-Workflow': 'true' } : {}),
+        ...(runtimeHeaders?.workflow_enabled && runtimeHeaders.workflow_key ? { 'X-Agent-Bridge-Workflow-Key': runtimeHeaders.workflow_key } : {}),
+        ...(runtimeHeaders?.workflow_enabled && runtimeHeaders.workflow_run_id ? { 'X-Agent-Bridge-Workflow-Run-Id': runtimeHeaders.workflow_run_id } : {}),
+      },
+    ),
   listScriptRuns: (scriptKey: string, limit = 20) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<ScriptRunListResult>(`/scripts/${scriptKey}/runs?${qs}`)

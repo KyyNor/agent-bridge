@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 class CreateKbRequest(BaseModel):
     slug: str
@@ -197,8 +197,16 @@ class ScriptRequest(BaseModel):
 
 
 class ScriptTestRunRequest(BaseModel):
-    script_params: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_script_params(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "params" not in value and "script_params" in value:
+            value = dict(value)
+            value["params"] = value.get("script_params") or {}
+        return value
 
 
 class RuntimeWorkflowSetTaskRequest(BaseModel):
