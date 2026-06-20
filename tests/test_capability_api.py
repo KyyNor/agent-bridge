@@ -934,9 +934,13 @@ def test_frontend_scripts_view_exposes_runtime_guide_and_test_headers() -> None:
     client_source = Path("frontend/capabilities/src/api/client.ts").read_text(encoding="utf-8")
 
     assert "使用指引" in source
+    assert "showGuide" in source
+    assert "<Dialog" in source
     assert "main(envelope)" in source
     assert "params (JSON 对象)" in source
-    assert "execute(service, tool_name, params)" in source
+    assert "让智能体协助编写" in source
+    assert 'skill_name":"design_script"' in source
+    assert "execute service='built-in'" in source
     assert "workflow_get_task" in source
     assert "workflow_run_log" in source
     assert "Workflow Headers" in source

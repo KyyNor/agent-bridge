@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import CodeMirror from '../../components/CodeMirror.vue'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { Textarea } from '../../components/ui/textarea'
 import {
@@ -24,6 +25,7 @@ const profiles = ref<ProjectProfile[]>([])
 const workflows = ref<WorkflowDefinition[]>([])
 const loading = ref(true)
 const error = ref('')
+const showGuide = ref(false)
 
 // 编辑模式表单状态
 const form = ref(emptyForm())
@@ -328,29 +330,32 @@ function errorMessage(e: unknown) {
   <!-- 列表模式 -->
   <div v-if="mode === 'list'" class="space-y-5">
     <div class="flex flex-wrap items-center gap-2">
+      <Button variant="outline" @click="showGuide = true">
+        <HelpCircle class="mr-1.5 h-4 w-4" />
+        使用指引
+      </Button>
       <Button @click="openCreate">
         <Plus class="mr-1.5 h-4 w-4" />
         新建脚本
       </Button>
     </div>
 
-    <Card>
-      <CardContent class="space-y-4 p-4">
-        <div class="flex items-center gap-2">
-          <HelpCircle class="h-4 w-4 text-muted-foreground" />
-          <div class="text-sm font-semibold text-foreground">使用指引</div>
-        </div>
-        <div class="grid gap-4 xl:grid-cols-2">
-          <section class="rounded-md border bg-muted/20 p-4">
+    <Dialog v-model:open="showGuide">
+      <DialogContent class="w-[96vw] max-w-[980px] sm:max-w-[980px]">
+        <DialogHeader>
+          <DialogTitle>脚本使用指引</DialogTitle>
+        </DialogHeader>
+        <div class="max-h-[74vh] space-y-4 overflow-auto pr-1 text-sm leading-6 text-muted-foreground">
+          <section class="rounded-md border p-4">
             <h3 class="text-sm font-semibold text-foreground">入参与出参</h3>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+            <p class="mt-2">
               脚本入口必须实现 <span class="font-mono text-foreground">main(envelope)</span>。页面里的测试运行会把自定义
               <span class="font-mono text-foreground"> params </span> 作为对象传到
               <span class="font-mono text-foreground">envelope["script_params"]</span>，并把 profile / workflow 信息放进
               <span class="font-mono text-foreground">envelope["profile_key"]</span> 与
               <span class="font-mono text-foreground">envelope["workflow"]</span>。
             </p>
-            <pre class="mt-3 overflow-auto rounded-md bg-background p-3 text-xs text-foreground">def main(envelope):
+            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">def main(envelope):
     params = envelope["script_params"]
     return {
         "ok": True,
@@ -358,71 +363,80 @@ function errorMessage(e: unknown) {
         "profile": envelope["profile_key"],
         "workflow": envelope["workflow"],
     }</pre>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+            <p class="mt-2">
               业务结果必须通过 <span class="font-mono text-foreground">return dict</span> 返回；<span class="font-mono text-foreground">print</span>
               / stdout 只用于日志，不再承担结果协议。
             </p>
           </section>
 
-          <section class="rounded-md border bg-muted/20 p-4">
+          <section class="rounded-md border p-4">
             <h3 class="text-sm font-semibold text-foreground">execute MCP</h3>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+            <p class="mt-2">
               脚本里调用其他能力时，用 runtime helper 暴露的
               <span class="font-mono text-foreground">execute(service, tool_name, params)</span>。这里不能手工传
               <span class="font-mono text-foreground">profile_key</span>，调用一律继承本次执行请求头里的 profile。
             </p>
-            <pre class="mt-3 overflow-auto rounded-md bg-background p-3 text-xs text-foreground">from agent_bridge_runtime import execute
+            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">from agent_bridge_runtime import execute
 
 def main(envelope):
     result = execute("built-in", "load_skill", {"skill_name": "design_workflow"})
     return {"skill": result["result"]}</pre>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+            <p class="mt-2">
               这意味着脚本可以复用能力中心的统一权限校验，调用其他 MCP 时仍然按来源 profile 检查可见性与可执行性。
             </p>
           </section>
 
-          <section class="rounded-md border bg-muted/20 p-4">
+          <section class="rounded-md border p-4">
             <h3 class="text-sm font-semibold text-foreground">workflow MCP</h3>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+            <p class="mt-2">
               如果脚本需要领取任务、写任务或记运行日志，可直接从 helper 引入
               <span class="font-mono text-foreground">workflow_get_task</span>、
               <span class="font-mono text-foreground">workflow_set_task</span>、
               <span class="font-mono text-foreground">workflow_run_log</span>。
               这些 helper 会把来源 workflow headers 透传给顶级 workflow 工具。
             </p>
-            <pre class="mt-3 overflow-auto rounded-md bg-background p-3 text-xs text-foreground">from agent_bridge_runtime import workflow_get_task, workflow_run_log
+            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">from agent_bridge_runtime import workflow_get_task, workflow_run_log
 
 def main(envelope):
-    task = workflow_get_task()
-    workflow_run_log(stage="lease", message="task leased", task_key=task["task"]["task_key"])
-    return {"task": task["task"]}</pre>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+    leased = workflow_get_task()
+    task = leased["task"]
+    workflow_run_log(stage="lease", message="task leased", task_key=task["task_key"] if task else None)
+    return {"task": task}</pre>
+            <p class="mt-2">
               没有完整 workflow context 时，这些 helper 会直接失败并报
               <span class="font-mono text-foreground">workflow context is required</span>。
             </p>
           </section>
 
-          <section class="rounded-md border bg-muted/20 p-4">
+          <section class="rounded-md border p-4">
             <h3 class="text-sm font-semibold text-foreground">权限与测试 Header</h3>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
+            <p class="mt-2">
               脚本管理页的“测试运行”支持传递 profile 与 workflow 相关 headers。profile 会进入
               <span class="font-mono text-foreground">X-Agent-Bridge-MetaMCP-Profile</span>；workflow 测试会带上
               <span class="font-mono text-foreground">X-Agent-Bridge-Workflow</span>、
               <span class="font-mono text-foreground">X-Agent-Bridge-Workflow-Key</span>、
               <span class="font-mono text-foreground">X-Agent-Bridge-Workflow-Run-Id</span>。
             </p>
-            <p class="mt-2 text-sm leading-6 text-muted-foreground">
-              权限控制始终以来源 header 为准，而不是脚本代码内部自报。也就是说：
+            <p class="mt-2">权限控制始终以来源 header 为准，而不是脚本代码内部自报。</p>
+          </section>
+
+          <section class="rounded-md border p-4">
+            <h3 class="text-sm font-semibold text-foreground">让智能体协助编写</h3>
+            <p class="mt-2">
+              先让智能体读取内置技能，再基于用户需求生成 <span class="font-mono text-foreground">script.py</span>。
             </p>
-            <ul class="mt-2 space-y-1 text-sm leading-6 text-muted-foreground">
-              <li>profile 决定脚本能否调用某个 MCP / tool。</li>
-              <li>workflow headers 决定脚本能否访问当前 workflow 运行上下文。</li>
-              <li>只有 header 完整时，workflow helper 才能成功调用。</li>
-            </ul>
+            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">execute service='built-in' tool_name='load_skill' params={"skill_name":"design_script"}</pre>
+            <p class="mt-2">
+              随后要求智能体参照技能内容完成开发，并检查 <span class="font-mono text-foreground">main(envelope)</span>、
+              参数读取、返回值格式、MCP 调用、workflow 上下文和权限约束。
+            </p>
           </section>
         </div>
-      </CardContent>
-    </Card>
+        <DialogFooter>
+          <Button variant="outline" @click="showGuide = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {{ error }}

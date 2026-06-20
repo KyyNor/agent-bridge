@@ -22,6 +22,12 @@ class SkillService:
         self.admins = admins
         defaults = Path(__file__).parent / "defaults"
         self._definitions = {
+            "design_script": SkillDefinition(
+                skill_name="design_script",
+                name="Design Script",
+                description="编写 Agent Bridge 受控脚本的提示词。",
+                default_path=defaults / "design_script.md",
+            ),
             "design_workflow": SkillDefinition(
                 skill_name="design_workflow",
                 name="Design Workflow",
