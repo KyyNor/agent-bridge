@@ -199,7 +199,18 @@ class ScriptRequest(BaseModel):
 class ScriptTestRunRequest(BaseModel):
     script_params: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int | None = None
-    profile_key: str | None = None
+
+
+class RuntimeWorkflowSetTaskRequest(BaseModel):
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RuntimeWorkflowRunLogRequest(BaseModel):
+    level: str = "info"
+    stage: str = ""
+    message: str = ""
+    task_key: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpsertBackendRequest(BaseModel):

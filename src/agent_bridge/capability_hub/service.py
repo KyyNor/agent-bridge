@@ -510,6 +510,7 @@ class CapabilityService:
         tool_name: str,
         params: dict[str, Any],
         profile_key: str | None = None,
+        workflow_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         started = monotonic_ms()
         request = {"service": service, "tool_name": tool_name, "params": params, "profile_key": profile_key}
@@ -527,7 +528,7 @@ class CapabilityService:
             if service in self.builtin_providers:
                 resource = self.builtin_providers[service].resource_from_arguments(tool_name, params)
                 resource_type, resource_key = self._builtin_resource_tuple(resource)
-                result = await self._execute_builtin(actor, service, tool_name, params, profile_key)
+                result = await self._execute_builtin(actor, service, tool_name, params, profile_key, workflow_context)
             elif is_openapi_service:
                 if not self.governance.is_source_allowed(actor, profile_key, SourceType.openapi_service.value, service):
                     raise _mark_call_log_failure(
@@ -600,10 +601,11 @@ class CapabilityService:
         tool_name: str,
         params: dict[str, Any],
         profile_key: str | None,
+        workflow_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         provider = self.builtin_providers[service]
         try:
-            result = await provider.execute(actor, tool_name, params, profile_key)
+            result = await provider.execute(actor, tool_name, params, profile_key, workflow_context)
         except ValidationError as exc:
             if str(exc) == "resource is blocked by profile policy":
                 resource = provider.resource_from_arguments(tool_name, params)

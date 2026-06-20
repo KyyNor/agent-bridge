@@ -75,10 +75,11 @@ def test_mcp_execute_tool_calls_capability_service():
     returned = {"success": True, "result": {}, "service": "svc-1", "tool_name": "read", "log_id": "call_1"}
 
     class FakeCapabilities:
-        async def execute(self, *, actor, service, tool_name, params, profile_key=None):
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None, workflow_context=None):
             assert service == "svc-1"
             assert tool_name == "read"
             assert params == {"path": "/docs"}
+            assert workflow_context is None
             return returned
 
     class FakeService:
@@ -111,13 +112,14 @@ def test_mcp_pinned_tool_calls_original_service_tool():
                 }
             ]
 
-        async def execute(self, *, actor, service, tool_name, params, profile_key=None):
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None, workflow_context=None):
             calls.append(
                 {
                     "service": service,
                     "tool_name": tool_name,
                     "params": params,
                     "profile_key": profile_key,
+                    "workflow_context": workflow_context,
                 }
             )
             return returned
@@ -135,6 +137,7 @@ def test_mcp_pinned_tool_calls_original_service_tool():
             "tool_name": "query_users",
             "params": {"q": "alice"},
             "profile_key": "safe-readonly",
+            "workflow_context": None,
         }
     ]
 
@@ -163,7 +166,7 @@ def test_mcp_skips_pinned_tool_with_invalid_schema_field(caplog):
                 }
             ]
 
-        async def execute(self, *, actor, service, tool_name, params, profile_key=None):
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None, workflow_context=None):
             raise AssertionError("invalid pinned tool should not be registered")
 
     class FakeService:

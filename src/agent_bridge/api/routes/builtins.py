@@ -1,9 +1,10 @@
 """Code repository and sync management endpoints."""
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from agent_bridge.api.runtime_context import profile_from_headers, workflow_context_from_headers
 from agent_bridge.api.schemas import (
     CodeRepoCategoryRequest,
     CodeRepositoryRequest,
@@ -222,6 +223,7 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
     def test_script(
         script_key: str,
         payload: ScriptTestRunRequest,
+        request: Request,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         ensure_capability_schema()
@@ -231,7 +233,8 @@ def create_builtin_routes(service, actor, call_safely, call_safely_async, ensure
                 script_key=script_key,
                 script_params=payload.script_params,
                 timeout_seconds=payload.timeout_seconds,
-                profile_key=payload.profile_key,
+                profile_key=profile_from_headers(request),
+                workflow_context=workflow_context_from_headers(request),
             )
         )
 

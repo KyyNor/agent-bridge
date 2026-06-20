@@ -14,6 +14,7 @@ from uuid import uuid4
 from agent_bridge.core.config import AgentBridgePaths, load_server_config
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
+from agent_bridge.system_config.scripts.runtime_support import render_runner, render_runtime_helper
 
 
 SCRIPT_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -100,6 +101,7 @@ class ScriptService:
         script_params: dict[str, Any] | None,
         timeout_seconds: int | None,
         profile_key: str | None = None,
+        workflow_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         return self.run_script(
@@ -108,6 +110,7 @@ class ScriptService:
             script_params=script_params or {},
             timeout_seconds=timeout_seconds,
             profile_key=profile_key,
+            workflow_context=workflow_context,
             run_type="test",
         )
 
@@ -119,6 +122,7 @@ class ScriptService:
         script_params: dict[str, Any],
         timeout_seconds: int | None,
         profile_key: str | None,
+        workflow_context: dict[str, Any] | None,
         run_type: str = "mcp",
     ) -> dict[str, Any]:
         if run_type not in RUN_TYPES:
@@ -138,6 +142,11 @@ class ScriptService:
             "script_key": script["script_key"],
             "script_params": script_params,
             "profile_key": profile_key,
+            "workflow": {
+                "enabled": bool(workflow_context and workflow_context.get("workflow")),
+                "workflow_key": (workflow_context or {}).get("workflow_key"),
+                "run_id": (workflow_context or {}).get("run_id"),
+            },
         }
         process = self._run_python(script, run_id=run_id, envelope=envelope, timeout_seconds=timeout, actor=actor)
         status = "success"
@@ -148,19 +157,26 @@ class ScriptService:
             error_message = f"script timed out after {timeout} seconds"
         elif process.exit_code != 0:
             status = "failed"
-            error_message = f"script exited with code {process.exit_code}"
+            stderr_text = process.stderr.strip()
+            stdout_text = process.stdout.strip()
+            error_message = stderr_text or stdout_text or f"script exited with code {process.exit_code}"
         else:
-            try:
-                parsed = json.loads(process.stdout.strip() or "{}")
-            except json.JSONDecodeError as exc:
+            result_path = self.base_run_dir / run_id / "result.json"
+            if not result_path.is_file():
                 status = "failed"
-                error_message = f"script stdout must be a JSON object: {exc}"
+                error_message = "script main(envelope) did not produce result.json"
             else:
-                if not isinstance(parsed, dict):
+                try:
+                    parsed = json.loads(result_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError as exc:
                     status = "failed"
-                    error_message = "script stdout must be a JSON object"
+                    error_message = f"script result file must be a JSON object: {exc}"
                 else:
-                    result = parsed
+                    if not isinstance(parsed, dict):
+                        status = "failed"
+                        error_message = "script main(envelope) must return a JSON object"
+                    else:
+                        result = parsed
         run = self.store.scripts.create_script_run(
             run_id=run_id,
             script_key=script["script_key"],
@@ -206,17 +222,18 @@ class ScriptService:
         run_dir.mkdir(parents=True, exist_ok=True)
         script_path = run_dir / "script.py"
         script_path.write_text(str(script["code"]), encoding="utf-8")
-        (run_dir / "agent_bridge_runtime.py").write_text(self._runtime_helper(), encoding="utf-8")
+        (run_dir / "envelope.json").write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "script_runner.py").write_text(render_runner(), encoding="utf-8")
+        (run_dir / "agent_bridge_runtime.py").write_text(render_runtime_helper(), encoding="utf-8")
         started = time.monotonic()
         try:
             completed = subprocess.run(
-                [sys.executable, str(script_path)],
-                input=json.dumps(envelope, ensure_ascii=False),
+                [sys.executable, str(run_dir / "script_runner.py")],
                 text=True,
                 capture_output=True,
                 timeout=timeout_seconds,
                 cwd=run_dir,
-                env=self._runtime_env(actor, str(envelope.get("profile_key") or "")),
+                env=self._runtime_env(actor, envelope),
                 check=False,
             )
             duration_ms = int((time.monotonic() - started) * 1000)
@@ -319,53 +336,19 @@ class ScriptService:
             return text
         return text[:MAX_CAPTURE_CHARS] + "\n...[truncated]"
 
-    def _runtime_env(self, actor: str, profile_key: str) -> dict[str, str]:
+    def _runtime_env(self, actor: str, envelope: dict[str, Any]) -> dict[str, str]:
         try:
             config = load_server_config(self.paths)
             base_url = f"http://127.0.0.1:{config.port}"
         except Exception:
             base_url = ""
+        workflow = envelope.get("workflow") if isinstance(envelope.get("workflow"), dict) else {}
         return {
             "AGENT_BRIDGE_API_BASE": base_url,
             "AGENT_BRIDGE_USER": actor,
-            "AGENT_BRIDGE_PROFILE": profile_key,
+            "AGENT_BRIDGE_PROFILE": str(envelope.get("profile_key") or ""),
+            "AGENT_BRIDGE_WORKFLOW": "true" if workflow.get("enabled") else "false",
+            "AGENT_BRIDGE_WORKFLOW_KEY": str(workflow.get("workflow_key") or ""),
+            "AGENT_BRIDGE_WORKFLOW_RUN_ID": str(workflow.get("run_id") or ""),
             "PYTHONIOENCODING": "utf-8",
         }
-
-    def _runtime_helper(self) -> str:
-        return '''from __future__ import annotations
-
-import json
-import os
-import urllib.error
-import urllib.request
-from typing import Any
-
-
-def execute(service: str, tool_name: str, params: dict[str, Any] | None = None, profile_key: str | None = None) -> dict[str, Any]:
-    base_url = os.environ.get("AGENT_BRIDGE_API_BASE", "").rstrip("/")
-    if not base_url:
-        raise RuntimeError("AGENT_BRIDGE_API_BASE is not configured")
-    payload = {
-        "service": service,
-        "tool_name": tool_name,
-        "params": params or {},
-        "profile_key": profile_key if profile_key is not None else os.environ.get("AGENT_BRIDGE_PROFILE") or None,
-    }
-    data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        base_url + "/capabilities/execute",
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "X-Agent-Bridge-User": os.environ.get("AGENT_BRIDGE_USER", "root"),
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Agent Bridge execute failed: HTTP {exc.code}: {body}") from exc
-'''

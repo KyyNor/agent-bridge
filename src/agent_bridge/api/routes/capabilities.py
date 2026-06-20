@@ -1,8 +1,9 @@
 """MCP service and tool registry endpoints."""
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from agent_bridge.api.runtime_context import profile_from_headers, workflow_context_from_headers
 from agent_bridge.api.schemas import (
     ExecuteCapabilityRequest,
     ImportOpenApiOperationsRequest,
@@ -106,15 +107,23 @@ def create_capability_routes(service, actor, call_safely, call_safely_async, ens
         return {"ok": True}
 
     @router.post("/capabilities/execute")
-    async def execute_capability(payload: ExecuteCapabilityRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+    async def execute_capability(
+        payload: ExecuteCapabilityRequest,
+        request: Request,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
         ensure_capability_schema()
+        profile_key = profile_from_headers(request)
+        if profile_key is None:
+            profile_key = payload.profile_key
         return await call_safely_async(
             lambda: service.capabilities.execute(
                 actor=current_actor,
                 service=payload.service,
                 tool_name=payload.tool_name,
                 params=payload.params,
-                profile_key=payload.profile_key,
+                profile_key=profile_key,
+                workflow_context=workflow_context_from_headers(request),
             )
         )
 

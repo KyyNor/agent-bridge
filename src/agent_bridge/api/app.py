@@ -166,6 +166,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     from agent_bridge.api.routes.workflows import create_workflow_routes
     app.include_router(create_workflow_routes(service, actor, call_safely, ensure_capability_schema))
 
+    from agent_bridge.api.routes.script_runtime import create_script_runtime_routes
+    app.include_router(create_script_runtime_routes(service, actor, call_safely, ensure_capability_schema))
+
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
     setup_mcp_route(app, service)

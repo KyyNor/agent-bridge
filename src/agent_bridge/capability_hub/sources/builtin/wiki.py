@@ -120,6 +120,7 @@ class WikiBuiltinProvider:
         tool: str,
         arguments: dict[str, Any],
         profile_key: str | None,
+        workflow_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if tool == "list_kbs":
             return {

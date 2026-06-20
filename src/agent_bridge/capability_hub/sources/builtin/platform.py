@@ -63,6 +63,7 @@ class PlatformBuiltinProvider:
         tool: str,
         arguments: dict[str, Any],
         profile_key: str | None,
+        workflow_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if tool == "load_skill":
             skill_name = str(arguments.get("skill_name") or "").strip()
@@ -82,6 +83,7 @@ class PlatformBuiltinProvider:
                 script_params=script_params,
                 timeout_seconds=arguments.get("timeout_seconds"),
                 profile_key=profile_key,
+                workflow_context=workflow_context,
                 run_type="mcp",
             )
         else:

@@ -142,6 +142,7 @@ def create_mcp_server(
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
+        current_workflow_context = _request_workflow_context.get() or active_workflow_context
         logger.info("执行 profile=%s service=%s tool=%s params=%s", active_profile, service, tool_name, json.dumps(params or {}, ensure_ascii=False))
         started = time.monotonic()
         try:
@@ -151,6 +152,7 @@ def create_mcp_server(
                 tool_name=tool_name,
                 params=params or {},
                 profile_key=active_profile,
+                workflow_context=current_workflow_context,
             )
             logger.info("执行完成 profile=%s service=%s tool=%s 耗时=%.0fms success=%s", active_profile, service, tool_name, (time.monotonic() - started) * 1000, result.get("success"))
             return result
