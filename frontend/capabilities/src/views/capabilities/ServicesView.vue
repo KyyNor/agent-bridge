@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Globe2, PlugZap, Plus, RotateCw, Search } from 'lucide-vue-next'
-import { onMounted, ref, computed } from 'vue'
+import { ArrowLeft, Globe2, PlugZap, Plus, RotateCw, Save, Search } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
@@ -28,6 +28,8 @@ import {
   type OpenApiImportState,
 } from './openapiImport'
 
+const props = defineProps<{ routeKey: string }>()
+
 const mcpServices = ref<McpService[]>([])
 const openApiServices = ref<OpenApiService[]>([])
 const toolCounts = ref<Record<string, number>>({})
@@ -36,13 +38,13 @@ const search = ref('')
 const statusFilter = ref('all')
 const sourceFilter = ref<'all' | ServiceSourceType>('all')
 
-const showForm = ref(false)
 const formMode = ref<ServiceFormMode>('create')
 const sourceType = ref<ServiceSourceType>('mcp_service')
 const mcpForm = ref(defaultServiceForm())
 const openApiForm = ref(defaultOpenApiServiceForm())
 const saving = ref(false)
 const formError = ref('')
+const serviceNotFound = ref(false)
 
 const showImport = ref(false)
 const importService = ref<OpenApiService | null>(null)
@@ -55,6 +57,17 @@ const services = computed<CapabilityServiceSource[]>(() => [
   ...mcpServices.value.map(service => ({ ...service, source_type: 'mcp_service' as const })),
   ...openApiServices.value.map(service => ({ ...service, source_type: 'openapi_service' as const })),
 ])
+const isFormPage = computed(() => props.routeKey === 'new' || props.routeKey.startsWith('edit/'))
+const routeParts = computed(() => props.routeKey.split('/').filter(Boolean))
+const editingSourceType = computed<ServiceSourceType | null>(() => {
+  if (routeParts.value[0] !== 'edit') return null
+  const value = routeParts.value[1]
+  return value === 'openapi_service' || value === 'mcp_service' ? value : null
+})
+const editingServiceKey = computed(() => routeParts.value[0] === 'edit' ? routeParts.value[2] || '' : '')
+const editingService = computed(() =>
+  services.value.find(service => service.source_type === editingSourceType.value && service.service_key === editingServiceKey.value) || null
+)
 
 function serviceCountKey(service: CapabilityServiceSource) {
   return `${service.source_type}:${service.service_key}`
@@ -92,8 +105,14 @@ async function loadServices() {
 
 onMounted(async () => {
   await loadServices()
+  applyRoute()
   loading.value = false
 })
+
+watch(
+  () => props.routeKey,
+  () => applyRoute(),
+)
 
 const filtered = computed(() => {
   let list = services.value
@@ -126,22 +145,47 @@ const dialogTitle = computed(() => {
 })
 const primaryActionLabel = computed(() => saving.value ? '保存中...' : '保存')
 
-function openCreate(type: ServiceSourceType = 'mcp_service') {
+function goList() {
+  window.location.hash = 'services'
+}
+
+function openCreate() {
+  window.location.hash = 'services/new'
+}
+
+function openEdit(service: CapabilityServiceSource) {
+  window.location.hash = `services/edit/${service.source_type}/${service.service_key}`
+}
+
+function applyRoute() {
+  formError.value = ''
+  serviceNotFound.value = false
+  if (!props.routeKey) return
+  if (props.routeKey === 'new') {
+    resetCreateForm()
+    return
+  }
+  if (routeParts.value[0] !== 'edit' || !editingSourceType.value || !editingServiceKey.value) {
+    serviceNotFound.value = true
+    return
+  }
+  const service = editingService.value
+  if (!service) {
+    serviceNotFound.value = true
+    return
+  }
+  formMode.value = 'edit'
+  sourceType.value = service.source_type
+  if (service.source_type === 'openapi_service') openApiForm.value = openApiServiceToForm(service)
+  else mcpForm.value = serviceToForm(service)
+}
+
+function resetCreateForm(type: ServiceSourceType = 'mcp_service') {
   formMode.value = 'create'
   sourceType.value = type
   mcpForm.value = defaultServiceForm()
   openApiForm.value = defaultOpenApiServiceForm()
   formError.value = ''
-  showForm.value = true
-}
-
-function openEdit(service: CapabilityServiceSource) {
-  formMode.value = 'edit'
-  sourceType.value = service.source_type
-  formError.value = ''
-  if (service.source_type === 'openapi_service') openApiForm.value = openApiServiceToForm(service)
-  else mcpForm.value = serviceToForm(service)
-  showForm.value = true
 }
 
 async function saveService() {
@@ -153,8 +197,8 @@ async function saveService() {
     } else {
       await api.registerService(buildServicePayload(mcpForm.value, formMode.value))
     }
-    showForm.value = false
     await loadServices()
+    goList()
   } catch (e: any) {
     formError.value = e.message || '保存失败'
   } finally {
@@ -230,6 +274,113 @@ const toolTypeOptions = [
 
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
+  <div v-else-if="isFormPage" class="space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+          <ArrowLeft class="mr-1 h-4 w-4" />
+          返回
+        </Button>
+        <div>
+          <h2 class="text-lg font-semibold text-foreground">{{ dialogTitle }}</h2>
+          <p class="font-mono text-xs text-muted-foreground">
+            {{ formMode === 'create' ? 'services/new' : `${sourceType}/${editingServiceKey}` }}
+          </p>
+        </div>
+      </div>
+      <Button :disabled="saving || serviceNotFound" size="sm" @click="saveService">
+        <Save class="mr-1.5 h-4 w-4" />
+        {{ primaryActionLabel }}
+      </Button>
+    </div>
+
+    <div v-if="serviceNotFound" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+      无法加载该服务（可能已被删除或不存在）。请<a class="underline" href="#services" @click.prevent="goList">返回列表</a>。
+    </div>
+
+    <Card v-else>
+      <CardContent class="space-y-4 p-4">
+        <div v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ formError }}</div>
+        <div v-if="formMode === 'create'" class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
+          <button type="button" :class="['flex-1 rounded-md px-3 py-1.5 text-sm font-medium', sourceType === 'mcp_service' ? 'bg-card shadow-sm' : 'text-muted-foreground']" @click="resetCreateForm('mcp_service')">MCP</button>
+          <button type="button" :class="['flex-1 rounded-md px-3 py-1.5 text-sm font-medium', sourceType === 'openapi_service' ? 'bg-card shadow-sm' : 'text-muted-foreground']" @click="resetCreateForm('openapi_service')">OpenAPI</button>
+        </div>
+
+        <template v-if="sourceType === 'mcp_service'">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">服务标识 <span class="text-destructive">*</span></label>
+              <Input v-model="mcpForm.service_key" placeholder="mysql-query" required :disabled="formMode === 'edit'" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">服务名称 <span class="text-destructive">*</span></label>
+              <Input v-model="mcpForm.name" placeholder="MySQL 查询服务" required />
+            </div>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">服务地址 <span class="text-destructive">*</span></label>
+            <Input v-model="mcpForm.endpoint_url" placeholder="http://example-mcp.internal:8080" required />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">描述</label>
+            <textarea v-model="mcpForm.description" rows="3" class="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">标签</label>
+            <Input v-model="mcpForm.tags" placeholder="数据库, 查询" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">请求 Header</label>
+            <textarea v-model="mcpForm.headers" placeholder='{"Authorization":"Bearer token"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">服务标识 <span class="text-destructive">*</span></label>
+              <Input v-model="openApiForm.service_key" placeholder="petstore" required :disabled="formMode === 'edit'" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">服务名称 <span class="text-destructive">*</span></label>
+              <Input v-model="openApiForm.name" placeholder="Petstore API" required />
+            </div>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">Base URL <span class="text-destructive">*</span></label>
+            <Input v-model="openApiForm.base_url" placeholder="https://api.example.com/v1" required />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">Spec URL</label>
+            <Input v-model="openApiForm.spec_url" placeholder="https://api.example.com/openapi.yaml" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">Spec 内容</label>
+            <textarea v-model="openApiForm.spec_content" rows="8" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">认证配置</label>
+              <textarea v-model="openApiForm.auth_config" placeholder='{"type":"bearer","token":"..."}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium">请求 Header</label>
+              <textarea v-model="openApiForm.headers" placeholder='{"Accept":"application/json"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+            </div>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">描述</label>
+            <textarea v-model="openApiForm.description" rows="3" class="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">标签</label>
+            <Input v-model="openApiForm.tags" placeholder="业务, 查询" />
+          </div>
+        </template>
+      </CardContent>
+    </Card>
+  </div>
+
   <div v-else class="space-y-5">
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[360px]">
@@ -256,13 +407,9 @@ const toolTypeOptions = [
           <SelectItem value="openapi_service">OpenAPI</SelectItem>
         </SelectContent>
       </Select>
-      <Button @click="openCreate('openapi_service')" variant="outline">
-        <Globe2 :size="14" />
-        OpenAPI
-      </Button>
-      <Button @click="openCreate('mcp_service')">
+      <Button @click="openCreate">
         <Plus :size="14" />
-        MCP
+        新建服务
       </Button>
     </div>
 
@@ -330,95 +477,6 @@ const toolTypeOptions = [
     <div class="flex items-center justify-between text-sm text-muted-foreground">
       <span>共 {{ filtered.length }} 条记录</span>
     </div>
-
-    <Dialog :open="showForm" @update:open="showForm = $event">
-      <DialogContent class="sm:max-w-[680px]">
-        <DialogHeader>
-          <DialogTitle>{{ dialogTitle }}</DialogTitle>
-        </DialogHeader>
-        <form @submit.prevent="saveService" class="space-y-4">
-          <div v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ formError }}</div>
-          <div v-if="formMode === 'create'" class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-            <button type="button" :class="['flex-1 rounded-md px-3 py-1.5 text-sm font-medium', sourceType === 'mcp_service' ? 'bg-card shadow-sm' : 'text-muted-foreground']" @click="sourceType = 'mcp_service'">MCP</button>
-            <button type="button" :class="['flex-1 rounded-md px-3 py-1.5 text-sm font-medium', sourceType === 'openapi_service' ? 'bg-card shadow-sm' : 'text-muted-foreground']" @click="sourceType = 'openapi_service'">OpenAPI</button>
-          </div>
-
-          <template v-if="sourceType === 'mcp_service'">
-            <div class="space-y-2">
-              <label class="text-sm font-medium">服务标识 <span class="text-destructive">*</span></label>
-              <Input v-model="mcpForm.service_key" placeholder="mysql-query" required :disabled="formMode === 'edit'" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">服务名称 <span class="text-destructive">*</span></label>
-              <Input v-model="mcpForm.name" placeholder="MySQL 查询服务" required />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">服务地址 <span class="text-destructive">*</span></label>
-              <Input v-model="mcpForm.endpoint_url" placeholder="http://example-mcp.internal:8080" required />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">描述</label>
-              <textarea v-model="mcpForm.description" rows="3" class="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">标签</label>
-              <Input v-model="mcpForm.tags" placeholder="数据库, 查询" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">请求 Header</label>
-              <textarea v-model="mcpForm.headers" placeholder='{"Authorization":"Bearer token"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-            </div>
-          </template>
-
-          <template v-else>
-            <div class="grid gap-4 sm:grid-cols-2">
-              <div class="space-y-2">
-                <label class="text-sm font-medium">服务标识 <span class="text-destructive">*</span></label>
-                <Input v-model="openApiForm.service_key" placeholder="petstore" required :disabled="formMode === 'edit'" />
-              </div>
-              <div class="space-y-2">
-                <label class="text-sm font-medium">服务名称 <span class="text-destructive">*</span></label>
-                <Input v-model="openApiForm.name" placeholder="Petstore API" required />
-              </div>
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">Base URL <span class="text-destructive">*</span></label>
-              <Input v-model="openApiForm.base_url" placeholder="https://api.example.com/v1" required />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">Spec URL</label>
-              <Input v-model="openApiForm.spec_url" placeholder="https://api.example.com/openapi.yaml" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">Spec 内容</label>
-              <textarea v-model="openApiForm.spec_content" rows="6" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-            </div>
-            <div class="grid gap-4 sm:grid-cols-2">
-              <div class="space-y-2">
-                <label class="text-sm font-medium">认证配置</label>
-                <textarea v-model="openApiForm.auth_config" placeholder='{"type":"bearer","token":"..."}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-              </div>
-              <div class="space-y-2">
-                <label class="text-sm font-medium">请求 Header</label>
-                <textarea v-model="openApiForm.headers" placeholder='{"Accept":"application/json"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-              </div>
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">描述</label>
-              <textarea v-model="openApiForm.description" rows="3" class="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium">标签</label>
-              <Input v-model="openApiForm.tags" placeholder="业务, 查询" />
-            </div>
-          </template>
-        </form>
-        <DialogFooter>
-          <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
-          <Button @click="saveService" :disabled="saving">{{ primaryActionLabel }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
 
     <Dialog :open="showImport" @update:open="showImport = $event">
       <DialogContent class="sm:max-w-[920px]">

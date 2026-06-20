@@ -39,7 +39,7 @@ const navGroups: NavGroup[] = [
   {
     label: '能力治理',
     items: [
-      { key: 'services', label: '能力接入', description: '管理和配置 MCP 服务连接' },
+      { key: 'services', label: '能力接入', description: '管理和配置 MCP/OpenAPI 服务连接' },
       { key: 'tools', label: '工具目录', description: '浏览和配置已同步的工具' },
       { key: 'profiles', label: '能力平面', description: '管理能力访问策略和权限' },
     ],
@@ -90,7 +90,7 @@ const view = computed(() => activeNavKey.value)
       <!-- Content -->
       <div class="p-7">
         <DashboardView v-if="view === 'dashboard'" />
-        <ServicesView v-else-if="view === 'services'" />
+        <ServicesView v-else-if="view === 'services'" :route-key="subRoute" />
         <ToolsView v-else-if="view === 'tools'" />
         <ProfilesView v-else-if="view === 'profiles'" />
         <CodeRepoView v-else-if="view === 'code-repos'" />
@@ -98,7 +98,7 @@ const view = computed(() => activeNavKey.value)
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
         <SkillManagementView v-else-if="view === 'skills'" />
         <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
-        <WorkflowView v-else-if="view === 'workflow'" />
+        <WorkflowView v-else-if="view === 'workflow'" :route-key="subRoute" />
         <LogsView v-else-if="view === 'logs'" />
         <AgentRunsView v-else-if="view === 'agent-runs'" />
         <StatsView v-else-if="view === 'stats'" />

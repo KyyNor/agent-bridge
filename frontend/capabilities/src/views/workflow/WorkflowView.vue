@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
-import { HelpCircle } from 'lucide-vue-next'
+import { ArrowLeft, HelpCircle, Save } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowTask } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -13,6 +13,7 @@ import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import { parseWorkflowDag } from './workflowDag'
 
 const artifactToolName = 'artifacts_search'
+const props = defineProps<{ routeKey: string }>()
 
 const workflows = ref<WorkflowDefinition[]>([])
 const profiles = ref<ProjectProfile[]>([])
@@ -22,7 +23,6 @@ const loading = ref(true)
 const artifactLoading = ref(false)
 const error = ref('')
 const artifactError = ref('')
-const showEditor = ref(false)
 const saving = ref(false)
 const formError = ref('')
 const artifactQuery = ref('')
@@ -35,10 +35,7 @@ const detailLoading = ref(false)
 const historyLoading = ref(false)
 const showArtifact = ref(false)
 const showArtifactHistory = ref(false)
-const showDetail = ref(false)
 const showGuide = ref(false)
-const showProgress = ref(false)
-const showTasks = ref(false)
 const showClearConfirm = ref(false)
 const progressWorkflowKey = ref('')
 const progressRunId = ref('')
@@ -61,6 +58,7 @@ const taskLogLoading = ref<Set<string>>(new Set())
 const testing = ref(false)
 const testingRunId = ref('')
 const testError = ref('')
+const routeError = ref('')
 let testPoll: ReturnType<typeof setInterval> | null = null
 
 const artifactHtml = computed(() =>
@@ -83,6 +81,19 @@ const form = ref({
 
 const selectedWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === selectedKey.value) || workflows.value[0] || null
+)
+const routeParts = computed(() => props.routeKey.split('/').filter(Boolean))
+const routeWorkflowKey = computed(() => routeParts.value[0] || '')
+const routeMode = computed<'list' | 'new' | 'edit' | 'detail' | 'tasks' | 'progress'>(() => {
+  if (!props.routeKey) return 'list'
+  if (routeParts.value[0] === 'new') return 'new'
+  const action = routeParts.value[1]
+  if (action === 'edit' || action === 'tasks' || action === 'progress') return action
+  return 'detail'
+})
+const isWorkflowFormPage = computed(() => routeMode.value === 'new' || routeMode.value === 'edit')
+const pageWorkflow = computed(() =>
+  workflows.value.find(item => item.workflow_key === routeWorkflowKey.value) || null
 )
 
 const workflowDag = computed(() => parseWorkflowDag(selectedWorkflow.value?.workflow_js || ''))
@@ -173,11 +184,17 @@ const artifactRows = computed<ArtifactTreeRow[]>(() => {
 
 onMounted(async () => {
   await loadAll()
+  await applyRoute()
 })
 
 watch(selectedKey, () => {
   testError.value = ''
 })
+
+watch(
+  () => props.routeKey,
+  async () => applyRoute(),
+)
 
 onUnmounted(() => stopTestPolling())
 
@@ -246,6 +263,10 @@ async function searchArtifacts() {
 }
 
 function openCreate() {
+  window.location.hash = 'workflow/new'
+}
+
+function prepareCreateForm() {
   form.value = {
     workflow_key: '',
     name: '',
@@ -256,10 +277,13 @@ function openCreate() {
     manifestText: '{\n  "name": "Page Report",\n  "nodes": [],\n  "edges": [],\n  "schemas": {}\n}',
   }
   formError.value = ''
-  showEditor.value = true
 }
 
 function openEdit(item: WorkflowDefinition) {
+  window.location.hash = `workflow/${item.workflow_key}/edit`
+}
+
+function prepareEditForm(item: WorkflowDefinition) {
   form.value = {
     workflow_key: item.workflow_key,
     name: item.name,
@@ -270,7 +294,6 @@ function openEdit(item: WorkflowDefinition) {
     manifestText: JSON.stringify(item.manifest, null, 2),
   }
   formError.value = ''
-  showEditor.value = true
 }
 
 async function saveWorkflow() {
@@ -302,10 +325,9 @@ async function saveWorkflow() {
       manifest,
     })
     selectedKey.value = saved.workflow_key
-    showEditor.value = false
     workflows.value = await api.listWorkflows()
     await loadRunsForWorkflows()
-    if (showDetail.value) await searchArtifacts()
+    window.location.hash = `workflow/${saved.workflow_key}/detail`
   } catch (e: unknown) {
     formError.value = errorMessage(e)
   } finally {
@@ -314,9 +336,53 @@ async function saveWorkflow() {
 }
 
 async function openDetail(item: WorkflowDefinition) {
+  window.location.hash = `workflow/${item.workflow_key}/detail`
+}
+
+async function prepareDetail(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
-  showDetail.value = true
   await Promise.all([searchArtifacts(), loadRuns(item.workflow_key)])
+}
+
+function goList() {
+  window.location.hash = 'workflow'
+}
+
+async function applyRoute() {
+  routeError.value = ''
+  if (!props.routeKey || loading.value) return
+  if (routeMode.value === 'new') {
+    prepareCreateForm()
+    return
+  }
+  const workflow = pageWorkflow.value
+  if (!workflow) {
+    routeError.value = '无法加载该工作流（可能已被删除或不存在）'
+    return
+  }
+  selectedKey.value = workflow.workflow_key
+  if (routeMode.value === 'edit') {
+    prepareEditForm(workflow)
+  } else if (routeMode.value === 'detail') {
+    await prepareDetail(workflow)
+  } else if (routeMode.value === 'tasks') {
+    taskWorkflowKey.value = workflow.workflow_key
+    await loadTasks(workflow.workflow_key)
+  } else if (routeMode.value === 'progress') {
+    const runId = routeParts.value[2] || runningRunFor(workflow.workflow_key)?.run_id || ''
+    progressWorkflowKey.value = workflow.workflow_key
+    progressRunId.value = runId
+    selectedRunId.value = runId
+    await loadRuns(workflow.workflow_key)
+    if (runId) await loadLogs()
+    const run = (workflowRuns.value[workflow.workflow_key] || []).find(item => item.run_id === runId)
+    if (run?.status === 'running') {
+      testing.value = true
+      testingRunId.value = run.run_id
+      stopTestPolling()
+      testPoll = setInterval(pollTestRun, 1500)
+    }
+  }
 }
 
 function isWorkflowManifest(value: Record<string, unknown>): value is WorkflowDefinition['manifest'] {
@@ -544,9 +610,12 @@ function isTaskLogLoading(task: WorkflowTask) {
 }
 
 async function openTasks(item: WorkflowDefinition) {
+  window.location.hash = `workflow/${item.workflow_key}/tasks`
+}
+
+async function prepareTasks(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
   taskWorkflowKey.value = item.workflow_key
-  showTasks.value = true
   await loadTasks(item.workflow_key)
 }
 
@@ -607,13 +676,13 @@ async function runWorkflow(item: WorkflowDefinition) {
       testingRunId.value = res.run_id
       progressWorkflowKey.value = wf.workflow_key
       progressRunId.value = res.run_id
-      showProgress.value = true
       selectedKey.value = wf.workflow_key
       selectedRunId.value = res.run_id
       await loadRuns(wf.workflow_key)
       await loadLogs()
       stopTestPolling()
       testPoll = setInterval(pollTestRun, 1500)
+      window.location.hash = `workflow/${wf.workflow_key}/progress/${res.run_id}`
     } else {
       testing.value = false
     }
@@ -626,11 +695,16 @@ async function runWorkflow(item: WorkflowDefinition) {
 async function openProgress(item: WorkflowDefinition, runId?: string) {
   const run = runId ? (workflowRuns.value[item.workflow_key] || []).find(r => r.run_id === runId) : runningRunFor(item.workflow_key)
   if (!run) return
+  window.location.hash = `workflow/${item.workflow_key}/progress/${run.run_id}`
+}
+
+async function prepareProgress(item: WorkflowDefinition, runId?: string) {
+  const run = runId ? (workflowRuns.value[item.workflow_key] || []).find(r => r.run_id === runId) : runningRunFor(item.workflow_key)
+  if (!run) return
   selectedKey.value = item.workflow_key
   progressWorkflowKey.value = item.workflow_key
   progressRunId.value = run.run_id
   selectedRunId.value = run.run_id
-  showProgress.value = true
   await loadLogs()
   if (run.status === 'running') {
     testing.value = true
@@ -677,8 +751,8 @@ async function deleteCurrent() {
     await api.deleteWorkflow(wf.workflow_key)
     workflows.value = await api.listWorkflows()
     selectedKey.value = workflows.value[0]?.workflow_key || ''
-    showDetail.value = false
     await loadAll()
+    goList()
   } catch (e: unknown) {
     error.value = errorMessage(e)
   }
@@ -715,7 +789,7 @@ async function confirmClearWorkflow() {
       loadRunsForWorkflows(),
       loadTasks(wf.workflow_key),
     ])
-    if (showDetail.value && selectedWorkflow.value?.workflow_key === wf.workflow_key) {
+    if (routeMode.value === 'detail' && selectedWorkflow.value?.workflow_key === wf.workflow_key) {
       await searchArtifacts()
     }
     showClearConfirm.value = false
@@ -730,6 +804,11 @@ async function confirmClearWorkflow() {
 
 <template>
   <div class="space-y-5">
+    <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+      {{ routeError }}。请<a class="underline" href="#workflow" @click.prevent="goList">返回列表</a>。
+    </div>
+
+    <template v-if="routeMode === 'list'">
     <div class="flex flex-wrap items-center gap-2">
       <Button variant="outline" @click="showGuide = true">
         <HelpCircle class="mr-1.5 h-4 w-4" />
@@ -878,13 +957,22 @@ async function confirmClearWorkflow() {
         <div v-if="testError" class="border-t px-4 py-3 text-xs text-destructive">{{ testError }}</div>
       </CardContent>
     </Card>
+    </template>
 
-    <Dialog v-model:open="showDetail">
-      <DialogContent class="w-[96vw] max-w-[1200px] sm:max-w-[1200px]">
-        <DialogHeader>
-          <DialogTitle>{{ selectedWorkflow?.name || '工作流详情' }}</DialogTitle>
-        </DialogHeader>
-        <div v-if="selectedWorkflow" class="max-h-[78vh] space-y-5 overflow-auto pr-1">
+    <section v-if="routeMode === 'detail' && !routeError" class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+            <ArrowLeft class="mr-1 h-4 w-4" />
+            返回
+          </Button>
+          <div>
+            <h2 class="text-lg font-semibold text-foreground">{{ selectedWorkflow?.name || '工作流详情' }}</h2>
+            <p class="font-mono text-xs text-muted-foreground">{{ selectedWorkflow?.workflow_key || routeWorkflowKey }}</p>
+          </div>
+        </div>
+      </div>
+      <div v-if="selectedWorkflow" class="space-y-5">
           <div class="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -1014,13 +1102,9 @@ async function confirmClearWorkflow() {
               </button>
             </div>
           </section>
-        </div>
-        <div v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</div>
-        <DialogFooter>
-          <Button variant="outline" @click="showDetail = false">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+      <div v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</div>
+    </section>
 
     <Dialog v-model:open="showClearConfirm">
       <DialogContent class="max-w-[520px] sm:max-w-[520px]">
@@ -1046,12 +1130,20 @@ async function confirmClearWorkflow() {
       </DialogContent>
     </Dialog>
 
-    <Dialog v-model:open="showTasks">
-      <DialogContent class="w-[96vw] max-w-[1180px] sm:max-w-[1180px]">
-        <DialogHeader>
-          <DialogTitle>{{ taskWorkflow?.name || '任务进度' }}</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[78vh] space-y-4 overflow-auto pr-1">
+    <section v-if="routeMode === 'tasks' && !routeError" class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+            <ArrowLeft class="mr-1 h-4 w-4" />
+            返回
+          </Button>
+          <div>
+            <h2 class="text-lg font-semibold text-foreground">{{ taskWorkflow?.name || '任务进度' }}</h2>
+            <p class="font-mono text-xs text-muted-foreground">{{ taskWorkflow?.workflow_key || routeWorkflowKey }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div class="min-w-0 space-y-2">
               <div class="flex flex-wrap items-center gap-2">
@@ -1150,19 +1242,23 @@ async function confirmClearWorkflow() {
               </div>
             </div>
           </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showTasks = false">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </section>
 
-    <Dialog v-model:open="showProgress">
-      <DialogContent class="w-[96vw] max-w-[1100px] sm:max-w-[1100px]">
-        <DialogHeader>
-          <DialogTitle>{{ progressWorkflow?.name || '运行进度' }}</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[78vh] space-y-4 overflow-auto pr-1">
+    <section v-if="routeMode === 'progress' && !routeError" class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+            <ArrowLeft class="mr-1 h-4 w-4" />
+            返回
+          </Button>
+          <div>
+            <h2 class="text-lg font-semibold text-foreground">{{ progressWorkflow?.name || '运行进度' }}</h2>
+            <p class="font-mono text-xs text-muted-foreground">{{ progressRunId || '暂无运行 ID' }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div class="min-w-0 space-y-1">
               <div class="flex flex-wrap items-center gap-2">
@@ -1215,19 +1311,28 @@ async function confirmClearWorkflow() {
               </div>
             </section>
           </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showProgress = false">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </section>
 
-    <Dialog v-model:open="showEditor">
-      <DialogContent class="w-[96vw] max-w-[1400px] sm:max-w-[1400px]">
-        <DialogHeader>
-          <DialogTitle>{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[78vh] space-y-5 overflow-auto pr-1">
+    <section v-if="isWorkflowFormPage && !routeError" class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+            <ArrowLeft class="mr-1 h-4 w-4" />
+            返回
+          </Button>
+          <div>
+            <h2 class="text-lg font-semibold text-foreground">{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</h2>
+            <p class="font-mono text-xs text-muted-foreground">{{ form.workflow_key || 'workflow/new' }}</p>
+          </div>
+        </div>
+        <Button :disabled="saving" size="sm" @click="saveWorkflow">
+          <Save class="mr-1.5 h-4 w-4" />
+          {{ saving ? '保存中' : '保存' }}
+        </Button>
+      </div>
+      <Card>
+        <CardContent class="space-y-5 p-4">
           <div class="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_0.7fr]">
             <div class="lg:col-span-1">
               <label class="mb-1 block text-xs text-muted-foreground">workflow_id</label>
@@ -1277,16 +1382,12 @@ async function confirmClearWorkflow() {
             </div>
             <div class="mt-2">没有可执行任务时输出 <span class="font-mono">{"status":"no_executable_task","reason":"..."}</span>。如任务带 task_version，result.json 必须原样写回。artifact 文件必须在运行目录内，当前只接受 Markdown。</div>
           </div>
-        </div>
         <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {{ formError }}
         </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showEditor = false">取消</Button>
-          <Button :disabled="saving" @click="saveWorkflow">{{ saving ? '保存中' : '保存' }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CardContent>
+      </Card>
+    </section>
 
     <Dialog v-model:open="showArtifact">
       <DialogContent class="max-w-[900px] sm:max-w-[900px]">
