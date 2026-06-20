@@ -76,7 +76,7 @@ def test_runner_drops_noisy_partial_messages_from_all_logs(wm_paths, tmp_path, m
             run_id="run_1",
             workflow_key="github-summary",
             profile_key="dev-plane",
-            workflow_js="export const manifest = {};",
+            workflow_js="export default async function workflow() {}",
             mcp_url="http://127.0.0.1:8765/mcp",
         ),
     )
@@ -102,13 +102,13 @@ def test_runner_prepares_run_directory_with_workflow_files(tmp_path):
         run_id="run_1",
         workflow_key="page-report",
         profile_key="report-plane",
-        workflow_js="export const manifest = {};",
+        workflow_js="export default async function workflow() {}",
         mcp_url="http://127.0.0.1:8765/mcp",
     )
 
     run_dir = prepare_run_directory(tmp_path, spec)
 
-    assert (run_dir / "workflow.js").read_text(encoding="utf-8") == "export const manifest = {};"
+    assert (run_dir / "workflow.js").read_text(encoding="utf-8") == "export default async function workflow() {}"
     assert (run_dir / "out").is_dir()
     mcp_config = (run_dir / ".mcp.json").read_text(encoding="utf-8")
     assert "X-Agent-Bridge-Workflow" in mcp_config
@@ -179,7 +179,7 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(wm_paths, tmp_pa
             run_id="run_1",
             workflow_key="github-summary",
             profile_key="dev-plane",
-            workflow_js="export const manifest = {};",
+            workflow_js="export default async function workflow() {}",
             mcp_url="http://127.0.0.1:8765/mcp",
         ),
     )
@@ -241,7 +241,7 @@ def test_claude_runner_returns_failure_when_sdk_raises(wm_paths, tmp_path, monke
             run_id="run_1",
             workflow_key="github-summary",
             profile_key="dev-plane",
-            workflow_js="export const manifest = {};",
+            workflow_js="export default async function workflow() {}",
             mcp_url="http://127.0.0.1:8765/mcp",
         ),
     )

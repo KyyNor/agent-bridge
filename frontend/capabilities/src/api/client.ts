@@ -168,7 +168,6 @@ export const api = {
     workflow_key: string
     name: string
     profile_key: string
-    manifest: Record<string, unknown>
   }) => post<WorkflowDefinition>('/workflows', { status: 'active', ...w }),
   searchWorkflowArtifacts: (params: {
     profile_key?: string

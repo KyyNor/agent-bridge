@@ -403,7 +403,6 @@ CREATE TABLE IF NOT EXISTS workflow_definitions (
   description TEXT NOT NULL DEFAULT '',
   profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE RESTRICT,
   workflow_js TEXT NOT NULL DEFAULT '',
-  manifest_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

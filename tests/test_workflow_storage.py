@@ -45,14 +45,13 @@ def test_workflow_definition_requires_profile_reference(wm_paths):
             name="Page Report",
             description="",
             profile_key="missing-profile",
-            workflow_js="export const manifest = {};",
-            manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+            workflow_js="export default async function workflow() {}",
             status="active",
             created_by="root",
         )
 
 
-def test_workflow_definition_round_trips_with_manifest(wm_paths):
+def test_workflow_definition_round_trips_without_manifest(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 
     store = SQLiteStore(wm_paths.db_path)
@@ -70,15 +69,14 @@ def test_workflow_definition_round_trips_with_manifest(wm_paths):
         name="Page Report",
         description="Nightly page report",
         profile_key="report-plane",
-        workflow_js="export const manifest = { name: 'Page Report' };",
-        manifest={"name": "Page Report", "nodes": [{"id": "get_task"}], "edges": [], "schemas": {}},
+        workflow_js="export default async function workflow() {}",
         status="active",
         created_by="root",
     )
 
     assert created["workflow_key"] == "page-report"
     assert created["profile_key"] == "report-plane"
-    assert created["manifest"]["nodes"] == [{"id": "get_task"}]
+    assert "manifest" not in created
     assert "schedule" not in created
 
     listed = store.list_workflow_definitions()
@@ -97,7 +95,6 @@ def test_workflow_task_upsert_is_idempotent_and_does_not_replace_completed(wm_pa
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -137,7 +134,6 @@ def test_workflow_task_version_allows_same_key_to_run_again(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -184,7 +180,6 @@ def test_workflow_task_completed_same_version_reopens_after_configured_rerun_win
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -243,7 +238,6 @@ def test_workflow_task_lease_is_exclusive_and_expired_leases_are_reclaimed(wm_pa
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -278,7 +272,6 @@ def test_workflow_task_lease_backfills_run_task_key(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -311,7 +304,6 @@ def test_workflow_task_upsert_does_not_release_active_lease(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -345,7 +337,6 @@ def test_workflow_task_upsert_reopens_expired_running_task(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -379,7 +370,6 @@ def test_workflow_task_complete_requires_current_lease_owner(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -412,7 +402,6 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -454,7 +443,6 @@ def _seed_workflow_with_task(store, workflow_key: str = "w", task_key: str = "pa
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": workflow_key, "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -521,7 +509,6 @@ def test_workflow_artifacts_keep_history_and_mark_only_latest_version_current(wm
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -597,7 +584,6 @@ def test_workflow_artifacts_keep_same_version_outputs_for_different_runs(wm_path
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -739,6 +725,10 @@ def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm
         )
 
     store.init_schema()
+    with store.connect() as conn:
+        workflow_columns = {row["name"] for row in conn.execute("PRAGMA table_info(workflow_definitions)").fetchall()}
+        assert "manifest_json" not in workflow_columns
+
     store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
     store.upsert_workflow_definition(
         workflow_key="page-report",
@@ -746,7 +736,6 @@ def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )

@@ -140,7 +140,7 @@ function miniMapColor(node: Node<WorkflowNodeData>) {
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="text-sm font-semibold">调用 DAG</h3>
-        <p class="mt-1 text-xs text-muted-foreground">从 workflow.js 静态解析 agent / parallel / if / return，不依赖工作流结构定义。</p>
+        <p class="mt-1 text-xs text-muted-foreground">从 workflow.js 静态解析 agent / parallel / if / return。</p>
       </div>
       <div class="flex flex-wrap gap-1">
         <Badge v-for="(count, phase) in phaseCounts" :key="phase" variant="outline">{{ phase }} {{ count }}</Badge>

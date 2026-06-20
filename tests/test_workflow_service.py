@@ -19,8 +19,7 @@ def test_workflow_service_creates_definition_with_existing_profile(wm_paths):
         name="Page Report",
         description="Nightly page report",
         profile_key="report-plane",
-        workflow_js="export const manifest = {};",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+        workflow_js="export default async function workflow() {}",
         status="active",
     )
 
@@ -41,7 +40,6 @@ def test_workflow_service_rejects_missing_profile(wm_paths):
             description="",
             profile_key="missing",
             workflow_js="",
-            manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
             status="active",
         )
     except ValidationError as exc:
@@ -59,7 +57,6 @@ def test_workflow_service_appends_run_log(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.store.create_workflow_run(
@@ -95,7 +92,6 @@ def test_workflow_service_saves_and_searches_artifacts(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
 
@@ -136,7 +132,6 @@ def test_workflow_service_search_returns_full_content_only_for_exact_path(wm_pat
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -178,7 +173,6 @@ def test_workflow_service_allows_non_admin_profile_artifact_search(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -254,7 +248,6 @@ def test_workflow_service_artifact_search_applies_tags_before_limit(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     for index in range(3):
@@ -307,7 +300,6 @@ def test_workflow_service_artifact_search_matches_literal_tag_wildcards(wm_paths
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -390,7 +382,6 @@ def test_workflow_service_rejects_artifact_profile_mismatch(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
 
@@ -414,7 +405,7 @@ def test_workflow_service_rejects_artifact_profile_mismatch(wm_paths):
         raise AssertionError("artifact profile mismatch should fail")
 
 
-def test_workflow_service_artifact_upsert_keeps_id_and_updates_hash_and_metadata(wm_paths):
+def test_workflow_service_artifact_upsert_tracks_current_version_and_metadata(wm_paths):
     svc = _service(wm_paths)
     svc.workflows.upsert_definition(
         actor="root",
@@ -423,7 +414,6 @@ def test_workflow_service_artifact_upsert_keeps_id_and_updates_hash_and_metadata
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
 
@@ -454,7 +444,9 @@ def test_workflow_service_artifact_upsert_keeps_id_and_updates_hash_and_metadata
         metadata={"version": 2},
     )
 
-    assert second["artifact_id"] == first["artifact_id"]
+    assert second["artifact_id"] != first["artifact_id"]
+    assert svc.store.get_workflow_artifact(first["artifact_id"])["is_current"] is False
+    assert svc.store.get_workflow_artifact(second["artifact_id"])["is_current"] is True
     assert second["content_hash"] != first["content_hash"]
     assert second["metadata"]["version"] == 2
     assert second["tags"] == ["report", "updated"]

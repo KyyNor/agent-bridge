@@ -1,15 +1,14 @@
 # design_workflow
 
-你正在为 Agent Bridge 编写工作流。先理解用户目标，再同时维护两份内容：
+你正在为 Agent Bridge 编写工作流。先理解用户目标，再维护核心脚本：
 
 1. `workflow.js`：Claude Code 动态工作流脚本（harness 运行时执行的**控制流脚本**）。
-2. 工作流结构定义：平台注册/渲染用的 JSON `manifest`（`name` / `nodes` / `edges` / `schemas`）。
 
 ## workflow.js 是什么（务必先理解）
 
 `workflow.js` **不是 Node.js 脚本**，而是 Claude Code 动态工作流规范的可执行脚本。harness 的 JS 运行时只跑**控制流**（`if` / `await` / `for` / `parallel`），每个 `agent()` 调用**派生一个子 agent** 去真正调工具、写文件、上网。
 
-运行方式：claude 以 `Workflow({ scriptPath: "./workflow.js" })` 执行本脚本。同目录的 `manifest.json` 是给平台注册/渲染用的【结构定义】，与本脚本分属两套运行时、互不解析——所以**这里不要再写 `export const manifest`**。
+运行方式：claude 以 `Workflow({ scriptPath: "./workflow.js" })` 执行本脚本。平台会从 `workflow.js` 静态解析调用图，不再要求额外维护结构定义文件。
 
 ### 铁律（违反会导致 run 失败）
 
@@ -228,46 +227,13 @@ await agent(
 
 > 提示：result.json 里 `task_key` / `path` / `file` 通常都是确定的，只有 `summary` 需要子 agent 生成——可在脚本里先拼好 JSON 骨架（`JSON.stringify`），再让写文件的 agent 只替换 `summary` 占位，避免子 agent 改动其它字段破坏硬约束。
 
-## 工作流结构定义 manifest
-
-`manifest.json` 供平台注册/渲染，包含 `name` / `nodes` / `edges` / `schemas`，**不被脚本运行时解析**。参考结构：
-
-```json
-{
-  "name": "示例速览",
-  "description": "一句话说明工作流目的。",
-  "nodes": [
-    { "id": "get_task", "kind": "io", "description": "workflow_get_task 租约一个待处理任务" },
-    { "id": "seed_tasks", "kind": "source", "description": "无任务时建任务再租约" },
-    { "id": "process", "kind": "fetch", "description": "按 task.type 分支处理" },
-    { "id": "write_artifact", "kind": "output", "description": "写 out/artifacts/<key>.md" },
-    { "id": "emit_result", "kind": "io", "description": "写 out/result.json" }
-  ],
-  "edges": [
-    { "from": "get_task", "to": "seed_tasks", "when": "task == null" },
-    { "from": "seed_tasks", "to": "get_task" },
-    { "from": "get_task", "to": "process", "when": "task != null" },
-    { "from": "process", "to": "write_artifact" },
-    { "from": "write_artifact", "to": "emit_result" }
-  ],
-  "schemas": {
-    "task": { "task_key": "string", "task_version": "string", "type": "string", "payload": {} },
-    "artifact": { "path": "reports/<key>.md", "file": "out/artifacts/<key>.md", "format": "markdown" }
-  }
-}
-```
-
-- `nodes[].kind`：建议用 `io` / `source` / `fetch` / `research` / `output` 等语义标签。
-- `edges[].when`：可选，标注分支条件，便于渲染条件流转。
-- `schemas`：字段示例/说明（非严格 JSON Schema），帮助读者理解 task 与 artifact 的形状。
-
 ## 智能体协作方式
 
 如果用户要求智能体协助编写工作流，应提示智能体先读取本技能：
 
 ```text
 请执行 execute service='built-in' tool_name='load_skill' params={"skill_name":"design_workflow"} 读取技能，
-然后参照技能内容与我的需求，完成 workflow.js 与 manifest.json。
+然后参照技能内容与我的需求，完成 workflow.js。
 ```
 
 智能体完成后应检查：
@@ -278,4 +244,3 @@ await agent(
 - 是否为不同 `task.type` 设计了清晰分支？独立的子任务是否用 `parallel([...])` 并行？
 - `artifact.file` 是否在 `./out/` 下、文件名安全（无 `/` / `..`）？`format` 是否为 `"markdown"`？
 - 是否原样写回了 `task_version`？
-- `manifest` 的 `nodes` / `edges` / `schemas` 是否能解释脚本结构？

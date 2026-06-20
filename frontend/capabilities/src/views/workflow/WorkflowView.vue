@@ -76,7 +76,6 @@ const form = ref({
   profile_key: '',
   status: 'active',
   workflow_js: '',
-  manifestText: '{\n  "name": "Page Report",\n  "nodes": [],\n  "edges": [],\n  "schemas": {}\n}',
 })
 
 const selectedWorkflow = computed(() =>
@@ -274,7 +273,6 @@ function prepareCreateForm() {
     profile_key: profiles.value[0]?.profile_key || '',
     status: 'active',
     workflow_js: '',
-    manifestText: '{\n  "name": "Page Report",\n  "nodes": [],\n  "edges": [],\n  "schemas": {}\n}',
   }
   formError.value = ''
 }
@@ -291,7 +289,6 @@ function prepareEditForm(item: WorkflowDefinition) {
     profile_key: item.profile_key,
     status: item.status,
     workflow_js: item.workflow_js,
-    manifestText: JSON.stringify(item.manifest, null, 2),
   }
   formError.value = ''
 }
@@ -300,17 +297,6 @@ async function saveWorkflow() {
   formError.value = ''
   if (!form.value.workflow_key || !form.value.name || !form.value.profile_key) {
     formError.value = '请填写工作流标识、名称，并选择关联的能力平面'
-    return
-  }
-  let manifest: Record<string, unknown>
-  try {
-    manifest = JSON.parse(form.value.manifestText)
-  } catch {
-    formError.value = 'Manifest 不是合法 JSON'
-    return
-  }
-  if (!isWorkflowManifest(manifest)) {
-    formError.value = 'Manifest 必须包含 name、nodes、edges、schemas'
     return
   }
   saving.value = true
@@ -322,7 +308,6 @@ async function saveWorkflow() {
       profile_key: form.value.profile_key,
       status: form.value.status,
       workflow_js: form.value.workflow_js,
-      manifest,
     })
     selectedKey.value = saved.workflow_key
     workflows.value = await api.listWorkflows()
@@ -383,14 +368,6 @@ async function applyRoute() {
       testPoll = setInterval(pollTestRun, 1500)
     }
   }
-}
-
-function isWorkflowManifest(value: Record<string, unknown>): value is WorkflowDefinition['manifest'] {
-  return typeof value.name === 'string'
-    && Array.isArray(value.nodes)
-    && Array.isArray(value.edges)
-    && typeof value.schemas === 'object'
-    && value.schemas !== null
 }
 
 function profileName(profileKey: string) {
@@ -867,29 +844,8 @@ async function confirmClearWorkflow() {
           </section>
 
           <section class="rounded-md border p-4">
-            <h3 class="mb-2 text-sm font-semibold text-foreground">工作流结构定义</h3>
-            <p>结构定义是 JSON manifest，页面用它展示流程节点、流转关系和数据结构。必须包含 <span class="font-mono text-foreground">name</span>、<span class="font-mono text-foreground">nodes</span>、<span class="font-mono text-foreground">edges</span>、<span class="font-mono text-foreground">schemas</span>。</p>
-            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">{
-  "name": "Page Report",
-  "nodes": [{ "id": "process", "label": "处理任务", "type": "task_worker" }],
-  "edges": [],
-  "schemas": {
-    "task": {
-      "type": "object",
-      "properties": {
-        "task_key": { "type": "string" },
-        "task_version": { "type": "string" },
-        "type": { "type": "string" },
-        "payload": { "type": "object" }
-      }
-    }
-  }
-}</pre>
-          </section>
-
-          <section class="rounded-md border p-4">
             <h3 class="mb-2 text-sm font-semibold text-foreground">让智能体协助编写</h3>
-            <p>先让智能体读取内置技能，再基于用户需求生成 <span class="font-mono text-foreground">workflow.js</span> 和 manifest。</p>
+            <p>先让智能体读取内置技能，再基于用户需求生成 <span class="font-mono text-foreground">workflow.js</span>。</p>
             <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">execute service='built-in' tool='load_skill' arguments={"skill_name":"design_workflow"}</pre>
             <p class="mt-2">随后要求智能体参照技能内容完成开发，并检查任务类型分支、日志、产物路径和 <span class="font-mono text-foreground">out/result.json</span>。</p>
           </section>
@@ -1363,15 +1319,9 @@ async function confirmClearWorkflow() {
             </div>
           </div>
 
-          <div class="grid gap-4 xl:grid-cols-2">
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">工作流结构定义</label>
-              <textarea v-model="form.manifestText" class="min-h-[34rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">Claude Code 工作流</label>
-              <textarea v-model="form.workflow_js" class="min-h-[34rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
-            </div>
+          <div>
+            <label class="mb-1 block text-xs text-muted-foreground">Claude Code 工作流</label>
+            <textarea v-model="form.workflow_js" class="min-h-[34rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
           </div>
 
           <div class="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">

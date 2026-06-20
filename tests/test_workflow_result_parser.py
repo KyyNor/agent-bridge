@@ -101,7 +101,6 @@ def test_ingest_parsed_result_saves_artifacts_and_completes_task(wm_paths, tmp_p
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.store.upsert_workflow_tasks("page-report", [{"task_key": "page:a", "payload": {"page": "a"}}])

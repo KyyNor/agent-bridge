@@ -50,6 +50,7 @@ class SQLiteStore:
             conn.executescript(SCHEMA)
             conn.executescript(CODEGRAPH_SCHEMA)
             conn.executescript(WORKFLOW_SCHEMA)
+            self._drop_column(conn, "workflow_definitions", "manifest_json")
             self._ensure_columns(
                 conn,
                 "workflow_tasks",
@@ -149,6 +150,7 @@ class SQLiteStore:
             # and the superseded workflow_cron config column on existing DBs.
             self._drop_column(conn, "knowledge_sync_config", "workflow_cron")
             self._drop_column(conn, "workflow_definitions", "schedule_json")
+            self._drop_column(conn, "workflow_definitions", "manifest_json")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS profile_doc_cache (
@@ -513,7 +515,6 @@ class SQLiteStore:
         description: str,
         profile_key: str,
         workflow_js: str,
-        manifest: dict[str, Any],
         status: str,
         created_by: str,
     ) -> dict[str, Any]:
@@ -523,7 +524,6 @@ class SQLiteStore:
             description=description,
             profile_key=profile_key,
             workflow_js=workflow_js,
-            manifest=manifest,
             status=status,
             created_by=created_by,
         )

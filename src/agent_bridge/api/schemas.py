@@ -178,7 +178,6 @@ class WorkflowDefinitionRequest(BaseModel):
     description: str = ""
     profile_key: str
     workflow_js: str = ""
-    manifest: dict[str, Any]
     status: str = "active"
 
 

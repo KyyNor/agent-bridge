@@ -25,7 +25,7 @@ class SkillService:
             "design_workflow": SkillDefinition(
                 skill_name="design_workflow",
                 name="Design Workflow",
-                description="编写 Agent Bridge workflow.js 与工作流结构定义的提示词。",
+                description="编写 Agent Bridge workflow.js 的提示词。",
                 default_path=defaults / "design_workflow.md",
             )
         }

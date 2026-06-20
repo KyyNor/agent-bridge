@@ -6,7 +6,7 @@ from typing import Any
 
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
-from agent_bridge.automation.workflows.models import WorkflowArtifactFormat, WorkflowStatus, require_manifest
+from agent_bridge.automation.workflows.models import WorkflowArtifactFormat, WorkflowStatus
 from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
 
 
@@ -35,14 +35,12 @@ class WorkflowService:
         description: str,
         profile_key: str,
         workflow_js: str,
-        manifest: dict[str, Any],
         status: str,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise ValidationError("profile not found")
         try:
-            require_manifest(manifest)
             next_status = WorkflowStatus(status).value
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
@@ -52,7 +50,6 @@ class WorkflowService:
             description=description,
             profile_key=profile_key,
             workflow_js=workflow_js,
-            manifest=manifest,
             status=next_status,
             created_by=actor,
         )

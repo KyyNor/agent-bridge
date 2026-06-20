@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent_bridge.storage.types import row_to_dict
-from agent_bridge.automation.workflows.models import WorkflowTaskStatus, require_manifest
+from agent_bridge.automation.workflows.models import WorkflowTaskStatus
 
 
 def _json_loads(value: Any, default: Any) -> Any:
@@ -57,7 +57,6 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if "is_current" in item:
         item["is_current"] = bool(item["is_current"])
     for source, target, default in [
-        ("manifest_json", "manifest", {}),
         ("payload_json", "payload", {}),
         ("tags_json", "tags", []),
         ("metadata_json", "metadata", {}),
@@ -80,25 +79,21 @@ class WorkflowsRepository:
         description: str,
         profile_key: str,
         workflow_js: str,
-        manifest: dict[str, Any],
         status: str,
         created_by: str,
     ) -> dict[str, Any]:
-        require_manifest(manifest)
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO workflow_definitions (
-                  workflow_key, name, description, profile_key, workflow_js,
-                  manifest_json, status, created_by
+                  workflow_key, name, description, profile_key, workflow_js, status, created_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
                   profile_key = excluded.profile_key,
                   workflow_js = excluded.workflow_js,
-                  manifest_json = excluded.manifest_json,
                   status = excluded.status,
                   updated_at = CURRENT_TIMESTAMP
                 """,
@@ -108,7 +103,6 @@ class WorkflowsRepository:
                     description,
                     profile_key,
                     workflow_js,
-                    _json_dumps(manifest),
                     status,
                     created_by,
                 ),

@@ -90,13 +90,6 @@ export interface WorkflowDefinition {
   description: string
   profile_key: string
   workflow_js: string
-  manifest: {
-    name: string
-    nodes: Record<string, unknown>[]
-    edges: Record<string, unknown>[]
-    schemas: Record<string, unknown>
-    [key: string]: unknown
-  }
   status: string
   created_by: string
   created_at: string

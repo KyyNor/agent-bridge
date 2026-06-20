@@ -11,7 +11,6 @@ def _create_workflow(store, key: str, profile_key: str = "report-plane"):
         description="",
         profile_key=profile_key,
         workflow_js="",
-        manifest={"name": key, "nodes": [], "edges": [], "schemas": {}},
         status="active",
         created_by="root",
     )
@@ -297,7 +296,7 @@ def test_run_workflow_now_bypasses_disabled_status(wm_paths, tmp_path):
     svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
     svc.store.upsert_workflow_definition(
         workflow_key="A", name="A", description="", profile_key="report-plane",
-        workflow_js="", manifest={"name": "A", "nodes": [], "edges": [], "schemas": {}},
+        workflow_js="",
         status="disabled", created_by="root",
     )
 

@@ -21,18 +21,19 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
             "name": "Page Report",
             "description": "Nightly page report",
             "profile_key": "report-plane",
-            "workflow_js": "export const manifest = {};",
-            "manifest": {"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
+            "workflow_js": "export default async function workflow() {}",
             "schedule": {"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
             "status": "active",
         },
     )
     assert response.status_code == 200, response.text
     assert response.json()["workflow_key"] == "page-report"
+    assert "manifest" not in response.json()
 
     listed = client.get("/workflows", headers={"X-Agent-Bridge-User": "root"})
     assert listed.status_code == 200
     assert [item["workflow_key"] for item in listed.json()] == ["page-report"]
+    assert "manifest" not in listed.json()[0]
 
 
 def test_workflow_api_lists_artifacts(wm_paths):
@@ -49,7 +50,6 @@ def test_workflow_api_lists_artifacts(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -89,7 +89,6 @@ def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -155,7 +154,6 @@ def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -190,7 +188,6 @@ def _seed_artifact(svc, content: str = "# Page A\n\nFull body") -> str:
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
     saved = svc.workflows.save_artifact(
@@ -273,7 +270,6 @@ def _seed_workflow(svc, key: str = "page-report") -> None:
         description="",
         profile_key="report-plane",
         workflow_js="",
-        manifest={"name": "Page Report", "nodes": [], "edges": [], "schemas": {}},
         status="active",
     )
 

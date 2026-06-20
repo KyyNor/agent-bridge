@@ -919,10 +919,10 @@ def test_frontend_workflow_view_exposes_workflow_management() -> None:
     assert "workflow_key" in source
     assert "profile_key" in source
     assert "artifacts_search" in source
-    assert "manifest" in source
     assert "workflow_js" in source
     assert "Claude Code 工作流" in source
-    assert "工作流结构定义" in source
+    assert "manifestText" not in source
+    assert "工作流结构定义" not in source
     assert "输出验收要求" in source
     assert "no_executable_task" in source
     assert "启用" in source
