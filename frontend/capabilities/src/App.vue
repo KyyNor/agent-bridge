@@ -2,6 +2,7 @@
 import { defineAsyncComponent, ref, computed } from 'vue'
 import AppShell from './components/AppShell.vue'
 import type { NavGroup } from './components/AppShell.vue'
+import { shouldShowPageHeader } from './lib/navigation'
 
 const DashboardView = defineAsyncComponent(() => import('./views/dashboard/DashboardView.vue'))
 const ServicesView = defineAsyncComponent(() => import('./views/capabilities/ServicesView.vue'))
@@ -26,6 +27,7 @@ window.addEventListener('hashchange', () => {
 const routeSegments = computed(() => hash.value.split('/'))
 const activeNavKey = computed(() => routeSegments.value[0] || 'dashboard')
 const subRoute = computed(() => routeSegments.value.slice(1).join('/'))
+const showPageHeader = computed(() => shouldShowPageHeader(activeNavKey.value, subRoute.value))
 
 const navGroups: NavGroup[] = [
   {
@@ -81,7 +83,7 @@ const view = computed(() => activeNavKey.value)
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
     <div class="flex-1 overflow-y-auto">
       <!-- Page Header -->
-      <div class="bg-card px-7 py-5">
+      <div v-if="showPageHeader" class="bg-card px-7 py-5">
         <h1 class="text-base font-semibold text-foreground">{{ currentNav?.label || 'Agent Bridge' }}</h1>
         <p v-if="currentNav?.description" class="mt-0.5 text-[13px] text-muted-foreground">{{ currentNav.description }}</p>
       </div>
