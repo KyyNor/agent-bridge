@@ -169,7 +169,9 @@ class KnowledgeSyncConfigRequest(BaseModel):
     workflow_start_time: str = "22:00"
     workflow_stop_time: str = "07:00"
     workflow_max_runs: int = 0
+    workflow_max_runtime_minutes: int = 30
     workflow_task_rerun_days: int = 30
+    understand_timeout_minutes: int = 120
 
 
 class WorkflowDefinitionRequest(BaseModel):

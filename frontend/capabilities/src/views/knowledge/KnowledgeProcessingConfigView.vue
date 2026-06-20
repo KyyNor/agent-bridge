@@ -21,7 +21,9 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   workflow_start_time: '22:00',
   workflow_stop_time: '07:00',
   workflow_max_runs: 0,
+  workflow_max_runtime_minutes: 30,
   workflow_task_rerun_days: 30,
+  understand_timeout_minutes: 120,
 })
 const configSaving = ref(false)
 const cronError = ref('')
@@ -112,13 +114,21 @@ const maxRunsValid = computed(() =>
 const taskRerunDaysValid = computed(() =>
   Number.isInteger(syncConfig.value.workflow_task_rerun_days) && syncConfig.value.workflow_task_rerun_days >= 0,
 )
+const workflowRuntimeValid = computed(() =>
+  Number.isInteger(syncConfig.value.workflow_max_runtime_minutes) && syncConfig.value.workflow_max_runtime_minutes >= 0,
+)
+const understandTimeoutValid = computed(() =>
+  Number.isInteger(syncConfig.value.understand_timeout_minutes) && syncConfig.value.understand_timeout_minutes > 0,
+)
 const cronValid = computed(() =>
   codeSyncNextRuns.value !== null
   && understandNextRuns.value !== null
   && docSyncNextRuns.value !== null
   && workflowTimesValid.value
   && maxRunsValid.value
-  && taskRerunDaysValid.value,
+  && taskRerunDaysValid.value
+  && workflowRuntimeValid.value
+  && understandTimeoutValid.value,
 )
 const runCountText = computed(() => {
   const wf = schedulerStatus.value?.workflow
@@ -286,6 +296,12 @@ async function deleteBackend(slug: string) {
           <span v-if="understandNextRuns" class="text-xs text-muted-foreground font-mono">{{ understandNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">代码理解超时 <span class="text-xs text-muted-foreground">(分钟)</span></div>
+          <Input v-model.number="syncConfig.understand_timeout_minutes" type="number" min="1" placeholder="120" class="w-32 font-mono text-sm" />
+          <span v-if="understandTimeoutValid" class="text-xs text-muted-foreground">单次 Understand Anything 分析的墙钟上限，超时即终止（默认 120）</span>
+          <span v-else class="text-xs text-destructive">请输入正整数</span>
+        </div>
         <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">知识同步 <span class="text-xs text-muted-foreground">(文档知识同步)</span></div>
           <Input v-model="syncConfig.doc_sync_cron" placeholder="*/30 * * * *" class="w-40 font-mono text-xs" />
@@ -306,6 +322,12 @@ async function deleteBackend(slug: string) {
           <div class="text-sm shrink-0 whitespace-nowrap">单工作流运行上限 <span class="text-xs text-muted-foreground">(次/窗口)</span></div>
           <Input v-model.number="syncConfig.workflow_max_runs" type="number" min="0" placeholder="0" class="w-32 font-mono text-sm" />
           <span v-if="maxRunsValid" class="text-xs text-muted-foreground">{{ syncConfig.workflow_max_runs > 0 ? `每个工作流每窗口最多自动运行 ${syncConfig.workflow_max_runs} 次（手动测试运行不计入）` : '不限（0）' }}</span>
+          <span v-else class="text-xs text-destructive">请输入非负整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">工作流运行时长上限 <span class="text-xs text-muted-foreground">(分钟)</span></div>
+          <Input v-model.number="syncConfig.workflow_max_runtime_minutes" type="number" min="0" placeholder="30" class="w-32 font-mono text-sm" />
+          <span v-if="workflowRuntimeValid" class="text-xs text-muted-foreground">{{ syncConfig.workflow_max_runtime_minutes > 0 ? `单次工作流运行超过 ${syncConfig.workflow_max_runtime_minutes} 分钟即强制终止` : '不限（0，回退默认上限）' }}</span>
           <span v-else class="text-xs text-destructive">请输入非负整数</span>
         </div>
         <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">

@@ -579,7 +579,9 @@ export interface KnowledgeSyncConfig {
   workflow_start_time: string
   workflow_stop_time: string
   workflow_max_runs: number
+  workflow_max_runtime_minutes: number
   workflow_task_rerun_days: number
+  understand_timeout_minutes: number
 }
 
 export interface SingleSchedulerStatus {

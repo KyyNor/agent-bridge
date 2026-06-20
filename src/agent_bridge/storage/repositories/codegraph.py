@@ -326,12 +326,14 @@ class CodeGraphRepository:
             "workflow_start_time": "22:00",
             "workflow_stop_time": "07:00",
             "workflow_max_runs": 0,
+            "workflow_max_runtime_minutes": 30,
             "workflow_task_rerun_days": 30,
+            "understand_timeout_minutes": 120,
         }
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_task_rerun_days
+                SELECT code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, understand_timeout_minutes
                 FROM knowledge_sync_config
                 WHERE id = 1
                 """
@@ -346,7 +348,9 @@ class CodeGraphRepository:
                 "workflow_start_time": row[4] if len(row) > 4 and row[4] else defaults["workflow_start_time"],
                 "workflow_stop_time": row[5] if len(row) > 5 and row[5] else defaults["workflow_stop_time"],
                 "workflow_max_runs": int(row[6]) if len(row) > 6 and row[6] is not None else 0,
-                "workflow_task_rerun_days": int(row[7]) if len(row) > 7 and row[7] is not None else 30,
+                "workflow_max_runtime_minutes": int(row[7]) if len(row) > 7 and row[7] is not None else 30,
+                "workflow_task_rerun_days": int(row[8]) if len(row) > 8 and row[8] is not None else 30,
+                "understand_timeout_minutes": int(row[9]) if len(row) > 9 and row[9] is not None else 120,
             }
             return result
 
@@ -360,13 +364,15 @@ class CodeGraphRepository:
         workflow_start_time: str = "22:00",
         workflow_stop_time: str = "07:00",
         workflow_max_runs: int = 0,
+        workflow_max_runtime_minutes: int = 30,
         workflow_task_rerun_days: int = 30,
+        understand_timeout_minutes: int = 120,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_task_rerun_days)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, understand_timeout_minutes)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_cron = excluded.code_sync_cron,
                   ua_git_url = excluded.ua_git_url,
@@ -375,10 +381,12 @@ class CodeGraphRepository:
                   workflow_start_time = excluded.workflow_start_time,
                   workflow_stop_time = excluded.workflow_stop_time,
                   workflow_max_runs = excluded.workflow_max_runs,
+                  workflow_max_runtime_minutes = excluded.workflow_max_runtime_minutes,
                   workflow_task_rerun_days = excluded.workflow_task_rerun_days,
+                  understand_timeout_minutes = excluded.understand_timeout_minutes,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_task_rerun_days),
+                (code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, understand_timeout_minutes),
             )
             return {
                 "code_sync_cron": code_sync_cron,
@@ -388,5 +396,7 @@ class CodeGraphRepository:
                 "workflow_start_time": workflow_start_time,
                 "workflow_stop_time": workflow_stop_time,
                 "workflow_max_runs": workflow_max_runs,
+                "workflow_max_runtime_minutes": workflow_max_runtime_minutes,
                 "workflow_task_rerun_days": workflow_task_rerun_days,
+                "understand_timeout_minutes": understand_timeout_minutes,
             }

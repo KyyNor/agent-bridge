@@ -58,6 +58,9 @@ class WorkflowScheduler:
         # Manual runs (run_workflow_now) bypass both the cap and the counting.
         self._max_runs: int = 0
         self.run_counts: dict[str, int] = {}
+        # Hard wall-clock cap (minutes) for a single workflow run. 0 = fall back
+        # to AgentService's own default timeout instead of applying a cap.
+        self._max_runtime_minutes: int = 0
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -107,6 +110,7 @@ class WorkflowScheduler:
             "max_concurrent_workflows": self._max_concurrent,
             "max_runs": self._max_runs,
             "run_counts": dict(self.run_counts),
+            "max_runtime_minutes": self._max_runtime_minutes,
         }
 
     def _ensure_scheduler(self) -> None:
@@ -120,6 +124,7 @@ class WorkflowScheduler:
         self._start_time = _parse_hhmm(self._start_time_str)
         self._stop_time = _parse_hhmm(self._stop_time_str)
         self._max_runs = int(config.get("workflow_max_runs") or 0)
+        self._max_runtime_minutes = int(config.get("workflow_max_runtime_minutes") or 0)
 
     def _refresh_jobs(self) -> None:
         if not self._scheduler:
@@ -273,6 +278,7 @@ class WorkflowScheduler:
                     profile_key=workflow["profile_key"],
                     workflow_js=workflow["workflow_js"],
                     mcp_url=self._mcp_url,
+                    timeout_seconds=self._max_runtime_minutes * 60 or None,
                 ),
             )
             if process_result.exit_code != 0:

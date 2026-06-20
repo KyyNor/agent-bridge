@@ -474,3 +474,48 @@ def test_get_status_exposes_max_runs_and_run_counts(wm_paths, tmp_path):
     status = scheduler.get_status()
     assert status["max_runs"] == 3
     assert status["run_counts"] == {"A": 1}
+
+
+def test_sync_config_round_trips_runtime_and_understand_timeout(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.save_sync_config(
+        actor="root",
+        code_sync_cron="0 * * * *",
+        ua_git_url="",
+        understand_cron="0 2 * * *",
+        doc_sync_cron="*/30 * * * *",
+        workflow_start_time="22:00",
+        workflow_stop_time="07:00",
+        workflow_max_runtime_minutes=45,
+        understand_timeout_minutes=90,
+    )
+
+    config = svc.store.get_sync_config()
+    assert config["workflow_max_runtime_minutes"] == 45
+    assert config["understand_timeout_minutes"] == 90
+
+
+def test_scheduler_reads_workflow_max_runtime_from_config(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.save_sync_config(
+        code_sync_cron="0 * * * *",
+        understand_cron="0 2 * * *",
+        doc_sync_cron="*/30 * * *",
+        workflow_start_time="22:00",
+        workflow_stop_time="07:00",
+        workflow_max_runtime_minutes=30,
+    )
+    scheduler = WorkflowScheduler(
+        service=svc.workflows, store=svc.store, admins={"root"}, runner=FakeWorkflowRunner()
+    )
+    scheduler._load_window()
+    assert scheduler._max_runtime_minutes == 30
+    assert scheduler.get_status()["max_runtime_minutes"] == 30

@@ -34,6 +34,7 @@ class WorkflowRunSpec:
     profile_key: str
     workflow_js: str
     mcp_url: str
+    timeout_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class ClaudeWorkflowRunner:
                     stderr=write_stderr,
                     include_partial_messages=True,
                     setting_sources=[],
+                    timeout=spec.timeout_seconds,
                 )
             )
             if res.ok:

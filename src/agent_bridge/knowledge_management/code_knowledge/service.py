@@ -374,7 +374,10 @@ class CodeGraphService:
             raise NotFound("repository local path not found — please sync first")
         sync_config = self.store.get_sync_config()
         ua_git_url = sync_config.get("ua_git_url", "")
-        result = self.ua_client.analyze(local_path, ua_git_url=ua_git_url)
+        timeout_minutes = int(sync_config.get("understand_timeout_minutes") or 120)
+        result = self.ua_client.analyze(
+            local_path, ua_git_url=ua_git_url, timeout=timeout_minutes * 60
+        )
         return {
             "success": result.success,
             "node_count": result.node_count,

@@ -257,3 +257,31 @@ def test_claude_runner_returns_failure_when_sdk_raises(wm_paths, tmp_path, monke
     ]
     assert events[-1]["kind"] == "error"
     assert events[-1]["message"] == "RuntimeError: sdk failed"
+
+
+def test_runner_forwards_timeout_seconds_to_agent_service(tmp_path):
+    from agent_bridge.agent_runtime.service import AgentRunResult
+    from agent_bridge.automation.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
+
+    captured: dict = {}
+
+    class _FakeAgentService:
+        async def run(self, **kwargs):
+            captured.update(kwargs)
+            return AgentRunResult(ok=True, result="done")
+
+    runner = ClaudeWorkflowRunner(agent_service=_FakeAgentService())
+    runner.run(
+        tmp_path,
+        WorkflowRunSpec(
+            run_id="run_t",
+            workflow_key="github-summary",
+            profile_key="dev-plane",
+            workflow_js="export default async function workflow() {}",
+            mcp_url="http://127.0.0.1:8765/mcp",
+            timeout_seconds=1800,
+        ),
+    )
+
+    # The configured per-run wall-clock cap must reach AgentService.run as `timeout`.
+    assert captured["timeout"] == 1800
