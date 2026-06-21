@@ -2,60 +2,30 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
+from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler, now_iso
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CRON = "0 2 * * *"
 
 
-class UnderstandingScheduler:
+class UnderstandingScheduler(BaseCronScheduler):
+    _cron_config_key = "understand_cron"
+    _default_cron = _DEFAULT_CRON
+    _scheduler_name = "Understand"
+
     def __init__(self, service: Any, store: Any, admins: set[str]) -> None:
-        self._service = service
-        self._store = store
-        self._admins = admins
-        self._scheduler: BackgroundScheduler | None = None
-        self._current_cron: str = _DEFAULT_CRON
+        super().__init__(service, store, admins)
         self._runs: dict[str, dict[str, Any]] = {}
         self._current_run: dict[str, Any] | None = None
         self._last_run: dict[str, Any] | None = None
 
-    def start(self) -> None:
-        config = self._store.get_sync_config()
-        self._current_cron = config.get("understand_cron") or _DEFAULT_CRON
-        self._ensure_scheduler()
-        self._refresh_jobs()
-        self._scheduler.start()
-        logger.info("Understand 调度器已启动 cron: %s", self._current_cron)
-
-    def stop(self) -> None:
-        if self._scheduler:
-            self._scheduler.shutdown(wait=False)
-            self._scheduler = None
-            logger.info("Understand 调度器已停止")
-
-    def refresh(self) -> None:
-        config = self._store.get_sync_config()
-        self._current_cron = config.get("understand_cron") or _DEFAULT_CRON
-        self._ensure_scheduler()
-        if not self._scheduler.running:
-            self._scheduler.start()
-            logger.info("Understand 调度器已启动 cron: %s", self._current_cron)
-        self._refresh_jobs()
-
     def get_status(self) -> dict[str, Any]:
+        base = {"cron": self._current_cron, "current_run": self._current_run, "last_run": self._last_run}
         if not self._scheduler or not self._scheduler.running:
-            return {
-                "running": False,
-                "cron": self._current_cron,
-                "jobs": [],
-                "current_run": self._current_run,
-                "last_run": self._last_run,
-            }
+            return {"running": False, "jobs": [], **base}
         jobs = []
         for job in self._scheduler.get_jobs():
             repo_key = str(job.kwargs.get("repo_key", job.id))
@@ -64,32 +34,17 @@ class UnderstandingScheduler:
                 "next_run_at": str(job.next_run_time.isoformat()) if job.next_run_time else None,
                 "progress": self._runs.get(repo_key),
             })
-        return {
-            "running": True,
-            "cron": self._current_cron,
-            "jobs": jobs,
-            "current_run": self._current_run,
-            "last_run": self._last_run,
-        }
-
-    def _ensure_scheduler(self) -> None:
-        if self._scheduler is None:
-            self._scheduler = BackgroundScheduler()
+        return {"running": True, "jobs": jobs, **base}
 
     def _refresh_jobs(self) -> None:
         if not self._scheduler:
             return
         self._scheduler.remove_all_jobs()
-        try:
-            trigger = CronTrigger.from_crontab(self._current_cron)
-        except (ValueError, TypeError) as exc:
-            logger.error("无效的 cron 表达式 '%s': %s", self._current_cron, exc)
+        trigger = self._build_trigger()
+        if trigger is None:
             return
-        repos = self._store.list_code_repositories()
-        for repo in repos:
-            if repo.get("status") != "active":
-                continue
-            if not repo.get("auto_understand"):
+        for repo in self._store.list_code_repositories():
+            if repo.get("status") != "active" or not repo.get("auto_understand"):
                 continue
             self._scheduler.add_job(
                 self._run_understand,
@@ -103,7 +58,7 @@ class UnderstandingScheduler:
         admin = next(iter(self._admins), "root")
         self._current_run = self._runs[repo_key] = {
             "status": "running",
-            "started_at": _now_iso(),
+            "started_at": now_iso(),
             "finished_at": None,
             "message": "正在执行代码理解",
             "error": None,
@@ -113,7 +68,7 @@ class UnderstandingScheduler:
             run_status = "succeeded" if result.get("success") else "failed"
             self._runs[repo_key].update({
                 "status": run_status,
-                "finished_at": _now_iso(),
+                "finished_at": now_iso(),
                 "message": (
                     f"理解完成，节点 {result.get('node_count', 0)}，边 {result.get('edge_count', 0)}"
                     if run_status == "succeeded"
@@ -134,14 +89,10 @@ class UnderstandingScheduler:
         except Exception as exc:
             self._runs[repo_key].update({
                 "status": "failed",
-                "finished_at": _now_iso(),
+                "finished_at": now_iso(),
                 "message": "代码理解失败",
                 "error": str(exc),
             })
             self._last_run = dict(self._runs[repo_key])
             self._current_run = None
             logger.exception("定时 Understand 分析失败 %s", repo_key)
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()

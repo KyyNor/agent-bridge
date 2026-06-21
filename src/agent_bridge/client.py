@@ -34,137 +34,87 @@ class AgentBridgeClient:
             detail = payload.get("detail", payload) if isinstance(payload, dict) else payload
         raise RuntimeError(str(detail))
 
-    def init_system(self) -> None:
-        response = httpx.post(f"{self.base_url}/admin/init", headers=self._headers(), timeout=10.0)
+    def _request(self, method: str, path: str, *, timeout: float = 10.0, **kwargs: Any) -> httpx.Response:
+        response = getattr(httpx, method.lower())(
+            f"{self.base_url}{path}", headers=self._headers(), timeout=timeout, **kwargs,
+        )
         self._raise(response)
+        return response
+
+    def init_system(self) -> None:
+        self._request("POST", "/admin/init")
 
     def list_kbs(self) -> list[dict[str, Any]]:
-        response = httpx.get(f"{self.base_url}/kbs", headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("GET", "/kbs").json()
 
     def create_kb(self, slug: str, name: str, description: str) -> dict[str, Any]:
-        response = httpx.post(
-            f"{self.base_url}/kbs",
-            json={"slug": slug, "name": name, "description": description},
-            headers=self._headers(),
-            timeout=10.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request(
+            "POST", "/kbs", json={"slug": slug, "name": name, "description": description},
+        ).json()
 
     def grant_member(self, kb_slug: str, linux_user: str, role: str) -> dict[str, Any]:
-        response = httpx.post(
-            f"{self.base_url}/kbs/{kb_slug}/members",
-            json={"linux_user": linux_user, "role": role},
-            headers=self._headers(),
-            timeout=10.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request(
+            "POST", f"/kbs/{kb_slug}/members", json={"linux_user": linux_user, "role": role},
+        ).json()
 
     def add_document(self, source: Path, kb_slugs: list[str], later: bool) -> dict[str, Any]:
         data = [("kb", kb) for kb in kb_slugs] + [("later", str(later).lower())]
         try:
             with source.open("rb") as handle:
-                response = httpx.post(
-                    f"{self.base_url}/docs",
-                    data=data,
-                    files={"file": (source.name, handle)},
-                    headers=self._headers(),
-                    timeout=60.0,
-                )
+                return self._request(
+                    "POST", "/docs", data=data, files={"file": (source.name, handle)}, timeout=60.0,
+                ).json()
         except OSError as exc:
             raise RuntimeError(f"cannot read source file: {exc}") from exc
-        self._raise(response)
-        return response.json()
 
     def update_document(self, doc_slug: str, source: Path, later: bool) -> dict[str, Any]:
         data = [("later", str(later).lower())]
         try:
             with source.open("rb") as handle:
-                response = httpx.post(
-                    f"{self.base_url}/docs/{doc_slug}/versions",
-                    data=data,
-                    files={"file": (source.name, handle)},
-                    headers=self._headers(),
-                    timeout=60.0,
-                )
+                return self._request(
+                    "POST", f"/docs/{doc_slug}/versions", data=data, files={"file": (source.name, handle)}, timeout=60.0,
+                ).json()
         except OSError as exc:
             raise RuntimeError(f"cannot read source file: {exc}") from exc
-        self._raise(response)
-        return response.json()
 
     def list_backends(self) -> list[dict[str, Any]]:
-        response = httpx.get(f"{self.base_url}/backends", headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("GET", "/backends").json()
 
     def list_docs(self, kb_slug: str, backend: str | None = None) -> list[dict[str, Any]]:
         params: dict[str, str] = {"kb": kb_slug}
         if backend:
             params["backend"] = backend
-        response = httpx.get(f"{self.base_url}/docs", params=params, headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("GET", "/docs", params=params).json()
 
     def get_doc(self, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
         params: dict[str, str] = {}
         if backend:
             params["backend"] = backend
-        response = httpx.get(f"{self.base_url}/docs/{doc_slug}", params=params, headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("GET", f"/docs/{doc_slug}", params=params).json()
 
     def delete_document(self, doc_slug: str) -> dict[str, Any]:
-        response = httpx.post(f"{self.base_url}/docs/{doc_slug}/delete", headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("POST", f"/docs/{doc_slug}/delete").json()
 
     def purge_document(self, doc_slug: str, confirm: bool) -> dict[str, Any]:
-        response = httpx.post(
-            f"{self.base_url}/docs/{doc_slug}/purge",
-            json={"confirm": confirm},
-            headers=self._headers(),
-            timeout=10.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request("POST", f"/docs/{doc_slug}/purge", json={"confirm": confirm}).json()
 
     def status(self, backend: str | None = None) -> dict[str, Any]:
         params: dict[str, str] = {}
         if backend:
             params["backend"] = backend
-        response = httpx.get(f"{self.base_url}/status", params=params, headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("GET", "/status", params=params).json()
 
     def sync(self, all_users: bool = False, backend: str | None = None) -> dict[str, Any]:
         params: dict[str, str] = {}
         if backend:
             params["backend"] = backend
-        response = httpx.post(
-            f"{self.base_url}/sync",
-            json={"all_users": all_users},
-            params=params,
-            headers=self._headers(),
-            timeout=60.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request("POST", "/sync", json={"all_users": all_users}, params=params, timeout=60.0).json()
 
     def search(self, kb_slug: str, question: str, backend: str | None = None, top_k: int = 6) -> dict[str, Any]:
         params: dict[str, str] = {"kb": kb_slug, "q": question, "top_k": str(top_k)}
         if backend:
             params["backend"] = backend
-        response = httpx.get(
-            f"{self.base_url}/search",
-            params=params,
-            headers=self._headers(),
-            timeout=30.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request("GET", "/search", params=params, timeout=30.0).json()
 
     def ask(self, kb_slug: str, question: str, backend: str | None = None, session_id: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"kb": kb_slug, "question": question}
@@ -172,59 +122,25 @@ class AgentBridgeClient:
             payload["backend"] = backend
         if session_id:
             payload["session_id"] = session_id
-        response = httpx.post(
-            f"{self.base_url}/ask",
-            json=payload,
-            headers=self._headers(),
-            timeout=60.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request("POST", "/ask", json=payload, timeout=60.0).json()
 
     def upsert_profile(self, profile_key: str, name: str, description: str, status: str) -> dict[str, Any]:
-        response = httpx.post(
-            f"{self.base_url}/capability-profiles",
+        return self._request(
+            "POST", "/capability-profiles",
             json={"profile_key": profile_key, "name": name, "description": description, "status": status},
-            headers=self._headers(),
-            timeout=10.0,
-        )
-        self._raise(response)
-        return response.json()
+        ).json()
 
     def list_profiles(self) -> list[dict[str, Any]]:
-        response = httpx.get(f"{self.base_url}/capability-profiles", headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("GET", "/capability-profiles").json()
 
     def get_profile(self, profile_key: str) -> dict[str, Any]:
-        response = httpx.get(f"{self.base_url}/capability-profiles/{profile_key}", headers=self._headers(), timeout=10.0)
-        self._raise(response)
-        return response.json()
+        return self._request("GET", f"/capability-profiles/{profile_key}").json()
 
     def render_profile_doc(self, profile_key: str) -> dict[str, Any]:
-        response = httpx.post(
-            f"{self.base_url}/capability-profiles/{profile_key}/doc/render",
-            headers=self._headers(),
-            timeout=10.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request("POST", f"/capability-profiles/{profile_key}/doc/render").json()
 
     def refresh_profile_pin_cache(self, profile_key: str) -> dict[str, Any]:
-        response = httpx.post(
-            f"{self.base_url}/capability-profiles/{profile_key}/pins/refresh",
-            headers=self._headers(),
-            timeout=10.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request("POST", f"/capability-profiles/{profile_key}/pins/refresh").json()
 
     def replace_profile_rules(self, profile_key: str, rules: list[dict[str, str]]) -> dict[str, Any]:
-        response = httpx.put(
-            f"{self.base_url}/capability-profiles/{profile_key}/rules",
-            json={"rules": rules},
-            headers=self._headers(),
-            timeout=10.0,
-        )
-        self._raise(response)
-        return response.json()
+        return self._request("PUT", f"/capability-profiles/{profile_key}/rules", json={"rules": rules}).json()

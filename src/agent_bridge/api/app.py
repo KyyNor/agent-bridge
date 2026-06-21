@@ -4,10 +4,10 @@ import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Header, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware
@@ -21,7 +21,6 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     resolved_paths = paths or AgentBridgePaths.from_root()
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = AgentBridgeService.create(resolved_paths, resolved_admins)
-    capability_schema_ready = False
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -58,33 +57,22 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     def actor(x_agent_bridge_user: str = Header(alias="X-Agent-Bridge-User")) -> str:
         return x_agent_bridge_user
 
-    def call_safely(call: Callable[[], Any]) -> Any:
-        try:
-            if admins is None:
-                service.admins = load_server_config(resolved_paths).admins
-                service.capabilities.admins = service.admins
-                service.governance.admins = service.admins
-                service.codegraph.admins = service.admins
-                service.workflows.admins = service.admins
-                service.skills.admins = service.admins
-                service.scripts.admins = service.admins
-            return call()
-        except AgentBridgeError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    @app.exception_handler(AgentBridgeError)
+    async def _handle_agent_bridge_error(request: Request, exc: AgentBridgeError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
-    async def call_safely_async(call: Callable[[], Awaitable[Any]]) -> Any:
-        try:
-            if admins is None:
-                service.admins = load_server_config(resolved_paths).admins
-                service.capabilities.admins = service.admins
-                service.governance.admins = service.admins
-                service.codegraph.admins = service.admins
-                service.workflows.admins = service.admins
-                service.skills.admins = service.admins
-                service.scripts.admins = service.admins
-            return await call()
-        except AgentBridgeError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    if admins is None:
+        @app.middleware("http")
+        async def _reload_admins_if_dynamic(request: Request, call_next):
+            reloaded = load_server_config(resolved_paths).admins
+            service.admins = reloaded
+            service.capabilities.admins = reloaded
+            service.governance.admins = reloaded
+            service.codegraph.admins = reloaded
+            service.workflows.admins = reloaded
+            service.skills.admins = reloaded
+            service.scripts.admins = reloaded
+            return await call_next(request)
 
     def save_upload(file: UploadFile) -> Path:
         resolved_paths.run_dir.mkdir(parents=True, exist_ok=True)
@@ -102,12 +90,6 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     def upload_filename(file: UploadFile) -> str:
         return Path((file.filename or "upload").replace("\\", "/")).name or "upload"
-
-    def ensure_capability_schema() -> None:
-        nonlocal capability_schema_ready
-        if not capability_schema_ready:
-            service.store.init_schema()
-            capability_schema_ready = True
 
     def catalog_sources(current_actor: str, profile_key: str | None, query: str | None) -> list[dict[str, Any]]:
         source_keys = [item["service_key"] for item in service.store.list_mcp_services()]
@@ -149,25 +131,25 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     app.include_router(health_router)
 
     from agent_bridge.api.routes.knowledge import create_knowledge_routes
-    app.include_router(create_knowledge_routes(service, actor, call_safely, save_upload, upload_filename))
+    app.include_router(create_knowledge_routes(service, actor, save_upload, upload_filename))
 
     from agent_bridge.api.routes.capabilities import create_capability_routes
-    app.include_router(create_capability_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema, catalog_sources))
+    app.include_router(create_capability_routes(service, actor, catalog_sources))
 
     from agent_bridge.api.routes.governance import create_governance_routes
-    app.include_router(create_governance_routes(service, actor, call_safely, ensure_capability_schema))
+    app.include_router(create_governance_routes(service, actor))
 
     from agent_bridge.api.routes.agent_runs import create_agent_runs_routes
-    app.include_router(create_agent_runs_routes(service, actor, call_safely, ensure_capability_schema))
+    app.include_router(create_agent_runs_routes(service, actor))
 
     from agent_bridge.api.routes.builtins import create_builtin_routes
-    app.include_router(create_builtin_routes(service, actor, call_safely, call_safely_async, ensure_capability_schema))
+    app.include_router(create_builtin_routes(service, actor))
 
     from agent_bridge.api.routes.workflows import create_workflow_routes
-    app.include_router(create_workflow_routes(service, actor, call_safely, ensure_capability_schema))
+    app.include_router(create_workflow_routes(service, actor))
 
     from agent_bridge.api.routes.script_runtime import create_script_runtime_routes
-    app.include_router(create_script_runtime_routes(service, actor, call_safely, ensure_capability_schema))
+    app.include_router(create_script_runtime_routes(service, actor))
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route

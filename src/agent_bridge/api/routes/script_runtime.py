@@ -9,7 +9,7 @@ from agent_bridge.api.runtime_context import profile_from_headers, workflow_cont
 from agent_bridge.api.schemas import RuntimeWorkflowRunLogRequest, RuntimeWorkflowSetTaskRequest
 
 
-def create_script_runtime_routes(service, actor, call_safely, ensure_capability_schema):
+def create_script_runtime_routes(service, actor):
     router = APIRouter()
 
     def require_runtime_context(request: Request) -> tuple[str | None, dict[str, str]]:
@@ -24,14 +24,11 @@ def create_script_runtime_routes(service, actor, call_safely, ensure_capability_
 
     @router.post("/runtime/workflow/get-task")
     def runtime_workflow_get_task(request: Request, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        ensure_capability_schema()
         profile_key, current = require_runtime_context(request)
-        return call_safely(
-            lambda: service.workflows.get_task_for_agent(
-                profile_key=profile_key,
-                workflow_key=current["workflow_key"],
-                run_id=current["run_id"],
-            )
+        return service.workflows.get_task_for_agent(
+            profile_key=profile_key,
+            workflow_key=current["workflow_key"],
+            run_id=current["run_id"],
         )
 
     @router.post("/runtime/workflow/set-task")
@@ -40,15 +37,12 @@ def create_script_runtime_routes(service, actor, call_safely, ensure_capability_
         request: Request,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        ensure_capability_schema()
         profile_key, current = require_runtime_context(request)
-        return call_safely(
-            lambda: service.workflows.set_tasks_for_agent(
-                profile_key=profile_key,
-                workflow_key=current["workflow_key"],
-                run_id=current["run_id"],
-                tasks=payload.tasks,
-            )
+        return service.workflows.set_tasks_for_agent(
+            profile_key=profile_key,
+            workflow_key=current["workflow_key"],
+            run_id=current["run_id"],
+            tasks=payload.tasks,
         )
 
     @router.post("/runtime/workflow/run-log")
@@ -57,26 +51,21 @@ def create_script_runtime_routes(service, actor, call_safely, ensure_capability_
         request: Request,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        ensure_capability_schema()
         profile_key, current = require_runtime_context(request)
-
-        def _write_log() -> dict[str, Any]:
-            service.workflows.require_workflow_run_context(
-                profile_key=profile_key,
-                workflow_key=current["workflow_key"],
-                run_id=current["run_id"],
-            )
-            service.workflows.append_run_log(
-                workflow_key=current["workflow_key"],
-                run_id=current["run_id"],
-                task_key=payload.task_key,
-                level=payload.level,
-                stage=payload.stage,
-                message=payload.message,
-                payload=payload.payload,
-            )
-            return {"ok": True}
-
-        return call_safely(_write_log)
+        service.workflows.require_workflow_run_context(
+            profile_key=profile_key,
+            workflow_key=current["workflow_key"],
+            run_id=current["run_id"],
+        )
+        service.workflows.append_run_log(
+            workflow_key=current["workflow_key"],
+            run_id=current["run_id"],
+            task_key=payload.task_key,
+            level=payload.level,
+            stage=payload.stage,
+            message=payload.message,
+            payload=payload.payload,
+        )
+        return {"ok": True}
 
     return router

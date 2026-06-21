@@ -2,48 +2,23 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
+from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler, now_iso
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CRON = "0 * * * *"
 
 
-class CodeGraphScheduler:
+class CodeGraphScheduler(BaseCronScheduler):
+    _cron_config_key = "code_sync_cron"
+    _default_cron = _DEFAULT_CRON
+    _scheduler_name = "CodeGraph"
+
     def __init__(self, service: Any, store: Any, admins: set[str]) -> None:
-        self._service = service
-        self._store = store
-        self._admins = admins
-        self._scheduler: BackgroundScheduler | None = None
-        self._current_cron: str = _DEFAULT_CRON
+        super().__init__(service, store, admins)
         self._runs: dict[str, dict[str, Any]] = {}
-
-    def start(self) -> None:
-        config = self._store.get_sync_config()
-        self._current_cron = config.get("code_sync_cron") or _DEFAULT_CRON
-        self._ensure_scheduler()
-        self._refresh_jobs()
-        self._scheduler.start()
-        logger.info("CodeGraph 调度器已启动 cron: %s", self._current_cron)
-
-    def stop(self) -> None:
-        if self._scheduler:
-            self._scheduler.shutdown(wait=False)
-            self._scheduler = None
-            logger.info("CodeGraph 调度器已停止")
-
-    def refresh(self) -> None:
-        config = self._store.get_sync_config()
-        self._current_cron = config.get("code_sync_cron") or _DEFAULT_CRON
-        self._ensure_scheduler()
-        if not self._scheduler.running:
-            self._scheduler.start()
-            logger.info("CodeGraph 调度器已启动 cron: %s", self._current_cron)
-        self._refresh_jobs()
 
     def get_status(self) -> dict[str, Any]:
         if not self._scheduler or not self._scheduler.running:
@@ -58,21 +33,14 @@ class CodeGraphScheduler:
             })
         return {"running": True, "cron": self._current_cron, "jobs": jobs}
 
-    def _ensure_scheduler(self) -> None:
-        if self._scheduler is None:
-            self._scheduler = BackgroundScheduler()
-
     def _refresh_jobs(self) -> None:
         if not self._scheduler:
             return
         self._scheduler.remove_all_jobs()
-        try:
-            trigger = CronTrigger.from_crontab(self._current_cron)
-        except (ValueError, TypeError) as exc:
-            logger.error("无效的 cron 表达式 '%s': %s", self._current_cron, exc)
+        trigger = self._build_trigger()
+        if trigger is None:
             return
-        repos = self._store.list_code_repositories()
-        for repo in repos:
+        for repo in self._store.list_code_repositories():
             if repo.get("status") != "active":
                 continue
             self._scheduler.add_job(
@@ -87,7 +55,7 @@ class CodeGraphScheduler:
         admin = next(iter(self._admins), "root")
         self._runs[repo_key] = {
             "status": "running",
-            "started_at": _now_iso(),
+            "started_at": now_iso(),
             "finished_at": None,
             "message": "正在同步代码仓库",
             "error": None,
@@ -96,7 +64,7 @@ class CodeGraphScheduler:
             result = self._service.sync_repository(admin, repo_key)
             self._runs[repo_key].update({
                 "status": "succeeded",
-                "finished_at": _now_iso(),
+                "finished_at": now_iso(),
                 "message": f"同步完成，索引 {result.get('indexed', 0)} 项",
                 "error": None,
             })
@@ -104,12 +72,8 @@ class CodeGraphScheduler:
         except Exception as exc:
             self._runs[repo_key].update({
                 "status": "failed",
-                "finished_at": _now_iso(),
+                "finished_at": now_iso(),
                 "message": "同步失败",
                 "error": str(exc),
             })
             logger.exception("定时同步失败 %s", repo_key)
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
