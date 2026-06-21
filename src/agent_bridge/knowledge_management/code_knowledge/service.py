@@ -590,36 +590,25 @@ class CodeGraphService:
             user = auth.get("username", "")
             pwd = auth.get("password", "")
             if user and pwd:
-                return self._embed_credentials(git_url, user, pwd)
+                import urllib.parse
+                userinfo = f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(pwd, safe='')}"
+                return self._embed_userinfo(git_url, userinfo)
         elif auth_type == "token":
             token = auth.get("token", "")
             if token:
-                return self._embed_token(git_url, token)
+                import urllib.parse
+                return self._embed_userinfo(git_url, f"oauth2:{urllib.parse.quote(token, safe='')}")
         return git_url
 
     @staticmethod
-    def _embed_credentials(url: str, user: str, pwd: str) -> str:
+    def _embed_userinfo(url: str, userinfo: str) -> str:
         import urllib.parse
         for prefix in ("https://", "http://"):
             if url.startswith(prefix):
                 rest = url[len(prefix):]
                 if "@" in rest:
                     rest = rest.split("@", 1)[1]
-                encoded_user = urllib.parse.quote(user, safe="")
-                encoded_pwd = urllib.parse.quote(pwd, safe="")
-                return f"{prefix}{encoded_user}:{encoded_pwd}@{rest}"
-        return url
-
-    @staticmethod
-    def _embed_token(url: str, token: str) -> str:
-        import urllib.parse
-        for prefix in ("https://", "http://"):
-            if url.startswith(prefix):
-                rest = url[len(prefix):]
-                if "@" in rest:
-                    rest = rest.split("@", 1)[1]
-                encoded_token = urllib.parse.quote(token, safe="")
-                return f"{prefix}oauth2:{encoded_token}@{rest}"
+                return f"{prefix}{userinfo}@{rest}"
         return url
 
     def test_clone(self, actor: str, git_url: str, auth_ref: str) -> dict[str, Any]:

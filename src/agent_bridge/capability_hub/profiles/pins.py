@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from agent_bridge.capability_hub.models import ToolType
+from agent_bridge.core.json_util import json_loads as _json_loads
 
 
 PINNABLE_TOOL_TYPES = {
@@ -40,15 +40,6 @@ def ratio_target(candidate_count: int, ratio_percent: int) -> int:
     if candidate_count <= 0 or ratio_percent <= 0:
         return 0
     return math.ceil(candidate_count * ratio_percent / 100)
-
-
-def _json_loads(value: Any, default: Any) -> Any:
-    if not isinstance(value, str):
-        return value if value is not None else default
-    try:
-        return json.loads(value) if value else default
-    except json.JSONDecodeError:
-        return default
 
 
 def tool_payload_to_pin_tool(

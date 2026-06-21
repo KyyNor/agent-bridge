@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent_bridge.agent_runtime.events import message_log_record
+
 logger = logging.getLogger(__name__)
 
 UA_DIR = ".understand-anything"
@@ -210,26 +212,6 @@ class DashboardPool:
             return False
 
 
-def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    if isinstance(value, list | tuple):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    return str(value)
-
-
-def _sdk_message_log_record(message: Any) -> dict[str, Any]:
-    record: dict[str, Any] = {"type": type(message).__name__}
-    for attr in ("subtype", "session_id", "uuid", "result", "total_cost_usd", "duration_ms", "num_turns"):
-        if hasattr(message, attr):
-            record[attr] = _json_safe(getattr(message, attr))
-    if hasattr(message, "content"):
-        record["content"] = _json_safe(getattr(message, "content"))
-    return record
-
-
 class UnderstandAnythingClient:
 
     def __init__(self, root: Path | None = None, *, agent_service: Any = None) -> None:
@@ -350,7 +332,7 @@ class UnderstandAnythingClient:
         output_lines: list[str] = []
 
         def on_message(message: Any) -> None:
-            output_lines.append(json.dumps(_sdk_message_log_record(message), ensure_ascii=False))
+            output_lines.append(json.dumps(message_log_record(message), ensure_ascii=False))
 
         res = asyncio.run(
             self._agent_service.run(

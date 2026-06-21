@@ -24,24 +24,6 @@ from agent_bridge.cli.profile import profile_app  # noqa: E402
 app.add_typer(server_app, name="server")
 app.add_typer(profile_app, name="profile")
 
-# Re-export symbols used by test monkeypatching
-from agent_bridge.cli.server import (  # noqa: E402, F401
-    _paths_from_root,
-    _run_server_action,
-    server_status_cmd,
-    server_init,
-    server_start,
-    server_stop,
-)
-from agent_bridge.cli.profile import (  # noqa: E402, F401
-    profile_create,
-    profile_list,
-    profile_show,
-    profile_rules,
-    profile_use,
-    profile_config,
-)
-
 T = TypeVar("T")
 
 

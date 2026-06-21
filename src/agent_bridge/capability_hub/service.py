@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -17,6 +17,7 @@ from agent_bridge.capability_hub.sources.builtin.base import (
 from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService, monotonic_ms
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.json_util import json_loads as _json_loads
 from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
 from agent_bridge.capability_hub.sources.openapi.http_client import OpenApiHttpClient
 from agent_bridge.capability_hub.sources.openapi.parser import parse_openapi_operations
@@ -25,14 +26,6 @@ from agent_bridge.storage.sqlite import SQLiteStore
 
 SERVICE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 READONLY_TOOL_TYPES = {ToolType.overview.value, ToolType.search.value, ToolType.detail.value}
-
-
-def _json_loads(value: Any, default: Any) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return json.loads(value) if value else default
-    return value
 
 
 def _json_text(value: Any) -> str:
@@ -82,19 +75,6 @@ def _mark_call_log_status(exc: Exception, status: str) -> Exception:
 
 def _call_log_status(exc: Exception) -> str:
     return str(getattr(exc, "_tool_call_log_status", CallLogStatus.error.value))
-
-
-def _mark_call_log_failure(
-    exc: Exception,
-    *,
-    stage: str,
-    owner: str,
-    error_type: str,
-) -> Exception:
-    setattr(exc, "_tool_call_failure_stage", stage)
-    setattr(exc, "_tool_call_failure_owner", owner)
-    setattr(exc, "_tool_call_error_type", error_type)
-    return exc
 
 
 def _failure_stage(exc: Exception) -> str:
@@ -531,7 +511,7 @@ class CapabilityService:
                 result = await self._execute_builtin(actor, service, tool_name, params, profile_key, workflow_context)
             elif is_openapi_service:
                 if not self.governance.is_source_allowed(actor, profile_key, SourceType.openapi_service.value, service):
-                    raise _mark_call_log_failure(
+                    raise mark_builtin_failure(
                         _mark_call_log_status(
                             ValidationError("source is blocked by profile policy"),
                             CallLogStatus.blocked.value,
@@ -542,7 +522,7 @@ class CapabilityService:
                     )
                 result = self._execute_openapi_without_log(actor, service, tool_name, params)
             elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
-                raise _mark_call_log_failure(
+                raise mark_builtin_failure(
                     _mark_call_log_status(
                         ValidationError("source is blocked by profile policy"),
                         CallLogStatus.blocked.value,
@@ -640,33 +620,7 @@ class CapabilityService:
     ) -> dict[str, Any]:
         service_payload = self._require_enabled_service(service)
         tool_payload = self.store.get_mcp_tool(service, tool_name)
-        if tool_payload is None or tool_payload.get("status") != "active":
-            raise _mark_call_log_failure(
-                NotFound("tool not found"),
-                stage=FailureStage.capability_registry.value,
-                owner=FailureOwner.platform.value,
-                error_type="capability_registry_error",
-            )
-        if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
-            if tool_payload["tool_type"] == ToolType.unconfigured.value:
-                raise _mark_call_log_failure(
-                    _mark_call_log_status(
-                        ValidationError("工具类型未配置，请联系管理员在 Agent Bridge 中配置工具类型"),
-                        CallLogStatus.blocked.value,
-                    ),
-                    stage=FailureStage.capability_registry.value,
-                    owner=FailureOwner.platform.value,
-                    error_type="capability_registry_error",
-                )
-            raise _mark_call_log_failure(
-                _mark_call_log_status(
-                    ValidationError("tool type is not executable"),
-                    CallLogStatus.blocked.value,
-                ),
-                stage=FailureStage.capability_registry.value,
-                owner=FailureOwner.platform.value,
-                error_type="capability_registry_error",
-            )
+        self._assert_tool_executable(tool_payload)
 
         headers = _json_loads(service_payload.get("headers_json"), {})
         try:
@@ -677,7 +631,7 @@ class CapabilityService:
                 params,
             )
         except Exception as exc:
-            raise _mark_call_log_failure(
+            raise mark_builtin_failure(
                 ValidationError(f"MCP tool execution failed: {exc}"),
                 stage=FailureStage.mcp_transport.value,
                 owner=FailureOwner.upstream_mcp.value,
@@ -700,33 +654,7 @@ class CapabilityService:
     ) -> dict[str, Any]:
         service_payload = self._require_enabled_openapi_service(service)
         tool_payload = self.store.get_openapi_tool(service, tool_name)
-        if tool_payload is None or tool_payload.get("status") != "active":
-            raise _mark_call_log_failure(
-                NotFound("tool not found"),
-                stage=FailureStage.capability_registry.value,
-                owner=FailureOwner.platform.value,
-                error_type="capability_registry_error",
-            )
-        if tool_payload["tool_type"] not in READONLY_TOOL_TYPES:
-            if tool_payload["tool_type"] == ToolType.unconfigured.value:
-                raise _mark_call_log_failure(
-                    _mark_call_log_status(
-                        ValidationError("工具类型未配置，请联系管理员在 Agent Bridge 中配置工具类型"),
-                        CallLogStatus.blocked.value,
-                    ),
-                    stage=FailureStage.capability_registry.value,
-                    owner=FailureOwner.platform.value,
-                    error_type="capability_registry_error",
-                )
-            raise _mark_call_log_failure(
-                _mark_call_log_status(
-                    ValidationError("tool type is not executable"),
-                    CallLogStatus.blocked.value,
-                ),
-                stage=FailureStage.capability_registry.value,
-                owner=FailureOwner.platform.value,
-                error_type="capability_registry_error",
-            )
+        self._assert_tool_executable(tool_payload)
         try:
             result = self.openapi_client.call_tool(
                 self._openapi_service_payload(service_payload),
@@ -734,7 +662,7 @@ class CapabilityService:
                 params,
             )
         except Exception as exc:
-            raise _mark_call_log_failure(
+            raise mark_builtin_failure(
                 ValidationError(f"OpenAPI tool execution failed: {exc}"),
                 stage=FailureStage.openapi_transport.value,
                 owner=FailureOwner.upstream_openapi.value,
@@ -742,41 +670,64 @@ class CapabilityService:
             ) from exc
         return {"service": service, "tool": tool_name, "tool_name": tool_name, "success": True, "result": result}
 
-    def _require_enabled_service(self, service_key: str) -> dict[str, Any]:
-        service = self.store.get_mcp_service(service_key)
+    def _require_enabled(
+        self,
+        service_key: str,
+        getter: Callable[[str], dict[str, Any] | None],
+        disabled_message: str,
+    ) -> dict[str, Any]:
+        service = getter(service_key)
         if service is None:
-            raise _mark_call_log_failure(
+            raise mark_builtin_failure(
                 NotFound("service not found"),
                 stage=FailureStage.capability_registry.value,
                 owner=FailureOwner.platform.value,
                 error_type="capability_registry_error",
             )
         if service["status"] != McpServiceStatus.enabled.value:
-            raise _mark_call_log_failure(
-                ValidationError("MCP service is not enabled"),
+            raise mark_builtin_failure(
+                ValidationError(disabled_message),
                 stage=FailureStage.capability_registry.value,
                 owner=FailureOwner.platform.value,
                 error_type="capability_registry_error",
             )
         return service
 
+    def _require_enabled_service(self, service_key: str) -> dict[str, Any]:
+        return self._require_enabled(service_key, self.store.get_mcp_service, "MCP service is not enabled")
+
     def _require_enabled_openapi_service(self, service_key: str) -> dict[str, Any]:
-        service = self.store.get_openapi_service(service_key)
-        if service is None:
-            raise _mark_call_log_failure(
-                NotFound("service not found"),
+        return self._require_enabled(service_key, self.store.get_openapi_service, "OpenAPI service is not enabled")
+
+    def _assert_tool_executable(self, tool_payload: dict[str, Any] | None) -> None:
+        if tool_payload is None or tool_payload.get("status") != "active":
+            raise mark_builtin_failure(
+                NotFound("tool not found"),
                 stage=FailureStage.capability_registry.value,
                 owner=FailureOwner.platform.value,
                 error_type="capability_registry_error",
             )
-        if service["status"] != McpServiceStatus.enabled.value:
-            raise _mark_call_log_failure(
-                ValidationError("OpenAPI service is not enabled"),
+        if tool_payload["tool_type"] in READONLY_TOOL_TYPES:
+            return
+        if tool_payload["tool_type"] == ToolType.unconfigured.value:
+            raise mark_builtin_failure(
+                _mark_call_log_status(
+                    ValidationError("工具类型未配置，请联系管理员在 Agent Bridge 中配置工具类型"),
+                    CallLogStatus.blocked.value,
+                ),
                 stage=FailureStage.capability_registry.value,
                 owner=FailureOwner.platform.value,
                 error_type="capability_registry_error",
             )
-        return service
+        raise mark_builtin_failure(
+            _mark_call_log_status(
+                ValidationError("tool type is not executable"),
+                CallLogStatus.blocked.value,
+            ),
+            stage=FailureStage.capability_registry.value,
+            owner=FailureOwner.platform.value,
+            error_type="capability_registry_error",
+        )
 
     def _root_search_items(self, *, actor: str, profile_key: str | None = None) -> list[dict[str, Any]]:
         enabled_services = [

@@ -9,14 +9,7 @@ from typing import Any
 
 from agent_bridge.storage.types import row_to_dict
 from agent_bridge.automation.workflows.models import WorkflowTaskStatus
-
-
-def _json_loads(value: Any, default: Any) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return json.loads(value) if value else default
-    return value
+from agent_bridge.core.json_util import json_loads as _json_loads
 
 
 def _json_dumps(value: Any) -> str:

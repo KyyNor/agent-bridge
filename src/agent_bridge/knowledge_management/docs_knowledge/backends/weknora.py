@@ -211,7 +211,7 @@ class WeknoraBackend:
         self._raise(response)
         items = self._data(response) or []
         return [
-            self._retrieval_result_from_search_item(item, backend_kb_id)
+            self._retrieval_result(item, backend_kb_id)
             for item in items[:top_k]
         ]
 
@@ -311,9 +311,12 @@ class WeknoraBackend:
         return self._data(response)["id"]
 
     @staticmethod
-    def _retrieval_result_from_search_item(
-        item: dict[str, Any], backend_kb_id: str
+    def _retrieval_result(
+        item: dict[str, Any], backend_kb_id: str, *, include_similarity_fallback: bool = False
     ) -> RetrievalResult:
+        score = item.get("score")
+        if not score and include_similarity_fallback:
+            score = item.get("similarity")
         return RetrievalResult(
             chunk_id=str(item.get("id", "")),
             content=str(item.get("content", "")),
@@ -322,23 +325,7 @@ class WeknoraBackend:
                 or item.get("knowledge_filename")
                 or ""
             ),
-            similarity=float(item.get("score") or 0.0),
-            dataset_id=str(item.get("knowledge_base_id") or backend_kb_id),
-        )
-
-    @classmethod
-    def _retrieval_result_from_reference(
-        cls, item: dict[str, Any], backend_kb_id: str
-    ) -> RetrievalResult:
-        return RetrievalResult(
-            chunk_id=str(item.get("id", "")),
-            content=str(item.get("content", "")),
-            document_name=str(
-                item.get("knowledge_title")
-                or item.get("knowledge_filename")
-                or ""
-            ),
-            similarity=float(item.get("score") or item.get("similarity") or 0.0),
+            similarity=float(score or 0.0),
             dataset_id=str(item.get("knowledge_base_id") or backend_kb_id),
         )
 
@@ -368,7 +355,7 @@ class WeknoraBackend:
                 raise RuntimeError(str(message))
             if response_type == "references":
                 for ref in payload.get("knowledge_references") or []:
-                    chunks.append(cls._retrieval_result_from_reference(ref, backend_kb_id))
+                    chunks.append(cls._retrieval_result(ref, backend_kb_id, include_similarity_fallback=True))
             if response_type == "answer":
                 answer_parts.append(str(payload.get("content") or ""))
 

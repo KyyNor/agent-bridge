@@ -585,10 +585,10 @@ class CapabilityGovernanceService:
         resource_type: str | None = None,
         resource_key: str | None = None,
     ) -> dict[str, Any]:
-        normalized_source_type = self._validate_optional_source_type(source_type)
+        normalized_source_type = self._optional_enum(source_type, SourceType, "source type")
         normalized_status = self._validate_call_log_status(status)
-        normalized_failure_stage = self._validate_optional_failure_stage(failure_stage)
-        normalized_failure_owner = self._validate_optional_failure_owner(failure_owner)
+        normalized_failure_stage = self._optional_enum(failure_stage, FailureStage, "failure stage")
+        normalized_failure_owner = self._optional_enum(failure_owner, FailureOwner, "failure owner")
         return self.store.create_tool_call_log(
             log_id=make_log_id(),
             actor=actor,
@@ -630,10 +630,10 @@ class CapabilityGovernanceService:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        normalized_source_type = self._validate_optional_source_type(source_type)
-        normalized_status = self._validate_optional_call_log_status(status)
-        normalized_failure_stage = self._validate_optional_failure_stage(failure_stage)
-        normalized_failure_owner = self._validate_optional_failure_owner(failure_owner)
+        normalized_source_type = self._optional_enum(source_type, SourceType, "source type")
+        normalized_status = self._optional_enum(status, CallLogStatus, "call log status")
+        normalized_failure_stage = self._optional_enum(failure_stage, FailureStage, "failure stage")
+        normalized_failure_owner = self._optional_enum(failure_owner, FailureOwner, "failure owner")
         return self.store.list_tool_call_logs(
             entrypoint=entrypoint,
             source_type=normalized_source_type,
@@ -715,34 +715,16 @@ class CapabilityGovernanceService:
         except ValueError as exc:
             raise ValidationError("invalid resource type") from exc
 
-    def _validate_optional_source_type(self, source_type: str | None) -> str | None:
-        if source_type is None:
-            return None
-        return self._validate_source_type(source_type)
-
     def _validate_call_log_status(self, status: str) -> str:
         try:
             return CallLogStatus(status).value
         except ValueError as exc:
             raise ValidationError("invalid call log status") from exc
 
-    def _validate_optional_call_log_status(self, status: str | None) -> str | None:
-        if status is None:
-            return None
-        return self._validate_call_log_status(status)
-
-    def _validate_optional_failure_stage(self, failure_stage: str | None) -> str | None:
-        if failure_stage is None:
+    def _optional_enum(self, value: str | None, enum_cls: type, label: str) -> str | None:
+        if value is None:
             return None
         try:
-            return FailureStage(failure_stage).value
+            return enum_cls(value).value
         except ValueError as exc:
-            raise ValidationError("invalid failure stage") from exc
-
-    def _validate_optional_failure_owner(self, failure_owner: str | None) -> str | None:
-        if failure_owner is None:
-            return None
-        try:
-            return FailureOwner(failure_owner).value
-        except ValueError as exc:
-            raise ValidationError("invalid failure owner") from exc
+            raise ValidationError(f"invalid {label}") from exc
