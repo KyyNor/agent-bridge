@@ -52,7 +52,7 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: '工作流',
+    label: '自动化',
     items: [
       { key: 'workflow', label: '工作流管理', description: '管理和编排知识工作流' },
     ],
