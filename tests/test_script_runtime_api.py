@@ -155,6 +155,28 @@ def test_runtime_workflow_routes_use_trusted_header_context(wm_paths):
     assert get_response.status_code == 200
     assert get_response.json()["task"]["lease_run_id"] == "run_1"
 
+    log_response = client.post(
+        "/runtime/workflow/run-log",
+        headers={
+            "X-Agent-Bridge-User": "root",
+            "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
+            "X-Agent-Bridge-Workflow": "true",
+            "X-Agent-Bridge-Workflow-Key": "page-report",
+            "X-Agent-Bridge-Workflow-Run-Id": "run_1",
+        },
+        json={"level": "info", "stage": "lease", "message": "leased task", "task_key": "page:a", "payload": {}},
+    )
+    assert log_response.status_code == 200
+    assert log_response.json() == {"ok": True}
+
+    tool_logs = svc.governance.list_logs(actor="root", entrypoint="runtime_workflow")
+    assert [item["tool_name"] for item in tool_logs] == [
+        "workflow_run_log",
+        "workflow_get_task",
+        "workflow_set_task",
+    ]
+    assert all(item["source_key"] == "workflow" for item in tool_logs)
+
 
 def test_script_test_route_accepts_legacy_script_params_body(wm_paths):
     client = _create_client(wm_paths)

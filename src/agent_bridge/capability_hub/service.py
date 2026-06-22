@@ -141,6 +141,55 @@ class CapabilityService:
     def register_builtin_provider(self, provider: BuiltinCapabilityProvider) -> None:
         self.builtin_providers[provider.source_key] = provider
 
+    def invoke_logged_tool(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        entrypoint: str,
+        source_type: str | None,
+        source_key: str | None,
+        tool_name: str,
+        request: dict[str, Any],
+        handler: Callable[[], dict[str, Any]],
+    ) -> dict[str, Any]:
+        started = monotonic_ms()
+        try:
+            result = handler()
+            self.governance.log_tool_call(
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint=entrypoint,
+                source_type=source_type,
+                source_key=source_key,
+                tool_name=tool_name,
+                request=request,
+                response=result,
+                status=CallLogStatus.success.value,
+                error_message=None,
+                duration_ms=monotonic_ms() - started,
+            )
+            return result
+        except Exception as exc:
+            log = self.governance.log_tool_call(
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint=entrypoint,
+                source_type=source_type,
+                source_key=source_key,
+                tool_name=tool_name,
+                request=request,
+                response={"error": str(exc)},
+                status=_call_log_status(exc),
+                error_message=str(exc),
+                failure_stage=_failure_stage(exc),
+                failure_owner=_failure_owner(exc),
+                error_type=_error_type(exc),
+                duration_ms=monotonic_ms() - started,
+            )
+            _attach_log_id(exc, log["log_id"])
+            raise
+
     def register_service(
         self,
         actor: str,

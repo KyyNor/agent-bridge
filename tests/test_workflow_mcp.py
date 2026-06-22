@@ -124,6 +124,13 @@ def test_workflow_mcp_set_get_and_run_log(wm_paths):
     assert log_result == {"ok": True}
     logs = svc.workflows.list_run_logs("root", "run_1")
     assert logs[0]["message"] == "leased task"
+    tool_logs = svc.governance.list_logs(actor="root", entrypoint="metamcp_execute")
+    assert [item["tool_name"] for item in tool_logs] == [
+        "workflow_run_log",
+        "workflow_get_task",
+        "workflow_set_task",
+    ]
+    assert all(item["source_key"] == "workflow" for item in tool_logs)
 
 
 def test_workflow_mcp_task_type_round_trips(wm_paths):

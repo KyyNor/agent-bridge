@@ -205,21 +205,43 @@ def create_mcp_server(
         def workflow_get_task() -> dict[str, Any]:
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}
-            return service.workflows.get_task_for_agent(
+            workflow_key = str(current.get("workflow_key") or "")
+            run_id = str(current.get("run_id") or "")
+            return bridge_service.capabilities.invoke_logged_tool(
+                actor=default_user(),
                 profile_key=active_profile,
-                workflow_key=str(current.get("workflow_key") or ""),
-                run_id=str(current.get("run_id") or ""),
+                entrypoint="metamcp_execute",
+                source_type="builtin",
+                source_key="workflow",
+                tool_name="workflow_get_task",
+                request={"workflow_key": workflow_key, "run_id": run_id},
+                handler=lambda: service.workflows.get_task_for_agent(
+                    profile_key=active_profile,
+                    workflow_key=workflow_key,
+                    run_id=run_id,
+                ),
             )
 
         @mcp.tool(description="Create or refresh pending tasks for the current workflow.")
         def workflow_set_task(tasks: list[dict[str, Any]]) -> dict[str, Any]:
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}
-            return service.workflows.set_tasks_for_agent(
+            workflow_key = str(current.get("workflow_key") or "")
+            run_id = str(current.get("run_id") or "")
+            return bridge_service.capabilities.invoke_logged_tool(
+                actor=default_user(),
                 profile_key=active_profile,
-                workflow_key=str(current.get("workflow_key") or ""),
-                run_id=str(current.get("run_id") or ""),
-                tasks=tasks,
+                entrypoint="metamcp_execute",
+                source_type="builtin",
+                source_key="workflow",
+                tool_name="workflow_set_task",
+                request={"workflow_key": workflow_key, "run_id": run_id, "tasks": tasks},
+                handler=lambda: service.workflows.set_tasks_for_agent(
+                    profile_key=active_profile,
+                    workflow_key=workflow_key,
+                    run_id=run_id,
+                    tasks=tasks,
+                ),
             )
 
         @mcp.tool(description="Append a workflow run log entry.")
@@ -234,21 +256,34 @@ def create_mcp_server(
             current = _request_workflow_context.get() or active_workflow_context or {}
             workflow_key = str(current.get("workflow_key") or "")
             run_id = str(current.get("run_id") or "")
-            service.workflows.require_workflow_run_context(
+            return bridge_service.capabilities.invoke_logged_tool(
+                actor=default_user(),
                 profile_key=active_profile,
-                workflow_key=workflow_key,
-                run_id=run_id,
+                entrypoint="metamcp_execute",
+                source_type="builtin",
+                source_key="workflow",
+                tool_name="workflow_run_log",
+                request={
+                    "workflow_key": workflow_key,
+                    "run_id": run_id,
+                    "task_key": task_key,
+                    "level": level,
+                    "stage": stage,
+                    "message": message,
+                    "payload": payload or {},
+                },
+                handler=lambda: _append_workflow_run_log(
+                    service=service,
+                    profile_key=active_profile,
+                    workflow_key=workflow_key,
+                    run_id=run_id,
+                    task_key=task_key,
+                    level=level,
+                    stage=stage,
+                    message=message,
+                    payload=payload or {},
+                ),
             )
-            service.workflows.append_run_log(
-                workflow_key=workflow_key,
-                run_id=run_id,
-                task_key=task_key,
-                level=level,
-                stage=stage,
-                message=message,
-                payload=payload or {},
-            )
-            return {"ok": True}
 
     def register_direct_builtin_tools() -> None:
         providers = getattr(service.capabilities, "builtin_providers", {})
@@ -334,6 +369,35 @@ def create_mcp_server(
     register_pinned_tools()
 
     return mcp
+
+
+def _append_workflow_run_log(
+    *,
+    service: AgentBridgeService,
+    profile_key: str | None,
+    workflow_key: str,
+    run_id: str,
+    task_key: str | None,
+    level: str,
+    stage: str,
+    message: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    service.workflows.require_workflow_run_context(
+        profile_key=profile_key,
+        workflow_key=workflow_key,
+        run_id=run_id,
+    )
+    service.workflows.append_run_log(
+        workflow_key=workflow_key,
+        run_id=run_id,
+        task_key=task_key,
+        level=level,
+        stage=stage,
+        message=message,
+        payload=payload,
+    )
+    return {"ok": True}
 
 
 def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:

@@ -25,10 +25,19 @@ def create_script_runtime_routes(service, actor):
     @router.post("/runtime/workflow/get-task")
     def runtime_workflow_get_task(request: Request, current_actor: str = Depends(actor)) -> dict[str, Any]:
         profile_key, current = require_runtime_context(request)
-        return service.workflows.get_task_for_agent(
+        return service.capabilities.invoke_logged_tool(
+            actor=current_actor,
             profile_key=profile_key,
-            workflow_key=current["workflow_key"],
-            run_id=current["run_id"],
+            entrypoint="runtime_workflow",
+            source_type="builtin",
+            source_key="workflow",
+            tool_name="workflow_get_task",
+            request={"workflow_key": current["workflow_key"], "run_id": current["run_id"]},
+            handler=lambda: service.workflows.get_task_for_agent(
+                profile_key=profile_key,
+                workflow_key=current["workflow_key"],
+                run_id=current["run_id"],
+            ),
         )
 
     @router.post("/runtime/workflow/set-task")
@@ -38,11 +47,20 @@ def create_script_runtime_routes(service, actor):
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         profile_key, current = require_runtime_context(request)
-        return service.workflows.set_tasks_for_agent(
+        return service.capabilities.invoke_logged_tool(
+            actor=current_actor,
             profile_key=profile_key,
-            workflow_key=current["workflow_key"],
-            run_id=current["run_id"],
-            tasks=payload.tasks,
+            entrypoint="runtime_workflow",
+            source_type="builtin",
+            source_key="workflow",
+            tool_name="workflow_set_task",
+            request={"workflow_key": current["workflow_key"], "run_id": current["run_id"], "tasks": payload.tasks},
+            handler=lambda: service.workflows.set_tasks_for_agent(
+                profile_key=profile_key,
+                workflow_key=current["workflow_key"],
+                run_id=current["run_id"],
+                tasks=payload.tasks,
+            ),
         )
 
     @router.post("/runtime/workflow/run-log")
@@ -52,20 +70,62 @@ def create_script_runtime_routes(service, actor):
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         profile_key, current = require_runtime_context(request)
-        service.workflows.require_workflow_run_context(
+        return service.capabilities.invoke_logged_tool(
+            actor=current_actor,
             profile_key=profile_key,
-            workflow_key=current["workflow_key"],
-            run_id=current["run_id"],
+            entrypoint="runtime_workflow",
+            source_type="builtin",
+            source_key="workflow",
+            tool_name="workflow_run_log",
+            request={
+                "workflow_key": current["workflow_key"],
+                "run_id": current["run_id"],
+                "task_key": payload.task_key,
+                "level": payload.level,
+                "stage": payload.stage,
+                "message": payload.message,
+                "payload": payload.payload,
+            },
+            handler=lambda: _append_workflow_run_log(
+                service=service,
+                profile_key=profile_key,
+                workflow_key=current["workflow_key"],
+                run_id=current["run_id"],
+                task_key=payload.task_key,
+                level=payload.level,
+                stage=payload.stage,
+                message=payload.message,
+                payload=payload.payload,
+            ),
         )
-        service.workflows.append_run_log(
-            workflow_key=current["workflow_key"],
-            run_id=current["run_id"],
-            task_key=payload.task_key,
-            level=payload.level,
-            stage=payload.stage,
-            message=payload.message,
-            payload=payload.payload,
-        )
-        return {"ok": True}
 
     return router
+
+
+def _append_workflow_run_log(
+    *,
+    service,
+    profile_key: str | None,
+    workflow_key: str,
+    run_id: str,
+    task_key: str | None,
+    level: str,
+    stage: str,
+    message: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    service.workflows.require_workflow_run_context(
+        profile_key=profile_key,
+        workflow_key=workflow_key,
+        run_id=run_id,
+    )
+    service.workflows.append_run_log(
+        workflow_key=workflow_key,
+        run_id=run_id,
+        task_key=task_key,
+        level=level,
+        stage=stage,
+        message=message,
+        payload=payload,
+    )
+    return {"ok": True}
