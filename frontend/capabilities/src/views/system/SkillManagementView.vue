@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { marked } from 'marked'
-import { Eye, Pencil, RotateCcw, Save } from 'lucide-vue-next'
+import { Check, Copy, Eye, Pencil, RotateCcw, Save } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { SkillPrompt } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -18,6 +18,7 @@ const saving = ref(false)
 const error = ref('')
 const message = ref('')
 const previewTab = ref<'edit' | 'preview'>('preview')
+const copied = ref(false)
 
 const hasChanges = computed(() => selected.value ? prompt.value !== (selected.value.prompt || '') : false)
 const sourceLabel = computed(() => selected.value?.source === 'database' ? '已自定义' : '默认提示词')
@@ -92,6 +93,23 @@ async function resetSkill() {
   }
 }
 
+async function copyRunPrompt() {
+  if (!selected.value) return
+  const cmd = `请执行 execute(service="built-in",tool_name="load_skill",param={"skill_name":"${selected.value.skill_name}"}) 来加载 skill`
+  try {
+    await navigator.clipboard.writeText(cmd)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = cmd
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  copied.value = true
+  setTimeout(() => { copied.value = false }, 2000)
+}
+
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
 }
@@ -149,6 +167,11 @@ function errorMessage(e: unknown) {
               </div>
               <div>
                 <div class="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" @click="copyRunPrompt">
+                    <Check v-if="copied" class="mr-1.5 h-4 w-4" />
+                    <Copy v-else class="mr-1.5 h-4 w-4" />
+                    {{ copied ? '已复制' : '复制运行提示' }}
+                  </Button>
                   <Button variant="outline" size="sm" :disabled="saving || selected.source === 'default'" @click="resetSkill">
                     <RotateCcw class="mr-1.5 h-4 w-4" />
                     恢复默认
@@ -158,7 +181,7 @@ function errorMessage(e: unknown) {
                     {{ saving ? '保存中' : '保存' }}
                   </Button>
                 </div>
-                <div class="mt-2 flex items-center gap-1">
+                <div class="mt-2 flex items-center justify-end gap-1">
                   <button
                     class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition"
                     :class="previewTab === 'edit' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
