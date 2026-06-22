@@ -4,6 +4,31 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+
+class CreateMemoryBlockRequest(BaseModel):
+    block_key: str
+    name: str
+    description: str = ""
+
+
+class UpdateMemoryBlockStatusRequest(BaseModel):
+    status: str
+
+
+class ProfileMemoryBindingRequest(BaseModel):
+    block_key: str | None = None
+    enabled: bool = True
+
+
+class MemoryHookRequest(BaseModel):
+    profile_key: str
+    event_name: str | None = None
+    matcher: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    hook_timeout_seconds: int = 60
+    source: str = "claude-code"
+
+
 class CreateKbRequest(BaseModel):
     slug: str
     name: str

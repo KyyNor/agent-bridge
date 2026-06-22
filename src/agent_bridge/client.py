@@ -139,6 +139,29 @@ class AgentBridgeClient:
     def render_profile_doc(self, profile_key: str) -> dict[str, Any]:
         return self._request("POST", f"/capability-profiles/{profile_key}/doc/render").json()
 
+    def list_memory_blocks(self) -> list[dict[str, Any]]:
+        return self._request("GET", "/memory/blocks").json()
+
+    def create_memory_block(self, block_key: str, name: str, description: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/memory/blocks",
+            json={"block_key": block_key, "name": name, "description": description},
+        ).json()
+
+    def get_profile_memory(self, profile_key: str) -> dict[str, Any]:
+        return self._request("GET", f"/capability-profiles/{profile_key}/memory").json()
+
+    def set_profile_memory(self, profile_key: str, block_key: str | None, enabled: bool = True) -> dict[str, Any]:
+        return self._request(
+            "PUT",
+            f"/capability-profiles/{profile_key}/memory",
+            json={"block_key": block_key, "enabled": enabled},
+        ).json()
+
+    def post_memory_hook(self, action: str, payload: dict[str, Any], *, timeout: float) -> dict[str, Any]:
+        return self._request("POST", f"/memory/hooks/claude-code/{action}", json=payload, timeout=timeout).json()
+
     def refresh_profile_pin_cache(self, profile_key: str) -> dict[str, Any]:
         return self._request("POST", f"/capability-profiles/{profile_key}/pins/refresh").json()
 

@@ -82,12 +82,14 @@ class AgentBridgeService:
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capability_hub.sources.builtin.codegraph import CodeGraphBuiltinProvider
+        from agent_bridge.capability_hub.sources.builtin.memory import MemoryBuiltinProvider
         from agent_bridge.capability_hub.sources.builtin.platform import PlatformBuiltinProvider
         from agent_bridge.capability_hub.sources.builtin.wiki import WikiBuiltinProvider
 
         self.capabilities.register_builtin_provider(PlatformBuiltinProvider(self))
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
         self.capabilities.register_builtin_provider(CodeGraphBuiltinProvider(self.codegraph, self.governance))
+        self.capabilities.register_builtin_provider(MemoryBuiltinProvider(self))
 
     @classmethod
     def create(cls, paths: AgentBridgePaths, admins: set[str]) -> "AgentBridgeService":

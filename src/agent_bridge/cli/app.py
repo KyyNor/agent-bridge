@@ -20,9 +20,11 @@ app = typer.Typer(
 # Register sub-apps
 from agent_bridge.cli.server import server_app  # noqa: E402
 from agent_bridge.cli.profile import profile_app  # noqa: E402
+from agent_bridge.cli.memory import memory_app  # noqa: E402
 
 app.add_typer(server_app, name="server")
 app.add_typer(profile_app, name="profile")
+app.add_typer(memory_app, name="memory")
 
 T = TypeVar("T")
 
@@ -62,6 +64,12 @@ def _claude_config_path(scope: str) -> Path:
     if scope == "user":
         return Path.home() / ".mcp.json"
     raise ValueError("scope 必须是 project 或 user")
+
+
+def _server_url_from_mcp_url(mcp_url: str) -> str:
+    if mcp_url.endswith("/mcp"):
+        return mcp_url[:-4].rstrip("/")
+    return mcp_url.rstrip("/")
 
 
 def _load_json_file(path: Path) -> dict[str, Any]:
