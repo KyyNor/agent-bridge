@@ -131,7 +131,13 @@ def test_scheduler_reads_workflow_window_from_system_config(wm_paths):
 
     assert status["start_time"] == "23:15"
     assert status["stop_time"] == "06:00"
-    assert [job["repo_key"] for job in status["jobs"]] == ["workflow_tick"]
+    job_ids = {job["repo_key"] for job in status["jobs"]}
+    assert "workflow_window_open" in job_ids
+    assert "workflow_window_close" in job_ids
+    if status["in_window"]:
+        assert "workflow_tick" in job_ids
+    else:
+        assert "workflow_tick" not in job_ids
 
 
 def test_scheduler_tick_runs_inside_window_and_skips_outside(wm_paths, tmp_path):
@@ -174,6 +180,62 @@ def test_scheduler_tick_runs_inside_window_and_skips_outside(wm_paths, tmp_path)
     out_window.tick()
     assert not out_window._running
     assert "A" not in out_window.finished_today
+
+
+def test_refresh_jobs_skips_minute_tick_outside_window(wm_paths, tmp_path):
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        runner=FakeWorkflowRunner(),
+        base_run_dir=tmp_path,
+    )
+
+    now = datetime.now()
+    scheduler._start_time = (now + timedelta(hours=1)).time().replace(second=0, microsecond=0)
+    scheduler._stop_time = (now + timedelta(hours=2)).time().replace(second=0, microsecond=0)
+    scheduler._ensure_scheduler()
+
+    scheduler._refresh_jobs()
+
+    job_ids = {job.id for job in scheduler._scheduler.get_jobs()}
+    assert "workflow_tick" not in job_ids
+    assert "workflow_window_open" in job_ids
+    assert "workflow_window_close" in job_ids
+
+
+def test_refresh_jobs_adds_minute_tick_inside_window(wm_paths, tmp_path):
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        runner=FakeWorkflowRunner(),
+        base_run_dir=tmp_path,
+    )
+
+    now = datetime.now()
+    scheduler._start_time = (now - timedelta(minutes=1)).time().replace(second=0, microsecond=0)
+    scheduler._stop_time = (now + timedelta(minutes=1)).time().replace(second=0, microsecond=0)
+    scheduler._ensure_scheduler()
+
+    scheduler._refresh_jobs()
+
+    job_ids = {job.id for job in scheduler._scheduler.get_jobs()}
+    assert "workflow_tick" in job_ids
+    assert "workflow_window_open" in job_ids
+    assert "workflow_window_close" in job_ids
 
 
 def test_failed_run_releases_leased_task_for_retry(wm_paths, tmp_path):

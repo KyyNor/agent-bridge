@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from agent_bridge.core.domain import ConflictError, NotFound
@@ -21,6 +22,9 @@ _DEFAULT_START_TIME = "22:00"
 _DEFAULT_STOP_TIME = "07:00"
 _TICK_INTERVAL_SECONDS = 60
 _MAX_TASK_ATTEMPTS = 3
+_TICK_JOB_ID = "workflow_tick"
+_WINDOW_OPEN_JOB_ID = "workflow_window_open"
+_WINDOW_CLOSE_JOB_ID = "workflow_window_close"
 
 
 class WorkflowScheduler:
@@ -130,11 +134,48 @@ class WorkflowScheduler:
         if not self._scheduler:
             return
         self._scheduler.remove_all_jobs()
+        if self._start_time is None and self._stop_time is None:
+            self._ensure_tick_job()
+            return
+        self._schedule_window_boundary_jobs()
+        if self._window_anchor(datetime.now()) is not None:
+            self._ensure_tick_job()
+            self.tick()
+
+    def _schedule_window_boundary_jobs(self) -> None:
+        if not self._scheduler:
+            return
+        open_at = self._start_time or time(0, 0)
+        close_at = self._stop_time or time(0, 0)
+        if open_at == close_at:
+            return
+        self._scheduler.add_job(
+            self._open_window,
+            trigger=CronTrigger(hour=open_at.hour, minute=open_at.minute),
+            id=_WINDOW_OPEN_JOB_ID,
+        )
+        self._scheduler.add_job(
+            self._close_window,
+            trigger=CronTrigger(hour=close_at.hour, minute=close_at.minute),
+            id=_WINDOW_CLOSE_JOB_ID,
+        )
+
+    def _ensure_tick_job(self) -> None:
+        if not self._scheduler or self._scheduler.get_job(_TICK_JOB_ID):
+            return
         self._scheduler.add_job(
             self.tick,
             trigger=IntervalTrigger(seconds=_TICK_INTERVAL_SECONDS),
-            id="workflow_tick",
+            id=_TICK_JOB_ID,
         )
+
+    def _open_window(self) -> None:
+        self._ensure_tick_job()
+        self.tick()
+
+    def _close_window(self) -> None:
+        if self._scheduler and self._scheduler.get_job(_TICK_JOB_ID):
+            self._scheduler.remove_job(_TICK_JOB_ID)
 
     def next_workflow_batch(self, candidates: set[str], running: set[str]) -> list[str]:
         ordered = sorted(candidates)
