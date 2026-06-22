@@ -66,6 +66,7 @@ def test_mcp_http_client_list_tools_handles_pagination(monkeypatch) -> None:
     session_state = {
         "initialize_calls": 0,
         "list_tools_cursors": [],
+        "timeouts": [],
     }
 
     class FakeStreamContext:
@@ -115,6 +116,7 @@ def test_mcp_http_client_list_tools_handles_pagination(monkeypatch) -> None:
             )
 
     def fake_streamablehttp_client(endpoint_url, *, headers, timeout):
+        session_state["timeouts"].append(timeout)
         return FakeStreamContext()
 
     monkeypatch.setattr(
@@ -132,7 +134,61 @@ def test_mcp_http_client_list_tools_handles_pagination(monkeypatch) -> None:
 
     assert session_state["initialize_calls"] == 1
     assert session_state["list_tools_cursors"] == [None, "next"]
+    assert session_state["timeouts"] == [150]
     assert [tool["name"] for tool in tools] == ["first_page", "second_page"]
+
+
+def test_mcp_http_client_call_tool_respects_explicit_timeout(monkeypatch) -> None:
+    session_state = {
+        "timeouts": [],
+        "read_timeouts": [],
+    }
+
+    class FakeStreamContext:
+        async def __aenter__(self):
+            return "read", "write", lambda: "session-id"
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+    class FakeClientSession:
+        def __init__(self, read_stream, write_stream, *, read_timeout_seconds):
+            session_state["read_timeouts"].append(read_timeout_seconds.total_seconds())
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        async def initialize(self):
+            return None
+
+        async def call_tool(self, tool_name, arguments):
+            return SimpleNamespace(isError=False, structuredContent=None, content=[])
+
+    def fake_streamablehttp_client(endpoint_url, *, headers, timeout):
+        session_state["timeouts"].append(timeout)
+        return FakeStreamContext()
+
+    monkeypatch.setattr(
+        "agent_bridge.capability_hub.sources.mcp.http_client.streamablehttp_client",
+        fake_streamablehttp_client,
+    )
+    monkeypatch.setattr("agent_bridge.capability_hub.sources.mcp.http_client.ClientSession", FakeClientSession)
+
+    asyncio.run(
+        McpHttpClient().call_tool(
+            "https://example.test/mcp",
+            headers={"Authorization": "Bearer token"},
+            tool_name="search_docs",
+            arguments={"query": "routing"},
+            timeout=150.0,
+        )
+    )
+
+    assert session_state["timeouts"] == [150.0]
+    assert session_state["read_timeouts"] == [150.0]
 
 
 def test_normalize_call_tool_result_handles_text_content() -> None:

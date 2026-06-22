@@ -35,6 +35,7 @@ from agent_bridge.knowledge_management.docs_knowledge.backends.mock import MockB
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry, create_registry_from_db
 from agent_bridge.knowledge_management.docs_knowledge.backends.weknora import WeknoraBackend
 from agent_bridge.core.slug import make_slug, unique_slug
+from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.service import ScriptService
 from agent_bridge.system_config.skills.service import SkillService
@@ -371,6 +372,7 @@ class AgentBridgeService:
         workflow_max_runs: int = 0,
         workflow_max_runtime_minutes: int = 30,
         workflow_task_rerun_days: int = 30,
+        mcp_timeout_seconds: int = DEFAULT_MCP_TIMEOUT_SECONDS,
         understand_timeout_minutes: int = 120,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -384,6 +386,7 @@ class AgentBridgeService:
             workflow_max_runs=workflow_max_runs,
             workflow_max_runtime_minutes=workflow_max_runtime_minutes,
             workflow_task_rerun_days=workflow_task_rerun_days,
+            mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
         )
         self.codegraph_scheduler.refresh()

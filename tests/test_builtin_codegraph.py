@@ -64,8 +64,16 @@ class FakeCodeGraphMcpClient:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def call_tool(self, project_dir: Path, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self.calls.append({"project_dir": project_dir, "tool_name": tool_name, "arguments": arguments})
+    async def call_tool(
+        self,
+        project_dir: Path,
+        tool_name: str,
+        arguments: dict[str, Any],
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {"project_dir": project_dir, "tool_name": tool_name, "arguments": arguments, "timeout": timeout}
+        )
         return {
             "is_error": False,
             "structured": {"answer": "explored"},
@@ -99,6 +107,7 @@ def test_codegraph_builtin_explore_uses_repo_scoped_stdio_mcp_after_profile_chec
     wm_paths: AgentBridgePaths,
 ) -> None:
     service = _service_with_repo(wm_paths, _git_repo(tmp_path / "repo"), tags=["python"])
+    service.store.save_sync_config(code_sync_cron="0 * * * *", mcp_timeout_seconds=150)
     fake_mcp = FakeCodeGraphMcpClient()
     service.codegraph.mcp_client = fake_mcp
     _allow_repo(service, "web-app")
@@ -121,6 +130,7 @@ def test_codegraph_builtin_explore_uses_repo_scoped_stdio_mcp_after_profile_chec
             "project_dir": wm_paths.repos_dir / "web-app",
             "tool_name": "codegraph_explore",
             "arguments": {"query": "App flow", "projectPath": str(wm_paths.repos_dir / "web-app")},
+            "timeout": 150.0,
         }
     ]
 

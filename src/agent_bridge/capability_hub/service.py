@@ -22,6 +22,7 @@ from agent_bridge.core.json_util import json_loads as _json_loads
 from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
 from agent_bridge.capability_hub.sources.openapi.http_client import OpenApiHttpClient
 from agent_bridge.capability_hub.sources.openapi.parser import parse_openapi_operations
+from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -132,6 +133,10 @@ class CapabilityService:
         self.openapi_client = openapi_client or OpenApiHttpClient()
         self.governance = governance or CapabilityGovernanceService(store=store, admins=admins)
         self.builtin_providers: dict[str, BuiltinCapabilityProvider] = {}
+
+    def _mcp_timeout_seconds(self) -> float:
+        config = self.store.get_sync_config()
+        return float(config.get("mcp_timeout_seconds") or DEFAULT_MCP_TIMEOUT_SECONDS)
 
     def register_builtin_provider(self, provider: BuiltinCapabilityProvider) -> None:
         self.builtin_providers[provider.source_key] = provider
@@ -366,7 +371,11 @@ class CapabilityService:
             raise NotFound("service not found")
         headers = _json_loads(service.get("headers_json"), {})
         try:
-            tools = await self.mcp_client.list_tools(service["endpoint_url"], headers)
+            tools = await self.mcp_client.list_tools(
+                service["endpoint_url"],
+                headers,
+                timeout=self._mcp_timeout_seconds(),
+            )
             active_tool_names: set[str] = set()
             for tool in tools:
                 normalized = self._normalize_synced_tool(tool)
@@ -662,6 +671,7 @@ class CapabilityService:
                 headers,
                 tool_name,
                 params,
+                timeout=self._mcp_timeout_seconds(),
             )
         except Exception as exc:
             raise mark_builtin_failure(

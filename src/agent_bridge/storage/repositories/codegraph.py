@@ -5,6 +5,7 @@ import json
 import sqlite3
 from typing import Any
 
+from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.types import row_to_dict
 
 
@@ -328,12 +329,13 @@ class CodeGraphRepository:
             "workflow_max_runs": 0,
             "workflow_max_runtime_minutes": 30,
             "workflow_task_rerun_days": 30,
+            "mcp_timeout_seconds": DEFAULT_MCP_TIMEOUT_SECONDS,
             "understand_timeout_minutes": 120,
         }
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, understand_timeout_minutes
+                SELECT code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, mcp_timeout_seconds, understand_timeout_minutes
                 FROM knowledge_sync_config
                 WHERE id = 1
                 """
@@ -350,7 +352,8 @@ class CodeGraphRepository:
                 "workflow_max_runs": int(row[6]) if len(row) > 6 and row[6] is not None else 0,
                 "workflow_max_runtime_minutes": int(row[7]) if len(row) > 7 and row[7] is not None else 30,
                 "workflow_task_rerun_days": int(row[8]) if len(row) > 8 and row[8] is not None else 30,
-                "understand_timeout_minutes": int(row[9]) if len(row) > 9 and row[9] is not None else 120,
+                "mcp_timeout_seconds": int(row[9]) if len(row) > 9 and row[9] is not None else DEFAULT_MCP_TIMEOUT_SECONDS,
+                "understand_timeout_minutes": int(row[10]) if len(row) > 10 and row[10] is not None else 120,
             }
             return result
 
@@ -366,13 +369,14 @@ class CodeGraphRepository:
         workflow_max_runs: int = 0,
         workflow_max_runtime_minutes: int = 30,
         workflow_task_rerun_days: int = 30,
+        mcp_timeout_seconds: int = DEFAULT_MCP_TIMEOUT_SECONDS,
         understand_timeout_minutes: int = 120,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, understand_timeout_minutes)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, mcp_timeout_seconds, understand_timeout_minutes)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_cron = excluded.code_sync_cron,
                   ua_git_url = excluded.ua_git_url,
@@ -383,10 +387,11 @@ class CodeGraphRepository:
                   workflow_max_runs = excluded.workflow_max_runs,
                   workflow_max_runtime_minutes = excluded.workflow_max_runtime_minutes,
                   workflow_task_rerun_days = excluded.workflow_task_rerun_days,
+                  mcp_timeout_seconds = excluded.mcp_timeout_seconds,
                   understand_timeout_minutes = excluded.understand_timeout_minutes,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, understand_timeout_minutes),
+                (code_sync_cron, ua_git_url, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_runtime_minutes, workflow_task_rerun_days, mcp_timeout_seconds, understand_timeout_minutes),
             )
             return {
                 "code_sync_cron": code_sync_cron,
@@ -398,5 +403,6 @@ class CodeGraphRepository:
                 "workflow_max_runs": workflow_max_runs,
                 "workflow_max_runtime_minutes": workflow_max_runtime_minutes,
                 "workflow_task_rerun_days": workflow_task_rerun_days,
+                "mcp_timeout_seconds": mcp_timeout_seconds,
                 "understand_timeout_minutes": understand_timeout_minutes,
             }

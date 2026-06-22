@@ -25,10 +25,13 @@ class FakeStdioContext:
 
 
 class FakeSession:
+    created_kwargs: list[dict[str, Any]] = []
+
     def __init__(self, read_stream: str, write_stream: str, **kwargs: Any) -> None:
         self.read_stream = read_stream
         self.write_stream = write_stream
         self.kwargs = kwargs
+        type(self).created_kwargs.append(kwargs)
 
     async def __aenter__(self) -> "FakeSession":
         return self
@@ -73,3 +76,29 @@ def test_codegraph_mcp_client_calls_codegraph_serve_in_repo_directory(
     assert recorder["stdio_closed"] is True
     assert result["is_error"] is False
     assert result["structured"] == {"answer": "ok"}
+    assert FakeSession.created_kwargs[-1]["read_timeout_seconds"].total_seconds() == 150.0
+
+
+def test_codegraph_mcp_client_respects_explicit_timeout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    recorder: dict[str, Any] = {}
+    FakeSession.created_kwargs.clear()
+
+    def fake_stdio_client(params: Any) -> FakeStdioContext:
+        return FakeStdioContext(recorder)
+
+    monkeypatch.setattr("agent_bridge.knowledge_management.code_knowledge.mcp_client.stdio_client", fake_stdio_client)
+    monkeypatch.setattr("agent_bridge.knowledge_management.code_knowledge.mcp_client.ClientSession", FakeSession)
+
+    asyncio.run(
+        CodeGraphMcpClient().call_tool(
+            tmp_path,
+            "codegraph_explore",
+            {"query": "routing flow"},
+            timeout=150.0,
+        )
+    )
+
+    assert FakeSession.created_kwargs[-1]["read_timeout_seconds"].total_seconds() == 150.0

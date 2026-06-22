@@ -16,6 +16,7 @@ from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import exte
 from agent_bridge.knowledge_management.code_knowledge.mcp_client import CodeGraphMcpClient
 from agent_bridge.knowledge_management.code_knowledge.ua_client import UnderstandAnythingClient
 from agent_bridge.core.config import AgentBridgePaths
+from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -42,6 +43,10 @@ class CodeGraphService:
         self.client = codegraph_client or CodeGraphClient()
         self.mcp_client = mcp_client or CodeGraphMcpClient()
         self.ua_client = ua_client or UnderstandAnythingClient(root=paths.root, agent_service=agent_service)
+
+    def _mcp_timeout_seconds(self) -> float:
+        config = self.store.get_sync_config()
+        return float(config.get("mcp_timeout_seconds") or DEFAULT_MCP_TIMEOUT_SECONDS)
 
     def upsert_repository(
         self,
@@ -285,6 +290,7 @@ class CodeGraphService:
             local_path,
             "codegraph_explore",
             {"query": query, "projectPath": str(local_path)},
+            timeout=self._mcp_timeout_seconds(),
         )
         return {
             "repo": repo_key,

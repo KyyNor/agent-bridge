@@ -144,6 +144,7 @@ class SQLiteStore:
                     "workflow_max_runs": "INTEGER NOT NULL DEFAULT 0",
                     "workflow_max_runtime_minutes": "INTEGER NOT NULL DEFAULT 30",
                     "workflow_task_rerun_days": "INTEGER NOT NULL DEFAULT 30",
+                    "mcp_timeout_seconds": "INTEGER NOT NULL DEFAULT 150",
                     "understand_timeout_minutes": "INTEGER NOT NULL DEFAULT 120",
                 },
             )
@@ -498,6 +499,7 @@ class SQLiteStore:
         workflow_max_runs: int = 0,
         workflow_max_runtime_minutes: int = 30,
         workflow_task_rerun_days: int = 30,
+        mcp_timeout_seconds: int = 150,
         understand_timeout_minutes: int = 120,
     ) -> dict[str, Any]:
         return self.codegraph.save_sync_config(
@@ -510,6 +512,7 @@ class SQLiteStore:
             workflow_max_runs=workflow_max_runs,
             workflow_max_runtime_minutes=workflow_max_runtime_minutes,
             workflow_task_rerun_days=workflow_task_rerun_days,
+            mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
         )
 

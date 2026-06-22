@@ -8,6 +8,8 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Tool
 
+from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
+
 
 def _plain(value: Any) -> Any:
     if is_dataclass(value):
@@ -44,7 +46,7 @@ class McpHttpClient:
         self,
         endpoint_url: str,
         headers: dict[str, str],
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_MCP_TIMEOUT_SECONDS,
     ) -> list[dict[str, Any]]:
         async with streamablehttp_client(endpoint_url, headers=headers, timeout=timeout) as (
             read_stream,
@@ -72,7 +74,7 @@ class McpHttpClient:
         headers: dict[str, str],
         tool_name: str,
         arguments: dict[str, Any],
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_MCP_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         async with streamablehttp_client(endpoint_url, headers=headers, timeout=timeout) as (
             read_stream,

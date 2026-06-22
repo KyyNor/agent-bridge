@@ -23,6 +23,7 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   workflow_max_runs: 0,
   workflow_max_runtime_minutes: 30,
   workflow_task_rerun_days: 30,
+  mcp_timeout_seconds: 150,
   understand_timeout_minutes: 120,
 })
 const configSaving = ref(false)
@@ -117,6 +118,9 @@ const taskRerunDaysValid = computed(() =>
 const workflowRuntimeValid = computed(() =>
   Number.isInteger(syncConfig.value.workflow_max_runtime_minutes) && syncConfig.value.workflow_max_runtime_minutes >= 0,
 )
+const mcpTimeoutValid = computed(() =>
+  Number.isInteger(syncConfig.value.mcp_timeout_seconds) && syncConfig.value.mcp_timeout_seconds > 0,
+)
 const understandTimeoutValid = computed(() =>
   Number.isInteger(syncConfig.value.understand_timeout_minutes) && syncConfig.value.understand_timeout_minutes > 0,
 )
@@ -128,6 +132,7 @@ const cronValid = computed(() =>
   && maxRunsValid.value
   && taskRerunDaysValid.value
   && workflowRuntimeValid.value
+  && mcpTimeoutValid.value
   && understandTimeoutValid.value,
 )
 const runCountText = computed(() => {
@@ -295,6 +300,12 @@ async function deleteBackend(slug: string) {
           <Input v-model="syncConfig.understand_cron" placeholder="0 2 * * *" class="w-40 font-mono text-xs" />
           <span v-if="understandNextRuns" class="text-xs text-muted-foreground font-mono">{{ understandNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">MCP 超时 <span class="text-xs text-muted-foreground">(秒)</span></div>
+          <Input v-model.number="syncConfig.mcp_timeout_seconds" type="number" min="1" placeholder="150" class="w-32 font-mono text-sm" />
+          <span v-if="mcpTimeoutValid" class="text-xs text-muted-foreground">HTTP MCP 与 CodeGraph MCP 的统一超时上限（默认 150）</span>
+          <span v-else class="text-xs text-destructive">请输入正整数</span>
         </div>
         <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">代码理解超时 <span class="text-xs text-muted-foreground">(分钟)</span></div>

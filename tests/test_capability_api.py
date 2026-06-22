@@ -577,6 +577,8 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
 
     assert "定时任务管理" in source
     assert "code_sync_cron" in source
+    assert "mcp_timeout_seconds" in source
+    assert "MCP 超时" in source
     assert "doc_sync_cron" in source
     assert "workflow_start_time" in source
     assert "workflow_stop_time" in source
@@ -835,8 +837,16 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
         def __init__(self) -> None:
             self.calls: list[dict[str, Any]] = []
 
-        async def call_tool(self, project_dir: Path, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            self.calls.append({"project_dir": project_dir, "tool_name": tool_name, "arguments": arguments})
+        async def call_tool(
+            self,
+            project_dir: Path,
+            tool_name: str,
+            arguments: dict[str, Any],
+            timeout: float = 60.0,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                {"project_dir": project_dir, "tool_name": tool_name, "arguments": arguments, "timeout": timeout}
+            )
             return {"is_error": False, "structured": {"answer": "ok"}, "content": []}
 
     repo = _git_repo(tmp_path / "repo")
@@ -852,6 +862,7 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
+    client.post("/sync-config", json={"code_sync_cron": "0 * * * *", "mcp_timeout_seconds": 150}, headers={"X-Agent-Bridge-User": "root"})
     client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
     fake_mcp = FakeMcpClient()
     app.state.agent_bridge_service.codegraph.mcp_client = fake_mcp
@@ -870,6 +881,7 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
             "project_dir": wm_paths.repos_dir / "web-app",
             "tool_name": "codegraph_explore",
             "arguments": {"query": "hello", "projectPath": str(wm_paths.repos_dir / "web-app")},
+            "timeout": 150.0,
         }
     ]
 

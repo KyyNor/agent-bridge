@@ -23,8 +23,13 @@ class FakeMcpClient:
             "content": [],
         }
 
-    async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
-        self.list_tools_calls.append({"endpoint_url": endpoint_url, "headers": headers})
+    async def list_tools(
+        self,
+        endpoint_url: str,
+        headers: dict[str, str],
+        timeout: float = 30.0,
+    ) -> list[dict[str, object]]:
+        self.list_tools_calls.append({"endpoint_url": endpoint_url, "headers": headers, "timeout": timeout})
         if self.tools is not None:
             return self.tools
         return [
@@ -58,6 +63,7 @@ class FakeMcpClient:
         headers: dict[str, str],
         tool_name: str,
         arguments: dict[str, object],
+        timeout: float = 30.0,
     ) -> dict[str, object]:
         self.call_tool_calls.append(
             {
@@ -65,6 +71,7 @@ class FakeMcpClient:
                 "headers": headers,
                 "tool_name": tool_name,
                 "params": arguments,
+                "timeout": timeout,
             }
         )
         return self.call_result
@@ -163,6 +170,7 @@ def test_sync_tools_stores_tools_and_passes_headers(wm_paths: AgentBridgePaths) 
         {
             "endpoint_url": "https://example.test/mcp",
             "headers": {"Authorization": "Bearer token", "X-Tenant": "docs"},
+            "timeout": 150.0,
         }
     ]
     tools = service.list_tools("alice", "docs-api")
@@ -173,9 +181,35 @@ def test_sync_tools_stores_tools_and_passes_headers(wm_paths: AgentBridgePaths) 
     }
 
 
+def test_execute_passes_configured_mcp_timeout(wm_paths: AgentBridgePaths) -> None:
+    service, client = _service(wm_paths)
+    service.store.save_sync_config(code_sync_cron="0 * * * *", mcp_timeout_seconds=150)
+    service.register_service(
+        actor="root",
+        service_key="docs-api",
+        name="Docs API",
+        endpoint_url="https://example.test/mcp",
+        headers={"Authorization": "Bearer token"},
+        description="Document capabilities",
+        tags=["docs"],
+    )
+    asyncio.run(service.sync_tools("root", "docs-api"))
+    service.set_tool_type("root", "docs-api", "search_docs", ToolType.search.value)
+
+    result = asyncio.run(service.execute("root", "docs-api", "search_docs", {"query": "routing"}))
+
+    assert result["result"]["structured"] == {"rows": [{"id": 1}]}
+    assert client.call_tool_calls[-1]["timeout"] == 150.0
+
+
 def test_sync_tools_marks_failure(wm_paths: AgentBridgePaths) -> None:
     class FailingMcpClient(FakeMcpClient):
-        async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
+        async def list_tools(
+            self,
+            endpoint_url: str,
+            headers: dict[str, str],
+            timeout: float = 150.0,
+        ) -> list[dict[str, object]]:
             raise RuntimeError("mcp unavailable")
 
     store = SQLiteStore(wm_paths.db_path)
@@ -297,8 +331,13 @@ def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: AgentBri
                 ],
             ]
 
-        async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
-            self.list_tools_calls.append({"endpoint_url": endpoint_url, "headers": headers})
+        async def list_tools(
+            self,
+            endpoint_url: str,
+            headers: dict[str, str],
+            timeout: float = 150.0,
+        ) -> list[dict[str, object]]:
+            self.list_tools_calls.append({"endpoint_url": endpoint_url, "headers": headers, "timeout": timeout})
             return self.tool_batches.pop(0)
 
     store = SQLiteStore(wm_paths.db_path)
@@ -344,7 +383,12 @@ def test_execute_rejects_unconfigured_tool(wm_paths: AgentBridgePaths) -> None:
 
 def test_admin_configures_tool_type_and_sync_preserves_choice(wm_paths: AgentBridgePaths) -> None:
     class ReadonlyNamingMcpClient(FakeMcpClient):
-        async def list_tools(self, endpoint_url: str, headers: dict[str, str]) -> list[dict[str, object]]:
+        async def list_tools(
+            self,
+            endpoint_url: str,
+            headers: dict[str, str],
+            timeout: float = 150.0,
+        ) -> list[dict[str, object]]:
             return [
                 {
                     "name": "list_archives",
@@ -439,6 +483,7 @@ def test_execute_calls_readonly_tool(wm_paths: AgentBridgePaths) -> None:
             "headers": {"Authorization": "Bearer token"},
             "tool_name": "search_docs",
             "params": {"query": "hello"},
+            "timeout": 150.0,
         }
     ]
 
@@ -573,6 +618,7 @@ def test_execute_wraps_mcp_client_failures(wm_paths: AgentBridgePaths) -> None:
             headers: dict[str, str],
             tool_name: str,
             arguments: dict[str, object],
+            timeout: float = 150.0,
         ) -> dict[str, object]:
             raise RuntimeError("transport unavailable")
 
@@ -611,6 +657,7 @@ def test_execute_unwraps_exceptiongroup_from_mcp_client(wm_paths: AgentBridgePat
             headers: dict[str, str],
             tool_name: str,
             arguments: dict[str, object],
+            timeout: float = 150.0,
         ) -> dict[str, object]:
             raise ExceptionGroup(
                 "unhandled errors in a taskgroup",

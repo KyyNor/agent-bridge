@@ -8,6 +8,7 @@ from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from agent_bridge.capability_hub.sources.mcp.http_client import normalize_call_tool_result
+from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 
 
 class CodeGraphMcpClient:
@@ -19,7 +20,7 @@ class CodeGraphMcpClient:
         project_dir: Path,
         tool_name: str,
         arguments: dict[str, Any],
-        timeout: float = 60.0,
+        timeout: float = DEFAULT_MCP_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         params = StdioServerParameters(
             command=self.cli_path,

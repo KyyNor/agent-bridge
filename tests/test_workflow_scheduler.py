@@ -490,12 +490,25 @@ def test_sync_config_round_trips_runtime_and_understand_timeout(wm_paths):
         workflow_start_time="22:00",
         workflow_stop_time="07:00",
         workflow_max_runtime_minutes=45,
+        mcp_timeout_seconds=150,
         understand_timeout_minutes=90,
     )
 
     config = svc.store.get_sync_config()
     assert config["workflow_max_runtime_minutes"] == 45
+    assert config["mcp_timeout_seconds"] == 150
     assert config["understand_timeout_minutes"] == 90
+
+
+def test_sync_config_defaults_mcp_timeout_seconds_to_150(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+
+    config = svc.store.get_sync_config()
+
+    assert config["mcp_timeout_seconds"] == 150
 
 
 def test_scheduler_reads_workflow_max_runtime_from_config(wm_paths):

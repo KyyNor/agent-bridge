@@ -392,6 +392,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   workflow_max_runs INTEGER NOT NULL DEFAULT 0,
   workflow_max_runtime_minutes INTEGER NOT NULL DEFAULT 30,
   workflow_task_rerun_days INTEGER NOT NULL DEFAULT 30,
+  mcp_timeout_seconds INTEGER NOT NULL DEFAULT 150,
   understand_timeout_minutes INTEGER NOT NULL DEFAULT 120,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
