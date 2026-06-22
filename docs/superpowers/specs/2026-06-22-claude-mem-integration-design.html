@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Bridge x claude-mem 集成设计</title>
+  <style>
+    :root {
+      --bg: #f7f5f0;
+      --paper: #fffdf8;
+      --ink: #181716;
+      --muted: #67615a;
+      --line: #d9d1c4;
+      --soft: #ede7dc;
+      --accent: #246b5a;
+      --accent-2: #9a4f2f;
+      --code-bg: #23211f;
+      --code-ink: #f7efe0;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.68;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 48px 28px 72px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+      gap: 28px;
+      align-items: end;
+      padding-bottom: 28px;
+      border-bottom: 2px solid var(--ink);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(36px, 6vw, 76px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 44px 0 14px;
+      font-size: 28px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+
+    p { margin: 0 0 13px; }
+
+    a { color: var(--accent); }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+      border-left: 3px solid var(--accent);
+      padding-left: 14px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin: 24px 0 10px;
+    }
+
+    .box {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .box strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .muted { color: var(--muted); }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    .flow div {
+      background: var(--soft);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 96px;
+      font-size: 14px;
+    }
+
+    .flow span {
+      display: block;
+      color: var(--accent-2);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 22px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+    }
+
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    th {
+      background: var(--soft);
+      font-weight: 700;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: rgba(36, 107, 90, 0.1);
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+
+    pre {
+      overflow-x: auto;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+
+    ul { padding-left: 22px; }
+    li { margin: 6px 0; }
+
+    .callout {
+      margin: 18px 0;
+      padding: 16px 18px;
+      border-left: 4px solid var(--accent);
+      background: #eef4ee;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .risk {
+      border-left-color: var(--accent-2);
+      background: #f6eee9;
+    }
+
+    .tag {
+      display: inline-block;
+      margin: 2px 5px 2px 0;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 12px;
+      background: var(--paper);
+    }
+
+    @media (max-width: 860px) {
+      main { padding: 32px 18px 56px; }
+      .hero, .summary, .grid-2, .flow { grid-template-columns: 1fr; }
+      h1 { font-size: 42px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <div>
+        <p class="muted">Design Spec · 2026-06-22</p>
+        <h1>Agent Bridge x claude-mem 集成设计</h1>
+      </div>
+      <aside class="meta">
+        <p><strong>目标</strong>：把 claude-mem 集成为 Agent Bridge 的记忆引擎，同时保持 Agent Bridge 作为 UI、profile、hook 注入、MCP 门面的控制平面。</p>
+        <p><strong>决策</strong>：采用混合收敛方案，不 fork claude-mem，不改 claude-mem 内部 schema。</p>
+      </aside>
+    </section>
+
+    <section class="summary">
+      <div class="box">
+        <strong>控制平面</strong>
+        <p>Agent Bridge 管理 memory block、profile 绑定、Claude Code hooks、服务端代理接口、健康状态和 MetaMCP 直出工具。</p>
+      </div>
+      <div class="box">
+        <strong>记忆引擎</strong>
+        <p>claude-mem 保持负责 worker、观察写入、压缩、存储、检索与上下文生成。</p>
+      </div>
+      <div class="box">
+        <strong>隔离模型</strong>
+        <p>每个 memory block 映射独立 <code>CLAUDE_MEM_DATA_DIR</code>，服务端目录不暴露给 CLI。</p>
+      </div>
+    </section>
+
+    <h2>1. 背景与范围</h2>
+    <p><code>docs/TODO.md</code> 已确定 claude-mem 集成方向：Agent Bridge 负责控制平面，claude-mem 负责 worker、压缩、存储和检索。第一阶段不 fork claude-mem，不重写其 native schema，通过 worker API 与 hook 行为完成闭环验证。</p>
+    <p>本设计覆盖后端 schema、服务层、CLI hook wrapper、Claude Code hook 注入、MetaMCP 工具、前端管理台和失败降级策略。实现计划另行编写。</p>
+
+    <div class="callout">
+      <strong>关键修正</strong>
+      <p>Hook 命令不能直接访问服务端目录，也不能由 CLI 直接调用 claude-mem worker。CLI 与服务端最终可能不在同一台机器，因此 CLI hook wrapper 只把 Claude Code payload 发送给 Agent Bridge 服务端，由服务端解析 profile、定位 memory block、托管或调用 claude-mem worker。</p>
+    </div>
+
+    <h2>2. 已确认决策</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>主题</th>
+          <th>决策</th>
+          <th>理由</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>总体方案</td>
+          <td>混合收敛：Agent Bridge 控制平面 + claude-mem 记忆引擎</td>
+          <td>实现量可控，保留 claude-mem 能力，不把外部 schema 变成 Agent Bridge 的维护负担。</td>
+        </tr>
+        <tr>
+          <td>数据隔离</td>
+          <td>每个 memory block 一个独立 <code>CLAUDE_MEM_DATA_DIR</code></td>
+          <td>避免 profile 作用域、project 作用域和 claude-mem 默认 project 作用域混乱。</td>
+        </tr>
+        <tr>
+          <td>Hook 行为</td>
+          <td>数量、事件、matcher、timeout 与 claude-mem 原始 <code>hooks.json</code> 保持一致</td>
+          <td>降低行为偏差，保持 claude-mem 原有写入、上下文、总结时机。</td>
+        </tr>
+        <tr>
+          <td>Hook 命令</td>
+          <td>只把命令入口改为 <code>agent-bridge memory hook claude-code &lt;action&gt;</code></td>
+          <td>Claude Code 调本地 CLI；本地 CLI 再调服务端，服务端执行真实处理。</td>
+        </tr>
+        <tr>
+          <td>MCP 暴露</td>
+          <td>Agent 只使用 Agent Bridge MetaMCP 的 <code>memory_search</code>、<code>memory_timeline</code>、<code>memory_get</code></td>
+          <td>避免用户同时面对 Agent Bridge MCP 与 claude-mem MCP 两套入口。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3. 系统边界</h2>
+    <div class="grid-2">
+      <div class="box">
+        <h3>Agent Bridge 负责</h3>
+        <ul>
+          <li>管理 memory block 的创建、列表、详情、状态和健康信息。</li>
+          <li>管理 profile 到 active memory block 的单选绑定。</li>
+          <li>在 <code>profile use</code> 时幂等写入 MetaMCP 配置、profile 指针和 Claude Code hooks。</li>
+          <li>提供瘦 CLI hook wrapper，把 hook payload 发送到服务端。</li>
+          <li>服务端按 memory block 解析 <code>CLAUDE_MEM_DATA_DIR</code> 并代理 claude-mem worker。</li>
+          <li>在 MetaMCP 暴露稳定的 memory 工具契约。</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>claude-mem 负责</h3>
+        <ul>
+          <li>worker 服务和原始 hook action 行为。</li>
+          <li>观察写入、文件上下文、会话初始化、总结和压缩。</li>
+          <li>底层存储、检索、timeline 与 observation detail。</li>
+          <li>内部 schema 与数据格式演进。</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>4. 数据模型</h2>
+    <h3><code>memory_blocks</code></h3>
+    <pre><code>CREATE TABLE IF NOT EXISTS memory_blocks (
+  block_key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  data_dir TEXT NOT NULL,
+  worker_base_url TEXT,
+  last_health_json TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);</code></pre>
+
+    <h3><code>profile_memory_bindings</code></h3>
+    <pre><code>CREATE TABLE IF NOT EXISTS profile_memory_bindings (
+  profile_key TEXT PRIMARY KEY REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+  block_key TEXT REFERENCES memory_blocks(block_key) ON DELETE SET NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);</code></pre>
+
+    <p><code>data_dir</code> 默认由服务端生成：<code>AGENT_BRIDGE_ROOT/data/claude-mem/blocks/&lt;block_key&gt;/</code>。CLI 不读取、不写入、不推导这个目录。</p>
+    <p>profile 绑定不放入 <code>profile_resource_rules</code>。后者表达“某 profile 可访问哪些资源”；active memory block 是运行时默认记忆落点，语义不同。</p>
+
+    <h2>5. 服务与模块</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>模块</th>
+          <th>职责</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>memory_management/service.py</code></td>
+          <td><code>MemoryService</code>：memory block CRUD、profile 绑定、search/timeline/get 聚合、权限判断。</td>
+        </tr>
+        <tr>
+          <td><code>memory_management/claude_mem/client.py</code></td>
+          <td><code>ClaudeMemClient</code>：封装 claude-mem worker HTTP 调用与响应归一化。</td>
+        </tr>
+        <tr>
+          <td><code>memory_management/claude_mem/worker.py</code></td>
+          <td><code>ClaudeMemWorkerService</code>：发现安装、按 block 启动 worker、健康检查、端口缓存、版本状态。</td>
+        </tr>
+        <tr>
+          <td><code>memory_management/hooks.py</code></td>
+          <td><code>MemoryHookService</code>：服务端接收 Claude Code hook action，解析 profile 与 block，执行 claude-mem 原始行为。</td>
+        </tr>
+        <tr>
+          <td><code>cli/memory.py</code></td>
+          <td>瘦 CLI：从 stdin 读取 hook payload，POST 服务端，输出服务端返回的 hook stdout。</td>
+        </tr>
+        <tr>
+          <td><code>cli/profile.py</code></td>
+          <td><code>profile use</code> 扩展：按原版 claude-mem hook 配置写入 Agent Bridge hook command。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>6. HTTP API</h2>
+    <h3>Memory block 管理</h3>
+    <pre><code>GET  /memory/blocks
+POST /memory/blocks
+GET  /memory/blocks/{block_key}
+POST /memory/blocks/{block_key}/status
+GET  /memory/blocks/{block_key}/health
+GET  /memory/blocks/{block_key}/search?q=&amp;limit=
+GET  /memory/blocks/{block_key}/timeline?limit=&amp;cursor=
+GET  /memory/blocks/{block_key}/observations/{observation_id}</code></pre>
+
+    <h3>Profile 绑定</h3>
+    <pre><code>GET /capability-profiles/{profile_key}/memory
+PUT /capability-profiles/{profile_key}/memory</code></pre>
+
+    <h3>Hook 服务端入口</h3>
+    <pre><code>POST /memory/hooks/claude-code/{action}</code></pre>
+
+    <p><code>{action}</code> 只允许 claude-mem 原版 action：<code>version-check</code>、<code>start</code>、<code>context</code>、<code>session-init</code>、<code>observation</code>、<code>file-context</code>、<code>summarize</code>。</p>
+
+    <pre><code>{
+  "profile_key": "dev",
+  "event_name": "PostToolUse",
+  "matcher": "*",
+  "payload": {},
+  "hook_timeout_seconds": 120,
+  "source": "claude-code"
+}</code></pre>
+
+    <pre><code>{
+  "stdout": "{\"continue\":true,\"suppressOutput\":true}",
+  "stderr": "",
+  "exit_code": 0,
+  "status": "ok"
+}</code></pre>
+
+    <h2>7. Claude Code hooks</h2>
+    <p>Agent Bridge 写入的 hook 数量、事件、matcher 与 timeout 保持和 claude-mem 原始 <code>plugin/hooks/hooks.json</code> 一致，只替换 command。原始配置来源：<a href="https://github.com/thedotmack/claude-mem/blob/main/plugin/hooks/hooks.json">claude-mem hooks.json</a>。</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>事件</th>
+          <th>Matcher</th>
+          <th>Action</th>
+          <th>Timeout</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>Setup</code></td><td><code>*</code></td><td><code>version-check</code></td><td>300</td></tr>
+        <tr><td><code>SessionStart</code></td><td><code>startup|clear|compact</code></td><td><code>start</code></td><td>60</td></tr>
+        <tr><td><code>SessionStart</code></td><td><code>startup|clear|compact</code></td><td><code>context</code></td><td>60</td></tr>
+        <tr><td><code>UserPromptSubmit</code></td><td>无 matcher</td><td><code>session-init</code></td><td>60</td></tr>
+        <tr><td><code>PostToolUse</code></td><td><code>*</code></td><td><code>observation</code></td><td>120</td></tr>
+        <tr><td><code>PreToolUse</code></td><td><code>Read</code></td><td><code>file-context</code></td><td>60</td></tr>
+        <tr><td><code>Stop</code></td><td>无 matcher</td><td><code>summarize</code></td><td>120</td></tr>
+      </tbody>
+    </table>
+
+    <h3>命令模板</h3>
+    <pre><code>agent-bridge memory hook claude-code &lt;action&gt; \
+  --profile &lt;profile_key&gt; \
+  --server-url &lt;agent_bridge_base_url&gt; \
+  --event &lt;event_name&gt; \
+  --matcher &lt;matcher_if_any&gt;</code></pre>
+
+    <p>Hook command 不固化 <code>block_key</code>。服务端每次按 <code>profile_key</code> 解析当前 active memory block，因此 UI 修改绑定后，无需立刻重新运行 <code>profile use</code> 才能生效。</p>
+
+    <h3>配置文件位置</h3>
+    <ul>
+      <li><code>profile use --scope project</code>：写当前项目 <code>.claude/settings.local.json</code>。</li>
+      <li><code>profile use --scope user</code>：写 <code>~/.claude/settings.json</code>。</li>
+      <li>只管理 Agent Bridge 自己的 command，不删除用户手写 hooks。</li>
+    </ul>
+
+    <p>Claude Code hook 通过 stdin 向 command 传入 JSON payload；hook command 可返回 JSON 控制是否继续、是否抑制输出等行为。参考：<a href="https://docs.anthropic.com/en/docs/claude-code/hooks">Claude Code Hooks 文档</a>。</p>
+
+    <h2>8. Hook 调用链</h2>
+    <div class="flow">
+      <div><span>1</span>Claude Code 触发原版事件，如 <code>PostToolUse</code>。</div>
+      <div><span>2</span>本地执行 <code>agent-bridge memory hook claude-code observation</code>。</div>
+      <div><span>3</span>CLI 从 stdin 读取 payload，POST 到服务端 hook API。</div>
+      <div><span>4</span>服务端按 profile 解析 active block，并设置 block 的 <code>CLAUDE_MEM_DATA_DIR</code>。</div>
+      <div><span>5</span>服务端调用或代理 claude-mem worker，返回兼容 Claude Code 的 hook stdout。</div>
+    </div>
+
+    <h3>CLI 降级</h3>
+    <p>如果 CLI 无法访问 Agent Bridge 服务端，默认输出：</p>
+    <pre><code>{"continue":true,"suppressOutput":true}</code></pre>
+    <p>并以 exit code <code>0</code> 退出，避免网络问题阻断 Claude Code 主流程。</p>
+
+    <h3>服务端降级</h3>
+    <ul>
+      <li>profile 不存在或停用：返回 no-op，并记录健康状态。</li>
+      <li>profile 未绑定 block：返回 no-op，状态为 <code>not_configured</code>。</li>
+      <li>worker 未安装、依赖缺失、版本过旧、启动失败：返回 no-op 或 claude-mem 兼容错误响应，默认不阻断 Claude Code。</li>
+      <li><code>context</code> 与 <code>file-context</code> 这类会影响 Claude Code 输出的 action，需要优先保持 claude-mem 原版 stdout contract。</li>
+    </ul>
+
+    <h2>9. Worker 管理与健康状态</h2>
+    <p>第一阶段采用轻量服务端托管：按需启动、健康检查、端口缓存、失败降级，不做复杂 supervisor。</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>状态</th>
+          <th>含义</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>not_configured</code></td><td>profile 未绑定 memory block。</td></tr>
+        <tr><td><code>claude_mem_not_installed</code></td><td>服务端未发现 claude-mem plugin scripts 或 worker 入口。</td></tr>
+        <tr><td><code>dependency_missing</code></td><td>服务端缺少 Node、Bun、uv 或 claude-mem 需要的运行时依赖。</td></tr>
+        <tr><td><code>worker_starting</code></td><td>服务端正在为 block 启动 worker。</td></tr>
+        <tr><td><code>worker_ready</code></td><td>worker 可用，检索与 hook action 可执行。</td></tr>
+        <tr><td><code>worker_error</code></td><td>worker 启动或请求失败。</td></tr>
+        <tr><td><code>version_outdated</code></td><td>检测到 claude-mem 版本过旧。</td></tr>
+      </tbody>
+    </table>
+
+    <p>服务端启动 worker 时注入 <code>CLAUDE_MEM_DATA_DIR=&lt;block.data_dir&gt;</code>。如果 claude-mem worker 本身要求端口发现文件或动态端口，Agent Bridge 负责在服务端侧缓存和复用，不暴露给 CLI。</p>
+
+    <h2>10. MetaMCP 工具契约</h2>
+    <p>在 <code>src/agent_bridge/capability_hub/gateway/metamcp.py</code> 中延续 wiki/codegraph 顶层直出模式，新增：</p>
+    <p>
+      <span class="tag">memory_search</span>
+      <span class="tag">memory_timeline</span>
+      <span class="tag">memory_get</span>
+    </p>
+
+    <h3><code>memory_search</code></h3>
+    <pre><code>{
+  "query": "string",
+  "limit": 10,
+  "block": "optional explicit block_key for admins/debug"
+}</code></pre>
+    <pre><code>{
+  "block_key": "dev-memory",
+  "status": "ok",
+  "items": [
+    {
+      "id": "obs_xxx",
+      "summary": "...",
+      "content_preview": "...",
+      "score": 0.82,
+      "timestamp": "...",
+      "metadata": {}
+    }
+  ]
+}</code></pre>
+
+    <h3><code>memory_timeline</code></h3>
+    <pre><code>{
+  "limit": 20,
+  "cursor": null,
+  "block": "optional explicit block_key for admins/debug"
+}</code></pre>
+
+    <h3><code>memory_get</code></h3>
+    <pre><code>{
+  "id": "obs_xxx",
+  "block": "optional explicit block_key for admins/debug"
+}</code></pre>
+
+    <h3>权限策略</h3>
+    <ul>
+      <li>普通 profile 只能访问自己绑定的 active memory block。</li>
+      <li><code>block</code> 参数第一阶段仅用于 admin/debug；非 admin 传非绑定 block 时返回 profile policy error。</li>
+      <li>profile 未绑定 block 时返回 <code>{"status":"not_configured","items":[]}</code>，不抛硬错误。</li>
+    </ul>
+
+    <h2>11. 前端 UI</h2>
+    <h3>新增导航</h3>
+    <p>在“知识管理”分组下新增 <strong>记忆区块</strong>。</p>
+
+    <h3>MemoryView</h3>
+    <ul>
+      <li>列表：名称、key、绑定 profile 数、worker health、最近更新时间。</li>
+      <li>新建：<code>block_key</code>、名称、描述。</li>
+      <li>详情：基本信息、只读 <code>data_dir</code>、health 状态、最近错误、search 调试、timeline、observation 详情。</li>
+    </ul>
+
+    <h3>ProfilesView 扩展</h3>
+    <ul>
+      <li>profile 配置弹窗新增“记忆”区域。</li>
+      <li>单选 active memory block，也可以选择“未绑定”。</li>
+      <li>展示 hook 安装提示：<code>agent-bridge profile use &lt;profile&gt; --scope project --url ...</code>。</li>
+    </ul>
+
+    <h2>12. 文件影响面</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>区域</th>
+          <th>文件</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>schema/store</td>
+          <td><code>src/agent_bridge/storage/schema.py</code>、<code>src/agent_bridge/storage/sqlite.py</code>、新增 memory repository。</td>
+        </tr>
+        <tr>
+          <td>service</td>
+          <td><code>src/agent_bridge/app/service.py</code>、新增 <code>src/agent_bridge/memory_management/</code>。</td>
+        </tr>
+        <tr>
+          <td>API</td>
+          <td><code>src/agent_bridge/api/routes/memory.py</code>、<code>src/agent_bridge/api/schemas.py</code>、<code>src/agent_bridge/api/app.py</code>。</td>
+        </tr>
+        <tr>
+          <td>CLI</td>
+          <td><code>src/agent_bridge/cli/memory.py</code>、<code>src/agent_bridge/cli/profile.py</code>、<code>src/agent_bridge/cli/app.py</code>。</td>
+        </tr>
+        <tr>
+          <td>MCP</td>
+          <td><code>src/agent_bridge/capability_hub/gateway/metamcp.py</code>、新增 memory builtin provider。</td>
+        </tr>
+        <tr>
+          <td>frontend</td>
+          <td><code>frontend/capabilities/src/App.vue</code>、<code>frontend/capabilities/src/api/types.ts</code>、<code>frontend/capabilities/src/api/client.ts</code>、新增 <code>MemoryView.vue</code>。</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>13. 测试策略</h2>
+    <ul>
+      <li>Storage：memory block CRUD、profile binding 唯一约束、删除 block 后 binding 行为。</li>
+      <li>Service：profile 未绑定、绑定 disabled block、admin explicit block、worker 不可用降级。</li>
+      <li>Hook CLI：stdin payload 透传、服务端返回 stdout 原样输出、服务端不可达 no-op。</li>
+      <li>Hook 注入：从 claude-mem 原始 hook specs 生成 Agent Bridge command，保持事件、matcher、timeout 不变；不删除用户 hooks。</li>
+      <li>MCP：<code>memory_search</code>、<code>memory_timeline</code>、<code>memory_get</code> 的 profile 作用域与 not_configured 响应。</li>
+      <li>API：memory routes 和 profile memory routes。</li>
+      <li>Frontend：列表、创建、绑定、搜索调试的基础交互测试。</li>
+    </ul>
+
+    <h2>14. 风险与取舍</h2>
+    <div class="callout risk">
+      <strong>Hook stdout contract 是最高风险点</strong>
+      <p><code>context</code> 与 <code>file-context</code> 会影响 Claude Code 行为。实现时应优先用集成测试固定 stdout，不要在第一阶段擅自改写 claude-mem 的返回语义。</p>
+    </div>
+    <ul>
+      <li><strong>远程 CLI 网络失败</strong>：默认 no-op，避免阻塞 Claude Code，但会导致某些记忆写入缺失；需要在 UI health 中可见。</li>
+      <li><strong>worker 端口发现</strong>：服务端负责，CLI 不参与；实现时要避免同 block 多 worker 竞争。</li>
+      <li><strong>敏感信息</strong>：第一阶段保留 claude-mem 原有过滤能力；Agent Bridge 仅在服务端代理层补充必要 metadata。更细粒度过滤放第二阶段。</li>
+      <li><strong>成本模型</strong>：observer LLM 调用成本先在 health/metadata 中曝光，完整统计放第二阶段。</li>
+      <li><strong>SQLite 写入压力</strong>：TODO 中的 WAL 模式应作为前置或同期工作，降低 hook 高频状态更新带来的锁冲突。</li>
+    </ul>
+
+    <h2>15. 分阶段交付</h2>
+    <h3>第一阶段：闭环验证</h3>
+    <ul>
+      <li>SQLite WAL。</li>
+      <li>memory schema、repository、service、API。</li>
+      <li>profile memory binding。</li>
+      <li>hook 配置一比一替换 claude-mem 原始 hooks。</li>
+      <li>CLI 瘦 wrapper 到服务端 hook API。</li>
+      <li>服务端按 block 托管/代理 claude-mem worker。</li>
+      <li>MetaMCP 三个 memory 工具。</li>
+      <li>基础 UI。</li>
+    </ul>
+
+    <h3>第二阶段：产品化</h3>
+    <ul>
+      <li>claude-mem 版本兼容矩阵和安装向导。</li>
+      <li>memory block 迁移、备份、归档。</li>
+      <li>敏感字段过滤与截断策略 UI。</li>
+      <li>成本观测与 token/observer 调用统计。</li>
+      <li>更精细的启动上下文策略和检索质量调试。</li>
+    </ul>
+
+    <h2>16. 验收标准</h2>
+    <ul>
+      <li>创建 memory block 后，服务端 data dir 位于 <code>AGENT_BRIDGE_ROOT/data/claude-mem/blocks/&lt;block_key&gt;/</code>。</li>
+      <li>profile 最多绑定一个 active memory block，UI 与 API 都能查看和修改。</li>
+      <li><code>profile use</code> 写入的 Claude Code hooks 与 claude-mem 原始事件、matcher、timeout 一致，command 改为 Agent Bridge CLI。</li>
+      <li>Hook CLI 不访问服务端本地目录；服务端不可达时不会阻断 Claude Code。</li>
+      <li>服务端 hook API 能按 profile 解析 block，并调用对应 claude-mem worker。</li>
+      <li>MetaMCP 暴露 <code>memory_search</code>、<code>memory_timeline</code>、<code>memory_get</code>，profile 未绑定时返回 not_configured。</li>
+      <li>worker 缺失、依赖缺失、版本过旧、启动失败在 UI health 中可见。</li>
+    </ul>
+
+    <h2>17. 参考</h2>
+    <ul>
+      <li><a href="https://github.com/thedotmack/claude-mem/blob/main/plugin/hooks/hooks.json">claude-mem 原始 hooks.json</a></li>
+      <li><a href="https://docs.anthropic.com/en/docs/claude-code/hooks">Claude Code Hooks 文档</a></li>
+      <li><a href="https://docs.claude-mem.ai/platform-integration">claude-mem Platform Integration Guide</a></li>
+      <li><a href="https://docs.claude-mem.ai/architecture/worker-service">claude-mem Worker Service</a></li>
+    </ul>
+  </main>
+</body>
+</html>
