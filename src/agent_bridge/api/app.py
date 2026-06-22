@@ -72,6 +72,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.workflows.admins = reloaded
             service.skills.admins = reloaded
             service.scripts.admins = reloaded
+            service.memory.admins = reloaded
             return await call_next(request)
 
     def save_upload(file: UploadFile) -> Path:
