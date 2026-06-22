@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -89,6 +90,34 @@ def test_wiki_list_kbs_respects_profile_resources(wm_paths: AgentBridgePaths) ->
     assert result["service"] == "wiki"
     assert result["tool"] == "list_kbs"
     assert [kb["slug"] for kb in result["result"]["kbs"]] == ["frontend-docs"]
+
+
+def test_wiki_search_does_not_block_event_loop(wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(wm_paths)
+
+    def slow_search(actor: str, kb_slug: str, question: str, top_k: int = 6, profile_key: str | None = None) -> list[object]:
+        time.sleep(0.2)
+        return []
+
+    monkeypatch.setattr(service, "search", slow_search)
+
+    async def run_concurrent_tasks() -> float:
+        started = time.monotonic()
+        execute_task = asyncio.create_task(
+            service.capabilities.execute(
+                "root",
+                "wiki",
+                "search",
+                {"kb": "frontend-docs", "question": "css"},
+                profile_key="safe-readonly",
+            )
+        )
+        await asyncio.sleep(0.01)
+        elapsed = time.monotonic() - started
+        await execute_task
+        return elapsed
+
+    assert asyncio.run(run_concurrent_tasks()) < 0.1
 
 
 def test_wiki_execute_blocks_unallowed_kb(wm_paths: AgentBridgePaths) -> None:

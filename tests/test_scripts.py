@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import time
 from contextlib import contextmanager
 
 import pytest
@@ -124,6 +125,33 @@ def test_builtin_run_script_executes_managed_script(wm_paths):
     assert result["success"] is True
     assert result["result"]["run_type"] == "mcp"
     assert result["result"]["result"]["params"] == {"name": "Ada"}
+
+
+def test_builtin_run_script_does_not_block_event_loop(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    def blocking_run_script(**kwargs):
+        time.sleep(0.2)
+        return {"ok": True}
+
+    service.scripts.run_script = blocking_run_script
+
+    async def run_concurrent_tasks():
+        started = time.monotonic()
+        execute_task = asyncio.create_task(
+            service.capabilities.execute(
+                "root",
+                "built-in",
+                "run_script",
+                {"script_key": "system.slow"},
+            )
+        )
+        await asyncio.sleep(0.01)
+        elapsed = time.monotonic() - started
+        await execute_task
+        return elapsed
+
+    assert asyncio.run(run_concurrent_tasks()) < 0.1
 
 
 def test_script_run_requires_main_function(wm_paths):

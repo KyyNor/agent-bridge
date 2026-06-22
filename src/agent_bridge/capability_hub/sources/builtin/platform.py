@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool
@@ -77,7 +78,8 @@ class PlatformBuiltinProvider:
             script_params = arguments.get("script_params") or {}
             if not isinstance(script_params, dict):
                 raise ValidationError("script_params must be an object")
-            return self.service.scripts.run_script(
+            return await asyncio.to_thread(
+                self.service.scripts.run_script,
                 actor=actor,
                 script_key=script_key,
                 script_params=script_params,

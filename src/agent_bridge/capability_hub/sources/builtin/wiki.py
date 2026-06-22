@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
@@ -136,8 +137,10 @@ class WikiBuiltinProvider:
             if not question:
                 raise ValidationError("question is required")
             try:
-                results = self.service.search_all(
-                    actor, question,
+                results = await asyncio.to_thread(
+                    self.service.search_all,
+                    actor,
+                    question,
                     top_k=int(arguments.get("top_k") or 6),
                     profile_key=profile_key,
                 )
@@ -168,7 +171,8 @@ class WikiBuiltinProvider:
             if not question:
                 raise ValidationError("question is required")
             try:
-                results = self.service.search(
+                results = await asyncio.to_thread(
+                    self.service.search,
                     actor,
                     kb_slug,
                     question,
@@ -191,7 +195,14 @@ class WikiBuiltinProvider:
             if not question:
                 raise ValidationError("question is required")
             try:
-                answer = self.service.ask(actor, kb_slug, question, session_id=arguments.get("session_id"), profile_key=profile_key)
+                answer = await asyncio.to_thread(
+                    self.service.ask,
+                    actor,
+                    kb_slug,
+                    question,
+                    session_id=arguments.get("session_id"),
+                    profile_key=profile_key,
+                )
             except AgentBridgeError:
                 raise
             except Exception as exc:

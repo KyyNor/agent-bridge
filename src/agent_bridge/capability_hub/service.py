@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any, Callable
@@ -546,7 +547,13 @@ class CapabilityService:
                         owner=FailureOwner.policy.value,
                         error_type="profile_policy_blocked",
                     )
-                result = self._execute_openapi_without_log(actor, service, tool_name, params)
+                result = await asyncio.to_thread(
+                    self._execute_openapi_without_log,
+                    actor,
+                    service,
+                    tool_name,
+                    params,
+                )
             elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
                 raise mark_builtin_failure(
                     _mark_call_log_status(
