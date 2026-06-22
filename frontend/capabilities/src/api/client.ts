@@ -30,8 +30,12 @@ import type {
   SyncJob,
   CodeRepoCategory,
   KnowledgeSyncConfig,
+  MemoryBlock,
+  MemorySearchResult,
+  MemoryTimelineResult,
   SchedulerStatus,
   SkillPrompt,
+  ProfileMemoryBinding,
   ToolCallLog,
   ToolCallStats,
   AgentRun,
@@ -165,6 +169,26 @@ export const api = {
     post<ProfileDocRender>(`/capability-profiles/${key}/doc/render`),
   updateProfileManualNotes: (key: string, manual_notes: string) =>
     put<ProfileDocRender>(`/capability-profiles/${key}/doc/manual-notes`, { manual_notes }),
+  getProfileMemory: (key: string) =>
+    get<ProfileMemoryBinding>(`/capability-profiles/${key}/memory`),
+  setProfileMemory: (key: string, blockKey: string | null, enabled = true) =>
+    put<ProfileMemoryBinding>(`/capability-profiles/${key}/memory`, { block_key: blockKey, enabled }),
+
+  // Memory Blocks
+  listMemoryBlocks: () => get<MemoryBlock[]>('/memory/blocks'),
+  createMemoryBlock: (block: { block_key: string; name: string; description?: string }) =>
+    post<MemoryBlock>('/memory/blocks', block),
+  getMemoryBlockHealth: (blockKey: string) =>
+    get<Record<string, unknown>>(`/memory/blocks/${blockKey}/health`),
+  searchMemoryBlock: (blockKey: string, query: string, limit = 10) => {
+    const qs = new URLSearchParams({ q: query, limit: String(limit) })
+    return get<MemorySearchResult>(`/memory/blocks/${blockKey}/search?${qs}`)
+  },
+  getMemoryTimeline: (blockKey: string, limit = 20, cursor?: string) => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    if (cursor) qs.set('cursor', cursor)
+    return get<MemoryTimelineResult>(`/memory/blocks/${blockKey}/timeline?${qs}`)
+  },
 
   // Workflows
   listWorkflows: () => get<WorkflowDefinition[]>('/workflows'),

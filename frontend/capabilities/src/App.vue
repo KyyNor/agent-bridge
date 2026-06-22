@@ -12,6 +12,7 @@ const ToolDebugView = defineAsyncComponent(() => import('./views/capabilities/To
 const CodeRepoView = defineAsyncComponent(() => import('./views/knowledge/CodeRepoView.vue'))
 const KnowledgeView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeView.vue'))
 const KnowledgeProcessingConfigView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
+const MemoryView = defineAsyncComponent(() => import('./views/knowledge/MemoryView.vue'))
 const WorkflowView = defineAsyncComponent(() => import('./views/workflow/WorkflowView.vue'))
 const SkillManagementView = defineAsyncComponent(() => import('./views/system/SkillManagementView.vue'))
 const ScriptsView = defineAsyncComponent(() => import('./views/system/ScriptsView.vue'))
@@ -51,6 +52,7 @@ const navGroups: NavGroup[] = [
     items: [
       { key: 'knowledge', label: '文档知识', description: '管理文档知识库和文档' },
       { key: 'code-repos', label: '代码知识', description: '管理代码仓库和知识图谱' },
+      { key: 'memory', label: '记忆区块', description: '管理 profile 绑定的 claude-mem 记忆区块' },
     ],
   },
   {
@@ -98,6 +100,7 @@ const view = computed(() => activeNavKey.value)
         <ToolDebugView v-else-if="view === 'tool-debug'" />
         <CodeRepoView v-else-if="view === 'code-repos'" />
         <KnowledgeView v-else-if="view === 'knowledge'" />
+        <MemoryView v-else-if="view === 'memory'" />
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
         <SkillManagementView v-else-if="view === 'skills'" />
         <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
