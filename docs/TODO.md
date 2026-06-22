@@ -3,7 +3,7 @@
 - [ ] SQLite 改成 WAL 模式
 - [ ] 解耦 CLI 与服务端：当前 CLI 很多功能依赖 localhost 的服务或本地文件，尤其是 `profile use` 命令依赖本地实时更新的说明文档
 - [ ] （可选）服务管理支持 CLI 类型的服务
-- [ ] 把 wiki 和 codegraph 从 `execute` 提取到顶层 MCP 工具
+- [x] 把 wiki 和 codegraph 从 `execute` 提取到顶层 MCP 工具
 
 ## Agent 相关
 

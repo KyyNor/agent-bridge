@@ -90,6 +90,121 @@ def test_mcp_execute_tool_calls_capability_service():
     assert structured == returned
 
 
+def test_mcp_exposes_builtin_direct_tools_at_top_level():
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
+    from agent_bridge.capability_hub.sources.builtin.base import BuiltinTool
+
+    class FakeProvider:
+        def __init__(self, source_key, tools):
+            self.source_key = source_key
+            self.tools = tools
+
+        def list_tools(self, actor, profile_key):
+            return self.tools
+
+    class FakeCapabilities:
+        builtin_providers = {
+            "wiki": FakeProvider(
+                "wiki",
+                [
+                    BuiltinTool(
+                        "search",
+                        "Wiki Search",
+                        "Search snippets in an allowed KB.",
+                        {"type": "object", "properties": {"kb": {"type": "string"}, "question": {"type": "string"}}},
+                        "search",
+                    ),
+                    BuiltinTool(
+                        "ask",
+                        "Wiki Ask",
+                        "Ask a question against an allowed KB.",
+                        {"type": "object", "properties": {"kb": {"type": "string"}, "question": {"type": "string"}}},
+                        "search",
+                    ),
+                ],
+            ),
+            "codegraph": FakeProvider(
+                "codegraph",
+                [
+                    BuiltinTool(
+                        "codegraph_explore",
+                        "CodeGraph Explore",
+                        "Explore an allowed code repository.",
+                        {"type": "object", "properties": {"repo": {"type": "string"}, "query": {"type": "string"}}},
+                        "search",
+                    )
+                ],
+            ),
+        }
+
+    class FakeService:
+        capabilities = FakeCapabilities()
+
+    mcp = create_mcp_server(FakeService())
+    tools = asyncio.run(mcp.list_tools())
+    tool_names = [tool.name for tool in tools]
+
+    assert "wiki_search" in tool_names
+    assert "wiki_ask" in tool_names
+    assert "codegraph_explore" in tool_names
+    assert tools[tool_names.index("wiki_search")].inputSchema["properties"]["kb"]["type"] == "string"
+    assert tools[tool_names.index("codegraph_explore")].inputSchema["properties"]["repo"]["type"] == "string"
+
+
+def test_mcp_builtin_direct_tool_calls_original_builtin_tool():
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
+    from agent_bridge.capability_hub.sources.builtin.base import BuiltinTool
+
+    calls = []
+    returned = {"success": True, "result": {"answer": "ok"}, "service": "wiki", "tool_name": "ask"}
+
+    class FakeProvider:
+        source_key = "wiki"
+
+        def list_tools(self, actor, profile_key):
+            return [
+                BuiltinTool(
+                    "ask",
+                    "Wiki Ask",
+                    "Ask a question against an allowed KB.",
+                    {"type": "object", "properties": {"kb": {"type": "string"}, "question": {"type": "string"}}},
+                    "search",
+                )
+            ]
+
+    class FakeCapabilities:
+        builtin_providers = {"wiki": FakeProvider()}
+
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None, workflow_context=None):
+            calls.append(
+                {
+                    "service": service,
+                    "tool_name": tool_name,
+                    "params": params,
+                    "profile_key": profile_key,
+                    "workflow_context": workflow_context,
+                }
+            )
+            return returned
+
+    class FakeService:
+        capabilities = FakeCapabilities()
+
+    mcp = create_mcp_server(FakeService(), profile_key="safe-readonly")
+    content, structured = asyncio.run(mcp.call_tool("wiki_ask", {"kb": "frontend-docs", "question": "css"}))
+
+    assert structured == returned
+    assert calls == [
+        {
+            "service": "wiki",
+            "tool_name": "ask",
+            "params": {"kb": "frontend-docs", "question": "css"},
+            "profile_key": "safe-readonly",
+            "workflow_context": None,
+        }
+    ]
+
+
 def test_mcp_pinned_tool_calls_original_service_tool():
     from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
 

@@ -23,6 +23,12 @@ logger = logging.getLogger("agent_bridge.mcp")
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 _request_workflow_context: ContextVar[dict[str, Any] | None] = ContextVar("_request_workflow_context", default=None)
 
+DIRECT_BUILTIN_TOOLS = [
+    {"name": "wiki_search", "service_key": "wiki", "tool_name": "search"},
+    {"name": "wiki_ask", "service_key": "wiki", "tool_name": "ask"},
+    {"name": "codegraph_explore", "service_key": "codegraph", "tool_name": "codegraph_explore"},
+]
+
 
 def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:
     value_type = definition.get("type")
@@ -243,6 +249,56 @@ def create_mcp_server(
                 payload=payload or {},
             )
             return {"ok": True}
+
+    def register_direct_builtin_tools() -> None:
+        providers = getattr(service.capabilities, "builtin_providers", {})
+        registered_names = {"search", "execute", "artifacts_search"}
+        for direct_spec in DIRECT_BUILTIN_TOOLS:
+            name = direct_spec["name"]
+            if name in registered_names:
+                continue
+            registered_names.add(name)
+            provider = providers.get(direct_spec["service_key"]) if isinstance(providers, dict) else None
+            if provider is None:
+                continue
+            builtin_tools = {
+                tool.tool: tool
+                for tool in provider.list_tools(default_user(), profile_key)
+            }
+            builtin_tool = builtin_tools.get(direct_spec["tool_name"])
+            if builtin_tool is None:
+                continue
+            invalid_parameter_names = _invalid_json_schema_property_names(builtin_tool.input_schema)
+            if invalid_parameter_names:
+                logger.warning(
+                    "跳过 direct builtin MCP tool name=%s invalid_schema_fields=%s",
+                    name,
+                    invalid_parameter_names,
+                )
+                continue
+
+            async def direct_builtin_tool(_spec: dict[str, str] = direct_spec, **kwargs: Any) -> dict[str, Any]:
+                active_profile = _request_profile.get() or profile_key
+                current_workflow_context = _request_workflow_context.get() or active_workflow_context
+                return await service.capabilities.execute(
+                    actor=default_user(),
+                    service=_spec["service_key"],
+                    tool_name=_spec["tool_name"],
+                    params=kwargs,
+                    profile_key=active_profile,
+                    workflow_context=current_workflow_context,
+                )
+
+            direct_builtin_tool.__signature__ = _signature_from_json_schema(builtin_tool.input_schema)  # type: ignore[attr-defined]
+            mcp.tool(
+                name=name,
+                description=(
+                    f"Direct built-in Agent Bridge tool for {provider.source_key}.{builtin_tool.tool}. "
+                    f"{builtin_tool.description}"
+                ),
+            )(direct_builtin_tool)
+
+    register_direct_builtin_tools()
 
     def register_pinned_tools() -> None:
         if profile_key is None or not hasattr(service.capabilities, "pinned_tool_specs"):
