@@ -157,7 +157,14 @@ def create_mcp_server(
             logger.info("执行完成 profile=%s service=%s tool=%s 耗时=%.0fms success=%s", active_profile, service, tool_name, (time.monotonic() - started) * 1000, result.get("success"))
             return result
         except Exception as exc:
-            logger.error("执行失败 profile=%s service=%s tool=%s 耗时=%.0fms 错误=%s", active_profile, service, tool_name, (time.monotonic() - started) * 1000, exc)
+            logger.error(
+                "执行失败 profile=%s service=%s tool=%s 耗时=%.0fms",
+                active_profile,
+                service,
+                tool_name,
+                (time.monotonic() - started) * 1000,
+                exc_info=True,
+            )
             raise
 
     @mcp.tool(description="Search workflow artifacts visible to the active Agent Bridge profile.")

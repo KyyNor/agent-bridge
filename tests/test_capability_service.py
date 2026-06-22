@@ -583,7 +583,7 @@ def test_execute_wraps_mcp_client_failures(wm_paths: AgentBridgePaths) -> None:
     asyncio.run(service.sync_tools("root", "docs-api"))
     service.set_tool_type("root", "docs-api", "search_docs", ToolType.search.value)
 
-    with pytest.raises(ValidationError, match=r"MCP tool execution failed: transport unavailable .*log_id: call_") as exc_info:
+    with pytest.raises(ValidationError, match=r"MCP tool execution failed: RuntimeError: transport unavailable .*log_id: call_") as exc_info:
         asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))
 
     logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
@@ -597,8 +597,44 @@ def test_execute_wraps_mcp_client_failures(wm_paths: AgentBridgePaths) -> None:
         "params": {"query": "hello"},
         "profile_key": None,
     }
-    assert json.loads(logs[0]["response_json"])["error"] == "MCP tool execution failed: transport unavailable"
-    assert logs[0]["error_message"] == "MCP tool execution failed: transport unavailable"
+    assert json.loads(logs[0]["response_json"])["error"] == "MCP tool execution failed: RuntimeError: transport unavailable"
+    assert logs[0]["error_message"] == "MCP tool execution failed: RuntimeError: transport unavailable"
+
+
+def test_execute_unwraps_exceptiongroup_from_mcp_client(wm_paths: AgentBridgePaths) -> None:
+    # streamablehttp_client 抛 BaseExceptionGroup("unhandled errors in a taskgroup ...") 时,
+    # 错误消息必须展开到真正的子异常, 而不是保留 "unhandled errors in a taskgroup".
+    class TaskGroupFailingMcpClient(FakeMcpClient):
+        async def call_tool(
+            self,
+            endpoint_url: str,
+            headers: dict[str, str],
+            tool_name: str,
+            arguments: dict[str, object],
+        ) -> dict[str, object]:
+            raise ExceptionGroup(
+                "unhandled errors in a taskgroup",
+                [ConnectionRefusedError("[Errno 111] Connection refused -> http://internal-mcp:8080/mcp")],
+            )
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    service = CapabilityService(store=store, mcp_client=TaskGroupFailingMcpClient(), admins={"root"})
+    service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
+    asyncio.run(service.sync_tools("root", "docs-api"))
+    service.set_tool_type("root", "docs-api", "search_docs", ToolType.search.value)
+
+    with pytest.raises(ValidationError, match=r"MCP tool execution failed: ConnectionRefusedError: .*Connection refused.*log_id: call_") as exc_info:
+        asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))
+
+    message = str(exc_info.value)
+    assert "unhandled errors in a taskgroup" not in message
+    assert "ConnectionRefusedError" in message
+
+    logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
+    assert len(logs) == 1
+    assert "unhandled errors in a taskgroup" not in logs[0]["error_message"]
+    assert "ConnectionRefusedError" in logs[0]["error_message"]
 
 
 def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) -> None:

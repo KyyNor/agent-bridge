@@ -32,6 +32,32 @@ def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).lower()
 
 
+def _root_cause_message(exc: BaseException) -> str:
+    """Flatten anyio/asyncio ExceptionGroup wrappers so logs show the real cause.
+
+    ``streamablehttp_client`` raises ``BaseExceptionGroup`` ("unhandled errors in a
+    taskgroup (N sub-exceptions)") on connection/transport failures, and ``str()``
+    on the group hides the leaf exception. Unwrap to the leaf cause(s).
+    """
+    leaves: list[str] = []
+    stack: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, BaseExceptionGroup):
+            stack.extend(current.exceptions)
+        else:
+            leaves.append(f"{type(current).__name__}: {current}")
+    if not leaves:
+        return str(exc)
+    if len(leaves) == 1:
+        return leaves[0]
+    return f"{len(leaves)} errors: " + "; ".join(leaves)
+
+
 def _schema_example(schema: dict[str, Any]) -> dict[str, Any]:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
@@ -632,7 +658,7 @@ class CapabilityService:
             )
         except Exception as exc:
             raise mark_builtin_failure(
-                ValidationError(f"MCP tool execution failed: {exc}"),
+                ValidationError(f"MCP tool execution failed: {_root_cause_message(exc)}"),
                 stage=FailureStage.mcp_transport.value,
                 owner=FailureOwner.upstream_mcp.value,
                 error_type="mcp_transport_error",
