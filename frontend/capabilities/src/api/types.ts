@@ -59,6 +59,21 @@ export type CapabilityServiceSource =
 
 export type CapabilityTool = McpTool | OpenApiTool
 
+export interface ExecuteCapabilityPayload {
+  service: string
+  tool_name: string
+  params?: Record<string, unknown>
+  profile_key?: string
+}
+
+export interface ExecuteCapabilityResult {
+  service: string
+  tool_name: string
+  profile_key?: string | null
+  result: unknown
+  [key: string]: unknown
+}
+
 export interface OpenApiImportResult {
   service_key: string
   operations: OpenApiTool[]

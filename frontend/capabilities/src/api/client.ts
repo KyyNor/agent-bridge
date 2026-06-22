@@ -9,6 +9,8 @@ import type {
   CodeRepository,
   Document,
   DocumentDetail,
+  ExecuteCapabilityPayload,
+  ExecuteCapabilityResult,
   KnowledgeBase,
   KnowledgeBaseSummary,
   OpenApiImportResult,
@@ -113,6 +115,19 @@ export const api = {
   listTools: (key: string) => get<McpTool[]>(`/capabilities/mcp-services/${key}/tools`),
   updateToolType: (serviceKey: string, toolName: string, toolType: string) =>
     put(`/capabilities/mcp-services/${serviceKey}/tools/${toolName}/type`, { tool_type: toolType }),
+  executeCapability: (
+    payload: ExecuteCapabilityPayload,
+    runtimeHeaders?: {
+      profile_key?: string
+    },
+  ) =>
+    post<ExecuteCapabilityResult>(
+      '/capabilities/execute',
+      payload,
+      {
+        ...(runtimeHeaders?.profile_key ? { 'X-Agent-Bridge-MetaMCP-Profile': runtimeHeaders.profile_key } : {}),
+      },
+    ),
 
   // OpenAPI Services
   listOpenApiServices: () => get<OpenApiService[]>('/capabilities/openapi-services'),

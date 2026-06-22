@@ -960,3 +960,23 @@ def test_frontend_scripts_view_exposes_runtime_guide_and_test_headers() -> None:
     assert "run_id" in source
     assert "X-Agent-Bridge-MetaMCP-Profile" in client_source
     assert "X-Agent-Bridge-Workflow-Run-Id" in client_source
+
+
+def test_frontend_tool_debug_view_exposes_profile_scoped_execute_debugging() -> None:
+    app_source = Path("frontend/capabilities/src/App.vue").read_text(encoding="utf-8")
+    view_source = Path("frontend/capabilities/src/views/capabilities/ToolDebugView.vue").read_text(encoding="utf-8")
+    client_source = Path("frontend/capabilities/src/api/client.ts").read_text(encoding="utf-8")
+
+    assert "tool-debug" in app_source
+    assert "工具调试" in app_source
+    assert "ToolDebugView" in app_source
+    assert "按能力平面选择并手动调试对外提供的工具" in app_source
+    assert "能力平面" in view_source
+    assert "执行工具" in view_source
+    assert "调试结果" in view_source
+    assert "OpenAPI" in view_source
+    assert "MCP" in view_source
+    assert "params 必须是 JSON 对象" in view_source
+    assert "api.executeCapability" in view_source
+    assert "X-Agent-Bridge-MetaMCP-Profile" in client_source
+    assert "executeCapability" in client_source

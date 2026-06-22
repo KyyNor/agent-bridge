@@ -25,4 +25,5 @@ test('shouldShowPageHeader hides the page title on service and workflow detail r
 test('shouldShowPageHeader keeps the page title for plain non-script routes', () => {
   assert.equal(shouldShowPageHeader('workflow', ''), true)
   assert.equal(shouldShowPageHeader('services', ''), true)
+  assert.equal(shouldShowPageHeader('tool-debug', ''), true)
 })

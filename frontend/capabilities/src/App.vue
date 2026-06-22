@@ -8,6 +8,7 @@ const DashboardView = defineAsyncComponent(() => import('./views/dashboard/Dashb
 const ServicesView = defineAsyncComponent(() => import('./views/capabilities/ServicesView.vue'))
 const ToolsView = defineAsyncComponent(() => import('./views/capabilities/ToolsView.vue'))
 const ProfilesView = defineAsyncComponent(() => import('./views/capabilities/ProfilesView.vue'))
+const ToolDebugView = defineAsyncComponent(() => import('./views/capabilities/ToolDebugView.vue'))
 const CodeRepoView = defineAsyncComponent(() => import('./views/knowledge/CodeRepoView.vue'))
 const KnowledgeView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeView.vue'))
 const KnowledgeProcessingConfigView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
@@ -42,6 +43,7 @@ const navGroups: NavGroup[] = [
       { key: 'services', label: '能力接入', description: '管理和配置 MCP/OpenAPI 服务连接' },
       { key: 'tools', label: '工具目录', description: '浏览和配置已同步的工具' },
       { key: 'profiles', label: '能力平面', description: '管理能力访问策略和权限' },
+      { key: 'tool-debug', label: '工具调试', description: '按能力平面选择并手动调试对外提供的工具' },
     ],
   },
   {
@@ -93,6 +95,7 @@ const view = computed(() => activeNavKey.value)
         <ServicesView v-else-if="view === 'services'" :route-key="subRoute" />
         <ToolsView v-else-if="view === 'tools'" />
         <ProfilesView v-else-if="view === 'profiles'" />
+        <ToolDebugView v-else-if="view === 'tool-debug'" />
         <CodeRepoView v-else-if="view === 'code-repos'" />
         <KnowledgeView v-else-if="view === 'knowledge'" />
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />

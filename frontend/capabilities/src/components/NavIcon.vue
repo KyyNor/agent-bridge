@@ -14,6 +14,7 @@ import {
   FileText,
   BarChart3,
   Activity,
+  Bug,
 } from 'lucide-vue-next'
 
 const props = defineProps<{ name: string }>()
@@ -24,6 +25,7 @@ const icon = computed(() => {
     services: Server,
     tools: Wrench,
     profiles: Shield,
+    'tool-debug': Bug,
     knowledge: BookOpen,
     'code-repos': GitBranch,
     'system-config': Cog,
