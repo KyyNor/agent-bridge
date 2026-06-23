@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -104,7 +105,7 @@ def _agent_bridge_hook_command(
     ]
     if matcher is not None:
         parts.extend(["--matcher", matcher])
-    return " ".join(parts)
+    return " ".join(shlex.quote(part) for part in parts)
 
 
 def _load_claude_settings(path: Path) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 import httpx
@@ -302,7 +303,11 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     assert hooks["Setup"][0]["hooks"][0]["timeout"] == 300
     assert hooks["Setup"][0]["hooks"][0]["command"].startswith("agent-bridge memory hook claude-code version-check")
     assert hooks["SessionStart"][0]["matcher"] == "startup|clear|compact"
-    assert [hook["command"].split("claude-code ", 1)[1].split()[0] for hook in hooks["SessionStart"][0]["hooks"]] == ["start", "context"]
+    session_start_argv = [shlex.split(hook["command"]) for hook in hooks["SessionStart"][0]["hooks"]]
+    assert [argv[4] for argv in session_start_argv] == ["start", "context"]
+    assert all(argv[argv.index("--matcher") + 1] == "startup|clear|compact" for argv in session_start_argv)
+    assert all("|" not in argv for argv in session_start_argv)
+    assert "'startup|clear|compact'" in hooks["SessionStart"][0]["hooks"][0]["command"]
     assert hooks["PostToolUse"][0]["matcher"] == "*"
     assert hooks["PreToolUse"][0]["matcher"] == "Read"
     assert hooks["Stop"][0]["hooks"][0]["timeout"] == 120
