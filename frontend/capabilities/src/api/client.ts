@@ -39,6 +39,9 @@ import type {
   ToolCallLog,
   ToolCallStats,
   AgentRun,
+  DesignAgentResponse,
+  WorkflowDesignResult,
+  ScriptDesignResult,
   UAStatus,
   UASummary,
   UAAvailability,
@@ -272,6 +275,10 @@ export const api = {
     return get<AgentRun[]>(`/agent-runs?${qs}`)
   },
   getAgentRun: (runKey: string) => get<AgentRun>(`/agent-runs/${runKey}`),
+  designWorkflow: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
+    post<DesignAgentResponse<WorkflowDesignResult>>('/agent-runs/design/workflow', body),
+  designScript: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
+    post<DesignAgentResponse<ScriptDesignResult>>('/agent-runs/design/script', body),
 
   // Catalog
   catalog: (profileKey?: string, query?: string) => {

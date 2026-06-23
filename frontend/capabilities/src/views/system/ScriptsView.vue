@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, HelpCircle, Play, Plus, RotateCcw, Save, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { ManagedScript, ProjectProfile, ScriptRun, WorkflowDefinition } from '../../api/types'
+import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, WorkflowDefinition } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -46,6 +46,12 @@ const testWorkflowKey = ref('__none__')
 const testWorkflowRunId = ref('')
 const runDetail = ref<ScriptRun | null>(null)
 const runDetailLoading = ref(false)
+const showDesigner = ref(false)
+const designMode = ref<'create' | 'modify'>('modify')
+const designPrompt = ref('')
+const designing = ref(false)
+const designError = ref('')
+const designResponse = ref<DesignAgentResponse<ScriptDesignResult> | null>(null)
 
 const mode = computed<'list' | 'edit'>(() => (props.routeKey ? 'edit' : 'list'))
 const isNew = computed(() => props.routeKey === 'new')
@@ -61,6 +67,7 @@ const ownerKeyOptions = computed(() => {
 const editingScript = computed(() =>
   editingKey.value ? scripts.value.find(s => s.script_key === editingKey.value) || null : null,
 )
+const scriptDesignDraft = computed(() => designResponse.value?.result?.script || null)
 
 onMounted(async () => {
   await loadAll()
@@ -184,8 +191,8 @@ async function saveScript(): Promise<ManagedScript | null> {
       owner_key: form.value.owner_type === 'system' ? '' : form.value.owner_key,
     })
     await reloadScripts()
-    // 新建成功后同步 URL，避免再次保存时被当作新建
-    if (isNew.value) {
+    // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
+    if (isNew.value || saved.script_key !== editingKey.value) {
       window.location.hash = 'scripts/' + saved.script_key
     }
     return saved
@@ -195,6 +202,74 @@ async function saveScript(): Promise<ManagedScript | null> {
   } finally {
     saving.value = false
   }
+}
+
+function openScriptDesigner(mode: 'create' | 'modify' = 'modify') {
+  designMode.value = mode
+  showDesigner.value = true
+  designError.value = ''
+}
+
+function scriptDesignerCurrent() {
+  if (designMode.value === 'modify') {
+    return {
+      script_key: form.value.script_key,
+      name: form.value.name,
+      description: form.value.description,
+      language: form.value.language,
+      code: form.value.code,
+      status: form.value.status,
+      owner_type: form.value.owner_type,
+      owner_key: form.value.owner_key,
+    }
+  }
+  return {
+    language: 'python',
+    status: 'active',
+    owner_type: form.value.owner_type,
+    owner_key: form.value.owner_key,
+  }
+}
+
+async function runScriptDesigner() {
+  designError.value = ''
+  if (!designPrompt.value.trim()) {
+    designError.value = '请输入提示词'
+    return
+  }
+  designing.value = true
+  try {
+    designResponse.value = await api.designScript({
+      mode: designMode.value,
+      prompt: designPrompt.value,
+      current: scriptDesignerCurrent(),
+      profile_key: form.value.owner_type === 'profile' ? form.value.owner_key : undefined,
+    })
+    if (!designResponse.value.ok) {
+      designError.value = designResponse.value.error || '设计 agent 执行失败'
+    }
+  } catch (e: unknown) {
+    designError.value = errorMessage(e)
+  } finally {
+    designing.value = false
+  }
+}
+
+async function acceptScriptDesign() {
+  const draft = scriptDesignDraft.value
+  if (!draft) return
+  form.value = {
+    script_key: draft.script_key,
+    name: draft.name,
+    description: draft.description,
+    language: draft.language,
+    code: draft.code,
+    status: draft.status,
+    owner_type: draft.owner_type,
+    owner_key: draft.owner_key,
+  }
+  const saved = await saveScript()
+  if (saved) showDesigner.value = false
 }
 
 async function runScript() {
@@ -502,6 +577,10 @@ def main(envelope):
         </div>
       </div>
       <div class="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" :disabled="designing" @click="openScriptDesigner('modify')">
+          <WandSparkles class="mr-1.5 h-4 w-4" />
+          AI 设计
+        </Button>
         <Button variant="outline" size="sm" :disabled="saving" @click="saveScript">
           <Save class="mr-1.5 h-4 w-4" />
           {{ saving ? '保存中' : '保存' }}
@@ -720,5 +799,78 @@ def main(envelope):
         </Card>
       </div>
     </div>
+
+    <aside
+      v-if="showDesigner"
+      class="fixed inset-y-0 right-0 z-40 flex w-full max-w-[560px] flex-col border-l bg-background shadow-xl"
+    >
+      <div class="flex items-start justify-between gap-3 border-b px-4 py-3">
+        <div>
+          <div class="text-sm font-semibold text-foreground">脚本设计 Agent</div>
+          <div class="font-mono text-xs text-muted-foreground">design_script</div>
+        </div>
+        <Button variant="ghost" size="sm" class="h-8 px-2" :disabled="designing" @click="showDesigner = false">关闭</Button>
+      </div>
+      <div class="flex-1 space-y-4 overflow-auto p-4">
+        <div class="grid grid-cols-2 gap-2 rounded-md border bg-muted/20 p-1">
+          <button
+            class="rounded px-3 py-2 text-sm transition"
+            :class="designMode === 'modify' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'"
+            @click="designMode = 'modify'"
+          >
+            修改
+          </button>
+          <button
+            class="rounded px-3 py-2 text-sm transition"
+            :class="designMode === 'create' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'"
+            @click="designMode = 'create'"
+          >
+            新建
+          </button>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs text-muted-foreground">提示词</label>
+          <Textarea
+            v-model="designPrompt"
+            class="min-h-32 text-sm"
+            placeholder="描述希望 agent 设计或修改的脚本目标"
+          />
+        </div>
+        <Button class="w-full" :disabled="designing" @click="runScriptDesigner">
+          <WandSparkles class="mr-1.5 h-4 w-4" />
+          {{ designing ? '生成中' : '生成方案' }}
+        </Button>
+
+        <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {{ designError }}
+        </div>
+
+        <section v-if="designResponse?.result" class="space-y-3 rounded-md border p-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-sm font-semibold">生成结果</div>
+            <Badge v-if="designResponse.run_key" variant="outline">{{ designResponse.run_key }}</Badge>
+          </div>
+          <p class="text-sm text-muted-foreground">{{ designResponse.result.summary }}</p>
+          <div v-if="designResponse.result.notes?.length" class="space-y-1 text-xs text-muted-foreground">
+            <div v-for="note in designResponse.result.notes" :key="note">· {{ note }}</div>
+          </div>
+          <div v-if="scriptDesignDraft" class="grid gap-2 text-xs">
+            <div class="rounded-md border bg-muted/20 p-2">
+              <div class="font-mono font-medium text-foreground">{{ scriptDesignDraft.script_key }}</div>
+              <div class="mt-1 text-muted-foreground">{{ scriptDesignDraft.name }}</div>
+            </div>
+            <pre class="max-h-96 overflow-auto rounded-md border bg-muted/20 p-3 text-xs">{{ scriptDesignDraft.code }}</pre>
+          </div>
+        </section>
+      </div>
+      <div class="flex items-center justify-end gap-2 border-t p-4">
+        <Button variant="outline" :disabled="designing" @click="showDesigner = false">取消</Button>
+        <Button :disabled="!scriptDesignDraft || saving" @click="acceptScriptDesign">
+          <Check class="mr-1.5 h-4 w-4" />
+          {{ saving ? '保存中' : '采纳并保存' }}
+        </Button>
+      </div>
+    </aside>
   </div>
 </template>

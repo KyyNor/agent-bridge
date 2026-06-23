@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
-import { ArrowLeft, HelpCircle, Save } from 'lucide-vue-next'
+import { ArrowLeft, Check, HelpCircle, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowTask } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowTask } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -59,6 +59,12 @@ const testing = ref(false)
 const testingRunId = ref('')
 const testError = ref('')
 const routeError = ref('')
+const showDesigner = ref(false)
+const designMode = ref<'create' | 'modify'>('modify')
+const designPrompt = ref('')
+const designing = ref(false)
+const designError = ref('')
+const designResponse = ref<DesignAgentResponse<WorkflowDesignResult> | null>(null)
 let testPoll: ReturnType<typeof setInterval> | null = null
 
 const artifactHtml = computed(() =>
@@ -116,6 +122,7 @@ const taskStats = computed(() => {
 const progressRun = computed(() =>
   (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
 )
+const workflowDesignDraft = computed(() => designResponse.value?.result?.workflow || null)
 
 const collapsedPaths = ref<Set<string>>(new Set())
 
@@ -293,11 +300,11 @@ function prepareEditForm(item: WorkflowDefinition) {
   formError.value = ''
 }
 
-async function saveWorkflow() {
+async function saveWorkflow(): Promise<WorkflowDefinition | null> {
   formError.value = ''
   if (!form.value.workflow_key || !form.value.name || !form.value.profile_key) {
     formError.value = '请填写工作流标识、名称，并选择关联的能力平面'
-    return
+    return null
   }
   saving.value = true
   try {
@@ -313,11 +320,75 @@ async function saveWorkflow() {
     workflows.value = await api.listWorkflows()
     await loadRunsForWorkflows()
     window.location.hash = `workflow/${saved.workflow_key}/detail`
+    return saved
   } catch (e: unknown) {
     formError.value = errorMessage(e)
+    return null
   } finally {
     saving.value = false
   }
+}
+
+function openWorkflowDesigner(mode: 'create' | 'modify' = 'modify') {
+  designMode.value = mode
+  showDesigner.value = true
+  designError.value = ''
+}
+
+function workflowDesignerCurrent() {
+  if (designMode.value === 'modify') {
+    return {
+      workflow_key: form.value.workflow_key,
+      name: form.value.name,
+      description: form.value.description,
+      profile_key: form.value.profile_key,
+      status: form.value.status,
+      workflow_js: form.value.workflow_js,
+    }
+  }
+  return {
+    profile_key: form.value.profile_key,
+    status: 'active',
+  }
+}
+
+async function runWorkflowDesigner() {
+  designError.value = ''
+  if (!designPrompt.value.trim()) {
+    designError.value = '请输入提示词'
+    return
+  }
+  designing.value = true
+  try {
+    designResponse.value = await api.designWorkflow({
+      mode: designMode.value,
+      prompt: designPrompt.value,
+      current: workflowDesignerCurrent(),
+      profile_key: form.value.profile_key || undefined,
+    })
+    if (!designResponse.value.ok) {
+      designError.value = designResponse.value.error || '设计 agent 执行失败'
+    }
+  } catch (e: unknown) {
+    designError.value = errorMessage(e)
+  } finally {
+    designing.value = false
+  }
+}
+
+async function acceptWorkflowDesign() {
+  const draft = workflowDesignDraft.value
+  if (!draft) return
+  form.value = {
+    workflow_key: draft.workflow_key,
+    name: draft.name,
+    description: draft.description,
+    profile_key: draft.profile_key,
+    status: draft.status,
+    workflow_js: draft.workflow_js,
+  }
+  const saved = await saveWorkflow()
+  if (saved) showDesigner.value = false
 }
 
 async function openDetail(item: WorkflowDefinition) {
@@ -1282,10 +1353,16 @@ async function confirmClearWorkflow() {
             <p class="font-mono text-xs text-muted-foreground">{{ form.workflow_key || 'workflow/new' }}</p>
           </div>
         </div>
-        <Button :disabled="saving" size="sm" @click="saveWorkflow">
-          <Save class="mr-1.5 h-4 w-4" />
-          {{ saving ? '保存中' : '保存' }}
-        </Button>
+        <div class="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" :disabled="designing" @click="openWorkflowDesigner('modify')">
+            <WandSparkles class="mr-1.5 h-4 w-4" />
+            AI 设计
+          </Button>
+          <Button :disabled="saving" size="sm" @click="saveWorkflow">
+            <Save class="mr-1.5 h-4 w-4" />
+            {{ saving ? '保存中' : '保存' }}
+          </Button>
+        </div>
       </div>
       <Card>
         <CardContent class="space-y-5 p-4">
@@ -1337,6 +1414,79 @@ async function confirmClearWorkflow() {
         </div>
         </CardContent>
       </Card>
+
+      <aside
+        v-if="showDesigner"
+        class="fixed inset-y-0 right-0 z-40 flex w-full max-w-[560px] flex-col border-l bg-background shadow-xl"
+      >
+        <div class="flex items-start justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <div class="text-sm font-semibold text-foreground">工作流设计 Agent</div>
+            <div class="font-mono text-xs text-muted-foreground">design_workflow</div>
+          </div>
+          <Button variant="ghost" size="sm" class="h-8 px-2" :disabled="designing" @click="showDesigner = false">关闭</Button>
+        </div>
+        <div class="flex-1 space-y-4 overflow-auto p-4">
+          <div class="grid grid-cols-2 gap-2 rounded-md border bg-muted/20 p-1">
+            <button
+              class="rounded px-3 py-2 text-sm transition"
+              :class="designMode === 'modify' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'"
+              @click="designMode = 'modify'"
+            >
+              修改
+            </button>
+            <button
+              class="rounded px-3 py-2 text-sm transition"
+              :class="designMode === 'create' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'"
+              @click="designMode = 'create'"
+            >
+              新建
+            </button>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-xs text-muted-foreground">提示词</label>
+            <textarea
+              v-model="designPrompt"
+              class="min-h-32 w-full rounded-md border bg-background p-3 text-sm"
+              placeholder="描述希望 agent 设计或修改的工作流目标"
+            />
+          </div>
+          <Button class="w-full" :disabled="designing" @click="runWorkflowDesigner">
+            <WandSparkles class="mr-1.5 h-4 w-4" />
+            {{ designing ? '生成中' : '生成方案' }}
+          </Button>
+
+          <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {{ designError }}
+          </div>
+
+          <section v-if="designResponse?.result" class="space-y-3 rounded-md border p-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-sm font-semibold">生成结果</div>
+              <Badge v-if="designResponse.run_key" variant="outline">{{ designResponse.run_key }}</Badge>
+            </div>
+            <p class="text-sm text-muted-foreground">{{ designResponse.result.summary }}</p>
+            <div v-if="designResponse.result.notes?.length" class="space-y-1 text-xs text-muted-foreground">
+              <div v-for="note in designResponse.result.notes" :key="note">· {{ note }}</div>
+            </div>
+            <div v-if="workflowDesignDraft" class="grid gap-2 text-xs">
+              <div class="rounded-md border bg-muted/20 p-2">
+                <div class="font-mono font-medium text-foreground">{{ workflowDesignDraft.workflow_key }}</div>
+                <div class="mt-1 text-muted-foreground">{{ workflowDesignDraft.name }}</div>
+              </div>
+              <pre class="max-h-96 overflow-auto rounded-md border bg-muted/20 p-3 text-xs">{{ workflowDesignDraft.workflow_js }}</pre>
+            </div>
+          </section>
+        </div>
+        <div class="flex items-center justify-end gap-2 border-t p-4">
+          <Button variant="outline" :disabled="designing" @click="showDesigner = false">取消</Button>
+          <Button :disabled="!workflowDesignDraft || saving" @click="acceptWorkflowDesign">
+            <Check class="mr-1.5 h-4 w-4" />
+            {{ saving ? '保存中' : '采纳并保存' }}
+          </Button>
+        </div>
+      </aside>
     </section>
 
     <Dialog v-model:open="showArtifact">
