@@ -99,6 +99,52 @@ export interface ProjectProfile {
   resource_rules?: ProfileResourceRule[]
 }
 
+export interface MemoryBlock {
+  block_key: string
+  name: string
+  description: string
+  status: string
+  data_dir: string
+  worker_base_url: string | null
+  last_health?: Record<string, unknown>
+  bound_profile_count?: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProfileMemoryBinding {
+  profile_key: string
+  block_key: string | null
+  enabled: number | boolean
+}
+
+export interface MemorySearchResult {
+  status: string
+  block_key: string | null
+  items: Array<{
+    id: string
+    summary: string
+    content_preview: string
+    score: number | null
+    timestamp: string | null
+    metadata: Record<string, unknown>
+  }>
+}
+
+export interface MemoryTimelineResult {
+  status: string
+  block_key: string | null
+  items: Array<{
+    id: string
+    event_type: string
+    summary: string
+    timestamp: string | null
+    metadata: Record<string, unknown>
+  }>
+  next_cursor: string | null
+}
+
 export interface WorkflowDefinition {
   workflow_key: string
   name: string

@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.slug import make_slug
+from agent_bridge.memory_management.claude_mem.worker import ClaudeMemWorkerService
+from agent_bridge.memory_management.hooks import MemoryHookService
+from agent_bridge.memory_management.models import ACTIVE_MEMORY_STATUSES
+from agent_bridge.storage.sqlite import SQLiteStore
+
+
+class MemoryService:
+    def __init__(self, *, paths, store: SQLiteStore, admins: set[str], worker_service: Any | None = None) -> None:
+        self.paths = paths
+        self.store = store
+        self.admins = admins
+        self.worker_service = worker_service or ClaudeMemWorkerService(paths=paths)
+        self.hooks = MemoryHookService(memory_service=self, worker_service=self.worker_service)
+
+    def create_block(self, actor: str, block_key: str, name: str, description: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        normalized_key = make_slug(block_key)
+        if not normalized_key or normalized_key != block_key:
+            raise ValidationError("memory block key must be a lowercase slug")
+        if self.store.memory.get_memory_block(block_key) is not None:
+            raise ValidationError("memory block already exists")
+        return self.store.memory.create_memory_block(
+            block_key=block_key,
+            name=name,
+            description=description,
+            data_dir=str(self._default_data_dir(block_key)),
+            created_by=actor,
+        )
+
+    def list_blocks(self, actor: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        return self.store.memory.list_memory_blocks()
+
+    def get_block(self, actor: str, block_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        block = self.store.memory.get_memory_block(block_key)
+        if block is None:
+            raise NotFound("memory block not found")
+        return block
+
+    def set_block_status(self, actor: str, block_key: str, status: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if status not in ACTIVE_MEMORY_STATUSES:
+            raise ValidationError("invalid memory block status")
+        if self.store.memory.get_memory_block(block_key) is None:
+            raise NotFound("memory block not found")
+        return self.store.memory.set_memory_block_status(block_key, status)
+
+    def get_profile_binding(self, actor: str, profile_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_profile(profile_key)
+        binding = self.store.memory.get_profile_memory_binding(profile_key)
+        return binding or {"profile_key": profile_key, "block_key": None, "enabled": 1}
+
+    def set_profile_binding(
+        self,
+        actor: str,
+        profile_key: str,
+        block_key: str | None,
+        *,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        self._require_profile(profile_key)
+        if block_key:
+            block = self.store.memory.get_memory_block(block_key)
+            if block is None:
+                raise NotFound("memory block not found")
+            if block.get("status") != "active":
+                raise ValidationError("memory block is not active")
+        return self.store.memory.set_profile_memory_binding(profile_key, block_key, enabled=enabled)
+
+    def resolve_profile_block(self, actor: str, profile_key: str | None) -> dict[str, Any]:
+        if not profile_key:
+            return {"status": "not_configured", "block": None}
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None or profile.get("status") != "active":
+            return {"status": "not_configured", "block": None}
+        binding = self.store.memory.get_profile_memory_binding(profile_key)
+        if not binding or not binding.get("enabled") or not binding.get("block_key"):
+            return {"status": "not_configured", "block": None}
+        block = self.store.memory.get_memory_block(str(binding["block_key"]))
+        if block is None or block.get("status") != "active":
+            return {"status": "not_configured", "block": None}
+        return {"status": "ok", "block": block}
+
+    def search(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        query: str,
+        limit: int = 10,
+        block_key: str | None = None,
+    ) -> dict[str, Any]:
+        resolved = self._resolve_runtime_block(actor, profile_key, block_key)
+        if resolved["status"] != "ok":
+            return {"status": resolved["status"], "block_key": None, "items": []}
+        return self.worker_service.search(resolved["block"], query=query, limit=limit)
+
+    def timeline(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        limit: int = 20,
+        cursor: str | None = None,
+        block_key: str | None = None,
+    ) -> dict[str, Any]:
+        resolved = self._resolve_runtime_block(actor, profile_key, block_key)
+        if resolved["status"] != "ok":
+            return {"status": resolved["status"], "block_key": None, "items": [], "next_cursor": None}
+        return self.worker_service.timeline(resolved["block"], limit=limit, cursor=cursor)
+
+    def get_observation(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        observation_id: str,
+        block_key: str | None = None,
+    ) -> dict[str, Any]:
+        resolved = self._resolve_runtime_block(actor, profile_key, block_key)
+        if resolved["status"] != "ok":
+            return {"status": resolved["status"], "block_key": None, "item": None}
+        return self.worker_service.get_observation(resolved["block"], observation_id)
+
+    def block_health(self, actor: str, block_key: str) -> dict[str, Any]:
+        block = self.get_block(actor, block_key)
+        health = self.worker_service.health(block)
+        self.store.memory.update_memory_block_health(block_key, health)
+        return {"block_key": block_key, **health}
+
+    def _resolve_runtime_block(self, actor: str, profile_key: str | None, block_key: str | None) -> dict[str, Any]:
+        if block_key:
+            require_admin_user(actor, self.admins)
+            block = self.store.memory.get_memory_block(block_key)
+            if block is None or block.get("status") != "active":
+                return {"status": "not_configured", "block": None}
+            return {"status": "ok", "block": block}
+        return self.resolve_profile_block(actor, profile_key)
+
+    def _require_profile(self, profile_key: str) -> dict[str, Any]:
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None:
+            raise NotFound("profile not found")
+        return profile
+
+    def _default_data_dir(self, block_key: str) -> Path:
+        return self.paths.data_dir / "claude-mem" / "blocks" / block_key

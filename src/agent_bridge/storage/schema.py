@@ -236,6 +236,27 @@ CREATE TABLE IF NOT EXISTS profile_doc_cache (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS memory_blocks (
+  block_key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  data_dir TEXT NOT NULL,
+  worker_base_url TEXT,
+  last_health_json TEXT NOT NULL DEFAULT '{}',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS profile_memory_bindings (
+  profile_key TEXT PRIMARY KEY REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+  block_key TEXT REFERENCES memory_blocks(block_key) ON DELETE SET NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_memory_blocks_status ON memory_blocks(status);
+CREATE INDEX IF NOT EXISTS idx_profile_memory_bindings_block ON profile_memory_bindings(block_key);
 CREATE TABLE IF NOT EXISTS tool_call_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   log_id TEXT NOT NULL UNIQUE,

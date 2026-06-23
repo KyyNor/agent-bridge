@@ -99,6 +99,22 @@ uv run agent-bridge profile use safe-readonly --scope project --url http://127.0
 uv run agent-bridge profile config --scope project
 ```
 
+## Memory Integration
+
+Agent Bridge can expose claude-mem memory through the same MetaMCP endpoint used
+by capability profiles. Create and bind a memory block in the capability console,
+then refresh the project integration:
+
+```bash
+uv run agent-bridge profile use safe-readonly --scope project --url http://127.0.0.1:8765/mcp
+```
+
+When the profile has an active memory block, `profile use` installs Claude Code
+hooks compatible with claude-mem's original hook events. The local hook command
+only sends the Claude Code hook payload to the Agent Bridge server; the server
+resolves the profile's memory block and calls claude-mem with that block's
+server-side data directory.
+
 ## Frontend Development
 
 ```bash

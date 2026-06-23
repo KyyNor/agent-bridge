@@ -19,12 +19,14 @@ class SQLiteStore:
         from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
         from agent_bridge.storage.repositories.governance import GovernanceRepository
         from agent_bridge.storage.repositories.knowledge import KnowledgeRepository
+        from agent_bridge.storage.repositories.memory import MemoryRepository
         from agent_bridge.storage.repositories.scripts import ScriptsRepository
         from agent_bridge.storage.repositories.workflows import WorkflowsRepository
 
         self.knowledge = KnowledgeRepository(db_path, self.connect)
         self.capabilities = CapabilitiesRepository(db_path, self.connect)
         self.governance = GovernanceRepository(db_path, self.connect)
+        self.memory = MemoryRepository(db_path, self.connect)
         self.codegraph = CodeGraphRepository(db_path, self.connect)
         self.workflows = WorkflowsRepository(db_path, self.connect)
         self.scripts = ScriptsRepository(db_path, self.connect)
@@ -35,6 +37,8 @@ class SQLiteStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
@@ -169,6 +173,35 @@ class SQLiteStore:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_blocks (
+                  block_key TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  description TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT 'active',
+                  data_dir TEXT NOT NULL,
+                  worker_base_url TEXT,
+                  last_health_json TEXT NOT NULL DEFAULT '{}',
+                  created_by TEXT NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS profile_memory_bindings (
+                  profile_key TEXT PRIMARY KEY REFERENCES project_profiles(profile_key) ON DELETE CASCADE,
+                  block_key TEXT REFERENCES memory_blocks(block_key) ON DELETE SET NULL,
+                  enabled INTEGER NOT NULL DEFAULT 1,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_blocks_status ON memory_blocks(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_profile_memory_bindings_block ON profile_memory_bindings(block_key)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_failure "
                 "ON tool_call_logs(failure_owner, failure_stage, error_type)"

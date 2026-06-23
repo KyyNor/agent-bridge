@@ -279,6 +279,62 @@ def test_profile_use_writes_agent_bridge_server_and_profile_files(monkeypatch, t
     assert str(profile_file.resolve()) in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
 
 
+def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+
+        def get_profile_memory(self, profile_key):
+            return {"profile_key": profile_key, "block_key": "dev-memory", "enabled": 1}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(
+        app,
+        ["profile", "use", "safe-readonly", "--scope", "project", "--url", "http://127.0.0.1:8765/mcp", "--yes"],
+    )
+
+    assert result.exit_code == 0
+    settings = json.loads((tmp_path / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    hooks = settings["hooks"]
+    assert hooks["Setup"][0]["matcher"] == "*"
+    assert hooks["Setup"][0]["hooks"][0]["timeout"] == 300
+    assert hooks["Setup"][0]["hooks"][0]["command"].startswith("agent-bridge memory hook claude-code version-check")
+    assert hooks["SessionStart"][0]["matcher"] == "startup|clear|compact"
+    assert [hook["command"].split("claude-code ", 1)[1].split()[0] for hook in hooks["SessionStart"][0]["hooks"]] == ["start", "context"]
+    assert hooks["PostToolUse"][0]["matcher"] == "*"
+    assert hooks["PreToolUse"][0]["matcher"] == "Read"
+    assert hooks["Stop"][0]["hooks"][0]["timeout"] == 120
+
+
+def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    settings_path = tmp_path / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo user"}]}]}}),
+        encoding="utf-8",
+    )
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+
+        def get_profile_memory(self, profile_key):
+            return {"profile_key": profile_key, "block_key": None, "enabled": 1}
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(
+        app,
+        ["profile", "use", "safe-readonly", "--scope", "project", "--url", "http://127.0.0.1:8765/mcp", "--yes"],
+    )
+
+    assert result.exit_code == 0
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["hooks"]["Stop"][0]["hooks"] == [{"type": "command", "command": "echo user"}]
+
+
 def test_profile_use_render_failure_does_not_write_project_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 

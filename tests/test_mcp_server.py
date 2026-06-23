@@ -151,6 +151,55 @@ def test_mcp_exposes_builtin_direct_tools_at_top_level():
     assert tools[tool_names.index("codegraph_explore")].inputSchema["properties"]["repo"]["type"] == "string"
 
 
+def test_mcp_exposes_memory_direct_tools_at_top_level():
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
+    from agent_bridge.capability_hub.sources.builtin.base import BuiltinTool
+
+    class FakeProvider:
+        source_key = "memory"
+
+        def list_tools(self, actor, profile_key):
+            return [
+                BuiltinTool(
+                    "search",
+                    "Memory Search",
+                    "Search active memory block.",
+                    {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}},
+                    "search",
+                ),
+                BuiltinTool(
+                    "timeline",
+                    "Memory Timeline",
+                    "Read active memory timeline.",
+                    {"type": "object", "properties": {"limit": {"type": "integer"}}},
+                    "search",
+                ),
+                BuiltinTool(
+                    "get",
+                    "Memory Get",
+                    "Read memory observation.",
+                    {"type": "object", "properties": {"id": {"type": "string"}}},
+                    "detail",
+                ),
+            ]
+
+    class FakeCapabilities:
+        builtin_providers = {"memory": FakeProvider()}
+
+        async def execute(self, *, actor, service, tool_name, params, profile_key=None, workflow_context=None):
+            return {"success": True, "service": service, "tool_name": tool_name, "result": params}
+
+    class FakeService:
+        capabilities = FakeCapabilities()
+
+    mcp = create_mcp_server(FakeService(), profile_key="dev")
+    names = [tool.name for tool in asyncio.run(mcp.list_tools())]
+
+    assert "memory_search" in names
+    assert "memory_timeline" in names
+    assert "memory_get" in names
+
+
 def test_mcp_builtin_direct_tool_calls_original_builtin_tool():
     from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
     from agent_bridge.capability_hub.sources.builtin.base import BuiltinTool
@@ -334,6 +383,16 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
             "description": "内置代码仓库结构和代码查询能力",
             "tags": ["builtin", "code"],
             "tool_count": 1,
+            "status": "enabled",
+            "resources": [],
+        },
+        {
+            "kind": "builtin",
+            "service": "memory",
+            "name": "Memory",
+            "description": "内置记忆检索能力",
+            "tags": ["builtin", "memory"],
+            "tool_count": 3,
             "status": "enabled",
             "resources": [],
         },

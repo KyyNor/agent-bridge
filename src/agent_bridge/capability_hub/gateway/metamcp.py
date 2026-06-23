@@ -27,6 +27,9 @@ DIRECT_BUILTIN_TOOLS = [
     {"name": "wiki_search", "service_key": "wiki", "tool_name": "search"},
     {"name": "wiki_ask", "service_key": "wiki", "tool_name": "ask"},
     {"name": "codegraph_explore", "service_key": "codegraph", "tool_name": "codegraph_explore"},
+    {"name": "memory_search", "service_key": "memory", "tool_name": "search"},
+    {"name": "memory_timeline", "service_key": "memory", "tool_name": "timeline"},
+    {"name": "memory_get", "service_key": "memory", "tool_name": "get"},
 ]
 
 

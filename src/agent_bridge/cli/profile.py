@@ -16,6 +16,30 @@ from agent_bridge.capability_hub.profiles.docs import (  # noqa: E402
 )
 
 
+AGENT_BRIDGE_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
+
+CLAUDE_MEM_COMPATIBLE_HOOKS = {
+    "Setup": [
+        {"matcher": "*", "actions": [("version-check", 300)]},
+    ],
+    "SessionStart": [
+        {"matcher": "startup|clear|compact", "actions": [("start", 60), ("context", 60)]},
+    ],
+    "UserPromptSubmit": [
+        {"matcher": None, "actions": [("session-init", 60)]},
+    ],
+    "PostToolUse": [
+        {"matcher": "*", "actions": [("observation", 120)]},
+    ],
+    "PreToolUse": [
+        {"matcher": "Read", "actions": [("file-context", 60)]},
+    ],
+    "Stop": [
+        {"matcher": None, "actions": [("summarize", 120)]},
+    ],
+}
+
+
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
     parts = [f"{key}: {data[key]}" for key in keys if key in data]
     typer.echo(", ".join(parts) if parts else data)
@@ -42,6 +66,147 @@ def _write_profile_doc(scope: str, profile: str, markdown: str) -> Path:
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     profile_path.write_text(markdown, encoding="utf-8")
     return profile_path
+
+
+def _claude_settings_path(scope: str) -> Path:
+    if scope == "project":
+        return Path.cwd() / ".claude" / "settings.local.json"
+    if scope == "user":
+        return Path.home() / ".claude" / "settings.json"
+    raise ValueError("scope 必须是 project 或 user")
+
+
+def _agent_bridge_hook_command(
+    action: str,
+    *,
+    profile: str,
+    server_url: str,
+    event: str,
+    matcher: str | None,
+    timeout: int,
+) -> str:
+    parts = [
+        "agent-bridge",
+        "memory",
+        "hook",
+        "claude-code",
+        action,
+        "--profile",
+        profile,
+        "--server-url",
+        server_url,
+        "--event",
+        event,
+        "--timeout",
+        str(timeout),
+        "--agent-bridge-hook-id",
+        "agent-bridge-memory",
+    ]
+    if matcher is not None:
+        parts.extend(["--matcher", matcher])
+    return " ".join(parts)
+
+
+def _load_claude_settings(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise RuntimeError(f"Claude settings must be a JSON object: {path}")
+    return loaded
+
+
+def _strip_agent_bridge_hooks(settings: dict[str, Any]) -> dict[str, Any]:
+    copied = dict(settings)
+    raw_hooks = copied.get("hooks")
+    if not isinstance(raw_hooks, dict):
+        return copied
+    cleaned: dict[str, Any] = {}
+    for event, entries in raw_hooks.items():
+        if not isinstance(entries, list):
+            cleaned[event] = entries
+            continue
+        kept_entries = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                kept_entries.append(entry)
+                continue
+            hooks = entry.get("hooks")
+            if not isinstance(hooks, list):
+                kept_entries.append(entry)
+                continue
+            kept_hooks = [
+                hook
+                for hook in hooks
+                if not (isinstance(hook, dict) and AGENT_BRIDGE_HOOK_MARKER in str(hook.get("command") or ""))
+            ]
+            if kept_hooks:
+                new_entry = dict(entry)
+                new_entry["hooks"] = kept_hooks
+                kept_entries.append(new_entry)
+        if kept_entries:
+            cleaned[event] = kept_entries
+    if cleaned:
+        copied["hooks"] = cleaned
+    else:
+        copied.pop("hooks", None)
+    return copied
+
+
+def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url: str) -> dict[str, Any]:
+    copied = _strip_agent_bridge_hooks(settings)
+    hooks = copied.get("hooks")
+    if not isinstance(hooks, dict):
+        hooks = {}
+    else:
+        hooks = dict(hooks)
+    for event, specs in CLAUDE_MEM_COMPATIBLE_HOOKS.items():
+        event_entries = list(hooks.get(event) or [])
+        for spec in specs:
+            matcher = spec["matcher"]
+            entry: dict[str, Any] = {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "shell": "bash",
+                        "command": _agent_bridge_hook_command(
+                            action,
+                            profile=profile,
+                            server_url=server_url,
+                            event=event,
+                            matcher=matcher,
+                            timeout=timeout,
+                        ),
+                        "timeout": timeout,
+                    }
+                    for action, timeout in spec["actions"]
+                ]
+            }
+            if matcher is not None:
+                entry["matcher"] = matcher
+            event_entries.append(entry)
+        hooks[event] = event_entries
+    copied["hooks"] = hooks
+    return copied
+
+
+def _write_memory_hooks(scope: str, *, profile: str, server_url: str, enabled: bool) -> Path:
+    settings_path = _claude_settings_path(scope)
+    settings = _load_claude_settings(settings_path)
+    updated = _install_memory_hooks(settings, profile=profile, server_url=server_url) if enabled else _strip_agent_bridge_hooks(settings)
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+    return settings_path
+
+
+def _profile_memory_hooks_enabled(profile: str) -> bool:
+    from agent_bridge.cli.app import _run_client
+
+    try:
+        binding = _run_client(lambda client: client.get_profile_memory(profile))
+    except AttributeError:
+        return False
+    return bool(binding.get("enabled")) and bool(binding.get("block_key"))
 
 
 @profile_app.command("create")
@@ -115,6 +280,7 @@ def profile_use(
         _load_json_file,
         _run_client,
         _resolve_metamcp_scope,
+        _server_url_from_mcp_url,
         _with_metamcp_config,
     )
 
@@ -143,11 +309,18 @@ def profile_use(
             json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        hooks_path = _write_memory_hooks(
+            resolved_scope,
+            profile=profile,
+            server_url=_server_url_from_mcp_url(url),
+            enabled=_profile_memory_hooks_enabled(profile),
+        )
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)
         raise typer.Exit(1) from None
     typer.echo(f"已写入: {path}")
     typer.echo(f"已写入: {profile_path}")
+    typer.echo(f"已写入: {hooks_path}")
 
 
 @profile_app.command("refresh")

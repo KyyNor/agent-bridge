@@ -34,6 +34,7 @@ from agent_bridge.core.domain import (
 from agent_bridge.knowledge_management.docs_knowledge.backends.mock import MockBackend
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry, create_registry_from_db
 from agent_bridge.knowledge_management.docs_knowledge.backends.weknora import WeknoraBackend
+from agent_bridge.memory_management.service import MemoryService
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -72,6 +73,7 @@ class AgentBridgeService:
         self.workflows = WorkflowService(store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
+        self.memory = MemoryService(paths=paths, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,
@@ -80,12 +82,14 @@ class AgentBridgeService:
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capability_hub.sources.builtin.codegraph import CodeGraphBuiltinProvider
+        from agent_bridge.capability_hub.sources.builtin.memory import MemoryBuiltinProvider
         from agent_bridge.capability_hub.sources.builtin.platform import PlatformBuiltinProvider
         from agent_bridge.capability_hub.sources.builtin.wiki import WikiBuiltinProvider
 
         self.capabilities.register_builtin_provider(PlatformBuiltinProvider(self))
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
         self.capabilities.register_builtin_provider(CodeGraphBuiltinProvider(self.codegraph, self.governance))
+        self.capabilities.register_builtin_provider(MemoryBuiltinProvider(self))
 
     @classmethod
     def create(cls, paths: AgentBridgePaths, admins: set[str]) -> "AgentBridgeService":

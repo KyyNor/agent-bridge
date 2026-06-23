@@ -4,6 +4,8 @@ import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import type {
   ProjectProfile,
+  MemoryBlock,
+  ProfileMemoryBinding,
   ProfileDocRender,
   ProfilePinPreview,
   ProfilePinRule,
@@ -39,6 +41,11 @@ const pendingResources = ref<ProfileResourceRule[]>([])
 const allServices = ref<CatalogSource[]>([])
 const allKbs = ref<KnowledgeBaseSummary[]>([])
 const allRepos = ref<CodeRepository[]>([])
+const allMemoryBlocks = ref<MemoryBlock[]>([])
+const profileMemory = ref<ProfileMemoryBinding | null>(null)
+const pendingMemoryBlock = ref('')
+const memoryLoaded = ref(false)
+const memoryError = ref('')
 const configSaving = ref(false)
 const configError = ref('')
 const saveError = ref('')
@@ -85,6 +92,10 @@ const filterTabs = computed(() => [
 
 const allowedServices = computed(() =>
   allServices.value.filter(svc => isServiceAllowed(svc.source_key))
+)
+
+const activeMemoryBlocks = computed(() =>
+  allMemoryBlocks.value.filter(block => block.status === 'active')
 )
 
 const autoPinGroups = computed(() =>
@@ -177,6 +188,7 @@ async function openConfig(p: ProjectProfile) {
     configLoading.value = false
     return
   }
+  await loadProfileMemory(p.profile_key)
   configLoading.value = false
   void loadProfilePins(p.profile_key)
   void loadProfileDoc(p.profile_key)
@@ -191,6 +203,11 @@ function resetConfigState() {
   configResources.value = []
   pendingRules.value = []
   pendingResources.value = []
+  allMemoryBlocks.value = []
+  profileMemory.value = null
+  pendingMemoryBlock.value = ''
+  memoryLoaded.value = false
+  memoryError.value = ''
   pinPreview.value = null
   pendingPins.value = []
   pinMode.value = 'disabled'
@@ -203,6 +220,29 @@ function resetConfigState() {
 
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
+}
+
+async function loadProfileMemory(profileKey: string) {
+  memoryError.value = ''
+  memoryLoaded.value = false
+  try {
+    const [memoryBlocks, memoryBinding] = await Promise.all([
+      api.listMemoryBlocks(),
+      api.getProfileMemory(profileKey),
+    ])
+    if (configProfile.value?.profile_key !== profileKey) return
+    allMemoryBlocks.value = memoryBlocks
+    profileMemory.value = memoryBinding
+    pendingMemoryBlock.value = memoryBinding.block_key || ''
+    memoryLoaded.value = true
+  } catch (e: unknown) {
+    if (configProfile.value?.profile_key === profileKey) {
+      allMemoryBlocks.value = []
+      profileMemory.value = null
+      pendingMemoryBlock.value = ''
+      memoryError.value = `加载记忆绑定失败：${errorMessage(e)}`
+    }
+  }
 }
 
 async function loadProfilePins(profileKey: string) {
@@ -313,6 +353,13 @@ async function saveConfig() {
     await api.replaceProfileRules(configProfile.value.profile_key, pendingRules.value)
     await api.replaceProfileResources(configProfile.value.profile_key, pendingResources.value)
     if (pinsLoaded.value) await savePins(true)
+    if (memoryLoaded.value) {
+      profileMemory.value = await api.setProfileMemory(
+        configProfile.value.profile_key,
+        pendingMemoryBlock.value || null,
+        true,
+      )
+    }
     await refreshProfileDoc(true)
     configRules.value = [...pendingRules.value]
     configResources.value = [...pendingResources.value]
@@ -519,6 +566,40 @@ async function refreshProfileDoc(raiseError = false) {
               </Button>
             </div>
           </div>
+
+          <!-- Memory Binding -->
+          <section class="space-y-3 rounded-lg border border-border p-4">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3 class="text-sm font-medium text-foreground">记忆</h3>
+                <p class="mt-1 text-xs text-muted-foreground">为此能力平面绑定一个 active memory block。</p>
+              </div>
+              <Badge v-if="profileMemory?.block_key" variant="outline" class="max-w-full break-all">
+                {{ profileMemory.block_key }}
+              </Badge>
+              <Badge v-else variant="secondary" class="text-muted-foreground">未绑定</Badge>
+            </div>
+            <div v-if="memoryError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
+              {{ memoryError }}
+            </div>
+            <select
+              v-model="pendingMemoryBlock"
+              :disabled="!!memoryError"
+              class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="">未绑定</option>
+              <option
+                v-for="block in activeMemoryBlocks"
+                :key="block.block_key"
+                :value="block.block_key"
+              >
+                {{ block.name }} ({{ block.block_key }})
+              </option>
+            </select>
+            <p class="break-all text-xs text-muted-foreground">
+              运行 agent-bridge profile use {{ configProfile?.profile_key }} --scope project --url http://127.0.0.1:8765/mcp 安装或刷新 Claude Code hooks。
+            </p>
+          </section>
 
           <!-- Allow List -->
           <div>
