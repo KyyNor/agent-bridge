@@ -237,6 +237,13 @@ class ScriptTestRunRequest(BaseModel):
         return value
 
 
+class DesignAgentRequest(BaseModel):
+    mode: str = "modify"
+    prompt: str
+    current: dict[str, Any] = Field(default_factory=dict)
+    profile_key: str | None = None
+
+
 class RuntimeWorkflowSetTaskRequest(BaseModel):
     tasks: list[dict[str, Any]] = Field(default_factory=list)
 

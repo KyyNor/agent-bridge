@@ -51,6 +51,7 @@ class AgentRunResult:
     error: str | None = None
     run_dir: str = ""
     session_id: str | None = None
+    run_key: str | None = None
     duration_ms: int = 0
     cost_usd: float | None = None
     num_turns: int | None = None
@@ -274,8 +275,9 @@ class AgentService:
     ) -> None:
         """Record this run in the agent_runs log. Logging failures never break the run."""
         try:
+            run_key = new_run_id(agent_name or "agent")
             self.store.agent_runs.create(
-                run_key=new_run_id(agent_name or "agent"),
+                run_key=run_key,
                 agent_name=agent_name or "agent",
                 profile_key=profile,
                 workflow_key=workflow_key or None,
@@ -293,6 +295,7 @@ class AgentService:
                 result=result.result,
                 events=events,
             )
+            result.run_key = run_key
         except Exception:
             logger.exception("Failed to persist agent_run log")
 

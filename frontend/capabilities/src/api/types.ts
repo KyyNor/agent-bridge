@@ -436,6 +436,42 @@ export interface AgentRun {
   events?: AgentRunEvent[]
 }
 
+export interface WorkflowDesignResult {
+  summary: string
+  notes?: string[]
+  workflow: {
+    workflow_key: string
+    name: string
+    description: string
+    profile_key: string
+    status: string
+    workflow_js: string
+  }
+}
+
+export interface ScriptDesignResult {
+  summary: string
+  notes?: string[]
+  script: {
+    script_key: string
+    name: string
+    description: string
+    language: string
+    code: string
+    status: string
+    owner_type: string
+    owner_key: string
+  }
+}
+
+export interface DesignAgentResponse<T> {
+  ok: boolean
+  error: string | null
+  run_key: string | null
+  result: T | null
+  agent_run?: AgentRun | null
+}
+
 export interface CodeRepository {
   repo_key: string
   name: string

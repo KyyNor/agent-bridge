@@ -34,6 +34,44 @@
 - `schema` 是 JSON Schema，强制子 agent 用结构化输出返回；脚本据此做控制流分支。优先 `additionalProperties: false` + 明确 `required`。
 - `parallel` 的每个元素必须是 thunk `() => agent(...)`，不是直接 `agent(...)`。
 
+## 子 agent 输出稳定性
+
+优先用 `agent(prompt, { schema })` 约束结构化返回；这样 workflow.js 可以直接按字段做控制流，不需要解析自然语言。
+
+如果确实需要接收子 agent 的文本输出（例如让子 agent 生成一段 JSON 字符串、Markdown 片段，或读取外部工具返回的混合文本），请在 workflow.js 里先做**纯字符串清理**，再继续使用。常见污染包括：
+
+- `<think>...</think>` 思考标签。
+- ```json / ```markdown 代码围栏。
+- JSON 前后的解释、寒暄、日志或其它多余输出。
+
+可复用下面这类 helper（只做字符串处理，不直接调工具）：
+
+```js
+function stripThink(text) {
+  return String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+}
+
+function stripFence(text) {
+  return stripThink(text)
+    .replace(/^```[a-zA-Z0-9_-]*\s*/g, '')
+    .replace(/\s*```$/g, '')
+    .trim()
+}
+
+function extractJsonText(text) {
+  const cleaned = stripFence(text)
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  return start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned
+}
+```
+
+要求：
+
+- 解析前先剥离 `<think>` 和围栏，再从首个 `{` 到最后一个 `}` 截取 JSON，降低“多说一句话”导致失败的概率。
+- 能用 `schema` 时不要改用手写 JSON 解析；手写清理只作为处理不可控文本的兜底。
+- 清理后的值仍要按固定返回格式校验，尤其是 `status`、`task_key`、`task_version`、`artifact.file` 和 `format`。
+
 ## 骨架（正确范式，通用版）
 
 ```js
