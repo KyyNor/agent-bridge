@@ -8,11 +8,13 @@ from typing import Any
 
 from agent_bridge.memory_management.claude_mem.client import ClaudeMemClient
 from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
+from agent_bridge.plugin_runtime import GitPluginRuntime
 
 
 class ClaudeMemWorkerService:
     def __init__(self, *, paths) -> None:
         self.paths = paths
+        self.plugin_runtime = GitPluginRuntime(paths)
         self._clients: dict[str, ClaudeMemClient] = {}
 
     def health(self, block: dict[str, Any]) -> dict[str, Any]:
@@ -135,6 +137,8 @@ class ClaudeMemWorkerService:
         candidates: list[Path] = []
         if explicit:
             candidates.append(Path(explicit).expanduser())
+        candidates.append(self.plugin_runtime.plugin_repo_dir("claude-mem"))
+        candidates.append(self.plugin_runtime.plugin_repo_dir("claude-mem") / "plugin")
         claude_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")).expanduser()
         cache_root = claude_dir / "plugins" / "cache" / "thedotmack" / "claude-mem"
         if cache_root.exists():
@@ -146,4 +150,32 @@ class ClaudeMemWorkerService:
                 plugin_dir / "scripts" / "worker-service.cjs"
             ).exists():
                 return plugin_dir
+        return None
+
+    def ensure_plugin(self, git_url: str) -> dict[str, Any]:
+        result = self.plugin_runtime.ensure_repo(plugin_key="claude-mem", git_url=git_url)
+        if result["status"] in {"failed", "skipped"}:
+            return result
+        plugin_dir = self._managed_plugin_dir()
+        if plugin_dir is None:
+            return {
+                "status": "failed",
+                "plugin_key": "claude-mem",
+                "repo_dir": str(self.plugin_runtime.plugin_repo_dir("claude-mem")),
+                "message": "claude-mem plugin directory was not found after clone/update",
+            }
+        install = self.plugin_runtime.run_install(
+            plugin_key="claude-mem",
+            cwd=plugin_dir,
+            command=["bun", "install"],
+        )
+        if install["status"] == "failed":
+            return install
+        return {**result, "install": install, "plugin_dir": str(plugin_dir)}
+
+    def _managed_plugin_dir(self) -> Path | None:
+        repo_dir = self.plugin_runtime.plugin_repo_dir("claude-mem")
+        for candidate in (repo_dir / "plugin", repo_dir):
+            if (candidate / "scripts").is_dir():
+                return candidate
         return None

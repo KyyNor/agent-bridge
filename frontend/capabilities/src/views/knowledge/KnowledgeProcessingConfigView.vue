@@ -16,6 +16,9 @@ const loading = ref(true)
 const syncConfig = ref<KnowledgeSyncConfig>({
   code_sync_cron: '0 * * * *',
   ua_git_url: '',
+  ua_plugin_update_cron: '0 3 * * 0',
+  claude_mem_git_url: '',
+  claude_mem_plugin_update_cron: '30 3 * * 0',
   understand_cron: '0 2 * * *',
   doc_sync_cron: '*/30 * * * *',
   workflow_start_time: '22:00',
@@ -103,6 +106,8 @@ function formatNextRuns(expr: string): string | null {
 
 const codeSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.code_sync_cron))
 const understandNextRuns = computed(() => formatNextRuns(syncConfig.value.understand_cron))
+const uaPluginUpdateNextRuns = computed(() => formatNextRuns(syncConfig.value.ua_plugin_update_cron || '0 3 * * 0'))
+const claudeMemPluginUpdateNextRuns = computed(() => formatNextRuns(syncConfig.value.claude_mem_plugin_update_cron || '30 3 * * 0'))
 const docSyncNextRuns = computed(() => formatNextRuns(syncConfig.value.doc_sync_cron || '*/30 * * * *'))
 const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/
 const workflowTimesValid = computed(() =>
@@ -127,6 +132,8 @@ const understandTimeoutValid = computed(() =>
 const cronValid = computed(() =>
   codeSyncNextRuns.value !== null
   && understandNextRuns.value !== null
+  && uaPluginUpdateNextRuns.value !== null
+  && claudeMemPluginUpdateNextRuns.value !== null
   && docSyncNextRuns.value !== null
   && workflowTimesValid.value
   && maxRunsValid.value
@@ -301,6 +308,18 @@ async function deleteBackend(slug: string) {
           <span v-if="understandNextRuns" class="text-xs text-muted-foreground font-mono">{{ understandNextRuns }}</span>
           <span v-else class="text-xs text-destructive">表达式无效</span>
         </div>
+        <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">UA 插件更新 <span class="text-xs text-muted-foreground">(每周默认)</span></div>
+          <Input v-model="syncConfig.ua_plugin_update_cron" placeholder="0 3 * * 0" class="w-40 font-mono text-xs" />
+          <span v-if="uaPluginUpdateNextRuns" class="text-xs text-muted-foreground font-mono">{{ uaPluginUpdateNextRuns }}</span>
+          <span v-else class="text-xs text-destructive">表达式无效</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">Memory 插件更新 <span class="text-xs text-muted-foreground">(claude-mem)</span></div>
+          <Input v-model="syncConfig.claude_mem_plugin_update_cron" placeholder="30 3 * * 0" class="w-40 font-mono text-xs" />
+          <span v-if="claudeMemPluginUpdateNextRuns" class="text-xs text-muted-foreground font-mono">{{ claudeMemPluginUpdateNextRuns }}</span>
+          <span v-else class="text-xs text-destructive">表达式无效</span>
+        </div>
         <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">MCP 超时 <span class="text-xs text-muted-foreground">(秒)</span></div>
           <Input v-model.number="syncConfig.mcp_timeout_seconds" type="number" min="1" placeholder="150" class="w-32 font-mono text-sm" />
@@ -431,6 +450,38 @@ async function deleteBackend(slug: string) {
             </div>
             <div>
               <div class="mb-2 flex items-center gap-3">
+                <span class="text-xs text-muted-foreground">插件更新</span>
+                <Badge :variant="schedulerStatus.plugin_update.running ? 'secondary' : 'outline'" :class="schedulerStatus.plugin_update.running ? 'bg-green-50 text-green-700' : ''">
+                  {{ schedulerStatus.plugin_update.running ? '运行中' : '已暂停' }}
+                </Badge>
+              </div>
+              <div v-if="schedulerStatus.plugin_update.jobs.length === 0" class="py-2 text-center text-xs text-muted-foreground">
+                {{ schedulerStatus.plugin_update.running ? '没有配置插件 Git URL' : '—' }}
+              </div>
+              <table v-else class="w-full">
+                <thead>
+                  <tr class="border-b border-border">
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">插件</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">下次执行</th>
+                    <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">最近进度</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="j in schedulerStatus.plugin_update.jobs" :key="j.plugin_key || j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                    <td class="px-3 py-2 text-sm font-mono">{{ j.plugin_key || j.repo_key }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
+                    <td class="px-3 py-2 text-xs text-muted-foreground">
+                      <Badge v-if="j.progress" variant="secondary" class="mr-2 text-[11px]" :class="runBadgeClass(j.progress.status)">
+                        {{ runLabel(j.progress.status) }}
+                      </Badge>
+                      <span>{{ j.progress?.message || '暂无执行记录' }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <div class="mb-2 flex items-center gap-3">
                 <span class="text-xs text-muted-foreground">知识同步</span>
                 <Badge :variant="schedulerStatus.doc_sync?.running ? 'secondary' : 'outline'" :class="schedulerStatus.doc_sync?.running ? 'bg-green-50 text-green-700' : ''">
                   {{ schedulerStatus.doc_sync?.running ? '运行中' : '已暂停' }}
@@ -539,6 +590,11 @@ async function deleteBackend(slug: string) {
         <div class="flex items-center gap-3">
           <div class="text-sm shrink-0 whitespace-nowrap">UA Git URL <span class="text-xs text-muted-foreground">(Understand Anything)</span></div>
           <Input v-model="syncConfig.ua_git_url" placeholder="https://github.com/Lum1104/Understand-Anything.git" class="font-mono text-xs flex-1" />
+          <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">保存</Button>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="text-sm shrink-0 whitespace-nowrap">Memory Git URL <span class="text-xs text-muted-foreground">(claude-mem)</span></div>
+          <Input v-model="syncConfig.claude_mem_git_url" placeholder="https://github.com/thedotmack/claude-mem.git" class="font-mono text-xs flex-1" />
           <Button @click="saveSyncConfig()" :disabled="configSaving" size="sm">保存</Button>
         </div>
         <div class="flex items-center justify-between border-t border-border pt-4">

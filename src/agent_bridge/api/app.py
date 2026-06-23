@@ -29,14 +29,20 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.align_backends()
         except Exception:
             pass
+        try:
+            service.ensure_managed_plugins()
+        except Exception:
+            pass
         service.codegraph_scheduler.start()
         service.understand_scheduler.start()
+        service.plugin_update_scheduler.start()
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
         yield
         service.codegraph.ua_client.stop_all_dashboards()
         service.workflow_scheduler.stop()
         service.doc_sync_scheduler.stop()
+        service.plugin_update_scheduler.stop()
         service.understand_scheduler.stop()
         service.codegraph_scheduler.stop()
 
@@ -73,6 +79,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.skills.admins = reloaded
             service.scripts.admins = reloaded
             service.memory.admins = reloaded
+            service.plugin_update_scheduler._admins = reloaded
             return await call_next(request)
 
     def save_upload(file: UploadFile) -> Path:

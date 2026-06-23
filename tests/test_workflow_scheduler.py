@@ -573,6 +573,31 @@ def test_sync_config_defaults_mcp_timeout_seconds_to_150(wm_paths):
     assert config["mcp_timeout_seconds"] == 150
 
 
+def test_sync_config_round_trips_plugin_update_config(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.save_sync_config(
+        actor="root",
+        code_sync_cron="0 * * * *",
+        ua_git_url="https://example.test/ua.git",
+        ua_plugin_update_cron="0 4 * * 0",
+        claude_mem_git_url="https://example.test/claude-mem.git",
+        claude_mem_plugin_update_cron="30 4 * * 0",
+        understand_cron="0 2 * * *",
+        doc_sync_cron="*/30 * * * *",
+        workflow_start_time="22:00",
+        workflow_stop_time="07:00",
+    )
+
+    config = svc.store.get_sync_config()
+    assert config["ua_git_url"] == "https://example.test/ua.git"
+    assert config["ua_plugin_update_cron"] == "0 4 * * 0"
+    assert config["claude_mem_git_url"] == "https://example.test/claude-mem.git"
+    assert config["claude_mem_plugin_update_cron"] == "30 4 * * 0"
+
+
 def test_scheduler_reads_workflow_max_runtime_from_config(wm_paths):
     from agent_bridge.app.service import AgentBridgeService
     from agent_bridge.automation.workflows.runner import FakeWorkflowRunner

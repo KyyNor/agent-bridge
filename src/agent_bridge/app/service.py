@@ -40,6 +40,7 @@ from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.service import ScriptService
 from agent_bridge.system_config.skills.service import SkillService
+from agent_bridge.system_config.plugin_update_scheduler import PluginUpdateScheduler
 from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 from agent_bridge.automation.workflows.service import WorkflowService
 
@@ -74,6 +75,7 @@ class AgentBridgeService:
         self.skills = SkillService(store=store, admins=admins)
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
         self.memory = MemoryService(paths=paths, store=store, admins=admins)
+        self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,
@@ -119,6 +121,27 @@ class AgentBridgeService:
                     adapter.ensure_hybrid_agent()
                 except Exception:
                     logger.warning("确保后端 '%s' 混合智能体失败", slug, exc_info=True)
+
+    def ensure_managed_plugins(self) -> dict[str, Any]:
+        config = self.store.get_sync_config()
+        results: dict[str, Any] = {}
+        ua_git_url = str(config.get("ua_git_url") or "").strip()
+        if ua_git_url:
+            results["understand-anything"] = self.codegraph.ensure_understand_plugin(ua_git_url)
+        claude_mem_git_url = str(config.get("claude_mem_git_url") or "").strip()
+        if claude_mem_git_url:
+            results["claude-mem"] = self.memory.worker_service.ensure_plugin(claude_mem_git_url)
+        return results
+
+    def update_understand_plugin(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        git_url = str(self.store.get_sync_config().get("ua_git_url") or "").strip()
+        return self.codegraph.ensure_understand_plugin(git_url)
+
+    def update_claude_mem_plugin(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        git_url = str(self.store.get_sync_config().get("claude_mem_git_url") or "").strip()
+        return self.memory.worker_service.ensure_plugin(git_url)
 
     def create_kb(self, actor: str, slug: str, name: str, description: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -369,6 +392,9 @@ class AgentBridgeService:
         *,
         code_sync_cron: str,
         ua_git_url: str = "",
+        ua_plugin_update_cron: str = "0 3 * * 0",
+        claude_mem_git_url: str = "",
+        claude_mem_plugin_update_cron: str = "30 3 * * 0",
         understand_cron: str = "0 2 * * *",
         doc_sync_cron: str = "*/30 * * *",
         workflow_start_time: str = "22:00",
@@ -383,6 +409,9 @@ class AgentBridgeService:
         result = self.store.save_sync_config(
             code_sync_cron=code_sync_cron,
             ua_git_url=ua_git_url,
+            ua_plugin_update_cron=ua_plugin_update_cron,
+            claude_mem_git_url=claude_mem_git_url,
+            claude_mem_plugin_update_cron=claude_mem_plugin_update_cron,
             understand_cron=understand_cron,
             doc_sync_cron=doc_sync_cron,
             workflow_start_time=workflow_start_time,
@@ -395,6 +424,7 @@ class AgentBridgeService:
         )
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()
+        self.plugin_update_scheduler.refresh()
         self.doc_sync_scheduler.refresh()
         self.workflow_scheduler.refresh()
         return result
@@ -404,6 +434,7 @@ class AgentBridgeService:
         return {
             "code_sync": self.codegraph_scheduler.get_status(),
             "understand": self.understand_scheduler.get_status(),
+            "plugin_update": self.plugin_update_scheduler.get_status(),
             "doc_sync": self.doc_sync_scheduler.get_status(),
             "workflow": self.workflow_scheduler.get_status(),
         }

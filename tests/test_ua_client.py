@@ -66,3 +66,9 @@ def test_analyze_uses_agent_sdk_options(wm_paths, tmp_path: Path, monkeypatch: p
     assert options["skills"] == ["understand"]
     assert options["include_partial_messages"] is True
     assert "session_1" in (result.output or "")
+
+
+def test_understand_anything_repo_lives_under_agent_bridge_plugins(wm_paths) -> None:
+    client = UnderstandAnythingClient(root=wm_paths.root)
+
+    assert client._ua_repo_dir() == wm_paths.root / "plugins" / "understand-anything"

@@ -18,6 +18,7 @@ from agent_bridge.knowledge_management.code_knowledge.ua_client import Understan
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.plugin_runtime import GitPluginRuntime
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -43,6 +44,7 @@ class CodeGraphService:
         self.client = codegraph_client or CodeGraphClient()
         self.mcp_client = mcp_client or CodeGraphMcpClient()
         self.ua_client = ua_client or UnderstandAnythingClient(root=paths.root, agent_service=agent_service)
+        self.plugin_runtime = GitPluginRuntime(paths)
 
     def _mcp_timeout_seconds(self) -> float:
         config = self.store.get_sync_config()
@@ -371,6 +373,9 @@ class CodeGraphService:
             "message": avail.message,
             "ua_git_url_configured": bool(ua_git_url),
         }
+
+    def ensure_understand_plugin(self, git_url: str) -> dict[str, Any]:
+        return self.plugin_runtime.ensure_repo(plugin_key="understand-anything", git_url=git_url)
 
     def analyze_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

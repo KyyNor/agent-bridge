@@ -189,6 +189,9 @@ class CodeRepoCategoryRequest(BaseModel):
 class KnowledgeSyncConfigRequest(BaseModel):
     code_sync_cron: str = "0 * * * *"
     ua_git_url: str = ""
+    ua_plugin_update_cron: str = "0 3 * * 0"
+    claude_mem_git_url: str = ""
+    claude_mem_plugin_update_cron: str = "30 3 * * 0"
     understand_cron: str = "0 2 * * *"
     doc_sync_cron: str = "*/30 * * * *"
     workflow_start_time: str = "22:00"

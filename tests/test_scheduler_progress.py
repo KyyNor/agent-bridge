@@ -5,6 +5,7 @@ from typing import Any
 from agent_bridge.knowledge_management.code_knowledge.scheduler import CodeGraphScheduler
 from agent_bridge.knowledge_management.code_knowledge.understand_scheduler import UnderstandingScheduler
 from agent_bridge.knowledge_management.docs_knowledge.doc_sync_scheduler import DocSyncScheduler
+from agent_bridge.system_config.plugin_update_scheduler import PluginUpdateScheduler
 
 
 class _SyncConfigStore:
@@ -13,6 +14,10 @@ class _SyncConfigStore:
             "code_sync_cron": "0 * * * *",
             "understand_cron": "0 2 * * *",
             "doc_sync_cron": "*/30 * * * *",
+            "ua_git_url": "",
+            "ua_plugin_update_cron": "0 3 * * 0",
+            "claude_mem_git_url": "",
+            "claude_mem_plugin_update_cron": "30 3 * * 0",
         }
 
 
@@ -117,3 +122,36 @@ def test_understanding_scheduler_logs_failed_runs(caplog) -> None:
     assert progress["message"] == "代码理解失败"
     assert progress["error"] == "分析超时（600s）"
     assert any("定时 Understand 分析失败 agent-bridge" in record.message for record in caplog.records)
+
+
+def test_plugin_update_scheduler_schedules_configured_plugins() -> None:
+    class Store(_SyncConfigStore):
+        def get_sync_config(self) -> dict[str, str]:
+            config = super().get_sync_config()
+            config.update({
+                "ua_git_url": "https://example.test/ua.git",
+                "claude_mem_git_url": "https://example.test/claude-mem.git",
+            })
+            return config
+
+    class Service:
+        def update_understand_plugin(self, actor: str) -> dict[str, str]:
+            assert actor == "root"
+            return {"status": "updated", "message": "ua updated"}
+
+        def update_claude_mem_plugin(self, actor: str) -> dict[str, str]:
+            assert actor == "root"
+            return {"status": "updated", "message": "memory updated"}
+
+    scheduler = PluginUpdateScheduler(Service(), Store(), {"root"})
+    scheduler.start()
+    try:
+        status = scheduler.get_status()
+        assert [job["plugin_key"] for job in status["jobs"]] == ["understand-anything", "claude-mem"]
+        scheduler._run_plugin_update("claude-mem")
+        progress = scheduler.get_status()["jobs"][1]["progress"]
+    finally:
+        scheduler.stop()
+
+    assert progress["status"] == "succeeded"
+    assert progress["message"] == "memory updated"

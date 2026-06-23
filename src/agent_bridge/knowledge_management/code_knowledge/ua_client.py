@@ -221,8 +221,8 @@ class UnderstandAnythingClient:
 
     def _ua_repo_dir(self) -> Path:
         if self._root is not None:
-            return self._root / "understand-anything-plugin"
-        return Path.home() / ".understand-anything" / "repo"
+            return self._root / "plugins" / "understand-anything"
+        return Path.home() / ".agent-bridge" / "plugins" / "understand-anything"
 
     def _ua_skills_src_dir(self) -> Path:
         return self._ua_repo_dir() / "understand-anything-plugin" / "skills"
@@ -259,7 +259,7 @@ class UnderstandAnythingClient:
         repo_dir = self._ua_repo_dir()
         skills_src = self._ua_skills_src_dir()
 
-        # Clone or update the shared repo
+        # Clone or update the shared repo.
         if not (repo_dir / ".git").is_dir():
             logger.info("正在克隆 UA 仓库 %s", ua_git_url)
             try:

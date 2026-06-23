@@ -134,6 +134,9 @@ class SQLiteStore:
                 "knowledge_sync_config",
                 {
                     "ua_git_url": "TEXT NOT NULL DEFAULT ''",
+                    "ua_plugin_update_cron": "TEXT NOT NULL DEFAULT '0 3 * * 0'",
+                    "claude_mem_git_url": "TEXT NOT NULL DEFAULT ''",
+                    "claude_mem_plugin_update_cron": "TEXT NOT NULL DEFAULT '30 3 * * 0'",
                 },
             )
             self._ensure_columns(
@@ -525,6 +528,9 @@ class SQLiteStore:
         *,
         code_sync_cron: str,
         ua_git_url: str = "",
+        ua_plugin_update_cron: str = "0 3 * * 0",
+        claude_mem_git_url: str = "",
+        claude_mem_plugin_update_cron: str = "30 3 * * 0",
         understand_cron: str = "0 2 * * *",
         doc_sync_cron: str = "*/30 * * * *",
         workflow_start_time: str = "22:00",
@@ -538,6 +544,9 @@ class SQLiteStore:
         return self.codegraph.save_sync_config(
             code_sync_cron=code_sync_cron,
             ua_git_url=ua_git_url,
+            ua_plugin_update_cron=ua_plugin_update_cron,
+            claude_mem_git_url=claude_mem_git_url,
+            claude_mem_plugin_update_cron=claude_mem_plugin_update_cron,
             understand_cron=understand_cron,
             doc_sync_cron=doc_sync_cron,
             workflow_start_time=workflow_start_time,

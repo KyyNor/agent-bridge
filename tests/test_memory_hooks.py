@@ -171,6 +171,32 @@ def test_worker_executes_original_claude_mem_version_check_command(wm_paths, tmp
     assert calls[0]["command"] == ["node", str(scripts / "version-check.js")]
 
 
+def test_worker_clones_managed_claude_mem_plugin_and_runs_bun_install(wm_paths, monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+        if command[:2] == ["git", "clone"]:
+            repo_dir = wm_paths.plugins_dir / "claude-mem"
+            scripts = repo_dir / "plugin" / "scripts"
+            scripts.mkdir(parents=True)
+            (repo_dir / ".git").mkdir()
+            (scripts / "bun-runner.js").write_text("", encoding="utf-8")
+            (scripts / "worker-service.cjs").write_text("", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.delenv("CLAUDE_MEM_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = ClaudeMemWorkerService(paths=wm_paths).ensure_plugin("https://example.test/claude-mem.git")
+
+    assert result["status"] == "cloned"
+    assert result["plugin_dir"] == str(wm_paths.plugins_dir / "claude-mem" / "plugin")
+    assert calls[0]["command"] == ["git", "clone", "https://example.test/claude-mem.git", str(wm_paths.plugins_dir / "claude-mem")]
+    assert calls[1]["command"] == ["bun", "install"]
+    assert calls[1]["cwd"] == str(wm_paths.plugins_dir / "claude-mem" / "plugin")
+
+
 def test_worker_returns_noop_when_claude_mem_plugin_unavailable(wm_paths, tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_MEM_PLUGIN_ROOT", raising=False)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "empty-claude"))

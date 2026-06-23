@@ -635,6 +635,9 @@ export interface CodeRepoCategory {
 export interface KnowledgeSyncConfig {
   code_sync_cron: string
   ua_git_url: string
+  ua_plugin_update_cron: string
+  claude_mem_git_url: string
+  claude_mem_plugin_update_cron: string
   understand_cron: string
   doc_sync_cron: string
   workflow_start_time: string
@@ -650,7 +653,8 @@ export interface SingleSchedulerStatus {
   running: boolean
   cron: string
   jobs: {
-    repo_key: string
+    repo_key?: string
+    plugin_key?: string
     next_run_at: string | null
     progress?: SchedulerRunProgress | null
   }[]
@@ -681,6 +685,7 @@ export interface SchedulerRunProgress {
 export interface SchedulerStatus {
   code_sync: SingleSchedulerStatus
   understand: SingleSchedulerStatus
+  plugin_update: SingleSchedulerStatus
   doc_sync: SingleSchedulerStatus
   workflow: Omit<SingleSchedulerStatus, 'cron'> & {
     start_time: string
