@@ -15,6 +15,7 @@ import {
   BarChart3,
   Activity,
   Bug,
+  Brain,
 } from 'lucide-vue-next'
 
 const props = defineProps<{ name: string }>()
@@ -35,6 +36,7 @@ const icon = computed(() => {
     logs: FileText,
     stats: BarChart3,
     'agent-runs': Activity,
+    memory: Brain,
   }
   return map[props.name] ?? null
 })
