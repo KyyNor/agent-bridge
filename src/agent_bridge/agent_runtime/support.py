@@ -20,13 +20,14 @@ def build_agent_bridge_server_config(
 ) -> dict[str, Any]:
     """Build the ``.mcp.json`` ``mcpServers`` mapping for an Agent Bridge run.
 
-    Returns an empty mapping (no MCP access) when ``profile`` is falsy. When a
-    profile is set, the governance profile header is always included, and the
-    workflow headers are added when both ``workflow_key`` and ``run_id`` are
-    provided — the ``/mcp`` endpoint consumes these to scope the tool set.
+    Returns an empty ``mcpServers`` record (no MCP access) when ``profile`` is
+    falsy. When a profile is set, the governance profile header is always
+    included, and the workflow headers are added when both ``workflow_key`` and
+    ``run_id`` are provided — the ``/mcp`` endpoint consumes these to scope the
+    tool set.
     """
     if not profile:
-        return {}
+        return {"mcpServers": {}}
     headers: dict[str, str] = {"X-Agent-Bridge-MetaMCP-Profile": profile}
     if workflow_key and run_id:
         headers["X-Agent-Bridge-Workflow"] = "true"

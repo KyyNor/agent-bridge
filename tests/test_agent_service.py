@@ -42,8 +42,8 @@ def _patch_sdk(monkeypatch, fake_query, env=None) -> None:
 # --- agent_support: MCP config ---
 
 
-def test_build_server_config_no_profile_returns_empty() -> None:
-    assert build_agent_bridge_server_config("http://x/mcp", None) == {}
+def test_build_server_config_no_profile_returns_empty_mcp_servers() -> None:
+    assert build_agent_bridge_server_config("http://x/mcp", None) == {"mcpServers": {}}
 
 
 def test_build_server_config_profile_only_has_profile_header() -> None:
@@ -256,7 +256,7 @@ def test_run_no_profile_skips_mcp_and_claude_md(wm_paths, monkeypatch) -> None:
 
     assert res.ok is True
     assert captured["setting_sources"] == []
-    assert captured["mcp_config"] == {}
+    assert captured["mcp_config"] == {"mcpServers": {}}
     assert not (Path(res.run_dir) / "CLAUDE.md").exists()
 
 
