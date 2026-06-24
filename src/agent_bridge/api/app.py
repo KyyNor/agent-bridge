@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
@@ -16,6 +18,8 @@ from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.web.pages import capability_admin_page
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = None) -> FastAPI:
     resolved_paths = paths or AgentBridgePaths.from_root()
@@ -29,16 +33,27 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.align_backends()
         except Exception:
             pass
-        try:
-            service.ensure_managed_plugins()
-        except Exception:
-            pass
+
+        # Managed plugin refresh (git pull on understand-anything / claude-mem)
+        # does blocking network I/O, so run it in the background instead of
+        # gating /health readiness — otherwise startup blocks ~3-4s (or up to
+        # ~60s per repo on a slow/unreachable git host).
+        async def _refresh_managed_plugins() -> None:
+            try:
+                await asyncio.to_thread(service.ensure_managed_plugins)
+            except Exception:
+                logger.warning("启动后台刷新托管插件失败", exc_info=True)
+
+        plugin_task = asyncio.create_task(_refresh_managed_plugins())
+
         service.codegraph_scheduler.start()
         service.understand_scheduler.start()
         service.plugin_update_scheduler.start()
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
         yield
+        if not plugin_task.done():
+            plugin_task.cancel()
         service.codegraph.ua_client.stop_all_dashboards()
         service.workflow_scheduler.stop()
         service.doc_sync_scheduler.stop()
