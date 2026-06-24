@@ -114,6 +114,7 @@ def test_worker_executes_original_claude_mem_hook_command_with_block_data_dir(wm
         return subprocess.CompletedProcess(command, 0, stdout='{"continue":true}\n', stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(ClaudeMemWorkerService, "_ensure_worker", lambda self, block, **kwargs: "http://127.0.0.1:37777")
     block = {
         "block_key": "dev-memory",
         "data_dir": str(wm_paths.data_dir / "claude-mem" / "blocks" / "dev-memory"),
@@ -139,6 +140,59 @@ def test_worker_executes_original_claude_mem_hook_command_with_block_data_dir(wm
     ]
     assert calls[0]["env"]["CLAUDE_MEM_DATA_DIR"] == block["data_dir"]
     assert calls[0]["input"] == '{"tool_name": "Read", "hook_event_name": "PostToolUse", "matcher": "*"}'
+
+
+def test_worker_start_hook_launches_managed_worker_without_original_start_wrapper(wm_paths, tmp_path, monkeypatch):
+    plugin_dir = tmp_path / "claude-mem"
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "bun-runner.js").write_text("", encoding="utf-8")
+    (scripts / "worker-service.cjs").write_text("", encoding="utf-8")
+    (scripts / "version-check.js").write_text("", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_MEM_PLUGIN_ROOT", str(plugin_dir))
+    worker_started = False
+    popen_calls = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode = None
+
+        def poll(self):
+            return None
+
+    def fake_popen(command, **kwargs):
+        nonlocal worker_started
+        worker_started = True
+        popen_calls.append({"command": command, **kwargs})
+        return FakeProcess()
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("start hook should not call the original claude-mem start wrapper")
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "run", fail_run)
+    monkeypatch.setattr(ClaudeMemWorkerService, "_bun_command", lambda self: "/usr/local/bin/bun")
+    monkeypatch.setattr(ClaudeMemWorkerService, "_worker_ready", lambda self, base_url: worker_started)
+    block = {
+        "block_key": "dev-memory",
+        "data_dir": str(wm_paths.data_dir / "claude-mem" / "blocks" / "dev-memory"),
+    }
+
+    result = ClaudeMemWorkerService(paths=wm_paths).handle_hook(
+        block,
+        action="start",
+        payload={"source": "startup"},
+        event_name="SessionStart",
+        matcher="startup|clear|compact",
+        timeout_seconds=60,
+    )
+
+    assert result == {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": "ok"}
+    assert popen_calls[0]["command"] == ["/usr/local/bin/bun", str(scripts / "worker-service.cjs")]
+    assert popen_calls[0]["cwd"] == plugin_dir
+    assert popen_calls[0]["env"]["CLAUDE_MEM_DATA_DIR"] == block["data_dir"]
+    assert popen_calls[0]["env"]["CLAUDE_MEM_PLUGIN_ROOT"] == str(plugin_dir)
+    assert (wm_paths.run_dir / "claude-mem-workers" / "dev-memory.json").exists()
 
 
 def test_worker_executes_original_claude_mem_version_check_command(wm_paths, tmp_path, monkeypatch):

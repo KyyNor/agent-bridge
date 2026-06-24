@@ -15,24 +15,32 @@ class ClaudeMemClient:
     def search(self, query: str, limit: int) -> dict[str, Any]:
         response = httpx.get(
             f"{self.base_url}/api/search",
-            params={"q": query, "limit": limit},
+            params={"query": query, "q": query, "limit": limit},
             timeout=self.timeout,
         )
         response.raise_for_status()
         payload = response.json()
+        if isinstance(payload, dict) and payload.get("isError"):
+            raise RuntimeError(_content_text(payload) or "claude-mem search failed")
         raw_items = payload.get("items") if isinstance(payload, dict) else payload
         items = raw_items if isinstance(raw_items, list) else []
         return {"items": [normalized_search_item(item) for item in items if isinstance(item, dict)]}
 
     def timeline(self, limit: int, cursor: str | None) -> dict[str, Any]:
-        params: dict[str, Any] = {"limit": limit}
-        if cursor:
-            params["cursor"] = cursor
-        response = httpx.get(f"{self.base_url}/api/timeline", params=params, timeout=self.timeout)
+        offset = _parse_offset(cursor)
+        response = httpx.get(
+            f"{self.base_url}/api/observations",
+            params={"limit": limit, "offset": offset},
+            timeout=self.timeout,
+        )
         response.raise_for_status()
         payload = response.json()
-        items = payload.get("items") if isinstance(payload, dict) else []
-        next_cursor = payload.get("next_cursor") if isinstance(payload, dict) else None
+        if isinstance(payload, dict) and payload.get("isError"):
+            raise RuntimeError(_content_text(payload) or "claude-mem timeline failed")
+        raw_items = payload.get("items") if isinstance(payload, dict) else []
+        items = raw_items if isinstance(raw_items, list) else []
+        has_more = bool(payload.get("hasMore") or payload.get("has_more")) if isinstance(payload, dict) else False
+        next_cursor = str(offset + limit) if has_more else None
         return {
             "items": [normalized_timeline_item(item) for item in items if isinstance(item, dict)],
             "next_cursor": next_cursor,
@@ -51,3 +59,20 @@ class ClaudeMemClient:
                 "raw": item,
             }
         }
+
+
+def _parse_offset(cursor: str | None) -> int:
+    if not cursor:
+        return 0
+    try:
+        return max(0, int(cursor))
+    except ValueError:
+        return 0
+
+
+def _content_text(payload: dict[str, Any]) -> str:
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts = [str(item.get("text") or "") for item in content if isinstance(item, dict)]
+    return "\n".join(part for part in parts if part)
