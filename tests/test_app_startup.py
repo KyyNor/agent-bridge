@@ -45,3 +45,17 @@ def test_shutdown_stops_claude_mem_workers(wm_paths) -> None:
         pass
 
     assert stopped == [True]
+
+
+def test_shutdown_stops_active_codegraph_processes(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    service = app.state.agent_bridge_service
+    stopped = []
+
+    service.ensure_managed_plugins = lambda: None  # type: ignore[assignment]
+    service.codegraph.stop_active_processes = lambda: stopped.append(True)  # type: ignore[assignment]
+
+    with TestClient(app):
+        pass
+
+    assert stopped == [True]

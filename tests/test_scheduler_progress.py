@@ -80,6 +80,21 @@ def test_code_sync_scheduler_exposes_latest_run_progress_in_status() -> None:
     assert progress["finished_at"] is not None
 
 
+def test_code_sync_scheduler_stop_terminates_active_processes() -> None:
+    stopped = []
+
+    class Service:
+        def stop_active_processes(self) -> None:
+            stopped.append(True)
+
+    scheduler = CodeGraphScheduler(Service(), _CodeStore(), {"root"})
+
+    scheduler.start()
+    scheduler.stop()
+
+    assert stopped == [True]
+
+
 def test_understanding_scheduler_exposes_latest_run_progress_in_status() -> None:
     class Service:
         def analyze_understand(self, actor: str, repo_key: str) -> dict[str, Any]:

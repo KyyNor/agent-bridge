@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphService
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
@@ -155,6 +156,39 @@ def test_codegraph_sync_advances_existing_clone(tmp_path: Path, wm_paths: AgentB
     assert saved["last_commit"] != first_commit
     assert files[0]["path"] == "app.py"
     assert "NEW_UPSTREAM_CONTENT" in files[0]["snippet"]
+
+
+def test_startup_marks_stale_codegraph_runs_interrupted(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_code_repository(
+        repo_key="web-app",
+        name="Web App",
+        git_url="https://example.test/web-app.git",
+        branch="main",
+        auth_ref="",
+        description="Demo app",
+        tags=["python"],
+        category_key="",
+        sync_interval_minutes=60,
+        auto_understand=False,
+        status="active",
+    )
+    stale = store.create_codegraph_sync_run("web-app", status="running", stage="indexing")
+
+    AgentBridgeService.create(wm_paths, {"root"})
+
+    with store.connect() as conn:
+        recovered = conn.execute(
+            "SELECT status, stage, error, finished_at FROM codegraph_sync_runs WHERE id = ?",
+            (stale["id"],),
+        ).fetchone()
+
+    assert recovered is not None
+    assert recovered["status"] == "interrupted"
+    assert recovered["stage"] == "interrupted"
+    assert "server startup recovered stale run" in recovered["error"]
+    assert recovered["finished_at"] is not None
 
 
 def test_dashboard_repo_by_token_matches_running_dashboard_url(

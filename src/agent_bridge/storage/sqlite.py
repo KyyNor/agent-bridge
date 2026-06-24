@@ -488,6 +488,9 @@ class SQLiteStore:
     ) -> dict[str, Any]:
         return self.codegraph.finish_codegraph_sync_run(run_id=run_id, status=status, stage=stage, error=error, duration_ms=duration_ms)
 
+    def interrupt_running_codegraph_sync_runs(self, *, error: str) -> int:
+        return self.codegraph.interrupt_running_codegraph_sync_runs(error=error)
+
     def search_codegraph_index(
         self,
         repo_key: str,

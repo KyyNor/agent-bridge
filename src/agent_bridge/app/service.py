@@ -103,6 +103,9 @@ class AgentBridgeService:
             admins=admins,
         )
         service.store.init_schema()
+        recovered = service.codegraph.recover_interrupted_sync_runs()
+        if recovered:
+            logger.warning("Recovered %s stale CodeGraph sync run(s) left running by a prior process", recovered)
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
         return service

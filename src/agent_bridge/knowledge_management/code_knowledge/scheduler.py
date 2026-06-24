@@ -20,6 +20,12 @@ class CodeGraphScheduler(BaseCronScheduler):
         super().__init__(service, store, admins)
         self._runs: dict[str, dict[str, Any]] = {}
 
+    def stop(self) -> None:
+        super().stop()
+        stop_processes = getattr(self._service, "stop_active_processes", None)
+        if callable(stop_processes):
+            stop_processes()
+
     def get_status(self) -> dict[str, Any]:
         if not self._scheduler or not self._scheduler.running:
             return {"running": False, "cron": self._current_cron, "jobs": []}
