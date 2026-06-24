@@ -24,7 +24,7 @@ CLAUDE_MEM_COMPATIBLE_HOOKS = {
         {"matcher": "*", "actions": [("version-check", 300)]},
     ],
     "SessionStart": [
-        {"matcher": "startup|clear|compact", "actions": [("start", 60), ("context", 60)]},
+        {"matcher": "startup|resume|clear|compact", "actions": [("session-start", 60)]},
     ],
     "UserPromptSubmit": [
         {"matcher": None, "actions": [("session-init", 60)]},
@@ -208,16 +208,6 @@ def _write_memory_hooks(scope: str, *, profile: str, server_url: str, enabled: b
     return settings_path
 
 
-def _profile_memory_hooks_enabled(profile: str) -> bool:
-    from agent_bridge.cli.app import _run_client
-
-    try:
-        binding = _run_client(lambda client: client.get_profile_memory(profile))
-    except AttributeError:
-        return False
-    return bool(binding.get("enabled")) and bool(binding.get("block_key"))
-
-
 @profile_app.command("create")
 def profile_create(
     profile_key: Annotated[str, typer.Argument(help="Profile 标识")],
@@ -322,7 +312,7 @@ def profile_use(
             resolved_scope,
             profile=profile,
             server_url=_server_url_from_mcp_url(url),
-            enabled=_profile_memory_hooks_enabled(profile),
+            enabled=True,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)

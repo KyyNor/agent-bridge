@@ -20,6 +20,22 @@ memory_app.add_typer(hook_app, name="hook")
 
 
 AGENT_BRIDGE_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
+AGENT_BRIDGE_UNAVAILABLE_CONTEXT = (
+    "Agent Bridge service is unavailable. Dynamic profile guidance, memory context, "
+    "and Agent Bridge MCP tools are unavailable for this session."
+)
+
+
+def _session_start_context_stdout(context: str) -> str:
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": context,
+            }
+        },
+        ensure_ascii=False,
+    )
 
 
 def _settings_has_agent_bridge_memory_hook(settings: dict) -> bool:
@@ -135,5 +151,8 @@ def claude_code_hook(
     except typer.Exit:
         raise
     except Exception:
-        typer.echo(NOOP_HOOK_STDOUT)
+        if action == "session-start":
+            typer.echo(_session_start_context_stdout(AGENT_BRIDGE_UNAVAILABLE_CONTEXT))
+        else:
+            typer.echo(NOOP_HOOK_STDOUT)
         raise typer.Exit(0) from None

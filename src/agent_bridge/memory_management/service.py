@@ -12,12 +12,24 @@ from agent_bridge.storage.sqlite import SQLiteStore
 
 
 class MemoryService:
-    def __init__(self, *, paths, store: SQLiteStore, admins: set[str], worker_service: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        paths,
+        store: SQLiteStore,
+        admins: set[str],
+        worker_service: Any | None = None,
+        governance_service: Any | None = None,
+    ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.worker_service = worker_service or ClaudeMemWorkerService(paths=paths)
-        self.hooks = MemoryHookService(memory_service=self, worker_service=self.worker_service)
+        self.hooks = MemoryHookService(
+            memory_service=self,
+            worker_service=self.worker_service,
+            governance_service=governance_service,
+        )
 
     def create_block(self, actor: str, block_key: str, name: str, description: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

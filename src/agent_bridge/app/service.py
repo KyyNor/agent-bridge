@@ -74,7 +74,7 @@ class AgentBridgeService:
         self.workflows = WorkflowService(store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
-        self.memory = MemoryService(paths=paths, store=store, admins=admins)
+        self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,

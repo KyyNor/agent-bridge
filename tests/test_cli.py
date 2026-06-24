@@ -304,13 +304,13 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     assert hooks["Setup"][0]["hooks"][0]["command"].startswith("agent-bridge memory hook claude-code version-check")
     setup_argv = shlex.split(hooks["Setup"][0]["hooks"][0]["command"])
     assert setup_argv[setup_argv.index("--scope") + 1] == "project"
-    assert hooks["SessionStart"][0]["matcher"] == "startup|clear|compact"
+    assert hooks["SessionStart"][0]["matcher"] == "startup|resume|clear|compact"
     session_start_argv = [shlex.split(hook["command"]) for hook in hooks["SessionStart"][0]["hooks"]]
-    assert [argv[4] for argv in session_start_argv] == ["start", "context"]
+    assert [argv[4] for argv in session_start_argv] == ["session-start"]
     assert all(argv[argv.index("--scope") + 1] == "project" for argv in session_start_argv)
-    assert all(argv[argv.index("--matcher") + 1] == "startup|clear|compact" for argv in session_start_argv)
+    assert all(argv[argv.index("--matcher") + 1] == "startup|resume|clear|compact" for argv in session_start_argv)
     assert all("|" not in argv for argv in session_start_argv)
-    assert "'startup|clear|compact'" in hooks["SessionStart"][0]["hooks"][0]["command"]
+    assert "'startup|resume|clear|compact'" in hooks["SessionStart"][0]["hooks"][0]["command"]
     assert hooks["PostToolUse"][0]["matcher"] == "*"
     assert hooks["PreToolUse"][0]["matcher"] == "Read"
     assert hooks["Stop"][0]["hooks"][0]["timeout"] == 120
@@ -341,6 +341,7 @@ def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
     assert result.exit_code == 0
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["hooks"]["Stop"][0]["hooks"] == [{"type": "command", "command": "echo user"}]
+    assert "agent-bridge memory hook claude-code summarize" in settings["hooks"]["Stop"][1]["hooks"][0]["command"]
 
 
 def test_profile_use_render_failure_does_not_write_project_config(monkeypatch, tmp_path: Path) -> None:

@@ -77,6 +77,38 @@ def test_memory_hook_noops_when_server_unreachable(monkeypatch):
     assert result.stdout == '{"continue":true,"suppressOutput":true}\n'
 
 
+def test_session_start_hook_reports_agent_bridge_unavailable(monkeypatch):
+    class FakeClient:
+        def post_memory_hook(self, action, payload, *, timeout):
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr("agent_bridge.cli.memory.AgentBridgeClient", lambda base_url, linux_user: FakeClient())
+
+    result = runner.invoke(
+        app,
+        [
+            "memory",
+            "hook",
+            "claude-code",
+            "session-start",
+            "--profile",
+            "dev",
+            "--server-url",
+            "http://bridge.example",
+            "--event",
+            "SessionStart",
+        ],
+        input=json.dumps({"session_id": "abc123", "hook_event_name": "SessionStart"}),
+    )
+
+    stdout = json.loads(result.stdout)
+    additional_context = stdout["hookSpecificOutput"]["additionalContext"]
+    assert result.exit_code == 0
+    assert stdout["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "Agent Bridge service is unavailable" in additional_context
+    assert "MCP tools are unavailable" in additional_context
+
+
 def test_user_scope_memory_hook_exits_silently_when_project_hook_exists(monkeypatch, tmp_path: Path):
     monkeypatch.chdir(tmp_path)
     settings_path = tmp_path / ".claude" / "settings.local.json"

@@ -28,6 +28,31 @@ class FakeWorkerService:
         return {"stdout": '{"continue":true}', "stderr": "", "exit_code": 0, "status": "ok"}
 
 
+class FakeContextWorkerService(FakeWorkerService):
+    def handle_hook(self, block, *, action, payload, event_name, matcher, timeout_seconds):
+        super().handle_hook(
+            block,
+            action=action,
+            payload=payload,
+            event_name=event_name,
+            matcher=matcher,
+            timeout_seconds=timeout_seconds,
+        )
+        return {
+            "stdout": json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": "Memory context from claude-mem.",
+                    }
+                }
+            ),
+            "stderr": "",
+            "exit_code": 0,
+            "status": "ok",
+        }
+
+
 def _service(wm_paths):
     service = AgentBridgeService.create(wm_paths, admins={"root"})
     service.init_system()
@@ -100,6 +125,67 @@ def test_hook_service_rejects_unknown_action(wm_paths):
     assert result["exit_code"] == 0
     assert result["status"] == "unsupported_action"
     assert result["stdout"] == NOOP_HOOK_STDOUT
+
+
+def test_session_start_hook_combines_profile_and_memory_context(wm_paths):
+    service = _service(wm_paths)
+    fake_worker = FakeContextWorkerService()
+    service.memory.worker_service = fake_worker
+    service.memory.hooks.worker_service = fake_worker
+
+    result = service.memory.hooks.handle_claude_code_hook(
+        actor="root",
+        profile_key="dev",
+        action="session-start",
+        event_name="SessionStart",
+        matcher="startup|resume|clear|compact",
+        payload={"source": "startup"},
+        timeout_seconds=60,
+    )
+
+    stdout = json.loads(result["stdout"])
+    additional_context = stdout["hookSpecificOutput"]["additionalContext"]
+    assert result["exit_code"] == 0
+    assert result["status"] == "ok"
+    assert stdout["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert "# Agent Bridge Profile: Dev" in additional_context
+    assert "Memory context from claude-mem." in additional_context
+    assert fake_worker.calls == [
+        {
+            "block_key": "dev-memory",
+            "action": "context",
+            "payload": {"source": "startup"},
+            "event_name": "SessionStart",
+            "matcher": "startup|resume|clear|compact",
+            "timeout_seconds": 60,
+        }
+    ]
+
+
+def test_session_start_hook_injects_profile_even_without_memory_binding(wm_paths):
+    service = AgentBridgeService.create(wm_paths, admins={"root"})
+    service.init_system()
+    service.governance.upsert_profile("root", "dev", "Dev", "", "active")
+    fake_worker = FakeContextWorkerService()
+    service.memory.worker_service = fake_worker
+    service.memory.hooks.worker_service = fake_worker
+
+    result = service.memory.hooks.handle_claude_code_hook(
+        actor="root",
+        profile_key="dev",
+        action="session-start",
+        event_name="SessionStart",
+        matcher="startup|resume|clear|compact",
+        payload={"source": "startup"},
+        timeout_seconds=60,
+    )
+
+    additional_context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+    assert result["exit_code"] == 0
+    assert result["status"] == "ok"
+    assert "# Agent Bridge Profile: Dev" in additional_context
+    assert "No active Agent Bridge memory block is bound" in additional_context
+    assert fake_worker.calls == []
 
 
 def test_worker_executes_original_claude_mem_hook_command_with_block_data_dir(wm_paths, tmp_path, monkeypatch):
