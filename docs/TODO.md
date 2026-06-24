@@ -7,13 +7,13 @@
 
 ## Agent 相关
 
-- [ ] Agent 协助编写脚本
-- [ ] Agent 协助编写工作流
+- [x] Agent 协助编写脚本
+- [x] Agent 协助编写工作流
 - [ ] 工作流图翻译为中文（当前解析出的图均为英文）
 
 ## 记忆
 
-- [ ] 集成 claude-mem 作为记忆引擎，agent-bridge 负责控制平面
+- [x] 集成 claude-mem 作为记忆引擎，agent-bridge 负责控制平面
 
   结论：
   - 不做纯 native 重写，也不把 claude-mem 当完全黑盒直接塞进来。
@@ -25,7 +25,7 @@
   - [x] profile 增加最多一个 active memory block 的单选绑定。
   - [x] `profile use` 根据 active memory block 注入/更新/清理 Claude Code hooks。
   - [x] 新增 agent-bridge hook wrapper：读取 Claude Code hook stdin payload，补充 profile/memory block 作用域，转发到服务端 hook API；worker 不可用时静默降级。
-  - [ ] 修改 `agb` 命令行的 hook 行为：当 user 和 project 都配置了 claude-mem hook 时，以 project 为准（project 覆盖 user），避免重复注入或冲突。
+  - [x] 修改 `agb` 命令行的 hook 行为：当 user 和 project 都配置了 claude-mem hook 时，以 project 为准（project 覆盖 user），避免重复注入或冲突。
   - [ ] 新增 claude-mem worker 管理与健康检查：处理未安装、端口变化、版本过旧、worker 未启动、Bun/uv 缺失等状态。
     - 第一阶段已支持服务端插件发现、`CLAUDE_MEM_DATA_DIR` 隔离、配置化 worker URL、基础健康状态与 hook 降级；自动端口发现、版本兼容矩阵、Bun/uv 诊断放第二阶段。
   - [x] 在 agent-bridge FastMCP gateway 暴露 `memory_search` / `memory_timeline` / `memory_get`，背后代理 claude-mem 检索，避免用户面对两套 MCP 入口。

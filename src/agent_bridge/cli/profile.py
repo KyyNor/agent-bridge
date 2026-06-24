@@ -82,6 +82,7 @@ def _agent_bridge_hook_command(
     *,
     profile: str,
     server_url: str,
+    scope: str,
     event: str,
     matcher: str | None,
     timeout: int,
@@ -96,6 +97,8 @@ def _agent_bridge_hook_command(
         profile,
         "--server-url",
         server_url,
+        "--scope",
+        scope,
         "--event",
         event,
         "--timeout",
@@ -154,7 +157,7 @@ def _strip_agent_bridge_hooks(settings: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
-def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url: str) -> dict[str, Any]:
+def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url: str, scope: str) -> dict[str, Any]:
     copied = _strip_agent_bridge_hooks(settings)
     hooks = copied.get("hooks")
     if not isinstance(hooks, dict):
@@ -174,6 +177,7 @@ def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url:
                             action,
                             profile=profile,
                             server_url=server_url,
+                            scope=scope,
                             event=event,
                             matcher=matcher,
                             timeout=timeout,
@@ -194,7 +198,11 @@ def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url:
 def _write_memory_hooks(scope: str, *, profile: str, server_url: str, enabled: bool) -> Path:
     settings_path = _claude_settings_path(scope)
     settings = _load_claude_settings(settings_path)
-    updated = _install_memory_hooks(settings, profile=profile, server_url=server_url) if enabled else _strip_agent_bridge_hooks(settings)
+    updated = (
+        _install_memory_hooks(settings, profile=profile, server_url=server_url, scope=scope)
+        if enabled
+        else _strip_agent_bridge_hooks(settings)
+    )
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
     return settings_path
