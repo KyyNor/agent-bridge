@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import shutil
 import socket
 import subprocess
@@ -235,6 +236,7 @@ class ClaudeMemWorkerService:
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
         finally:
             log_file.close()
@@ -321,6 +323,52 @@ class ClaudeMemWorkerService:
         except OSError:
             return False
         return True
+
+    def stop_all_workers(self, *, grace_seconds: float = 3.0) -> dict[str, Any]:
+        state_dir = self.paths.run_dir / "claude-mem-workers"
+        stopped = 0
+        removed_state_files = 0
+        errors: list[str] = []
+        if not state_dir.exists():
+            return {"stopped": stopped, "removed_state_files": removed_state_files, "errors": errors}
+
+        for state_path in state_dir.glob("*.json"):
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except Exception:
+                state_path.unlink(missing_ok=True)
+                removed_state_files += 1
+                continue
+            try:
+                pid = int(state.get("pid") or 0) if isinstance(state, dict) else 0
+                if pid > 0 and self._pid_alive(pid):
+                    self._signal_worker(pid, signal.SIGTERM)
+                    stopped += 1
+                    deadline = time.monotonic() + max(0.0, grace_seconds)
+                    while time.monotonic() < deadline and self._pid_alive(pid):
+                        time.sleep(0.1)
+                    if self._pid_alive(pid):
+                        self._signal_worker(pid, signal.SIGKILL)
+                state_path.unlink(missing_ok=True)
+                removed_state_files += 1
+            except Exception as exc:
+                errors.append(f"{state_path.name}: {exc}")
+
+        return {"stopped": stopped, "removed_state_files": removed_state_files, "errors": errors}
+
+    def _signal_worker(self, pid: int, sig: int) -> None:
+        try:
+            os.killpg(pid, sig)
+        except ProcessLookupError:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        except OSError:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
 
     def _port_in_use(self, port: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+import signal
 import subprocess
 
 from agent_bridge.app.service import AgentBridgeService
@@ -193,6 +196,29 @@ def test_worker_start_hook_launches_managed_worker_without_original_start_wrappe
     assert popen_calls[0]["env"]["CLAUDE_MEM_DATA_DIR"] == block["data_dir"]
     assert popen_calls[0]["env"]["CLAUDE_MEM_PLUGIN_ROOT"] == str(plugin_dir)
     assert (wm_paths.run_dir / "claude-mem-workers" / "dev-memory.json").exists()
+
+
+def test_worker_stop_all_workers_terminates_state_pids_and_removes_state_files(wm_paths, monkeypatch):
+    state_dir = wm_paths.run_dir / "claude-mem-workers"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "dev-memory.json"
+    state_path.write_text(json.dumps({"pid": 4242, "base_url": "http://127.0.0.1:37742"}), encoding="utf-8")
+    calls = []
+
+    def fake_kill(pid, sig):
+        calls.append((pid, sig))
+        if sig == 0:
+            return None
+        return None
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+
+    result = ClaudeMemWorkerService(paths=wm_paths).stop_all_workers(grace_seconds=0)
+
+    assert result["stopped"] == 1
+    assert (4242, signal.SIGTERM) in calls
+    assert (4242, signal.SIGKILL) in calls
+    assert not state_path.exists()
 
 
 def test_worker_executes_original_claude_mem_version_check_command(wm_paths, tmp_path, monkeypatch):

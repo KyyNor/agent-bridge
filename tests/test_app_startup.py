@@ -31,3 +31,17 @@ def test_startup_does_not_block_on_managed_plugins(wm_paths) -> None:
         assert client.get("/health").status_code == 200
         # 后台任务仍然会真正执行刷新。
         assert refresh_started.wait(timeout=refresh_duration + 2)
+
+
+def test_shutdown_stops_claude_mem_workers(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    service = app.state.agent_bridge_service
+    stopped = []
+
+    service.ensure_managed_plugins = lambda: None  # type: ignore[assignment]
+    service.memory.worker_service.stop_all_workers = lambda: stopped.append(True)  # type: ignore[attr-defined]
+
+    with TestClient(app):
+        pass
+
+    assert stopped == [True]

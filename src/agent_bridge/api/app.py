@@ -55,6 +55,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         if not plugin_task.done():
             plugin_task.cancel()
         service.codegraph.ua_client.stop_all_dashboards()
+        try:
+            service.memory.worker_service.stop_all_workers()
+        except Exception:
+            logger.warning("停止 claude-mem worker 失败", exc_info=True)
         service.workflow_scheduler.stop()
         service.doc_sync_scheduler.stop()
         service.plugin_update_scheduler.stop()
