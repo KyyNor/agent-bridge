@@ -455,7 +455,7 @@ class AgentBridgeService:
         clear_api_key: bool = False,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        return self.memory.worker_service.config.save_config(
+        config = self.memory.worker_service.config.save_config(
             base_url=base_url,
             auth_token=auth_token,
             api_key=api_key,
@@ -463,6 +463,8 @@ class AgentBridgeService:
             clear_auth_token=clear_auth_token,
             clear_api_key=clear_api_key,
         )
+        self.memory.worker_service.stop_all_workers()
+        return config
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
         require_admin_user(actor, self.admins)

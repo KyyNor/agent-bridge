@@ -221,6 +221,35 @@ def test_worker_stop_all_workers_terminates_state_pids_and_removes_state_files(w
     assert not state_path.exists()
 
 
+def test_worker_stop_all_workers_uses_block_pid_files_when_bridge_state_is_missing(wm_paths, monkeypatch):
+    block_dir = wm_paths.data_dir / "claude-mem" / "blocks" / "dev-memory"
+    block_dir.mkdir(parents=True)
+    worker_pid_path = block_dir / "worker.pid"
+    supervisor_path = block_dir / "supervisor.json"
+    worker_pid_path.write_text(json.dumps({"pid": 4242}), encoding="utf-8")
+    supervisor_path.write_text(
+        json.dumps({"processes": {"worker": {"pid": 4242}, "chroma-mcp": {"pid": 4243}}}),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_kill(pid, sig):
+        calls.append(("pid", pid, sig))
+        if sig == 0:
+            return None
+        return None
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+
+    result = ClaudeMemWorkerService(paths=wm_paths).stop_all_workers(grace_seconds=0)
+
+    assert result["stopped"] == 2
+    assert ("pid", 4242, signal.SIGTERM) in calls
+    assert ("pid", 4243, signal.SIGTERM) in calls
+    assert not worker_pid_path.exists()
+    assert json.loads(supervisor_path.read_text(encoding="utf-8")) == {"processes": {}}
+
+
 def test_worker_executes_original_claude_mem_version_check_command(wm_paths, tmp_path, monkeypatch):
     plugin_dir = tmp_path / "claude-mem"
     scripts = plugin_dir / "scripts"

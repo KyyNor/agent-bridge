@@ -326,21 +326,56 @@ class ClaudeMemWorkerService:
 
     def stop_all_workers(self, *, grace_seconds: float = 3.0) -> dict[str, Any]:
         state_dir = self.paths.run_dir / "claude-mem-workers"
+        block_dirs = self.paths.data_dir / "claude-mem" / "blocks"
+        pids: dict[int, str] = {}
+        state_paths: list[Path] = []
+        worker_pid_paths: list[Path] = []
+        supervisor_paths: list[Path] = []
         stopped = 0
         removed_state_files = 0
         errors: list[str] = []
-        if not state_dir.exists():
-            return {"stopped": stopped, "removed_state_files": removed_state_files, "errors": errors}
 
-        for state_path in state_dir.glob("*.json"):
-            try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-            except Exception:
-                state_path.unlink(missing_ok=True)
-                removed_state_files += 1
-                continue
-            try:
+        if state_dir.exists():
+            for state_path in state_dir.glob("*.json"):
+                state_paths.append(state_path)
+                try:
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
                 pid = int(state.get("pid") or 0) if isinstance(state, dict) else 0
+                if pid > 0:
+                    pids.setdefault(pid, state_path.name)
+
+        if block_dirs.exists():
+            for block_dir in block_dirs.iterdir():
+                if not block_dir.is_dir():
+                    continue
+                worker_pid_path = block_dir / "worker.pid"
+                if worker_pid_path.exists():
+                    worker_pid_paths.append(worker_pid_path)
+                    try:
+                        state = json.loads(worker_pid_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        state = {}
+                    pid = int(state.get("pid") or 0) if isinstance(state, dict) else 0
+                    if pid > 0:
+                        pids.setdefault(pid, f"{block_dir.name}/worker.pid")
+                supervisor_path = block_dir / "supervisor.json"
+                if supervisor_path.exists():
+                    supervisor_paths.append(supervisor_path)
+                    try:
+                        supervisor = json.loads(supervisor_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        supervisor = {}
+                    processes = supervisor.get("processes") if isinstance(supervisor, dict) else {}
+                    if isinstance(processes, dict):
+                        for process_name, process_state in processes.items():
+                            pid = int(process_state.get("pid") or 0) if isinstance(process_state, dict) else 0
+                            if pid > 0:
+                                pids.setdefault(pid, f"{block_dir.name}/supervisor.json:{process_name}")
+
+        for pid, source in pids.items():
+            try:
                 if pid > 0 and self._pid_alive(pid):
                     self._signal_worker(pid, signal.SIGTERM)
                     stopped += 1
@@ -349,16 +384,40 @@ class ClaudeMemWorkerService:
                         time.sleep(0.1)
                     if self._pid_alive(pid):
                         self._signal_worker(pid, signal.SIGKILL)
+            except Exception as exc:
+                errors.append(f"{source}: {exc}")
+
+        for state_path in state_paths:
+            try:
                 state_path.unlink(missing_ok=True)
                 removed_state_files += 1
             except Exception as exc:
                 errors.append(f"{state_path.name}: {exc}")
+        for worker_pid_path in worker_pid_paths:
+            try:
+                worker_pid_path.unlink(missing_ok=True)
+                removed_state_files += 1
+            except Exception as exc:
+                errors.append(f"{worker_pid_path}: {exc}")
+        for supervisor_path in supervisor_paths:
+            try:
+                supervisor_path.write_text(
+                    json.dumps({"processes": {}}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                removed_state_files += 1
+            except Exception as exc:
+                errors.append(f"{supervisor_path}: {exc}")
 
         return {"stopped": stopped, "removed_state_files": removed_state_files, "errors": errors}
 
     def _signal_worker(self, pid: int, sig: int) -> None:
         try:
-            os.killpg(pid, sig)
+            process_group_id = os.getpgid(pid)
+        except OSError:
+            process_group_id = pid
+        try:
+            os.killpg(process_group_id, sig)
         except ProcessLookupError:
             try:
                 os.kill(pid, sig)

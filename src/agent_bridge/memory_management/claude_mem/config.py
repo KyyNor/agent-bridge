@@ -113,7 +113,9 @@ class ClaudeMemConfigManager:
             if env.get(key):
                 values[key] = env[key]
         shared_config: dict[str, str] = {}
-        model = env.get("ANTHROPIC_MODEL") or env.get("ANTHROPIC_DEFAULT_SONNET_MODEL") or ""
+        model = self._normalize_claude_settings_model(
+            env.get("ANTHROPIC_MODEL") or env.get("ANTHROPIC_DEFAULT_SONNET_MODEL") or ""
+        )
         if model:
             shared_config["model"] = model
         return values, shared_config
@@ -183,6 +185,12 @@ class ClaudeMemConfigManager:
         if values.get("ANTHROPIC_API_KEY"):
             return "api-key"
         return "cli"
+
+    def _normalize_claude_settings_model(self, model: str) -> str:
+        cleaned = model.strip()
+        if cleaned.endswith("[1M]"):
+            return cleaned[: -len("[1M]")].strip()
+        return cleaned
 
     def _set_or_remove(self, values: dict[str, str], key: str, value: str | None) -> None:
         if value is None:

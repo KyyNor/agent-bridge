@@ -45,6 +45,22 @@ def test_claude_mem_config_bootstraps_shared_env_from_claude_settings(wm_paths, 
     }
 
 
+def test_claude_mem_config_strips_one_million_suffix_from_claude_settings_model(wm_paths, tmp_path):
+    claude_settings = tmp_path / ".claude" / "settings.json"
+    claude_settings.parent.mkdir(parents=True)
+    claude_settings.write_text(
+        json.dumps({"env": {"ANTHROPIC_MODEL": "glm-5.2[1M]"}}),
+        encoding="utf-8",
+    )
+
+    config = ClaudeMemConfigManager(paths=wm_paths, claude_settings_path=claude_settings).get_config(bootstrap=True)
+
+    assert config["model"] == "glm-5.2"
+    assert json.loads((wm_paths.data_dir / "claude-mem" / "shared" / "config.json").read_text(encoding="utf-8")) == {
+        "model": "glm-5.2"
+    }
+
+
 def test_worker_env_uses_shared_env_file_and_default_chinese_mode(wm_paths, tmp_path, monkeypatch):
     plugin_dir = tmp_path / "claude-mem"
     scripts = plugin_dir / "scripts"
@@ -90,9 +106,12 @@ def test_worker_env_uses_shared_env_file_and_default_chinese_mode(wm_paths, tmp_
     assert "ANTHROPIC_AUTH_TOKEN" not in env
 
 
-def test_claude_mem_config_api_saves_without_returning_secret(wm_paths, tmp_path, monkeypatch):
+def test_claude_mem_config_api_saves_without_returning_secret_and_stops_workers(wm_paths, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    client = TestClient(create_app(paths=wm_paths, admins={"root"}))
+    app = create_app(paths=wm_paths, admins={"root"})
+    stopped = []
+    app.state.agent_bridge_service.memory.worker_service.stop_all_workers = lambda: stopped.append(True)  # type: ignore[attr-defined]
+    client = TestClient(app)
     headers = {"X-Agent-Bridge-User": "root"}
 
     saved = client.post(
@@ -112,3 +131,4 @@ def test_claude_mem_config_api_saves_without_returning_secret(wm_paths, tmp_path
     assert body["model"] == "glm-5.2"
     assert "new-secret" not in json.dumps(body)
     assert "new-secret" in (wm_paths.data_dir / "claude-mem" / "shared" / ".env").read_text(encoding="utf-8")
+    assert stopped == [True]
