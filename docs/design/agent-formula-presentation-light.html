@@ -1,0 +1,1761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>从试点碰壁到能力成形</title>
+  <style>
+    :root {
+      --paper: #f6f3ee;
+      --paper-deep: #ece6dd;
+      --card: rgba(255, 252, 247, 0.9);
+      --card-solid: #fffdf9;
+      --ink: #1f2328;
+      --ink-soft: #5e625d;
+      --line: rgba(76, 66, 56, 0.16);
+      --line-strong: rgba(76, 66, 56, 0.32);
+      --accent: #7b4336;
+      --accent-soft: rgba(123, 67, 54, 0.1);
+      --accent-ink: #5c2c21;
+      --green: #3d5a4d;
+      --navy: #32485f;
+      --amber: #806230;
+      --shadow: 0 20px 60px rgba(48, 36, 28, 0.08);
+      --radius-lg: 28px;
+      --radius-md: 18px;
+      --radius-sm: 12px;
+      --sidebar-w: 280px;
+      --font-sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      --font-serif: "Iowan Old Style", "Songti SC", "STSong", serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.7), transparent 32%),
+        radial-gradient(circle at bottom right, rgba(123,67,54,0.05), transparent 28%),
+        var(--paper);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.18), rgba(255,255,255,0.18)),
+        repeating-linear-gradient(
+          0deg,
+          transparent 0,
+          transparent 26px,
+          rgba(61, 44, 30, 0.02) 27px
+        );
+      mix-blend-mode: multiply;
+      opacity: 0.55;
+    }
+
+    .deck {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: rgba(248, 245, 239, 0.88);
+      backdrop-filter: blur(18px);
+      padding: 32px 24px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      position: relative;
+      z-index: 3;
+    }
+
+    .brand {
+      display: grid;
+      gap: 10px;
+    }
+
+    .brand .eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .brand h1 {
+      font-family: var(--font-serif);
+      font-size: 30px;
+      line-height: 1.08;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--accent-ink);
+    }
+
+    .brand p {
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--ink-soft);
+    }
+
+    .meta-box {
+      background: rgba(255,255,255,0.42);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .meta-box .label {
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .meta-box .formula {
+      font-size: 18px;
+      line-height: 1.5;
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .meta-box .formula span {
+      color: var(--accent);
+    }
+
+    .nav {
+      display: grid;
+      gap: 6px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .nav-item {
+      border: 1px solid transparent;
+      border-radius: 14px;
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      cursor: pointer;
+      transition: 0.24s ease;
+      color: var(--ink-soft);
+      user-select: none;
+    }
+
+    .nav-item:hover {
+      background: rgba(255,255,255,0.45);
+      border-color: var(--line);
+      color: var(--ink);
+    }
+
+    .nav-item.active {
+      background: var(--card-solid);
+      border-color: rgba(123, 67, 54, 0.22);
+      box-shadow: 0 12px 30px rgba(69, 48, 35, 0.06);
+      color: var(--ink);
+    }
+
+    .nav-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+
+    .nav-item.active .nav-num {
+      border-color: rgba(123, 67, 54, 0.3);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .nav-text strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 3px;
+      color: inherit;
+    }
+
+    .nav-text span {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--ink-soft);
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+
+    .main {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .progress {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 3px;
+      width: 0;
+      background: linear-gradient(90deg, var(--accent), #9f6a58);
+      z-index: 4;
+      transition: width 0.3s ease;
+    }
+
+    .slides {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 56px 64px 48px;
+      opacity: 0;
+      transform: translateX(48px);
+      transition: opacity 0.34s ease, transform 0.34s ease;
+      pointer-events: none;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 28px;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    .slide-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: flex-start;
+    }
+
+    .slide-meta {
+      display: grid;
+      gap: 10px;
+    }
+
+    .section-tag {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: var(--ink-soft);
+    }
+
+    .slide-title {
+      font-family: var(--font-serif);
+      font-size: 46px;
+      line-height: 1.05;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--ink);
+      max-width: 14ch;
+    }
+
+    .slide-subtitle {
+      font-size: 17px;
+      line-height: 1.75;
+      color: var(--ink-soft);
+      max-width: 58ch;
+    }
+
+    .page-pill {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.5);
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--ink-soft);
+      white-space: nowrap;
+    }
+
+    .slide-body {
+      min-height: 0;
+      display: grid;
+      gap: 24px;
+      align-content: start;
+    }
+
+    .slide-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+
+    .hint {
+      letter-spacing: 0.02em;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      padding: 26px 28px;
+    }
+
+    .panel h3 {
+      font-size: 18px;
+      line-height: 1.45;
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+
+    .panel p,
+    .panel li {
+      font-size: 15px;
+      line-height: 1.82;
+      color: var(--ink-soft);
+    }
+
+    .panel strong {
+      color: var(--ink);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .quote {
+      padding: 26px 28px;
+      border-radius: var(--radius-lg);
+      border: 1px solid rgba(123, 67, 54, 0.18);
+      background: rgba(123, 67, 54, 0.06);
+      color: var(--accent-ink);
+      font-size: 24px;
+      line-height: 1.55;
+      font-family: var(--font-serif);
+    }
+
+    .quote small {
+      display: block;
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      font-family: var(--font-sans);
+    }
+
+    .title-slide .slide-body {
+      align-content: center;
+    }
+
+    .hero-block {
+      display: grid;
+      gap: 18px;
+      max-width: 980px;
+    }
+
+    .hero-kicker {
+      font-size: 13px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .hero-title {
+      font-family: var(--font-serif);
+      font-size: 72px;
+      line-height: 0.98;
+      letter-spacing: -0.045em;
+      color: var(--accent-ink);
+      max-width: 11ch;
+    }
+
+    .hero-subtitle {
+      font-size: 20px;
+      line-height: 1.7;
+      color: var(--ink-soft);
+      max-width: 42ch;
+    }
+
+    .hero-meta {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .hero-chip,
+    .mini-chip {
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.55);
+      padding: 10px 14px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    .hero-formula {
+      margin-top: 18px;
+      padding: 24px 28px;
+      background: var(--card-solid);
+      border-radius: var(--radius-lg);
+      border: 1px solid rgba(123, 67, 54, 0.18);
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 28px;
+      line-height: 1.5;
+      box-shadow: var(--shadow);
+      width: fit-content;
+    }
+
+    .hero-formula .accent {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .agenda-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px 20px;
+    }
+
+    .agenda-item {
+      background: rgba(255,255,255,0.56);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 18px 20px;
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 16px;
+    }
+
+    .agenda-item .index {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 16px;
+      background: rgba(123, 67, 54, 0.06);
+    }
+
+    .agenda-item h3 {
+      margin-bottom: 8px;
+      font-size: 17px;
+    }
+
+    .bullet-list {
+      list-style: none;
+      display: grid;
+      gap: 12px;
+    }
+
+    .bullet-list li {
+      padding-left: 18px;
+      position: relative;
+    }
+
+    .bullet-list li::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      position: absolute;
+      left: 0;
+      top: 11px;
+      opacity: 0.65;
+    }
+
+    .problem-frame {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .diagnosis-box {
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.52);
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .diagnosis-box .title {
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .diagnosis-box .big {
+      font-size: 21px;
+      line-height: 1.5;
+      color: var(--ink);
+      font-family: var(--font-serif);
+    }
+
+    .diagnosis-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .small-card {
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.58);
+      padding: 16px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .small-card h4 {
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .small-card p {
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--ink-soft);
+    }
+
+    .formula-stage {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 22px;
+    }
+
+    .equation-board {
+      padding: 34px 32px;
+      border-radius: var(--radius-lg);
+      background: var(--card-solid);
+      border: 1px solid rgba(123, 67, 54, 0.18);
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 20px;
+    }
+
+    .equation {
+      font-family: var(--font-serif);
+      font-size: 42px;
+      line-height: 1.4;
+      color: var(--ink);
+    }
+
+    .equation .accent {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .equation-notes {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .equation-note {
+      border-radius: 999px;
+      padding: 9px 14px;
+      background: var(--accent-soft);
+      color: var(--accent-ink);
+      font-size: 13px;
+      border: 1px solid rgba(123, 67, 54, 0.12);
+    }
+
+    .pillar {
+      display: grid;
+      gap: 14px;
+    }
+
+    .pillar-card {
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.55);
+      padding: 20px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .pillar-card .tag {
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .pillar-card h3 {
+      margin-bottom: 0;
+      font-size: 18px;
+    }
+
+    .lane-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .lane {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.56);
+      padding: 22px;
+      display: grid;
+      gap: 14px;
+      min-height: 280px;
+    }
+
+    .lane .lane-tag {
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .lane h3 {
+      font-size: 20px;
+      line-height: 1.45;
+      margin-bottom: 0;
+    }
+
+    .lane p {
+      font-size: 14px;
+      line-height: 1.78;
+    }
+
+    .lane.green {
+      background: rgba(61, 90, 77, 0.07);
+      border-color: rgba(61, 90, 77, 0.18);
+    }
+
+    .lane.navy {
+      background: rgba(50, 72, 95, 0.06);
+      border-color: rgba(50, 72, 95, 0.16);
+    }
+
+    .lane.amber {
+      background: rgba(128, 98, 48, 0.08);
+      border-color: rgba(128, 98, 48, 0.18);
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+    }
+
+    .matrix-col {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.56);
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .matrix-col h3 {
+      margin-bottom: 0;
+      font-size: 19px;
+    }
+
+    .flow-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .flow-item {
+      padding: 15px 16px;
+      border-left: 3px solid rgba(123, 67, 54, 0.45);
+      background: rgba(123, 67, 54, 0.05);
+      border-radius: 0 14px 14px 0;
+    }
+
+    .flow-item strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .knowledge-plane {
+      display: grid;
+      grid-template-columns: 0.95fr 0.2fr 1.15fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .source-stack,
+    .scene-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .source-card,
+    .scene-card {
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.58);
+      padding: 18px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .source-card h4,
+    .scene-card h4 {
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .source-card p,
+    .scene-card p {
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--ink-soft);
+    }
+
+    .connector {
+      display: grid;
+      align-items: center;
+      justify-items: center;
+      color: var(--accent);
+      font-size: 13px;
+      gap: 14px;
+    }
+
+    .connector .line {
+      width: 1px;
+      height: 100%;
+      min-height: 80px;
+      background: linear-gradient(180deg, transparent, rgba(123,67,54,0.42), transparent);
+    }
+
+    .connector .label {
+      writing-mode: vertical-rl;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      font-size: 11px;
+    }
+
+    .guardrails {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .guardrail {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.56);
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .guardrail .tag {
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .guardrail h3 {
+      margin-bottom: 0;
+      font-size: 21px;
+    }
+
+    .guardrail ul {
+      list-style: none;
+      display: grid;
+      gap: 11px;
+    }
+
+    .guardrail li {
+      padding-left: 16px;
+      position: relative;
+      font-size: 14px;
+      line-height: 1.72;
+      color: var(--ink-soft);
+    }
+
+    .guardrail li::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      position: absolute;
+      left: 0;
+      top: 10px;
+      opacity: 0.7;
+    }
+
+    .accuracy-frame {
+      display: grid;
+      grid-template-columns: 0.95fr 1.05fr;
+      gap: 22px;
+    }
+
+    .triad {
+      display: grid;
+      gap: 14px;
+    }
+
+    .triad-step {
+      display: grid;
+      grid-template-columns: 54px 1fr;
+      gap: 14px;
+      padding: 18px;
+      background: rgba(255,255,255,0.58);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+    }
+
+    .triad-step .num {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: rgba(123,67,54,0.08);
+      border: 1px solid rgba(123,67,54,0.18);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .triad-step h4 {
+      font-size: 16px;
+      margin-bottom: 6px;
+    }
+
+    .triad-step p {
+      font-size: 14px;
+      line-height: 1.75;
+      color: var(--ink-soft);
+    }
+
+    .bridge-board {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.56);
+      padding: 26px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .bridge-row {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .bridge-node {
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      padding: 18px;
+      min-height: 106px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    .bridge-node h4 {
+      font-size: 16px;
+    }
+
+    .bridge-node p {
+      font-size: 13px;
+      line-height: 1.68;
+      color: var(--ink-soft);
+    }
+
+    .bridge-arrow {
+      color: var(--accent);
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .milestones {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .milestone {
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.58);
+      padding: 20px 18px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .milestone .phase {
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+    }
+
+    .milestone h4 {
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .demo-placeholder {
+      min-height: 420px;
+      border-radius: var(--radius-lg);
+      border: 1px dashed rgba(123, 67, 54, 0.34);
+      background:
+        linear-gradient(rgba(255,255,255,0.72), rgba(255,255,255,0.72)),
+        repeating-linear-gradient(
+          135deg,
+          rgba(123,67,54,0.04) 0 18px,
+          transparent 18px 36px
+        );
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 40px;
+    }
+
+    .demo-placeholder h3 {
+      font-family: var(--font-serif);
+      font-size: 34px;
+      color: var(--accent-ink);
+      margin-bottom: 14px;
+    }
+
+    .demo-placeholder p {
+      max-width: 46ch;
+      font-size: 17px;
+      line-height: 1.8;
+      color: var(--ink-soft);
+    }
+
+    .closing {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .closing .summary-board {
+      border-radius: var(--radius-lg);
+      background: var(--card-solid);
+      border: 1px solid rgba(123, 67, 54, 0.18);
+      box-shadow: var(--shadow);
+      padding: 30px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .summary-board .statement {
+      font-family: var(--font-serif);
+      font-size: 34px;
+      line-height: 1.4;
+      color: var(--accent-ink);
+    }
+
+    .summary-board .statement strong {
+      color: var(--accent);
+    }
+
+    .callouts {
+      display: grid;
+      gap: 14px;
+    }
+
+    .callout {
+      border-radius: var(--radius-md);
+      background: rgba(255,255,255,0.58);
+      border: 1px solid var(--line);
+      padding: 18px;
+    }
+
+    .callout h4 {
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+
+    .callout p {
+      font-size: 13px;
+      line-height: 1.72;
+      color: var(--ink-soft);
+    }
+
+    @media (max-width: 1180px) {
+      .deck {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .slide {
+        padding: 34px 22px 28px;
+      }
+
+      .slide-title {
+        font-size: 34px;
+      }
+
+      .hero-title {
+        font-size: 48px;
+      }
+
+      .grid-2,
+      .grid-3,
+      .problem-frame,
+      .formula-stage,
+      .lane-grid,
+      .matrix,
+      .knowledge-plane,
+      .guardrails,
+      .accuracy-frame,
+      .closing,
+      .milestones {
+        grid-template-columns: 1fr;
+      }
+
+      .agenda-list {
+        grid-template-columns: 1fr;
+      }
+
+      .diagnosis-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .bridge-row {
+        grid-template-columns: 1fr;
+      }
+
+      .bridge-arrow {
+        transform: rotate(90deg);
+        justify-self: center;
+      }
+
+      .connector {
+        grid-template-columns: 1fr;
+      }
+
+      .connector .label {
+        writing-mode: horizontal-tb;
+      }
+
+      .connector .line {
+        width: 100%;
+        height: 1px;
+        min-height: 1px;
+        min-width: 80px;
+        background: linear-gradient(90deg, transparent, rgba(123,67,54,0.42), transparent);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="eyebrow">Agent Presentation / Light Draft</div>
+        <h1>从试点碰壁到能力成形</h1>
+        <p>科技条线智能体建设的一点实践</p>
+      </div>
+      <div class="meta-box">
+        <div class="label">Main Formula</div>
+        <div class="formula">智能体能力 = <span>模型能力 × 数据质量</span> + 流程编排</div>
+      </div>
+      <div class="nav" id="nav"></div>
+      <div class="sidebar-footer">
+        <span>浅色版汇报稿</span>
+        <span>← → 翻页</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="progress" id="progress"></div>
+      <section class="slides" id="slides">
+        <article class="slide title-slide active" data-title="标题" data-desc="定调与总公式">
+          <div class="slide-header">
+            <div class="slide-meta"></div>
+            <div class="page-pill">01 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="hero-block">
+              <div class="hero-kicker">科技条线智能体建设汇报</div>
+              <div class="hero-title">从试点碰壁到能力成形</div>
+              <div class="hero-subtitle">不是从“模型能不能做”出发，而是从“复杂任务为什么会失稳”出发，逐步摸清一条更稳的建设路径。</div>
+              <div class="hero-meta">
+                <div class="hero-chip">汇报对象：总行科技部门</div>
+                <div class="hero-chip">场景边界：短期聚焦科技条线内部应用</div>
+                <div class="hero-chip">材料类型：正式汇报 / 演示稿</div>
+              </div>
+              <div class="hero-formula">
+                <span>智能体能力</span>
+                <span>=</span>
+                <span class="accent">模型能力 × 数据质量</span>
+                <span>+</span>
+                <span>流程编排</span>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>主轴不是“我们用了 AI”，而是“我们形成了方法”。</span>
+            <span class="hint">键盘左右键 / 点击左侧目录</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="今天讲什么" data-desc="目录与叙事结构">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Overview</div>
+              <div class="slide-title">今天讲什么</div>
+              <div class="slide-subtitle">从一次碰壁开始，落到一套能力底座；先说为什么不能直接冲业务，再说我们如何补齐基础能力。</div>
+            </div>
+            <div class="page-pill">02 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="agenda-list">
+              <div class="agenda-item">
+                <div class="index">1</div>
+                <div>
+                  <h3>为什么早期探索会折戟</h3>
+                  <p>淘沙问数类需求并不是“模型太笨”，而是上下文、知识关系、验证链条同时失稳。</p>
+                </div>
+              </div>
+              <div class="agenda-item">
+                <div class="index">2</div>
+                <div>
+                  <h3>用一个公式收束经验</h3>
+                  <p>把问题重新拆成模型能力、数据质量、流程编排三部分，明确各自的边界和权重。</p>
+                </div>
+              </div>
+              <div class="agenda-item">
+                <div class="index">3</div>
+                <div>
+                  <h3>为什么本项目重点是知识库</h3>
+                  <p>知识散落各处，真正难的是把它们按场景组织成不同的“知识平面”，供智能体稳定使用。</p>
+                </div>
+              </div>
+              <div class="agenda-item">
+                <div class="index">4</div>
+                <div>
+                  <h3>如何把智能体变成工程能力</h3>
+                  <p>工具链、验证链、软约束、硬约束共同作用，决定结果能否可控、可追溯、可复制。</p>
+                </div>
+              </div>
+              <div class="agenda-item">
+                <div class="index">5</div>
+                <div>
+                  <h3>演示与后续判断</h3>
+                  <p>演示部分单独展开；正文的目标不是申请，而是让“值得继续支持”成为自然结论。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>结构策略：问题牵引切入，能力底座收束。</span>
+            <span>受众重点：管理人员 / 科技方向制定者</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="早期探索为何折戟" data-desc="坦率讲问题">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Why It Broke</div>
+              <div class="slide-title">早期探索为何折戟</div>
+              <div class="slide-subtitle">我们最早也试过直接面向复杂需求做智能体，但很快发现，把资料一股脑喂给模型，并不会自然得到稳定结果。</div>
+            </div>
+            <div class="page-pill">03 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="problem-frame">
+              <div class="panel stack">
+                <h3>淘沙问数类需求，为什么没能直接做成</h3>
+                <ul class="bullet-list">
+                  <li>输入层面看似很充分：表结构、关联关系、业务知识都尽量提供给模型。</li>
+                  <li>执行层面却很不稳定：模型会把知道的、猜到的、误解的内容混在一起使用。</li>
+                  <li>结果层面问题集中暴露：关系搞错、口径不一致、引用不存在的数据、结论难以复核。</li>
+                </ul>
+                <div class="quote">
+                  真正的问题不是“资料给少了”，而是“信息虽然很多，但没有被组织成可执行、可验证、可纠偏的能力”。
+                  <small>把所有东西都给模型，不等于模型就真的掌握了复杂业务问题。</small>
+                </div>
+              </div>
+              <div class="stack">
+                <div class="diagnosis-box">
+                  <div class="title">核心症结</div>
+                  <div class="big">模型面对的是一堆材料，而不是一个被约束、被校验、被组织好的工作环境。</div>
+                </div>
+                <div class="diagnosis-grid">
+                  <div class="small-card">
+                    <h4>信息混杂</h4>
+                    <p>上下文多，不代表关系清。模型能看到，不代表会正确理解和组合。</p>
+                  </div>
+                  <div class="small-card">
+                    <h4>知识散落</h4>
+                    <p>代码、文档、经验、规则分散在不同角落，缺少按场景重组的能力。</p>
+                  </div>
+                  <div class="small-card">
+                    <h4>验证缺位</h4>
+                    <p>没有稳定的外部校验链条，模型很容易用“自信的错误”填满空白。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这一步要讲得坦率，但不能停留在“失败”本身。</span>
+            <span>关键是把问题抽象出来</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="直接喂资料为何不稳" data-desc="把问题拆开看">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Failure Analysis</div>
+              <div class="slide-title">直接把资料都喂给模型，为什么仍然不稳</div>
+              <div class="slide-subtitle">复杂业务需求不是知识点问答，而是一个需要约束、推理、执行、验证共同参与的工程过程。</div>
+            </div>
+            <div class="page-pill">04 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="lane-grid">
+              <div class="lane">
+                <div class="lane-tag">Problem 01</div>
+                <h3>上下文并不自动转化为能力</h3>
+                <p>模型看到了表结构、文档和历史代码，但并不会天然知道哪些更可信、哪些已过时、哪些需要交叉验证。</p>
+              </div>
+              <div class="lane green">
+                <div class="lane-tag">Problem 02</div>
+                <h3>知识之间缺少“可执行关系”</h3>
+                <p>表与表怎么勾稽、代码链路怎样流转、规则在什么场景下适用，这些都需要被组织，而不是被堆放。</p>
+              </div>
+              <div class="lane navy">
+                <div class="lane-tag">Problem 03</div>
+                <h3>没有验证闭环，错误会被放大</h3>
+                <p>如果模型既负责生成、又负责解释、又负责自证，那就很容易把问题藏在漂亮的输出里。</p>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>因此，问题的重心不应只放在“换更强的模型”</h3>
+              <p>更强的模型当然重要，但如果数据质量和流程编排没有补齐，复杂任务依然会失稳。模型能力只能放大上限，不能替代底座。</p>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>从这里自然引出主公式。</span>
+            <span>模型强，不等于系统稳</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="一个公式" data-desc="作为整场主线">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Formula</div>
+              <div class="slide-title">用一个公式收束这段经验</div>
+              <div class="slide-subtitle">这个公式不是总结页的点缀，而是理解智能体建设的分析框架。</div>
+            </div>
+            <div class="page-pill">05 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="formula-stage">
+              <div class="equation-board">
+                <div class="equation">智能体能力 = <span class="accent">模型能力 × 数据质量</span> + 流程编排</div>
+                <div class="equation-notes">
+                  <div class="equation-note">模型能力是乘数</div>
+                  <div class="equation-note">数据质量决定决策上限</div>
+                  <div class="equation-note">流程编排决定稳定性</div>
+                </div>
+                <p>如果只有模型能力，没有高质量数据和外部流程，复杂任务就会依赖模型临场发挥；一旦遇到高耦合、多约束、可解释性要求高的场景，结果往往不稳。</p>
+              </div>
+              <div class="pillar">
+                <div class="pillar-card">
+                  <div class="tag">Multiplier</div>
+                  <h3>模型能力</h3>
+                  <p>更强模型可以提升理解、规划和表达能力，但不能替代事实来源、工具支撑和校验闭环。</p>
+                </div>
+                <div class="pillar-card">
+                  <div class="tag">Upper Bound</div>
+                  <h3>数据质量</h3>
+                  <p>这里的数据是广义的：原始数据、加工链路、知识组织、工具返回结果，都会成为模型决策的依据。</p>
+                </div>
+                <div class="pillar-card">
+                  <div class="tag">Stability</div>
+                  <h3>流程编排</h3>
+                  <p>任务怎么拆、如何验证、哪些能做、哪些不能做，都需要在模型之外被明确定义和约束。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这页建议在汇报时反复回扣。</span>
+            <span>公式贯穿全文</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="模型能力" data-desc="承认乘数价值，但不过度展开">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Factor 01</div>
+              <div class="slide-title">模型能力仍然重要，但不是全部答案</div>
+              <div class="slide-subtitle">同样的知识底座、工具供给和流程设计下，模型越强，结果通常越好；但如果基础层不牢，乘数也无从发挥。</div>
+            </div>
+            <div class="page-pill">06 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="matrix">
+              <div class="matrix-col">
+                <h3>应该承认的现实</h3>
+                <div class="flow-list">
+                  <div class="flow-item">
+                    <strong>更大的上下文、更好的推理能力，确实能显著改善协作体验。</strong>
+                    模型升级后，很多原来必须人工兜底的环节，会自然变得更顺畅。
+                  </div>
+                  <div class="flow-item">
+                    <strong>模型能力差距是客观存在的。</strong>
+                    对复杂研发任务来说，模型档次不同，规划质量、纠错能力和容错空间也会不同。
+                  </div>
+                </div>
+              </div>
+              <div class="matrix-col">
+                <h3>但不能忽略的边界</h3>
+                <div class="flow-list">
+                  <div class="flow-item">
+                    <strong>模型强，不等于知道什么可信。</strong>
+                    如果输入里混有过时代码、错误知识或不完整规则，强模型也可能在错误基座上做出更流畅的推断。
+                  </div>
+                  <div class="flow-item">
+                    <strong>模型强，不等于结果天然可控。</strong>
+                    复杂任务最终要回到可验证、可回放、可追责的工程体系里，而不是只追求一次性回答质量。
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这页不必展开过多技术细节，主要是把“模型是乘数”说透。</span>
+            <span>承认模型价值，同时稳住逻辑</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="数据质量" data-desc="广义数据质量与工具链">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Factor 02</div>
+              <div class="slide-title">数据质量，决定智能体决策的上限</div>
+              <div class="slide-subtitle">这里的数据质量是广义概念，不只包括原始数据，也包括数据加工质量、知识组织质量，以及工具返回结果的质量。</div>
+            </div>
+            <div class="page-pill">07 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="lane-grid">
+              <div class="lane">
+                <div class="lane-tag">Source</div>
+                <h3>原始数据与数据链路</h3>
+                <p>表结构、字段含义、分区策略、上下游依赖是否清晰，会直接影响模型对问题边界的判断。</p>
+              </div>
+              <div class="lane green">
+                <div class="lane-tag">Knowledge</div>
+                <h3>知识的组织方式</h3>
+                <p>代码知识、文档知识、规则知识、经验知识，如果不能互相映照，就难以形成可用的判断依据。</p>
+              </div>
+              <div class="lane amber">
+                <div class="lane-tag">Tool Return</div>
+                <h3>工具返回结果的可信度</h3>
+                <p>数据血缘工具、代码检索工具、数据查询工具返回什么、如何标注、是否含状态信息，都会影响模型决策质量。</p>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>工具链最终沉淀的，不只是几个查询能力，而是“数据工厂 / 知识工厂”的基础设施</h3>
+              <p>当工具能稳定暴露血缘、代码、查询、规则和状态信息时，模型才有可能在事实基础上工作，而不是在模糊印象上工作。</p>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这页是知识库定位的前提。</span>
+            <span>先讲“什么算数据质量”</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="知识平面" data-desc="知识库的核心观点">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Knowledge Plane</div>
+              <div class="slide-title">知识库不是仓库，而是“按场景组织知识平面”的能力</div>
+              <div class="slide-subtitle">知识本身散落在各个角落，真正关键的是：面向不同应用场景，把不同形式的知识组织成不同平面，再支撑知识应用。</div>
+            </div>
+            <div class="page-pill">08 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="knowledge-plane">
+              <div class="source-stack">
+                <div class="source-card">
+                  <h4>代码知识</h4>
+                  <p>数据加工逻辑、历史实现、启用状态、上下游依赖。</p>
+                </div>
+                <div class="source-card">
+                  <h4>文档知识</h4>
+                  <p>设计说明、接口约束、业务口径、流程文档。</p>
+                </div>
+                <div class="source-card">
+                  <h4>规则知识</h4>
+                  <p>研发规范、命名约定、质量校验、边界条件。</p>
+                </div>
+                <div class="source-card">
+                  <h4>经验知识</h4>
+                  <p>踩坑记录、问题归因、修复策略、会话外沉淀。</p>
+                </div>
+              </div>
+              <div class="connector">
+                <div class="label">Organize</div>
+                <div class="line"></div>
+                <div class="label">Compose</div>
+              </div>
+              <div class="scene-stack">
+                <div class="scene-card">
+                  <h4>面向数据开发场景的知识平面</h4>
+                  <p>突出血缘、表结构、历史 SQL、开发规范、启用状态、校验方式。</p>
+                </div>
+                <div class="scene-card">
+                  <h4>面向研发协同场景的知识平面</h4>
+                  <p>突出代码检索、模块边界、工程约定、变更影响、验证路径。</p>
+                </div>
+                <div class="scene-card">
+                  <h4>面向解释与复核场景的知识平面</h4>
+                  <p>突出来源可追溯、口径可比对、结论可复核，而不是只给一个答案。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这是本项目最值得强调的思想之一。</span>
+            <span>不同知识，不应被局限在一种展示方式里</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="流程编排" data-desc="从自由生成到受约束工作流">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Factor 03</div>
+              <div class="slide-title">流程编排，决定智能体能否稳定发挥</div>
+              <div class="slide-subtitle">重点不是让模型“自由发挥”，而是把模型放进一个受约束、可验证、可纠偏的工作流里。</div>
+            </div>
+            <div class="page-pill">09 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="guardrails">
+              <div class="guardrail">
+                <div class="tag">Soft Orchestration</div>
+                <h3>软约束：把工作流说清楚</h3>
+                <ul>
+                  <li>明确任务拆解顺序，而不是让模型一口气做完整个复杂问题。</li>
+                  <li>通过规则文件、角色定义、产出格式、循环上限，告诉模型“怎样做更像一个工程过程”。</li>
+                  <li>把数据开发工作流程抽象出来，让智能体理解“先查什么、再做什么、最后怎么验”。</li>
+                </ul>
+              </div>
+              <div class="guardrail">
+                <div class="tag">Hard Orchestration</div>
+                <h3>硬约束：把不能做的事情拦住</h3>
+                <ul>
+                  <li>通过 hook、工具代码和仓库隔离，直接限制模型的可见范围和可操作边界。</li>
+                  <li>对查询、代码检索、启用状态、分区规范做硬性校验，而不是只靠提示词建议。</li>
+                  <li>让模型无法绕开关键规则，使稳定性从“依赖自觉”变成“依赖系统”。</li>
+                </ul>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>从框架视角看，本质是协作方式在进化</h3>
+              <p>从“提示词驱动”到“上下文驱动”，再到“带工具、带约束、带验证的 Agent 工作流”，重点不在换了多少术语，而在工程控制力显著增强。</p>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>建议把“hook 是硬约束”讲得具体一点。</span>
+            <span>这是和一般科普最能拉开差距的地方</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="如何保证准确" data-desc="来源、加工、验证">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Accuracy</div>
+              <div class="slide-title">如何保证智能体更准确</div>
+              <div class="slide-subtitle">目标不是承诺彻底消灭幻觉，而是把结果放进可测试、可验证、可回放的工程体系内。</div>
+            </div>
+            <div class="page-pill">10 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="accuracy-frame">
+              <div class="triad">
+                <div class="triad-step">
+                  <div class="num">1</div>
+                  <div>
+                    <h4>数据来源要可信</h4>
+                    <p>让模型尽量依赖可追溯的工具结果，而不是依赖模糊的背景记忆或一次性拼接的上下文。</p>
+                  </div>
+                </div>
+                <div class="triad-step">
+                  <div class="num">2</div>
+                  <div>
+                    <h4>数据加工要透明</h4>
+                    <p>中间推导、加工逻辑、参考依据都应留下痕迹，便于后续复查和持续修正。</p>
+                  </div>
+                </div>
+                <div class="triad-step">
+                  <div class="num">3</div>
+                  <div>
+                    <h4>数据验证要外部化</h4>
+                    <p>让验证链条独立于生成链条，通过工具校验、规则校验和结果复核共同压缩错误空间。</p>
+                  </div>
+                </div>
+              </div>
+              <div class="bridge-board">
+                <h3>工程化做法：如果模型直接生成不可靠，就让模型先生成“可测试、可验证的代码与过程”</h3>
+                <div class="bridge-row">
+                  <div class="bridge-node">
+                    <h4>模型生成初稿</h4>
+                    <p>先产出 SQL、脚本、检索结果、推理路径，而不是直接产出最终结论。</p>
+                  </div>
+                  <div class="bridge-arrow">→</div>
+                  <div class="bridge-node">
+                    <h4>工具和规则接管验证</h4>
+                    <p>用数据查询、代码检索、规范检查、启用状态标注来校验其合理性。</p>
+                  </div>
+                </div>
+                <div class="bridge-row">
+                  <div class="bridge-node">
+                    <h4>高质量代码沉淀下来</h4>
+                    <p>把一次次验证后的成果变成可复用脚本和能力，而不只是临时回答。</p>
+                  </div>
+                  <div class="bridge-arrow">→</div>
+                  <div class="bridge-node">
+                    <h4>生产力才真正释放</h4>
+                    <p>很多过去没人力做、或者不值得做的小自动化和辅助能力，因此变得可行。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这里可以自然引出 FDE 视角。</span>
+            <span>准确不是神话，是工程结果</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="FDE 视角" data-desc="AI 不会自动提升效率">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Engineering View</div>
+              <div class="slide-title">真正稀缺的，不只是模型，而是把模型接进现有体系的能力</div>
+              <div class="slide-subtitle">AI 来了，效率不会自动提升。真正关键的是：谁能把大模型能力和既有系统、流程、规范、工具粘合起来。</div>
+            </div>
+            <div class="page-pill">11 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="milestones">
+              <div class="milestone">
+                <div class="phase">Observation</div>
+                <h4>不是有模型就有产出</h4>
+                <p>缺少知识组织和流程控制时，模型更像一个不稳定的助手，而不是可靠的工程能力。</p>
+              </div>
+              <div class="milestone">
+                <div class="phase">Role</div>
+                <h4>FDE 价值正在凸显</h4>
+                <p>真正能落地的人，不只是会调模型，而是能把模型嵌入既有技术体系和工作流。</p>
+              </div>
+              <div class="milestone">
+                <div class="phase">Method</div>
+                <h4>先把底座做扎实</h4>
+                <p>短期聚焦科技条线内部应用，先把知识、工具、验证、约束做厚，再逐步走向更复杂场景。</p>
+              </div>
+              <div class="milestone">
+                <div class="phase">Meaning</div>
+                <h4>从单点试验走向可复用能力</h4>
+                <p>这不是几次零散尝试，而是在形成一套可复制、可扩展、可治理的 AI 工程化能力底座。</p>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>因此，我们短期并不急于直接追求大规模业务落地</h3>
+              <p>更现实的路径，是先在科技部门内部把方法跑通，把底座打稳。这样既能验证方向，也能为后续更大范围的应用积累治理和工程经验。</p>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这页帮助总行理解“为什么当前先不追业务大面积落地”。</span>
+            <span>不是保守，而是磨刀</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="案例演示" data-desc="留白承接">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Demo</div>
+              <div class="slide-title">案例演示</div>
+              <div class="slide-subtitle">这里建议与现场讲解结合，不在正文里提前写满；前面的逻辑负责铺路，演示负责把方法落到具体感受上。</div>
+            </div>
+            <div class="page-pill">12 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="demo-placeholder">
+              <div>
+                <h3>演示内容现场展开</h3>
+                <p>建议围绕“输入是什么、模型如何被约束、工具如何参与、验证如何完成、最终沉淀了什么能力”这五步来演示，而不只是展示一个最终结果。</p>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>这一页刻意留白，避免正文和演示互相抢内容。</span>
+            <span>把方法论和现场体验分开</span>
+          </div>
+        </article>
+
+        <article class="slide" data-title="总结" data-desc="底座化收束">
+          <div class="slide-header">
+            <div class="slide-meta">
+              <div class="section-tag">Conclusion</div>
+              <div class="slide-title">最后想收束成一句话</div>
+              <div class="slide-subtitle">我们当前做的，不是某个零散场景的小尝试，而是在为科技条线形成一套可复用的 AI 工程化能力底座。</div>
+            </div>
+            <div class="page-pill">13 / 13</div>
+          </div>
+          <div class="slide-body">
+            <div class="closing">
+              <div class="summary-board">
+                <div class="statement">复杂业务智能体不能靠“把资料都喂给模型”直接做成，而要先补齐 <strong>知识组织、工具供给、流程约束</strong> 这三类基础能力。</div>
+                <div class="equation">智能体能力 = <span class="accent">模型能力 × 数据质量</span> + 流程编排</div>
+                <p>如果把这三件事做实，模型能力才能被真正释放；如果这三件事不稳，再强的模型也难以在复杂研发场景里持续稳定地产生产出。</p>
+              </div>
+              <div class="callouts">
+                <div class="callout">
+                  <h4>对内的意义</h4>
+                  <p>先在科技条线内部把能力跑通，能够沉淀方法、校验机制和治理经验。</p>
+                </div>
+                <div class="callout">
+                  <h4>对后的意义</h4>
+                  <p>当底座清晰之后，更多场景的智能体建设才有可能从“试试看”进入“可复制”。</p>
+                </div>
+                <div class="callout">
+                  <h4>材料语气的控制</h4>
+                  <p>正文不直接写资源诉求，但应让“这条路值得继续支持”成为听众自然得出的结论。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="slide-footer">
+            <span>正文到这里收住即可，资源话题留给现场判断。</span>
+            <span>结束页建议停留稍长一点</span>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const nav = document.getElementById("nav");
+    const progress = document.getElementById("progress");
+    let current = 0;
+
+    slides.forEach((slide, index) => {
+      const item = document.createElement("div");
+      item.className = "nav-item";
+      item.dataset.index = index;
+      item.innerHTML = `
+        <div class="nav-num">${String(index + 1).padStart(2, "0")}</div>
+        <div class="nav-text">
+          <strong>${slide.dataset.title}</strong>
+          <span>${slide.dataset.desc}</span>
+        </div>
+      `;
+      item.addEventListener("click", () => goTo(index));
+      nav.appendChild(item);
+    });
+
+    const navItems = Array.from(document.querySelectorAll(".nav-item"));
+
+    function render() {
+      slides.forEach((slide, index) => {
+        slide.classList.toggle("active", index === current);
+      });
+      navItems.forEach((item, index) => {
+        item.classList.toggle("active", index === current);
+      });
+      progress.style.width = `${((current + 1) / slides.length) * 100}%`;
+    }
+
+    function goTo(index) {
+      if (index < 0 || index >= slides.length) return;
+      current = index;
+      render();
+    }
+
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+        event.preventDefault();
+        goTo(current + 1);
+      }
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        goTo(current - 1);
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        goTo(0);
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        goTo(slides.length - 1);
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
