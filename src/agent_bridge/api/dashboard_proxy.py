@@ -29,6 +29,23 @@ DASHBOARD_ROOT_ENDPOINTS = {
     "/config.json",
     "/file-content.json",
 }
+MEMORY_DASHBOARD_ROOT_ASSET_SUFFIXES = {
+    ".css",
+    ".eot",
+    ".gif",
+    ".html",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".json",
+    ".png",
+    ".svg",
+    ".ttf",
+    ".webp",
+    ".woff",
+    ".woff2",
+}
 
 
 class DashboardProxyMiddleware:
@@ -125,7 +142,11 @@ class MemoryDashboardProxyMiddleware:
         path = str(scope.get("path", ""))
         block_key, suffix = _match_memory_dashboard_path(path)
         upstream_path = suffix if block_key else ""
-        if block_key is None and (path.startswith("/api/") or path == "/stream"):
+        if block_key is None and (
+            path.startswith("/api/")
+            or path == "/stream"
+            or _is_memory_dashboard_root_asset(path)
+        ):
             block_key = _memory_key_from_referer(scope.get("headers", []))
             upstream_path = path
         if block_key is None:
@@ -210,6 +231,16 @@ def _match_memory_dashboard_path(path: str) -> tuple[str | None, str]:
     if not block_key:
         return None, ""
     return block_key, f"/{suffix}" if suffix else "/"
+
+
+def _is_memory_dashboard_root_asset(path: str) -> bool:
+    if not path.startswith("/") or path.startswith(("/api/", "/memory-dashboard/", "/dashboard/")):
+        return False
+    leaf = path.rsplit("/", 1)[-1]
+    if "." not in leaf:
+        return False
+    suffix = "." + leaf.rsplit(".", 1)[-1].lower()
+    return suffix in MEMORY_DASHBOARD_ROOT_ASSET_SUFFIXES
 
 
 def _upstream_path(repo_key: str, suffix: str) -> str:

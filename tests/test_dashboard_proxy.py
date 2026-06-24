@@ -166,3 +166,40 @@ def test_memory_dashboard_proxy_routes_worker_api_requests_from_referer(monkeypa
 
     assert app_called is False
     assert calls == [("test-mem", "/api/observations", "http://127.0.0.1:48100/")]
+
+
+def test_memory_dashboard_proxy_routes_root_static_assets_from_referer(monkeypatch) -> None:
+    app_called = False
+    calls = []
+
+    async def app(scope, receive, send):
+        nonlocal app_called
+        app_called = True
+
+    async def fake_proxy_http(self, scope, receive, send, block_key, upstream_path, target):
+        calls.append((block_key, upstream_path, target))
+
+    monkeypatch.setattr(MemoryDashboardProxyMiddleware, "_proxy_http", fake_proxy_http)
+    middleware = MemoryDashboardProxyMiddleware(
+        app,
+        target_resolver={"test-mem": "http://127.0.0.1:48100/"}.get,
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/icon-thick-investigated.svg",
+        "query_string": b"",
+        "headers": [(b"referer", b"http://127.0.0.1:8765/memory-dashboard/test-mem/")],
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        pass
+
+    asyncio.run(middleware(scope, receive, send))
+
+    assert app_called is False
+    assert calls == [("test-mem", "/icon-thick-investigated.svg", "http://127.0.0.1:48100/")]
