@@ -202,7 +202,7 @@ def test_profile_use_writes_project_config(monkeypatch, tmp_path: Path) -> None:
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
@@ -234,7 +234,7 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
@@ -257,12 +257,12 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
     assert "agent-capability-hub" not in data["mcpServers"]
 
 
-def test_profile_use_writes_agent_bridge_server_and_profile_files(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_writes_stable_channel_without_profile_files(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": "# Agent Bridge Profile: Safe\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
@@ -274,10 +274,9 @@ def test_profile_use_writes_agent_bridge_server_and_profile_files(monkeypatch, t
     data = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
     assert "agent-bridge" in data["mcpServers"]
     assert "agent-capability-hub" not in data["mcpServers"]
-    profile_file = tmp_path / ".agent-bridge" / "profiles" / "safe.md"
-    assert profile_file.read_text(encoding="utf-8") == "# Agent Bridge Profile: Safe\n"
-    assert f"@{profile_file.resolve()}" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
-    assert str(profile_file.resolve()) in (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert not (tmp_path / ".agent-bridge" / "profiles" / "safe.md").exists()
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / "AGENTS.md").exists()
 
 
 def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path: Path) -> None:
@@ -285,7 +284,7 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
         def get_profile_memory(self, profile_key):
             return {"profile_key": profile_key, "block_key": "dev-memory", "enabled": 1}
@@ -327,7 +326,7 @@ def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
         def get_profile_memory(self, profile_key):
             return {"profile_key": profile_key, "block_key": None, "enabled": 1}
@@ -344,22 +343,21 @@ def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
     assert "agent-bridge memory hook claude-code summarize" in settings["hooks"]["Stop"][1]["hooks"][0]["command"]
 
 
-def test_profile_use_render_failure_does_not_write_project_config(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_does_not_call_render_profile_doc(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            raise RuntimeError("render failed")
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project"])
 
-    assert result.exit_code == 1
-    assert "render failed" in result.stderr
-    assert not (tmp_path / ".mcp.json").exists()
+    assert result.exit_code == 0
+    assert (tmp_path / ".mcp.json").exists()
 
 
-def test_profile_use_render_failure_does_not_overwrite_project_config(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_does_not_need_render_profile_doc_when_preserving_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     config = tmp_path / ".mcp.json"
     original = {"mcpServers": {"existing": {"command": "node"}}}
@@ -367,22 +365,24 @@ def test_profile_use_render_failure_does_not_overwrite_project_config(monkeypatc
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            raise RuntimeError("render failed")
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project"])
+    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project", "--yes"])
 
-    assert result.exit_code == 1
-    assert json.loads(config.read_text(encoding="utf-8")) == original
+    assert result.exit_code == 0
+    data = json.loads(config.read_text(encoding="utf-8"))
+    assert "existing" in data["mcpServers"]
+    assert "agent-bridge" in data["mcpServers"]
 
 
-def test_profile_use_writes_user_scope_profile_files(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_writes_user_scope_channel_without_profile_files(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": "# User Safe\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["profile", "use", "safe", "--scope", "user"])
@@ -390,10 +390,9 @@ def test_profile_use_writes_user_scope_profile_files(monkeypatch, tmp_path: Path
     assert result.exit_code == 0
     data = json.loads((home / ".mcp.json").read_text(encoding="utf-8"))
     assert "agent-bridge" in data["mcpServers"]
-    profile_file = home / ".agent-bridge" / "profiles" / "safe.md"
-    assert profile_file.read_text(encoding="utf-8") == "# User Safe\n"
-    assert f"@{profile_file.resolve()}" in (home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
-    assert str(profile_file.resolve()) in (home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
+    assert not (home / ".agent-bridge" / "profiles" / "safe.md").exists()
+    assert not (home / ".claude" / "CLAUDE.md").exists()
+    assert not (home / ".codex" / "AGENTS.md").exists()
 
 
 def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, tmp_path: Path) -> None:
@@ -413,7 +412,7 @@ def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, 
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": "# Safe\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project", "--yes"])
@@ -425,7 +424,7 @@ def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, 
     assert "agent-capability-hub" not in data["mcpServers"]
 
 
-def test_profile_use_replaces_existing_pointer_block(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_does_not_modify_existing_claude_or_agents_files(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "CLAUDE.md").write_text(
         "keep me\n<!-- agent-bridge:profile-pointer start -->\n@/old/profile.md\n"
@@ -440,21 +439,19 @@ def test_profile_use_replaces_existing_pointer_block(monkeypatch, tmp_path: Path
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": "# New Profile\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["profile", "use", "new-profile", "--scope", "project", "--yes"])
 
     assert result.exit_code == 0
-    profile_file = tmp_path / ".agent-bridge" / "profiles" / "new-profile.md"
     claude = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert "keep me" in claude
-    assert "@/old/profile.md" not in claude
-    assert f"@{profile_file.resolve()}" in claude
+    assert "@/old/profile.md" in claude
     assert "keep agents" in agents
-    assert "old pointer" not in agents
-    assert str(profile_file.resolve()) in agents
+    assert "old pointer" in agents
+    assert not (tmp_path / ".agent-bridge" / "profiles" / "new-profile.md").exists()
 
 
 def test_profile_use_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path) -> None:
@@ -465,7 +462,7 @@ def test_profile_use_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path)
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
-            return {"markdown": f"# {profile_key}\n", "rendered_hash": "abc"}
+            raise AssertionError("profile use should not render or write local profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
 
@@ -548,20 +545,11 @@ def test_profile_use_confirms_legacy_server_migration(monkeypatch, tmp_path: Pat
     assert "已取消" in result.stderr
 
 
-def test_profile_refresh_writes_profile_file(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-
-    class FakeClient:
-        def render_profile_doc(self, profile_key):
-            return {"markdown": "# Refreshed\n", "rendered_hash": "abc"}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+def test_profile_refresh_command_is_removed() -> None:
     result = runner.invoke(app, ["profile", "refresh", "safe", "--scope", "project"])
 
-    profile_file = tmp_path / ".agent-bridge" / "profiles" / "safe.md"
-    assert result.exit_code == 0
-    assert profile_file.read_text(encoding="utf-8") == "# Refreshed\n"
-    assert f"已刷新: {profile_file}" in result.stdout
+    assert result.exit_code == 2
+    assert "No such command" in result.output
 
 
 def test_profile_pins_refresh_calls_client(monkeypatch) -> None:

@@ -22,7 +22,7 @@ uv run agent-bridge server stop
 uv run agent-bridge server status
 uv run agent-bridge server init      # 初始化 SQLite 表结构
 
-# Profile 接入 Claude Code（写本地 .mcp.json + 注入 CLAUDE.md 指针）
+# Profile 接入 Claude Code（写本地 .mcp.json + 稳定 hooks；动态上下文由 SessionStart 注入）
 uv run agent-bridge profile use <profile> --scope project --url http://127.0.0.1:8765/mcp
 ```
 
@@ -76,7 +76,7 @@ npm run typecheck
 - **资源级是纯 allow-list**（无 deny），按 `ProfileResourceType`（`wiki_kb` / `code_repo`）。
 - `log_tool_call` 是**唯一审计出口**：每次 `execute`/`search`（含被拒绝的）都写一行，带 `entrypoint`、`source_type`、`status`、`failure_stage`、`failure_owner`、`error_type`、`duration_ms`，失败时把 `log_id` 缝进异常信息便于关联。`invoke_logged_tool`（`service.py:144`）让工作流辅助工具/脚本运行也走同一套审计。
 
-**Profile 文档与 Pin（`profiles/`）**：`docs.py` 把 profile 渲染成 Markdown 指导文档，并用 `@`-import 指针块幂等地注入到 `CLAUDE.md`/`AGENTS.md`（`install_profile_to_cwd`，与 `agb profile use` 的行为一致）。`pins.py` 里只有 `{overview, search, detail}` 类型工具可被 pin，pin 粒度是 `(service, tool_type)` 组而非单个工具，可按 ratio/count 自动选（基于 30 天用量，结果缓存 24h）。
+**Profile 文档与 Pin（`profiles/`）**：`docs.py` 仍提供 profile Markdown 渲染和 `install_profile_to_cwd` helper，主要供服务端托管 agent run 写隔离工作目录使用；`agb profile use` 不再写本地 profile md，也不再改用户/项目的 `CLAUDE.md`/`AGENTS.md`。Claude Code 交互会通过 `SessionStart` hook 从服务端实时注入 profile 指导。`pins.py` 里只有 `{overview, search, detail}` 类型工具可被 pin，pin 粒度是 `(service, tool_type)` 组而非单个工具，可按 ratio/count 自动选（基于 30 天用量，结果缓存 24h）。
 
 ### 知识管理（`knowledge_management/`）
 
@@ -104,7 +104,7 @@ npm run typecheck
 ### API 与 CLI
 
 - `api/routes/*` 按 domain 分模块（health / knowledge / capabilities / governance / agent_runs / builtins / workflows / script_runtime），均以工厂函数 `create_*_routes(service, actor, ...)` 形式注册到 `api/app.py`。`actor` 来自 `X-Agent-Bridge-User` 头。
-- CLI（`cli/`，Typer）只是个 HTTP 客户端薄壳，通过 `AgentBridgeClient`（`client.py`）调服务端；`server` 子命令直接管进程。`profile use` 是少数会写**本地文件**的命令（`.mcp.json` + profile 文档 + CLAUDE.md 指针），它依赖服务端实时渲染的 profile 文档，这也是 TODO 里提到的「CLI 与服务端耦合」点。
+- CLI（`cli/`，Typer）只是个 HTTP 客户端薄壳，通过 `AgentBridgeClient`（`client.py`）调服务端；`server` 子命令直接管进程。`profile use` 只写稳定本地通道（`.mcp.json` + Claude Code hooks），不再写 profile md 或修改 `CLAUDE.md`/`AGENTS.md`；动态 profile/memory 上下文由服务端在 `SessionStart` hook 中实时注入。
 
 ## 系统级配置项
 

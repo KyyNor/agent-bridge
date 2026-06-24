@@ -11,12 +11,6 @@ profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
 pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=True)
 profile_app.add_typer(pins_app, name="pins")
 
-from agent_bridge.capability_hub.profiles.docs import (  # noqa: E402
-    pointer_block as _pointer_block,
-    replace_agent_bridge_block as _replace_agent_bridge_block,
-)
-
-
 AGENT_BRIDGE_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
 
 CLAUDE_MEM_COMPATIBLE_HOOKS = {
@@ -44,29 +38,6 @@ CLAUDE_MEM_COMPATIBLE_HOOKS = {
 def _echo_mapping(data: dict[str, Any], keys: tuple[str, ...]) -> None:
     parts = [f"{key}: {data[key]}" for key in keys if key in data]
     typer.echo(", ".join(parts) if parts else data)
-
-
-def _profile_doc_path(scope: str, profile: str) -> Path:
-    if scope == "project":
-        return Path.cwd() / ".agent-bridge" / "profiles" / f"{profile}.md"
-    if scope == "user":
-        return Path.home() / ".agent-bridge" / "profiles" / f"{profile}.md"
-    raise ValueError("scope 必须是 project 或 user")
-
-
-def _pointer_paths(scope: str) -> tuple[Path, Path]:
-    if scope == "project":
-        return Path.cwd() / "CLAUDE.md", Path.cwd() / "AGENTS.md"
-    if scope == "user":
-        return Path.home() / ".claude" / "CLAUDE.md", Path.home() / ".codex" / "AGENTS.md"
-    raise ValueError("scope 必须是 project 或 user")
-
-
-def _write_profile_doc(scope: str, profile: str, markdown: str) -> Path:
-    profile_path = _profile_doc_path(scope, profile)
-    profile_path.parent.mkdir(parents=True, exist_ok=True)
-    profile_path.write_text(markdown, encoding="utf-8")
-    return profile_path
 
 
 def _claude_settings_path(scope: str) -> Path:
@@ -288,21 +259,6 @@ def profile_use(
         path = _claude_config_path(resolved_scope)
         existing = _load_json_file(path)
         _confirm_overwrite(existing, yes)
-        rendered = _run_client(lambda client: client.render_profile_doc(profile))
-        markdown = rendered.get("markdown")
-        if not isinstance(markdown, str):
-            raise RuntimeError("Profile 文档渲染结果缺少 markdown")
-        profile_path = _write_profile_doc(resolved_scope, profile, markdown)
-        claude_path, agents_path = _pointer_paths(resolved_scope)
-        resolved_profile_path = profile_path.resolve()
-        _replace_agent_bridge_block(claude_path, _pointer_block(f"@{resolved_profile_path}"))
-        _replace_agent_bridge_block(
-            agents_path,
-            _pointer_block(
-                "Read the active Agent Bridge profile before using agent-bridge capabilities: "
-                f"{resolved_profile_path}"
-            ),
-        )
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
@@ -318,28 +274,7 @@ def profile_use(
         typer.echo(f"配置错误: {exc}", err=True)
         raise typer.Exit(1) from None
     typer.echo(f"已写入: {path}")
-    typer.echo(f"已写入: {profile_path}")
     typer.echo(f"已写入: {hooks_path}")
-
-
-@profile_app.command("refresh")
-def profile_refresh(
-    profile: Annotated[str, typer.Argument(help="要刷新的 Profile 标识")],
-    scope: Annotated[str, typer.Option("--scope", help="配置范围: project 或 user")] = "project",
-) -> None:
-    """刷新本地 Profile Markdown 文档"""
-    from agent_bridge.cli.app import _run_client
-
-    try:
-        rendered = _run_client(lambda client: client.render_profile_doc(profile))
-        markdown = rendered.get("markdown")
-        if not isinstance(markdown, str):
-            raise RuntimeError("Profile 文档渲染结果缺少 markdown")
-        profile_path = _write_profile_doc(scope, profile, markdown)
-    except (OSError, ValueError, RuntimeError) as exc:
-        typer.echo(f"配置错误: {exc}", err=True)
-        raise typer.Exit(1) from None
-    typer.echo(f"已刷新: {profile_path}")
 
 
 @pins_app.command("refresh")
