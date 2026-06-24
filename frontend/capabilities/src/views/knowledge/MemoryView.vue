@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Database, Plus, RefreshCw, Search } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ArrowLeft, Database, Maximize2, Minimize2, Plus, RefreshCw, Search } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { MemoryBlock, MemorySearchResult, MemoryTimelineResult } from '../../api/types'
+import type { MemoryBlock, MemoryDashboardStatus, MemorySearchResult, MemoryTimelineResult } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -28,6 +28,13 @@ const searchResult = ref<MemorySearchResult | null>(null)
 const timelineLoading = ref(false)
 const timelineError = ref('')
 const timeline = ref<MemoryTimelineResult | null>(null)
+const dashboardStatus = ref<MemoryDashboardStatus | null>(null)
+const dashboardLoading = ref(false)
+const dashboardStarting = ref(false)
+const dashboardStopping = ref(false)
+const dashboardError = ref('')
+const dashboardMaximized = ref(false)
+let dashboardTouchTimer: ReturnType<typeof setInterval> | null = null
 
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
 const selected = computed(() => blocks.value.find(block => block.block_key === props.routeKey) || null)
@@ -40,15 +47,25 @@ const healthPreview = computed(() => {
   const health = selectedHealth.value || selected.value?.last_health
   return health ? JSON.stringify(health, null, 2) : '{}'
 })
+const dashboardSrc = computed(() => {
+  if (!dashboardStatus.value?.running || !dashboardStatus.value.url) return ''
+  return dashboardStatus.value.url
+})
 
 onMounted(loadBlocks)
+onBeforeUnmount(stopDashboardTouchTimer)
 
 watch(
   () => props.routeKey,
   () => {
     searchResult.value = null
     timeline.value = null
+    dashboardStatus.value = null
+    dashboardError.value = ''
+    dashboardMaximized.value = false
+    stopDashboardTouchTimer()
     void loadHealth()
+    void loadDashboardStatus()
   },
 )
 
@@ -64,6 +81,7 @@ async function loadBlocks() {
     loading.value = false
   }
   await loadHealth()
+  await loadDashboardStatus()
 }
 
 async function createBlock() {
@@ -102,6 +120,78 @@ async function loadHealth() {
   } finally {
     healthLoading.value = false
   }
+}
+
+async function loadDashboardStatus() {
+  if (!selected.value) {
+    dashboardStatus.value = null
+    stopDashboardTouchTimer()
+    return
+  }
+  dashboardLoading.value = true
+  dashboardError.value = ''
+  try {
+    dashboardStatus.value = await api.getMemoryDashboardStatus(selected.value.block_key)
+    if (dashboardStatus.value.running) {
+      startDashboardTouchTimer()
+    } else {
+      stopDashboardTouchTimer()
+    }
+  } catch (e: unknown) {
+    dashboardError.value = `加载 worker 页面状态失败：${errorMessage(e)}`
+  } finally {
+    dashboardLoading.value = false
+  }
+}
+
+async function startMemoryDashboard() {
+  if (!selected.value) return
+  dashboardStarting.value = true
+  dashboardError.value = ''
+  try {
+    dashboardStatus.value = await api.startMemoryDashboard(selected.value.block_key)
+    if (!dashboardStatus.value.running) {
+      dashboardError.value = dashboardStatus.value.error || 'worker 页面启动失败'
+      stopDashboardTouchTimer()
+      return
+    }
+    startDashboardTouchTimer()
+  } catch (e: unknown) {
+    dashboardError.value = `启动 worker 页面失败：${errorMessage(e)}`
+  } finally {
+    dashboardStarting.value = false
+  }
+}
+
+async function stopMemoryDashboard() {
+  if (!selected.value) return
+  dashboardStopping.value = true
+  dashboardError.value = ''
+  try {
+    await api.stopMemoryDashboard(selected.value.block_key)
+    dashboardStatus.value = { running: false, url: null }
+    dashboardMaximized.value = false
+    stopDashboardTouchTimer()
+  } catch (e: unknown) {
+    dashboardError.value = `停止 worker 页面失败：${errorMessage(e)}`
+  } finally {
+    dashboardStopping.value = false
+  }
+}
+
+function startDashboardTouchTimer() {
+  if (dashboardTouchTimer || !selected.value) return
+  dashboardTouchTimer = setInterval(() => {
+    if (selected.value && dashboardStatus.value?.running) {
+      void api.touchMemoryDashboard(selected.value.block_key).catch(() => {})
+    }
+  }, 60_000)
+}
+
+function stopDashboardTouchTimer() {
+  if (!dashboardTouchTimer) return
+  clearInterval(dashboardTouchTimer)
+  dashboardTouchTimer = null
 }
 
 async function runSearch() {
@@ -285,6 +375,37 @@ function errorMessage(e: unknown) {
           <pre class="max-h-[160px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-relaxed text-foreground">{{ healthPreview }}</pre>
         </div>
 
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-sm font-medium">worker 页面</div>
+            <div class="flex items-center gap-2">
+              <Button variant="outline" size="sm" :disabled="dashboardLoading" @click="loadDashboardStatus">
+                <RefreshCw :size="14" />
+                {{ dashboardLoading ? '刷新中...' : '刷新' }}
+              </Button>
+              <Button size="sm" :disabled="dashboardStarting || Boolean(dashboardSrc)" @click="startMemoryDashboard">
+                {{ dashboardStarting ? '启动中...' : '打开页面' }}
+              </Button>
+              <Button variant="outline" size="sm" :disabled="dashboardStopping || !dashboardSrc" @click="stopMemoryDashboard">
+                {{ dashboardStopping ? '停止中...' : '停止' }}
+              </Button>
+            </div>
+          </div>
+          <div v-if="dashboardError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ dashboardError }}</div>
+          <div v-if="dashboardSrc" class="flex min-h-[60vh] flex-col overflow-hidden rounded-md border border-border">
+            <div class="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-2">
+              <div class="truncate font-mono text-xs text-muted-foreground">{{ dashboardSrc }}</div>
+              <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="最大化" @click="dashboardMaximized = true">
+                <Maximize2 :size="14" />
+              </Button>
+            </div>
+            <iframe :src="dashboardSrc" title="claude-mem worker" class="min-h-[60vh] flex-1 border-0" />
+          </div>
+          <div v-else class="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+            worker 页面未运行
+          </div>
+        </div>
+
         <div class="space-y-3">
           <div class="flex gap-2">
             <Input v-model="query" placeholder="搜索记忆" @keyup.enter="runSearch" />
@@ -337,5 +458,15 @@ function errorMessage(e: unknown) {
         未找到记忆区块
       </CardContent>
     </Card>
+
+    <div v-if="dashboardMaximized && dashboardSrc" class="fixed inset-0 z-[10000] flex flex-col bg-background">
+      <div class="flex h-11 items-center justify-between border-b border-border px-4">
+        <div class="truncate font-mono text-xs text-muted-foreground">{{ dashboardSrc }}</div>
+        <Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="还原" @click="dashboardMaximized = false">
+          <Minimize2 :size="14" />
+        </Button>
+      </div>
+      <iframe :src="dashboardSrc" title="claude-mem worker maximized" class="flex-1 border-0" />
+    </div>
   </div>
 </template>

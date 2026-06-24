@@ -30,6 +30,18 @@ class FakeWorkerService:
     def health(self, block):
         return {"status": "worker_ready", "base_url": "http://127.0.0.1:8766"}
 
+    def dashboard_status(self, block):
+        return {"running": True, "url": "http://127.0.0.1:48100/", "pid": 4242}
+
+    def start_dashboard(self, block):
+        return {"success": True, "running": True, "url": "http://127.0.0.1:48100/", "pid": 4242}
+
+    def stop_dashboard(self, block):
+        return {"stopped": True}
+
+    def touch_dashboard(self, block):
+        return None
+
 
 def _service(wm_paths):
     service = AgentBridgeService.create(wm_paths, admins={"root"})
@@ -112,3 +124,21 @@ def test_memory_runtime_methods_delegate_to_worker_for_active_binding(wm_paths):
     assert timeline["items"][0]["event_type"] == "tool"
     assert observation["item"]["content"] == "Observation"
     assert health["status"] == "worker_ready"
+
+
+def test_memory_dashboard_methods_externalize_worker_url(wm_paths):
+    service = _service(wm_paths)
+    service.memory.create_block("root", "dev-memory", "Dev Memory", "")
+    service.memory.worker_service = FakeWorkerService()
+
+    status = service.memory.dashboard_status("root", "dev-memory")
+    started = service.memory.start_dashboard("root", "dev-memory")
+    stopped = service.memory.stop_dashboard("root", "dev-memory")
+    touched = service.memory.touch_dashboard("root", "dev-memory")
+    target = service.memory.dashboard_proxy_target("dev-memory")
+
+    assert status["url"] == "/memory-dashboard/dev-memory/"
+    assert started["url"] == "/memory-dashboard/dev-memory/"
+    assert stopped == {"stopped": True}
+    assert touched == {"ok": True}
+    assert target == "http://127.0.0.1:48100/"

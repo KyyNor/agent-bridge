@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import signal
@@ -20,7 +19,8 @@ from agent_bridge.plugin_runtime import GitPluginRuntime
 
 
 DEFAULT_WORKER_HOST = "127.0.0.1"
-DEFAULT_WORKER_PORT_BASE = 37700
+DEFAULT_WORKER_PORT_BASE = 48100
+DEFAULT_WORKER_MAX_SESSIONS = 20
 
 
 class ClaudeMemWorkerService:
@@ -84,6 +84,52 @@ class ClaudeMemWorkerService:
         except Exception as exc:
             return {"status": "worker_error", "block_key": block["block_key"], "item": None, "error": str(exc)}
         return {"status": "ok", "block_key": block["block_key"], "item": result["item"]}
+
+    def dashboard_status(self, block: dict[str, Any]) -> dict[str, Any]:
+        configured = self._configured_base_url(block)
+        if configured:
+            return {"running": self._worker_ready(configured), "url": configured}
+        state = self._read_worker_state(block)
+        base_url = str(state.get("base_url") or "") if isinstance(state, dict) else ""
+        pid = int(state.get("pid") or 0) if isinstance(state, dict) else 0
+        running = bool(base_url and pid > 0 and self._pid_alive(pid) and self._worker_ready(base_url))
+        if running:
+            self._touch_worker_state(block)
+        return {
+            "running": running,
+            "url": base_url if running else None,
+            "pid": pid if running else None,
+            "port": int(state.get("port") or 0) if running else None,
+            "started_at": state.get("started_at") if running else None,
+        }
+
+    def start_dashboard(self, block: dict[str, Any]) -> dict[str, Any]:
+        try:
+            base_url = self._ensure_worker(block)
+        except Exception as exc:
+            return {"success": False, "running": False, "url": None, "error": str(exc)}
+        state = self._read_worker_state(block)
+        return {
+            "success": True,
+            "running": True,
+            "url": base_url,
+            "pid": state.get("pid"),
+            "port": state.get("port"),
+            "started_at": state.get("started_at"),
+        }
+
+    def stop_dashboard(self, block: dict[str, Any]) -> dict[str, Any]:
+        state = self._read_worker_state(block)
+        if not state:
+            return {"stopped": False}
+        stopped = self._stop_worker_session(
+            {**state, "state_path": self._worker_state_path(block)},
+            grace_seconds=3.0,
+        )
+        return {"stopped": stopped}
+
+    def touch_dashboard(self, block: dict[str, Any]) -> None:
+        self._touch_worker_state(block)
 
     def handle_hook(
         self,
@@ -194,8 +240,10 @@ class ClaudeMemWorkerService:
         base_url = self._base_url_for_port(port)
         pid = int(state.get("pid") or 0) if isinstance(state, dict) else 0
         if pid and self._pid_alive(pid) and self._worker_ready(base_url):
+            self._touch_worker_state(block)
             return base_url
         if self._worker_ready(base_url):
+            self._touch_worker_state(block)
             return base_url
 
         port = self._available_worker_port(block, start_port=port)
@@ -210,6 +258,7 @@ class ClaudeMemWorkerService:
                 "data_dir": str(Path(str(block["data_dir"])).expanduser()),
                 "plugin_dir": str(plugin_dir),
                 "started_at": time.time(),
+                "last_accessed_at": time.time(),
             },
         )
         if self._wait_until_ready(base_url, process=process, timeout_seconds=timeout_seconds):
@@ -265,9 +314,7 @@ class ClaudeMemWorkerService:
             return int(env_port)
         if state and state.get("port"):
             return int(state["port"])
-        block_key = str(block["block_key"])
-        digest = hashlib.sha256(block_key.encode("utf-8")).hexdigest()
-        return DEFAULT_WORKER_PORT_BASE + (int(digest[:6], 16) % 1000)
+        return DEFAULT_WORKER_PORT_BASE
 
     def _available_worker_port(self, block: dict[str, Any], *, start_port: int) -> int:
         if os.environ.get("CLAUDE_MEM_WORKER_PORT", "").strip():
@@ -275,13 +322,39 @@ class ClaudeMemWorkerService:
             if self._worker_ready(base_url) or not self._port_in_use(start_port):
                 return start_port
             raise RuntimeError(f"configured claude-mem worker port is already in use: {start_port}")
-        port = start_port
-        for offset in range(1000):
-            candidate = DEFAULT_WORKER_PORT_BASE + ((port - DEFAULT_WORKER_PORT_BASE + offset) % 1000)
-            base_url = self._base_url_for_port(candidate)
-            if self._worker_ready(base_url) or not self._port_in_use(candidate):
+
+        pool_ports = range(DEFAULT_WORKER_PORT_BASE, DEFAULT_WORKER_PORT_BASE + DEFAULT_WORKER_MAX_SESSIONS)
+        sessions = self._managed_worker_sessions()
+        live_sessions: list[dict[str, Any]] = []
+        occupied_ports: set[int] = set()
+        for session in sessions:
+            pid = int(session.get("pid") or 0)
+            port = int(session.get("port") or 0)
+            if pid > 0 and self._pid_alive(pid):
+                live_sessions.append(session)
+                if port in pool_ports:
+                    occupied_ports.add(port)
+            else:
+                self._remove_worker_state(session)
+
+        for candidate in pool_ports:
+            if candidate in occupied_ports:
+                continue
+            if not self._port_in_use(candidate):
                 return candidate
-        raise RuntimeError("no available local port was found for claude-mem worker")
+
+        evictable = [session for session in live_sessions if int(session.get("port") or 0) in pool_ports]
+        evictable.sort(key=lambda item: float(item.get("last_accessed_at") or item.get("started_at") or 0))
+        for session in evictable:
+            port = int(session.get("port") or 0)
+            self._stop_worker_session(session, grace_seconds=3.0)
+            if not self._port_in_use(port):
+                return port
+
+        raise RuntimeError(
+            "no available local port was found for claude-mem worker "
+            f"({DEFAULT_WORKER_PORT_BASE}-{DEFAULT_WORKER_PORT_BASE + DEFAULT_WORKER_MAX_SESSIONS - 1})"
+        )
 
     def _base_url_for_port(self, port: int) -> str:
         return f"http://{DEFAULT_WORKER_HOST}:{port}"
@@ -323,6 +396,62 @@ class ClaudeMemWorkerService:
         except OSError:
             return False
         return True
+
+    def _managed_worker_sessions(self) -> list[dict[str, Any]]:
+        state_dir = self.paths.run_dir / "claude-mem-workers"
+        if not state_dir.exists():
+            return []
+        sessions: list[dict[str, Any]] = []
+        for state_path in state_dir.glob("*.json"):
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except Exception:
+                state_path.unlink(missing_ok=True)
+                continue
+            if isinstance(state, dict):
+                sessions.append({**state, "state_path": state_path})
+        return sessions
+
+    def _touch_worker_state(self, block: dict[str, Any]) -> None:
+        state = self._read_worker_state(block)
+        if not state:
+            return
+        state["last_accessed_at"] = time.time()
+        self._write_worker_state(block, state)
+
+    def _remove_worker_state(self, session: dict[str, Any]) -> None:
+        state_path = session.get("state_path")
+        if isinstance(state_path, Path):
+            state_path.unlink(missing_ok=True)
+
+    def _stop_worker_session(self, session: dict[str, Any], *, grace_seconds: float) -> bool:
+        pid = int(session.get("pid") or 0)
+        stopped = self._terminate_pid(pid, grace_seconds=grace_seconds)
+        self._remove_worker_state(session)
+        data_dir = str(session.get("data_dir") or "").strip()
+        if data_dir:
+            self._clear_block_runtime_state(Path(data_dir).expanduser())
+        return stopped
+
+    def _terminate_pid(self, pid: int, *, grace_seconds: float) -> bool:
+        if pid <= 0 or not self._pid_alive(pid):
+            return False
+        self._signal_worker(pid, signal.SIGTERM)
+        deadline = time.monotonic() + max(0.0, grace_seconds)
+        while time.monotonic() < deadline and self._pid_alive(pid):
+            time.sleep(0.1)
+        if self._pid_alive(pid):
+            self._signal_worker(pid, signal.SIGKILL)
+        return True
+
+    def _clear_block_runtime_state(self, data_dir: Path) -> None:
+        (data_dir / "worker.pid").unlink(missing_ok=True)
+        supervisor_path = data_dir / "supervisor.json"
+        if supervisor_path.exists():
+            supervisor_path.write_text(
+                json.dumps({"processes": {}}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
     def stop_all_workers(self, *, grace_seconds: float = 3.0) -> dict[str, Any]:
         state_dir = self.paths.run_dir / "claude-mem-workers"

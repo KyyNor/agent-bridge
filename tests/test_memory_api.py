@@ -65,3 +65,26 @@ def test_memory_hook_api_returns_noop_when_unbound(wm_paths):
     assert response.status_code == 200
     assert response.json()["status"] == "not_configured"
     assert response.json()["exit_code"] == 0
+
+
+def test_memory_dashboard_api_starts_worker_and_returns_embedded_url(wm_paths):
+    app = create_app(paths=wm_paths, admins={"root"})
+    app.state.agent_bridge_service.memory.worker_service.start_dashboard = lambda block: {  # type: ignore[attr-defined]
+        "success": True,
+        "running": True,
+        "url": "http://127.0.0.1:48100/",
+        "pid": 4242,
+    }
+    client = TestClient(app)
+    headers = {"X-Agent-Bridge-User": "root"}
+    client.post(
+        "/memory/blocks",
+        json={"block_key": "dev-memory", "name": "Dev Memory", "description": "Project memory"},
+        headers=headers,
+    )
+
+    response = client.post("/memory/blocks/dev-memory/dashboard/start", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["running"] is True
+    assert response.json()["url"] == "/memory-dashboard/dev-memory/"

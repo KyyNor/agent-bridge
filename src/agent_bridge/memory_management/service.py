@@ -138,6 +138,33 @@ class MemoryService:
         self.store.memory.update_memory_block_health(block_key, health)
         return {"block_key": block_key, **health}
 
+    def dashboard_status(self, actor: str, block_key: str) -> dict[str, Any]:
+        block = self.get_block(actor, block_key)
+        return self._external_dashboard_payload(block_key, self.worker_service.dashboard_status(block))
+
+    def start_dashboard(self, actor: str, block_key: str) -> dict[str, Any]:
+        block = self.get_block(actor, block_key)
+        return self._external_dashboard_payload(block_key, self.worker_service.start_dashboard(block))
+
+    def stop_dashboard(self, actor: str, block_key: str) -> dict[str, Any]:
+        block = self.get_block(actor, block_key)
+        return self.worker_service.stop_dashboard(block)
+
+    def touch_dashboard(self, actor: str, block_key: str) -> dict[str, Any]:
+        block = self.get_block(actor, block_key)
+        self.worker_service.touch_dashboard(block)
+        return {"ok": True}
+
+    def dashboard_proxy_target(self, block_key: str) -> str | None:
+        block = self.store.memory.get_memory_block(block_key)
+        if block is None or block.get("status") != "active":
+            return None
+        status = self.worker_service.dashboard_status(block)
+        if not status.get("running"):
+            return None
+        url = status.get("url")
+        return str(url) if url else None
+
     def _resolve_runtime_block(self, actor: str, profile_key: str | None, block_key: str | None) -> dict[str, Any]:
         if block_key:
             require_admin_user(actor, self.admins)
@@ -155,3 +182,10 @@ class MemoryService:
 
     def _default_data_dir(self, block_key: str) -> Path:
         return self.paths.data_dir / "claude-mem" / "blocks" / block_key
+
+    def _external_dashboard_payload(self, block_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if "url" not in payload:
+            return payload
+        if not payload.get("url"):
+            return {**payload, "url": None}
+        return {**payload, "url": f"/memory-dashboard/{block_key}/"}

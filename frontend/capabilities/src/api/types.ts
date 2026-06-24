@@ -145,6 +145,16 @@ export interface MemoryTimelineResult {
   next_cursor: string | null
 }
 
+export interface MemoryDashboardStatus {
+  success?: boolean
+  running: boolean
+  url: string | null
+  pid?: number | null
+  port?: number | null
+  started_at?: number | string | null
+  error?: string | null
+}
+
 export interface WorkflowDefinition {
   workflow_key: string
   name: string

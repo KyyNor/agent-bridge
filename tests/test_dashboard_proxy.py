@@ -4,10 +4,14 @@ import asyncio
 
 from agent_bridge.api.dashboard_proxy import (
     DashboardProxyMiddleware,
+    MemoryDashboardProxyMiddleware,
     _match_dashboard_path,
+    _match_memory_dashboard_path,
+    _memory_key_from_referer,
     _repo_key_from_referer,
     _repo_key_from_token,
     _rewrite_location,
+    _rewrite_prefixed_location,
     _upstream_path,
 )
 from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import external_dashboard_url
@@ -51,6 +55,23 @@ def test_dashboard_proxy_extracts_repo_and_strips_prefix() -> None:
     assert _match_dashboard_path("/code-repo/repositories") == (None, "")
 
 
+def test_memory_dashboard_proxy_extracts_block_and_strips_prefix() -> None:
+    assert _match_memory_dashboard_path("/memory-dashboard/test-mem/assets/app.js") == ("test-mem", "/assets/app.js")
+    assert _match_memory_dashboard_path("/memory-dashboard/test-mem/") == ("test-mem", "/")
+    assert _match_memory_dashboard_path("/memory/blocks") == (None, "")
+
+
+def test_memory_dashboard_proxy_rewrites_worker_root_redirect_to_block_base() -> None:
+    location = _rewrite_prefixed_location(
+        "/",
+        prefix="/memory-dashboard",
+        key="test-mem",
+        target="http://127.0.0.1:48100/",
+    )
+
+    assert location == "/memory-dashboard/test-mem/"
+
+
 def test_dashboard_proxy_keeps_vite_base_for_upstream_module_requests() -> None:
     assert _upstream_path("headroom", "/@vite/client") == "/dashboard/headroom/@vite/client"
     assert _upstream_path("headroom", "/src/main.tsx") == "/dashboard/headroom/src/main.tsx"
@@ -60,6 +81,12 @@ def test_dashboard_proxy_can_route_root_data_endpoints_from_referer() -> None:
     headers = [(b"referer", b"http://127.0.0.1:8765/dashboard/headroom/?token=abc&theme=dark")]
 
     assert _repo_key_from_referer(headers) == "headroom"
+
+
+def test_memory_dashboard_proxy_can_route_api_requests_from_referer() -> None:
+    headers = [(b"referer", b"http://127.0.0.1:8765/memory-dashboard/test-mem/?theme=dark")]
+
+    assert _memory_key_from_referer(headers) == "test-mem"
 
 
 def test_dashboard_proxy_can_route_root_data_endpoints_from_token_without_referer() -> None:
@@ -102,3 +129,40 @@ def test_dashboard_proxy_uses_token_resolver_for_root_data_endpoint_without_refe
 
     assert app_called is False
     assert calls == [("headroom", "/knowledge-graph.json", "http://127.0.0.1:48000/?token=abc")]
+
+
+def test_memory_dashboard_proxy_routes_worker_api_requests_from_referer(monkeypatch) -> None:
+    app_called = False
+    calls = []
+
+    async def app(scope, receive, send):
+        nonlocal app_called
+        app_called = True
+
+    async def fake_proxy_http(self, scope, receive, send, block_key, upstream_path, target):
+        calls.append((block_key, upstream_path, target))
+
+    monkeypatch.setattr(MemoryDashboardProxyMiddleware, "_proxy_http", fake_proxy_http)
+    middleware = MemoryDashboardProxyMiddleware(
+        app,
+        target_resolver={"test-mem": "http://127.0.0.1:48100/"}.get,
+    )
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/observations",
+        "query_string": b"",
+        "headers": [(b"referer", b"http://127.0.0.1:8765/memory-dashboard/test-mem/")],
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        pass
+
+    asyncio.run(middleware(scope, receive, send))
+
+    assert app_called is False
+    assert calls == [("test-mem", "/api/observations", "http://127.0.0.1:48100/")]

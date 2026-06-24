@@ -12,7 +12,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware
+from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
 from agent_bridge.core.config import AgentBridgePaths, default_user, load_server_config
 from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.app.service import AgentBridgeService
@@ -71,6 +71,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         DashboardProxyMiddleware,
         target_resolver=service.codegraph.dashboard_proxy_target,
         token_resolver=service.codegraph.dashboard_repo_by_token,
+    )
+    app.add_middleware(
+        MemoryDashboardProxyMiddleware,
+        target_resolver=service.memory.dashboard_proxy_target,
     )
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir, check_dir=False), name="capabilities-static")

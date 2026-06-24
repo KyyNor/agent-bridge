@@ -33,6 +33,7 @@ import type {
   CodeRepoCategory,
   KnowledgeSyncConfig,
   MemoryBlock,
+  MemoryDashboardStatus,
   MemorySearchResult,
   MemoryTimelineResult,
   SchedulerStatus,
@@ -185,6 +186,14 @@ export const api = {
     post<MemoryBlock>('/memory/blocks', block),
   getMemoryBlockHealth: (blockKey: string) =>
     get<Record<string, unknown>>(`/memory/blocks/${blockKey}/health`),
+  getMemoryDashboardStatus: (blockKey: string) =>
+    get<MemoryDashboardStatus>(`/memory/blocks/${blockKey}/dashboard`),
+  startMemoryDashboard: (blockKey: string) =>
+    post<MemoryDashboardStatus>(`/memory/blocks/${blockKey}/dashboard/start`),
+  stopMemoryDashboard: (blockKey: string) =>
+    post<{ stopped: boolean }>(`/memory/blocks/${blockKey}/dashboard/stop`),
+  touchMemoryDashboard: (blockKey: string) =>
+    post<{ ok: boolean }>(`/memory/blocks/${blockKey}/dashboard/touch`),
   searchMemoryBlock: (blockKey: string, query: string, limit = 10) => {
     const qs = new URLSearchParams({ q: query, limit: String(limit) })
     return get<MemorySearchResult>(`/memory/blocks/${blockKey}/search?${qs}`)

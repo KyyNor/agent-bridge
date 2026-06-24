@@ -61,6 +61,22 @@ def create_memory_routes(service, actor):
     def get_memory_block_health(block_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.memory.block_health(current_actor, block_key)
 
+    @router.get("/memory/blocks/{block_key}/dashboard")
+    def memory_dashboard_status(block_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.memory.dashboard_status(current_actor, block_key)
+
+    @router.post("/memory/blocks/{block_key}/dashboard/start")
+    def start_memory_dashboard(block_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.memory.start_dashboard(current_actor, block_key)
+
+    @router.post("/memory/blocks/{block_key}/dashboard/stop")
+    def stop_memory_dashboard(block_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.memory.stop_dashboard(current_actor, block_key)
+
+    @router.post("/memory/blocks/{block_key}/dashboard/touch")
+    def touch_memory_dashboard(block_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.memory.touch_dashboard(current_actor, block_key)
+
     @router.get("/memory/blocks/{block_key}/search")
     def search_memory_block(
         block_key: str,

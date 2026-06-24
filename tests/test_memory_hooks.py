@@ -198,6 +198,96 @@ def test_worker_start_hook_launches_managed_worker_without_original_start_wrappe
     assert (wm_paths.run_dir / "claude-mem-workers" / "dev-memory.json").exists()
 
 
+def test_worker_start_allocates_ports_from_claude_mem_pool(wm_paths, tmp_path, monkeypatch):
+    plugin_dir = tmp_path / "claude-mem"
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "bun-runner.js").write_text("", encoding="utf-8")
+    (scripts / "worker-service.cjs").write_text("", encoding="utf-8")
+    (scripts / "version-check.js").write_text("", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_MEM_PLUGIN_ROOT", str(plugin_dir))
+    started_ports = []
+
+    class FakeProcess:
+        returncode = None
+
+        def __init__(self, pid):
+            self.pid = pid
+
+        def poll(self):
+            return None
+
+    def fake_popen(command, **kwargs):
+        port = int(kwargs["env"]["CLAUDE_MEM_WORKER_PORT"])
+        started_ports.append(port)
+        return FakeProcess(5000 + len(started_ports))
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(ClaudeMemWorkerService, "_bun_command", lambda self: "/usr/local/bin/bun")
+    monkeypatch.setattr(ClaudeMemWorkerService, "_wait_until_ready", lambda self, base_url, **kwargs: True)
+    monkeypatch.setattr(ClaudeMemWorkerService, "_pid_alive", lambda self, pid: pid >= 5001)
+    monkeypatch.setattr(ClaudeMemWorkerService, "_port_in_use", lambda self, port: port in started_ports)
+    monkeypatch.setattr(ClaudeMemWorkerService, "_worker_ready", lambda self, base_url: False)
+    service = ClaudeMemWorkerService(paths=wm_paths)
+
+    first = service._ensure_worker(
+        {"block_key": "first-memory", "data_dir": str(wm_paths.data_dir / "claude-mem" / "blocks" / "first-memory")}
+    )
+    second = service._ensure_worker(
+        {"block_key": "second-memory", "data_dir": str(wm_paths.data_dir / "claude-mem" / "blocks" / "second-memory")}
+    )
+
+    assert first == "http://127.0.0.1:48100"
+    assert second == "http://127.0.0.1:48101"
+    assert started_ports == [48100, 48101]
+
+
+def test_worker_port_pool_evicts_least_recently_used_worker_when_full(wm_paths, monkeypatch):
+    state_dir = wm_paths.run_dir / "claude-mem-workers"
+    state_dir.mkdir(parents=True)
+    alive_pids = set(range(6000, 6020))
+    port_by_pid = {}
+    for index in range(20):
+        pid = 6000 + index
+        port = 48100 + index
+        port_by_pid[pid] = port
+        (state_dir / f"memory-{index}.json").write_text(
+            json.dumps(
+                {
+                    "pid": pid,
+                    "port": port,
+                    "base_url": f"http://127.0.0.1:{port}",
+                    "started_at": 1000 + index,
+                    "last_accessed_at": 1000 + index,
+                }
+            ),
+            encoding="utf-8",
+        )
+    signals = []
+
+    def fake_signal(pid, sig):
+        signals.append((pid, sig))
+        if sig == signal.SIGTERM:
+            alive_pids.discard(pid)
+
+    monkeypatch.setattr(ClaudeMemWorkerService, "_pid_alive", lambda self, pid: pid in alive_pids)
+    monkeypatch.setattr(ClaudeMemWorkerService, "_signal_worker", lambda self, pid, sig: fake_signal(pid, sig))
+    monkeypatch.setattr(
+        ClaudeMemWorkerService,
+        "_port_in_use",
+        lambda self, port: any(port_by_pid.get(pid) == port for pid in alive_pids),
+    )
+
+    port = ClaudeMemWorkerService(paths=wm_paths)._available_worker_port(
+        {"block_key": "new-memory", "data_dir": str(wm_paths.data_dir / "claude-mem" / "blocks" / "new-memory")},
+        start_port=48100,
+    )
+
+    assert port == 48100
+    assert (6000, signal.SIGTERM) in signals
+    assert not (state_dir / "memory-0.json").exists()
+
+
 def test_worker_stop_all_workers_terminates_state_pids_and_removes_state_files(wm_paths, monkeypatch):
     state_dir = wm_paths.run_dir / "claude-mem-workers"
     state_dir.mkdir(parents=True)
