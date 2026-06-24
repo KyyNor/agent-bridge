@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import signal
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
 
 class CodeGraphClient:
-    def __init__(self, cli_path: str = "codegraph") -> None:
+    def __init__(
+        self,
+        cli_path: str = "codegraph",
+        *,
+        command_timeout: float = 120,
+        terminate_grace_seconds: float = 5,
+    ) -> None:
         self.cli_path = cli_path
+        self.command_timeout = command_timeout
+        self.terminate_grace_seconds = terminate_grace_seconds
         self._available: bool | None = None
+        self._active_processes: set[subprocess.Popen[str]] = set()
+        self._active_processes_lock = threading.Lock()
 
     def is_available(self) -> bool:
         """Check if codegraph CLI is installed and reachable."""
@@ -88,14 +101,68 @@ class CodeGraphClient:
         return data if isinstance(data, list) else []
 
     def _run(self, cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        result = subprocess.run(
-            [self.cli_path, *args],
-            cwd=cwd, capture_output=True, text=True, timeout=120,
+        command = [self.cli_path, *args]
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
         )
+        try:
+            with self._active_processes_lock:
+                self._active_processes.add(process)
+            try:
+                stdout, stderr = process.communicate(timeout=self.command_timeout)
+            except subprocess.TimeoutExpired as exc:
+                self._terminate_process_group(process)
+                stdout, stderr = process.communicate()
+                raise subprocess.TimeoutExpired(
+                    command,
+                    self.command_timeout,
+                    output=stdout,
+                    stderr=stderr,
+                ) from exc
+        finally:
+            with self._active_processes_lock:
+                self._active_processes.discard(process)
+        result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
         if result.returncode != 0:
             msg = result.stderr or result.stdout or f"codegraph {' '.join(args)} failed"
             raise RuntimeError(msg.strip())
         return result
+
+    def terminate_active_processes(self) -> None:
+        with self._active_processes_lock:
+            processes = list(self._active_processes)
+        for process in processes:
+            self._terminate_process_group(process)
+
+    def _terminate_process_group(self, process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        if hasattr(os, "killpg"):
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            try:
+                process.wait(timeout=self.terminate_grace_seconds)
+                return
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    return
+                process.wait(timeout=self.terminate_grace_seconds)
+                return
+        process.terminate()
+        try:
+            process.wait(timeout=self.terminate_grace_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=self.terminate_grace_seconds)
 
     def _parse_status(self, output: str) -> dict[str, Any]:
         stats: dict[str, Any] = {}

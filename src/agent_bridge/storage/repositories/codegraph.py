@@ -204,6 +204,22 @@ class CodeGraphRepository:
                 raise KeyError(f"codegraph sync run not found: {run_id}")
             return run
 
+    def interrupt_running_codegraph_sync_runs(self, *, error: str) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE codegraph_sync_runs
+                SET status = 'interrupted',
+                    stage = 'interrupted',
+                    error = ?,
+                    duration_ms = CAST((julianday(CURRENT_TIMESTAMP) - julianday(started_at)) * 86400000 AS INTEGER),
+                    finished_at = CURRENT_TIMESTAMP
+                WHERE status = 'running'
+                """,
+                (error,),
+            )
+            return cursor.rowcount
+
     def search_codegraph_index(
         self,
         repo_key: str,

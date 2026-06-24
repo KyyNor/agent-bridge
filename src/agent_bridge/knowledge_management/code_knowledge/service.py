@@ -111,6 +111,14 @@ class CodeGraphService:
             "message": None if available else "codegraph CLI 未安装，请运行 npm i -g @colbymchenry/codegraph",
         }
 
+    def recover_interrupted_sync_runs(self) -> int:
+        return self.store.interrupt_running_codegraph_sync_runs(
+            error="server startup recovered stale run interrupted by prior process exit",
+        )
+
+    def stop_active_processes(self) -> None:
+        self.client.terminate_active_processes()
+
     def sync_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         repo = self._require_repository(repo_key)

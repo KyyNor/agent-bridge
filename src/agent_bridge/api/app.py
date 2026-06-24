@@ -59,11 +59,11 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.memory.worker_service.stop_all_workers()
         except Exception:
             logger.warning("停止 claude-mem worker 失败", exc_info=True)
-        service.workflow_scheduler.stop()
-        service.doc_sync_scheduler.stop()
-        service.plugin_update_scheduler.stop()
-        service.understand_scheduler.stop()
         service.codegraph_scheduler.stop()
+        service.understand_scheduler.stop()
+        service.plugin_update_scheduler.stop()
+        service.doc_sync_scheduler.stop()
+        service.workflow_scheduler.stop()
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
     app.state.agent_bridge_service = service
