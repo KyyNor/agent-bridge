@@ -3,6 +3,8 @@ import type {
   BackendAgent,
   BackendAgentPreset,
   CatalogSource,
+  ClaudeMemConfig,
+  ClaudeMemConfigUpdate,
   CodeGraphStatus,
   CodeGraphNode,
   CodeGraphExploreResult,
@@ -192,6 +194,9 @@ export const api = {
     if (cursor) qs.set('cursor', cursor)
     return get<MemoryTimelineResult>(`/memory/blocks/${blockKey}/timeline?${qs}`)
   },
+  getClaudeMemConfig: () => get<ClaudeMemConfig>('/claude-mem/config'),
+  saveClaudeMemConfig: (config: ClaudeMemConfigUpdate) =>
+    post<ClaudeMemConfig>('/claude-mem/config', config),
 
   // Workflows
   listWorkflows: () => get<WorkflowDefinition[]>('/workflows'),

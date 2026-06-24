@@ -685,6 +685,29 @@ export interface KnowledgeSyncConfig {
   understand_timeout_minutes: number
 }
 
+export interface ClaudeMemConfig {
+  env_file_path: string
+  config_file_path: string
+  env_file_exists: boolean
+  base_url: string
+  model: string
+  mode: string
+  provider: string
+  auth_method: string
+  has_auth_token: boolean
+  has_api_key: boolean
+  has_secret: boolean
+}
+
+export interface ClaudeMemConfigUpdate {
+  base_url?: string | null
+  auth_token?: string | null
+  api_key?: string | null
+  model?: string | null
+  clear_auth_token?: boolean
+  clear_api_key?: boolean
+}
+
 export interface SingleSchedulerStatus {
   running: boolean
   cron: string

@@ -2,7 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import CronExpressionParser from 'cron-parser'
 import { api } from '../../api/client'
-import type { BackendInfo, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../../api/types'
+import type { BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -31,6 +31,11 @@ const syncConfig = ref<KnowledgeSyncConfig>({
 })
 const configSaving = ref(false)
 const cronError = ref('')
+
+const claudeMemConfig = ref<ClaudeMemConfig | null>(null)
+const claudeMemForm = ref({ base_url: '', model: '', auth_token: '', api_key: '', clear_auth_token: false, clear_api_key: false })
+const claudeMemSaving = ref(false)
+const claudeMemError = ref('')
 
 // Categories
 const categories = ref<CodeRepoCategory[]>([])
@@ -63,12 +68,29 @@ const isPageIndex = computed(() => backendForm.value.backend_type === 'pageindex
 const supportsModelConfig = computed(() => isWeknora.value || isPageIndex.value)
 
 onMounted(async () => {
-  await Promise.all([loadSyncConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
+  await Promise.all([loadSyncConfig(), loadClaudeMemConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
   loading.value = false
 })
 
 async function loadSyncConfig() {
   try { syncConfig.value = await api.getSyncConfig() } catch { /* ignore */ }
+}
+
+async function loadClaudeMemConfig() {
+  try {
+    const config = await api.getClaudeMemConfig()
+    claudeMemConfig.value = config
+    claudeMemForm.value = {
+      base_url: config.base_url || '',
+      model: config.model || '',
+      auth_token: '',
+      api_key: '',
+      clear_auth_token: false,
+      clear_api_key: false,
+    }
+  } catch {
+    claudeMemConfig.value = null
+  }
 }
 
 async function loadCategories() {
@@ -190,6 +212,33 @@ async function saveSyncConfig() {
     await loadSchedulerStatus()
   } catch { /* ignore */ }
   configSaving.value = false
+}
+
+async function saveClaudeMemConfig() {
+  claudeMemSaving.value = true
+  claudeMemError.value = ''
+  try {
+    const saved = await api.saveClaudeMemConfig({
+      base_url: claudeMemForm.value.base_url,
+      model: claudeMemForm.value.model,
+      auth_token: claudeMemForm.value.auth_token || null,
+      api_key: claudeMemForm.value.api_key || null,
+      clear_auth_token: claudeMemForm.value.clear_auth_token,
+      clear_api_key: claudeMemForm.value.clear_api_key,
+    })
+    claudeMemConfig.value = saved
+    claudeMemForm.value = {
+      base_url: saved.base_url || '',
+      model: saved.model || '',
+      auth_token: '',
+      api_key: '',
+      clear_auth_token: false,
+      clear_api_key: false,
+    }
+  } catch (e: any) {
+    claudeMemError.value = e.message || '保存失败'
+  }
+  claudeMemSaving.value = false
 }
 
 function openAddCategory() {
@@ -526,6 +575,81 @@ async function deleteBackend(slug: string) {
                 <div>运行计数：{{ runCountText }}</div>
               </div>
             </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Claude Mem 运行配置 -->
+    <Card>
+      <CardContent class="space-y-4 p-5">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <div class="text-sm font-medium">Claude Mem 运行配置</div>
+            <div class="mt-1 text-xs text-muted-foreground">所有 Memory Block 共享这份配置，首次缺省会从 ~/.claude/settings.json 生成</div>
+          </div>
+          <Button variant="outline" size="sm" @click="loadClaudeMemConfig()">刷新</Button>
+        </div>
+
+        <div v-if="!claudeMemConfig" class="py-4 text-center text-sm text-muted-foreground">无法获取 Claude Mem 配置</div>
+        <div v-else class="space-y-4">
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm shrink-0 whitespace-nowrap">共享 .env</div>
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="truncate font-mono text-xs text-muted-foreground">{{ claudeMemConfig.env_file_path }}</span>
+              <Badge variant="secondary" class="text-[11px]" :class="claudeMemConfig.env_file_exists ? 'bg-green-50 text-green-700' : ''">
+                {{ claudeMemConfig.env_file_exists ? '已生成' : '未生成' }}
+              </Badge>
+            </div>
+          </div>
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm shrink-0 whitespace-nowrap">Provider</div>
+            <div class="flex items-center gap-2 text-sm">
+              <Badge variant="outline" class="font-mono text-[11px]">{{ claudeMemConfig.provider }}</Badge>
+              <span class="text-xs text-muted-foreground">auth: {{ claudeMemConfig.auth_method }}</span>
+              <span class="text-xs text-muted-foreground">mode: {{ claudeMemConfig.mode }}</span>
+            </div>
+          </div>
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm shrink-0 whitespace-nowrap">Base URL</div>
+            <Input v-model="claudeMemForm.base_url" placeholder="https://open.bigmodel.cn/api/anthropic" class="font-mono text-xs" />
+          </div>
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm shrink-0 whitespace-nowrap">Model</div>
+            <Input v-model="claudeMemForm.model" placeholder="glm-5.2" class="font-mono text-xs" />
+          </div>
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm shrink-0 whitespace-nowrap">Auth Token</div>
+            <div class="flex items-center gap-3">
+              <Input v-model="claudeMemForm.auth_token" type="password" placeholder="留空保持不变" class="font-mono text-xs" :disabled="claudeMemForm.clear_auth_token" />
+              <Badge variant="secondary" class="text-[11px]" :class="claudeMemConfig.has_auth_token ? 'bg-green-50 text-green-700' : ''">
+                {{ claudeMemConfig.has_auth_token ? '已配置' : '未配置' }}
+              </Badge>
+              <label class="flex items-center gap-2 text-xs text-muted-foreground">
+                <input v-model="claudeMemForm.clear_auth_token" type="checkbox" class="h-4 w-4" />
+                清除
+              </label>
+            </div>
+          </div>
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm shrink-0 whitespace-nowrap">API Key</div>
+            <div class="flex items-center gap-3">
+              <Input v-model="claudeMemForm.api_key" type="password" placeholder="留空保持不变" class="font-mono text-xs" :disabled="claudeMemForm.clear_api_key" />
+              <Badge variant="secondary" class="text-[11px]" :class="claudeMemConfig.has_api_key ? 'bg-green-50 text-green-700' : ''">
+                {{ claudeMemConfig.has_api_key ? '已配置' : '未配置' }}
+              </Badge>
+              <label class="flex items-center gap-2 text-xs text-muted-foreground">
+                <input v-model="claudeMemForm.clear_api_key" type="checkbox" class="h-4 w-4" />
+                清除
+              </label>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <Button @click="saveClaudeMemConfig()" :disabled="claudeMemSaving" size="sm">
+              {{ claudeMemSaving ? '保存中...' : '保存配置' }}
+            </Button>
+            <span v-if="claudeMemError" class="text-xs text-destructive">{{ claudeMemError }}</span>
+            <span v-else class="text-xs text-muted-foreground">新配置会在下一次 worker 启动或 hook 调用时生效</span>
           </div>
         </div>
       </CardContent>

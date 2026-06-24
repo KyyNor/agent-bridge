@@ -439,6 +439,31 @@ class AgentBridgeService:
             "workflow": self.workflow_scheduler.get_status(),
         }
 
+    def get_claude_mem_config(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return self.memory.worker_service.config.get_config(bootstrap=True)
+
+    def save_claude_mem_config(
+        self,
+        actor: str,
+        *,
+        base_url: str | None = None,
+        auth_token: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        clear_auth_token: bool = False,
+        clear_api_key: bool = False,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return self.memory.worker_service.config.save_config(
+            base_url=base_url,
+            auth_token=auth_token,
+            api_key=api_key,
+            model=model,
+            clear_auth_token=clear_auth_token,
+            clear_api_key=clear_api_key,
+        )
+
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
         require_admin_user(actor, self.admins)
         return {"jobs": self.store.list_all_jobs(backend_slug=backend)}

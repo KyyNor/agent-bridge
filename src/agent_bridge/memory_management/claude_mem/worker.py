@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from agent_bridge.memory_management.claude_mem.config import ClaudeMemConfigManager
 from agent_bridge.memory_management.claude_mem.client import ClaudeMemClient
 from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
 from agent_bridge.plugin_runtime import GitPluginRuntime
@@ -25,6 +26,7 @@ class ClaudeMemWorkerService:
     def __init__(self, *, paths) -> None:
         self.paths = paths
         self.plugin_runtime = GitPluginRuntime(paths)
+        self.config = ClaudeMemConfigManager(paths=paths)
         self._clients: dict[str, ClaudeMemClient] = {}
 
     def health(self, block: dict[str, Any]) -> dict[str, Any]:
@@ -244,6 +246,7 @@ class ClaudeMemWorkerService:
         env["CLAUDE_MEM_PLUGIN_ROOT"] = str(plugin_dir)
         env["CLAUDE_PLUGIN_ROOT"] = str(plugin_dir)
         env["PLUGIN_ROOT"] = str(plugin_dir)
+        self.config.apply_to_env(env)
 
     def _bun_command(self) -> str:
         bun = shutil.which("bun")

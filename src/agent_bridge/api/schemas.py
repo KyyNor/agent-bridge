@@ -203,6 +203,15 @@ class KnowledgeSyncConfigRequest(BaseModel):
     understand_timeout_minutes: int = 120
 
 
+class ClaudeMemConfigRequest(BaseModel):
+    base_url: str | None = None
+    auth_token: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    clear_auth_token: bool = False
+    clear_api_key: bool = False
+
+
 class WorkflowDefinitionRequest(BaseModel):
     workflow_key: str
     name: str

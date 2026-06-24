@@ -8,6 +8,7 @@ from agent_bridge.api.runtime_context import profile_from_headers, workflow_cont
 from agent_bridge.api.schemas import (
     CodeRepoCategoryRequest,
     CodeRepositoryRequest,
+    ClaudeMemConfigRequest,
     KnowledgeSyncConfigRequest,
     ScriptRequest,
     ScriptTestRunRequest,
@@ -144,6 +145,16 @@ def create_builtin_routes(service, actor):
     @router.get("/sync-config/scheduler-status")
     def get_scheduler_status(current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.get_scheduler_status(current_actor)
+
+    # -- Claude Mem Config --
+
+    @router.get("/claude-mem/config")
+    def get_claude_mem_config(current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.get_claude_mem_config(current_actor)
+
+    @router.post("/claude-mem/config")
+    def save_claude_mem_config(payload: ClaudeMemConfigRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.save_claude_mem_config(current_actor, **payload.model_dump())
 
     # -- Skills --
 
