@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.124.0",
     "httpx>=0.28.0",
     "litellm>=1.89.0",
+    "loguru>=0.7.2",
     "markitdown[all]>=0.1.6",
     "mcp>=1.27.2",
     "pageindex>=0.2.8",
