@@ -128,6 +128,14 @@ class AgentService:
         tool_names: dict[str, str] = {}
         result_msg: ResultMessage | None = None
         error: str | None = None
+        mode = "in-place" if cwd is not None else "managed"
+        logger.info(
+            "Agent run 开始 agent=%s mode=%s profile=%s skills=%s",
+            agent_name or "agent",
+            mode,
+            profile,
+            ",".join(skills) if skills else "",
+        )
 
         try:
             if cwd is not None:
@@ -184,13 +192,20 @@ class AgentService:
             )
         except TimeoutError:
             error = f"agent timed out after {timeout_seconds}s"
+            logger.warning("Agent run 超时 agent=%s 超时=%ss", agent_name or "agent", timeout_seconds)
             events.append(event_record("error", status="failed", message=error))
         except Exception as exc:
-            logger.exception("AgentService run failed agent=%s", agent_name)
+            logger.error("Agent run 失败 agent=%s 原因=%s", agent_name or "agent", exc, exc_info=True)
             error = f"{type(exc).__name__}: {exc}"
             events.append(event_record("error", status="failed", message=error))
 
         result = self._build_result(work_dir, started, result_msg, output_schema, error)
+        logger.info(
+            "Agent run 完成 agent=%s 成功=%s 耗时=%dms",
+            agent_name or "agent",
+            result.ok,
+            result.duration_ms,
+        )
         self._persist_run(
             prompt=prompt,
             output_schema=output_schema,
@@ -297,7 +312,7 @@ class AgentService:
             )
             result.run_key = run_key
         except Exception:
-            logger.exception("Failed to persist agent_run log")
+            logger.error("Agent run 日志持久化失败", exc_info=True)
 
     def _make_work_dir(self, agent_name: str) -> Path:
         work_dir = self.base_run_dir / new_run_id(agent_name)

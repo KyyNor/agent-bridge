@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
@@ -9,6 +10,8 @@ from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
 
 if TYPE_CHECKING:
     from agent_bridge.app.service import AgentBridgeService
+
+logger = logging.getLogger(__name__)
 
 
 class WikiBuiltinProvider:
@@ -136,6 +139,7 @@ class WikiBuiltinProvider:
             question = str(arguments.get("question") or "").strip()
             if not question:
                 raise ValidationError("question is required")
+            logger.info("Wiki search_all 开始 actor=%s profile=%s", actor, profile_key)
             try:
                 results = await asyncio.to_thread(
                     self.service.search_all,
@@ -147,6 +151,7 @@ class WikiBuiltinProvider:
             except AgentBridgeError:
                 raise
             except Exception as exc:
+                logger.error("Wiki search_all 后端失败 actor=%s 原因=%s", actor, exc, exc_info=True)
                 raise mark_builtin_failure(
                     ValidationError(f"Wiki builtin backend failed: {exc}"),
                     stage=FailureStage.builtin_backend.value,
@@ -165,11 +170,19 @@ class WikiBuiltinProvider:
             ProfileResourceType.wiki_kb.value,
             kb_slug,
         ):
+            logger.warning(
+                "Wiki 资源被拒绝 actor=%s profile=%s kb=%s 原因=%s",
+                actor,
+                profile_key,
+                kb_slug,
+                "不在 allow 列表",
+            )
             raise ValidationError("resource is blocked by profile policy")
         if tool == "search":
             question = str(arguments.get("question") or arguments.get("query") or "").strip()
             if not question:
                 raise ValidationError("question is required")
+            logger.info("Wiki search 开始 actor=%s kb=%s", actor, kb_slug)
             try:
                 results = await asyncio.to_thread(
                     self.service.search,
@@ -182,6 +195,7 @@ class WikiBuiltinProvider:
             except AgentBridgeError:
                 raise
             except Exception as exc:
+                logger.error("Wiki search 后端失败 actor=%s kb=%s 原因=%s", actor, kb_slug, exc, exc_info=True)
                 raise self._backend_error(exc, kb_slug) from exc
             return {
                 "kb": kb_slug,
@@ -194,6 +208,7 @@ class WikiBuiltinProvider:
             question = str(arguments.get("question") or "").strip()
             if not question:
                 raise ValidationError("question is required")
+            logger.info("Wiki ask 开始 actor=%s kb=%s", actor, kb_slug)
             try:
                 answer = await asyncio.to_thread(
                     self.service.ask,
@@ -206,6 +221,7 @@ class WikiBuiltinProvider:
             except AgentBridgeError:
                 raise
             except Exception as exc:
+                logger.error("Wiki ask 后端失败 actor=%s kb=%s 原因=%s", actor, kb_slug, exc, exc_info=True)
                 raise self._backend_error(exc, kb_slug) from exc
             return {"kb": kb_slug, "answer": answer.model_dump() if hasattr(answer, "model_dump") else answer}
         if tool == "get_document":

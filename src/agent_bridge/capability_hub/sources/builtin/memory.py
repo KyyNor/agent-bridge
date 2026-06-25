@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from agent_bridge.capability_hub.models import ToolType
@@ -8,6 +9,8 @@ from agent_bridge.core.domain import NotFound, ValidationError
 
 if TYPE_CHECKING:
     from agent_bridge.app.service import AgentBridgeService
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryBuiltinProvider:
@@ -86,6 +89,7 @@ class MemoryBuiltinProvider:
     ) -> dict[str, Any]:
         del workflow_context
         block_key = str(arguments.get("block") or "").strip() or None
+        logger.debug("Memory 调用 actor=%s profile=%s tool=%s block=%s", actor, profile_key, tool, block_key)
         if tool == "search":
             query = str(arguments.get("query") or "").strip()
             if not query:

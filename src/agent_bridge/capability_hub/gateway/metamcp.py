@@ -102,6 +102,14 @@ def create_mcp_server(
     profile_key: str | None = None,
     workflow_context: dict[str, Any] | None = None,
 ) -> FastMCP:
+    """为单次请求构建一个无状态的 FastMCP 实例。
+
+    每个请求都新建一个临时 server（无进程级单例），per-request 的 profile /
+    workflow 上下文通过模块级 ``ContextVar``（``_request_profile`` /
+    ``_request_workflow_context``）传递，而非函数参数。除 search/execute 外，
+    存在完整 workflow 上下文时还会注册 workflow_get_task 等 3 个辅助工具，
+    以及 profile 的 pinned 工具和 wiki/codegraph/memory 直连工具。
+    """
     bridge_service = service
     mcp = FastMCP(
         name="agent-bridge",
@@ -203,6 +211,11 @@ def create_mcp_server(
 
     active_workflow_context = workflow_context or _request_workflow_context.get()
     if _has_complete_workflow_context(active_workflow_context):
+        logger.info(
+            "工作流上下文已注册 workflow=%s run=%s",
+            active_workflow_context.get("workflow_key"),
+            active_workflow_context.get("run_id"),
+        )
 
         @mcp.tool(description="Lease one pending task for the current workflow run.")
         def workflow_get_task() -> dict[str, Any]:
@@ -474,6 +487,7 @@ async def _dispatch_mcp(mcp: FastMCP, request: Request) -> Response:
         tg.cancel_scope.cancel()
 
     if not response_started:
+        logger.warning("MCP transport 未产生响应，返回 500")
         return Response(status_code=500, content=b"Transport did not produce a response")
 
     return Response(

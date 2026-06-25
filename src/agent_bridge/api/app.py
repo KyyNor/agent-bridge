@@ -31,11 +31,14 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """应用生命周期：初始化存储、对齐后端、后台刷新托管插件、启动调度器，停止时逆序收尾。"""
+        logger.info("Agent Bridge 服务启动 root=%s", resolved_paths.root)
         service.store.init_schema()
         try:
             service.align_backends()
         except Exception:
-            pass
+            # 后端对齐失败不阻断启动：个别检索后端不可用时仍允许 /health 就绪
+            logger.warning("align_backends 后端对齐失败，跳过", exc_info=True)
 
         # Managed plugin refresh (git pull on understand-anything / claude-mem)
         # does blocking network I/O, so run it in the background instead of
@@ -43,7 +46,8 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         # ~60s per repo on a slow/unreachable git host).
         async def _refresh_managed_plugins() -> None:
             try:
-                await asyncio.to_thread(service.ensure_managed_plugins)
+                results = await asyncio.to_thread(service.ensure_managed_plugins)
+                logger.info("托管插件后台刷新完成 result=%s", results)
             except Exception:
                 logger.warning("启动后台刷新托管插件失败", exc_info=True)
 
@@ -54,7 +58,11 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.plugin_update_scheduler.start()
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
+        logger.info(
+            "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow"
+        )
         yield
+        logger.info("Agent Bridge 服务停止 root=%s", resolved_paths.root)
         if not plugin_task.done():
             plugin_task.cancel()
         service.codegraph.ua_client.stop_all_dashboards()
@@ -67,6 +75,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.plugin_update_scheduler.stop()
         service.doc_sync_scheduler.stop()
         service.workflow_scheduler.stop()
+        logger.info("Agent Bridge 服务已停止")
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
     app.state.agent_bridge_service = service

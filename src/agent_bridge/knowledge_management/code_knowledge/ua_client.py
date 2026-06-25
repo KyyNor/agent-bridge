@@ -228,6 +228,7 @@ class UnderstandAnythingClient:
         return self._ua_repo_dir() / "understand-anything-plugin" / "skills"
 
     def check_availability(self, *, project_dir: Path | None = None) -> UAAvailability:
+        """检测 claude 与 UA 技能是否就绪（按项目 ``.claude/skills/understand`` 是否存在判定）。"""
         if project_dir:
             skill_dir = project_dir / SKILL_DIR_NAME
             understand_link = skill_dir / "understand"
@@ -255,7 +256,11 @@ class UnderstandAnythingClient:
         )
 
     def ensure_skills(self, project_dir: Path, ua_git_url: str) -> str | None:
-        """Clone UA repo and symlink skills. Returns error string or None on success."""
+        """克隆 UA 仓库并把各 skill 符号链接到项目 ``.claude/skills`` 下。
+
+        已克隆则尝试 ``git pull --ff-only`` 更新（失败容忍，沿用旧版本）。
+        成功返回 ``None``，失败返回中文错误串。
+        """
         repo_dir = self._ua_repo_dir()
         skills_src = self._ua_skills_src_dir()
 
@@ -268,8 +273,10 @@ class UnderstandAnythingClient:
                     ["git", "clone", ua_git_url, str(repo_dir)],
                     capture_output=True, text=True, timeout=120, check=True,
                 )
+                logger.info("UA 仓库克隆完成 路径=%s", repo_dir)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 msg = exc.stderr if hasattr(exc, "stderr") and exc.stderr else str(exc)
+                logger.error("UA 仓库克隆失败 url=%s 原因=%s", ua_git_url, msg, exc_info=True)
                 return f"clone UA 仓库失败: {msg}"
         else:
             # Pull latest
@@ -309,21 +316,46 @@ class UnderstandAnythingClient:
         language: str = "zh",
         timeout: int = 7200,
     ) -> UAAnalyzeResult:
+        """驱动 Understand Anything 知识图谱分析。
+
+        流程：检测 claude + UA 技能可用性 → 必要时按 ua_git_url 自动克隆安装技能 →
+        把整个 agent 循环委托给 ``AgentService.run`` → 读取产出的 knowledge-graph.json。
+        返回的 ``UAAnalyzeResult`` 带节点/边数与耗时。
+        """
+        repo_dir_name = project_dir.name
+        logger.info("UA 开始解析 repo=%s", repo_dir_name)
+
         # Step 1: Check if skills are already available
         avail = self.check_availability(project_dir=project_dir)
         if not avail.claude_installed:
+            logger.error(
+                "UA 解析错误 repo=%s 原因=%s",
+                repo_dir_name, avail.message or "claude 未安装",
+            )
             return UAAnalyzeResult(success=False, error=avail.message)
 
         # Step 2: If not available, try auto-install
         if not avail.ua_skill_available:
             if not ua_git_url:
+                logger.error(
+                    "UA 解析错误 repo=%s 原因=%s",
+                    repo_dir_name, avail.message or "skill 不可用且未配置自动安装地址",
+                )
                 return UAAnalyzeResult(success=False, error=avail.message)
             install_error = self.ensure_skills(project_dir, ua_git_url)
             if install_error:
+                logger.error(
+                    "UA 解析错误 repo=%s 原因=%s",
+                    repo_dir_name, install_error,
+                )
                 return UAAnalyzeResult(success=False, error=install_error)
             # Re-check after install
             avail = self.check_availability(project_dir=project_dir)
             if not avail.ua_skill_available:
+                logger.error(
+                    "UA 解析错误 repo=%s 原因=%s",
+                    repo_dir_name, "自动安装 UA 技能后仍未检测到",
+                )
                 return UAAnalyzeResult(success=False, error="自动安装 UA 技能后仍未检测到")
 
         # Step 3: Run analysis (delegates the SDK loop to AgentService)
@@ -355,10 +387,18 @@ class UnderstandAnythingClient:
             error = res.error or "unknown error"
             if "timed out" in error:
                 error = f"分析超时（{timeout}s）"
+            logger.error(
+                "UA 解析错误 repo=%s 原因=%s 耗时=%dms",
+                repo_dir_name, error, duration_ms, exc_info=True,
+            )
             return UAAnalyzeResult(success=False, error=error, output=output, duration_ms=duration_ms)
 
         graph_path = project_dir / UA_DIR / GRAPH_FILE
         if not graph_path.is_file():
+            logger.error(
+                "UA 解析错误 repo=%s 原因=%s 耗时=%dms",
+                repo_dir_name, "knowledge-graph.json 缺失", duration_ms,
+            )
             return UAAnalyzeResult(
                 success=False,
                 error="分析完成但未生成 knowledge-graph.json",
@@ -369,12 +409,22 @@ class UnderstandAnythingClient:
         try:
             data = json.loads(graph_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
+            logger.error(
+                "UA 解析错误 repo=%s 原因=%s 耗时=%dms",
+                repo_dir_name, f"图谱解析失败: {exc}", duration_ms, exc_info=True,
+            )
             return UAAnalyzeResult(success=False, error=f"图谱解析失败: {exc}", output=output, duration_ms=duration_ms)
 
+        node_count = len(data.get("nodes") or [])
+        edge_count = len(data.get("edges") or [])
+        logger.info(
+            "UA 解析完成 repo=%s 节点=%d 边=%d 耗时=%dms",
+            repo_dir_name, node_count, edge_count, duration_ms,
+        )
         return UAAnalyzeResult(
             success=True,
-            node_count=len(data.get("nodes") or []),
-            edge_count=len(data.get("edges") or []),
+            node_count=node_count,
+            edge_count=edge_count,
             output=output,
             duration_ms=duration_ms,
         )

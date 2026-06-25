@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, is_dataclass
 from datetime import timedelta
 from typing import Any
@@ -9,6 +10,8 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Tool
 
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
+
+logger = logging.getLogger(__name__)
 
 
 def _plain(value: Any) -> Any:
@@ -48,25 +51,39 @@ class McpHttpClient:
         headers: dict[str, str],
         timeout: float = DEFAULT_MCP_TIMEOUT_SECONDS,
     ) -> list[dict[str, Any]]:
-        async with streamablehttp_client(endpoint_url, headers=headers, timeout=timeout) as (
-            read_stream,
-            write_stream,
-            _get_session_id,
-        ):
-            async with ClientSession(
+        logger.info("MCP list_tools 开始 endpoint=%s timeout=%ss", endpoint_url, timeout)
+        try:
+            async with streamablehttp_client(endpoint_url, headers=headers, timeout=timeout) as (
                 read_stream,
                 write_stream,
-                read_timeout_seconds=timedelta(seconds=timeout),
-            ) as session:
-                await session.initialize()
-                tools: list[dict[str, Any]] = []
-                cursor: str | None = None
-                while True:
-                    result = await session.list_tools(cursor=cursor)
-                    tools.extend(normalize_tool(tool) for tool in result.tools)
-                    cursor = getattr(result, "nextCursor", None)
-                    if cursor is None:
-                        return tools
+                _get_session_id,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(seconds=timeout),
+                ) as session:
+                    await session.initialize()
+                    tools: list[dict[str, Any]] = []
+                    cursor: str | None = None
+                    while True:
+                        result = await session.list_tools(cursor=cursor)
+                        tools.extend(normalize_tool(tool) for tool in result.tools)
+                        cursor = getattr(result, "nextCursor", None)
+                        if cursor is None:
+                            logger.info("MCP list_tools 完成 endpoint=%s 工具数=%d", endpoint_url, len(tools))
+                            return tools
+        except TimeoutError:
+            logger.warning("MCP list_tools 超时 endpoint=%s timeout=%ss", endpoint_url, timeout)
+            raise
+        except Exception as exc:
+            logger.error(
+                "MCP list_tools 失败 endpoint=%s 原因=%s",
+                endpoint_url,
+                exc,
+                exc_info=True,
+            )
+            raise
 
     async def call_tool(
         self,
@@ -76,16 +93,37 @@ class McpHttpClient:
         arguments: dict[str, Any],
         timeout: float = DEFAULT_MCP_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
-        async with streamablehttp_client(endpoint_url, headers=headers, timeout=timeout) as (
-            read_stream,
-            write_stream,
-            _get_session_id,
-        ):
-            async with ClientSession(
+        logger.debug("MCP call_tool 开始 endpoint=%s tool=%s", endpoint_url, tool_name)
+        try:
+            async with streamablehttp_client(endpoint_url, headers=headers, timeout=timeout) as (
                 read_stream,
                 write_stream,
-                read_timeout_seconds=timedelta(seconds=timeout),
-            ) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, arguments)
-                return normalize_call_tool_result(result)
+                _get_session_id,
+            ):
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(seconds=timeout),
+                ) as session:
+                    await session.initialize()
+                    result = await session.call_tool(tool_name, arguments)
+                    normalized = normalize_call_tool_result(result)
+                    logger.debug(
+                        "MCP call_tool 完成 endpoint=%s tool=%s is_error=%s",
+                        endpoint_url,
+                        tool_name,
+                        normalized.get("is_error"),
+                    )
+                    return normalized
+        except TimeoutError:
+            logger.warning("MCP call_tool 超时 endpoint=%s tool=%s timeout=%ss", endpoint_url, tool_name, timeout)
+            raise
+        except Exception as exc:
+            logger.error(
+                "MCP call_tool 失败 endpoint=%s tool=%s 原因=%s",
+                endpoint_url,
+                tool_name,
+                exc,
+                exc_info=True,
+            )
+            raise

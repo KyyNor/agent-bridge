@@ -35,17 +35,22 @@ class DocSyncScheduler(BaseCronScheduler):
         return {"running": True, "jobs": jobs, **base}
 
     def _refresh_jobs(self) -> None:
+        """重建文档同步 job。cron 无效时跳过注册(降级,沿用基类逻辑)。"""
         if not self._scheduler:
             return
         self._scheduler.remove_all_jobs()
         trigger = self._build_trigger()
         if trigger is None:
+            # 基类已记 WARNING;此处仅说明本调度器本轮未注册任何 job
+            logger.warning("DocSync 本轮未注册定时任务,文档同步暂停直到 cron 修复")
             return
         self._scheduler.add_job(self._run_sync, trigger=trigger, id="doc_sync")
         logger.debug("已调度文档同步 cron: %s", self._current_cron)
 
     def _run_sync(self) -> None:
+        """cron 触发的同步入口:扇出到所有检索后端(具体扇出在 service.sync 内完成)。"""
         admin = next(iter(self._admins), "root")
+        logger.info("DocSync 定时同步开始 actor=%s", admin)
         self._current_run = {
             "status": "running",
             "started_at": now_iso(),
@@ -70,7 +75,10 @@ class DocSyncScheduler(BaseCronScheduler):
                 })
                 self._last_run = dict(self._current_run)
                 self._current_run = None
-            logger.info("定时文档同步完成: 已处理 %s 个任务", result.get("processed", 0))
+            logger.info(
+                "DocSync 定时同步完成: 已处理=%s 成功=%s 失败=%s",
+                result.get("processed", 0), result.get("succeeded", 0), result.get("failed", 0),
+            )
         except Exception as exc:
             if self._current_run is not None:
                 self._current_run.update({
@@ -80,7 +88,7 @@ class DocSyncScheduler(BaseCronScheduler):
                 })
                 self._last_run = dict(self._current_run)
                 self._current_run = None
-            logger.exception("定时文档同步异常失败")
+            logger.error("DocSync 定时同步失败 原因=%s", exc, exc_info=True)
 
     def _update_progress(self, event: dict[str, Any]) -> None:
         if self._current_run is None:

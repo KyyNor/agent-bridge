@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any, Callable
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from agent_bridge.capability_hub.sources.builtin.base import (
     BuiltinCapabilityProvider,
@@ -153,6 +156,19 @@ class CapabilityService:
         request: dict[str, Any],
         handler: Callable[[], dict[str, Any]],
     ) -> dict[str, Any]:
+        """带审计的工作流辅助工具/脚本执行入口。
+
+        让 workflow_get_task / workflow_set_task / workflow_run_log / run_script
+        等也走和 ``execute`` 相同的 ``log_tool_call`` 审计路径。成功写一行
+        success，失败捕获异常、写错误行、把 log_id 缝进异常再抛出。
+        """
+        logger.info(
+            "invoke_logged_tool 入口 actor=%s profile=%s source=%s tool=%s",
+            actor,
+            profile_key,
+            source_key,
+            tool_name,
+        )
         started = monotonic_ms()
         try:
             result = handler()
@@ -168,6 +184,12 @@ class CapabilityService:
                 status=CallLogStatus.success.value,
                 error_message=None,
                 duration_ms=monotonic_ms() - started,
+            )
+            logger.info(
+                "invoke_logged_tool 完成 source=%s tool=%s 耗时=%dms",
+                source_key,
+                tool_name,
+                monotonic_ms() - started,
             )
             return result
         except Exception as exc:
@@ -188,6 +210,14 @@ class CapabilityService:
                 duration_ms=monotonic_ms() - started,
             )
             _attach_log_id(exc, log["log_id"])
+            logger.warning(
+                "invoke_logged_tool 失败 source=%s tool=%s 耗时=%dms log_id=%s 原因=%s",
+                source_key,
+                tool_name,
+                monotonic_ms() - started,
+                log["log_id"],
+                exc,
+            )
             raise
 
     def register_service(
@@ -528,6 +558,12 @@ class CapabilityService:
         limit: int,
         profile_key: str | None,
     ) -> dict[str, Any]:
+        """实际的搜索逻辑（不带审计写库，由 ``search`` 包一层再写 log）。
+
+        根据 path 探测来源类型：builtin > openapi > mcp（固定优先级，非注册表）。
+        探测到 openapi/mcp 时会先做来源级策略校验，未 allow 直接返回空 items；
+        builtin 来源自带资源级校验，这里只列工具不查资源。
+        """
         normalized_path = (path or "").strip("/")
         if normalized_path == "":
             items = self._root_search_items(actor=actor, profile_key=profile_key)
@@ -547,6 +583,7 @@ class CapabilityService:
                     SourceType.openapi_service.value,
                     normalized_path,
                 ):
+                    logger.debug("搜索 openapi 来源被拒绝 path=%s", normalized_path)
                     return {"path": normalized_path, "items": []}
                 self._require_enabled_openapi_service(normalized_path)
                 items = [self._openapi_tool_search_item(tool) for tool in self._active_openapi_tools(normalized_path)]
@@ -558,6 +595,7 @@ class CapabilityService:
                     SourceType.mcp_service.value,
                     normalized_path,
                 ):
+                    logger.debug("搜索 mcp 来源被拒绝 path=%s", normalized_path)
                     return {"path": normalized_path, "items": []}
                 self._require_enabled_service(normalized_path)
                 items = [self._tool_search_item(tool) for tool in self._active_tools(normalized_path)]
@@ -566,6 +604,7 @@ class CapabilityService:
         if query:
             needle = query.lower()
             items = [item for item in items if needle in _json_text(item)]
+        logger.debug("搜索完成 path=%s 结果数=%d", response_path, len(items))
         return {"path": response_path, "items": items[:limit]}
 
     async def execute(
@@ -577,6 +616,12 @@ class CapabilityService:
         profile_key: str | None = None,
         workflow_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """能力执行的统一入口（经 MetaMCP gateway ``execute`` 工具暴露给 agent）。
+
+        按 if/elif 探测来源类型（固定优先级 builtin > openapi > mcp，非注册表），
+        再走对应分支：builtin 自带资源级校验、openapi/mcp 先做来源级策略校验。
+        无论成功失败都经 ``log_tool_call`` 写一行审计，失败时把 log_id 缝进异常。
+        """
         started = monotonic_ms()
         request = {"service": service, "tool_name": tool_name, "params": params, "profile_key": profile_key}
         is_openapi_service = self.store.get_openapi_service(service) is not None
@@ -591,11 +636,20 @@ class CapabilityService:
         resource_key = None
         try:
             if service in self.builtin_providers:
+                # 分支 1：内置能力（wiki/codegraph/memory/platform），自带资源级策略校验
                 resource = self.builtin_providers[service].resource_from_arguments(tool_name, params)
                 resource_type, resource_key = self._builtin_resource_tuple(resource)
+                logger.debug("能力分发 builtin service=%s tool=%s resource=%s", service, tool_name, resource_key)
                 result = await self._execute_builtin(actor, service, tool_name, params, profile_key, workflow_context)
             elif is_openapi_service:
+                # 分支 2：OpenAPI 能力，先做来源级策略校验
                 if not self.governance.is_source_allowed(actor, profile_key, SourceType.openapi_service.value, service):
+                    logger.warning(
+                        "能力执行被拒绝 actor=%s service=%s 原因=%s",
+                        actor,
+                        service,
+                        "openapi 来源被 profile 策略拦截",
+                    )
                     raise mark_builtin_failure(
                         _mark_call_log_status(
                             ValidationError("source is blocked by profile policy"),
@@ -605,6 +659,7 @@ class CapabilityService:
                         owner=FailureOwner.policy.value,
                         error_type="profile_policy_blocked",
                     )
+                logger.debug("能力分发 openapi service=%s tool=%s", service, tool_name)
                 result = await asyncio.to_thread(
                     self._execute_openapi_without_log,
                     actor,
@@ -613,6 +668,13 @@ class CapabilityService:
                     params,
                 )
             elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
+                # 分支 3a：MCP 能力，来源级策略校验未通过
+                logger.warning(
+                    "能力执行被拒绝 actor=%s service=%s 原因=%s",
+                    actor,
+                    service,
+                    "mcp 来源被 profile 策略拦截",
+                )
                 raise mark_builtin_failure(
                     _mark_call_log_status(
                         ValidationError("source is blocked by profile policy"),
@@ -623,6 +685,8 @@ class CapabilityService:
                     error_type="profile_policy_blocked",
                 )
             else:
+                # 分支 3b：MCP 能力正常执行
+                logger.debug("能力分发 mcp service=%s tool=%s", service, tool_name)
                 result = await self._execute_without_log(actor, service, tool_name, params)
             log = self.governance.log_tool_call(
                 actor=actor,
@@ -663,6 +727,15 @@ class CapabilityService:
                 duration_ms=monotonic_ms() - started,
             )
             _attach_log_id(exc, log["log_id"])
+            logger.warning(
+                "能力执行失败 actor=%s service=%s tool=%s 耗时=%dms log_id=%s 原因=%s",
+                actor,
+                service,
+                tool_name,
+                monotonic_ms() - started,
+                log["log_id"],
+                exc,
+            )
             raise
 
     async def _execute_builtin(
@@ -723,6 +796,13 @@ class CapabilityService:
                 timeout=self._mcp_timeout_seconds(),
             )
         except Exception as exc:
+            logger.error(
+                "MCP 传输失败 service=%s tool=%s 原因=%s",
+                service,
+                tool_name,
+                _root_cause_message(exc),
+                exc_info=True,
+            )
             raise mark_builtin_failure(
                 ValidationError(f"MCP tool execution failed: {_root_cause_message(exc)}"),
                 stage=FailureStage.mcp_transport.value,
@@ -754,6 +834,13 @@ class CapabilityService:
                 params,
             )
         except Exception as exc:
+            logger.error(
+                "OpenAPI 传输失败 service=%s tool=%s 原因=%s",
+                service,
+                tool_name,
+                exc,
+                exc_info=True,
+            )
             raise mark_builtin_failure(
                 ValidationError(f"OpenAPI tool execution failed: {exc}"),
                 stage=FailureStage.openapi_transport.value,

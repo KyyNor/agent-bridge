@@ -95,6 +95,8 @@ class AgentBridgeService:
 
     @classmethod
     def create(cls, paths: AgentBridgePaths, admins: set[str]) -> "AgentBridgeService":
+        """工厂入口：装配全部子服务，恢复中断的 CodeGraph 同步，迁移并重建后端 registry。"""
+        logger.info("AgentBridgeService 开始装配 root=%s admins=%s", paths.root, sorted(admins))
         service = cls(
             paths=paths,
             store=SQLiteStore(paths.db_path),
@@ -108,6 +110,11 @@ class AgentBridgeService:
             logger.warning("Recovered %s stale CodeGraph sync run(s) left running by a prior process", recovered)
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
+        logger.info(
+            "AgentBridgeService 装配完成 子服务=governance/capabilities/agents/codegraph/"
+            "memory/workflows/skills/scripts 后端数=%d",
+            len(service.registry.list_slugs()) if service.registry else 0,
+        )
         return service
 
     def init_system(self) -> None:
@@ -126,14 +133,27 @@ class AgentBridgeService:
                     logger.warning("确保后端 '%s' 混合智能体失败", slug, exc_info=True)
 
     def ensure_managed_plugins(self) -> dict[str, Any]:
+        """按 sync_config 拉取/更新 understand-anything 与 claude-mem 两个托管插件仓库。"""
         config = self.store.get_sync_config()
         results: dict[str, Any] = {}
         ua_git_url = str(config.get("ua_git_url") or "").strip()
         if ua_git_url:
-            results["understand-anything"] = self.codegraph.ensure_understand_plugin(ua_git_url)
+            logger.info("understand-anything 插件开始拉取 url=%s", ua_git_url)
+            try:
+                results["understand-anything"] = self.codegraph.ensure_understand_plugin(ua_git_url)
+                logger.info("understand-anything 插件拉取完成 result=%s", results["understand-anything"])
+            except Exception:
+                logger.error("understand-anything 插件拉取失败 url=%s", ua_git_url, exc_info=True)
+                raise
         claude_mem_git_url = str(config.get("claude_mem_git_url") or "").strip()
         if claude_mem_git_url:
-            results["claude-mem"] = self.memory.worker_service.ensure_plugin(claude_mem_git_url)
+            logger.info("claude-mem 插件开始拉取 url=%s", claude_mem_git_url)
+            try:
+                results["claude-mem"] = self.memory.worker_service.ensure_plugin(claude_mem_git_url)
+                logger.info("claude-mem 插件拉取完成 result=%s", results["claude-mem"])
+            except Exception:
+                logger.error("claude-mem 插件拉取失败 url=%s", claude_mem_git_url, exc_info=True)
+                raise
         return results
 
     def update_understand_plugin(self, actor: str) -> dict[str, Any]:
@@ -230,6 +250,9 @@ class AgentBridgeService:
 
         doc["current_version_no"] = version["version_no"]
         doc["kb_slugs"] = [kb["slug"] for kb in kbs]
+        logger.info(
+            "文档已入档 doc=%s KB数=%d 立即同步=%s", slug, len(kbs), not later
+        )
         if not later:
             self.sync(actor=actor, all_users=False)
         return doc
@@ -424,6 +447,12 @@ class AgentBridgeService:
             workflow_task_rerun_days=workflow_task_rerun_days,
             mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
+        )
+        # 配置变更后刷新全部调度器，使其读取最新 cron / 时间窗
+        logger.info(
+            "同步配置已保存，刷新全部调度器 code_sync_cron=%s doc_sync_cron=%s understand_cron=%s "
+            "workflow_window=%s-%s",
+            code_sync_cron, doc_sync_cron, understand_cron, workflow_start_time, workflow_stop_time,
         )
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()

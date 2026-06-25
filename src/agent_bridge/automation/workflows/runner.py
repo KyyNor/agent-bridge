@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,8 @@ from agent_bridge.agent_runtime.events import (
     write_event as _write_event,
 )
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
+
+logger = logging.getLogger(__name__)
 
 
 WORKFLOW_PROMPT = "Run the workflow defined in ./workflow.js and write the final result to ./out/result.json."
@@ -74,6 +77,13 @@ class ClaudeWorkflowRunner:
         self._agent_service = agent_service
 
     def run(self, base_dir: Path, spec: WorkflowRunSpec) -> WorkflowProcessResult:
+        """驱动一个 workflow run：装隔离工作目录 -> 跑 AgentService -> 落地 stdout/stderr/events。"""
+        logger.info(
+            "Workflow agent 调用开始 workflow=%s run=%s profile=%s",
+            spec.workflow_key,
+            spec.run_id,
+            spec.profile_key,
+        )
         run_dir = prepare_run_directory(base_dir, spec)
         stdout_path = run_dir / "stdout.log"
         stderr_path = run_dir / "stderr.log"
@@ -121,6 +131,13 @@ class ClaudeWorkflowRunner:
                 error_message = res.error or "unknown error"
                 stderr.write(f"{error_message}\n")
                 _write_event(events, _event_record("error", status="failed", message=error_message))
+        logger.info(
+            "Workflow agent 调用完成 workflow=%s run=%s exit_code=%d 耗时=%dms",
+            spec.workflow_key,
+            spec.run_id,
+            exit_code,
+            int((time.monotonic() - started) * 1000),
+        )
         return WorkflowProcessResult(
             run_dir=run_dir,
             exit_code=exit_code,

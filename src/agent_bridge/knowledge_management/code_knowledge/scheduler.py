@@ -40,6 +40,7 @@ class CodeGraphScheduler(BaseCronScheduler):
         return {"running": True, "cron": self._current_cron, "jobs": jobs}
 
     def _refresh_jobs(self) -> None:
+        """按当前 cron 为每个 active 仓库注册一个同步 job（先清空旧 job）。"""
         if not self._scheduler:
             return
         self._scheduler.remove_all_jobs()
@@ -58,7 +59,9 @@ class CodeGraphScheduler(BaseCronScheduler):
             logger.debug("已调度同步 %s cron: %s", repo["repo_key"], self._current_cron)
 
     def _sync_repo(self, repo_key: str) -> None:
+        """cron tick 触发的单仓库同步任务（成功/失败各记一条）。"""
         admin = next(iter(self._admins), "root")
+        logger.info("CodeGraph tick 同步开始 repo=%s", repo_key)
         self._runs[repo_key] = {
             "status": "running",
             "started_at": now_iso(),

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 import json
 from datetime import datetime, timedelta
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from agent_bridge.capability_hub.models import (
     CallLogStatus,
@@ -449,6 +452,12 @@ class CapabilityGovernanceService:
         source_type: str,
         source_keys: list[str],
     ) -> list[str]:
+        """按来源级策略过滤可见的 service key。
+
+        来源级默认拒绝：profile 下若没有任何 allow 规则则全部不可见；
+        再用 deny 从 allow 里扣除。``profile_key is None`` 时（管理员/无治理
+        上下文）放行全部来源。
+        """
         normalized_source_type = self._validate_source_type(source_type)
         if profile_key is None:
             return source_keys
@@ -473,9 +482,29 @@ class CapabilityGovernanceService:
         }
 
         if not allow:
+            # 来源级默认拒绝：profile 没有任何 allow 规则 → 全部 source 不可见
+            logger.warning(
+                "能力来源被拒绝 actor=%s profile=%s source_type=%s 原因=%s",
+                actor,
+                profile_key,
+                normalized_source_type,
+                "无 allow 规则",
+            )
             return []
         allowed = [source_key for source_key in source_keys if source_key in allow]
-        return [source_key for source_key in allowed if source_key not in deny]
+        result = [source_key for source_key in allowed if source_key not in deny]
+        # 仅在被 deny 实际拦截到本应放行的来源时记一条，避免每次查询打噪音
+        denied = [source_key for source_key in allowed if source_key in deny]
+        if denied:
+            logger.warning(
+                "能力来源被拒绝 actor=%s profile=%s source_type=%s blocked=%s 原因=%s",
+                actor,
+                profile_key,
+                normalized_source_type,
+                denied,
+                "命中 deny 规则",
+            )
+        return result
 
     def is_source_allowed(
         self,
@@ -499,6 +528,12 @@ class CapabilityGovernanceService:
         resource_type: str,
         resource_keys: list[str],
     ) -> list[str]:
+        """按资源级策略过滤可见的 resource key（纯 allow-list，无 deny）。
+
+        wiki_kb / code_repo 资源只在 profile 显式 allow 时可见；不在 allow
+        集合中的资源一律隐藏，但不抛异常——由上层（如 wiki/codegraph builtin
+        provider）在调用具体资源时决定是否转为“被拒绝”。
+        """
         normalized_resource_type = self._validate_resource_type(resource_type)
         if profile_key is None:
             return resource_keys
@@ -515,6 +550,16 @@ class CapabilityGovernanceService:
             for rule in rules
             if rule["resource_type"] == normalized_resource_type
         }
+        blocked = [key for key in resource_keys if key not in allow]
+        if blocked:
+            logger.warning(
+                "能力资源被拒绝 actor=%s profile=%s resource_type=%s blocked=%s 原因=%s",
+                actor,
+                profile_key,
+                normalized_resource_type,
+                blocked,
+                "不在 allow 列表",
+            )
         return [resource_key for resource_key in resource_keys if resource_key in allow]
 
     def is_resource_allowed(
@@ -585,6 +630,14 @@ class CapabilityGovernanceService:
         resource_type: str | None = None,
         resource_key: str | None = None,
     ) -> dict[str, Any]:
+        """工具调用的唯一审计出口。
+
+        每次 search/execute（含被拒绝的）都经此写一行 tool_call_log，带
+        status / failure_stage / failure_owner / error_type / duration_ms。
+        故意不打 INFO——这是高频审计写入，逐条打日志会成为噪音；可观测性靠
+        事后查 tool_call_logs 表而非日志流。失败时调用方会把返回的 log_id
+        缝进异常信息便于关联。
+        """
         normalized_source_type = self._optional_enum(source_type, SourceType, "source type")
         normalized_status = self._validate_call_log_status(status)
         normalized_failure_stage = self._optional_enum(failure_stage, FailureStage, "failure stage")
@@ -707,18 +760,21 @@ class CapabilityGovernanceService:
         try:
             return SourceType(source_type).value
         except ValueError as exc:
+            logger.warning("策略校验失败：非法 source_type=%s", source_type)
             raise ValidationError("invalid source type") from exc
 
     def _validate_resource_type(self, resource_type: str | None) -> str:
         try:
             return ProfileResourceType(resource_type).value
         except ValueError as exc:
+            logger.warning("策略校验失败：非法 resource_type=%s", resource_type)
             raise ValidationError("invalid resource type") from exc
 
     def _validate_call_log_status(self, status: str) -> str:
         try:
             return CallLogStatus(status).value
         except ValueError as exc:
+            logger.warning("审计日志校验失败：非法 status=%s", status)
             raise ValidationError("invalid call log status") from exc
 
     def _optional_enum(self, value: str | None, enum_cls: type, label: str) -> str | None:
@@ -727,4 +783,5 @@ class CapabilityGovernanceService:
         try:
             return enum_cls(value).value
         except ValueError as exc:
+            logger.warning("策略校验失败：非法 %s=%s", label, value)
             raise ValidationError(f"invalid {label}") from exc

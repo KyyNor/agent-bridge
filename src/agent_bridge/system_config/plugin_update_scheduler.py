@@ -76,12 +76,20 @@ class PluginUpdateScheduler:
         )
 
     def _add_plugin_job(self, *, plugin_key: str, cron: str, enabled: bool) -> None:
+        """为单个插件注册定时更新 job。
+
+        ``enabled`` 为 False(git url 未配置)时静默跳过;cron 解析失败记 WARNING 降级,
+        不影响其他插件的 job 注册。
+        """
         if not enabled or not self._scheduler:
             return
         try:
             trigger = CronTrigger.from_crontab(cron)
         except (ValueError, TypeError) as exc:
-            logger.error("无效的插件更新 cron '%s' (%s): %s", cron, plugin_key, exc)
+            logger.warning(
+                "插件更新 %s 降级:无效 cron '%s' 原因=%s,跳过该插件调度",
+                plugin_key, cron, exc,
+            )
             return
         self._scheduler.add_job(
             self._run_plugin_update,
@@ -92,7 +100,9 @@ class PluginUpdateScheduler:
         logger.debug("已调度插件更新 %s cron: %s", plugin_key, cron)
 
     def _run_plugin_update(self, plugin_key: str) -> None:
+        """cron 触发的插件更新入口,按 plugin_key 分发到对应 service 方法。"""
         admin = next(iter(self._admins), "root")
+        logger.info("插件更新开始 plugin=%s actor=%s", plugin_key, admin)
         self._current_run = self._runs[plugin_key] = {
             "status": "running",
             "started_at": now_iso(),
@@ -116,6 +126,10 @@ class PluginUpdateScheduler:
             })
             self._last_run = dict(self._runs[plugin_key])
             self._current_run = None
+            logger.info(
+                "插件更新完成 plugin=%s status=%s",
+                plugin_key, status,
+            )
         except Exception as exc:
             self._runs[plugin_key].update({
                 "status": "failed",
@@ -125,4 +139,4 @@ class PluginUpdateScheduler:
             })
             self._last_run = dict(self._runs[plugin_key])
             self._current_run = None
-            logger.exception("插件更新失败 %s", plugin_key)
+            logger.error("插件更新失败 plugin=%s 原因=%s", plugin_key, exc, exc_info=True)

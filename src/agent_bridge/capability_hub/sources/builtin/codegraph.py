@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
@@ -7,6 +8,8 @@ from agent_bridge.capability_hub.models import FailureOwner, FailureStage, Profi
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
 from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphService
 from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
+
+logger = logging.getLogger(__name__)
 
 
 EXPLORE_TOOL = "codegraph_explore"
@@ -88,12 +91,20 @@ class CodeGraphBuiltinProvider:
             ProfileResourceType.code_repo.value,
             repo_key,
         ):
+            logger.warning(
+                "CodeGraph 资源被拒绝 actor=%s profile=%s repo=%s 原因=%s",
+                actor,
+                profile_key,
+                repo_key,
+                "不在 allow 列表",
+            )
             raise ValidationError("resource is blocked by profile policy")
 
         try:
             query = str(arguments.get("query") or "").strip()
             if not query:
                 raise ValidationError("query is required")
+            logger.info("CodeGraph 探索开始 actor=%s repo=%s query=%s", actor, repo_key, query)
             return await self.codegraph.explore(
                 actor,
                 repo_key,
@@ -102,6 +113,7 @@ class CodeGraphBuiltinProvider:
         except AgentBridgeError:
             raise
         except Exception as exc:
+            logger.error("CodeGraph 探索失败 actor=%s repo=%s 原因=%s", actor, repo_key, exc, exc_info=True)
             raise self._backend_error(exc, repo_key) from exc
 
     def _repo_key(self, arguments: dict[str, Any]) -> str:

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
+
+
+logger = logging.getLogger(__name__)
 
 
 SESSION_START_ACTION = "session-start"
@@ -44,7 +48,10 @@ class MemoryHookService:
         payload: dict[str, Any],
         timeout_seconds: int,
     ) -> dict[str, Any]:
+        """Claude Code hook 总入口：按 action 派发到 session-start 同步或 worker.handle_hook。"""
+        logger.info("memory hook 收到请求 actor=%s profile=%s action=%s", actor, profile_key, action)
         if action not in CLAUDE_MEM_HOOK_ACTIONS:
+            logger.warning("memory hook 未支持的 action=%s", action)
             return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": "unsupported_action"}
         if action == SESSION_START_ACTION:
             return self._handle_session_start(
@@ -57,9 +64,11 @@ class MemoryHookService:
             )
         resolved = self.memory_service.resolve_profile_block(actor, profile_key)
         if resolved["status"] != "ok":
+            logger.info("memory hook 未绑定记忆块 actor=%s profile=%s status=%s", actor, profile_key, resolved["status"])
             return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": resolved["status"]}
         worker = self.worker_service or self.memory_service.worker_service
         if worker is None:
+            logger.warning("memory worker 服务未配置 actor=%s action=%s", actor, action)
             return {
                 "stdout": NOOP_HOOK_STDOUT,
                 "stderr": "memory worker service is not configured",
@@ -85,12 +94,17 @@ class MemoryHookService:
         payload: dict[str, Any],
         timeout_seconds: int,
     ) -> dict[str, Any]:
-        sections = [section for section in [self._profile_context(actor, profile_key)] if section]
+        """SessionStart 同步：拼装 profile 指导 + claude-mem 记忆上下文，作为 additionalContext 注入会话。"""
         resolved = self.memory_service.resolve_profile_block(actor, profile_key)
+        block = resolved.get("block") if resolved["status"] == "ok" else None
+        block_key = block.get("block_key") if isinstance(block, dict) else None
+        logger.info("claude-mem 开始同步 block=%s actor=%s profile=%s", block_key, actor, profile_key)
+        sections = [section for section in [self._profile_context(actor, profile_key)] if section]
         memory_status = resolved["status"]
         if memory_status == "ok":
             worker = self.worker_service or self.memory_service.worker_service
             if worker is None:
+                logger.warning("claude-mem 同步跳过：worker 服务未配置 actor=%s", actor)
                 sections.append("Agent Bridge memory context is unavailable: memory worker service is not configured.")
                 memory_status = "worker_error"
             else:
@@ -114,11 +128,16 @@ class MemoryHookService:
         context = "\n\n".join(section.strip() for section in sections if section.strip())
         if not context:
             context = "Agent Bridge session context is unavailable for this profile."
+        final_status = "ok" if memory_status in {"ok", "not_configured"} else memory_status
+        if final_status == "ok":
+            logger.info("claude-mem 同步完成 block=%s", block_key)
+        else:
+            logger.warning("claude-mem 同步未就绪 block=%s status=%s", block_key, final_status)
         return {
             "stdout": self._session_start_stdout(context),
             "stderr": "",
             "exit_code": 0,
-            "status": "ok" if memory_status in {"ok", "not_configured"} else memory_status,
+            "status": final_status,
         }
 
     def _profile_context(self, actor: str, profile_key: str) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import signal
 import shutil
@@ -17,6 +18,8 @@ from agent_bridge.memory_management.claude_mem.client import ClaudeMemClient
 from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
 from agent_bridge.plugin_runtime import GitPluginRuntime
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_WORKER_HOST = "127.0.0.1"
 DEFAULT_WORKER_PORT_BASE = 48100
@@ -42,6 +45,7 @@ class ClaudeMemWorkerService:
         try:
             base_url = self._ensure_worker(block, plugin_dir=plugin_dir, timeout_seconds=8)
         except Exception as exc:
+            logger.warning("claude-mem worker 健康检查失败 block=%s 原因=%s", block.get("block_key"), exc)
             log_path = self._worker_log_path(block)
             return {
                 "status": "worker_error",
@@ -141,8 +145,12 @@ class ClaudeMemWorkerService:
         matcher: str | None,
         timeout_seconds: int,
     ) -> dict[str, Any]:
+        """claude-mem hook 调用入口：按 action 派发到 worker 子进程（或 version-check 直查）。"""
+        block_key = str(block.get("block_key"))
+        logger.info("claude-mem worker 处理 hook block=%s action=%s", block_key, action)
         plugin_dir = self._plugin_dir()
         if plugin_dir is None:
+            logger.warning("claude-mem 插件未安装 block=%s", block_key)
             return {
                 "stdout": NOOP_HOOK_STDOUT,
                 "stderr": "claude-mem plugin scripts were not found on the server",
@@ -153,6 +161,7 @@ class ClaudeMemWorkerService:
             try:
                 self._ensure_worker(block, plugin_dir=plugin_dir, timeout_seconds=min(timeout_seconds, 15))
             except Exception as exc:
+                logger.error("claude-mem worker 就绪失败 block=%s action=%s 原因=%s", block_key, action, exc, exc_info=True)
                 return {
                     "stdout": NOOP_HOOK_STDOUT,
                     "stderr": str(exc),
@@ -180,13 +189,17 @@ class ClaudeMemWorkerService:
                 check=False,
             )
         except Exception as exc:
+            logger.error("claude-mem hook 执行异常 block=%s action=%s 原因=%s", block_key, action, exc, exc_info=True)
             return {"stdout": NOOP_HOOK_STDOUT, "stderr": str(exc), "exit_code": 0, "status": "worker_error"}
         stdout = completed.stdout.strip() or NOOP_HOOK_STDOUT
+        status = "ok" if completed.returncode == 0 else "worker_error"
+        if completed.returncode != 0:
+            logger.warning("claude-mem hook 返回非零退出码 block=%s action=%s exit_code=%s", block_key, action, completed.returncode)
         return {
             "stdout": stdout,
             "stderr": completed.stderr,
             "exit_code": completed.returncode,
-            "status": "ok" if completed.returncode == 0 else "worker_error",
+            "status": status,
         }
 
     def _hook_command(self, plugin_dir: Path, action: str) -> list[str]:
@@ -222,6 +235,7 @@ class ClaudeMemWorkerService:
         plugin_dir: Path | None = None,
         timeout_seconds: int = 12,
     ) -> str:
+        """确保 block 对应的 worker 进程存活并就绪：复用已存活进程，否则按端口池新拉一个。"""
         configured = self._configured_base_url(block)
         if configured:
             if not self._worker_ready(configured):
@@ -261,13 +275,21 @@ class ClaudeMemWorkerService:
                 "last_accessed_at": time.time(),
             },
         )
+        logger.info(
+            "claude-mem worker 进程启动 block=%s pid=%s port=%s",
+            block.get("block_key"),
+            process.pid,
+            port,
+        )
         if self._wait_until_ready(base_url, process=process, timeout_seconds=timeout_seconds):
+            logger.info("claude-mem worker 就绪 block=%s base_url=%s", block.get("block_key"), base_url)
             return base_url
         raise RuntimeError(
             f"claude-mem worker did not become ready at {base_url}; log: {self._worker_log_path(block)}"
         )
 
     def _start_worker_process(self, block: dict[str, Any], *, plugin_dir: Path, port: int) -> subprocess.Popen:
+        """fork worker 子进程，stdout/stderr 重定向到 per-worker 日志文件（见 _worker_log_path）。"""
         bun = self._bun_command()
         data_dir = Path(str(block["data_dir"])).expanduser()
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -377,15 +399,22 @@ class ClaudeMemWorkerService:
             return False
 
     def _wait_until_ready(self, base_url: str, *, process: subprocess.Popen, timeout_seconds: int) -> bool:
+        """轮询 worker 健康端点，直到就绪、超时或子进程异常退出。"""
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             if self._worker_ready(base_url):
                 return True
             if process.poll() is not None:
+                logger.error(
+                    "claude-mem worker 子进程异常退出 base_url=%s exit_code=%s",
+                    base_url,
+                    process.returncode,
+                )
                 raise RuntimeError(
                     f"claude-mem worker exited with code {process.returncode}; log: {self._worker_log_path_from_url(base_url)}"
                 )
             time.sleep(0.2)
+        logger.warning("claude-mem worker 等待就绪超时 base_url=%s timeout=%ss", base_url, timeout_seconds)
         return False
 
     def _pid_alive(self, pid: int) -> bool:
@@ -425,15 +454,25 @@ class ClaudeMemWorkerService:
             state_path.unlink(missing_ok=True)
 
     def _stop_worker_session(self, session: dict[str, Any], *, grace_seconds: float) -> bool:
+        """停止单个 worker 会话：先 SIGTERM 优雅退出，清理状态文件与 block 运行时文件。"""
         pid = int(session.get("pid") or 0)
+        block_key = session.get("state_path")
         stopped = self._terminate_pid(pid, grace_seconds=grace_seconds)
         self._remove_worker_state(session)
         data_dir = str(session.get("data_dir") or "").strip()
         if data_dir:
             self._clear_block_runtime_state(Path(data_dir).expanduser())
+        if pid > 0:
+            logger.info(
+                "claude-mem worker 进程停止 pid=%s stopped=%s source=%s",
+                pid,
+                stopped,
+                getattr(block_key, "name", block_key),
+            )
         return stopped
 
     def _terminate_pid(self, pid: int, *, grace_seconds: float) -> bool:
+        """终止进程：先 SIGTERM 等待 grace 期，仍存活则 SIGKILL 兜底。返回是否执行过终止。"""
         if pid <= 0 or not self._pid_alive(pid):
             return False
         self._signal_worker(pid, signal.SIGTERM)
@@ -441,6 +480,7 @@ class ClaudeMemWorkerService:
         while time.monotonic() < deadline and self._pid_alive(pid):
             time.sleep(0.1)
         if self._pid_alive(pid):
+            logger.warning("claude-mem worker 优雅退出超时，升级为 SIGKILL pid=%s", pid)
             self._signal_worker(pid, signal.SIGKILL)
         return True
 
@@ -454,6 +494,7 @@ class ClaudeMemWorkerService:
             )
 
     def stop_all_workers(self, *, grace_seconds: float = 3.0) -> dict[str, Any]:
+        """进程退出时清理：枚举所有 worker pid（状态文件 + block 目录的 worker.pid/supervisor.json），统一终止并清状态。"""
         state_dir = self.paths.run_dir / "claude-mem-workers"
         block_dirs = self.paths.data_dir / "claude-mem" / "blocks"
         pids: dict[int, str] = {}
@@ -538,6 +579,12 @@ class ClaudeMemWorkerService:
             except Exception as exc:
                 errors.append(f"{supervisor_path}: {exc}")
 
+        logger.info(
+            "claude-mem 停止全部 worker count=%d removed_state_files=%d errors=%d",
+            stopped,
+            removed_state_files,
+            len(errors),
+        )
         return {"stopped": stopped, "removed_state_files": removed_state_files, "errors": errors}
 
     def _signal_worker(self, pid: int, sig: int) -> None:
@@ -626,11 +673,15 @@ class ClaudeMemWorkerService:
         return None
 
     def ensure_plugin(self, git_url: str) -> dict[str, Any]:
+        """克隆/更新 claude-mem 插件仓库并跑 `bun install` 安装依赖。"""
+        logger.info("claude-mem 插件开始安装 git_url=%s", git_url)
         result = self.plugin_runtime.ensure_repo(plugin_key="claude-mem", git_url=git_url)
         if result["status"] in {"failed", "skipped"}:
+            logger.warning("claude-mem 插件仓库准备跳过/失败 status=%s", result["status"])
             return result
         plugin_dir = self._managed_plugin_dir()
         if plugin_dir is None:
+            logger.error("claude-mem 插件目录在克隆/更新后仍未找到")
             return {
                 "status": "failed",
                 "plugin_key": "claude-mem",
@@ -643,7 +694,9 @@ class ClaudeMemWorkerService:
             command=["bun", "install"],
         )
         if install["status"] == "failed":
+            logger.error("claude-mem 插件依赖安装失败 plugin_dir=%s", plugin_dir, exc_info=True)
             return install
+        logger.info("claude-mem 插件安装完成 plugin_dir=%s", plugin_dir)
         return {**result, "install": install, "plugin_dir": str(plugin_dir)}
 
     def _managed_plugin_dir(self) -> Path | None:

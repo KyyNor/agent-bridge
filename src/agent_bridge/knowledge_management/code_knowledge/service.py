@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.plugin_runtime import GitPluginRuntime
 from agent_bridge.storage.sqlite import SQLiteStore
+
+logger = logging.getLogger(__name__)
 
 
 MAX_INDEX_CHARS = 20_000
@@ -120,24 +123,34 @@ class CodeGraphService:
         self.client.terminate_active_processes()
 
     def sync_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
+        """同步代码仓库：镜像 git → 建索引。
+
+        索引在 ``codegraph`` CLI 可用时走 CLI，否则降级为内置文本索引器写进 SQLite。
+        全程记录 sync run 状态；任一阶段失败都标记 run 并抛 ``ValidationError``。
+        """
         require_admin_user(actor, self.admins)
         repo = self._require_repository(repo_key)
         self.paths.repos_dir.mkdir(parents=True, exist_ok=True)
         local_path = self.paths.repos_dir / repo_key
         run = self.store.create_codegraph_sync_run(repo_key, status="running", stage="git")
         started = time.perf_counter()
+        logger.info("仓库镜像开始 repo=%s 本地=%s", repo_key, local_path)
 
         try:
             self._sync_git(repo, local_path)
+            logger.info("仓库镜像完成 repo=%s", repo_key)
             self.store.update_codegraph_sync_run(int(run["id"]), stage="indexing")
             if self.client.is_available():
+                logger.info("代码索引开始 repo=%s 模式=CLI", repo_key)
                 self.client.init(local_path)
                 self.client.index(local_path)
                 indexed_count = len(self.client.files(local_path))
             else:
+                logger.info("代码索引开始 repo=%s 模式=SQLite降级", repo_key)
                 items = self._index_files(repo_key, local_path)
                 self.store.replace_codegraph_index(repo_key, items)
                 indexed_count = len(items)
+            logger.info("代码索引完成 repo=%s 索引项=%d", repo_key, indexed_count)
             last_commit = self._git_output(local_path, ["rev-parse", "HEAD"])
             duration_ms = int((time.perf_counter() - started) * 1000)
             self.store.mark_code_repository_sync(
@@ -154,10 +167,15 @@ class CodeGraphService:
                 error=None,
                 duration_ms=duration_ms,
             )
+            logger.info("仓库同步完成 repo=%s 耗时=%dms", repo_key, duration_ms)
             return {"repo_key": repo_key, "status": "succeeded", "indexed": indexed_count}
         except Exception as exc:
             duration_ms = int((time.perf_counter() - started) * 1000)
             message = str(exc)
+            logger.error(
+                "仓库同步失败 repo=%s 原因=%s 耗时=%dms",
+                repo_key, message, duration_ms, exc_info=True,
+            )
             self.store.mark_code_repository_sync(
                 repo_key,
                 local_path=str(local_path),
@@ -175,12 +193,15 @@ class CodeGraphService:
             raise ValidationError(f"codegraph sync failed: {message}") from exc
 
     def search_code(self, actor: str, repo_key: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """代码搜索：CLI 可用走 codegraph 查询，否则降级到 SQLite 文本索引。"""
         require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         if self.client.is_available():
+            logger.debug("代码索引模式=CLI repo=%s query=%s", repo_key, query)
             local_path = self._local_path(repo_key)
             nodes = self.client.query(local_path, query, limit=limit)
             return [self._codegraph_node_payload(n) for n in nodes]
+        logger.debug("代码索引模式=SQLite降级 repo=%s query=%s", repo_key, query)
         return [
             self._index_payload(item)
             for item in self.store.search_codegraph_index(repo_key, query=query, item_type="file", limit=limit)
@@ -291,17 +312,24 @@ class CodeGraphService:
         return self.client.files(local_path)
 
     async def explore(self, actor: str, repo_key: str, query: str) -> dict[str, Any]:
+        """通过 codegraph MCP 直连执行代码图查询（``codegraph_explore`` 工具）。"""
         require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         if not local_path.is_dir():
             raise NotFound("repository local path not found")
-        mcp_result = await self.mcp_client.call_tool(
-            local_path,
-            "codegraph_explore",
-            {"query": query, "projectPath": str(local_path)},
-            timeout=self._mcp_timeout_seconds(),
-        )
+        logger.info("代码查询开始 repo=%s 模式=MCP query=%s", repo_key, query)
+        try:
+            mcp_result = await self.mcp_client.call_tool(
+                local_path,
+                "codegraph_explore",
+                {"query": query, "projectPath": str(local_path)},
+                timeout=self._mcp_timeout_seconds(),
+            )
+        except Exception:
+            logger.error("代码查询失败 repo=%s 模式=MCP query=%s", repo_key, query, exc_info=True)
+            raise
+        logger.info("代码查询完成 repo=%s 模式=MCP query=%s", repo_key, query)
         return {
             "repo": repo_key,
             "query": query,
@@ -386,6 +414,10 @@ class CodeGraphService:
         return self.plugin_runtime.ensure_repo(plugin_key="understand-anything", git_url=git_url)
 
     def analyze_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
+        """触发 Understand Anything 知识图谱分析（委托 ``ua_client.analyze``）。
+
+        从 sync_config 读 ``ua_git_url`` 与 ``understand_timeout_minutes``。
+        """
         require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
@@ -394,9 +426,20 @@ class CodeGraphService:
         sync_config = self.store.get_sync_config()
         ua_git_url = sync_config.get("ua_git_url", "")
         timeout_minutes = int(sync_config.get("understand_timeout_minutes") or 120)
+        logger.info("Understand 分析开始 repo=%s 超时=%dmin", repo_key, timeout_minutes)
         result = self.ua_client.analyze(
             local_path, ua_git_url=ua_git_url, timeout=timeout_minutes * 60
         )
+        if result.success:
+            logger.info(
+                "Understand 分析完成 repo=%s 节点=%d 边=%d 耗时=%dms",
+                repo_key, result.node_count, result.edge_count, result.duration_ms,
+            )
+        else:
+            logger.warning(
+                "Understand 分析失败 repo=%s 原因=%s 耗时=%dms",
+                repo_key, result.error or "unknown error", result.duration_ms,
+            )
         return {
             "success": result.success,
             "node_count": result.node_count,

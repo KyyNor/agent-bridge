@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,9 @@ from agent_bridge.memory_management.claude_mem.worker import ClaudeMemWorkerServ
 from agent_bridge.memory_management.hooks import MemoryHookService
 from agent_bridge.memory_management.models import ACTIVE_MEMORY_STATUSES
 from agent_bridge.storage.sqlite import SQLiteStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryService:
@@ -90,16 +94,20 @@ class MemoryService:
         return self.store.memory.set_profile_memory_binding(profile_key, block_key, enabled=enabled)
 
     def resolve_profile_block(self, actor: str, profile_key: str | None) -> dict[str, Any]:
+        """解析 profile 当前绑定的记忆块：任一环节缺失/未启用/未激活即返回 not_configured。"""
         if not profile_key:
             return {"status": "not_configured", "block": None}
         profile = self.store.get_project_profile(profile_key)
         if profile is None or profile.get("status") != "active":
+            logger.debug("profile=%s 未激活或不存在，记忆块未绑定", profile_key)
             return {"status": "not_configured", "block": None}
         binding = self.store.memory.get_profile_memory_binding(profile_key)
         if not binding or not binding.get("enabled") or not binding.get("block_key"):
+            logger.debug("profile=%s 未绑定记忆块或绑定已禁用", profile_key)
             return {"status": "not_configured", "block": None}
         block = self.store.memory.get_memory_block(str(binding["block_key"]))
         if block is None or block.get("status") != "active":
+            logger.warning("profile=%s 绑定的记忆块 block=%s 不存在或未激活", profile_key, binding.get("block_key"))
             return {"status": "not_configured", "block": None}
         return {"status": "ok", "block": block}
 
@@ -112,8 +120,10 @@ class MemoryService:
         limit: int = 10,
         block_key: str | None = None,
     ) -> dict[str, Any]:
+        """记忆检索入口：先解析运行时记忆块，再委托 worker。未绑定则直接返回 not_configured。"""
         resolved = self._resolve_runtime_block(actor, profile_key, block_key)
         if resolved["status"] != "ok":
+            logger.info("memory 检索跳过 actor=%s status=%s", actor, resolved["status"])
             return {"status": resolved["status"], "block_key": None, "items": []}
         return self.worker_service.search(resolved["block"], query=query, limit=limit)
 
@@ -126,8 +136,10 @@ class MemoryService:
         cursor: str | None = None,
         block_key: str | None = None,
     ) -> dict[str, Any]:
+        """记忆时间线入口：分页读取观察序列，未绑定则直接返回 not_configured。"""
         resolved = self._resolve_runtime_block(actor, profile_key, block_key)
         if resolved["status"] != "ok":
+            logger.info("memory 时间线跳过 actor=%s status=%s", actor, resolved["status"])
             return {"status": resolved["status"], "block_key": None, "items": [], "next_cursor": None}
         return self.worker_service.timeline(resolved["block"], limit=limit, cursor=cursor)
 
@@ -139,8 +151,10 @@ class MemoryService:
         observation_id: str,
         block_key: str | None = None,
     ) -> dict[str, Any]:
+        """单条观察读取入口：按 observation_id 取详情，未绑定则直接返回 not_configured。"""
         resolved = self._resolve_runtime_block(actor, profile_key, block_key)
         if resolved["status"] != "ok":
+            logger.info("memory 读取观察跳过 actor=%s status=%s", actor, resolved["status"])
             return {"status": resolved["status"], "block_key": None, "item": None}
         return self.worker_service.get_observation(resolved["block"], observation_id)
 

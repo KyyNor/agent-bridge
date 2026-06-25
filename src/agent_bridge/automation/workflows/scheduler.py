@@ -170,10 +170,12 @@ class WorkflowScheduler:
         )
 
     def _open_window(self) -> None:
+        logger.info("Workflow 执行窗口已开启 %s - %s", self._start_time_str, self._stop_time_str)
         self._ensure_tick_job()
         self.tick()
 
     def _close_window(self) -> None:
+        logger.info("Workflow 执行窗口已关闭 %s - %s", self._start_time_str, self._stop_time_str)
         if self._scheduler and self._scheduler.get_job(_TICK_JOB_ID):
             self._scheduler.remove_job(_TICK_JOB_ID)
 
@@ -243,12 +245,22 @@ class WorkflowScheduler:
                 }
             available = self._max_concurrent - len(self._running)
             if available <= 0:
+                logger.info(
+                    "Workflow 并发上限已占满 运行中=%s 上限=%d",
+                    sorted(self._running),
+                    self._max_concurrent,
+                )
                 return
             batch = self.next_workflow_batch(candidates, self._running)[:available]
             for workflow_key in batch:
                 self._running.add(workflow_key)
                 if self._max_runs > 0:
                     self.run_counts[workflow_key] = self.run_counts.get(workflow_key, 0) + 1
+                logger.info(
+                    "Workflow run 启动 workflow=%s run=%s",
+                    workflow_key,
+                    "(pending)",
+                )
                 thread = threading.Thread(target=self._run_and_release, args=(workflow_key,), daemon=True)
                 thread.start()
 
@@ -286,6 +298,12 @@ class WorkflowScheduler:
                 temp_dir=str(base_dir / run_id),
             )
             self._running.add(workflow_key)
+        logger.info(
+            "Workflow 即时测试 run 启动 workflow=%s run=%s profile=%s",
+            workflow_key,
+            run_id,
+            workflow["profile_key"],
+        )
         thread = threading.Thread(
             target=self._run_and_release, args=(workflow_key, run_id), daemon=True
         )
@@ -293,8 +311,14 @@ class WorkflowScheduler:
         return {"status": "started", "run_id": run_id}
 
     def run_one_workflow(self, workflow_key: str, run_id: str | None = None) -> dict[str, Any]:
+        """执行单个 workflow run 的完整生命周期：建 run 行 -> 跑 agent -> 解析 result -> 入库。
+
+        失败（agent 非零退出、result 解析不通过、异常）统一落 failed 状态并
+        释放已租借的任务以便快速重试。
+        """
         workflow = self._store.get_workflow_definition(workflow_key)
         if workflow is None:
+            logger.warning("Workflow 定义不存在 workflow=%s", workflow_key)
             self.finished_today.add(workflow_key)
             return {"status": "missing"}
 
@@ -309,6 +333,12 @@ class WorkflowScheduler:
                 status="running",
                 temp_dir=str(base_dir / run_id),
             )
+        logger.info(
+            "Workflow run 开始执行 workflow=%s run=%s profile=%s",
+            workflow_key,
+            run_id,
+            workflow["profile_key"],
+        )
         process_result = None
         try:
             process_result = self._runner.run(
@@ -323,6 +353,12 @@ class WorkflowScheduler:
                 ),
             )
             if process_result.exit_code != 0:
+                logger.error(
+                    "Workflow runner 退出非零 workflow=%s run=%s exit_code=%d",
+                    workflow_key,
+                    run_id,
+                    process_result.exit_code,
+                )
                 return self._finish_failed(workflow_key, run_id, process_result, "claude workflow runner failed")
             parsed = parse_workflow_result(process_result.run_dir)
             ingested = self._service.ingest_parsed_result(
@@ -342,6 +378,13 @@ class WorkflowScheduler:
                 stderr_path=str(process_result.stderr_path),
                 error=None,
                 duration_ms=process_result.duration_ms,
+            )
+            logger.info(
+                "Workflow run 完成 workflow=%s run=%s 状态=%s 耗时=%dms",
+                workflow_key,
+                run_id,
+                final_status,
+                process_result.duration_ms,
             )
             return ingested
         except Exception as exc:

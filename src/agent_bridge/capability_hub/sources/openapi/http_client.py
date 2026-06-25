@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from urllib.parse import quote, urljoin
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class OpenApiHttpClient:
@@ -14,6 +17,7 @@ class OpenApiHttpClient:
         self.timeout = timeout
 
     def call_tool(self, service: dict[str, Any], tool: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        service_key = str(service.get("service_key") or "")
         method = str(tool.get("method") or "GET").upper()
         mapping = tool.get("request_mapping") if isinstance(tool.get("request_mapping"), dict) else {}
         url = _build_url(str(service.get("base_url") or ""), str(tool.get("path") or ""), mapping.get("path"), params)
@@ -21,7 +25,29 @@ class OpenApiHttpClient:
         headers = _headers(service, mapping.get("headers"), params)
         body_arg = mapping.get("body")
         json_body = params.get(body_arg) if isinstance(body_arg, str) and body_arg else None
-        response = httpx.request(method, url, params=query, headers=headers, json=json_body, timeout=self.timeout)
+        logger.debug("OpenAPI 调用开始 service=%s %s %s", service_key, method, url)
+        try:
+            response = httpx.request(method, url, params=query, headers=headers, json=json_body, timeout=self.timeout)
+        except httpx.TimeoutException:
+            logger.warning("OpenAPI 调用超时 service=%s %s %s timeout=%ss", service_key, method, url, self.timeout)
+            raise
+        except Exception as exc:
+            logger.error(
+                "OpenAPI 调用失败 service=%s %s %s 原因=%s",
+                service_key,
+                method,
+                url,
+                exc,
+                exc_info=True,
+            )
+            raise
+        logger.debug(
+            "OpenAPI 调用完成 service=%s %s %s status=%d",
+            service_key,
+            method,
+            url,
+            response.status_code,
+        )
         return {
             "status_code": response.status_code,
             "headers": {"content-type": response.headers.get("content-type", "")},

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import textwrap
 from typing import Any
@@ -13,14 +14,23 @@ import yaml
 from agent_bridge.capability_hub.models import ToolType
 from agent_bridge.core.domain import ValidationError
 
+logger = logging.getLogger(__name__)
+
 
 HTTP_METHODS = {"get", "head", "post", "put", "patch", "delete", "options", "trace"}
 
 
 def parse_openapi_operations(spec: dict[str, Any] | str) -> list[dict[str, Any]]:
+    """把 OpenAPI 文档解析成可编辑的 Agent Bridge 工具候选列表。
+
+    每个 operation 推断出一个默认 tool_type（仅 GET/HEAD 能被自动分类，
+    其余方法保持 unconfigured 等待管理员手动配置）。返回的候选随后由
+    ``CapabilityService.import_openapi_operations`` 持久化。
+    """
     document = _load_spec(spec)
     paths = document.get("paths")
     if not isinstance(paths, dict):
+        logger.warning("OpenAPI 解析失败：缺少 paths 字段")
         raise ValidationError("OpenAPI spec must contain paths")
 
     candidates: list[dict[str, Any]] = []
@@ -55,6 +65,7 @@ def parse_openapi_operations(spec: dict[str, Any] | str) -> list[dict[str, Any]]
                     "examples": [],
                 }
             )
+    logger.info("OpenAPI 解析完成 操作数=%d", len(candidates))
     return candidates
 
 
@@ -164,6 +175,13 @@ def _schema_from_response(response: Any) -> dict[str, Any]:
 
 
 def _default_tool_type(method: str, path: str) -> str:
+    """推断 operation 的默认 tool_type。
+
+    关键决策：只有 GET/HEAD 能被自动分类——若路径最后一段是 ``{var}``
+    形参则判为 detail（如 GET /users/{id}），否则判为 search（如 GET /users）。
+    其余写操作（POST/PUT/...）一律保持 ``unconfigured``，等管理员在 UI
+    里手动配置，避免误把副作用操作当成只读工具暴露给 agent。
+    """
     if method not in {"get", "head"}:
         return ToolType.unconfigured.value
     segments = [segment for segment in path.strip("/").split("/") if segment]

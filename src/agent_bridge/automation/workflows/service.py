@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, re
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import WorkflowArtifactFormat, WorkflowStatus
 from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
+
+logger = logging.getLogger(__name__)
 
 
 def _snippet(content: str, query: str | None, size: int = 220) -> str:
@@ -44,7 +47,7 @@ class WorkflowService:
             next_status = WorkflowStatus(status).value
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
-        return self.store.upsert_workflow_definition(
+        result = self.store.upsert_workflow_definition(
             workflow_key=workflow_key,
             name=name,
             description=description,
@@ -53,6 +56,14 @@ class WorkflowService:
             status=next_status,
             created_by=actor,
         )
+        logger.info(
+            "Workflow 定义已保存 workflow=%s profile=%s 状态=%s actor=%s",
+            workflow_key,
+            profile_key,
+            next_status,
+            actor,
+        )
+        return result
 
     def list_definitions(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
@@ -70,6 +81,7 @@ class WorkflowService:
         if self.store.get_workflow_definition(workflow_key) is None:
             raise NotFound("workflow not found")
         self.store.delete_workflow_definition(workflow_key)
+        logger.info("Workflow 定义已删除 workflow=%s actor=%s", workflow_key, actor)
         return {"workflow_key": workflow_key, "deleted": True}
 
     def clear_execution_data(self, actor: str, workflow_key: str) -> dict[str, Any]:
@@ -236,7 +248,7 @@ class WorkflowService:
             raise ValidationError("invalid artifact path")
         if artifact_format != WorkflowArtifactFormat.markdown.value:
             raise ValidationError("unsupported artifact format")
-        return self.store.upsert_workflow_artifact(
+        saved = self.store.upsert_workflow_artifact(
             workflow_key=workflow_key,
             profile_key=profile_key,
             run_id=run_id,
@@ -250,6 +262,14 @@ class WorkflowService:
             content=content,
             metadata=metadata,
         )
+        logger.info(
+            "workflow 产物已保存 run_id=%s path=%s workflow=%s task=%s",
+            run_id,
+            path,
+            workflow_key,
+            task_key,
+        )
+        return saved
 
     def ingest_parsed_result(
         self,

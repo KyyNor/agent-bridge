@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import signal
@@ -10,6 +11,8 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class CodeGraphClient:
@@ -28,7 +31,11 @@ class CodeGraphClient:
         self._active_processes_lock = threading.Lock()
 
     def is_available(self) -> bool:
-        """Check if codegraph CLI is installed and reachable."""
+        """Check if codegraph CLI is installed and reachable.
+
+        结果会缓存（首次探测后不再重复执行 ``--version``）。
+        不可用时调用方据此降级到 SQLite 文本索引模式。
+        """
         if self._available is not None:
             return self._available
         try:
@@ -39,6 +46,7 @@ class CodeGraphClient:
             self._available = result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             self._available = False
+        logger.info("codegraph CLI 探测 可用=%s", self._available)
         return self._available
 
     def init(self, project_dir: Path) -> None:
@@ -101,6 +109,7 @@ class CodeGraphClient:
         return data if isinstance(data, list) else []
 
     def _run(self, cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+        """执行一次 codegraph CLI 子进程（独立进程组，超时即终止整组）。"""
         command = [self.cli_path, *args]
         process = subprocess.Popen(
             command,
@@ -116,6 +125,10 @@ class CodeGraphClient:
             try:
                 stdout, stderr = process.communicate(timeout=self.command_timeout)
             except subprocess.TimeoutExpired as exc:
+                logger.warning(
+                    "codegraph 命令超时 args=%s 超时=%ss",
+                    " ".join(args), self.command_timeout,
+                )
                 self._terminate_process_group(process)
                 stdout, stderr = process.communicate()
                 raise subprocess.TimeoutExpired(
@@ -130,6 +143,7 @@ class CodeGraphClient:
         result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
         if result.returncode != 0:
             msg = result.stderr or result.stdout or f"codegraph {' '.join(args)} failed"
+            logger.error("codegraph 命令失败 args=%s rc=%s 原因=%s", " ".join(args), result.returncode, msg.strip())
             raise RuntimeError(msg.strip())
         return result
 

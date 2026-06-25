@@ -37,6 +37,7 @@ class UnderstandingScheduler(BaseCronScheduler):
         return {"running": True, "jobs": jobs, **base}
 
     def _refresh_jobs(self) -> None:
+        """按当前 cron 为每个 active 且开启 auto_understand 的仓库注册分析 job。"""
         if not self._scheduler:
             return
         self._scheduler.remove_all_jobs()
@@ -55,7 +56,9 @@ class UnderstandingScheduler(BaseCronScheduler):
             logger.debug("已调度 Understand 分析 %s cron: %s", repo["repo_key"], self._current_cron)
 
     def _run_understand(self, repo_key: str) -> None:
+        """cron tick 触发的单仓库 Understand 分析任务（成功/失败各记一条）。"""
         admin = next(iter(self._admins), "root")
+        logger.info("Understand tick 分析开始 repo=%s", repo_key)
         self._current_run = self._runs[repo_key] = {
             "status": "running",
             "started_at": now_iso(),
