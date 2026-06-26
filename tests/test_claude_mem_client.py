@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from agent_bridge.memory_management.claude_mem.client import ClaudeMemClient
+from agent_bridge.knowledge_management.memory.claude_mem.client import ClaudeMemClient
 
 
 def _response(url: str, payload: dict) -> httpx.Response:

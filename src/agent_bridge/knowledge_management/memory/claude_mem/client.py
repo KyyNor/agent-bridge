@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from agent_bridge.memory_management.models import normalized_search_item, normalized_timeline_item
+from agent_bridge.knowledge_management.memory.models import normalized_search_item, normalized_timeline_item
 
 
 logger = logging.getLogger(__name__)

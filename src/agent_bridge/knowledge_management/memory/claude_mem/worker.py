@@ -13,9 +13,9 @@ from typing import Any
 
 import httpx
 
-from agent_bridge.memory_management.claude_mem.config import ClaudeMemConfigManager
-from agent_bridge.memory_management.claude_mem.client import ClaudeMemClient
-from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
+from agent_bridge.knowledge_management.memory.claude_mem.config import ClaudeMemConfigManager
+from agent_bridge.knowledge_management.memory.claude_mem.client import ClaudeMemClient
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 from agent_bridge.plugin_runtime import GitPluginRuntime
 
 

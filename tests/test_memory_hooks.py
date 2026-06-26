@@ -6,8 +6,8 @@ import signal
 import subprocess
 
 from agent_bridge.app.service import AgentBridgeService
-from agent_bridge.memory_management.claude_mem.worker import ClaudeMemWorkerService
-from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
+from agent_bridge.knowledge_management.memory.claude_mem.worker import ClaudeMemWorkerService
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
 class FakeWorkerService:

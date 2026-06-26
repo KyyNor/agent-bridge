@@ -6,9 +6,9 @@ from typing import Any
 
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.core.slug import make_slug
-from agent_bridge.memory_management.claude_mem.worker import ClaudeMemWorkerService
-from agent_bridge.memory_management.hooks import MemoryHookService
-from agent_bridge.memory_management.models import ACTIVE_MEMORY_STATUSES
+from agent_bridge.knowledge_management.memory.claude_mem.worker import ClaudeMemWorkerService
+from agent_bridge.knowledge_management.memory.hooks import MemoryHookService
+from agent_bridge.knowledge_management.memory.models import ACTIVE_MEMORY_STATUSES
 from agent_bridge.storage.sqlite import SQLiteStore
 
 

@@ -6,8 +6,8 @@ import subprocess
 from fastapi.testclient import TestClient
 
 from agent_bridge.api.app import create_app
-from agent_bridge.memory_management.claude_mem.config import ClaudeMemConfigManager
-from agent_bridge.memory_management.claude_mem.worker import ClaudeMemWorkerService
+from agent_bridge.knowledge_management.memory.claude_mem.config import ClaudeMemConfigManager
+from agent_bridge.knowledge_management.memory.claude_mem.worker import ClaudeMemWorkerService
 
 
 def test_claude_mem_config_bootstraps_shared_env_from_claude_settings(wm_paths, tmp_path):

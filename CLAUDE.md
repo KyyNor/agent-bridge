@@ -84,6 +84,8 @@ npm run typecheck
 
 **代码知识（`code_knowledge/`，CodeGraph）**：镜像 git 仓库 → 索引成符号/文件图（`codegraph` CLI 可用时走 CLI，否则降级为内置文本索引器写进 SQLite）→ 可选地用 Understand-Anything 做知识图谱分析。**所有查询接口都有「优先 CLI/MCP、否则 SQLite 降级」的双模式**。`UnderstandAnythingClient.analyze` 不跑 CLI，而是把整个 agent 循环委托给 `AgentService.run(skills=["understand"])`，期望 agent 写出 `.understand-anything/knowledge-graph.json`。`DashboardPool` 是一个 LRU+空闲超时的 Vite dev-server 进程池，用来托管 UA dashboard。
 
+**记忆（`memory/`，Memory）**：与文档/代码知识平级的第三类知识来源，但写入与生命周期不同——观察在会话中由 Claude Code hook（`hooks.py`，走 `SessionStart` 等）实时写入，而非 cron 批量同步。`MemoryService` 负责 memory block CRUD、profile↔block 绑定与检索（search/timeline/get）；实际读写委托给 `claude_mem/worker.py` 托管的 claude-mem worker（**LRU+空闲超时的进程池**，自带 dashboard）。block 元数据与绑定在 SQLite，观察数据在 claude-mem 侧。注意 memory **不继承 `BaseCronScheduler`**——它的插件更新 cron（`claude_mem_plugin_update_cron`）走独立的 `PluginUpdateScheduler`（`system_config/`），worker 启停是按需拉起的进程池生命周期，不是 cron 类调度。
+
 ### 工作流（`automation/workflows/`）
 
 定时任务队列驱动：每个 workflow run 启动一个 Claude agent 执行一份 **JS manifest（`workflow.js`）**，agent 通过 MCP 辅助工具（`workflow_get_task` 等，全部经 `invoke_logged_tool` 审计）领任务、回写进度，最终产出受版本管理的 markdown 产物（artifact）。

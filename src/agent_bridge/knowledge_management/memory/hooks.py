@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
 logger = logging.getLogger(__name__)

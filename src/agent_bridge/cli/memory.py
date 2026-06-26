@@ -11,7 +11,7 @@ import typer
 
 from agent_bridge.client import AgentBridgeClient
 from agent_bridge.core.config import default_user
-from agent_bridge.memory_management.models import NOOP_HOOK_STDOUT
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
 memory_app = typer.Typer(help="管理记忆与 Claude Code hook 代理", no_args_is_help=True)

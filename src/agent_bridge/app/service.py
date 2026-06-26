@@ -34,7 +34,7 @@ from agent_bridge.core.domain import (
 from agent_bridge.knowledge_management.docs_knowledge.backends.mock import MockBackend
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry, create_registry_from_db
 from agent_bridge.knowledge_management.docs_knowledge.backends.weknora import WeknoraBackend
-from agent_bridge.memory_management.service import MemoryService
+from agent_bridge.knowledge_management.memory.service import MemoryService
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore

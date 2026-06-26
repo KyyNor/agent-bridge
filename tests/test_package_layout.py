@@ -6,6 +6,7 @@ def test_page_aligned_package_layout_imports() -> None:
     from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
     from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphService
     from agent_bridge.knowledge_management.docs_knowledge.backends.mock import MockBackend
+    from agent_bridge.knowledge_management.memory.service import MemoryService
     from agent_bridge.system_config.scripts.service import ScriptService
     from agent_bridge.system_config.skills.service import SkillService
 
@@ -16,5 +17,6 @@ def test_page_aligned_package_layout_imports() -> None:
     assert McpHttpClient is not None
     assert CodeGraphService is not None
     assert MockBackend is not None
+    assert MemoryService is not None
     assert ScriptService is not None
     assert SkillService is not None
