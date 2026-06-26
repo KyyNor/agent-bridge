@@ -35,7 +35,7 @@ UA_SKILLS = [
 ]
 
 ANALYZE_PROMPT = """\
-Use the Understand Anything skill to analyze this repository: {project_dir}
+Analyze this repository using the loaded `understand` skill: {project_dir}
 
 Requirements:
 - Generate .understand-anything/knowledge-graph.json
@@ -46,8 +46,8 @@ Requirements:
 """
 
 UA_SYSTEM_PROMPT = """\
-You are running an Agent Bridge Understand Anything analysis.
-Use the configured Understand Anything skill.
+You are running an Agent Bridge knowledge-graph analysis.
+The `understand` skill is already loaded — invoke it directly by that exact name (do not look for a skill named "understand-anything").
 Do not modify repository source code.
 """
 
