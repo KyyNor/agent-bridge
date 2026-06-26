@@ -181,6 +181,53 @@ class AgentBridgeService:
                         self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
         return kb
 
+    def delete_kb(self, actor: str, kb_slug: str) -> dict[str, Any]:
+        """硬删除一个知识库。
+
+        前置校验：该 KB 下不得仍有活动文档（用户须先逐个删除文档）。
+        副作用清理：通知各检索后端删除远端 KB（容错）、清理能力平面里引用该
+        KB 的 resource 规则（无外键，需手动删）。最后删除 KB 行，依赖外键
+        ON DELETE CASCADE 清除 members / document_kbs / backend_targets /
+        sync_jobs / sync_states。
+        """
+        require_admin_user(actor, self.admins)
+        kb = self.store.get_kb_by_slug(kb_slug)
+        if kb is None:
+            raise NotFound(f"knowledge base '{kb_slug}' not found")
+        kb_id = kb["id"]
+
+        active_docs = self.store.list_docs_for_kb(kb_id)
+        if active_docs:
+            raise ValidationError(
+                f"请先删除该知识库下的所有文档（仍有 {len(active_docs)} 篇）"
+            )
+
+        # 远端检索后端清理：逐个通知后端删除其上镜像的 KB（容错，失败不阻断删除）
+        if self.registry:
+            for target in self.store.list_backend_targets(kb_id):
+                backend_kb_id = target.get("backend_kb_id")
+                if not backend_kb_id:
+                    continue
+                adapter = self.registry.get(target["slug"])
+                if adapter is None:
+                    continue
+                try:
+                    adapter.delete_kb(backend_kb_id)
+                except Exception:
+                    logger.warning(
+                        "删除知识库 %s 时清理远端后端 %s 失败，已忽略", kb_slug, target["slug"],
+                        exc_info=True,
+                    )
+
+        # 治理软关联清理（无外键）：移除能力平面里引用该 KB 的 resource 规则
+        self.store.delete_resource_rules_by_key(
+            resource_type=ProfileResourceType.wiki_kb.value, resource_key=kb_slug
+        )
+
+        self.store.delete_kb(kb_id)
+        logger.info("已删除文档知识库 %s", kb_slug)
+        return {"slug": kb_slug, "deleted": True}
+
     def grant_kb_member(self, actor: str, kb_slug: str, linux_user: str, role: Any) -> dict[str, str]:
         raise ValidationError("knowledge base member roles are no longer supported; use capability profiles")
 

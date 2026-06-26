@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Database, Maximize2, Minimize2, Plus, RefreshCw, Search } from 'lucide-vue-next'
+import { ArrowLeft, Database, Maximize2, Minimize2, Plus, RefreshCw, Search, Trash2 } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { MemoryBlock, MemoryDashboardStatus, MemorySearchResult, MemoryTimelineResult } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -82,6 +82,16 @@ async function loadBlocks() {
   }
   await loadHealth()
   await loadDashboardStatus()
+}
+
+async function deleteBlock(block: MemoryBlock) {
+  if (!confirm(`确定删除记忆区块「${block.name}」？将停止 worker 进程并清除该区块的全部记忆数据，且不可恢复。`)) return
+  try {
+    await api.deleteMemoryBlock(block.block_key)
+    await loadBlocks()
+  } catch (e: unknown) {
+    alert(errorMessage(e))
+  }
 }
 
 async function createBlock() {
@@ -285,7 +295,13 @@ function errorMessage(e: unknown) {
               </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ block.bound_profile_count || 0 }}</td>
               <td class="px-4 py-3">
-                <Button variant="outline" size="sm" class="h-8 text-xs" @click="openDetail(block)">详情</Button>
+                <div class="flex gap-2">
+                  <Button variant="outline" size="sm" class="h-8 text-xs" @click="openDetail(block)">详情</Button>
+                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteBlock(block)">
+                    <Trash2 :size="14" />
+                    删除
+                  </Button>
+                </div>
               </td>
             </tr>
           </tbody>

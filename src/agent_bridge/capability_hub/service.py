@@ -406,6 +406,33 @@ class CapabilityService:
             raise NotFound("tool not found")
         self.store.delete_openapi_tool(service_key, tool_name)
 
+    def delete_mcp_service(self, actor: str, service_key: str) -> None:
+        """硬删除一个 MCP 服务，并清理能力平面里的软关联规则。
+
+        删除顺序：先校验权限与存在性，再清理治理软关联（source/pin 规则无外键），
+        最后删除服务行 —— mcp_tools 由外键 ON DELETE CASCADE 自动清除。
+        """
+        require_admin_user(actor, self.admins)
+        if self.store.get_mcp_service(service_key) is None:
+            raise NotFound("service not found")
+        self._purge_service_governance_rules(SourceType.mcp_service.value, service_key)
+        self.store.delete_mcp_service(service_key)
+        logger.info("已删除 MCP 能力服务 %s", service_key)
+
+    def delete_openapi_service(self, actor: str, service_key: str) -> None:
+        """硬删除一个 OpenAPI 服务，并清理能力平面里的软关联规则。"""
+        require_admin_user(actor, self.admins)
+        if self.store.get_openapi_service(service_key) is None:
+            raise NotFound("service not found")
+        self._purge_service_governance_rules(SourceType.openapi_service.value, service_key)
+        self.store.delete_openapi_service(service_key)
+        logger.info("已删除 OpenAPI 能力服务 %s", service_key)
+
+    def _purge_service_governance_rules(self, source_type: str, service_key: str) -> None:
+        """清理某个能力来源在所有能力平面上的软关联规则（无外键，需手动删）。"""
+        self.store.delete_source_rules_by_key(source_type=source_type, source_key=service_key)
+        self.store.delete_pin_rules_by_service(service_key=service_key)
+
     def list_services(self, actor: str) -> list[dict[str, Any]]:
         return [self._service_payload(service, redact_headers=True) for service in self.store.list_mcp_services()]
 

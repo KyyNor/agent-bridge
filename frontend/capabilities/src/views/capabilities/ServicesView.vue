@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, Globe2, PlugZap, Plus, RotateCw, Save, Search } from 'lucide-vue-next'
+import { ArrowLeft, Globe2, PlugZap, Plus, RotateCw, Save, Search, Trash2 } from 'lucide-vue-next'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
@@ -211,6 +211,17 @@ async function toggleStatus(svc: CapabilityServiceSource) {
   if (svc.source_type === 'openapi_service') await api.updateOpenApiServiceStatus(svc.service_key, newStatus)
   else await api.updateServiceStatus(svc.service_key, newStatus)
   await loadServices()
+}
+
+async function deleteService(svc: CapabilityServiceSource) {
+  if (!confirm(`确定删除能力服务「${svc.service_key}」？其下所有工具及能力平面相关规则将一并清除，且不可恢复。`)) return
+  try {
+    if (svc.source_type === 'openapi_service') await api.deleteOpenApiService(svc.service_key)
+    else await api.deleteMcpService(svc.service_key)
+    await loadServices()
+  } catch (e: any) {
+    alert(e.message || '删除失败')
+  }
 }
 
 async function syncMcpTools(key: string) {
@@ -465,6 +476,10 @@ const toolTypeOptions = [
                   <Button variant="ghost" size="sm" @click="openEdit(s)" class="h-8 text-xs">编辑</Button>
                   <Button variant="ghost" size="sm" @click="toggleStatus(s)" class="h-8 text-xs">
                     {{ s.status === 'enabled' ? '停用' : '启用' }}
+                  </Button>
+                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteService(s)">
+                    <Trash2 :size="14" />
+                    删除
                   </Button>
                 </div>
               </td>

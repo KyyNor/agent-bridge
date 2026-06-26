@@ -106,6 +106,39 @@ class CodeGraphService:
         require_admin_user(actor, self.admins)
         return [self._repository_payload(repo) for repo in self.store.list_code_repositories()]
 
+    def delete_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
+        """硬删除一个代码仓库，并清理其副作用数据。
+
+        清理顺序：停止 Understand Anything 进程（容错）→ 删除本地镜像目录 →
+        清理能力平面里引用该仓库的 resource 规则（无外键，需手动删）→ 删除仓库
+        行，依赖外键 ON DELETE CASCADE 清除 sync_runs / index_items。
+        """
+        from agent_bridge.capability_hub.models import ProfileResourceType
+
+        require_admin_user(actor, self.admins)
+        repo = self.store.get_code_repository(repo_key)
+        if repo is None:
+            raise NotFound("repository not found")
+        local_path = self._local_path(repo_key)
+
+        # 停止可能正在运行的 Understand Anything 进程（容错，失败不阻断删除）
+        try:
+            self.ua_client.stop_dashboard(local_path)
+        except Exception:
+            logger.warning("删除代码仓库 %s 时停止 UA 进程失败，已忽略", repo_key, exc_info=True)
+
+        # 删除本地镜像目录（容错，目录可能不存在）
+        shutil.rmtree(local_path, ignore_errors=True)
+
+        # 治理软关联清理（无外键）：移除能力平面里引用该仓库的 resource 规则
+        self.store.delete_resource_rules_by_key(
+            resource_type=ProfileResourceType.code_repo.value, resource_key=repo_key
+        )
+
+        self.store.delete_code_repository(repo_key)
+        logger.info("已删除代码知识库 %s", repo_key)
+        return {"repo_key": repo_key, "deleted": True}
+
     def get_status(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         available = self.client.is_available()

@@ -51,6 +51,10 @@ def create_builtin_routes(service, actor):
     def sync_code_repository(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.codegraph.sync_repository(current_actor, repo_key)
 
+    @router.post("/code-repo/repositories/{repo_key}/delete")
+    def delete_code_repository(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.codegraph.delete_repository(current_actor, repo_key)
+
     @router.get("/code-repo/repositories/{repo_key}/overview")
     def get_repo_overview(repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.codegraph.repository_overview(current_actor, repo_key)

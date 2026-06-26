@@ -617,6 +617,16 @@ class KnowledgeRepository:
             cursor = conn.execute("DELETE FROM backends WHERE slug = ?", (slug,))
             return cursor.rowcount > 0
 
+    def delete_kb(self, kb_id: int) -> None:
+        """硬删除一个知识库。
+
+        依赖外键 ON DELETE CASCADE 清除 knowledge_base_members / document_kbs /
+        backend_targets / sync_jobs / sync_states。删除前应由 service 层保证该 KB
+        下已无活动文档，并已通知各检索后端清理远端 KB。
+        """
+        with self._connect() as conn:
+            conn.execute("DELETE FROM knowledge_bases WHERE id = ?", (kb_id,))
+
     def update_kb_defaults(self, kb_id: int, default_backend_slug: str | None, default_agent_id: str | None) -> None:
         with self._connect() as conn:
             conn.execute(

@@ -125,6 +125,7 @@ export const api = {
   listTools: (key: string) => get<McpTool[]>(`/capabilities/mcp-services/${key}/tools`),
   updateToolType: (serviceKey: string, toolName: string, toolType: string) =>
     put(`/capabilities/mcp-services/${serviceKey}/tools/${toolName}/type`, { tool_type: toolType }),
+  deleteMcpService: (key: string) => post<{ ok: boolean }>(`/capabilities/mcp-services/${key}/delete`),
   executeCapability: (
     payload: ExecuteCapabilityPayload,
     runtimeHeaders?: {
@@ -154,6 +155,7 @@ export const api = {
     put(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}/type`, { tool_type: toolType }),
   deleteOpenApiTool: (serviceKey: string, toolName: string) =>
     del<{ ok: boolean }>(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}`),
+  deleteOpenApiService: (key: string) => post<{ ok: boolean }>(`/capabilities/openapi-services/${key}/delete`),
 
   // Profiles
   listProfiles: () => get<ProjectProfile[]>('/capability-profiles'),
@@ -184,6 +186,7 @@ export const api = {
   listMemoryBlocks: () => get<MemoryBlock[]>('/memory/blocks'),
   createMemoryBlock: (block: { block_key: string; name: string; description?: string }) =>
     post<MemoryBlock>('/memory/blocks', block),
+  deleteMemoryBlock: (blockKey: string) => post<{ deleted: boolean }>(`/memory/blocks/${blockKey}/delete`),
   getMemoryBlockHealth: (blockKey: string) =>
     get<Record<string, unknown>>(`/memory/blocks/${blockKey}/health`),
   getMemoryDashboardStatus: (blockKey: string) =>
@@ -322,6 +325,7 @@ export const api = {
   testClone: (gitUrl: string, authRef: string) =>
     post<TestCloneResult>('/code-repo/test-clone', { git_url: gitUrl, auth_ref: authRef }),
   syncCodeRepo: (key: string) => post(`/code-repo/repositories/${key}/sync`),
+  deleteCodeRepo: (key: string) => post<{ deleted: boolean }>(`/code-repo/repositories/${key}/delete`),
   listWikiKbs: () => get<KnowledgeBaseSummary[]>('/builtin/wiki/kbs'),
 
   // CodeGraph detail
@@ -404,6 +408,7 @@ export const api = {
     post<KnowledgeBase>('/kbs', data),
   updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null }) =>
     put<{ ok: boolean }>(`/kbs/${kbSlug}/defaults`, data),
+  deleteKnowledgeBase: (kbSlug: string) => post<{ deleted: boolean }>(`/kbs/${kbSlug}/delete`),
 
   // Documents
   listDocs: (kb: string, backend?: string) => {

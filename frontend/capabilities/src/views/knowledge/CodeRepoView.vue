@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, Plus, RotateCw, Maximize2, Minimize2, Loader2 } from 'lucide-vue-next'
+import { Search, Plus, RotateCw, Maximize2, Minimize2, Loader2, Trash2 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'
@@ -195,6 +195,16 @@ async function syncRepo(key: string) {
     await loadRepos()
   } catch { /* ignore */ }
   syncingKey.value = ''
+}
+
+async function deleteRepo(r: CodeRepository) {
+  if (!confirm(`确定删除代码知识库「${r.name}」？将清除本地代码镜像、索引与知识图谱产物，且不可恢复。`)) return
+  try {
+    await api.deleteCodeRepo(r.repo_key)
+    await loadRepos()
+  } catch (e: any) {
+    alert(e.message || '删除失败')
+  }
 }
 
 async function openDetail(r: CodeRepository) {
@@ -506,6 +516,10 @@ watch(showDetail, (open) => {
                   <Button variant="outline" size="sm" @click="openRepoForm('edit', r)" class="h-8 text-xs">编辑</Button>
                   <Button variant="outline" size="sm" @click="openDetail(r)" class="h-8 text-xs">详情</Button>
                   <Button variant="outline" size="sm" @click="openPlaneDialog(r)" class="h-8 text-xs">能力平面</Button>
+                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteRepo(r)">
+                    <Trash2 :size="14" />
+                    删除
+                  </Button>
                 </div>
               </td>
             </tr>

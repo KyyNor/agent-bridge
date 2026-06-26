@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,32 @@ class MemoryService:
         if self.store.memory.get_memory_block(block_key) is None:
             raise NotFound("memory block not found")
         return self.store.memory.set_memory_block_status(block_key, status)
+
+    def delete_block(self, actor: str, block_key: str) -> dict[str, Any]:
+        """硬删除一个记忆区块，并清理其副作用数据。
+
+        清理顺序：停止 claude-mem worker 进程（容错）→ 删除记忆数据目录 → 删除
+        区块行。``profile_memory_bindings.block_key`` 是外键 ON DELETE SET NULL，
+        删除后绑定行保留但 block_key 置空（``resolve_profile_block`` 会安全返回
+        not_configured）。
+        """
+        require_admin_user(actor, self.admins)
+        block = self.store.memory.get_memory_block(block_key)
+        if block is None:
+            raise NotFound("memory block not found")
+
+        # 停止可能正在运行的 claude-mem worker 进程（容错，失败不阻断删除）
+        try:
+            self.worker_service.stop_dashboard(block)
+        except Exception:
+            logger.warning("删除记忆区块 %s 时停止 worker 失败，已忽略", block_key, exc_info=True)
+
+        # 删除记忆数据目录（含全部观察数据，容错，目录可能不存在）
+        shutil.rmtree(self._default_data_dir(block_key), ignore_errors=True)
+
+        self.store.memory.delete_memory_block(block_key)
+        logger.info("已删除记忆区块 %s", block_key)
+        return {"block_key": block_key, "deleted": True}
 
     def get_profile_binding(self, actor: str, profile_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

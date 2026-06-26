@@ -71,6 +71,10 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
     def list_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.list_kbs(current_actor)
 
+    @router.post("/kbs/{kb_slug}/delete")
+    def delete_kb(kb_slug: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.delete_kb(current_actor, kb_slug)
+
     @router.post("/docs")
     def add_document(
         current_actor: str = Depends(actor),

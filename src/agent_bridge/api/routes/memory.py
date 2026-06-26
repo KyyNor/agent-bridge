@@ -57,6 +57,10 @@ def create_memory_routes(service, actor):
     ) -> dict[str, Any]:
         return _memory_block_payload(service.memory.set_block_status(current_actor, block_key, payload.status))
 
+    @router.post("/memory/blocks/{block_key}/delete")
+    def delete_memory_block(block_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.memory.delete_block(current_actor, block_key)
+
     @router.get("/memory/blocks/{block_key}/health")
     def get_memory_block_health(block_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.memory.block_health(current_actor, block_key)

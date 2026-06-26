@@ -332,6 +332,16 @@ class CodeGraphRepository:
             conn.execute("UPDATE code_repositories SET category_key = '' WHERE category_key = ?", (category_key,))
             conn.execute("DELETE FROM code_repo_categories WHERE category_key = ?", (category_key,))
 
+    def delete_repository(self, repo_key: str) -> None:
+        """硬删除一个代码仓库。
+
+        依赖外键 ON DELETE CASCADE 清除 codegraph_sync_runs / codegraph_index_items。
+        删除前应由 service 层清理本地镜像目录、停止 Understand Anything 进程，
+        并清理能力平面里引用该仓库的 resource 规则（无外键，需手动删）。
+        """
+        with self._connect() as conn:
+            conn.execute("DELETE FROM code_repositories WHERE repo_key = ?", (repo_key,))
+
     # -- Sync Config --
 
     def get_sync_config(self) -> dict[str, Any]:

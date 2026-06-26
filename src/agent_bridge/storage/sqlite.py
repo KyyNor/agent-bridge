@@ -521,6 +521,9 @@ class SQLiteStore:
     def delete_category(self, category_key: str) -> None:
         return self.codegraph.delete_category(category_key=category_key)
 
+    def delete_code_repository(self, repo_key: str) -> None:
+        return self.codegraph.delete_repository(repo_key=repo_key)
+
     # -- Sync Config --
 
     def get_sync_config(self) -> dict[str, Any]:
@@ -967,6 +970,12 @@ class SQLiteStore:
     def delete_openapi_tool(self, service_key: str, tool_name: str) -> None:
         return self.capabilities.delete_openapi_tool(service_key=service_key, tool_name=tool_name)
 
+    def delete_mcp_service(self, service_key: str) -> None:
+        return self.capabilities.delete_mcp_service(service_key=service_key)
+
+    def delete_openapi_service(self, service_key: str) -> None:
+        return self.capabilities.delete_openapi_service(service_key=service_key)
+
     def upsert_project_profile(
         self,
         *,
@@ -1001,6 +1010,15 @@ class SQLiteStore:
 
     def list_profile_pin_rules(self, profile_key: str) -> list[dict[str, Any]]:
         return self.governance.list_profile_pin_rules(profile_key=profile_key)
+
+    def delete_source_rules_by_key(self, source_type: str, source_key: str) -> None:
+        return self.governance.delete_source_rules_by_key(source_type=source_type, source_key=source_key)
+
+    def delete_pin_rules_by_service(self, service_key: str) -> None:
+        return self.governance.delete_pin_rules_by_service(service_key=service_key)
+
+    def delete_resource_rules_by_key(self, resource_type: str, resource_key: str) -> None:
+        return self.governance.delete_resource_rules_by_key(resource_type=resource_type, resource_key=resource_key)
 
     def upsert_profile_pin_settings(
         self,
@@ -1162,6 +1180,9 @@ class SQLiteStore:
 
     def delete_backend(self, slug: str) -> bool:
         return self.knowledge.delete_backend(slug=slug)
+
+    def delete_kb(self, kb_id: int) -> None:
+        return self.knowledge.delete_kb(kb_id=kb_id)
 
     def list_sync_states_for_doc(self, doc_id: int) -> list[dict[str, Any]]:
         return self.knowledge.list_sync_states_for_doc(doc_id=doc_id)

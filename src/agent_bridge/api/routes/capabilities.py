@@ -44,6 +44,11 @@ def create_capability_routes(service, actor, catalog_sources):
     def update_mcp_tool_type(service_key: str, tool_name: str, payload: UpdateMcpToolTypeRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.capabilities.set_tool_type(current_actor, service_key, tool_name, payload.tool_type)
 
+    @router.post("/capabilities/mcp-services/{service_key}/delete")
+    def delete_mcp_service(service_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        service.capabilities.delete_mcp_service(current_actor, service_key)
+        return {"ok": True}
+
     @router.post("/capabilities/openapi-services")
     def register_openapi_service(payload: RegisterOpenApiServiceRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.capabilities.register_openapi_service(
@@ -88,6 +93,11 @@ def create_capability_routes(service, actor, catalog_sources):
     @router.delete("/capabilities/openapi-services/{service_key}/tools/{tool_name}")
     def delete_openapi_tool(service_key: str, tool_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         service.capabilities.delete_openapi_tool(current_actor, service_key, tool_name)
+        return {"ok": True}
+
+    @router.post("/capabilities/openapi-services/{service_key}/delete")
+    def delete_openapi_service(service_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        service.capabilities.delete_openapi_service(current_actor, service_key)
         return {"ok": True}
 
     @router.post("/capabilities/execute")

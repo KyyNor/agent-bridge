@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, RotateCw, Upload, File, Folder } from 'lucide-vue-next'
+import { Plus, RotateCw, Upload, File, Folder, Trash2 } from 'lucide-vue-next'
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api/client'
 import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent } from '../../api/types'
@@ -87,6 +87,16 @@ onMounted(async () => {
 
 async function loadKbs() {
   try { kbs.value = await api.listWikiKbs() } catch { kbs.value = [] }
+}
+
+async function deleteKb(kb: KnowledgeBaseSummary) {
+  if (!confirm(`确定删除文档知识库「${kb.name}」？若其下仍有文档将被拒绝，请先清空文档。`)) return
+  try {
+    await api.deleteKnowledgeBase(kb.slug)
+    await loadKbs()
+  } catch (e: any) {
+    alert(e.message || '删除失败')
+  }
 }
 
 async function loadBackends() {
@@ -456,6 +466,10 @@ async function savePlaneProfiles() {
                   </Button>
                   <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
                   <Button variant="outline" size="sm" @click="openPlaneDialog(k)" class="h-8 text-xs">能力平面</Button>
+                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteKb(k)">
+                    <Trash2 :size="12" />
+                    删除
+                  </Button>
                 </div>
               </td>
             </tr>

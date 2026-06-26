@@ -224,6 +224,30 @@ class GovernanceRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def delete_source_rules_by_key(self, source_type: str, source_key: str) -> None:
+        """删除某个能力来源的全部 source 规则（删 mcp/openapi service 时清理软关联）。"""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM profile_source_rules WHERE source_type = ? AND source_key = ?",
+                (source_type, source_key),
+            )
+
+    def delete_pin_rules_by_service(self, service_key: str) -> None:
+        """删除某个能力来源的全部 pin 规则（删 mcp/openapi service 时清理软关联）。"""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM profile_pin_rules WHERE service_key = ?",
+                (service_key,),
+            )
+
+    def delete_resource_rules_by_key(self, resource_type: str, resource_key: str) -> None:
+        """删除某个资源的全部 resource 规则（删 wiki_kb/code_repo 时清理软关联）。"""
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM profile_resource_rules WHERE resource_type = ? AND resource_key = ?",
+                (resource_type, resource_key),
+            )
+
     def upsert_profile_pin_settings(
         self,
         *,

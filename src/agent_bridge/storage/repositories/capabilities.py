@@ -511,3 +511,13 @@ class CapabilitiesRepository:
                 """,
                 (service_key, tool_name),
             )
+
+    def delete_mcp_service(self, service_key: str) -> None:
+        """硬删除一个 MCP 服务；mcp_tools 经外键 ON DELETE CASCADE 自动清除。"""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM mcp_services WHERE service_key = ?", (service_key,))
+
+    def delete_openapi_service(self, service_key: str) -> None:
+        """硬删除一个 OpenAPI 服务；openapi_tools 经外键 ON DELETE CASCADE 自动清除。"""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM openapi_services WHERE service_key = ?", (service_key,))
