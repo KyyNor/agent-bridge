@@ -84,6 +84,11 @@ class LoggingConfig:
     retention_days: int = 90  # 分卷保留天数
     retention_max_bytes: int = 5 * 1024 ** 3  # 5 GiB；分卷累计容量上限
     compression: str = "zip"  # 旧分卷压缩格式
+    # uvicorn 访问日志：all（每条请求）/ errors_only（仅 4xx5xx，默认）/ off（全关）
+    access_log: str = "errors_only"
+    # httpx 每请求转发日志级别；默认 WARNING 以屏蔽 dashboard 代理等「纯转发 200」噪音，
+    # 仍保留超时 / 连接失败等告警
+    httpx_log_level: str = "WARNING"
 
     @property
     def rotation(self) -> str:
@@ -131,7 +136,9 @@ def load_server_config(paths: AgentBridgePaths) -> ServerConfig:
             f"# rotation_size_mb = 100           # 单分卷大小上限，超过即轮转\n"
             f"# retention_days = 90              # 分卷保留天数\n"
             f"# retention_max_bytes = \"5 GiB\"    # 分卷累计容量上限（KB/MB/GB/KiB/MiB/GiB）\n"
-            f"# compression = \"zip\"              # 旧分卷压缩格式\n",
+            f"# compression = \"zip\"              # 旧分卷压缩格式\n"
+            f"# access_log = \"errors_only\"       # uvicorn 访问日志：all/errors_only(仅4xx5xx)/off\n"
+            f"# httpx_log_level = \"WARNING\"      # httpx 转发日志级别（WARNING 屏蔽纯转发 200 噪音）\n",
             encoding="utf-8",
         )
     raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
@@ -189,6 +196,8 @@ def load_logging_config(paths: AgentBridgePaths) -> LoggingConfig:
         retention_days=int(section.get("retention_days", 90)),
         retention_max_bytes=parse_size(section.get("retention_max_bytes", "5 GiB")),
         compression=str(section.get("compression", "zip")),
+        access_log=str(section.get("access_log", "errors_only")),
+        httpx_log_level=str(section.get("httpx_log_level", "WARNING")),
     )
 
 

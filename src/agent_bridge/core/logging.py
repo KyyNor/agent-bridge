@@ -24,6 +24,7 @@ from __future__ import annotations
 import inspect
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -69,6 +70,22 @@ class InterceptHandler(logging.Handler):
             depth += 1
 
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+
+class _AccessLogNonSuccessFilter(logging.Filter):
+    """``uvicorn.access`` 过滤器：丢弃 2xx/3xx 成功访问行，仅保留 4xx/5xx。
+
+    uvicorn 访问行把状态码作为行尾数字（如 ``... HTTP/1.1" 304``）；匹配不到状态码
+    的行一律保留，避免误删自定义格式。
+    """
+
+    _STATUS_TAIL = re.compile(r"(\d{3})\s*$")
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401 - logging 钩子
+        m = self._STATUS_TAIL.search(record.getMessage().strip())
+        if m and int(m.group(1)) < 400:
+            return False  # 2xx/3xx 成功转发 → 丢弃
+        return True
 
 
 def _make_retention(max_age_days: int, max_total_bytes: int) -> Callable[[Iterable[Path]], list[Path]]:
@@ -137,12 +154,29 @@ def _configure(paths: AgentBridgePaths, cfg: LoggingConfig) -> None:
     root.setLevel(0)  # 放行所有级别，由 loguru sink 做最终过滤
     if not any(isinstance(h, InterceptHandler) for h in root.handlers):
         root.addHandler(InterceptHandler())
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    for name in ("uvicorn", "uvicorn.error"):
         uv = logging.getLogger(name)
         if not any(isinstance(h, InterceptHandler) for h in uv.handlers):
             uv.handlers = [InterceptHandler()]  # 移除默认 StreamHandler，避免直写 stderr 绕过 loguru
         uv.propagate = False
         uv.setLevel(0)
+    # uvicorn.access 按配置过滤：all / errors_only（仅 4xx5xx）/ off
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(h, InterceptHandler) for h in access.handlers):
+        access.handlers = [InterceptHandler()]
+    access.propagate = False
+    # 先摘除既有的成功请求过滤器（幂等：支持重复 setup_logging 切换模式）
+    for flt in [f for f in access.filters if isinstance(f, _AccessLogNonSuccessFilter)]:
+        access.removeFilter(flt)
+    if cfg.access_log == "off":
+        # uvicorn.access 仅在 INFO 打访问行；提到 WARNING 即整体静默
+        access.setLevel(logging.WARNING)
+    else:
+        access.setLevel(0)
+        if cfg.access_log == "errors_only":
+            access.addFilter(_AccessLogNonSuccessFilter())
+    # httpx 每请求转发日志按配置级别；默认 WARNING 屏蔽「纯转发 200」噪音，保留超时等告警
+    logging.getLogger("httpx").setLevel(cfg.httpx_log_level)
 
 
 def setup_logging(paths: AgentBridgePaths, *, config: LoggingConfig | None = None) -> None:

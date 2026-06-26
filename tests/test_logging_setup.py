@@ -16,7 +16,12 @@ from agent_bridge.core.config import (
     load_logging_config,
     parse_size,
 )
-from agent_bridge.core.logging import InterceptHandler, _make_retention, setup_logging
+from agent_bridge.core.logging import (
+    InterceptHandler,
+    _AccessLogNonSuccessFilter,
+    _make_retention,
+    setup_logging,
+)
 
 
 def _paths(tmp_path: Path) -> AgentBridgePaths:
@@ -204,3 +209,60 @@ def test_load_logging_config_parses_section(tmp_path: Path) -> None:
     assert cfg.retention_days == 14
     assert cfg.retention_max_bytes == 500 * 1000 ** 2
     assert cfg.compression == "tar.gz"
+
+
+# ---------- 访问日志 / httpx 转发噪音过滤 ----------
+
+def _access_record(message: str) -> logging.LogRecord:
+    return logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, message, None, None)
+
+
+def test_access_filter_drops_success_keeps_errors() -> None:
+    """_AccessLogNonSuccessFilter 丢弃 2xx/3xx，保留 4xx/5xx 与无法解析的行。"""
+    flt = _AccessLogNonSuccessFilter()
+    # 2xx/3xx 成功转发 → 丢弃
+    assert flt.filter(_access_record('127.0.0.1:1 - "GET /a HTTP/1.1" 200')) is False
+    assert flt.filter(_access_record('127.0.0.1:1 - "GET /icon.svg HTTP/1.1" 304')) is False
+    # 4xx/5xx → 保留
+    assert flt.filter(_access_record('127.0.0.1:1 - "POST /x HTTP/1.1" 404')) is True
+    assert flt.filter(_access_record('127.0.0.1:1 - "GET /x HTTP/1.1" 500')) is True
+    # 无状态码行 → 保留（不误删）
+    assert flt.filter(_access_record("some non-access message")) is True
+
+
+def test_configure_silences_httpx_and_access_by_default(tmp_path: Path) -> None:
+    """默认配置：httpx 提到 WARNING；uvicorn.access 仅保留 4xx5xx。"""
+    try:
+        setup_logging(paths=_paths(tmp_path), config=LoggingConfig(console=False))
+        assert logging.getLogger("httpx").level == logging.WARNING
+        access = logging.getLogger("uvicorn.access")
+        assert access.level == 0  # NOTSET → 由过滤器而非级别阻断成功请求
+        assert any(isinstance(f, _AccessLogNonSuccessFilter) for f in access.filters)
+    finally:
+        logger.remove()
+
+
+def test_configure_access_log_modes(tmp_path: Path) -> None:
+    """access_log=off → 整体静默（WARNING）；access_log=all → 不过滤。"""
+    try:
+        # off
+        setup_logging(paths=_paths(tmp_path), config=LoggingConfig(console=False, access_log="off"))
+        access = logging.getLogger("uvicorn.access")
+        assert access.level == logging.WARNING
+        assert not any(isinstance(f, _AccessLogNonSuccessFilter) for f in access.filters)
+        # all
+        setup_logging(paths=_paths(tmp_path), config=LoggingConfig(console=False, access_log="all"))
+        assert access.level == 0
+        assert not any(isinstance(f, _AccessLogNonSuccessFilter) for f in access.filters)
+    finally:
+        logger.remove()
+
+
+def test_configure_httpx_log_level_respected(tmp_path: Path) -> None:
+    """httpx_log_level 配置项驱动 httpx logger 级别。"""
+    try:
+        setup_logging(paths=_paths(tmp_path), config=LoggingConfig(console=False, httpx_log_level="DEBUG"))
+        assert logging.getLogger("httpx").level == logging.DEBUG
+    finally:
+        logger.remove()
+
