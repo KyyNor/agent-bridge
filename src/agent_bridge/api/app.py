@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
-from agent_bridge.core.config import AgentBridgePaths, default_user, load_server_config
+from agent_bridge.core.config import AgentBridgePaths, default_user, load_logging_config, load_server_config
 from agent_bridge.core.logging import setup_logging
 from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.app.service import AgentBridgeService
@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = None) -> FastAPI:
     resolved_paths = paths or AgentBridgePaths.from_root()
-    # 尽早初始化日志（早于 Service 装配，使构造期日志也被捕获）
-    setup_logging(resolved_paths)
+    # 尽早初始化日志（早于 Service 装配，使构造期日志也被捕获）；
+    # 参数来自 server.toml 的 [logging] 段（缺失则用默认值）
+    setup_logging(resolved_paths, config=load_logging_config(resolved_paths))
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = AgentBridgeService.create(resolved_paths, resolved_admins)
 

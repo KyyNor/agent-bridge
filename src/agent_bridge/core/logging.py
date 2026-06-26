@@ -7,8 +7,9 @@
   且保留原始的 模块名 / 函数名 / 行号。
 - uvicorn 的 ``uvicorn`` / ``uvicorn.error`` / ``uvicorn.access`` 三个 logger 的 handler
   也被替换为 :class:`InterceptHandler`，使 access / error 日志并入同一份应用主日志。
-- 主日志文件 ``logs/agent-bridge.log`` 支持 **分卷（100 MB）、最大容量（90 天 / 5 GiB）、
-  自动打包（zip）**，详见 :func:`setup_logging`。
+- 主日志文件 ``logs/agent-bridge.log`` 支持 **分卷、最大容量、自动打包**；具体参数
+  （级别 / 分卷大小 / 保留天数 / 容量上限 / 压缩格式）由 ``server.toml`` 的
+  ``[logging]`` 段配置，见 :class:`agent_bridge.core.config.LoggingConfig`。
 - root logger 采用 **非破坏式** 装配：仅在尚未挂载 InterceptHandler 时追加，避免破坏
   pytest ``caplog`` 等既有 handler。
 
@@ -26,16 +27,11 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from loguru import logger
 
-from .config import AgentBridgePaths
-
-# 保留策略参数（见 :func:`_retention_files`）
-_MAX_AGE_DAYS = 90
-_MAX_TOTAL_BYTES = 5 * 1024 ** 3  # 5 GiB
-_ROTATION_SIZE = "100 MB"
+from .config import AgentBridgePaths, LoggingConfig
 
 # 日志行格式：时间 | 级别 | 模块:函数:行号 - 消息
 _LOG_FORMAT = (
@@ -75,32 +71,35 @@ class InterceptHandler(logging.Handler):
         logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
-def _retention_files(files: Iterable[Path]) -> list[Path]:
-    """自定义保留策略：同时满足「不超过 90 天」且「累计不超过 5 GiB」。
+def _make_retention(max_age_days: int, max_total_bytes: int) -> Callable[[Iterable[Path]], list[Path]]:
+    """构造 loguru ``retention`` callable：同时满足「不超过 max_age_days 天」且「累计不超过 max_total_bytes」。
 
     loguru 的 ``retention`` 在每次轮转后接收 **已轮转的分卷文件列表**（不含当前活跃文件），
-    返回需要删除的子集。本函数先删超过年龄上限的分卷，再从最旧的开始删，直到累计容量
-    回到 5 GiB 以内。
+    返回需要删除的子集。本 callable 先删超过年龄上限的分卷，再从最旧的开始删，直到累计容量
+    回到上限内。用闭包而非模块常量，便于按 :class:`LoggingConfig` 注入参数。
     """
-    # 最旧在前，便于「超容量时优先删最旧」
-    files = sorted(files, key=lambda p: os.path.getmtime(str(p)))
-    now = time.time()
-    age_cutoff = now - _MAX_AGE_DAYS * 86400
+    def _retention(files: Iterable[Path]) -> list[Path]:
+        # 最旧在前，便于「超容量时优先删最旧」
+        files = sorted(files, key=lambda p: os.path.getmtime(str(p)))
+        now = time.time()
+        age_cutoff = now - max_age_days * 86400
 
-    to_remove = [f for f in files if os.path.getmtime(str(f)) < age_cutoff]
-    survivors = [f for f in files if os.path.getmtime(str(f)) >= age_cutoff]
+        to_remove = [f for f in files if os.path.getmtime(str(f)) < age_cutoff]
+        survivors = [f for f in files if os.path.getmtime(str(f)) >= age_cutoff]
 
-    total = sum(os.path.getsize(str(f)) for f in survivors)
-    for f in survivors:  # 最旧在前
-        if total <= _MAX_TOTAL_BYTES:
-            break
-        to_remove.append(f)
-        total -= os.path.getsize(str(f))
+        total = sum(os.path.getsize(str(f)) for f in survivors)
+        for f in survivors:  # 最旧在前
+            if total <= max_total_bytes:
+                break
+            to_remove.append(f)
+            total -= os.path.getsize(str(f))
 
-    return to_remove
+        return to_remove
+
+    return _retention
 
 
-def _configure(paths: AgentBridgePaths, *, level: str, console: bool) -> None:
+def _configure(paths: AgentBridgePaths, cfg: LoggingConfig) -> None:
     """实际装配 loguru sink 与 stdlib 拦截（由 :func:`setup_logging` 调用）。"""
     paths.logs_dir.mkdir(parents=True, exist_ok=True)
     log_file = paths.logs_dir / "agent-bridge.log"
@@ -108,14 +107,14 @@ def _configure(paths: AgentBridgePaths, *, level: str, console: bool) -> None:
     # 1) 清空 loguru 默认 sink，统一接管（幂等：重复调用不叠加）
     logger.remove()
 
-    # 2) 主日志：分卷 / 容量上限 / 自动打包
+    # 2) 主日志：分卷 / 容量上限 / 自动打包（参数全部来自 LoggingConfig）
     logger.add(
         log_file,
-        level=level,
+        level=cfg.level,
         format=_LOG_FORMAT,
-        rotation=_ROTATION_SIZE,
-        retention=_retention_files,
-        compression="zip",
+        rotation=cfg.rotation,
+        retention=_make_retention(cfg.retention_days, cfg.retention_max_bytes),
+        compression=cfg.compression,
         encoding="utf-8",
         enqueue=True,  # 多线程 / 多请求安全写盘
         backtrace=True,
@@ -123,10 +122,10 @@ def _configure(paths: AgentBridgePaths, *, level: str, console: bool) -> None:
     )
 
     # 3) 控制台（stderr）；服务子进程下 stderr 会被重定向到 server.log，兼作崩溃捕获
-    if console:
+    if cfg.console:
         logger.add(
             sys.stderr,
-            level=level,
+            level=cfg.level,
             format=_LOG_FORMAT,
             colorize=True,
             backtrace=True,
@@ -146,17 +145,22 @@ def _configure(paths: AgentBridgePaths, *, level: str, console: bool) -> None:
         uv.setLevel(0)
 
 
-def setup_logging(paths: AgentBridgePaths, *, level: str = "INFO", console: bool = True) -> None:
+def setup_logging(paths: AgentBridgePaths, *, config: LoggingConfig | None = None) -> None:
     """初始化全局日志。
 
-    应在服务进程最早期调用（``create_app`` 顶部）。幂等：重复调用会先清空既有 sink 再重装，
+    应在服务进程最早期调用（``create_app`` 顶部）。``config`` 缺省时用
+    :class:`LoggingConfig` 默认值；生产路径由 ``create_app`` 传入
+    :func:`load_logging_config` 的解析结果。幂等：重复调用会先清空既有 sink 再重装，
     因此测试里每次用不同 tmp 路径 ``create_app`` 都能落到对应隔离目录。
     """
-    _configure(paths, level=level, console=console)
+    cfg = config or LoggingConfig()
+    _configure(paths, cfg)
     logger.info(
-        "日志系统已就绪：主日志={} 轮转={} 保留={}天/{}GiB 压缩=zip",
+        "日志系统已就绪：主日志={} 级别={} 轮转={} 保留={}天/{}字节 压缩={}",
         paths.logs_dir / "agent-bridge.log",
-        _ROTATION_SIZE,
-        _MAX_AGE_DAYS,
-        _MAX_TOTAL_BYTES // (1024 ** 3),
+        cfg.level,
+        cfg.rotation,
+        cfg.retention_days,
+        cfg.retention_max_bytes,
+        cfg.compression,
     )

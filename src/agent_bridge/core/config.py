@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,6 +71,27 @@ class ServerConfig:
 
 
 @dataclass(frozen=True)
+class LoggingConfig:
+    """日志配置（server.toml 的 ``[logging]`` 段），所有字段都有默认值。
+
+    由 :func:`load_logging_config` 在启动期读取一次；修改后需重启服务生效
+    （日志 sink 不做每请求热重载，避免 sink 频繁重建）。
+    """
+
+    level: str = "INFO"  # DEBUG / INFO / WARNING / ERROR
+    console: bool = True  # 同时输出到 stderr（服务子进程下进 server.log）
+    rotation_size_mb: int = 100  # 单个分卷大小上限，超过即轮转
+    retention_days: int = 90  # 分卷保留天数
+    retention_max_bytes: int = 5 * 1024 ** 3  # 5 GiB；分卷累计容量上限
+    compression: str = "zip"  # 旧分卷压缩格式
+
+    @property
+    def rotation(self) -> str:
+        """loguru ``rotation`` 字符串。"""
+        return f"{self.rotation_size_mb} MB"
+
+
+@dataclass(frozen=True)
 class BackendConfig:
     slug: str
     backend_type: str
@@ -99,7 +121,17 @@ def load_server_config(paths: AgentBridgePaths) -> ServerConfig:
     if not paths.server_config_path.exists():
         admin = default_user()
         paths.server_config_path.write_text(
-            f"host = \"127.0.0.1\"\nport = 8765\nadmins = [{json.dumps(admin)}]\n",
+            f"host = \"127.0.0.1\"\n"
+            f"port = 8765\n"
+            f"admins = [{json.dumps(admin)}]\n"
+            f"\n"
+            f"# [logging]  # 日志配置（取消注释并按需修改；改后需重启服务生效）\n"
+            f"# level = \"INFO\"                   # DEBUG/INFO/WARNING/ERROR\n"
+            f"# console = true                   # 同时输出到 stderr（进 server.log）\n"
+            f"# rotation_size_mb = 100           # 单分卷大小上限，超过即轮转\n"
+            f"# retention_days = 90              # 分卷保留天数\n"
+            f"# retention_max_bytes = \"5 GiB\"    # 分卷累计容量上限（KB/MB/GB/KiB/MiB/GiB）\n"
+            f"# compression = \"zip\"              # 旧分卷压缩格式\n",
             encoding="utf-8",
         )
     raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
@@ -109,6 +141,54 @@ def load_server_config(paths: AgentBridgePaths) -> ServerConfig:
         port=int(raw.get("port", 8765)),
         admins=admins,
         default_backend=raw.get("default_backend"),
+    )
+
+
+# 容量单位 → 字节数（十进制 KB/MB/GB 与二进制 KiB/MiB/GiB 均支持）
+_SIZE_UNITS = {
+    "B": 1,
+    "KB": 1000, "MB": 1000 ** 2, "GB": 1000 ** 3, "TB": 1000 ** 4,
+    "KIB": 1024, "MIB": 1024 ** 2, "GIB": 1024 ** 3, "TIB": 1024 ** 4,
+    "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4,
+}
+
+_SIZE_RE = re.compile(r"\s*([\d.]+)\s*([A-Za-z]*)\s*")
+
+
+def parse_size(value: int | float | str) -> int:
+    """把 ``"5 GiB"`` / ``"500 MB"`` / ``1024`` 解析成字节数；纯数字视为字节。"""
+    if isinstance(value, bool):  # bool 是 int 子类，先排除
+        raise ValueError(f"无法解析容量: {value!r}")
+    if isinstance(value, (int, float)):
+        return int(value)
+    m = _SIZE_RE.fullmatch(str(value))
+    if not m:
+        raise ValueError(f"无法解析容量: {value!r}")
+    num = float(m.group(1))
+    unit = m.group(2).upper() or "B"
+    if unit not in _SIZE_UNITS:
+        raise ValueError(f"未知容量单位: {m.group(2)!r}")
+    return int(num * _SIZE_UNITS[unit])
+
+
+def load_logging_config(paths: AgentBridgePaths) -> LoggingConfig:
+    """读取 server.toml 的 ``[logging]`` 段；文件或段缺失时返回全默认值。
+
+    仅在启动期读取一次（:func:`agent_bridge.core.logging.setup_logging` 调用）。
+    """
+    if not paths.server_config_path.exists():
+        return LoggingConfig()
+    raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
+    section = raw.get("logging")
+    if not section:
+        return LoggingConfig()
+    return LoggingConfig(
+        level=str(section.get("level", "INFO")),
+        console=bool(section.get("console", True)),
+        rotation_size_mb=int(section.get("rotation_size_mb", 100)),
+        retention_days=int(section.get("retention_days", 90)),
+        retention_max_bytes=parse_size(section.get("retention_max_bytes", "5 GiB")),
+        compression=str(section.get("compression", "zip")),
     )
 
 

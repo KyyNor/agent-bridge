@@ -110,9 +110,12 @@ npm run typecheck
 
 `save_sync_config`（`app/service.py`）集中管理一组同步/调度参数，写入 `knowledge_sync_config` 表，并触发所有 scheduler `refresh()`：`code_sync_cron`、`understand_cron`、`doc_sync_cron`、`workflow_start_time/stop_time`、`workflow_max_runs/max_runtime_minutes/task_rerun_days`、`mcp_timeout_seconds`（默认 150，见 `core/defaults.py`，最近 `a65223a` 才可配）、`understand_timeout_minutes`。改这些参数后必须让对应 scheduler 刷新。
 
+日志参数不走 `save_sync_config`，而是 `server.toml` 的 `[logging]` 段（见 `core/config.py:LoggingConfig` / `load_logging_config`，在 `create_app` 顶部读一次并传入 `core/logging.py:setup_logging`）：`level`、`console`、`rotation_size_mb`、`retention_days`、`retention_max_bytes`（支持 `KB/MB/GB/KiB/MiB/GiB` 字符串）、`compression`。改后需重启服务生效（日志 sink 不做热重载）。
+
 ## 给改动者的关键约定
 
 1. **新增一类能力来源 ≠ 加个文件**：来源类型分发是 `service.py` 里的 if/elif，要新增来源类型得改 `execute`/`_search_without_log` 的探测分支（参考既有 memory 笔记：这是「if/elif 探测分发非注册表」）。但**新增内置提供者**很简单：实现 Protocol + 在 `app/service.py` 调 `register_builtin_provider`。
 2. 写新的 service 方法时：开头 `require_admin_user`，业务失败抛 `AgentBridgeError` 子类，不要自己返回 HTTP 码。涉及工具执行就考虑是否要经 `log_tool_call` / `invoke_logged_tool` 审计。
 3. Profile 策略：来源级记得「无 allow 即全拒」，资源级是纯 allow-list；改动治理逻辑后注意 `search` 的可见性过滤（root 列表 + path 探测两处）和 `execute` 的两个分支（openapi `service.py:598`、mcp `service.py:615`）都要覆盖。
 4. 任何经 MCP gateway 暴露给 agent 的执行，profile / workflow 上下文都从请求头读，靠 `ContextVar` 传递——不要在 gateway 里假设有进程级单例状态。
+5. **日志**：一律用 `logging.getLogger(__name__)`（文件里没有就新增这两行），**不要** `from loguru import logger`——所有日志经 `core/logging.py` 的 `InterceptHandler` 统一转发进 loguru（写 `logs/agent-bridge.log`，并保留真实调用方的 模块/函数/行号）。风格：中文消息 + `%s` 惰性格式化（不用 f-string）；`INFO`=生命周期边界（开始/完成）、`WARNING`=可恢复异常/被拒绝/降级、`ERROR`=失败（带 `exc_info=True`）；热路径循环用 `DEBUG` 或聚合，不逐条打 `INFO`（governance 的 `log_tool_call` 是高频审计，故意不打 INFO）。日志参数（级别 / `rotation_size_mb` / `retention_days` / `retention_max_bytes` / `compression` / `console`）在 `server.toml` 的 `[logging]` 段配置（见 `core/config.py` 的 `LoggingConfig` / `load_logging_config`），启动期读一次、改后重启生效。
