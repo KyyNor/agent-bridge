@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
+
+import httpx
 
 from agent_bridge.api.dashboard_proxy import (
     DashboardProxyMiddleware,
@@ -203,3 +206,192 @@ def test_memory_dashboard_proxy_routes_root_static_assets_from_referer(monkeypat
 
     assert app_called is False
     assert calls == [("test-mem", "/icon-thick-investigated.svg", "http://127.0.0.1:48100/")]
+
+
+async def _noop_app(scope, receive, send):  # pragma: no cover - routing should never reach the app
+    raise AssertionError("downstream app must not be called for proxied paths")
+
+
+def _assert_proxy_streams_sse_first_event(middleware, scope, respx_mock, upstream_url) -> None:
+    # SSE upstream: yields one event, then never ends (the connection stays open,
+    # exactly like the claude-mem dashboard /stream). A buffering proxy hangs
+    # forever reading the full body; a streaming proxy must forward the first event
+    # promptly while the upstream is still open.
+    first_event = b'data: {"type":"connected"}\n\n'
+    never_finish = asyncio.Event()
+
+    async def upstream_stream():
+        yield first_event
+        await never_finish.wait()
+
+    respx_mock.get(upstream_url).mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream", "cache-control": "no-cache"},
+            stream=upstream_stream(),
+        )
+    )
+
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    body_sent = False
+
+    async def receive():
+        nonlocal body_sent
+        if not body_sent:
+            body_sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        # Real ASGI blocks here until the client disconnects; in this window it
+        # never does, so block forever (the task is cancelled by the driver).
+        await never_finish.wait()
+        return {"type": "http.disconnect"}
+
+    async def driver():
+        task = asyncio.create_task(middleware(scope, receive, send))
+        # Give a streaming proxy ample time to forward the first event; a buffering
+        # proxy is still blocked reading the never-ending body at this point.
+        await asyncio.sleep(0.3)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(driver())
+
+    starts = [m for m in sent if m.get("type") == "http.response.start"]
+    assert starts and starts[0]["status"] == 200
+    forwarded = b"".join(m.get("body", b"") for m in sent if m.get("type") == "http.response.body")
+    assert first_event in forwarded
+
+
+def test_memory_dashboard_proxy_streams_sse_events_without_buffering(respx_mock) -> None:
+    middleware = MemoryDashboardProxyMiddleware(
+        app=_noop_app,
+        target_resolver={"test-mem": "http://127.0.0.1:48100/"}.get,
+    )
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/stream",
+        "query_string": b"",
+        "headers": [(b"referer", b"http://127.0.0.1:8765/memory-dashboard/test-mem/")],
+    }
+    _assert_proxy_streams_sse_first_event(
+        middleware, scope, respx_mock, "http://127.0.0.1:48100/stream"
+    )
+
+
+def test_codegraph_dashboard_proxy_streams_sse_events_without_buffering(respx_mock) -> None:
+    middleware = DashboardProxyMiddleware(
+        app=_noop_app,
+        target_resolver={"headroom": "http://127.0.0.1:48000/"}.get,
+    )
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/dashboard/headroom/stream",
+        "query_string": b"",
+        "headers": [],
+    }
+    _assert_proxy_streams_sse_first_event(
+        middleware, scope, respx_mock, "http://127.0.0.1:48000/dashboard/headroom/stream"
+    )
+
+
+def test_memory_dashboard_proxy_returns_502_when_upstream_is_unreachable(respx_mock) -> None:
+    respx_mock.get("http://127.0.0.1:48100/stream").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    middleware = MemoryDashboardProxyMiddleware(
+        app=_noop_app,
+        target_resolver={"test-mem": "http://127.0.0.1:48100/"}.get,
+    )
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/stream",
+        "query_string": b"",
+        "headers": [(b"referer", b"http://127.0.0.1:8765/memory-dashboard/test-mem/")],
+    }
+
+    asyncio.run(middleware(scope, receive, send))
+
+    starts = [m for m in sent if m.get("type") == "http.response.start"]
+    assert starts and starts[0]["status"] == 502
+    body = b"".join(m.get("body", b"") for m in sent if m.get("type") == "http.response.body")
+    # Pre-streaming behaviour: the 502 body carries the proxy label + underlying
+    # error so failures stay greppable in logs.
+    assert b"memory dashboard proxy failed" in body
+
+
+def test_memory_dashboard_proxy_stops_reading_upstream_when_client_disconnects(respx_mock) -> None:
+    pull_count = 0
+
+    async def upstream_stream():
+        nonlocal pull_count
+        while True:
+            pull_count += 1
+            yield b"data: tick\n\n"
+            await asyncio.sleep(0.02)
+
+    respx_mock.get("http://127.0.0.1:48100/stream").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=upstream_stream(),
+        )
+    )
+
+    async def send(message):
+        pass
+
+    receive_calls = 0
+
+    async def receive():
+        nonlocal receive_calls
+        receive_calls += 1
+        if receive_calls == 1:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        # Client disconnects a moment into the stream.
+        await asyncio.sleep(0.1)
+        return {"type": "http.disconnect"}
+
+    middleware = MemoryDashboardProxyMiddleware(
+        app=_noop_app,
+        target_resolver={"test-mem": "http://127.0.0.1:48100/"}.get,
+    )
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/stream",
+        "query_string": b"",
+        "headers": [(b"referer", b"http://127.0.0.1:8765/memory-dashboard/test-mem/")],
+    }
+
+    async def driver():
+        task = asyncio.create_task(middleware(scope, receive, send))
+        await asyncio.sleep(0.6)
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    asyncio.run(driver())
+
+    # A proxy that honours disconnect stops consuming the upstream shortly after
+    # the client goes away (~5 ticks in 0.1s). One that ignores disconnect keeps
+    # pulling forever (~30 ticks in 0.6s) and leaks the upstream connection.
+    assert 1 <= pull_count < 15, f"upstream kept being read after disconnect: {pull_count} pulls"

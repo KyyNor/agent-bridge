@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
@@ -92,37 +94,16 @@ class DashboardProxyMiddleware:
         upstream_path: str,
         target: str,
     ) -> None:
-        body = await _read_body(receive)
-        target_parts = urlsplit(target)
-        query = scope.get("query_string", b"").decode("latin-1")
-        upstream_url = urlunsplit((
-            target_parts.scheme,
-            target_parts.netloc,
-            upstream_path,
-            query,
-            "",
-        ))
-        headers = _forward_headers(scope.get("headers", []), target_parts.netloc)
-
-        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
-            try:
-                response = await client.request(
-                    str(scope.get("method", "GET")),
-                    upstream_url,
-                    content=body,
-                    headers=headers,
-                )
-            except httpx.HTTPError as exc:
-                await _send_plain(send, 502, f"dashboard proxy failed: {exc}".encode("utf-8"))
-                return
-
-        response_headers = _response_headers(response.headers, repo_key, target)
-        await send({
-            "type": "http.response.start",
-            "status": response.status_code,
-            "headers": response_headers,
-        })
-        await send({"type": "http.response.body", "body": response.content})
+        await _proxy_stream_response(
+            scope,
+            receive,
+            send,
+            upstream_path=upstream_path,
+            target=target,
+            location_prefix="/dashboard",
+            location_key=repo_key,
+            error_label="dashboard proxy failed",
+        )
 
 
 class MemoryDashboardProxyMiddleware:
@@ -169,42 +150,16 @@ class MemoryDashboardProxyMiddleware:
         upstream_path: str,
         target: str,
     ) -> None:
-        body = await _read_body(receive)
-        target_parts = urlsplit(target)
-        query = scope.get("query_string", b"").decode("latin-1")
-        upstream_url = urlunsplit((
-            target_parts.scheme,
-            target_parts.netloc,
-            upstream_path,
-            query,
-            "",
-        ))
-        headers = _forward_headers(scope.get("headers", []), target_parts.netloc)
-
-        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
-            try:
-                response = await client.request(
-                    str(scope.get("method", "GET")),
-                    upstream_url,
-                    content=body,
-                    headers=headers,
-                )
-            except httpx.HTTPError as exc:
-                await _send_plain(send, 502, f"memory dashboard proxy failed: {exc}".encode("utf-8"))
-                return
-
-        response_headers = _response_headers_for_prefix(
-            response.headers,
-            prefix="/memory-dashboard",
-            key=block_key,
+        await _proxy_stream_response(
+            scope,
+            receive,
+            send,
+            upstream_path=upstream_path,
             target=target,
+            location_prefix="/memory-dashboard",
+            location_key=block_key,
+            error_label="memory dashboard proxy failed",
         )
-        await send({
-            "type": "http.response.start",
-            "status": response.status_code,
-            "headers": response_headers,
-        })
-        await send({"type": "http.response.body", "body": response.content})
 
 
 def _match_dashboard_path(path: str) -> tuple[str | None, str]:
@@ -278,6 +233,87 @@ def _repo_key_from_token(
     return token_resolver(token)
 
 
+async def _proxy_stream_response(
+    scope: Scope,
+    receive: Receive,
+    send: Send,
+    *,
+    upstream_path: str,
+    target: str,
+    location_prefix: str,
+    location_key: str,
+    error_label: str,
+) -> None:
+    """Forward a request to a dashboard upstream, streaming the response back.
+
+    Uses ``client.stream`` so long-lived responses (notably the SSE ``/stream``
+    endpoint) are forwarded chunk-by-chunk as they arrive. Buffering the whole
+    body (``client.request`` + ``response.content``) hangs on a never-ending
+    stream until the read timeout, then surfaces as a 502.
+    """
+    body = await _read_body(receive)
+    target_parts = urlsplit(target)
+    query = scope.get("query_string", b"").decode("latin-1")
+    upstream_url = urlunsplit((
+        target_parts.scheme,
+        target_parts.netloc,
+        upstream_path,
+        query,
+        "",
+    ))
+    headers = _forward_headers(scope.get("headers", []), target_parts.netloc)
+    method = str(scope.get("method", "GET"))
+    # ``read=None`` keeps idle SSE connections alive; connect/write/pool stay
+    # bounded so a misbehaving upstream still fails fast.
+    timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
+
+    start_sent = False
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+            async with client.stream(method, upstream_url, content=body, headers=headers) as response:
+                response_headers = _response_headers_for_prefix(
+                    response.headers,
+                    prefix=location_prefix,
+                    key=location_key,
+                    target=target,
+                )
+                await send({
+                    "type": "http.response.start",
+                    "status": response.status_code,
+                    "headers": response_headers,
+                })
+                start_sent = True
+                # Long-lived responses (SSE) outlive the request body, so keep
+                # watching ``receive`` for client disconnect — otherwise the upstream
+                # connection is held open for a stream nobody is consuming.
+                disconnected = asyncio.Event()
+                drain_task = asyncio.create_task(_await_disconnect(receive, disconnected))
+                try:
+                    async for chunk in response.aiter_raw():
+                        if disconnected.is_set():
+                            break
+                        await send({"type": "http.response.body", "body": chunk, "more_body": True})
+                finally:
+                    drain_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await drain_task
+                    # Always close the response, even if the upstream errors or the
+                    # client disconnects mid-stream, so the downstream never hangs.
+                    with suppress(Exception):
+                        await send({"type": "http.response.body", "body": b""})
+    except httpx.HTTPError as exc:
+        if not start_sent:
+            await _send_plain(send, 502, f"{error_label}: {exc}".encode("utf-8"))
+
+
+async def _await_disconnect(receive: Receive, disconnected: asyncio.Event) -> None:
+    while True:
+        message = await receive()
+        if message.get("type") == "http.disconnect":
+            disconnected.set()
+            return
+
+
 async def _read_body(receive: Receive) -> bytes:
     chunks: list[bytes] = []
     more_body = True
@@ -300,10 +336,6 @@ def _forward_headers(raw_headers: Any, host: str) -> dict[str, str]:
             continue
         headers[bytes(name).decode("latin-1")] = bytes(value).decode("latin-1")
     return headers
-
-
-def _response_headers(headers: httpx.Headers, repo_key: str, target: str) -> list[tuple[bytes, bytes]]:
-    return _response_headers_for_prefix(headers, prefix="/dashboard", key=repo_key, target=target)
 
 
 def _response_headers_for_prefix(
