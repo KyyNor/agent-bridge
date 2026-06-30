@@ -95,15 +95,17 @@ class ClaudeMemWorkerService:
             return {"running": self._worker_ready(configured), "url": configured}
         state = self._read_worker_state(block)
         base_url = str(state.get("base_url") or "") if isinstance(state, dict) else ""
-        pid = int(state.get("pid") or 0) if isinstance(state, dict) else 0
-        running = bool(base_url and pid > 0 and self._pid_alive(pid) and self._worker_ready(base_url))
+        identity = self._runtime_worker_identity(block, state)
+        running = bool(base_url and identity and self._worker_ready(base_url))
         if running:
+            if identity:
+                state = {**state, **identity}
             self._touch_worker_state(block)
         return {
             "running": running,
             "url": base_url if running else None,
-            "pid": pid if running else None,
-            "port": int(state.get("port") or 0) if running else None,
+            "pid": identity.get("pid") if running else None,
+            "port": int(state.get("port") or identity.get("port") or 0) if running else None,
             "started_at": state.get("started_at") if running else None,
         }
 
@@ -113,12 +115,13 @@ class ClaudeMemWorkerService:
         except Exception as exc:
             return {"success": False, "running": False, "url": None, "error": str(exc)}
         state = self._read_worker_state(block)
+        identity = self._runtime_worker_identity(block, state)
         return {
             "success": True,
             "running": True,
             "url": base_url,
-            "pid": state.get("pid"),
-            "port": state.get("port"),
+            "pid": identity.get("pid") or state.get("pid"),
+            "port": state.get("port") or identity.get("port"),
             "started_at": state.get("started_at"),
         }
 
@@ -127,7 +130,7 @@ class ClaudeMemWorkerService:
         if not state:
             return {"stopped": False}
         stopped = self._stop_worker_session(
-            {**state, "state_path": self._worker_state_path(block)},
+            {**state, **self._runtime_worker_identity(block, state), "state_path": self._worker_state_path(block)},
             grace_seconds=3.0,
         )
         return {"stopped": stopped}
@@ -252,11 +255,10 @@ class ClaudeMemWorkerService:
         state = self._read_worker_state(block)
         port = self._worker_port(block, state=state)
         base_url = self._base_url_for_port(port)
-        pid = int(state.get("pid") or 0) if isinstance(state, dict) else 0
-        if pid and self._pid_alive(pid) and self._worker_ready(base_url):
-            self._touch_worker_state(block)
-            return base_url
-        if self._worker_ready(base_url):
+        identity = self._runtime_worker_identity(block, state)
+        if identity and self._worker_ready(base_url):
+            state = {**state, **identity}
+            self._write_worker_state(block, state)
             self._touch_worker_state(block)
             return base_url
 
@@ -350,9 +352,11 @@ class ClaudeMemWorkerService:
         live_sessions: list[dict[str, Any]] = []
         occupied_ports: set[int] = set()
         for session in sessions:
-            pid = int(session.get("pid") or 0)
-            port = int(session.get("port") or 0)
-            if pid > 0 and self._pid_alive(pid):
+            identity = self._runtime_worker_identity({"data_dir": session.get("data_dir", "")}, session)
+            pid = int(identity.get("pid") or 0)
+            port = int(identity.get("port") or session.get("port") or 0)
+            if pid > 0:
+                session = {**session, **identity}
                 live_sessions.append(session)
                 if port in pool_ports:
                     occupied_ports.add(port)
@@ -384,6 +388,33 @@ class ClaudeMemWorkerService:
     def _state_base_url(self, block: dict[str, Any]) -> str:
         state = self._read_worker_state(block)
         return str(state.get("base_url") or "") if isinstance(state, dict) else ""
+
+    def _runtime_worker_identity(self, block: dict[str, Any], state: dict[str, Any]) -> dict[str, int]:
+        """Return the live claude-mem worker pid/port when wrapper state is stale.
+
+        On some package-manager shims, the pid returned by ``Popen`` belongs to
+        a short-lived wrapper. The worker records its actual daemon pid under
+        the block data directory, so prefer that when it is alive.
+        """
+        data_dir = Path(str(state.get("data_dir") or block.get("data_dir") or "")).expanduser()
+        supervisor_processes = self._read_json_path(data_dir / "supervisor.json").get("processes", {})
+        supervisor_worker = supervisor_processes.get("worker", {}) if isinstance(supervisor_processes, dict) else {}
+        for payload in (
+            self._read_json_path(data_dir / "worker.pid"),
+            supervisor_worker,
+            state,
+        ):
+            if not isinstance(payload, dict):
+                continue
+            pid = self._coerce_positive_int(payload.get("pid"))
+            if pid is None or not self._pid_alive(pid):
+                continue
+            identity = {"pid": pid}
+            port = self._coerce_positive_int(payload.get("port") or state.get("port"))
+            if port is not None:
+                identity["port"] = port
+            return identity
+        return {}
 
     def _worker_ready(self, base_url: str) -> bool:
         try:
@@ -637,6 +668,22 @@ class ClaudeMemWorkerService:
         except Exception:
             return {}
         return payload if isinstance(payload, dict) else {}
+
+    def _read_json_path(self, path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _coerce_positive_int(self, value: Any) -> int | None:
+        try:
+            integer = int(value)
+        except (TypeError, ValueError):
+            return None
+        return integer if integer > 0 else None
 
     def _write_worker_state(self, block: dict[str, Any], state: dict[str, Any]) -> None:
         state_path = self._worker_state_path(block)
