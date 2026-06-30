@@ -5,7 +5,7 @@ description = "Agent capability and knowledge bridge for managed MCP access."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "apscheduler>=3.10.0",
+    "apscheduler>=3.10.0,<4",
     "claude-agent-sdk>=0.2.103",
     "cryptography>=48.0.0",
     "fastapi>=0.124.0",
