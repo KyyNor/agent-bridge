@@ -28,14 +28,14 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
         git_url="https://example.test/agent-bridge.git",
         branch="main",
         auth_ref="",
-        description="",
+        description="Agent Bridge source repository.",
         tags=[],
         category_key="",
         sync_interval_minutes=60,
         auto_understand=False,
         status="active",
     )
-    store.create_kb("frontend-docs", "Frontend Docs", "", "root")
+    store.create_kb("frontend-docs", "Frontend Docs", "Frontend documentation.", "root")
     store.replace_profile_resource_rules(
         "safe",
         [
@@ -52,8 +52,8 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     assert "search" in rendered["markdown"]
     assert "execute" in rendered["markdown"]
     assert "- MySQL (`mysql`)：Run SQL queries." in rendered["markdown"]
-    assert "- Agent Bridge (`agent-bridge`)" in rendered["markdown"]
-    assert "- Frontend Docs (`frontend-docs`)" in rendered["markdown"]
+    assert "- Agent Bridge (`agent-bridge`)：Agent Bridge source repository." in rendered["markdown"]
+    assert "- Frontend Docs (`frontend-docs`)：Frontend documentation." in rendered["markdown"]
     assert "Use read-only queries only." in rendered["markdown"]
     assert "https://mysql.test/mcp" not in rendered["markdown"]
     assert "pin_mysql" not in rendered["markdown"]
@@ -65,6 +65,12 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     assert cache["rendered_hash"] == rendered["rendered_hash"]
     assert json.loads(cache["auto_summary_json"])["services"] == [
         {"service_key": "mysql", "name": "MySQL", "description": "Run SQL queries."}
+    ]
+    assert json.loads(cache["auto_summary_json"])["code_repositories"] == [
+        {"repo_key": "agent-bridge", "name": "Agent Bridge", "description": "Agent Bridge source repository."}
+    ]
+    assert json.loads(cache["auto_summary_json"])["knowledge_bases"] == [
+        {"slug": "frontend-docs", "name": "Frontend Docs", "description": "Frontend documentation."}
     ]
     assert "https://mysql.test/mcp" not in cache["auto_summary_json"]
 

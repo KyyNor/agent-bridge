@@ -256,6 +256,7 @@ class CapabilityGovernanceService:
             {
                 "repo_key": repository["repo_key"],
                 "name": repository.get("name") or repository["repo_key"],
+                "description": repository.get("description") or "",
             }
             for repository in self.store.list_code_repositories()
             if repository["repo_key"] in allowed_repo_keys
@@ -264,6 +265,7 @@ class CapabilityGovernanceService:
             {
                 "slug": kb["slug"],
                 "name": kb.get("name") or kb["slug"],
+                "description": kb.get("description") or "",
             }
             for kb in self.store.list_kbs()
             if kb["slug"] in allowed_kb_slugs
