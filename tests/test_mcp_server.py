@@ -30,12 +30,15 @@ def test_mcp_search_tool_has_path_query_schema():
     assert "path" in schema["properties"]
     assert "query" in schema["properties"]
     assert "limit" in schema["properties"]
-    assert "no arguments" in search_tool.description
+    assert search_tool.description == "浏览并搜索 Agent Bridge 能力目录。"
     # 可选参数必须是明确的单类型（顶层 type 字段），否则 MCP 客户端显示为 "unknown"。
     properties = schema["properties"]
     assert properties["path"]["type"] == "string"
     assert properties["query"]["type"] == "string"
     assert properties["limit"]["type"] == "integer"
+    assert properties["path"]["description"] == "要浏览的能力路径；留空时返回当前可见服务列表。"
+    assert properties["query"]["description"] == "用于过滤当前路径结果的关键词。"
+    assert properties["limit"]["description"] == "本次最多返回的结果数量。"
     assert not any("anyOf" in v or "oneOf" in v for v in properties.values())
 
 
@@ -58,6 +61,10 @@ def test_mcp_execute_tool_has_service_tool_name_params_schema():
     assert properties["service"]["type"] == "string"
     assert properties["tool_name"]["type"] == "string"
     assert properties["params"]["type"] == "object"
+    assert execute_tool.description == "执行一个已注册的 Agent Bridge 能力。"
+    assert properties["service"]["description"] == "要调用的服务标识。"
+    assert properties["tool_name"]["description"] == "服务下要执行的工具名称。"
+    assert properties["params"]["description"] == "传给目标工具的 JSON 参数对象。"
     assert not any("anyOf" in v or "oneOf" in v for v in properties.values())
 
 
@@ -123,14 +130,26 @@ def test_mcp_exposes_builtin_direct_tools_at_top_level():
                         "search",
                         "Wiki Search",
                         "Search snippets in an allowed KB.",
-                        {"type": "object", "properties": {"kb": {"type": "string"}, "question": {"type": "string"}}},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "kb": {"type": "string", "description": "要搜索的知识库 slug。"},
+                                "question": {"type": "string", "description": "要检索的知识库问题。"},
+                            },
+                        },
                         "search",
                     ),
                     BuiltinTool(
                         "ask",
                         "Wiki Ask",
                         "Ask a question against an allowed KB.",
-                        {"type": "object", "properties": {"kb": {"type": "string"}, "question": {"type": "string"}}},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "kb": {"type": "string", "description": "要提问的知识库 slug。"},
+                                "question": {"type": "string", "description": "要向知识库提出的问题。"},
+                            },
+                        },
                         "search",
                     ),
                 ],
@@ -142,7 +161,13 @@ def test_mcp_exposes_builtin_direct_tools_at_top_level():
                         "codegraph_explore",
                         "CodeGraph Explore",
                         "Explore an allowed code repository.",
-                        {"type": "object", "properties": {"repo": {"type": "string"}, "query": {"type": "string"}}},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "repo": {"type": "string", "description": "要访问的代码仓库标识。"},
+                                "query": {"type": "string", "description": "要在仓库内执行的查询内容。"},
+                            },
+                        },
                         "search",
                     )
                 ],
@@ -161,6 +186,9 @@ def test_mcp_exposes_builtin_direct_tools_at_top_level():
     assert "codegraph_explore" in tool_names
     assert tools[tool_names.index("wiki_search")].inputSchema["properties"]["kb"]["type"] == "string"
     assert tools[tool_names.index("codegraph_explore")].inputSchema["properties"]["repo"]["type"] == "string"
+    assert tools[tool_names.index("wiki_search")].description.startswith("直连内置工具")
+    assert tools[tool_names.index("wiki_search")].inputSchema["properties"]["kb"]["description"] == "要搜索的知识库 slug。"
+    assert tools[tool_names.index("codegraph_explore")].inputSchema["properties"]["query"]["description"] == "要在仓库内执行的查询内容。"
 
 
 def test_mcp_exposes_memory_direct_tools_at_top_level():
@@ -176,21 +204,37 @@ def test_mcp_exposes_memory_direct_tools_at_top_level():
                     "search",
                     "Memory Search",
                     "Search active memory block.",
-                    {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "要检索的记忆关键词或问题。"},
+                            "limit": {"type": "integer", "description": "本次最多返回的结果数量。"},
+                        },
+                    },
                     "search",
                 ),
                 BuiltinTool(
                     "timeline",
                     "Memory Timeline",
                     "Read active memory timeline.",
-                    {"type": "object", "properties": {"limit": {"type": "integer"}}},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "description": "本次读取的时间线条目数量上限。"},
+                        },
+                    },
                     "search",
                 ),
                 BuiltinTool(
                     "get",
                     "Memory Get",
                     "Read memory observation.",
-                    {"type": "object", "properties": {"id": {"type": "string"}}},
+                    {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "要读取的记忆 observation ID。"},
+                        },
+                    },
                     "detail",
                 ),
             ]
@@ -206,10 +250,14 @@ def test_mcp_exposes_memory_direct_tools_at_top_level():
 
     mcp = create_mcp_server(FakeService(), profile_key="dev")
     names = [tool.name for tool in asyncio.run(mcp.list_tools())]
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
 
     assert "memory_search" in names
     assert "memory_timeline" in names
     assert "memory_get" in names
+    assert tools["memory_search"].inputSchema["properties"]["query"]["description"] == "要检索的记忆关键词或问题。"
+    assert tools["memory_timeline"].inputSchema["properties"]["limit"]["description"] == "本次读取的时间线条目数量上限。"
+    assert tools["memory_get"].inputSchema["properties"]["id"]["description"] == "要读取的记忆 observation ID。"
 
 
 def test_mcp_builtin_direct_tool_calls_original_builtin_tool():

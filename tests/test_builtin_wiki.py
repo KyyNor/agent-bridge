@@ -80,6 +80,9 @@ def test_metamcp_wiki_path_lists_fixed_tools(wm_paths: AgentBridgePaths) -> None
     assert schemas["list_kbs"] == {"type": "object", "properties": {}}
     assert schemas["search"]["required"] == ["kb", "question"]
     assert "top_k" in schemas["search"]["properties"]
+    assert schemas["ask"]["properties"]["kb"]["description"] == "要访问的知识库 slug。"
+    assert schemas["ask"]["properties"]["question"]["description"] == "要向知识库提出的问题。"
+    assert result["items"][0]["description"] == "向已授权知识库提问。"
 
 
 def test_wiki_list_kbs_respects_profile_resources(wm_paths: AgentBridgePaths) -> None:

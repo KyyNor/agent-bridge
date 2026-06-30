@@ -127,6 +127,20 @@ def test_builtin_run_script_executes_managed_script(wm_paths):
     assert result["result"]["result"]["params"] == {"name": "Ada"}
 
 
+def test_platform_builtin_tool_schemas_include_chinese_descriptions(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    provider = service.capabilities.builtin_providers["built-in"]
+
+    tools = {tool.tool: tool for tool in provider.list_tools("root", None)}
+
+    assert tools["load_skill"].description == "加载一个由 Agent Bridge 管理的技能提示词。"
+    assert tools["load_skill"].input_schema["properties"]["skill_name"]["description"] == "要加载的技能名称。"
+    assert tools["run_script"].description == "运行托管的服务端 Python 脚本并返回 JSON 结果。"
+    assert tools["run_script"].input_schema["properties"]["script_key"]["description"] == "要执行的脚本标识。"
+    assert tools["run_script"].input_schema["properties"]["script_params"]["description"] == "传给脚本的 JSON 参数对象。"
+    assert tools["run_script"].input_schema["properties"]["timeout_seconds"]["description"] == "脚本执行超时时间，单位为秒。"
+
+
 def test_builtin_run_script_does_not_block_event_loop(wm_paths):
     service = AgentBridgeService.create(wm_paths, {"root"})
 

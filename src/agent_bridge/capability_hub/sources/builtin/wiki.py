@@ -46,13 +46,13 @@ class WikiBuiltinProvider:
             BuiltinTool(
                 "ask",
                 "Wiki Ask",
-                "Ask a question against an allowed KB.",
+                "向已授权知识库提问。",
                 {
                     "type": "object",
                     "properties": {
-                        "kb": {"type": "string"},
-                        "question": {"type": "string"},
-                        "session_id": {"type": "string"},
+                        "kb": {"type": "string", "description": "要访问的知识库 slug。"},
+                        "question": {"type": "string", "description": "要向知识库提出的问题。"},
+                        "session_id": {"type": "string", "description": "可选的对话会话 ID，用于延续上下文。"},
                     },
                     "required": ["kb", "question"],
                 },
@@ -61,12 +61,12 @@ class WikiBuiltinProvider:
             BuiltinTool(
                 "get_document",
                 "Wiki Document",
-                "Read document metadata from an allowed KB.",
+                "读取已授权知识库中的文档元数据。",
                 {
                     "type": "object",
                     "properties": {
-                        "kb": {"type": "string"},
-                        "doc_slug": {"type": "string"},
+                        "kb": {"type": "string", "description": "要访问的知识库 slug。"},
+                        "doc_slug": {"type": "string", "description": "要读取的文档 slug。"},
                     },
                     "required": ["kb", "doc_slug"],
                 },
@@ -75,19 +75,19 @@ class WikiBuiltinProvider:
             BuiltinTool(
                 "list_kbs",
                 "Wiki KB List",
-                "List allowed knowledge bases.",
+                "列出当前可访问的知识库。",
                 {"type": "object", "properties": {}},
                 ToolType.overview.value,
             ),
             BuiltinTool(
                 "search_all",
                 "Wiki Search All",
-                "Search across all allowed KBs, returning which KBs have matching content.",
+                "跨所有已授权知识库搜索，并返回命中的知识库。",
                 {
                     "type": "object",
                     "properties": {
-                        "question": {"type": "string"},
-                        "top_k": {"type": "integer", "default": 6},
+                        "question": {"type": "string", "description": "要搜索的知识库问题。"},
+                        "top_k": {"type": "integer", "default": 6, "description": "每个知识库最多返回的结果数量。"},
                     },
                     "required": ["question"],
                 },
@@ -96,13 +96,13 @@ class WikiBuiltinProvider:
             BuiltinTool(
                 "search",
                 "Wiki Search",
-                "Search snippets in an allowed KB.",
+                "在已授权知识库中搜索片段。",
                 {
                     "type": "object",
                     "properties": {
-                        "kb": {"type": "string"},
-                        "question": {"type": "string"},
-                        "top_k": {"type": "integer", "default": 6},
+                        "kb": {"type": "string", "description": "要访问的知识库 slug。"},
+                        "question": {"type": "string", "description": "要检索的知识库问题。"},
+                        "top_k": {"type": "integer", "default": 6, "description": "最多返回的结果数量。"},
                     },
                     "required": ["kb", "question"],
                 },

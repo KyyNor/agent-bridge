@@ -34,13 +34,13 @@ class MemoryBuiltinProvider:
             BuiltinTool(
                 "search",
                 "Memory Search",
-                "Search the active memory block bound to this profile.",
+                "检索当前 profile 绑定的记忆区块。",
                 {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string"},
-                        "limit": {"type": "integer", "default": 10},
-                        "block": {"type": "string"},
+                        "query": {"type": "string", "description": "要检索的记忆关键词或问题。"},
+                        "limit": {"type": "integer", "default": 10, "description": "本次最多返回的结果数量。"},
+                        "block": {"type": "string", "description": "可选的记忆区块标识；留空时使用当前 profile 绑定区块。"},
                     },
                     "required": ["query"],
                 },
@@ -49,13 +49,13 @@ class MemoryBuiltinProvider:
             BuiltinTool(
                 "timeline",
                 "Memory Timeline",
-                "Read recent timeline items from the active memory block.",
+                "读取当前记忆区块的最近时间线。",
                 {
                     "type": "object",
                     "properties": {
-                        "limit": {"type": "integer", "default": 20},
-                        "cursor": {"type": "string"},
-                        "block": {"type": "string"},
+                        "limit": {"type": "integer", "default": 20, "description": "本次读取的时间线条目数量上限。"},
+                        "cursor": {"type": "string", "description": "时间线分页游标。"},
+                        "block": {"type": "string", "description": "可选的记忆区块标识；留空时使用当前 profile 绑定区块。"},
                     },
                 },
                 ToolType.search.value,
@@ -63,12 +63,12 @@ class MemoryBuiltinProvider:
             BuiltinTool(
                 "get",
                 "Memory Get",
-                "Read a memory observation by id.",
+                "按 ID 读取单条记忆 observation。",
                 {
                     "type": "object",
                     "properties": {
-                        "id": {"type": "string"},
-                        "block": {"type": "string"},
+                        "id": {"type": "string", "description": "要读取的记忆 observation ID。"},
+                        "block": {"type": "string", "description": "可选的记忆区块标识；留空时使用当前 profile 绑定区块。"},
                     },
                     "required": ["id"],
                 },

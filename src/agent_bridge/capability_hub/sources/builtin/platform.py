@@ -31,11 +31,11 @@ class PlatformBuiltinProvider:
             BuiltinTool(
                 "load_skill",
                 "Load Skill",
-                "Load a managed Agent Bridge skill prompt.",
+                "加载一个由 Agent Bridge 管理的技能提示词。",
                 {
                     "type": "object",
                     "properties": {
-                        "skill_name": {"type": "string"},
+                        "skill_name": {"type": "string", "description": "要加载的技能名称。"},
                     },
                     "required": ["skill_name"],
                 },
@@ -44,13 +44,13 @@ class PlatformBuiltinProvider:
             BuiltinTool(
                 "run_script",
                 "Run Script",
-                "Run a managed server-side Python script and return its JSON result.",
+                "运行托管的服务端 Python 脚本并返回 JSON 结果。",
                 {
                     "type": "object",
                     "properties": {
-                        "script_key": {"type": "string"},
-                        "script_params": {"type": "object", "default": {}},
-                        "timeout_seconds": {"type": "integer", "default": 60},
+                        "script_key": {"type": "string", "description": "要执行的脚本标识。"},
+                        "script_params": {"type": "object", "default": {}, "description": "传给脚本的 JSON 参数对象。"},
+                        "timeout_seconds": {"type": "integer", "default": 60, "description": "脚本执行超时时间，单位为秒。"},
                     },
                     "required": ["script_key"],
                 },

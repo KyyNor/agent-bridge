@@ -8,12 +8,13 @@ import keyword
 import logging
 import time
 from contextvars import ContextVar
-from typing import Any
+from typing import Annotated, Any
 
 import anyio
 from fastapi import APIRouter, Request, Response
 from mcp.server.fastmcp import FastMCP
 from mcp.server.streamable_http import StreamableHTTPServerTransport
+from pydantic import Field
 
 from agent_bridge.core.config import default_user
 from agent_bridge.app.service import AgentBridgeService
@@ -92,12 +93,16 @@ def _signature_from_json_schema(schema: dict[str, Any]) -> inspect.Signature:
         if not isinstance(definition, dict):
             definition = {}
         default = inspect._empty if name in required_names else definition.get("default", None)
+        annotation = _annotation_from_json_schema(definition)
+        description = definition.get("description")
+        if isinstance(description, str) and description.strip():
+            annotation = Annotated[annotation, Field(description=description.strip())]
         parameters.append(
             inspect.Parameter(
                 name,
                 inspect.Parameter.KEYWORD_ONLY,
                 default=default,
-                annotation=_annotation_from_json_schema(definition),
+                annotation=annotation,
             )
         )
     return inspect.Signature(parameters=parameters, return_annotation=dict[str, Any])
@@ -133,17 +138,12 @@ def create_mcp_server(
     )
 
     @mcp.tool(
-        description=(
-            "Browse and search the Agent Capability Hub registry. "
-            "With no arguments, returns visible MCP services. "
-            "With path=service_key, returns tools under that service. "
-            "query filters the current path."
-        ),
+        description="浏览并搜索 Agent Bridge 能力目录。",
     )
     def search(
-        path: str = "",
-        query: str = "",
-        limit: int = 20,
+        path: str = Field(default="", description="要浏览的能力路径；留空时返回当前可见服务列表。"),
+        query: str = Field(default="", description="用于过滤当前路径结果的关键词。"),
+        limit: int = Field(default=20, description="本次最多返回的结果数量。"),
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
         logger.info("搜索 profile=%s path=%s query=%s limit=%s", active_profile, path, query, limit)
@@ -163,12 +163,12 @@ def create_mcp_server(
             raise
 
     @mcp.tool(
-        description="Execute a registered Agent Bridge capability through the Agent Capability Hub gateway.",
+        description="执行一个已注册的 Agent Bridge 能力。",
     )
     async def execute(
-        service: str,
-        tool_name: str,
-        params: dict[str, Any] = {},
+        service: Annotated[str, Field(description="要调用的服务标识。")],
+        tool_name: Annotated[str, Field(description="服务下要执行的工具名称。")],
+        params: dict[str, Any] = Field(default_factory=dict, description="传给目标工具的 JSON 参数对象。"),
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
         current_workflow_context = _request_workflow_context.get() or active_workflow_context
@@ -196,15 +196,15 @@ def create_mcp_server(
             )
             raise
 
-    @mcp.tool(description="Search workflow artifacts visible to the active Agent Bridge profile.")
+    @mcp.tool(description="搜索当前 profile 可见的工作流产物。")
     def artifacts_search(
-        query: str = "",
-        tags: list[str] = [],
-        path: str = "",
-        workflow_key: str = "",
-        task_key: str = "",
-        task_version: str = "",
-        limit: int = 20,
+        query: str = Field(default="", description="按标题、摘要或内容检索产物的关键词。"),
+        tags: list[str] = Field(default_factory=list, description="要匹配的产物标签列表。"),
+        path: str = Field(default="", description="按产物路径前缀过滤结果。"),
+        workflow_key: str = Field(default="", description="只返回指定工作流的产物。"),
+        task_key: str = Field(default="", description="只返回指定任务键关联的产物。"),
+        task_version: str = Field(default="", description="只返回指定任务版本关联的产物。"),
+        limit: int = Field(default=20, description="本次最多返回的产物数量。"),
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
         return service.workflows.search_artifacts(
@@ -229,7 +229,7 @@ def create_mcp_server(
             active_workflow_context.get("run_id"),
         )
 
-        @mcp.tool(description="Lease one pending task for the current workflow run.")
+        @mcp.tool(description="领取当前工作流运行中的一个待处理任务。")
         def workflow_get_task() -> dict[str, Any]:
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}
@@ -250,8 +250,10 @@ def create_mcp_server(
                 ),
             )
 
-        @mcp.tool(description="Create or refresh pending tasks for the current workflow.")
-        def workflow_set_task(tasks: list[dict[str, Any]]) -> dict[str, Any]:
+        @mcp.tool(description="创建或刷新当前工作流的待处理任务。")
+        def workflow_set_task(
+            tasks: Annotated[list[dict[str, Any]], Field(description="要写入工作流队列的任务列表。")]
+        ) -> dict[str, Any]:
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}
             workflow_key = str(current.get("workflow_key") or "")
@@ -272,13 +274,13 @@ def create_mcp_server(
                 ),
             )
 
-        @mcp.tool(description="Append a workflow run log entry.")
+        @mcp.tool(description="追加一条当前工作流运行日志。")
         def workflow_run_log(
-            level: str = "info",
-            stage: str = "",
-            message: str = "",
-            task_key: str = "",
-            payload: dict[str, Any] = {},
+            level: str = Field(default="info", description="日志级别，如 info、warning 或 error。"),
+            stage: str = Field(default="", description="日志所属阶段标识。"),
+            message: str = Field(default="", description="日志消息正文。"),
+            task_key: str = Field(default="", description="关联的任务键；没有可留空。"),
+            payload: dict[str, Any] = Field(default_factory=dict, description="附加到日志中的 JSON 结构化载荷。"),
         ) -> dict[str, Any]:
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}
@@ -356,7 +358,7 @@ def create_mcp_server(
             mcp.tool(
                 name=name,
                 description=(
-                    f"Direct built-in Agent Bridge tool for {provider.source_key}.{builtin_tool.tool}. "
+                    f"直连内置工具 {provider.source_key}.{builtin_tool.tool}。"
                     f"{builtin_tool.description}"
                 ),
             )(direct_builtin_tool)

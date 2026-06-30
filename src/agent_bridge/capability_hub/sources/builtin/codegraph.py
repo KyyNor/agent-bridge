@@ -50,12 +50,12 @@ class CodeGraphBuiltinProvider:
             BuiltinTool(
                 EXPLORE_TOOL,
                 "CodeGraph Explore",
-                "Explore an allowed code repository through the repo-scoped CodeGraph MCP server.",
+                "在已授权代码仓库中进行结构化探索。",
                 {
                     "type": "object",
                     "properties": {
-                        "repo": {"type": "string"},
-                        "query": {"type": "string"},
+                        "repo": {"type": "string", "description": "要访问的代码仓库标识。"},
+                        "query": {"type": "string", "description": "要在仓库内执行的查询内容。"},
                     },
                     "required": ["repo", "query"],
                 },

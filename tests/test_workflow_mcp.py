@@ -66,11 +66,20 @@ def test_workflow_mcp_context_sees_workflow_task_tools(wm_paths):
     )
     tools = asyncio.run(mcp.list_tools())
     names = [tool.name for tool in tools]
+    tools_by_name = {tool.name: tool for tool in tools}
 
     assert "artifacts_search" in names
     assert "workflow_get_task" in names
     assert "workflow_set_task" in names
     assert "workflow_run_log" in names
+    assert tools_by_name["artifacts_search"].description == "搜索当前 profile 可见的工作流产物。"
+    assert tools_by_name["artifacts_search"].inputSchema["properties"]["query"]["description"] == "按标题、摘要或内容检索产物的关键词。"
+    assert tools_by_name["artifacts_search"].inputSchema["properties"]["tags"]["description"] == "要匹配的产物标签列表。"
+    assert tools_by_name["workflow_get_task"].description == "领取当前工作流运行中的一个待处理任务。"
+    assert tools_by_name["workflow_set_task"].description == "创建或刷新当前工作流的待处理任务。"
+    assert tools_by_name["workflow_set_task"].inputSchema["properties"]["tasks"]["description"] == "要写入工作流队列的任务列表。"
+    assert tools_by_name["workflow_run_log"].description == "追加一条当前工作流运行日志。"
+    assert tools_by_name["workflow_run_log"].inputSchema["properties"]["message"]["description"] == "日志消息正文。"
 
 
 def test_workflow_mcp_context_requires_workflow_key_and_run_id(wm_paths):

@@ -100,6 +100,9 @@ def test_codegraph_builtin_search_exposes_only_explore_tool(
     assert [item["tool"] for item in tools["items"]] == ["codegraph_explore"]
     schemas = {item["tool"]: item["input_schema"] for item in tools["items"]}
     assert schemas["codegraph_explore"]["required"] == ["repo", "query"]
+    assert schemas["codegraph_explore"]["properties"]["repo"]["description"] == "要访问的代码仓库标识。"
+    assert schemas["codegraph_explore"]["properties"]["query"]["description"] == "要在仓库内执行的查询内容。"
+    assert tools["items"][0]["description"] == "在已授权代码仓库中进行结构化探索。"
 
 
 def test_codegraph_builtin_explore_uses_repo_scoped_stdio_mcp_after_profile_check(
