@@ -211,7 +211,8 @@ class CapabilityGovernanceService:
         return self.render_profile_markdown(actor, profile_key)
 
     def render_profile_markdown(self, actor: str, profile_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        # 只读渲染：用于 SessionStart hook / agent 运行时给任意用户注入 profile 指导，
+        # 无副作用，不要求全局 admin。写操作（manual notes / pin refresh）各自有校验。
         profile = self.store.get_project_profile(profile_key)
         if profile is None:
             raise NotFound("profile not found")
