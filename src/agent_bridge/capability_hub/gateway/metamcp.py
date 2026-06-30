@@ -37,6 +37,18 @@ def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:
     value_type = definition.get("type")
     if isinstance(value_type, list):
         value_type = next((item for item in value_type if item != "null"), None)
+    # Pydantic 把 Optional/联合类型生成为 anyOf/oneOf，很多 MCP 客户端只认顶层 type
+    # 字段；这里取联合中非 null 的子 schema，避免最终参数类型显示为 "unknown"。
+    if value_type is None:
+        for union_key in ("anyOf", "oneOf"):
+            union = definition.get(union_key)
+            if isinstance(union, list):
+                for branch in union:
+                    if isinstance(branch, dict) and branch.get("type") != "null":
+                        value_type = branch.get("type")
+                        break
+                if value_type is not None:
+                    break
     if value_type == "string":
         return str
     if value_type == "integer":
@@ -129,8 +141,8 @@ def create_mcp_server(
         ),
     )
     def search(
-        path: str | None = None,
-        query: str | None = None,
+        path: str = "",
+        query: str = "",
         limit: int = 20,
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
@@ -156,7 +168,7 @@ def create_mcp_server(
     async def execute(
         service: str,
         tool_name: str,
-        params: dict[str, Any] | None = None,
+        params: dict[str, Any] = {},
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
         current_workflow_context = _request_workflow_context.get() or active_workflow_context
@@ -186,12 +198,12 @@ def create_mcp_server(
 
     @mcp.tool(description="Search workflow artifacts visible to the active Agent Bridge profile.")
     def artifacts_search(
-        query: str | None = None,
-        tags: list[str] | None = None,
-        path: str | None = None,
-        workflow_key: str | None = None,
-        task_key: str | None = None,
-        task_version: str | None = None,
+        query: str = "",
+        tags: list[str] = [],
+        path: str = "",
+        workflow_key: str = "",
+        task_key: str = "",
+        task_version: str = "",
         limit: int = 20,
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
@@ -265,8 +277,8 @@ def create_mcp_server(
             level: str = "info",
             stage: str = "",
             message: str = "",
-            task_key: str | None = None,
-            payload: dict[str, Any] | None = None,
+            task_key: str = "",
+            payload: dict[str, Any] = {},
         ) -> dict[str, Any]:
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}

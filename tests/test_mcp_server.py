@@ -31,6 +31,12 @@ def test_mcp_search_tool_has_path_query_schema():
     assert "query" in schema["properties"]
     assert "limit" in schema["properties"]
     assert "no arguments" in search_tool.description
+    # 可选参数必须是明确的单类型（顶层 type 字段），否则 MCP 客户端显示为 "unknown"。
+    properties = schema["properties"]
+    assert properties["path"]["type"] == "string"
+    assert properties["query"]["type"] == "string"
+    assert properties["limit"]["type"] == "integer"
+    assert not any("anyOf" in v or "oneOf" in v for v in properties.values())
 
 
 def test_mcp_execute_tool_has_service_tool_name_params_schema():
@@ -47,6 +53,12 @@ def test_mcp_execute_tool_has_service_tool_name_params_schema():
     assert "service" in schema["properties"]
     assert "tool_name" in schema["properties"]
     assert "params" in schema["properties"]
+    # params 必须有明确 type=object，不能只含 anyOf（否则客户端显示 "unknown"）。
+    properties = schema["properties"]
+    assert properties["service"]["type"] == "string"
+    assert properties["tool_name"]["type"] == "string"
+    assert properties["params"]["type"] == "object"
+    assert not any("anyOf" in v or "oneOf" in v for v in properties.values())
 
 
 def test_mcp_search_tool_calls_capability_service():
@@ -398,3 +410,38 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
         },
     ]
     assert structured["log_id"].startswith("call_")
+
+
+def test_anyof_json_schema_flattens_to_single_type_for_client_compat():
+    """外部 MCP 服务返回的 schema 常含 anyOf（Pydantic Optional 产物），多数 MCP 客户端
+    只认顶层 type 字段，否则参数类型显示为 "unknown"。验证 _signature_from_json_schema
+    能把 anyOf 含 null 的联合类型折叠为单一非 null 类型。"""
+    from agent_bridge.capability_hub.gateway.metamcp import _signature_from_json_schema
+    from mcp.server.fastmcp import FastMCP
+
+    schema_with_anyof = {
+        "type": "object",
+        "properties": {
+            "repo": {"type": "string"},
+            "query": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+            "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": None},
+        },
+        "required": ["repo"],
+    }
+
+    sig = _signature_from_json_schema(schema_with_anyof)
+    mcp = FastMCP(name="probe")
+
+    def fake_pinned_tool(**kwargs):
+        return {}
+
+    fake_pinned_tool.__signature__ = sig
+    mcp.tool(name="pinned_test", description="probe")(fake_pinned_tool)
+
+    tools = asyncio.run(mcp.list_tools())
+    properties = tools[0].inputSchema["properties"]
+    # 折叠后应带明确 type，且不再有 anyOf-only 字段。
+    assert properties["repo"]["type"] == "string"
+    assert properties["query"]["type"] == "string"
+    assert properties["limit"]["type"] == "integer"
+    assert not any("anyOf" in v or "oneOf" in v for v in properties.values())
