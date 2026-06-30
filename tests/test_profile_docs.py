@@ -65,3 +65,30 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     assert cache["rendered_hash"] == rendered["rendered_hash"]
     assert json.loads(cache["auto_summary_json"])["services"] == [{"service_key": "mysql", "name": "MySQL"}]
     assert "https://mysql.test/mcp" not in cache["auto_summary_json"]
+
+
+def test_render_profile_markdown_allows_non_admin_actor(wm_paths: AgentBridgePaths) -> None:
+    """render_profile_markdown 是只读渲染，对非 admin 用户开放（SessionStart hook / agent 运行时路径）。"""
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="safe", name="Safe Profile", description="", status="active", created_by="root")
+    store.create_mcp_service(
+        service_key="mysql",
+        name="MySQL",
+        endpoint_url="https://mysql.test/mcp",
+        headers={},
+        description="",
+        tags=[],
+        created_by="root",
+    )
+    store.update_mcp_service_status("mysql", "enabled")
+    store.replace_profile_source_rules("safe", [{"source_type": "mcp_service", "source_key": "mysql", "effect": "allow"}])
+    governance = CapabilityGovernanceService(store=store, admins={"root"})  # admins 不含 alice
+
+    # 非 admin 用户（alice）应能成功渲染，且结果与 admin（root）完全一致。
+    rendered_by_user = governance.render_profile_markdown("alice", "safe")
+    rendered_by_admin = governance.render_profile_markdown("root", "safe")
+
+    assert "Safe Profile" in rendered_by_user["markdown"]
+    assert rendered_by_user["markdown"] == rendered_by_admin["markdown"]
+    assert rendered_by_user["rendered_hash"] == rendered_by_admin["rendered_hash"]
