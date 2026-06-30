@@ -74,37 +74,37 @@ def install_profile_to_cwd(cwd: Path, profile: str, markdown: str) -> Path:
 
 
 def render_profile_markdown(summary: dict[str, Any], manual_notes: str) -> str:
-    profile_name = summary.get("profile_name") or summary.get("profile_key") or "Unnamed Profile"
+    profile_name = summary.get("profile_name") or summary.get("profile_key") or "未命名 Profile"
     services = _named_items(summary.get("services") or [], key_field="service_key")
     repositories = _named_items(summary.get("code_repositories") or [], key_field="repo_key")
     knowledge_bases = _named_items(summary.get("knowledge_bases") or [], key_field="slug")
-    notes = manual_notes.strip() or "No manual notes."
+    notes = manual_notes.strip() or "暂无手动备注。"
 
     return "\n".join(
         [
-            f"# Agent Bridge Profile: {profile_name}",
+            f"# Agent Bridge Profile：{profile_name}",
             "",
-            "## How To Use Agent Bridge",
+            "## 如何使用 Agent Bridge",
             "",
-            "- Use `search` to discover relevant tools and resources available to this profile.",
-            "- Use `execute` to call an allowed MCP tool after choosing the right service and tool.",
-            "- Use code repository capabilities to search and inspect indexed source code.",
-            "- Use knowledge base capabilities to search and ask questions over connected documentation.",
-            "- High-frequency capabilities may also be exposed directly as `pin_*` tools.",
+            "- 使用 `search` 发现此 profile 可用的相关工具和资源。",
+            "- 选择合适的服务与工具后，使用 `execute` 调用已允许的 MCP 工具。",
+            "- 使用代码仓库能力检索并查看已索引的源代码。",
+            "- 使用知识库能力检索连接的文档，并围绕这些文档提问。",
+            "- 高频能力也可能以 `pin_*` 工具的形式直接暴露。",
             "",
-            "## Available MCP Services",
+            "## 可用 MCP 服务",
             "",
-            "*_No MCP services._" if not services else "\n".join(services),
+            "*_暂无 MCP 服务。_*" if not services else "\n".join(services),
             "",
-            "## Available Code Repositories",
+            "## 可用代码仓库",
             "",
-            "*_None._" if not repositories else "\n".join(repositories),
+            "*_暂无。_*" if not repositories else "\n".join(repositories),
             "",
-            "## Available Knowledge Bases",
+            "## 可用知识库",
             "",
-            "*_None._" if not knowledge_bases else "\n".join(knowledge_bases),
+            "*_暂无。_*" if not knowledge_bases else "\n".join(knowledge_bases),
             "",
-            "## Manual Notes",
+            "## 手动备注",
             "",
             notes,
             "",
@@ -117,7 +117,9 @@ def _named_items(items: list[dict[str, Any]], *, key_field: str) -> list[str]:
     for item in items:
         key = str(item.get(key_field) or "").strip()
         name = str(item.get("name") or key).strip()
+        description = " ".join(str(item.get("description") or "").split())
         if not key:
             continue
-        rendered.append(f"- {name} (`{key}`)")
+        suffix = f"：{description}" if description else ""
+        rendered.append(f"- {name} (`{key}`){suffix}")
     return rendered

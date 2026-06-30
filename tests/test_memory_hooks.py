@@ -148,7 +148,7 @@ def test_session_start_hook_combines_profile_and_memory_context(wm_paths):
     assert result["exit_code"] == 0
     assert result["status"] == "ok"
     assert stdout["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    assert "# Agent Bridge Profile: Dev" in additional_context
+    assert "# Agent Bridge Profile：Dev" in additional_context
     assert "Memory context from claude-mem." in additional_context
     assert fake_worker.calls == [
         {
@@ -183,7 +183,7 @@ def test_session_start_hook_injects_profile_even_without_memory_binding(wm_paths
     additional_context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
     assert result["exit_code"] == 0
     assert result["status"] == "ok"
-    assert "# Agent Bridge Profile: Dev" in additional_context
+    assert "# Agent Bridge Profile：Dev" in additional_context
     assert "No active Agent Bridge memory block is bound" in additional_context
     assert fake_worker.calls == []
 

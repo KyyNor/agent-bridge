@@ -235,6 +235,7 @@ class CapabilityGovernanceService:
             {
                 "service_key": service["service_key"],
                 "name": service.get("name") or service["service_key"],
+                "description": service.get("description") or "",
             }
             for service in services
             if service["service_key"] in allowed_service_keys

@@ -405,7 +405,7 @@ def test_profile_doc_api_render_and_notes(wm_paths) -> None:
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert rendered.status_code == 200
-    assert "# Agent Bridge Profile: Safe" in rendered.json()["markdown"]
+    assert "# Agent Bridge Profile：Safe" in rendered.json()["markdown"]
     assert "Manual policy" in rendered.json()["markdown"]
 
 

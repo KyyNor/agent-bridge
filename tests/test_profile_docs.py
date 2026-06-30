@@ -16,7 +16,7 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
         name="MySQL",
         endpoint_url="https://mysql.test/mcp",
         headers={},
-        description="",
+        description="Run SQL queries.",
         tags=[],
         created_by="root",
     )
@@ -48,10 +48,10 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
 
     rendered = governance.render_profile_markdown("root", "safe")
 
-    assert "# Agent Bridge Profile: Safe Profile" in rendered["markdown"]
+    assert "# Agent Bridge Profile：Safe Profile" in rendered["markdown"]
     assert "search" in rendered["markdown"]
     assert "execute" in rendered["markdown"]
-    assert "- MySQL (`mysql`)" in rendered["markdown"]
+    assert "- MySQL (`mysql`)：Run SQL queries." in rendered["markdown"]
     assert "- Agent Bridge (`agent-bridge`)" in rendered["markdown"]
     assert "- Frontend Docs (`frontend-docs`)" in rendered["markdown"]
     assert "Use read-only queries only." in rendered["markdown"]
@@ -63,7 +63,9 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     assert cache["manual_notes"] == "## Manual Notes\nUse read-only queries only."
     assert cache["last_rendered_markdown"] == rendered["markdown"]
     assert cache["rendered_hash"] == rendered["rendered_hash"]
-    assert json.loads(cache["auto_summary_json"])["services"] == [{"service_key": "mysql", "name": "MySQL"}]
+    assert json.loads(cache["auto_summary_json"])["services"] == [
+        {"service_key": "mysql", "name": "MySQL", "description": "Run SQL queries."}
+    ]
     assert "https://mysql.test/mcp" not in cache["auto_summary_json"]
 
 
