@@ -34,7 +34,7 @@ def create_workflow_routes(service, actor):
     @router.get("/workflows/{workflow_key}/runs")
     def list_workflow_runs(
         workflow_key: str,
-        limit: int = 20,
+        limit: int = 200,
         current_actor: str = Depends(actor),
     ) -> list[dict[str, Any]]:
         return service.workflows.list_runs(current_actor, workflow_key, limit=limit)

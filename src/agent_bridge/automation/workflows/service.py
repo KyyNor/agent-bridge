@@ -93,7 +93,7 @@ class WorkflowService:
 
     def list_runs(self, actor: str, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        bounded = min(max(limit, 1), 50)
+        bounded = min(max(limit, 1), 200)
         return self.store.list_workflow_runs(workflow_key, limit=bounded)
 
     def list_tasks(self, actor: str, workflow_key: str) -> dict[str, Any]:

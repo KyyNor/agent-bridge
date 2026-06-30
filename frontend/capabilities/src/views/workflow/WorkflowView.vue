@@ -13,6 +13,7 @@ import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import { parseWorkflowDag } from './workflowDag'
 
 const artifactToolName = 'artifacts_search'
+const WORKFLOW_RUN_LIMIT = 200
 const props = defineProps<{ routeKey: string }>()
 
 const workflows = ref<WorkflowDefinition[]>([])
@@ -227,7 +228,7 @@ async function loadRunsForWorkflows(items = workflows.value) {
   runsLoading.value = true
   try {
     const entries = await Promise.all(
-      items.map(async item => [item.workflow_key, await api.listWorkflowRuns(item.workflow_key, 20)] as const),
+      items.map(async item => [item.workflow_key, await api.listWorkflowRuns(item.workflow_key, WORKFLOW_RUN_LIMIT)] as const),
     )
     workflowRuns.value = Object.fromEntries(entries)
     const runningEntry = entries.find(([, runList]) => runList.some(run => run.status === 'running'))
@@ -573,7 +574,7 @@ async function loadRuns(workflowKey = selectedWorkflow.value?.workflow_key || ''
   }
   runsLoading.value = true
   try {
-    const nextRuns = await api.listWorkflowRuns(key, 20)
+    const nextRuns = await api.listWorkflowRuns(key, WORKFLOW_RUN_LIMIT)
     workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns }
     if (key === selectedWorkflow.value?.workflow_key && !nextRuns.some(r => r.run_id === selectedRunId.value)) {
       selectedRunId.value = nextRuns[0]?.run_id || ''
@@ -593,7 +594,7 @@ function mergeWorkflowRun(run: WorkflowRun) {
   const nextRuns = index >= 0
     ? currentRuns.map(item => item.run_id === run.run_id ? run : item)
     : [run, ...currentRuns]
-  workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns.slice(0, 20) }
+  workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns.slice(0, WORKFLOW_RUN_LIMIT) }
 }
 
 async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '') {

@@ -617,6 +617,90 @@ class KnowledgeRepository:
             cursor = conn.execute("DELETE FROM backends WHERE slug = ?", (slug,))
             return cursor.rowcount > 0
 
+    def upsert_kb_repo_source(self, kb_id: int, repo_key: str, include_suffixes: list[str]) -> dict[str, Any]:
+        suffixes_json = json.dumps(include_suffixes, ensure_ascii=False)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO kb_repo_sources (kb_id, repo_key, include_suffixes_json, status, last_error)
+                VALUES (?, ?, ?, 'active', NULL)
+                ON CONFLICT(kb_id, repo_key) DO UPDATE SET
+                  include_suffixes_json = excluded.include_suffixes_json,
+                  status = 'active',
+                  last_error = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (kb_id, repo_key, suffixes_json),
+            )
+            row = conn.execute(
+                """
+                SELECT source.*, repo.name AS repo_name
+                FROM kb_repo_sources source
+                JOIN code_repositories repo ON repo.repo_key = source.repo_key
+                WHERE source.kb_id = ? AND source.repo_key = ?
+                """,
+                (kb_id, repo_key),
+            ).fetchone()
+            return self._kb_repo_source_payload(row)
+
+    def list_kb_repo_sources(self, kb_id: int) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT source.*, repo.name AS repo_name
+                FROM kb_repo_sources source
+                JOIN code_repositories repo ON repo.repo_key = source.repo_key
+                WHERE source.kb_id = ? AND source.status = 'active'
+                ORDER BY source.repo_key
+                """,
+                (kb_id,),
+            ).fetchall()
+            return [self._kb_repo_source_payload(row) for row in rows]
+
+    def get_kb_repo_source(self, kb_id: int, repo_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT source.*, repo.name AS repo_name
+                FROM kb_repo_sources source
+                JOIN code_repositories repo ON repo.repo_key = source.repo_key
+                WHERE source.kb_id = ? AND source.repo_key = ? AND source.status = 'active'
+                """,
+                (kb_id, repo_key),
+            ).fetchone()
+            return self._kb_repo_source_payload(row) if row else None
+
+    def mark_kb_repo_source_sync(
+        self,
+        kb_id: int,
+        repo_key: str,
+        *,
+        success: bool,
+        error: str | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE kb_repo_sources
+                SET last_synced_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE last_synced_at END,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE kb_id = ? AND repo_key = ?
+                """,
+                (1 if success else 0, error, kb_id, repo_key),
+            )
+
+    @staticmethod
+    def _kb_repo_source_payload(row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        raw_suffixes = payload.pop("include_suffixes_json", "[]")
+        try:
+            suffixes = json.loads(raw_suffixes)
+        except json.JSONDecodeError:
+            suffixes = []
+        payload["include_suffixes"] = [str(item) for item in suffixes if item]
+        return payload
+
     def delete_kb(self, kb_id: int) -> None:
         """硬删除一个知识库。
 

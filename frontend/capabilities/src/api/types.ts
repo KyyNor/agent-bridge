@@ -498,6 +498,27 @@ export interface CodeRepository {
   has_auth_ref?: boolean
 }
 
+export interface KbRepoSource {
+  id: number
+  kb_id: number
+  repo_key: string
+  repo_name: string
+  include_suffixes: string[]
+  status: string
+  last_synced_at: string | null
+  last_error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface KbRepoSourceSyncResult {
+  kb_slug: string
+  repo_key: string
+  matched: number
+  imported: number
+  skipped: number
+}
+
 export interface TestCloneResult {
   success: boolean
   message: string

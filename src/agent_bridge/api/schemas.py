@@ -180,6 +180,11 @@ class CodeRepositoryRequest(BaseModel):
     status: str = "active"
 
 
+class KbRepoSourceRequest(BaseModel):
+    repo_key: str
+    include_suffixes: list[str] = Field(default_factory=lambda: [".md", ".txt"])
+
+
 class CodeRepoCategoryRequest(BaseModel):
     category_key: str
     name: str

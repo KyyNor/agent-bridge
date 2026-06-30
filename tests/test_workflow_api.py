@@ -36,6 +36,42 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
     assert "manifest" not in listed.json()[0]
 
 
+def test_workflow_api_can_list_more_than_default_twenty_runs(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        status="active",
+    )
+    for i in range(75):
+        svc.store.create_workflow_run(
+            run_id=f"run_{i:02d}",
+            workflow_key="page-report",
+            profile_key="report-plane",
+            task_key=None,
+            status="completed",
+            temp_dir="",
+        )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.get(
+        "/workflows/page-report/runs?limit=75",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == 75
+
+
 def test_workflow_api_lists_artifacts(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService

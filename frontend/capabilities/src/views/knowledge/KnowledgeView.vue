@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Plus, RotateCw, Upload, File, Folder, Trash2 } from 'lucide-vue-next'
+import { Plus, RotateCw, Upload, File, Folder, Trash2, GitBranch } from 'lucide-vue-next'
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent } from '../../api/types'
+import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -20,12 +20,20 @@ const createError = ref('')
 // Detail dialog
 const showDetail = ref(false)
 const detailKb = ref<KnowledgeBaseSummary | null>(null)
-const detailTab = ref<'docs' | 'sync' | 'search'>('docs')
+const detailTab = ref<'docs' | 'sync' | 'sources' | 'search'>('docs')
 const detailDocs = ref<Document[]>([])
 const detailSyncJobs = ref<SyncJob[]>([])
+const detailRepoSources = ref<KbRepoSource[]>([])
 const detailLoading = ref(false)
 // Sync
 const syncing = ref(false)
+// Git repo sources
+const codeRepos = ref<CodeRepository[]>([])
+const repoSourceForm = ref({ repo_key: '', include_suffixes: '.md, .txt' })
+const repoSourceSaving = ref(false)
+const repoSourceSyncing = ref<Record<string, boolean>>({})
+const repoSourceError = ref('')
+const repoSourceMessage = ref('')
 // Search/Q&A
 const searchQuery = ref('')
 const searchResults = ref<SearchResultChunk[]>([])
@@ -159,13 +167,21 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   searchResults.value = []
   askAnswer.value = ''
   askChunks.value = []
+  detailRepoSources.value = []
+  repoSourceError.value = ''
+  repoSourceMessage.value = ''
   try {
-    const [docs, syncStatus] = await Promise.allSettled([
+    const [docs, syncStatus, repoSources, repos] = await Promise.allSettled([
       api.listDocs(kb.slug),
       api.getSyncStatus(),
+      api.listKbRepoSources(kb.slug),
+      api.listCodeRepos(),
     ])
     detailDocs.value = docs.status === 'fulfilled' ? docs.value : []
     detailSyncJobs.value = syncStatus.status === 'fulfilled' ? syncStatus.value.jobs.filter((j: SyncJob) => j.kb_slug === kb.slug) : []
+    detailRepoSources.value = repoSources.status === 'fulfilled' ? repoSources.value : []
+    codeRepos.value = repos.status === 'fulfilled' ? repos.value : []
+    resetRepoSourceForm()
     if (isWeknoraBackend(kb.default_backend_slug)) {
       detailAgents.value = await loadAgentsForBackend(kb.default_backend_slug as string)
     }
@@ -191,6 +207,81 @@ async function triggerSync() {
     }
   } catch { /* ignore */ }
   syncing.value = false
+}
+
+function resetRepoSourceForm() {
+  if (codeRepos.value.length === 0) {
+    repoSourceForm.value = { repo_key: '', include_suffixes: '.md, .txt' }
+    return
+  }
+  const repo = codeRepos.value.find(r => !detailRepoSources.value.some(source => source.repo_key === r.repo_key)) || codeRepos.value[0]
+  repoSourceForm.value.repo_key = repo.repo_key
+  onRepoSourceSelect()
+}
+
+function normalizeSuffixInput(value: string): string[] {
+  const suffixes: string[] = []
+  for (const raw of value.split(/[\s,，]+/)) {
+    const trimmed = raw.trim().toLowerCase()
+    if (!trimmed) continue
+    const suffix = trimmed.startsWith('.') ? trimmed : `.${trimmed}`
+    if (!suffixes.includes(suffix)) suffixes.push(suffix)
+  }
+  return suffixes
+}
+
+function onRepoSourceSelect() {
+  const existing = detailRepoSources.value.find(source => source.repo_key === repoSourceForm.value.repo_key)
+  repoSourceForm.value.include_suffixes = existing?.include_suffixes.join(', ') || '.md, .txt'
+  repoSourceError.value = ''
+  repoSourceMessage.value = ''
+}
+
+async function saveRepoSource() {
+  if (!detailKb.value) return
+  repoSourceError.value = ''
+  repoSourceMessage.value = ''
+  const include_suffixes = normalizeSuffixInput(repoSourceForm.value.include_suffixes)
+  if (!repoSourceForm.value.repo_key) {
+    repoSourceError.value = '请选择代码仓库'
+    return
+  }
+  if (include_suffixes.length === 0) {
+    repoSourceError.value = '请至少填写一个文件后缀'
+    return
+  }
+  repoSourceSaving.value = true
+  try {
+    await api.saveKbRepoSource(detailKb.value.slug, { repo_key: repoSourceForm.value.repo_key, include_suffixes })
+    detailRepoSources.value = await api.listKbRepoSources(detailKb.value.slug)
+    repoSourceForm.value.include_suffixes = include_suffixes.join(', ')
+    repoSourceMessage.value = '已保存 Git 数据源'
+  } catch (e: any) {
+    repoSourceError.value = e.message || '保存失败'
+  }
+  repoSourceSaving.value = false
+}
+
+async function syncRepoSource(source: KbRepoSource) {
+  if (!detailKb.value) return
+  repoSourceError.value = ''
+  repoSourceMessage.value = ''
+  repoSourceSyncing.value = { ...repoSourceSyncing.value, [source.repo_key]: true }
+  try {
+    const result = await api.syncKbRepoSource(detailKb.value.slug, source.repo_key)
+    const [repoSources, docs, syncStatus] = await Promise.all([
+      api.listKbRepoSources(detailKb.value.slug),
+      api.listDocs(detailKb.value.slug),
+      api.getSyncStatus(),
+    ])
+    detailRepoSources.value = repoSources
+    detailDocs.value = docs
+    detailSyncJobs.value = syncStatus.jobs.filter((j: SyncJob) => j.kb_slug === detailKb.value!.slug)
+    repoSourceMessage.value = `已导入 ${result.imported} 个文件，跳过 ${result.skipped} 个`
+  } catch (e: any) {
+    repoSourceError.value = e.message || '同步失败'
+  }
+  repoSourceSyncing.value = { ...repoSourceSyncing.value, [source.repo_key]: false }
 }
 
 async function doSearch() {
@@ -593,6 +684,7 @@ async function savePlaneProfiles() {
             <button v-for="t in [
               { key: 'docs', label: `文档 (${detailDocs.length})` },
               { key: 'sync', label: `同步 (${detailSyncJobs.length})` },
+              { key: 'sources', label: `Git 数据源 (${detailRepoSources.length})` },
               { key: 'search', label: '检索' },
             ]" :key="t.key"
               :class="['rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', detailTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
@@ -656,6 +748,65 @@ async function savePlaneProfiles() {
                 <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.backend_slug }}</td>
                 <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-red-600" :title="j.error ?? ''">{{ j.error || '—' }}</td>
                 <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ formatLocalDatetime(j.updated_at) }}</td>
+              </tr></tbody>
+            </table>
+          </div>
+
+          <!-- Git Sources Tab -->
+          <div v-if="detailTab === 'sources'" class="space-y-4">
+            <div class="rounded-lg border border-border p-4">
+              <div class="mb-3 flex items-center gap-2">
+                <GitBranch :size="15" class="text-muted-foreground" />
+                <h4 class="text-sm font-medium">Git 数据源</h4>
+              </div>
+              <div v-if="codeRepos.length === 0" class="py-4 text-sm text-muted-foreground">暂无已登记的代码仓库，请先在代码知识中添加仓库。</div>
+              <div v-else class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                <div class="space-y-1.5">
+                  <label class="text-xs font-medium text-muted-foreground">代码仓库</label>
+                  <select v-model="repoSourceForm.repo_key" @change="onRepoSourceSelect" class="h-9 w-full rounded-md border border-border bg-background px-2 text-sm">
+                    <option v-for="repo in codeRepos" :key="repo.repo_key" :value="repo.repo_key">{{ repo.name || repo.repo_key }}</option>
+                  </select>
+                </div>
+                <div class="space-y-1.5">
+                  <label class="text-xs font-medium text-muted-foreground">后缀过滤</label>
+                  <Input v-model="repoSourceForm.include_suffixes" placeholder=".md, .txt" />
+                </div>
+                <div class="flex items-end">
+                  <Button class="h-9" @click="saveRepoSource" :disabled="repoSourceSaving || !repoSourceForm.repo_key">
+                    {{ repoSourceSaving ? '保存中...' : '保存' }}
+                  </Button>
+                </div>
+              </div>
+              <div v-if="repoSourceError" class="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{{ repoSourceError }}</div>
+              <div v-if="repoSourceMessage" class="mt-3 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">{{ repoSourceMessage }}</div>
+            </div>
+
+            <div v-if="detailRepoSources.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无 Git 数据源</div>
+            <table v-else class="w-full">
+              <thead><tr class="border-b border-border">
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">include_suffixes</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">最近同步</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
+              </tr></thead>
+              <tbody><tr v-for="source in detailRepoSources" :key="source.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                <td class="px-3 py-2">
+                  <div class="text-sm font-medium">{{ source.repo_name || source.repo_key }}</div>
+                  <div class="font-mono text-xs text-muted-foreground">{{ source.repo_key }}</div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex flex-wrap gap-1">
+                    <Badge v-for="suffix in source.include_suffixes" :key="suffix" variant="secondary" class="font-mono text-[11px]">{{ suffix }}</Badge>
+                  </div>
+                </td>
+                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ source.last_synced_at ? formatLocalDatetime(source.last_synced_at) : '未同步' }}</td>
+                <td class="px-3 py-2 max-w-[180px] overflow-hidden text-ellipsis text-xs text-red-600" :title="source.last_error ?? ''">{{ source.last_error || '—' }}</td>
+                <td class="px-3 py-2 text-right">
+                  <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="repoSourceSyncing[source.repo_key]">
+                    {{ repoSourceSyncing[source.repo_key] ? '同步中...' : '立即同步' }}
+                  </Button>
+                </td>
               </tr></tbody>
             </table>
           </div>

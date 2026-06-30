@@ -15,6 +15,8 @@ import type {
   ExecuteCapabilityResult,
   KnowledgeBase,
   KnowledgeBaseSummary,
+  KbRepoSource,
+  KbRepoSourceSyncResult,
   OpenApiImportResult,
   OpenApiService,
   OpenApiTool,
@@ -216,7 +218,7 @@ export const api = {
   deleteWorkflow: (key: string) => post<{ workflow_key: string; deleted: boolean }>(`/workflows/${key}/delete`),
   clearWorkflowExecutionData: (key: string) =>
     post<WorkflowClearResult>(`/workflows/${key}/clear`),
-  listWorkflowRuns: (key: string, limit = 20) => {
+  listWorkflowRuns: (key: string, limit = 200) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
   },
@@ -408,6 +410,12 @@ export const api = {
     post<KnowledgeBase>('/kbs', data),
   updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null }) =>
     put<{ ok: boolean }>(`/kbs/${kbSlug}/defaults`, data),
+  listKbRepoSources: (kbSlug: string) =>
+    get<KbRepoSource[]>(`/kbs/${kbSlug}/repo-sources`),
+  saveKbRepoSource: (kbSlug: string, data: { repo_key: string; include_suffixes: string[] }) =>
+    post<KbRepoSource>(`/kbs/${kbSlug}/repo-sources`, data),
+  syncKbRepoSource: (kbSlug: string, repoKey: string) =>
+    post<KbRepoSourceSyncResult>(`/kbs/${kbSlug}/repo-sources/${repoKey}/sync`),
   deleteKnowledgeBase: (kbSlug: string) => post<{ deleted: boolean }>(`/kbs/${kbSlug}/delete`),
 
   // Documents

@@ -453,6 +453,85 @@ class AgentBridgeService:
         require_admin_user(actor, self.admins)
         self.store.delete_category(category_key=category_key)
 
+    def list_kb_repo_sources(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        return self.store.list_kb_repo_sources(kb["id"])
+
+    def upsert_kb_repo_source(
+        self,
+        actor: str,
+        kb_slug: str,
+        *,
+        repo_key: str,
+        include_suffixes: list[str],
+    ) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        if self.store.get_code_repository(repo_key) is None:
+            raise NotFound("code repository not found")
+        suffixes = self._normalize_repo_source_suffixes(include_suffixes)
+        return self.store.upsert_kb_repo_source(kb["id"], repo_key, suffixes)
+
+    def sync_kb_repo_source(self, actor: str, kb_slug: str, repo_key: str) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        source = self.store.get_kb_repo_source(kb["id"], repo_key)
+        if source is None:
+            raise NotFound("knowledge repo source not found")
+        repo = self.store.get_code_repository(repo_key)
+        if repo is None:
+            raise NotFound("code repository not found")
+
+        local_path = Path(str(repo.get("local_path") or "")) if repo.get("local_path") else self.paths.repos_dir / repo_key
+        try:
+            if not local_path.exists():
+                self.codegraph.sync_repository(actor, repo_key)
+                repo = self.store.get_code_repository(repo_key) or repo
+                local_path = Path(str(repo.get("local_path") or "")) if repo.get("local_path") else self.paths.repos_dir / repo_key
+            if not local_path.exists():
+                raise ValidationError("code repository has not been synced")
+
+            suffixes = set(source["include_suffixes"])
+            matched = 0
+            imported = 0
+            skipped = 0
+            for path in sorted(local_path.rglob("*")):
+                if path.is_symlink() or not path.is_file():
+                    continue
+                try:
+                    relative_parts = path.relative_to(local_path).parts
+                except ValueError:
+                    continue
+                if ".git" in relative_parts:
+                    continue
+                if path.suffix.lower() not in suffixes:
+                    continue
+                matched += 1
+                if path.suffix.lower() not in ALLOWED_EXTENSIONS:
+                    skipped += 1
+                    continue
+                self.add_document(actor, path, [kb_slug], later=True, original_filename=path.name)
+                imported += 1
+
+            self.store.mark_kb_repo_source_sync(kb["id"], repo_key, success=True)
+            return {"kb_slug": kb_slug, "repo_key": repo_key, "matched": matched, "imported": imported, "skipped": skipped}
+        except Exception as exc:
+            self.store.mark_kb_repo_source_sync(kb["id"], repo_key, success=False, error=str(exc))
+            raise
+
+    @staticmethod
+    def _normalize_repo_source_suffixes(suffixes: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for raw in suffixes:
+            value = str(raw or "").strip().lower()
+            if not value:
+                continue
+            if not value.startswith("."):
+                value = f".{value}"
+            if value not in normalized:
+                normalized.append(value)
+        if not normalized:
+            raise ValidationError("at least one suffix is required")
+        return normalized
+
     # -- Sync config & scheduler --
 
     def get_sync_config(self, actor: str) -> dict[str, Any]:

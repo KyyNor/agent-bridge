@@ -7,6 +7,7 @@ from agent_bridge.api.schemas import (
     AskRequest,
     CreateAgentRequest,
     CreateKbRequest,
+    KbRepoSourceRequest,
     PurgeRequest,
     SyncRequest,
     UpdateKbDefaultsRequest,
@@ -74,6 +75,27 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
     @router.post("/kbs/{kb_slug}/delete")
     def delete_kb(kb_slug: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.delete_kb(current_actor, kb_slug)
+
+    @router.get("/kbs/{kb_slug}/repo-sources")
+    def list_kb_repo_sources(kb_slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return service.list_kb_repo_sources(current_actor, kb_slug)
+
+    @router.post("/kbs/{kb_slug}/repo-sources")
+    def upsert_kb_repo_source(
+        kb_slug: str,
+        payload: KbRepoSourceRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.upsert_kb_repo_source(
+            current_actor,
+            kb_slug,
+            repo_key=payload.repo_key,
+            include_suffixes=payload.include_suffixes,
+        )
+
+    @router.post("/kbs/{kb_slug}/repo-sources/{repo_key}/sync")
+    def sync_kb_repo_source(kb_slug: str, repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.sync_kb_repo_source(current_actor, kb_slug, repo_key)
 
     @router.post("/docs")
     def add_document(

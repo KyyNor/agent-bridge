@@ -1217,6 +1217,25 @@ class SQLiteStore:
     def delete_backend(self, slug: str) -> bool:
         return self.knowledge.delete_backend(slug=slug)
 
+    def upsert_kb_repo_source(self, kb_id: int, repo_key: str, include_suffixes: list[str]) -> dict[str, Any]:
+        return self.knowledge.upsert_kb_repo_source(kb_id=kb_id, repo_key=repo_key, include_suffixes=include_suffixes)
+
+    def list_kb_repo_sources(self, kb_id: int) -> list[dict[str, Any]]:
+        return self.knowledge.list_kb_repo_sources(kb_id=kb_id)
+
+    def get_kb_repo_source(self, kb_id: int, repo_key: str) -> dict[str, Any] | None:
+        return self.knowledge.get_kb_repo_source(kb_id=kb_id, repo_key=repo_key)
+
+    def mark_kb_repo_source_sync(
+        self,
+        kb_id: int,
+        repo_key: str,
+        *,
+        success: bool,
+        error: str | None = None,
+    ) -> None:
+        return self.knowledge.mark_kb_repo_source_sync(kb_id=kb_id, repo_key=repo_key, success=success, error=error)
+
     def delete_kb(self, kb_id: int) -> None:
         return self.knowledge.delete_kb(kb_id=kb_id)
 

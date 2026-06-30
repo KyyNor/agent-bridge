@@ -402,6 +402,20 @@ CREATE TABLE IF NOT EXISTS code_repo_categories (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS kb_repo_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  repo_key TEXT NOT NULL REFERENCES code_repositories(repo_key) ON DELETE CASCADE,
+  include_suffixes_json TEXT NOT NULL DEFAULT '[".md",".txt"]',
+  status TEXT NOT NULL DEFAULT 'active',
+  last_synced_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (kb_id, repo_key)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_repo_sources_kb ON kb_repo_sources(kb_id);
+CREATE INDEX IF NOT EXISTS idx_kb_repo_sources_repo ON kb_repo_sources(repo_key);
 CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   code_sync_cron TEXT NOT NULL DEFAULT '*/30 * * * *',

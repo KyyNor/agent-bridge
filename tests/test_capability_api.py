@@ -591,6 +591,63 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
     assert "grid-cols-[12rem_minmax(0,10rem)_1fr]" in source
 
 
+def test_kb_repo_source_api_saves_config_and_syncs_filtered_files(wm_paths, tmp_path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    (repo / "notes.txt").write_text("notes\n", encoding="utf-8")
+    (repo / "skip.py").write_text("print('skip')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "docs"], cwd=repo, check=True, capture_output=True)
+    client.post(
+        "/kbs",
+        json={"slug": "docs", "name": "Docs", "description": ""},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    client.post(
+        "/code-repo/repositories",
+        json={
+            "repo_key": "docs-repo",
+            "name": "Docs Repo",
+            "git_url": str(repo),
+            "branch": "master",
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    client.post("/code-repo/repositories/docs-repo/sync", headers={"X-Agent-Bridge-User": "root"})
+
+    saved = client.post(
+        "/kbs/docs/repo-sources",
+        json={"repo_key": "docs-repo", "include_suffixes": [".md", ".txt"]},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    listed = client.get("/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post(
+        "/kbs/docs/repo-sources/docs-repo/sync",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"})
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["include_suffixes"] == [".md", ".txt"]
+    assert listed.status_code == 200
+    assert listed.json()[0]["repo_key"] == "docs-repo"
+    assert synced.status_code == 200, synced.text
+    assert synced.json()["matched"] == 2
+    assert {item["title"] for item in docs.json()} == {"guide", "notes"}
+
+
+def test_frontend_knowledge_view_exposes_git_repo_source_controls() -> None:
+    source = Path("frontend/capabilities/src/views/knowledge/KnowledgeView.vue").read_text(encoding="utf-8")
+    client = Path("frontend/capabilities/src/api/client.ts").read_text(encoding="utf-8")
+
+    assert "Git 数据源" in source
+    assert "include_suffixes" in source
+    assert "listKbRepoSources" in client
+    assert "syncKbRepoSource" in client
+
+
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
