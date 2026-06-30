@@ -35,6 +35,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         """应用生命周期：初始化存储、对齐后端、后台刷新托管插件、启动调度器，停止时逆序收尾。"""
         logger.info("Agent Bridge 服务启动 root=%s", resolved_paths.root)
         service.store.init_schema()
+        service.store.set_runtime_log_retention_days(int(service.store.get_sync_config().get("log_retention_days") or 180))
+        deleted_logs = service.store.prune_runtime_logs(force=True)
+        if any(deleted_logs.values()):
+            logger.info("运行日志清理完成 tool_call_logs=%d agent_runs=%d", deleted_logs["tool_call_logs"], deleted_logs["agent_runs"])
         try:
             service.align_backends()
         except Exception:

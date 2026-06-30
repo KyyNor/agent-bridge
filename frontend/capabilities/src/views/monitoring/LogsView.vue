@@ -9,10 +9,12 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 
 const logs = ref<ToolCallLog[]>([])
 const loading = ref(false)
 const statusFilter = ref('')
+const sourceFilter = ref('__all__')
 const search = ref('')
 
 const showDetail = ref(false)
@@ -42,6 +44,7 @@ async function loadLogs() {
   loading.value = true
   const params: Record<string, string | number> = { limit: 100 }
   if (statusFilter.value) params.status = statusFilter.value
+  if (sourceFilter.value !== '__all__') params.source_type = sourceFilter.value
   if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
   if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
   try { logs.value = await api.listLogs(params) } catch { logs.value = [] }
@@ -73,7 +76,9 @@ const displayLogs = computed(() => {
   return logs.value.filter(l =>
     l.tool_name?.toLowerCase().includes(q) ||
     l.actor?.toLowerCase().includes(q) ||
-    l.entrypoint?.toLowerCase().includes(q)
+    l.entrypoint?.toLowerCase().includes(q) ||
+    l.source_type?.toLowerCase().includes(q) ||
+    l.source_key?.toLowerCase().includes(q)
   )
 })
 
@@ -88,6 +93,57 @@ const filterTabs = computed(() => [
   { key: 'error', label: '失败', count: logs.value.filter(l => l.status === 'error').length },
   { key: 'blocked', label: '拦截', count: logs.value.filter(l => l.status === 'blocked').length },
 ])
+
+const sourceOptions = [
+  { value: '__all__', label: '全部来源' },
+  { value: 'hook', label: 'Hook' },
+  { value: 'mcp_service', label: 'MCP' },
+  { value: 'openapi_service', label: 'OpenAPI' },
+  { value: 'builtin', label: 'Builtin' },
+]
+
+function sourceTypeLabel(sourceType: string | null | undefined): string {
+  switch (sourceType) {
+    case 'hook':
+      return 'Hook'
+    case 'mcp_service':
+      return 'MCP'
+    case 'openapi_service':
+      return 'OpenAPI'
+    case 'builtin':
+      return 'Builtin'
+    default:
+      return '未标记'
+  }
+}
+
+function sourceBadgeClass(sourceType: string | null | undefined): string {
+  switch (sourceType) {
+    case 'hook':
+      return 'bg-indigo-50 text-indigo-700'
+    case 'mcp_service':
+      return 'bg-blue-50 text-blue-700'
+    case 'openapi_service':
+      return 'bg-cyan-50 text-cyan-700'
+    case 'builtin':
+      return 'bg-stone-100 text-stone-700'
+    default:
+      return ''
+  }
+}
+
+function entrypointLabel(entrypoint: string): string {
+  switch (entrypoint) {
+    case 'memory_hook_claude_code':
+      return 'Claude Code Hook'
+    case 'metamcp_execute':
+      return 'MetaMCP Execute'
+    case 'metamcp_search':
+      return 'MetaMCP Search'
+    default:
+      return entrypoint
+  }
+}
 </script>
 
 <template>
@@ -99,6 +155,14 @@ const filterTabs = computed(() => [
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" />
       </div>
+      <Select v-model="sourceFilter" @update:model-value="loadLogs">
+        <SelectTrigger class="w-[160px]">
+          <SelectValue placeholder="全部来源" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="option in sourceOptions" :key="option.value" :value="option.value">{{ option.label }}</SelectItem>
+        </SelectContent>
+      </Select>
       <div class="flex items-center gap-2 text-sm">
         <Input v-model="dateFrom" type="date" class="w-[140px]" @change="applyDateFilter" />
         <span class="text-muted-foreground">至</span>
@@ -130,6 +194,7 @@ const filterTabs = computed(() => [
           <thead>
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">时间</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">来源</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Profile</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">耗时</th>
@@ -141,6 +206,12 @@ const filterTabs = computed(() => [
           <tbody>
             <tr v-for="l in displayLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(l.created_at) }}</td>
+              <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                  <Badge variant="secondary" :class="sourceBadgeClass(l.source_type)">{{ sourceTypeLabel(l.source_type) }}</Badge>
+                  <span class="font-mono text-xs text-muted-foreground">{{ l.source_key || '—' }}</span>
+                </div>
+              </td>
               <td class="px-4 py-3 text-sm">{{ l.profile_key || '—' }}</td>
               <td class="px-4 py-3 font-mono text-sm">{{ l.tool_name || '—' }}</td>
               <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">{{ l.duration_ms != null ? `${l.duration_ms}ms` : '—' }}</td>
@@ -174,11 +245,17 @@ const filterTabs = computed(() => [
         <div v-else-if="detailLog" class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div><span class="text-muted-foreground">调用者</span><div class="font-medium">{{ detailLog.actor }}</div></div>
-            <div><span class="text-muted-foreground">入口</span><div class="font-medium">{{ detailLog.entrypoint }}</div></div>
+            <div><span class="text-muted-foreground">入口</span><div class="font-medium">{{ entrypointLabel(detailLog.entrypoint) }}</div></div>
             <div><span class="text-muted-foreground">工具</span><div class="font-mono font-medium">{{ detailLog.tool_name || '—' }}</div></div>
             <div><span class="text-muted-foreground">耗时</span><div class="font-medium tabular-nums">{{ detailLog.duration_ms != null ? `${detailLog.duration_ms}ms` : '—' }}</div></div>
             <div><span class="text-muted-foreground">Profile</span><div class="font-medium">{{ detailLog.profile_key || '—' }}</div></div>
-            <div><span class="text-muted-foreground">来源</span><div class="font-medium">{{ detailLog.source_key || '—' }}</div></div>
+            <div>
+              <span class="text-muted-foreground">来源</span>
+              <div class="flex items-center gap-2">
+                <Badge variant="secondary" :class="sourceBadgeClass(detailLog.source_type)">{{ sourceTypeLabel(detailLog.source_type) }}</Badge>
+                <span class="font-mono text-xs font-medium">{{ detailLog.source_key || '—' }}</span>
+              </div>
+            </div>
             <div><span class="text-muted-foreground">状态</span>
               <div>
                 <Badge v-if="detailLog.status === 'success'" variant="secondary" class="bg-green-50 text-green-700">成功</Badge>

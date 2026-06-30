@@ -691,6 +691,7 @@ export interface KnowledgeSyncConfig {
   workflow_max_runs: number
   workflow_max_runtime_minutes: number
   workflow_task_rerun_days: number
+  log_retention_days: number
   mcp_timeout_seconds: number
   understand_timeout_minutes: number
 }

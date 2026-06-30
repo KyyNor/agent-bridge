@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -13,6 +15,9 @@ from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEM
 class SQLiteStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
+        self._runtime_log_retention_days = 180
+        self._last_runtime_log_prune_monotonic: float | None = None
+        self._runtime_log_prune_interval_seconds = 3600.0
 
         from agent_bridge.storage.repositories.agent_runs import AgentRunsRepository
         from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
@@ -30,7 +35,7 @@ class SQLiteStore:
         self.codegraph = CodeGraphRepository(db_path, self.connect)
         self.workflows = WorkflowsRepository(db_path, self.connect)
         self.scripts = ScriptsRepository(db_path, self.connect)
-        self.agent_runs = AgentRunsRepository(db_path, self.connect)
+        self.agent_runs = AgentRunsRepository(db_path, self.connect, prune_callback=self.maybe_prune_runtime_logs)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -151,6 +156,7 @@ class SQLiteStore:
                     "workflow_max_runs": "INTEGER NOT NULL DEFAULT 0",
                     "workflow_max_runtime_minutes": "INTEGER NOT NULL DEFAULT 30",
                     "workflow_task_rerun_days": "INTEGER NOT NULL DEFAULT 30",
+                    "log_retention_days": "INTEGER NOT NULL DEFAULT 180",
                     "mcp_timeout_seconds": "INTEGER NOT NULL DEFAULT 150",
                     "understand_timeout_minutes": "INTEGER NOT NULL DEFAULT 120",
                 },
@@ -544,6 +550,7 @@ class SQLiteStore:
         workflow_max_runs: int = 0,
         workflow_max_runtime_minutes: int = 30,
         workflow_task_rerun_days: int = 30,
+        log_retention_days: int = 180,
         mcp_timeout_seconds: int = 150,
         understand_timeout_minutes: int = 120,
     ) -> dict[str, Any]:
@@ -560,6 +567,7 @@ class SQLiteStore:
             workflow_max_runs=workflow_max_runs,
             workflow_max_runtime_minutes=workflow_max_runtime_minutes,
             workflow_task_rerun_days=workflow_task_rerun_days,
+            log_retention_days=log_retention_days,
             mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
         )
@@ -1100,7 +1108,9 @@ class SQLiteStore:
         resource_key: str | None = None,
         duration_ms: int | None = None,
     ) -> dict[str, Any]:
-        return self.governance.create_tool_call_log(log_id=log_id, actor=actor, profile_key=profile_key, entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, request=request, response=response, status=status, error_message=error_message, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, duration_ms=duration_ms)
+        log = self.governance.create_tool_call_log(log_id=log_id, actor=actor, profile_key=profile_key, entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, request=request, response=response, status=status, error_message=error_message, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, duration_ms=duration_ms)
+        self.maybe_prune_runtime_logs()
+        return log
 
     def list_tool_call_logs(
         self,
@@ -1138,6 +1148,32 @@ class SQLiteStore:
 
     def get_tool_call_log(self, log_id: str) -> dict[str, Any] | None:
         return self.governance.get_tool_call_log(log_id=log_id)
+
+    def set_runtime_log_retention_days(self, days: int) -> None:
+        self._runtime_log_retention_days = max(int(days), 0)
+
+    def maybe_prune_runtime_logs(self, force: bool = False) -> dict[str, int]:
+        if self._runtime_log_retention_days <= 0:
+            return {"tool_call_logs": 0, "agent_runs": 0}
+        now = time.monotonic()
+        if not force and self._last_runtime_log_prune_monotonic is not None:
+            if now - self._last_runtime_log_prune_monotonic < self._runtime_log_prune_interval_seconds:
+                return {"tool_call_logs": 0, "agent_runs": 0}
+        deleted = self.prune_runtime_logs(force=True)
+        self._last_runtime_log_prune_monotonic = now
+        return deleted
+
+    def prune_runtime_logs(self, force: bool = False) -> dict[str, int]:
+        if self._runtime_log_retention_days <= 0:
+            return {"tool_call_logs": 0, "agent_runs": 0}
+        cutoff = (datetime.now(UTC) - timedelta(days=self._runtime_log_retention_days)).strftime("%Y-%m-%d %H:%M:%S")
+        deleted = {
+            "tool_call_logs": self.governance.purge_tool_call_logs_before(cutoff),
+            "agent_runs": self.agent_runs.purge_created_before(cutoff),
+        }
+        if force:
+            self._last_runtime_log_prune_monotonic = time.monotonic()
+        return deleted
 
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         return self.knowledge.create_kb(slug=slug, name=name, description=description, created_by=created_by)

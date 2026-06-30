@@ -475,6 +475,7 @@ class AgentBridgeService:
         workflow_max_runs: int = 0,
         workflow_max_runtime_minutes: int = 30,
         workflow_task_rerun_days: int = 30,
+        log_retention_days: int = 180,
         mcp_timeout_seconds: int = DEFAULT_MCP_TIMEOUT_SECONDS,
         understand_timeout_minutes: int = 120,
     ) -> dict[str, Any]:
@@ -492,14 +493,24 @@ class AgentBridgeService:
             workflow_max_runs=workflow_max_runs,
             workflow_max_runtime_minutes=workflow_max_runtime_minutes,
             workflow_task_rerun_days=workflow_task_rerun_days,
+            log_retention_days=log_retention_days,
             mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
         )
+        self.store.set_runtime_log_retention_days(log_retention_days)
+        deleted_logs = self.store.prune_runtime_logs(force=True)
         # 配置变更后刷新全部调度器，使其读取最新 cron / 时间窗
         logger.info(
             "同步配置已保存，刷新全部调度器 code_sync_cron=%s doc_sync_cron=%s understand_cron=%s "
-            "workflow_window=%s-%s",
-            code_sync_cron, doc_sync_cron, understand_cron, workflow_start_time, workflow_stop_time,
+            "workflow_window=%s-%s log_retention_days=%s pruned_tool_call_logs=%s pruned_agent_runs=%s",
+            code_sync_cron,
+            doc_sync_cron,
+            understand_cron,
+            workflow_start_time,
+            workflow_stop_time,
+            log_retention_days,
+            deleted_logs["tool_call_logs"],
+            deleted_logs["agent_runs"],
         )
         self.codegraph_scheduler.refresh()
         self.understand_scheduler.refresh()

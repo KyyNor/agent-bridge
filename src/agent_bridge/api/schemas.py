@@ -199,6 +199,7 @@ class KnowledgeSyncConfigRequest(BaseModel):
     workflow_max_runs: int = 0
     workflow_max_runtime_minutes: int = 30
     workflow_task_rerun_days: int = 30
+    log_retention_days: int = Field(default=180, ge=1)
     mcp_timeout_seconds: int = 150
     understand_timeout_minutes: int = 120
 

@@ -13,6 +13,7 @@ class McpServiceStatus(str, Enum):
 
 class SourceType(str, Enum):
     builtin = "builtin"
+    hook = "hook"
     mcp_service = "mcp_service"
     openapi_service = "openapi_service"
 

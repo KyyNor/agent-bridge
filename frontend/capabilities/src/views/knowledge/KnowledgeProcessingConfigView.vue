@@ -26,6 +26,7 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   workflow_max_runs: 0,
   workflow_max_runtime_minutes: 30,
   workflow_task_rerun_days: 30,
+  log_retention_days: 180,
   mcp_timeout_seconds: 150,
   understand_timeout_minutes: 120,
 })
@@ -145,6 +146,9 @@ const taskRerunDaysValid = computed(() =>
 const workflowRuntimeValid = computed(() =>
   Number.isInteger(syncConfig.value.workflow_max_runtime_minutes) && syncConfig.value.workflow_max_runtime_minutes >= 0,
 )
+const logRetentionValid = computed(() =>
+  Number.isInteger(syncConfig.value.log_retention_days) && syncConfig.value.log_retention_days > 0,
+)
 const mcpTimeoutValid = computed(() =>
   Number.isInteger(syncConfig.value.mcp_timeout_seconds) && syncConfig.value.mcp_timeout_seconds > 0,
 )
@@ -161,6 +165,7 @@ const cronValid = computed(() =>
   && maxRunsValid.value
   && taskRerunDaysValid.value
   && workflowRuntimeValid.value
+  && logRetentionValid.value
   && mcpTimeoutValid.value
   && understandTimeoutValid.value,
 )
@@ -414,6 +419,12 @@ async function deleteBackend(slug: string) {
           <Input v-model.number="syncConfig.workflow_task_rerun_days" type="number" min="0" placeholder="30" class="w-32 font-mono text-sm" />
           <span v-if="taskRerunDaysValid" class="text-xs text-muted-foreground">同 workflow/task/version 完成后超过 {{ syncConfig.workflow_task_rerun_days }} 天，set task 会重新置为待处理</span>
           <span v-else class="text-xs text-destructive">请输入非负整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">运行日志保留 <span class="text-xs text-muted-foreground">(天)</span></div>
+          <Input v-model.number="syncConfig.log_retention_days" type="number" min="1" placeholder="180" class="w-32 font-mono text-sm" />
+          <span v-if="logRetentionValid" class="text-xs text-muted-foreground">结构化调用日志与 Agent 运行记录仅保留最近 {{ syncConfig.log_retention_days }} 天</span>
+          <span v-else class="text-xs text-destructive">请输入正整数</span>
         </div>
 
         <div class="flex items-center gap-3">

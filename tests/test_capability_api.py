@@ -577,6 +577,8 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
 
     assert "定时任务管理" in source
     assert "code_sync_cron" in source
+    assert "log_retention_days" in source
+    assert "运行日志保留" in source
     assert "mcp_timeout_seconds" in source
     assert "MCP 超时" in source
     assert "doc_sync_cron" in source
@@ -884,6 +886,23 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
             "timeout": 150.0,
         }
     ]
+
+
+def test_sync_config_api_round_trips_log_retention_days(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    saved = client.post(
+        "/sync-config",
+        json={"code_sync_cron": "0 * * * *", "log_retention_days": 90},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    loaded = client.get("/sync-config", headers={"X-Agent-Bridge-User": "root"})
+
+    assert saved.status_code == 200
+    assert saved.json()["log_retention_days"] == 90
+    assert loaded.status_code == 200
+    assert loaded.json()["log_retention_days"] == 90
 
 
 def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths) -> None:

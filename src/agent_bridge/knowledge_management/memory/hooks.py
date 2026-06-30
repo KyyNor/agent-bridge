@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
+from agent_bridge.capability_hub.models import CallLogStatus, SourceType
 from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
@@ -50,6 +52,62 @@ class MemoryHookService:
     ) -> dict[str, Any]:
         """Claude Code hook 总入口：按 action 派发到 session-start 同步或 worker.handle_hook。"""
         logger.info("memory hook 收到请求 actor=%s profile=%s action=%s", actor, profile_key, action)
+        started = time.monotonic()
+        request_payload = {
+            "action": action,
+            "event_name": event_name,
+            "matcher": matcher,
+            "payload": payload,
+            "timeout_seconds": timeout_seconds,
+            "source": "claude-code",
+        }
+        try:
+            result = self._dispatch_claude_code_hook(
+                actor=actor,
+                profile_key=profile_key,
+                action=action,
+                event_name=event_name,
+                matcher=matcher,
+                payload=payload,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as exc:
+            self._audit_hook_call(
+                actor=actor,
+                profile_key=profile_key,
+                action=action,
+                request=request_payload,
+                response={"exception_type": type(exc).__name__, "message": str(exc)},
+                status=CallLogStatus.error.value,
+                error_message=f"{type(exc).__name__}: {exc}",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                error_type="hook_exception",
+            )
+            raise
+        self._audit_hook_call(
+            actor=actor,
+            profile_key=profile_key,
+            action=action,
+            request=request_payload,
+            response=result,
+            status=self._audit_status(result),
+            error_message=self._audit_error_message(result),
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error_type=self._audit_error_type(result),
+        )
+        return result
+
+    def _dispatch_claude_code_hook(
+        self,
+        *,
+        actor: str,
+        profile_key: str,
+        action: str,
+        event_name: str | None,
+        matcher: str | None,
+        payload: dict[str, Any],
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
         if action not in CLAUDE_MEM_HOOK_ACTIONS:
             logger.warning("memory hook 未支持的 action=%s", action)
             return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": "unsupported_action"}
@@ -83,6 +141,63 @@ class MemoryHookService:
             matcher=matcher,
             timeout_seconds=timeout_seconds,
         )
+
+    def _audit_hook_call(
+        self,
+        *,
+        actor: str,
+        profile_key: str,
+        action: str,
+        request: dict[str, Any],
+        response: dict[str, Any],
+        status: str,
+        error_message: str | None,
+        duration_ms: int,
+        error_type: str | None,
+    ) -> None:
+        if self.governance_service is None:
+            return
+        try:
+            self.governance_service.log_tool_call(
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint="memory_hook_claude_code",
+                source_type=SourceType.hook.value,
+                source_key="claude_code",
+                tool_name=action,
+                request=request,
+                response=response,
+                status=status,
+                error_message=error_message,
+                duration_ms=duration_ms,
+                error_type=error_type,
+            )
+        except Exception:
+            logger.warning("memory hook 审计写入失败 action=%s", action, exc_info=True)
+
+    @staticmethod
+    def _audit_status(result: dict[str, Any]) -> str:
+        hook_status = str(result.get("status") or "")
+        exit_code = int(result.get("exit_code") or 0)
+        if exit_code == 0 and hook_status in {"ok", "not_configured"}:
+            return CallLogStatus.success.value
+        return CallLogStatus.error.value
+
+    @staticmethod
+    def _audit_error_message(result: dict[str, Any]) -> str | None:
+        if MemoryHookService._audit_status(result) == CallLogStatus.success.value:
+            return None
+        stderr = str(result.get("stderr") or "").strip()
+        if stderr:
+            return stderr
+        return str(result.get("status") or "hook_error")
+
+    @staticmethod
+    def _audit_error_type(result: dict[str, Any]) -> str | None:
+        if MemoryHookService._audit_status(result) == CallLogStatus.success.value:
+            return None
+        status = str(result.get("status") or "").strip()
+        return status or "hook_error"
 
     def _handle_session_start(
         self,

@@ -690,6 +690,14 @@ class GovernanceRepository:
             ).fetchone()
             return row_to_dict(row)
 
+    def purge_tool_call_logs_before(self, cutoff_created_at: str) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM tool_call_logs WHERE created_at < ?",
+                (cutoff_created_at,),
+            )
+            return int(cursor.rowcount or 0)
+
     def migrate_profile_resource_retrieval_columns(self) -> None:
         with self._connect() as conn:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(profile_resource_rules)").fetchall()}
