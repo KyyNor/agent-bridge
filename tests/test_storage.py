@@ -183,6 +183,47 @@ def test_list_all_active_repo_sources(wm_paths: AgentBridgePaths) -> None:
     assert all(r["status"] == "active" for r in result)
 
 
+def test_list_kb_repo_sources_includes_doc_count(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb(slug="docs", name="Docs", description="", created_by="root")
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO code_repositories (repo_key, name, git_url, branch, auth_ref, status) "
+            "VALUES ('r1', 'R1', 'http://x', 'main', '', 'active')"
+        )
+    store.upsert_kb_repo_source(kb["id"], "r1", [".md"])
+    # 两个 git 文档 + 一个 manual
+    for slug in ("g1", "g2"):
+        d = store.create_document(slug, slug, "root", source_type="git", source_repo_key="r1")
+        store.attach_document_to_kb(d["id"], kb["id"], "root")
+    manual = store.create_document("m1", "M1", "root")
+    store.attach_document_to_kb(manual["id"], kb["id"], "root")
+    result = store.list_kb_repo_sources(kb["id"])
+    assert result[0]["doc_count"] == 2
+
+
+def test_delete_kb_repo_source_soft_deletes(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb(slug="docs", name="Docs", description="", created_by="root")
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO code_repositories (repo_key, name, git_url, branch, auth_ref, status) "
+            "VALUES ('r1', 'R1', 'http://x', 'main', '', 'active')"
+        )
+    store.upsert_kb_repo_source(kb["id"], "r1", [".md"])
+    store.delete_kb_repo_source(kb["id"], "r1")
+    # list 只返回 active
+    assert store.list_kb_repo_sources(kb["id"]) == []
+    # 但行还在(软删)
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT status FROM kb_repo_sources WHERE kb_id=? AND repo_key='r1'", (kb["id"],)
+        ).fetchone()
+        assert row[0] == "inactive"
+
+
 def test_schema_migration_adds_phase2_columns(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "test.db")
     store.init_schema()

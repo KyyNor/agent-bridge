@@ -1285,6 +1285,9 @@ class SQLiteStore:
     def list_all_active_repo_sources(self) -> list[dict[str, Any]]:
         return self.knowledge.list_all_active_repo_sources()
 
+    def delete_kb_repo_source(self, kb_id: int, repo_key: str) -> None:
+        return self.knowledge.delete_kb_repo_source(kb_id=kb_id, repo_key=repo_key)
+
     def delete_kb(self, kb_id: int) -> None:
         return self.knowledge.delete_kb(kb_id=kb_id)
 

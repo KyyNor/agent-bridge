@@ -654,7 +654,17 @@ class KnowledgeRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT source.*, repo.name AS repo_name
+                SELECT source.*, repo.name AS repo_name,
+                       (
+                           SELECT COUNT(*)
+                           FROM documents doc
+                           JOIN document_kbs dk ON dk.doc_id = doc.id
+                           WHERE dk.kb_id = source.kb_id
+                             AND dk.status = 'active'
+                             AND doc.source_type = 'git'
+                             AND doc.source_repo_key = source.repo_key
+                             AND doc.status != 'deleted'
+                       ) AS doc_count
                 FROM kb_repo_sources source
                 JOIN code_repositories repo ON repo.repo_key = source.repo_key
                 WHERE source.kb_id = ? AND source.status = 'active'
@@ -728,6 +738,18 @@ class KnowledgeRepository:
                 WHERE kb_id = ? AND repo_key = ?
                 """,
                 (1 if success else 0, error, kb_id, repo_key),
+            )
+
+    def delete_kb_repo_source(self, kb_id: int, repo_key: str) -> None:
+        """软删除 KB 与 git 仓库的数据源关联(保留行,供历史/重建)。"""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE kb_repo_sources
+                SET status = 'inactive', updated_at = CURRENT_TIMESTAMP
+                WHERE kb_id = ? AND repo_key = ?
+                """,
+                (kb_id, repo_key),
             )
 
     @staticmethod
