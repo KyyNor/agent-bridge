@@ -193,6 +193,9 @@ export interface WorkflowArtifact {
   format: string
   summary: string
   snippet: string
+  /** Full body — present only when the caller asks for `full` content or does
+   *  an exact-path lookup (see WorkflowTaskListParams / searchArtifacts). */
+  content?: string
   created_at: string
   updated_at: string
 }
@@ -274,6 +277,7 @@ export interface WorkflowTask {
   lease_expires_at: string | null
   attempt_count: number
   last_error: string | null
+  priority_flag: string | null
   created_at: string
   updated_at: string
   completed_at: string | null
@@ -281,6 +285,15 @@ export interface WorkflowTask {
 
 export interface WorkflowTasksResult {
   tasks: WorkflowTask[]
+}
+
+/** Server-side query params for listing a workflow's tasks (筛选/搜索/排序). */
+export interface WorkflowTaskListParams {
+  status?: string
+  type?: string
+  search?: string
+  /** Recognised: default | task_key_asc | task_key_desc | set_at_asc | set_at_desc | updated_at_desc */
+  sort?: string
 }
 
 export interface WorkflowClearResult {
@@ -304,6 +317,19 @@ export interface WorkflowRunEvent {
   session_id?: string
   total_cost_usd?: number
   num_turns?: number
+  /** Sub-agent attribution (feature 5). "main" for the top-level agent,
+   *  "subagent" for events produced by a Task-spawned sub-agent. */
+  agent_role?: 'main' | 'subagent'
+  /** Task id of the sub-agent this event belongs to (absent for main agent). */
+  task_id?: string
+  /** Human-readable sub-agent description / label. */
+  description?: string
+  /** The tool_use_id of the Task call that spawned this sub-agent. */
+  parent_tool_use_id?: string
+  /** Sub-agent usage stats (tokens / tool_uses / duration) on progress/end. */
+  usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number }
+  summary?: string
+  last_tool_name?: string
   [key: string]: unknown
 }
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from agent_bridge.agent_runtime.events import (
+    Attribution,
     event_record as _event_record,
     is_noisy_partial_message as _is_noisy_partial_message,
     message_events as _message_events,
@@ -95,6 +96,7 @@ class ClaudeWorkflowRunner:
             events_path.open("w", encoding="utf-8") as events,
         ):
             tool_names: dict[str, str] = {}
+            attribution = Attribution()
 
             def on_message(message: Any) -> None:
                 if _is_noisy_partial_message(message):
@@ -103,7 +105,7 @@ class ClaudeWorkflowRunner:
                     return
                 stdout.write(json.dumps(_message_log_record(message), ensure_ascii=False) + "\n")
                 stdout.flush()
-                for record in _message_events(message, tool_names):
+                for record in _message_events(message, tool_names, attribution=attribution):
                     _write_event(events, record)
 
             def write_stderr(chunk: str) -> None:

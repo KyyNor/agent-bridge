@@ -272,7 +272,7 @@ class SQLiteStore:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_key, created_at DESC)")
-            self._ensure_columns(conn, "workflow_tasks", {"type": "TEXT NOT NULL DEFAULT ''"})
+            self._ensure_columns(conn, "workflow_tasks", {"type": "TEXT NOT NULL DEFAULT ''", "priority_flag": "TEXT"})
 
     def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -613,8 +613,22 @@ class SQLiteStore:
     ) -> dict[str, Any] | None:
         return self.workflows.get_workflow_task(workflow_key, task_key, task_version=task_version)
 
-    def list_workflow_tasks(self, workflow_key: str) -> list[dict[str, Any]]:
-        return self.workflows.list_workflow_tasks(workflow_key)
+    def list_workflow_tasks(
+        self,
+        workflow_key: str,
+        *,
+        status: str | None = None,
+        type: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_tasks(
+            workflow_key,
+            status=status,
+            type=type,
+            search=search,
+            sort=sort,
+        )
 
     def lease_workflow_task(
         self,
@@ -624,6 +638,27 @@ class SQLiteStore:
         lease_seconds: int = 7200,
     ) -> dict[str, Any] | None:
         return self.workflows.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=lease_seconds)
+
+    def set_priority_for_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        *,
+        task_version: str | None = None,
+        flagged_at: str | None = None,
+    ) -> bool:
+        return self.workflows.set_priority_for_task(
+            workflow_key, task_key, task_version=task_version, flagged_at=flagged_at
+        )
+
+    def reset_workflow_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        *,
+        task_version: str | None = None,
+    ) -> bool:
+        return self.workflows.reset_workflow_task(workflow_key, task_key, task_version=task_version)
 
     def complete_workflow_task(
         self,

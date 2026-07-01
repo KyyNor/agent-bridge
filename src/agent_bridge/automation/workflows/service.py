@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -96,11 +97,122 @@ class WorkflowService:
         bounded = min(max(limit, 1), 200)
         return self.store.list_workflow_runs(workflow_key, limit=bounded)
 
-    def list_tasks(self, actor: str, workflow_key: str) -> dict[str, Any]:
+    def list_tasks(
+        self,
+        actor: str,
+        workflow_key: str,
+        *,
+        status: str | None = None,
+        type: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_workflow_definition(workflow_key) is None:
             raise NotFound("workflow not found")
-        return {"tasks": self.store.list_workflow_tasks(workflow_key)}
+        return {
+            "tasks": self.store.list_workflow_tasks(
+                workflow_key, status=status, type=type, search=search, sort=sort
+            )
+        }
+
+    @staticmethod
+    def _is_leasable(task: dict[str, Any]) -> bool:
+        """Mirror of lease_workflow_task's eligibility: pending, or running
+        with an expired lease."""
+        status = task.get("status")
+        if status == "pending":
+            return True
+        if status == "running":
+            expires_at = task.get("lease_expires_at")
+            if expires_at:
+                try:
+                    return datetime.fromisoformat(expires_at) < datetime.now(timezone.utc)
+                except ValueError:
+                    return False
+        return False
+
+    def execute_task(
+        self,
+        *,
+        actor: str,
+        workflow_key: str,
+        task_key: str,
+        task_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Mark a single task for priority execution.
+
+        Stamps a one-shot priority flag so the next ``workflow_get_task`` lease
+        picks this task ahead of normal id ordering, then (in the route layer)
+        a workflow run is started. Does not itself start the run. The task must
+        be currently leasable (pending or lease-expired); otherwise the caller
+        must reset it first.
+        """
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        task = self.store.get_workflow_task(workflow_key, task_key, task_version=(task_version or None))
+        if task is None:
+            raise NotFound("workflow task not found")
+        if not self._is_leasable(task):
+            raise ValidationError("task is not currently executable; reset it first")
+        resolved_task_version = str(task.get("task_version") or "")
+        self.store.set_priority_for_task(workflow_key, task_key, task_version=resolved_task_version)
+        logger.info(
+            "Workflow 任务标记优先执行 workflow=%s task=%s version=%s actor=%s",
+            workflow_key,
+            task_key,
+            resolved_task_version,
+            actor,
+        )
+        return {
+            "workflow_key": workflow_key,
+            "task_key": task_key,
+            "task_version": resolved_task_version,
+            "priority": True,
+        }
+
+    def reset_task(
+        self,
+        *,
+        actor: str,
+        workflow_key: str,
+        task_key: str,
+        task_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Reset a task to a leasable state without triggering execution.
+
+        Clears status/lease/completion/priority so the task can be picked up by
+        the next ``workflow_get_task`` call. Does not start a run and does not
+        change queue ordering. ``attempt_count`` and ``last_error`` are kept as
+        an audit trail.
+        """
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        task = self.store.get_workflow_task(workflow_key, task_key, task_version=(task_version or None))
+        if task is None:
+            raise NotFound("workflow task not found")
+        if task.get("status") == "running" and not self._is_leasable(task):
+            raise ValidationError("task is currently running; wait for the lease to expire or stop the run first")
+        resolved_task_version = str(task.get("task_version") or "")
+        updated = self.store.reset_workflow_task(workflow_key, task_key, task_version=resolved_task_version)
+        if not updated:
+            raise NotFound("workflow task not found")
+        task = self.store.get_workflow_task(workflow_key, task_key, task_version=resolved_task_version)
+        logger.info(
+            "Workflow 任务已重置 workflow=%s task=%s version=%s actor=%s",
+            workflow_key,
+            task_key,
+            resolved_task_version,
+            actor,
+        )
+        return {
+            "workflow_key": workflow_key,
+            "task_key": task_key,
+            "task_version": resolved_task_version,
+            "status": task["status"],
+        }
 
     def get_run(self, actor: str, run_id: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -362,6 +474,7 @@ class WorkflowService:
         task_version: str | None = None,
         include_history: bool = False,
         trusted_profile_context: bool = False,
+        full: bool = False,
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
             raise AccessDenied("capability profile is required")
@@ -405,9 +518,10 @@ class WorkflowService:
                 "created_at": item["created_at"],
                 "updated_at": item["updated_at"],
             }
-            # Exact-path lookup is a "fetch this one" request: return the full
-            # body, not just a snippet. Prefix matches keep snippet-only.
-            if path and item["path"] == path:
+            # Return the full body when explicitly requested (feature: view a
+            # task's outputs from the progress page) or on an exact-path lookup
+            # ("fetch this one"). Prefix matches keep snippet-only otherwise.
+            if full or (path and item["path"] == path):
                 entry["content"] = item["content"]
             return entry
 

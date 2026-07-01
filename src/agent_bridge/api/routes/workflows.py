@@ -40,8 +40,22 @@ def create_workflow_routes(service, actor):
         return service.workflows.list_runs(current_actor, workflow_key, limit=limit)
 
     @router.get("/workflows/{workflow_key}/tasks")
-    def list_workflow_tasks(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.workflows.list_tasks(current_actor, workflow_key)
+    def list_workflow_tasks(
+        workflow_key: str,
+        status: str | None = None,
+        type: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.list_tasks(
+            current_actor,
+            workflow_key,
+            status=status,
+            type=type,
+            search=search,
+            sort=sort,
+        )
 
     @router.get("/workflow-runs/{run_id}/logs")
     def list_run_logs(run_id: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
@@ -60,6 +74,7 @@ def create_workflow_routes(service, actor):
         task_key: str | None = None,
         task_version: str | None = None,
         include_history: bool = False,
+        full: bool = False,
         tags: list[str] = Query(default=[]),
         limit: int = 20,
         current_actor: str = Depends(actor),
@@ -74,6 +89,7 @@ def create_workflow_routes(service, actor):
             task_key=task_key,
             task_version=task_version,
             include_history=include_history,
+            full=full,
             limit=limit,
         )
 
@@ -108,6 +124,38 @@ def create_workflow_routes(service, actor):
     @router.post("/workflows/{workflow_key}/run")
     def run_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflow_scheduler.run_workflow_now(workflow_key)
+
+    @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/execute")
+    def execute_task(
+        workflow_key: str,
+        task_key: str,
+        task_version: str | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        # Stamp the one-shot priority flag, then start a workflow run. The
+        # flagged task is leased first by the agent's workflow_get_task call.
+        flagged = service.workflows.execute_task(
+            actor=current_actor,
+            workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+        )
+        started = service.workflow_scheduler.run_workflow_now(workflow_key)
+        return {**flagged, "run_id": started.get("run_id"), "run_status": started.get("status")}
+
+    @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/reset")
+    def reset_task(
+        workflow_key: str,
+        task_key: str,
+        task_version: str | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.reset_task(
+            actor=current_actor,
+            workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+        )
 
     @router.get("/workflow-runs/{run_id}")
     def get_run(run_id: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
