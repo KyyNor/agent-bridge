@@ -12,6 +12,20 @@ from typing import Any, TextIO
 
 import json
 
+# SDK message type names that carry Task-lifecycle (sub-agent) metadata. We key
+# off the type name (not isinstance) so the extraction works even when the SDK
+# message classes are mocked/ducked in tests.
+_TASK_STARTED = "TaskStartedMessage"
+_TASK_PROGRESS = "TaskProgressMessage"
+_TASK_NOTIFICATION = "TaskNotificationMessage"
+_TASK_UPDATED = "TaskUpdatedMessage"
+_TASK_MESSAGE_TYPES = frozenset({_TASK_STARTED, _TASK_PROGRESS, _TASK_NOTIFICATION, _TASK_UPDATED})
+
+# Subtypes whose raw high-frequency *partial* messages are dropped from the
+# canonical event stream. A generic ``task_progress`` streaming partial (a
+# SystemMessage with this subtype, no task metadata) is noise; the valuable
+# sub-agent progress is carried by the typed ``TaskProgressMessage`` which is
+# projected to a ``subagent_progress`` event before reaching this check.
 _NOISY_PARTIAL_SUBTYPES = {"thinking_tokens", "task_progress"}
 
 
@@ -51,14 +65,6 @@ def write_event(events: TextIO, record: dict[str, Any]) -> None:
     events.flush()
 
 
-# Subtypes whose raw high-frequency *partial* messages are dropped from the
-# canonical event stream. A generic ``task_progress`` streaming partial (a
-# SystemMessage with this subtype, no task metadata) is noise; the valuable
-# sub-agent progress is carried by the typed ``TaskProgressMessage`` which is
-# projected to a ``subagent_progress`` event before reaching this check.
-_NOISY_PARTIAL_SUBTYPES = {"thinking_tokens", "task_progress"}
-
-
 def is_noisy_partial_message(message: Any) -> bool:
     """High-frequency SDK partials (thinking_tokens, task_progress) — drop.
 
@@ -70,16 +76,6 @@ def is_noisy_partial_message(message: Any) -> bool:
     if type(message).__name__ in _TASK_MESSAGE_TYPES:
         return False
     return getattr(message, "subtype", None) in _NOISY_PARTIAL_SUBTYPES
-
-
-# SDK message type names that carry Task-lifecycle (sub-agent) metadata. We key
-# off the type name (not isinstance) so the extraction works even when the SDK
-# message classes are mocked/ducked in tests.
-_TASK_STARTED = "TaskStartedMessage"
-_TASK_PROGRESS = "TaskProgressMessage"
-_TASK_NOTIFICATION = "TaskNotificationMessage"
-_TASK_UPDATED = "TaskUpdatedMessage"
-_TASK_MESSAGE_TYPES = frozenset({_TASK_STARTED, _TASK_PROGRESS, _TASK_NOTIFICATION, _TASK_UPDATED})
 
 
 class Attribution:

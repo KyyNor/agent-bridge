@@ -11,7 +11,7 @@ export interface WorkflowTaskFilters {
   /** Sentinel `__all__` means "no type filter" (reka-ui Select rejects empty values). */
   type: string
   search: string
-  /** Recognised: default | id_asc | id_desc | set_at_asc | set_at_desc | updated_at_desc */
+  /** Recognised: default | task_key_asc | task_key_desc | set_at_asc | set_at_desc | updated_at_desc */
   sort: string
 }
 
@@ -62,9 +62,9 @@ export function matchTaskFilter(task: WorkflowTask, filters: WorkflowTaskFilters
 
 function compareTask(a: WorkflowTask, b: WorkflowTask, sort: string): number {
   switch (sort) {
-    case 'id_asc':
+    case 'task_key_asc':
       return a.task_key < b.task_key ? -1 : a.task_key > b.task_key ? 1 : 0
-    case 'id_desc':
+    case 'task_key_desc':
       return a.task_key < b.task_key ? 1 : a.task_key > b.task_key ? -1 : 0
     case 'set_at_asc':
       return a.set_at < b.set_at ? -1 : a.set_at > b.set_at ? 1 : 0

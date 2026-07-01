@@ -749,6 +749,13 @@ function canExecuteTask(task: WorkflowTask): boolean {
   return false
 }
 
+function canResetTask(task: WorkflowTask): boolean {
+  return task.status === 'completed'
+    || task.status === 'failed'
+    || task.status === 'abandoned'
+    || (task.status === 'running' && canExecuteTask(task))
+}
+
 function taskActionKey(task: WorkflowTask) {
   return taskId(task)
 }
@@ -1478,8 +1485,8 @@ async function confirmClearWorkflow() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="default">默认（状态优先）</SelectItem>
-                <SelectItem value="id_asc">task_key ↑</SelectItem>
-                <SelectItem value="id_desc">task_key ↓</SelectItem>
+                <SelectItem value="task_key_asc">task_key ↑</SelectItem>
+                <SelectItem value="task_key_desc">task_key ↓</SelectItem>
                 <SelectItem value="set_at_asc">设置时间 ↑</SelectItem>
                 <SelectItem value="set_at_desc">设置时间 ↓</SelectItem>
                 <SelectItem value="updated_at_desc">最近更新</SelectItem>
@@ -1549,7 +1556,7 @@ async function confirmClearWorkflow() {
                     {{ expandedTaskIds.has(taskId(task)) ? '收起日志' : '展开日志' }}
                   </Button>
                   <Button
-                    v-if="task.status === 'completed' || task.status === 'failed' || task.status === 'abandoned' || task.status === 'running'"
+                    v-if="canResetTask(task)"
                     variant="ghost"
                     size="sm"
                     class="h-8 text-xs text-amber-600"

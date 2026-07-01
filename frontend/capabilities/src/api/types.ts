@@ -292,7 +292,7 @@ export interface WorkflowTaskListParams {
   status?: string
   type?: string
   search?: string
-  /** Recognised: default | id_asc | id_desc | set_at_asc | set_at_desc | updated_at_desc */
+  /** Recognised: default | task_key_asc | task_key_desc | set_at_asc | set_at_desc | updated_at_desc */
   sort?: string
 }
 

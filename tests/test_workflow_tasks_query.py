@@ -109,7 +109,19 @@ def test_list_tasks_sort_options(wm_paths):
     store.init_schema()
     _seed(store)
 
-    # id ascending -> insertion order.
+    # task_key ascending / descending use lexical key order.
+    assert _task_keys(store.list_workflow_tasks("w", sort="task_key_asc")) == [
+        "page:alpha",
+        "page:beta",
+        "page:gamma",
+    ]
+    assert _task_keys(store.list_workflow_tasks("w", sort="task_key_desc")) == [
+        "page:gamma",
+        "page:beta",
+        "page:alpha",
+    ]
+
+    # id ascending -> insertion order (kept as a compatibility alias).
     assert _task_keys(store.list_workflow_tasks("w", sort="id_asc")) == [
         "page:alpha",
         "page:beta",

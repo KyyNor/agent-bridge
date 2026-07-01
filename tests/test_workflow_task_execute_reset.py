@@ -112,6 +112,24 @@ def test_execute_task_supports_task_version(wm_paths):
     assert svc.store.get_workflow_task("w", "page:a", task_version="v2")["priority_flag"] is not None
 
 
+def test_execute_task_without_version_prioritizes_resolved_latest_version(wm_paths):
+    """When task_version is omitted, the API reports the latest row and must
+    priority-stamp that same row only."""
+    svc = _service(wm_paths)
+    svc.store.upsert_workflow_tasks(
+        "w",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {}}, {"task_key": "page:a", "task_version": "v2", "payload": {}}],
+    )
+
+    result = svc.workflows.execute_task(actor="root", workflow_key="w", task_key="page:a")
+
+    assert result["task_version"] == "v2"
+    assert svc.store.get_workflow_task("w", "page:a", task_version="v1")["priority_flag"] is None
+    assert svc.store.get_workflow_task("w", "page:a", task_version="v2")["priority_flag"] is not None
+    leased = svc.store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
+    assert leased["task_version"] == "v2"
+
+
 # ---------------------------------------------------------------------------
 # reset_task
 # ---------------------------------------------------------------------------
@@ -154,6 +172,32 @@ def test_reset_task_preserves_attempt_count(wm_paths):
 
     svc.workflows.reset_task(actor="root", workflow_key="w", task_key="page:a")
     assert svc.store.get_workflow_task("w", "page:a")["attempt_count"] == 1
+
+
+def test_reset_task_rejects_active_running_task(wm_paths):
+    svc = _service(wm_paths)
+    svc.store.upsert_workflow_tasks("w", [{"task_key": "page:a", "payload": {}}])
+    _seed_run(svc.store)
+    svc.store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
+
+    with pytest.raises(ValidationError):
+        svc.workflows.reset_task(actor="root", workflow_key="w", task_key="page:a")
+
+
+def test_reset_task_without_version_resets_resolved_latest_version_only(wm_paths):
+    svc = _service(wm_paths)
+    svc.store.upsert_workflow_tasks(
+        "w",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {}}, {"task_key": "page:a", "task_version": "v2", "payload": {}}],
+    )
+    svc.store.set_priority_for_task("w", "page:a", task_version="v1")
+    svc.store.set_priority_for_task("w", "page:a", task_version="v2")
+
+    result = svc.workflows.reset_task(actor="root", workflow_key="w", task_key="page:a")
+
+    assert result["task_version"] == "v2"
+    assert svc.store.get_workflow_task("w", "page:a", task_version="v1")["priority_flag"] is not None
+    assert svc.store.get_workflow_task("w", "page:a", task_version="v2")["priority_flag"] is None
 
 
 def test_reset_task_unknown_task_raises_not_found(wm_paths):

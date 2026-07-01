@@ -125,7 +125,7 @@ def create_workflow_routes(service, actor):
     def run_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflow_scheduler.run_workflow_now(workflow_key)
 
-    @router.post("/workflows/{workflow_key}/tasks/{task_key}/execute")
+    @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/execute")
     def execute_task(
         workflow_key: str,
         task_key: str,
@@ -143,7 +143,7 @@ def create_workflow_routes(service, actor):
         started = service.workflow_scheduler.run_workflow_now(workflow_key)
         return {**flagged, "run_id": started.get("run_id"), "run_status": started.get("status")}
 
-    @router.post("/workflows/{workflow_key}/tasks/{task_key}/reset")
+    @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/reset")
     def reset_task(
         workflow_key: str,
         task_key: str,

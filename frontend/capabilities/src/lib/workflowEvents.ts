@@ -61,9 +61,10 @@ export function groupEventsByActor(events: WorkflowRunEvent[]): EventGroup[] {
   const actors = distinctActors(events)
   const buckets: Record<string, WorkflowRunEvent[]> = {}
   for (const ev of events) {
-    const id = (ev.agent_role === 'subagent' && ev.task_id) || (SUBAGENT_KINDS.has(ev.kind) && ev.task_id)
-      ? ev.task_id!
-      : 'main'
+    const belongsToSubagent = Boolean(
+      ev.task_id && (ev.agent_role === 'subagent' || SUBAGENT_KINDS.has(ev.kind)),
+    )
+    const id = belongsToSubagent ? ev.task_id! : 'main'
     ;(buckets[id] ||= []).push(ev)
   }
   return actors

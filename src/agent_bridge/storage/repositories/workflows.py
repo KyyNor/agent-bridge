@@ -250,6 +250,8 @@ class WorkflowsRepository:
     _TASK_SORT_ORDER_BY = {
         "id_asc": "id ASC",
         "id_desc": "id DESC",
+        "task_key_asc": "task_key ASC, task_version ASC, id ASC",
+        "task_key_desc": "task_key DESC, task_version DESC, id DESC",
         "set_at_asc": "set_at ASC, id ASC",
         "set_at_desc": "set_at DESC, id DESC",
         "updated_at_desc": "updated_at DESC, id DESC",

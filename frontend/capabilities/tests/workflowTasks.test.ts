@@ -95,13 +95,13 @@ test('filterAndSortTasks search matches task_key (case-insensitive) and type', (
   )
 })
 
-test('filterAndSortTasks sorts by id_asc / id_desc', () => {
+test('filterAndSortTasks sorts by task_key_asc / task_key_desc', () => {
   assert.deepEqual(
-    filterAndSortTasks(sample, filters({ sort: 'id_asc' })).map(t => t.task_key),
+    filterAndSortTasks(sample, filters({ sort: 'task_key_asc' })).map(t => t.task_key),
     ['page:alpha', 'page:beta', 'page:gamma'],
   )
   assert.deepEqual(
-    filterAndSortTasks(sample, filters({ sort: 'id_desc' })).map(t => t.task_key),
+    filterAndSortTasks(sample, filters({ sort: 'task_key_desc' })).map(t => t.task_key),
     ['page:gamma', 'page:beta', 'page:alpha'],
   )
 })

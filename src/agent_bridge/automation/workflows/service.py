@@ -156,18 +156,19 @@ class WorkflowService:
             raise NotFound("workflow task not found")
         if not self._is_leasable(task):
             raise ValidationError("task is not currently executable; reset it first")
-        self.store.set_priority_for_task(workflow_key, task_key, task_version=(task_version or None))
+        resolved_task_version = str(task.get("task_version") or "")
+        self.store.set_priority_for_task(workflow_key, task_key, task_version=resolved_task_version)
         logger.info(
             "Workflow 任务标记优先执行 workflow=%s task=%s version=%s actor=%s",
             workflow_key,
             task_key,
-            task_version or "",
+            resolved_task_version,
             actor,
         )
         return {
             "workflow_key": workflow_key,
             "task_key": task_key,
-            "task_version": task.get("task_version", task_version or ""),
+            "task_version": resolved_task_version,
             "priority": True,
         }
 
@@ -189,21 +190,27 @@ class WorkflowService:
         require_admin_user(actor, self.admins)
         if self.store.get_workflow_definition(workflow_key) is None:
             raise NotFound("workflow not found")
-        updated = self.store.reset_workflow_task(workflow_key, task_key, task_version=(task_version or None))
+        task = self.store.get_workflow_task(workflow_key, task_key, task_version=(task_version or None))
+        if task is None:
+            raise NotFound("workflow task not found")
+        if task.get("status") == "running" and not self._is_leasable(task):
+            raise ValidationError("task is currently running; wait for the lease to expire or stop the run first")
+        resolved_task_version = str(task.get("task_version") or "")
+        updated = self.store.reset_workflow_task(workflow_key, task_key, task_version=resolved_task_version)
         if not updated:
             raise NotFound("workflow task not found")
-        task = self.store.get_workflow_task(workflow_key, task_key, task_version=(task_version or None))
+        task = self.store.get_workflow_task(workflow_key, task_key, task_version=resolved_task_version)
         logger.info(
             "Workflow 任务已重置 workflow=%s task=%s version=%s actor=%s",
             workflow_key,
             task_key,
-            task_version or "",
+            resolved_task_version,
             actor,
         )
         return {
             "workflow_key": workflow_key,
             "task_key": task_key,
-            "task_version": task.get("task_version", task_version or ""),
+            "task_version": resolved_task_version,
             "status": task["status"],
         }
 
