@@ -317,6 +317,19 @@ export interface WorkflowRunEvent {
   session_id?: string
   total_cost_usd?: number
   num_turns?: number
+  /** Sub-agent attribution (feature 5). "main" for the top-level agent,
+   *  "subagent" for events produced by a Task-spawned sub-agent. */
+  agent_role?: 'main' | 'subagent'
+  /** Task id of the sub-agent this event belongs to (absent for main agent). */
+  task_id?: string
+  /** Human-readable sub-agent description / label. */
+  description?: string
+  /** The tool_use_id of the Task call that spawned this sub-agent. */
+  parent_tool_use_id?: string
+  /** Sub-agent usage stats (tokens / tool_uses / duration) on progress/end. */
+  usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number }
+  summary?: string
+  last_tool_name?: string
   [key: string]: unknown
 }
 

@@ -22,6 +22,7 @@ from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
 from claude_agent_sdk.types import ResultMessage
 
 from agent_bridge.agent_runtime.events import (
+    Attribution,
     event_record,
     is_noisy_partial_message,
     message_events,
@@ -126,6 +127,7 @@ class AgentService:
         work_dir: Path | None = None
         events: list[dict[str, Any]] = []
         tool_names: dict[str, str] = {}
+        attribution = Attribution()
         result_msg: ResultMessage | None = None
         error: str | None = None
         mode = "in-place" if cwd is not None else "managed"
@@ -187,7 +189,7 @@ class AgentService:
                 max_budget_usd=max_budget_usd,
             )
             result_msg = await asyncio.wait_for(
-                self._drain_query(prompt, options, on_message, events, tool_names),
+                self._drain_query(prompt, options, on_message, events, tool_names, attribution),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
@@ -227,13 +229,14 @@ class AgentService:
         on_message: Callable[[Any], None] | None,
         events: list[dict[str, Any]],
         tool_names: dict[str, str],
+        attribution: Attribution,
     ) -> ResultMessage | None:
         last: ResultMessage | None = None
         async for message in claude_query(prompt=prompt, options=options):
             if on_message is not None:
                 on_message(message)
             if not is_noisy_partial_message(message):
-                events.extend(message_events(message, tool_names))
+                events.extend(message_events(message, tool_names, attribution=attribution))
             if isinstance(message, ResultMessage):
                 last = message
         return last

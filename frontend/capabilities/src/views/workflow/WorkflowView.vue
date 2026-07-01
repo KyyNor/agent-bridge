@@ -20,6 +20,13 @@ import {
   taskStats as computeTaskStats,
   taskStatusLabel as labelTaskStatus,
 } from '../../lib/workflowTasks'
+import {
+  distinctActors,
+  filterEventsByActor,
+  groupEventsByActor,
+  subagentUsage,
+  subagentStatus,
+} from '../../lib/workflowEvents'
 
 const artifactToolName = 'artifacts_search'
 const WORKFLOW_RUN_LIMIT = 200
@@ -81,6 +88,8 @@ const taskActionLoading = ref<Set<string>>(new Set())
 const taskActionError = ref('')
 const resetTarget = ref<WorkflowTask | null>(null)
 const resetting = ref(false)
+// Per-task sub-agent event filter (feature 5). Keyed by task id; "" = all.
+const taskActorFilter = ref<Record<string, string>>({})
 const taskArtifactActive = ref<Record<string, string>>({})
 let taskSearchDebounce: ReturnType<typeof setTimeout> | null = null
 const testing = ref(false)
@@ -538,12 +547,16 @@ function logLevelClass(level: string) {
 }
 
 function eventKindLabel(event: WorkflowRunEvent) {
-  if (event.kind === 'agent_message') return event.agent_name || 'agent'
+  if (event.kind === 'agent_message') return event.agent_role === 'subagent' ? '子 Agent' : (event.agent_name || 'agent')
   if (event.kind === 'tool_call') return '工具调用'
   if (event.kind === 'tool_result') return event.status === 'failed' ? '工具失败' : '工具完成'
   if (event.kind === 'result') return event.status === 'failed' ? '运行失败' : '运行结果'
   if (event.kind === 'error') return '异常'
   if (event.kind === 'status') return '状态'
+  if (event.kind === 'subagent_start') return '子 Agent 启动'
+  if (event.kind === 'subagent_progress') return '子 Agent 进度'
+  if (event.kind === 'subagent_end') return event.status === 'failed' ? '子 Agent 失败' : '子 Agent 完成'
+  if (event.kind === 'subagent_updated') return '子 Agent 更新'
   return event.kind
 }
 
@@ -828,6 +841,37 @@ function taskEvents(task: WorkflowTask) {
   return task.lease_run_id ? taskRunEvents.value[task.lease_run_id] || [] : []
 }
 
+/** Sub-agent actors present in a task's event stream (feature 5). */
+function taskActors(task: WorkflowTask) {
+  return distinctActors(taskEvents(task))
+}
+
+function taskActorFilterFor(task: WorkflowTask) {
+  return taskActorFilter.value[taskId(task)] || ''
+}
+
+function setTaskActorFilter(task: WorkflowTask, actorId: string) {
+  taskActorFilter.value = { ...taskActorFilter.value, [taskId(task)]: actorId }
+}
+
+/** Events for a task after the per-task actor filter is applied. */
+function taskFilteredEvents(task: WorkflowTask) {
+  return filterEventsByActor(taskEvents(task), taskActorFilterFor(task))
+}
+
+/** Filtered events grouped by actor (main + each sub-agent). */
+function taskEventGroups(task: WorkflowTask) {
+  return groupEventsByActor(taskFilteredEvents(task))
+}
+
+function taskUsageFor(task: WorkflowTask, taskIdStr: string) {
+  return subagentUsage(taskEvents(task), taskIdStr)
+}
+
+function taskStatusFor(task: WorkflowTask, taskIdStr: string) {
+  return subagentStatus(taskEvents(task), taskIdStr)
+}
+
 function isTaskLogLoading(task: WorkflowTask) {
   return task.lease_run_id ? taskLogLoading.value.has(task.lease_run_id) : false
 }
@@ -1015,6 +1059,7 @@ async function confirmClearWorkflow() {
     taskActionLoading.value = new Set()
     taskActionError.value = ''
     resetTarget.value = null
+    taskActorFilter.value = {}
     await Promise.all([
       loadRunsForWorkflows(),
       loadTasks(wf.workflow_key),
@@ -1577,15 +1622,44 @@ async function confirmClearWorkflow() {
                       <div class="text-xs font-semibold text-foreground">Agent 输出</div>
                       <Badge variant="outline">{{ taskEvents(task).length }}</Badge>
                     </div>
+                    <!-- 子 Agent 筛选（feature 5） -->
+                    <div v-if="taskActors(task).length > 1" class="flex flex-wrap items-center gap-1">
+                      <button type="button" class="cursor-pointer" @click="setTaskActorFilter(task, '')">
+                        <Badge :variant="taskActorFilterFor(task) === '' ? 'default' : 'outline'">全部</Badge>
+                      </button>
+                      <button
+                        v-for="actor in taskActors(task)"
+                        :key="actor.id"
+                        type="button"
+                        class="cursor-pointer"
+                        @click="setTaskActorFilter(task, actor.id)"
+                      >
+                        <Badge :variant="taskActorFilterFor(task) === actor.id ? 'default' : 'outline'" :class="actor.role === 'subagent' ? 'bg-purple-50 text-purple-700' : ''">
+                          {{ actor.label }}
+                        </Badge>
+                      </button>
+                    </div>
                     <div v-if="!taskEvents(task).length" class="text-sm text-muted-foreground">暂无 agent 输出</div>
-                    <div v-else class="max-h-72 space-y-2 overflow-auto text-xs">
-                      <div v-for="(event, idx) in taskEvents(task)" :key="taskRunLogKey(task) + ':event:' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                          <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                          <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                    <div v-else class="max-h-80 space-y-3 overflow-auto text-xs">
+                      <div v-for="group in taskEventGroups(task)" :key="taskRunLogKey(task) + ':actor:' + group.actor.id" class="space-y-1">
+                        <div v-if="group.actor.role === 'subagent'" class="flex flex-wrap items-center gap-2 rounded bg-purple-50/60 px-2 py-1 dark:bg-purple-950/30">
+                          <span class="font-medium text-purple-700 dark:text-purple-300">{{ group.actor.label }}</span>
+                          <Badge variant="outline" class="text-[10px]">{{ group.events.length }}</Badge>
+                          <span v-if="taskUsageFor(task, group.actor.id)" class="text-[10px] text-muted-foreground">
+                            {{ taskUsageFor(task, group.actor.id)?.total_tokens ?? 0 }} tokens · {{ taskUsageFor(task, group.actor.id)?.tool_uses ?? 0 }} 工具
+                          </span>
+                          <Badge v-if="taskStatusFor(task, group.actor.id)" variant="outline" :class="taskStatusFor(task, group.actor.id) === 'completed' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'" class="text-[10px]">
+                            {{ taskStatusFor(task, group.actor.id) }}
+                          </Badge>
                         </div>
-                        <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                        <div v-for="(event, idx) in group.events" :key="taskRunLogKey(task) + ':event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                            <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                            <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                          </div>
+                          <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                        </div>
                       </div>
                     </div>
                   </section>
