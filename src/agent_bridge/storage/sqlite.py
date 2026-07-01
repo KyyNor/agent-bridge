@@ -1409,5 +1409,8 @@ class SQLiteStore:
     def soft_delete_document(self, doc_id: int) -> None:
         return self.knowledge.soft_delete_document(doc_id=doc_id)
 
+    def rename_document_slug(self, doc_id: int, slug: str) -> None:
+        return self.knowledge.rename_document_slug(doc_id=doc_id, slug=slug)
+
     def purge_document(self, doc_id: int) -> list[str]:
         return self.knowledge.purge_document(doc_id=doc_id)

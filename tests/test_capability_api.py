@@ -1116,6 +1116,60 @@ def test_sync_changes_modifies_changed_file_as_delete_then_add(wm_paths, tmp_pat
     docs_after = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     # doc_id 变化(先删后加)
     assert docs_after[0]["id"] != doc_id_before
+    unchanged = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    assert unchanged.json()["unchanged"] == 1
+    assert unchanged.json()["added"] == 0
+    assert unchanged.json()["removed"] == 0
+    assert unchanged.json()["updated"] == 0
+
+
+def test_sync_changes_refreshes_repo_before_diff(wm_paths, tmp_path: Path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    repo = _setup_repo_and_kb(tmp_path, client)
+    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+
+    (repo / "guide.md").write_text("# Guide from upstream\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "upstream update"], cwd=repo, check=True, capture_output=True)
+
+    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["updated"] == 1
+    assert r.json()["unchanged"] == 0
+
+
+def test_sync_changes_handles_duplicate_slugs_stably(wm_paths, tmp_path: Path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "a").mkdir()
+    (repo / "b").mkdir()
+    (repo / "a" / "guide.md").write_text("# First\n", encoding="utf-8")
+    (repo / "b" / "guide.md").write_text("# Second\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "duplicate guides"], cwd=repo, check=True, capture_output=True)
+    client.post("/kbs", json={"slug": "docs", "name": "Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
+    client.post(
+        "/code-repo/repositories",
+        json={"repo_key": "r1", "name": "R1", "git_url": str(repo), "branch": "master"},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    client.post(
+        "/kbs/docs/repo-sources",
+        json={"repo_key": "r1", "include_suffixes": [".md"]},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    first = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    second = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+
+    assert first.status_code == 200, first.text
+    assert first.json()["added"] == 2
+    assert second.status_code == 200, second.text
+    assert second.json()["updated"] == 0
+    assert second.json()["unchanged"] == 2
 
 
 def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:

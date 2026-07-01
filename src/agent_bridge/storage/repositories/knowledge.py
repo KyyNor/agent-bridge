@@ -203,6 +203,13 @@ class KnowledgeRepository:
                 (DocumentStatus.deleted.value, doc_id),
             )
 
+    def rename_document_slug(self, doc_id: int, slug: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE documents SET slug = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (slug, doc_id),
+            )
+
     def purge_document(self, doc_id: int) -> list[str]:
         with self._connect() as conn:
             rows = conn.execute(

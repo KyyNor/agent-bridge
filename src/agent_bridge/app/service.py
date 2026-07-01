@@ -267,6 +267,7 @@ class AgentBridgeService:
         original_filename: str | None = None,
         source_type: str = "manual",
         source_repo_key: str = "",
+        slug_override: str | None = None,
     ) -> dict[str, Any]:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
@@ -275,7 +276,7 @@ class AgentBridgeService:
         kbs = [self._require_kb_admin_visible(actor, kb_slug) for kb_slug in kb_slugs]
 
         display_name = original_filename or source.name
-        slug = unique_slug(make_slug(display_name), self.store.list_document_slugs())
+        slug = slug_override or unique_slug(make_slug(display_name), self.store.list_document_slugs())
         archived = self.archive.store(source)
         doc = self.store.create_document(
             slug=slug, title=Path(display_name).stem, owner_user=actor,
@@ -492,7 +493,7 @@ class AgentBridgeService:
             raise NotFound("knowledge repo source not found")
         git_docs = self.store.list_git_docs_for_repo(kb["id"], repo_key)
         for doc in git_docs:
-            self.delete_document(actor, doc["slug"], later=True)
+            self._delete_git_document(actor, doc)
         self.store.delete_kb_repo_source(kb["id"], repo_key)
         logger.info("git 数据源已删除 kb=%s repo=%s 删除文档数=%d", kb_slug, repo_key, len(git_docs))
         return {"kb_slug": kb_slug, "repo_key": repo_key, "deleted_docs": len(git_docs)}
@@ -514,25 +515,24 @@ class AgentBridgeService:
         if repo is None:
             raise NotFound("code repository not found")
 
-        local_path = Path(str(repo.get("local_path") or "")) if repo.get("local_path") else self.paths.repos_dir / repo_key
         try:
-            if not local_path.exists():
-                self.codegraph.sync_repository(actor, repo_key)
-                repo = self.store.get_code_repository(repo_key) or repo
-                local_path = Path(str(repo.get("local_path") or "")) if repo.get("local_path") else self.paths.repos_dir / repo_key
+            self.codegraph.sync_repository(actor, repo_key)
+            repo = self.store.get_code_repository(repo_key) or repo
+            local_path = Path(str(repo.get("local_path") or "")) if repo.get("local_path") else self.paths.repos_dir / repo_key
             if not local_path.exists():
                 raise ValidationError("code repository has not been synced")
 
             suffixes = set(source["include_suffixes"])
-            # existing: {slug: content_hash}
+            # existing: {slug: doc}
             existing = {
-                d["slug"]: (d.get("content_hash") or "")
+                d["slug"]: d
                 for d in self.store.list_git_docs_for_repo(kb["id"], repo_key)
             }
             existing_slugs = set(existing.keys())
 
-            # current: 扫描仓库,计算每个文件的 (slug, content_hash)
-            current: dict[str, str] = {}
+            # current: 扫描仓库,按实际可存入的 slug 计算每个文件的 (path, content_hash)。
+            occupied_slugs = self.store.list_document_slugs() - existing_slugs
+            current: dict[str, dict[str, Any]] = {}
             for path in sorted(local_path.rglob("*")):
                 if path.is_symlink() or not path.is_file():
                     continue
@@ -546,25 +546,25 @@ class AgentBridgeService:
                     continue
                 if path.suffix.lower() not in ALLOWED_EXTENSIONS:
                     continue
-                slug = make_slug(Path(path.name).stem)
-                current[slug] = self._sha256_file(path)
+                slug = unique_slug(make_slug(path.name), occupied_slugs | set(current.keys()))
+                current[slug] = {"path": path, "content_hash": self._sha256_file(path)}
 
             added = removed = updated = unchanged = 0
             # 新增 + 修改
-            for slug, content_hash in current.items():
+            for slug, item in current.items():
                 if slug not in existing_slugs:
-                    self._import_repo_file(actor, kb_slug, repo_key, local_path, suffixes, slug)
+                    self._import_repo_file(actor, kb_slug, repo_key, item["path"], slug)
                     added += 1
-                elif existing[slug] != content_hash:
+                elif (existing[slug].get("content_hash") or "") != item["content_hash"]:
                     # 修改:先删后加
-                    self.delete_document(actor, slug, later=True)
-                    self._import_repo_file(actor, kb_slug, repo_key, local_path, suffixes, slug)
+                    self._delete_git_document(actor, existing[slug])
+                    self._import_repo_file(actor, kb_slug, repo_key, item["path"], slug)
                     updated += 1
                 else:
                     unchanged += 1
             # 删除
             for slug in existing_slugs - set(current.keys()):
-                self.delete_document(actor, slug, later=True)
+                self._delete_git_document(actor, existing[slug])
                 removed += 1
 
             self.store.mark_kb_repo_source_sync(kb["id"], repo_key, success=True)
@@ -581,29 +581,23 @@ class AgentBridgeService:
         actor: str,
         kb_slug: str,
         repo_key: str,
-        local_path: Path,
-        suffixes: set[str],
-        target_slug: str,
+        path: Path,
+        slug: str,
     ) -> None:
-        """按 slug 找到仓库内第一个匹配文件并导入为 git 文档。"""
-        for path in sorted(local_path.rglob("*")):
-            if path.is_symlink() or not path.is_file():
-                continue
-            try:
-                relative_parts = path.relative_to(local_path).parts
-            except ValueError:
-                continue
-            if ".git" in relative_parts:
-                continue
-            if path.suffix.lower() not in suffixes or path.suffix.lower() not in ALLOWED_EXTENSIONS:
-                continue
-            if make_slug(Path(path.name).stem) == target_slug:
-                self.add_document(
-                    actor, path, [kb_slug], later=True,
-                    original_filename=path.name,
-                    source_type="git", source_repo_key=repo_key,
-                )
-                return
+        self.add_document(
+            actor, path, [kb_slug], later=True,
+            original_filename=path.name,
+            source_type="git", source_repo_key=repo_key,
+            slug_override=slug,
+        )
+
+    def _delete_git_document(self, actor: str, doc: dict[str, Any]) -> None:
+        self.delete_document(actor, doc["slug"], later=True)
+        released_slug = unique_slug(
+            f"{doc['slug']}-deleted-{doc['id']}",
+            self.store.list_document_slugs(),
+        )
+        self.store.rename_document_slug(doc["id"], released_slug)
 
     @staticmethod
     def _sha256_file(path: Path) -> str:
