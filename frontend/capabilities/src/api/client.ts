@@ -443,6 +443,8 @@ export const api = {
     post<KbRepoSource>(`/kbs/${kbSlug}/repo-sources`, data),
   syncKbRepoSource: (kbSlug: string, repoKey: string) =>
     post<KbRepoSourceSyncResult>(`/kbs/${kbSlug}/repo-sources/${repoKey}/sync`),
+  deleteKbRepoSource: (kbSlug: string, repoKey: string) =>
+    post<{ kb_slug: string; repo_key: string; deleted_docs: number }>(`/kbs/${kbSlug}/repo-sources/${repoKey}/delete`),
   deleteKnowledgeBase: (kbSlug: string) => post<{ deleted: boolean }>(`/kbs/${kbSlug}/delete`),
 
   // Documents

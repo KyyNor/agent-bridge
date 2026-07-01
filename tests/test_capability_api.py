@@ -666,8 +666,10 @@ def test_frontend_knowledge_view_exposes_git_repo_source_controls() -> None:
 
     assert "Git 数据源" in source
     assert "include_suffixes" in source
+    assert "deleteRepoSource" in source
     assert "listKbRepoSources" in client
     assert "syncKbRepoSource" in client
+    assert "deleteKbRepoSource" in client
 
 
 def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:

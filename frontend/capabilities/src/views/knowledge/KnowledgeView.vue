@@ -32,6 +32,7 @@ const codeRepos = ref<CodeRepository[]>([])
 const repoSourceForm = ref({ repo_key: '', include_suffixes: '.md, .txt' })
 const repoSourceSaving = ref(false)
 const repoSourceSyncing = ref<Record<string, boolean>>({})
+const repoSourceDeleting = ref<Record<string, boolean>>({})
 const repoSourceError = ref('')
 const repoSourceMessage = ref('')
 // Search/Q&A
@@ -278,11 +279,32 @@ async function syncRepoSource(source: KbRepoSource) {
     detailRepoSources.value = repoSources
     detailDocs.value = docs
     detailSyncJobs.value = syncStatus.jobs.filter((j: SyncJob) => j.kb_slug === detailKb.value!.slug)
-    repoSourceMessage.value = `已导入 ${result.imported} 个文件，跳过 ${result.skipped} 个`
+    repoSourceMessage.value = `已同步：新增 ${result.added}，删除 ${result.removed}，更新 ${result.updated}`
   } catch (e: any) {
     repoSourceError.value = e.message || '同步失败'
   }
   repoSourceSyncing.value = { ...repoSourceSyncing.value, [source.repo_key]: false }
+}
+
+async function deleteRepoSource(source: KbRepoSource) {
+  if (!detailKb.value) return
+  if (!confirm(`确定移除数据源「${source.repo_name || source.repo_key}」？将从该知识库删除 ${source.doc_count} 个由它提供的文档，并在后端同步删除。此操作不会删除 git 仓库本身。`)) return
+  repoSourceError.value = ''
+  repoSourceMessage.value = ''
+  repoSourceDeleting.value = { ...repoSourceDeleting.value, [source.repo_key]: true }
+  try {
+    await api.deleteKbRepoSource(detailKb.value.slug, source.repo_key)
+    const [repoSources, docs] = await Promise.all([
+      api.listKbRepoSources(detailKb.value.slug),
+      api.listDocs(detailKb.value.slug),
+    ])
+    detailRepoSources.value = repoSources
+    detailDocs.value = docs
+    repoSourceMessage.value = '已移除数据源'
+  } catch (e: any) {
+    repoSourceError.value = e.message || '删除失败'
+  }
+  repoSourceDeleting.value = { ...repoSourceDeleting.value, [source.repo_key]: false }
 }
 
 async function doSearch() {
@@ -804,9 +826,14 @@ async function savePlaneProfiles() {
                 <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ source.last_synced_at ? formatLocalDatetime(source.last_synced_at) : '未同步' }}</td>
                 <td class="px-3 py-2 max-w-[180px] overflow-hidden text-ellipsis text-xs text-red-600" :title="source.last_error ?? ''">{{ source.last_error || '—' }}</td>
                 <td class="px-3 py-2 text-right">
-                  <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="repoSourceSyncing[source.repo_key]">
-                    {{ repoSourceSyncing[source.repo_key] ? '同步中...' : '立即同步' }}
-                  </Button>
+                  <div class="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="repoSourceSyncing[source.repo_key]">
+                      {{ repoSourceSyncing[source.repo_key] ? '同步中...' : '立即同步' }}
+                    </Button>
+                    <Button variant="outline" size="sm" class="h-7 text-xs text-red-600 hover:text-red-700" @click="deleteRepoSource(source)" :disabled="repoSourceDeleting[source.repo_key]">
+                      {{ repoSourceDeleting[source.repo_key] ? '删除中...' : '删除' }}
+                    </Button>
+                  </div>
                 </td>
               </tr></tbody>
             </table>

@@ -535,14 +535,16 @@ export interface KbRepoSource {
   last_error: string | null
   created_at: string
   updated_at: string
+  doc_count: number
 }
 
 export interface KbRepoSourceSyncResult {
   kb_slug: string
   repo_key: string
-  matched: number
-  imported: number
-  skipped: number
+  added: number
+  removed: number
+  updated: number
+  unchanged: number
 }
 
 export interface TestCloneResult {
