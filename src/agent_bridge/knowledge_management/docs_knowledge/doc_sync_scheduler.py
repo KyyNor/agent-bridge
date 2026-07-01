@@ -63,6 +63,7 @@ class DocSyncScheduler(BaseCronScheduler):
             "error": None,
         }
         try:
+            self._sync_repo_sources()
             result = self._service.sync(admin, all_users=True, progress_callback=self._update_progress)
             if self._current_run is not None:
                 self._current_run.update({
@@ -89,6 +90,23 @@ class DocSyncScheduler(BaseCronScheduler):
                 self._last_run = dict(self._current_run)
                 self._current_run = None
             logger.error("DocSync 定时同步失败 原因=%s", exc, exc_info=True)
+
+    def _sync_repo_sources(self) -> None:
+        """git 数据源增量同步:遍历所有 active 源,diff 生成同步任务。
+
+        在 service.sync drain 之前执行。单源失败仅记录 last_error 并跳过,
+        不阻塞后续 drain。
+        """
+        admin = next(iter(self._admins), "root")
+        for src in self._store.list_all_active_repo_sources():
+            kb_id = src["kb_id"]
+            kb_slug = src.get("kb_slug")
+            repo_key = src["repo_key"]
+            try:
+                self._service.sync_kb_repo_source_changes(admin, kb_slug, repo_key)
+            except Exception as exc:
+                self._store.mark_kb_repo_source_sync(kb_id, repo_key, success=False, error=str(exc))
+                logger.warning("git 源同步失败 kb=%s repo=%s: %s", kb_slug, repo_key, exc)
 
     def _update_progress(self, event: dict[str, Any]) -> None:
         if self._current_run is None:

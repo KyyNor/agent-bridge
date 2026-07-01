@@ -20,6 +20,9 @@ class _SyncConfigStore:
             "claude_mem_plugin_update_cron": "30 3 * * 0",
         }
 
+    def list_all_active_repo_sources(self) -> list[dict[str, Any]]:
+        return []
+
 
 class _CodeStore(_SyncConfigStore):
     def list_code_repositories(self) -> list[dict[str, Any]]:
@@ -170,3 +173,57 @@ def test_plugin_update_scheduler_schedules_configured_plugins() -> None:
 
     assert progress["status"] == "succeeded"
     assert progress["message"] == "memory updated"
+
+
+class _RepoSourceStore(_SyncConfigStore):
+    """fake store:list 两个源,记录 mark_kb_repo_source_sync 的失败调用。"""
+
+    def __init__(self) -> None:
+        self.marked_errors: list[tuple[Any, str, str]] = []  # (kb_id, repo_key, error)
+
+    def list_all_active_repo_sources(self) -> list[dict[str, Any]]:
+        return [
+            {"kb_id": 1, "kb_slug": "kb-ok", "repo_key": "r-ok"},
+            {"kb_id": 2, "kb_slug": "kb-bad", "repo_key": "r-bad"},
+        ]
+
+    def mark_kb_repo_source_sync(self, kb_id, repo_key, *, success, error=None) -> None:
+        if not success:
+            self.marked_errors.append((kb_id, repo_key, error))
+
+
+def test_run_sync_runs_git_diff_phase_before_drain() -> None:
+    calls: list[str] = []
+
+    class Service:
+        def sync_kb_repo_source_changes(self, actor, kb_slug, repo_key):
+            calls.append(f"diff:{kb_slug}:{repo_key}")
+
+        def sync(self, actor, all_users, progress_callback):
+            calls.append("drain")
+            return {"processed": 0, "succeeded": 0, "failed": 0}
+
+    store = _RepoSourceStore()
+    scheduler = DocSyncScheduler(Service(), store, {"root"})
+    scheduler._run_sync()
+    # git diff 阶段先于 drain
+    assert calls.index("diff:kb-ok:r-ok") < calls.index("drain")
+    assert calls.index("diff:kb-bad:r-bad") < calls.index("drain")
+
+
+def test_run_sync_isolates_failing_source_and_still_drains() -> None:
+    class Service:
+        def sync_kb_repo_source_changes(self, actor, kb_slug, repo_key):
+            if repo_key == "r-bad":
+                raise RuntimeError("boom")
+
+        def sync(self, actor, all_users, progress_callback):
+            return {"processed": 0, "succeeded": 0, "failed": 0}
+
+    store = _RepoSourceStore()
+    scheduler = DocSyncScheduler(Service(), store, {"root"})
+    scheduler._run_sync()
+    # 失败源被记录
+    assert (2, "r-bad", "boom") in store.marked_errors
+    # 不影响整体 status(仍 succeeded)
+    assert scheduler.get_status()["last_run"]["status"] == "succeeded"
