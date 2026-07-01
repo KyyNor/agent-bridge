@@ -677,6 +677,39 @@ class KnowledgeRepository:
             ).fetchone()
             return self._kb_repo_source_payload(row) if row else None
 
+    def list_git_docs_for_repo(self, kb_id: int, repo_key: str) -> list[dict[str, Any]]:
+        """返回某 KB 下由指定 git 仓库提供、仍 active 的文档(带当前 version 的 content_hash)。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT doc.slug AS slug, doc.id AS id, ver.content_hash AS content_hash
+                FROM documents doc
+                JOIN document_kbs dk ON dk.doc_id = doc.id
+                LEFT JOIN document_versions ver ON ver.id = doc.current_version_id
+                WHERE dk.kb_id = ? AND dk.status = 'active'
+                  AND doc.source_type = 'git' AND doc.source_repo_key = ?
+                  AND doc.status != 'deleted'
+                """,
+                (kb_id, repo_key),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_all_active_repo_sources(self) -> list[dict[str, Any]]:
+        """跨所有 KB 枚举 active 的 git 数据源(定时增量同步用)。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT source.kb_id AS kb_id, kb.slug AS kb_slug,
+                       source.repo_key AS repo_key, source.include_suffixes_json AS include_suffixes_json,
+                       source.status AS status
+                FROM kb_repo_sources source
+                JOIN knowledge_bases kb ON kb.id = source.kb_id
+                WHERE source.status = 'active' AND kb.status = 'active'
+                ORDER BY kb.slug, source.repo_key
+                """,
+            ).fetchall()
+            return [self._kb_repo_source_payload(row) for row in rows]
+
     def mark_kb_repo_source_sync(
         self,
         kb_id: int,

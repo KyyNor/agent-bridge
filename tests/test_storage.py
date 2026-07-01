@@ -138,6 +138,51 @@ def test_create_document_records_source(wm_paths: AgentBridgePaths) -> None:
     assert git_doc["source_repo_key"] == "docs-repo"
 
 
+def test_list_git_docs_for_repo(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb(slug="docs", name="Docs", description="", created_by="root")
+    # 两个 active git 文档 + 一个 manual 文档 + 一个已软删的 git 文档
+    g1 = store.create_document("guide", "Guide", "root", source_type="git", source_repo_key="r1")
+    g2 = store.create_document("notes", "Notes", "root", source_type="git", source_repo_key="r1")
+    manual = store.create_document("manual", "Manual", "root")  # 不属于任何 repo
+    g_del = store.create_document("old", "Old", "root", source_type="git", source_repo_key="r1")
+    for d in (g1, g2, g_del, manual):
+        store.attach_document_to_kb(d["id"], kb["id"], "root")
+    store.soft_delete_document(g_del["id"])
+    # 为 g1 建 version 带 content_hash
+    store.create_document_version(
+        doc_id=g1["id"], original_filename="guide.md", content_hash="hash-a",
+        file_size=8, mime_type="text/markdown", archive_path="/a", created_by="root",
+    )
+
+    result = store.list_git_docs_for_repo(kb["id"], "r1")
+    slugs = {d["slug"] for d in result}
+    assert slugs == {"guide", "notes"}  # 不含 manual、不含已软删的 old
+    guide = next(d for d in result if d["slug"] == "guide")
+    assert guide["content_hash"] == "hash-a"
+
+
+def test_list_all_active_repo_sources(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb1 = store.create_kb(slug="kb1", name="KB1", description="", created_by="root")
+    kb2 = store.create_kb(slug="kb2", name="KB2", description="", created_by="root")
+    with store.connect() as conn:
+        conn.execute(
+            "INSERT INTO code_repositories (repo_key, name, git_url, branch, auth_ref, status) "
+            "VALUES ('r1', 'R1', 'http://x', 'main', '', 'active')"
+        )
+    store.upsert_kb_repo_source(kb1["id"], "r1", [".md"])
+    store.upsert_kb_repo_source(kb2["id"], "r1", [".md", ".txt"])
+    result = store.list_all_active_repo_sources()
+    assert len(result) == 2
+    pairs = {(r["kb_slug"], r["repo_key"]) for r in result}
+    assert ("kb1", "r1") in pairs
+    assert ("kb2", "r1") in pairs
+    assert all(r["status"] == "active" for r in result)
+
+
 def test_schema_migration_adds_phase2_columns(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "test.db")
     store.init_schema()

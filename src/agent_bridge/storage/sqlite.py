@@ -1279,6 +1279,12 @@ class SQLiteStore:
     ) -> None:
         return self.knowledge.mark_kb_repo_source_sync(kb_id=kb_id, repo_key=repo_key, success=success, error=error)
 
+    def list_git_docs_for_repo(self, kb_id: int, repo_key: str) -> list[dict[str, Any]]:
+        return self.knowledge.list_git_docs_for_repo(kb_id=kb_id, repo_key=repo_key)
+
+    def list_all_active_repo_sources(self) -> list[dict[str, Any]]:
+        return self.knowledge.list_all_active_repo_sources()
+
     def delete_kb(self, kb_id: int) -> None:
         return self.knowledge.delete_kb(kb_id=kb_id)
 
