@@ -56,3 +56,28 @@ def test_add_backend_backfills_existing_synced_docs(wm_paths, tmp_path: Path) ->
     for did in (doc1["id"], doc2["id"]):
         state = svc.store.get_sync_state(did, kb_id, "ragflow")
         assert state is not None and state["status"] == "synced"
+
+
+def test_align_backends_backfills_existing_target_missing_jobs(wm_paths, tmp_path: Path) -> None:
+    svc = _service(wm_paths)
+
+    svc.add_backend("root", slug="weknora", backend_type="mock")
+    svc.create_kb("root", "kb-a", "KB A", "")
+    doc = svc.add_document("root", source=_write_doc(tmp_path, "doc.md"), kb_slugs=["kb-a"], later=False)
+    kb_id = svc.store.get_kb_by_slug("kb-a")["id"]
+    assert svc.store.get_sync_state(doc["id"], kb_id, "weknora")["status"] == "synced"
+
+    # Simulates a migrated/config-edited database: the target row exists, but
+    # historical docs were never enqueued for that backend.
+    svc.store.ensure_backend_target(kb_id, slug="pageindex", backend_type="pageindex")
+
+    svc.add_backend("root", slug="pageindex", backend_type="mock")
+
+    pageindex_jobs = svc.store.list_all_jobs(backend_slug="pageindex")
+    pending_create = [
+        job for job in pageindex_jobs
+        if job["doc_id"] == doc["id"]
+        and job["operation"] == "create"
+        and job["status"] == "pending"
+    ]
+    assert len(pending_create) == 1

@@ -962,16 +962,6 @@ class AgentBridgeService:
                     except Exception:
                         self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
 
-                    # Create pending sync jobs for docs already synced to any
-                    # backend, so a newly-added backend catches up on history.
-                    for doc_id in self.store.list_synced_doc_ids(kb["id"]):
-                        versions = self.store.list_versions(doc_id)
-                        version_id = versions[-1]["id"] if versions else None
-                        self.store.create_sync_job(
-                            doc_id, kb["id"], Operation.create, version_id,
-                            backend_slug=backend_slug,
-                        )
-
                 # Reactivate previously inactive targets
                 for target in existing_targets:
                     if target["slug"] == backend_slug and target["status"] == "inactive":
@@ -983,6 +973,36 @@ class AgentBridgeService:
                             except Exception:
                                 pass
                         self.store.set_backend_target_status(kb["id"], backend_slug, "active")
+                self._backfill_missing_backend_jobs(kb, backend_slug)
+
+    def _backfill_missing_backend_jobs(self, kb: dict[str, Any], backend_slug: str) -> None:
+        runnable_statuses = {
+            SyncJobStatus.pending.value,
+            SyncJobStatus.running.value,
+            SyncJobStatus.failed.value,
+        }
+        runnable_doc_ids = {
+            job["doc_id"]
+            for job in self.store.list_all_jobs(backend_slug=backend_slug)
+            if job["kb_id"] == kb["id"]
+            and job["operation"] == Operation.create.value
+            and job["status"] in runnable_statuses
+        }
+        for doc_id in self.store.list_synced_doc_ids(kb["id"]):
+            sync_state = self.store.get_sync_state(doc_id, kb["id"], backend_slug)
+            if sync_state and sync_state["status"] == SyncStateStatus.synced.value:
+                continue
+            if doc_id in runnable_doc_ids:
+                continue
+            versions = self.store.list_versions(doc_id)
+            version_id = versions[-1]["id"] if versions else None
+            self.store.create_sync_job(
+                doc_id,
+                kb["id"],
+                Operation.create,
+                version_id,
+                backend_slug=backend_slug,
+            )
 
     def list_backends(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
