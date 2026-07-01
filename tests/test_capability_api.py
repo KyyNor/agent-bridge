@@ -1091,3 +1091,49 @@ def test_sync_changes_imports_new_files(wm_paths, tmp_path: Path) -> None:
     assert r.json()["updated"] == 0
     docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     assert {d["title"] for d in docs} == {"guide"}
+
+
+def test_sync_changes_modifies_changed_file_as_delete_then_add(wm_paths, tmp_path: Path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    repo = _setup_repo_and_kb(tmp_path, client)
+    # 首次导入 guide.md
+    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    docs_before = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    doc_id_before = docs_before[0]["id"]
+    # 修改文件内容
+    (repo / "guide.md").write_text("# Guide v2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "v2"], cwd=repo, check=True, capture_output=True)
+    client.post("/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    # 再次同步:应为 updated=1
+    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    assert r.json()["updated"] == 1
+    assert r.json()["added"] == 0
+    docs_after = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    # doc_id 变化(先删后加)
+    assert docs_after[0]["id"] != doc_id_before
+
+
+def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    repo = _setup_repo_and_kb(tmp_path, client)
+    # 建 mock backend target 以便删除时生成 sync job
+    store = SQLiteStore(wm_paths.db_path)
+    kb = store.get_kb_by_slug("docs")
+    store.ensure_backend_target(kb["id"], "mock", "mock")
+    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    # 删除文件
+    (repo / "guide.md").unlink()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "del"], cwd=repo, check=True, capture_output=True)
+    client.post("/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    assert r.json()["removed"] == 1
+    # active 文档应已清空(guide 被软删)
+    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    assert docs == []
+    # 应生成 delete 同步任务
+    jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
+    assert any(j["operation"] == "delete" for j in jobs)
