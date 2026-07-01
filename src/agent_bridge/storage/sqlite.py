@@ -1309,8 +1309,18 @@ class SQLiteStore:
     def list_document_slugs(self) -> set[str]:
         return self.knowledge.list_document_slugs()
 
-    def create_document(self, slug: str, title: str, owner_user: str) -> dict[str, Any]:
-        return self.knowledge.create_document(slug=slug, title=title, owner_user=owner_user)
+    def create_document(
+        self,
+        slug: str,
+        title: str,
+        owner_user: str,
+        source_type: str = "manual",
+        source_repo_key: str = "",
+    ) -> dict[str, Any]:
+        return self.knowledge.create_document(
+            slug=slug, title=title, owner_user=owner_user,
+            source_type=source_type, source_repo_key=source_repo_key,
+        )
 
     def get_document_by_slug(self, slug: str, include_deleted: bool = False) -> dict[str, Any] | None:
         return self.knowledge.get_document_by_slug(slug=slug, include_deleted=include_deleted)

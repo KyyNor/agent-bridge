@@ -126,11 +126,18 @@ class KnowledgeRepository:
             rows = conn.execute("SELECT slug FROM documents").fetchall()
             return {row["slug"] for row in rows}
 
-    def create_document(self, slug: str, title: str, owner_user: str) -> dict[str, Any]:
+    def create_document(
+        self,
+        slug: str,
+        title: str,
+        owner_user: str,
+        source_type: str = "manual",
+        source_repo_key: str = "",
+    ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO documents (slug, title, owner_user) VALUES (?, ?, ?)",
-                (slug, title, owner_user),
+                "INSERT INTO documents (slug, title, owner_user, source_type, source_repo_key) VALUES (?, ?, ?, ?, ?)",
+                (slug, title, owner_user, source_type, source_repo_key),
             )
             row = conn.execute("SELECT * FROM documents WHERE id = ?", (cursor.lastrowid,)).fetchone()
             document = row_to_dict(row)

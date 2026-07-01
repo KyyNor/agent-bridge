@@ -122,6 +122,22 @@ def test_purge_document_only_returns_archive_paths_no_longer_referenced(wm_paths
     assert store.purge_document(second["id"]) == [archive_path]
 
 
+def test_create_document_records_source(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    # 默认值(不传 source 参数)
+    doc = store.create_document(slug="manual", title="Manual", owner_user="alice")
+    assert doc["source_type"] == "manual"
+    assert doc["source_repo_key"] == ""
+    # git 来源
+    git_doc = store.create_document(
+        slug="guide", title="Guide", owner_user="alice",
+        source_type="git", source_repo_key="docs-repo",
+    )
+    assert git_doc["source_type"] == "git"
+    assert git_doc["source_repo_key"] == "docs-repo"
+
+
 def test_schema_migration_adds_phase2_columns(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "test.db")
     store.init_schema()
