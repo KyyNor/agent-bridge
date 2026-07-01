@@ -62,6 +62,7 @@ import type {
   WorkflowRunEvent,
   WorkflowRunLog,
   WorkflowTasksResult,
+  WorkflowTaskListParams,
   ManagedScript,
   ScriptRun,
   ScriptRunListResult,
@@ -222,7 +223,15 @@ export const api = {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
   },
-  listWorkflowTasks: (key: string) => get<WorkflowTasksResult>(`/workflows/${key}/tasks`),
+  listWorkflowTasks: (key: string, params: WorkflowTaskListParams = {}) => {
+    const qs = new URLSearchParams()
+    if (params.status) qs.set('status', params.status)
+    if (params.type) qs.set('type', params.type)
+    if (params.search) qs.set('search', params.search)
+    if (params.sort) qs.set('sort', params.sort)
+    const tail = qs.toString() ? `?${qs}` : ''
+    return get<WorkflowTasksResult>(`/workflows/${key}/tasks${tail}`)
+  },
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
   getWorkflowRunEvents: (runId: string) => get<WorkflowRunEvent[]>(`/workflow-runs/${runId}/events`),
   upsertWorkflow: (w: Partial<WorkflowDefinition> & {
@@ -238,6 +247,7 @@ export const api = {
     task_key?: string
     task_version?: string
     include_history?: boolean
+    full?: boolean
     tags?: string[]
     limit?: number
   } = {}) => {
@@ -249,6 +259,7 @@ export const api = {
     if (params.task_key) qs.set('task_key', params.task_key)
     if (params.task_version) qs.set('task_version', params.task_version)
     if (params.include_history) qs.set('include_history', 'true')
+    if (params.full) qs.set('full', 'true')
     if (params.limit) qs.set('limit', String(params.limit))
     ;(params.tags || []).forEach(tag => qs.append('tags', tag))
     return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)

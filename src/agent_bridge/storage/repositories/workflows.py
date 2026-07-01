@@ -244,13 +244,17 @@ class WorkflowsRepository:
                 ).fetchone()
             )
 
-    def list_workflow_tasks(self, workflow_key: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM workflow_tasks
-                WHERE workflow_key = ?
-                ORDER BY
+    # Recognised user-controlled sort modes for list_workflow_tasks. The
+    # historical default ("status priority, then recency") is preserved when no
+    # sort (or an unrecognised value) is supplied.
+    _TASK_SORT_ORDER_BY = {
+        "id_asc": "id ASC",
+        "id_desc": "id DESC",
+        "set_at_asc": "set_at ASC, id ASC",
+        "set_at_desc": "set_at DESC, id DESC",
+        "updated_at_desc": "updated_at DESC, id DESC",
+    }
+    _TASK_SORT_DEFAULT_ORDER_BY = """
                   CASE status
                     WHEN 'running' THEN 0
                     WHEN 'pending' THEN 1
@@ -261,8 +265,38 @@ class WorkflowsRepository:
                   END,
                   updated_at DESC,
                   id DESC
+                """
+
+    def list_workflow_tasks(
+        self,
+        workflow_key: str,
+        *,
+        status: str | None = None,
+        type: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses = ["workflow_key = ?"]
+        params: list[Any] = [workflow_key]
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if type:
+            clauses.append("type = ?")
+            params.append(type)
+        if search:
+            clauses.append("(lower(task_key) LIKE ? OR lower(type) LIKE ?)")
+            like = f"%{search.lower()}%"
+            params.extend([like, like])
+        order_by = self._TASK_SORT_ORDER_BY.get(sort or "", self._TASK_SORT_DEFAULT_ORDER_BY)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM workflow_tasks
+                WHERE {' AND '.join(clauses)}
+                ORDER BY {order_by}
                 """,
-                (workflow_key,),
+                params,
             ).fetchall()
             return [item for row in rows if (item := _row_payload(row)) is not None]
 

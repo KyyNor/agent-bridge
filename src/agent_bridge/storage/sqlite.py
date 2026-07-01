@@ -613,8 +613,22 @@ class SQLiteStore:
     ) -> dict[str, Any] | None:
         return self.workflows.get_workflow_task(workflow_key, task_key, task_version=task_version)
 
-    def list_workflow_tasks(self, workflow_key: str) -> list[dict[str, Any]]:
-        return self.workflows.list_workflow_tasks(workflow_key)
+    def list_workflow_tasks(
+        self,
+        workflow_key: str,
+        *,
+        status: str | None = None,
+        type: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_tasks(
+            workflow_key,
+            status=status,
+            type=type,
+            search=search,
+            sort=sort,
+        )
 
     def lease_workflow_task(
         self,

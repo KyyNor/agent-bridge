@@ -96,11 +96,24 @@ class WorkflowService:
         bounded = min(max(limit, 1), 200)
         return self.store.list_workflow_runs(workflow_key, limit=bounded)
 
-    def list_tasks(self, actor: str, workflow_key: str) -> dict[str, Any]:
+    def list_tasks(
+        self,
+        actor: str,
+        workflow_key: str,
+        *,
+        status: str | None = None,
+        type: str | None = None,
+        search: str | None = None,
+        sort: str | None = None,
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_workflow_definition(workflow_key) is None:
             raise NotFound("workflow not found")
-        return {"tasks": self.store.list_workflow_tasks(workflow_key)}
+        return {
+            "tasks": self.store.list_workflow_tasks(
+                workflow_key, status=status, type=type, search=search, sort=sort
+            )
+        }
 
     def get_run(self, actor: str, run_id: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -362,6 +375,7 @@ class WorkflowService:
         task_version: str | None = None,
         include_history: bool = False,
         trusted_profile_context: bool = False,
+        full: bool = False,
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
             raise AccessDenied("capability profile is required")
@@ -405,9 +419,10 @@ class WorkflowService:
                 "created_at": item["created_at"],
                 "updated_at": item["updated_at"],
             }
-            # Exact-path lookup is a "fetch this one" request: return the full
-            # body, not just a snippet. Prefix matches keep snippet-only.
-            if path and item["path"] == path:
+            # Return the full body when explicitly requested (feature: view a
+            # task's outputs from the progress page) or on an exact-path lookup
+            # ("fetch this one"). Prefix matches keep snippet-only otherwise.
+            if full or (path and item["path"] == path):
                 entry["content"] = item["content"]
             return entry
 

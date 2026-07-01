@@ -193,6 +193,9 @@ export interface WorkflowArtifact {
   format: string
   summary: string
   snippet: string
+  /** Full body — present only when the caller asks for `full` content or does
+   *  an exact-path lookup (see WorkflowTaskListParams / searchArtifacts). */
+  content?: string
   created_at: string
   updated_at: string
 }
@@ -281,6 +284,15 @@ export interface WorkflowTask {
 
 export interface WorkflowTasksResult {
   tasks: WorkflowTask[]
+}
+
+/** Server-side query params for listing a workflow's tasks (筛选/搜索/排序). */
+export interface WorkflowTaskListParams {
+  status?: string
+  type?: string
+  search?: string
+  /** Recognised: default | id_asc | id_desc | set_at_asc | set_at_desc | updated_at_desc */
+  sort?: string
 }
 
 export interface WorkflowClearResult {

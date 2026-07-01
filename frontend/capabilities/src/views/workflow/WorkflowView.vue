@@ -9,8 +9,17 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import { parseWorkflowDag } from './workflowDag'
+import {
+  ALL_TYPE_SENTINEL,
+  filterAndSortTasks,
+  distinctStatuses,
+  distinctTypes,
+  taskStats as computeTaskStats,
+  taskStatusLabel as labelTaskStatus,
+} from '../../lib/workflowTasks'
 
 const artifactToolName = 'artifacts_search'
 const WORKFLOW_RUN_LIMIT = 200
@@ -56,6 +65,19 @@ const expandedTaskIds = ref<Set<string>>(new Set())
 const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
 const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
 const taskLogLoading = ref<Set<string>>(new Set())
+// Task progress page: client-side filter / search / sort (feature 1).
+const taskStatusFilter = ref('')
+const taskTypeFilter = ref('__all__')
+const taskSearchInput = ref('')
+const taskSearch = ref('')
+const taskSort = ref('default')
+// Per-task artifacts fetched on demand (feature 2 — view outputs from tasks page).
+const expandedArtifactIds = ref<Set<string>>(new Set())
+const taskArtifacts = ref<Record<string, WorkflowArtifact[]>>({})
+const taskArtifactLoading = ref<Set<string>>(new Set())
+const taskArtifactError = ref('')
+const taskArtifactActive = ref<Record<string, string>>({})
+let taskSearchDebounce: ReturnType<typeof setTimeout> | null = null
 const testing = ref(false)
 const testingRunId = ref('')
 const testError = ref('')
@@ -115,11 +137,32 @@ const taskWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === taskWorkflowKey.value) || selectedWorkflow.value
 )
 const tasks = computed(() => workflowTasks.value[taskWorkflow.value?.workflow_key || ''] || [])
-const taskStats = computed(() => {
-  const stats: Record<string, number> = {}
-  for (const task of tasks.value) stats[task.status] = (stats[task.status] || 0) + 1
-  return stats
-})
+const taskStats = computed(() => computeTaskStats(tasks.value))
+/** Distinct status values present, in the canonical display order. */
+const taskStatuses = computed(() => distinctStatuses(tasks.value))
+/** Distinct, non-empty type values present. */
+const taskTypes = computed(() => distinctTypes(tasks.value))
+/** Tasks after client-side filter + sort. The server already applies a default
+ *  status-priority order; client sort only reshuffles when the user picks an
+ *  explicit mode. */
+const filteredTasks = computed(() =>
+  filterAndSortTasks(tasks.value, {
+    status: taskStatusFilter.value,
+    type: taskTypeFilter.value,
+    search: taskSearch.value,
+    sort: taskSort.value,
+  }),
+)
+function toggleStatusFilter(status: string) {
+  taskStatusFilter.value = taskStatusFilter.value === status ? '' : status
+}
+function resetTaskFilters() {
+  taskStatusFilter.value = ''
+  taskTypeFilter.value = ALL_TYPE_SENTINEL
+  taskSearchInput.value = ''
+  taskSearch.value = ''
+  taskSort.value = 'default'
+}
 const progressRun = computed(() =>
   (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
 )
@@ -472,14 +515,7 @@ function runBadgeClass(status: string) {
 }
 
 function taskStatusLabel(status: string) {
-  const map: Record<string, string> = {
-    pending: '待处理',
-    running: '执行中',
-    completed: '已完成',
-    failed: '失败',
-    abandoned: '已放弃',
-  }
-  return map[status] || status
+  return labelTaskStatus(status)
 }
 
 function taskBadgeClass(status: string) {
@@ -610,6 +646,78 @@ async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '
     workflowTasks.value = { ...workflowTasks.value, [key]: [] }
   } finally {
     tasksLoading.value = false
+  }
+}
+
+function onTaskSearchInput() {
+  if (taskSearchDebounce) clearTimeout(taskSearchDebounce)
+  taskSearchDebounce = setTimeout(() => {
+    taskSearch.value = taskSearchInput.value
+  }, 250)
+}
+
+function taskArtifactKey(task: WorkflowTask) {
+  return `${task.workflow_key}:${task.task_key}:${task.task_version}`
+}
+
+function taskArtifactsOf(task: WorkflowTask) {
+  return taskArtifacts.value[taskArtifactKey(task)] || []
+}
+
+function isTaskArtifactLoading(task: WorkflowTask) {
+  return taskArtifactLoading.value.has(taskArtifactKey(task))
+}
+
+function isTaskArtifactExpanded(task: WorkflowTask) {
+  return expandedArtifactIds.value.has(taskArtifactKey(task))
+}
+
+function taskArtifactActiveId(task: WorkflowTask) {
+  return taskArtifactActive.value[taskArtifactKey(task)] || ''
+}
+
+function selectTaskArtifact(task: WorkflowTask, artifactId: string) {
+  taskArtifactActive.value = { ...taskArtifactActive.value, [taskArtifactKey(task)]: artifactId }
+}
+
+function activeTaskArtifact(task: WorkflowTask): WorkflowArtifact | null {
+  const items = taskArtifactsOf(task)
+  if (!items.length) return null
+  const id = taskArtifactActiveId(task)
+  return items.find(item => item.artifact_id === id) || items[0]
+}
+
+async function toggleTaskArtifacts(task: WorkflowTask) {
+  const key = taskArtifactKey(task)
+  const next = new Set(expandedArtifactIds.value)
+  if (next.has(key)) {
+    next.delete(key)
+    expandedArtifactIds.value = next
+    return
+  }
+  next.add(key)
+  expandedArtifactIds.value = next
+  if (taskArtifacts.value[key]) return
+  const loading = new Set(taskArtifactLoading.value)
+  loading.add(key)
+  taskArtifactLoading.value = loading
+  taskArtifactError.value = ''
+  try {
+    const result = await api.searchWorkflowArtifacts({
+      workflow_key: task.workflow_key,
+      task_key: task.task_key,
+      include_history: true,
+      full: true,
+      limit: 50,
+    })
+    taskArtifacts.value = { ...taskArtifacts.value, [key]: result.items }
+  } catch (e: unknown) {
+    taskArtifactError.value = errorMessage(e)
+    taskArtifacts.value = { ...taskArtifacts.value, [key]: [] }
+  } finally {
+    const done = new Set(taskArtifactLoading.value)
+    done.delete(key)
+    taskArtifactLoading.value = done
   }
 }
 
@@ -834,6 +942,10 @@ async function confirmClearWorkflow() {
     expandedTaskIds.value = new Set()
     taskRunLogs.value = {}
     taskRunEvents.value = {}
+    resetTaskFilters()
+    expandedArtifactIds.value = new Set()
+    taskArtifacts.value = {}
+    taskArtifactActive.value = {}
     await Promise.all([
       loadRunsForWorkflows(),
       loadTasks(wf.workflow_key),
@@ -1176,12 +1288,22 @@ async function confirmClearWorkflow() {
             <div class="min-w-0 space-y-2">
               <div class="flex flex-wrap items-center gap-2">
                 <Badge v-if="taskWorkflow" variant="outline">{{ taskWorkflow.workflow_key }}</Badge>
-                <Badge variant="outline">全部 {{ tasks.length }}</Badge>
-                <Badge v-for="(count, status) in taskStats" :key="status" variant="outline" :class="taskBadgeClass(String(status))">
-                  {{ taskStatusLabel(String(status)) }} {{ count }}
-                </Badge>
+                <button type="button" class="cursor-pointer" @click="toggleStatusFilter('')">
+                  <Badge :variant="taskStatusFilter === '' ? 'default' : 'outline'">全部 {{ tasks.length }}</Badge>
+                </button>
+                <button
+                  v-for="status in taskStatuses"
+                  :key="status"
+                  type="button"
+                  class="cursor-pointer"
+                  @click="toggleStatusFilter(status)"
+                >
+                  <Badge :variant="taskStatusFilter === status ? 'default' : 'outline'" :class="taskBadgeClass(status)">
+                    {{ taskStatusLabel(status) }} {{ taskStats[status] || 0 }}
+                  </Badge>
+                </button>
               </div>
-              <div class="text-xs text-muted-foreground">展开任务可查看关联运行的日志；未领取的任务暂无运行日志。</div>
+              <div class="text-xs text-muted-foreground">展开任务可查看产出物与关联运行的日志；点击上方状态可按状态筛选。</div>
             </div>
             <Button
               variant="outline"
@@ -1193,13 +1315,59 @@ async function confirmClearWorkflow() {
             </Button>
           </div>
 
+          <!-- 筛选 / 搜索 / 排序 -->
+          <div class="flex flex-wrap items-center gap-2">
+            <Input
+              v-model="taskSearchInput"
+              type="search"
+              placeholder="搜索 task_key / 类型"
+              class="h-8 w-56 text-xs"
+              @input="onTaskSearchInput"
+            />
+            <Select v-model="taskTypeFilter">
+              <SelectTrigger class="h-8 w-[140px] text-xs">
+                <SelectValue placeholder="全部类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">全部类型</SelectItem>
+                <SelectItem v-for="t in taskTypes" :key="t" :value="t">{{ t }}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select v-model="taskSort">
+              <SelectTrigger class="h-8 w-[150px] text-xs">
+                <SelectValue placeholder="排序" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">默认（状态优先）</SelectItem>
+                <SelectItem value="id_asc">task_key ↑</SelectItem>
+                <SelectItem value="id_desc">task_key ↓</SelectItem>
+                <SelectItem value="set_at_asc">设置时间 ↑</SelectItem>
+                <SelectItem value="set_at_desc">设置时间 ↓</SelectItem>
+                <SelectItem value="updated_at_desc">最近更新</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              v-if="taskStatusFilter || taskTypeFilter || taskSearch || taskSort !== 'default'"
+              variant="ghost"
+              size="sm"
+              class="h-8 text-xs"
+              @click="resetTaskFilters"
+            >
+              重置筛选
+            </Button>
+            <div class="ml-auto text-xs text-muted-foreground">
+              {{ filteredTasks.length }} / {{ tasks.length }}
+            </div>
+          </div>
+
           <div v-if="taskError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {{ taskError }}
           </div>
           <div v-if="tasksLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!tasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无任务</div>
+          <div v-else-if="!filteredTasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">没有符合筛选条件的任务</div>
           <div v-else class="space-y-2">
-            <div v-for="task in tasks" :key="taskId(task)" class="rounded-md border">
+            <div v-for="task in filteredTasks" :key="taskId(task)" class="rounded-md border">
               <div class="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
@@ -1219,9 +1387,60 @@ async function confirmClearWorkflow() {
                     {{ task.last_error }}
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" class="h-8 text-xs" @click="toggleTaskLogs(task)">
-                  {{ expandedTaskIds.has(taskId(task)) ? '收起日志' : '展开日志' }}
-                </Button>
+                <div class="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" class="h-8 text-xs" @click="toggleTaskArtifacts(task)">
+                    {{ isTaskArtifactExpanded(task) ? '收起产出物' : '产出物' }}
+                    <Badge v-if="taskArtifactsOf(task).length" variant="outline" class="ml-1">{{ taskArtifactsOf(task).length }}</Badge>
+                  </Button>
+                  <Button variant="ghost" size="sm" class="h-8 text-xs" @click="toggleTaskLogs(task)">
+                    {{ expandedTaskIds.has(taskId(task)) ? '收起日志' : '展开日志' }}
+                  </Button>
+                </div>
+              </div>
+              <!-- 产出物（feature 2） -->
+              <div v-if="isTaskArtifactExpanded(task)" class="space-y-2 border-t bg-muted/20 px-3 py-3">
+                <div v-if="taskArtifactError" class="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                  {{ taskArtifactError }}
+                </div>
+                <div v-if="isTaskArtifactLoading(task)" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">
+                  产出物加载中
+                </div>
+                <div v-else-if="!taskArtifactsOf(task).length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">
+                  该任务暂无产出物。
+                </div>
+                <div v-else class="space-y-3">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <div class="text-xs font-semibold text-foreground">产出物版本</div>
+                    <button
+                      v-for="item in taskArtifactsOf(task)"
+                      :key="item.artifact_id"
+                      type="button"
+                      class="cursor-pointer"
+                      @click="selectTaskArtifact(task, item.artifact_id)"
+                    >
+                      <Badge :variant="taskArtifactActiveId(task) === item.artifact_id ? 'default' : 'outline'">
+                        {{ item.task_version || '(无版本)' }}
+                        <span v-if="item.is_current" class="ml-1">·当前</span>
+                      </Badge>
+                    </button>
+                  </div>
+                  <template v-if="activeTaskArtifact(task)">
+                    <div class="rounded-md border bg-background p-3">
+                      <div class="mb-1 flex flex-wrap items-center gap-2">
+                        <span class="text-sm font-medium text-foreground">{{ activeTaskArtifact(task)?.title }}</span>
+                        <Badge variant="outline">{{ activeTaskArtifact(task)?.path }}</Badge>
+                        <span class="text-xs text-muted-foreground">更新 {{ activeTaskArtifact(task)?.updated_at }}</span>
+                      </div>
+                      <div v-if="activeTaskArtifact(task)?.summary" class="mb-2 text-xs text-muted-foreground">
+                        {{ activeTaskArtifact(task)?.summary }}
+                      </div>
+                      <div
+                        class="prose prose-sm max-w-none overflow-auto rounded bg-muted p-2 text-xs"
+                        v-html="renderMarkdown(activeTaskArtifact(task)?.content || '')"
+                      />
+                    </div>
+                  </template>
+                </div>
               </div>
               <div v-if="expandedTaskIds.has(taskId(task))" class="space-y-3 border-t bg-muted/20 px-3 py-3">
                 <div class="rounded-md border bg-background p-3">
