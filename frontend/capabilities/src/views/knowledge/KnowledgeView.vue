@@ -189,8 +189,9 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   detailLoading.value = false
 }
 
-async function deleteDoc(slug: string) {
+async function deleteDoc(slug: string, docTitle: string) {
   if (!detailKb.value) return
+  if (!confirm(`确定删除文档「${docTitle}」？删除后将从当前知识库中移除，并等待后端同步删除。`)) return
   try {
     await api.deleteDocument(slug)
     detailDocs.value = await api.listDocs(detailKb.value.slug)
@@ -714,7 +715,7 @@ async function savePlaneProfiles() {
                   </Badge>
                 </td>
                 <td class="px-3 py-2">
-                  <Button variant="ghost" size="sm" class="h-7 text-xs text-red-600 hover:text-red-700" @click="deleteDoc(d.slug)">删除</Button>
+                  <Button variant="ghost" size="sm" class="h-7 text-xs text-red-600 hover:text-red-700" @click="deleteDoc(d.slug, d.title)">删除</Button>
                 </td>
               </tr></tbody>
             </table>

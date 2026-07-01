@@ -269,6 +269,7 @@ async function saveCategory() {
 }
 
 async function deleteCategory(key: string) {
+  if (!confirm(`确定删除代码仓库分类「${key}」？已归类仓库可能需要重新整理。`)) return
   try {
     await api.deleteCategory(key)
     await loadCategories()
@@ -335,6 +336,7 @@ async function saveBackend() {
 }
 
 async function deleteBackend(slug: string) {
+  if (!confirm(`确定删除知识后端「${slug}」？相关知识库后续将无法继续使用该后端。`)) return
   try {
     await api.deleteBackend(slug)
     await loadBackends()
