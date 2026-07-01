@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -76,6 +78,7 @@ class FakePageIndexCollection:
         self.added: list[str] = []
         self.documents: dict[str, dict] = {}
         self.deleted: list[str] = []
+        self.queries: list[dict] = []
 
     def add(self, file_path: str) -> str:
         doc_id = f"pi3-{len(self.added) + 1}"
@@ -94,6 +97,10 @@ class FakePageIndexCollection:
 
     def get_document_structure(self, doc_id: str) -> list[dict]:
         return self.documents[doc_id]["structure"]
+
+    def query(self, question: str, doc_ids: list[str] | None = None, stream: bool = False) -> str:
+        self.queries.append({"question": question, "doc_ids": doc_ids, "stream": stream})
+        return "Revenue grew from official PageIndex query."
 
     def delete_document(self, doc_id: str) -> None:
         self.deleted.append(doc_id)
@@ -137,8 +144,6 @@ def _backend(tmp_path: Path, **kwargs):
         root=tmp_path / "pageindex",
         client_class=kwargs.get("client_class", FakePageIndexClient),
         markitdown_factory=kwargs.get("markitdown_factory"),
-        completion=kwargs.get("completion"),
-        agent_runner=kwargs.get("agent_runner"),
         base_url="http://litellm.internal/v1",
         api_key="internal-key",
         model=kwargs.get("model", "openai/local-chat"),
@@ -199,18 +204,11 @@ def test_upload_uses_pageindex_v3_local_collection_client(tmp_path: Path) -> Non
 
 
 def test_litellm_gateway_models_without_provider_use_openai_prefix(tmp_path: Path) -> None:
-    calls: list[dict] = []
-
-    def agent_runner(model: str | None, base_url: str | None, api_key: str | None, tools: dict[str, object], prompt: str) -> str:
-        calls.append({"model": model, "base_url": base_url, "api_key": api_key})
-        return "ok"
-
     backend = _backend(
         tmp_path,
         client_class=FakePageIndexV3Client,
         model="deepseek-v4-flash",
         retrieve_model="deepseek-v4-flash",
-        agent_runner=agent_runner,
     )
     backend.create_kb("docs", "Docs")
     source = tmp_path / "guide.md"
@@ -222,7 +220,7 @@ def test_litellm_gateway_models_without_provider_use_openai_prefix(tmp_path: Pat
     client = FakePageIndexV3Client.created[-1]
     assert client.model == "openai/deepseek-v4-flash"
     assert client.retrieve_model == "openai/deepseek-v4-flash"
-    assert calls[0]["model"] == "openai/deepseek-v4-flash"
+    assert client._collection.queries[0]["question"] == "hello"
 
 
 def test_cloud_only_pageindex_sdk_raises_clear_error(tmp_path: Path) -> None:
@@ -323,24 +321,8 @@ def test_retrieve_returns_keyword_matching_pageindex_content(tmp_path: Path) -> 
     assert results[0].dataset_id == "docs"
 
 
-def test_ask_uses_agentic_pageindex_tools_with_chat_model(tmp_path: Path) -> None:
-    calls: list[dict] = []
-
-    def agent_runner(model: str | None, base_url: str | None, api_key: str | None, tools: dict[str, object], prompt: str) -> str:
-        calls.append(
-            {
-                "model": model,
-                "base_url": base_url,
-                "api_key": api_key,
-                "prompt": prompt,
-                "document": tools["get_document"]("pi-1"),
-                "structure": tools["get_document_structure"]("pi-1"),
-                "page_content": tools["get_page_content"]("pi-1", "1"),
-            }
-        )
-        return "Revenue grew from enterprise expansion."
-
-    backend = _backend(tmp_path, agent_runner=agent_runner)
+def test_ask_prefers_official_pageindex_collection_query(tmp_path: Path) -> None:
+    backend = _backend(tmp_path, client_class=FakePageIndexV3Client)
     backend.create_kb("docs", "Docs")
     source = tmp_path / "guide.md"
     source.write_text("# Revenue\n\nRevenue grew.", encoding="utf-8")
@@ -349,14 +331,47 @@ def test_ask_uses_agentic_pageindex_tools_with_chat_model(tmp_path: Path) -> Non
     result, chat_id = backend.ask("docs", "why did revenue grow?")
 
     assert isinstance(result, AskResult)
-    assert result.answer == "Revenue grew from enterprise expansion."
+    assert result.answer == "Revenue grew from official PageIndex query."
     assert result.chunks
-    assert calls[0]["model"] == "openai/local-chat"
-    assert calls[0]["base_url"] == "http://litellm.internal/v1"
-    assert calls[0]["api_key"] == "internal-key"
-    assert "Available PageIndex documents" in calls[0]["prompt"]
-    assert "why did revenue grow?" in calls[0]["prompt"]
-    assert "guide.md" in calls[0]["document"]
-    assert "Revenue" in calls[0]["structure"]
-    assert "enterprise customers" in calls[0]["page_content"]
+    collection = FakePageIndexV3Client.created[-1]._collection
+    assert collection.queries == [
+        {"question": "why did revenue grow?", "doc_ids": ["pi3-1"], "stream": False}
+    ]
     assert chat_id == ""
+
+
+def test_ask_configures_pageindex_query_for_chat_completions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple] = []
+    fake_agents = SimpleNamespace(
+        set_default_openai_api=lambda api: calls.append(("api", api)),
+        set_default_openai_key=lambda key, use_for_tracing=True: calls.append(
+            ("key", key, use_for_tracing)
+        ),
+        set_tracing_disabled=lambda disabled: calls.append(("tracing", disabled)),
+    )
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+    backend = _backend(tmp_path, client_class=FakePageIndexV3Client)
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / "guide.md"
+    source.write_text("# Revenue\n\nRevenue grew.", encoding="utf-8")
+    backend.upload("docs", "guide", source, "guide.md")
+
+    backend.ask("docs", "why did revenue grow?")
+
+    assert ("api", "chat_completions") in calls
+    assert ("key", "internal-key", False) in calls
+    assert ("tracing", True) in calls
+
+
+def test_ask_requires_official_pageindex_query_interface(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / "guide.md"
+    source.write_text("# Revenue\n\nRevenue grew.", encoding="utf-8")
+    backend.upload("docs", "guide", source, "guide.md")
+
+    with pytest.raises(RuntimeError, match="official PageIndex query"):
+        backend.ask("docs", "why did revenue grow?")
