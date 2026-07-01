@@ -14,7 +14,7 @@ dependencies = [
     "loguru>=0.7.2",
     "markitdown[all]>=0.1.6",
     "mcp>=1.27.2",
-    "pageindex>=0.2.8",
+    "pageindex==0.3.0.dev1",
     "python-multipart>=0.0.20",
     "pyyaml>=6.0.0",
     "questionary>=2.1.1",

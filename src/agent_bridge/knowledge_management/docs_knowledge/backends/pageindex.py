@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
+import inspect
 import json
 import os
 import re
@@ -25,6 +28,15 @@ _MARKITDOWN_EXTENSIONS = {
     ".xlsx",
     ".xml",
 }
+
+_AGENT_SYSTEM_PROMPT = """
+You are PageIndex, a document QA assistant.
+Use the provided PageIndex tools to inspect indexed documents before answering.
+Call get_document first to confirm metadata, then get_document_structure to find
+relevant page or line ranges, then get_page_content with tight ranges. Answer
+only from tool output. Be concise, and say when the indexed documents do not
+contain enough information.
+""".strip()
 
 
 def _default_pageindex_client_class():
@@ -64,12 +76,102 @@ def _default_completion(model: str | None, prompt: str) -> str:
     return response.choices[0].message.content or ""
 
 
+def _litellm_gateway_model(model: str | None, base_url: str | None) -> str | None:
+    if not model:
+        return model
+    if "/" in model or not base_url:
+        return model
+    return f"openai/{model}"
+
+
+def _run_coroutine(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _default_agent_runner(
+    model: str | None,
+    base_url: str | None,
+    api_key: str | None,
+    tools: dict[str, Callable[..., str]],
+    prompt: str,
+) -> str:
+    if not model:
+        raise RuntimeError("PageIndex ask requires a retrieve model or index model.")
+    try:
+        from agents import Agent, Runner, function_tool, set_tracing_disabled
+        from agents.extensions.models.litellm_model import LitellmModel
+    except ImportError as exc:
+        raise RuntimeError(
+            "PageIndex agentic ask requires openai-agents with LiteLLM support."
+        ) from exc
+
+    set_tracing_disabled(True)
+
+    @function_tool
+    def get_document(doc_id: str) -> str:
+        """Get document metadata for a PageIndex document id."""
+        return tools["get_document"](doc_id)
+
+    @function_tool
+    def get_document_structure(doc_id: str) -> str:
+        """Get the document tree structure for a PageIndex document id."""
+        return tools["get_document_structure"](doc_id)
+
+    @function_tool
+    def get_page_content(doc_id: str, pages: str) -> str:
+        """Get text for specific pages or line ranges in a PageIndex document."""
+        return tools["get_page_content"](doc_id, pages)
+
+    agent = Agent(
+        name="PageIndex",
+        instructions=_AGENT_SYSTEM_PROMPT,
+        tools=[get_document, get_document_structure, get_page_content],
+        model=LitellmModel(model=model, base_url=base_url, api_key=api_key),
+    )
+
+    async def _run() -> str:
+        result = await Runner.run(agent, prompt)
+        return "" if result.final_output is None else str(result.final_output)
+
+    return _run_coroutine(_run())
+
+
 def _tokens(text: str) -> set[str]:
     return {
         token.lower()
         for token in re.findall(r"[\w\u4e00-\u9fff]+", text, flags=re.UNICODE)
         if token.strip()
     }
+
+
+class _PageIndexCollectionClient:
+    def __init__(self, collection: Any) -> None:
+        self._collection = collection
+
+    def index(self, file_path: str, mode: str = "auto") -> str:
+        return self._collection.add(file_path)
+
+    def get_document_structure(self, doc_id: str) -> Any:
+        return self._collection.get_document_structure(doc_id)
+
+    def get_document(self, doc_id: str) -> Any:
+        if hasattr(self._collection, "get_document"):
+            return self._collection.get_document(doc_id)
+        return {"doc_id": doc_id}
+
+    def get_page_content(self, doc_id: str, pages: str) -> Any:
+        if hasattr(self._collection, "get_page_content"):
+            return self._collection.get_page_content(doc_id, pages)
+        return self.get_document_structure(doc_id)
+
+    def delete_document(self, doc_id: str) -> None:
+        if hasattr(self._collection, "delete_document"):
+            self._collection.delete_document(doc_id)
 
 
 class PageIndexBackend:
@@ -90,6 +192,10 @@ class PageIndexBackend:
         client_class: type | None = None,
         markitdown_factory: Callable[[], Any] | None = None,
         completion: Callable[[str | None, str], str] | None = None,
+        agent_runner: Callable[
+            [str | None, str | None, str | None, dict[str, Callable[..., str]], str],
+            str,
+        ] | None = None,
     ) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
@@ -100,6 +206,7 @@ class PageIndexBackend:
         self._client_class = client_class
         self._markitdown_factory = markitdown_factory
         self._completion = completion or _default_completion
+        self._agent_runner = agent_runner or _default_agent_runner
         self._clients: dict[str, Any] = {}
 
     def create_kb(self, slug: str, name: str) -> str:
@@ -151,7 +258,9 @@ class PageIndexBackend:
         docs.pop(backend_doc_id, None)
         self._save_docs(backend_kb_id, docs)
         client = self._clients.get(backend_kb_id)
-        if client is not None and hasattr(client, "documents"):
+        if client is not None and hasattr(client, "delete_document"):
+            client.delete_document(backend_doc_id)
+        elif client is not None and hasattr(client, "documents"):
             client.documents.pop(backend_doc_id, None)
 
     def get_status(
@@ -208,19 +317,58 @@ class PageIndexBackend:
         session_id: str | None = None,
         agent_id: str | None = None,
     ) -> tuple[AskResult, str]:
+        client = self._client(backend_kb_id)
+        docs = self._load_docs(backend_kb_id)
         chunks = self.retrieve(backend_kb_id, question, top_k=6)
-        context = "\n\n".join(
-            f"[{index}] {chunk.document_name}\n{chunk.content}"
-            for index, chunk in enumerate(chunks, start=1)
-        )
-        prompt = (
-            "Answer the question using only the provided PageIndex context. "
-            "If the context is insufficient, say so.\n\n"
-            f"Question:\n{question}\n\nContext:\n{context}"
-        )
+        prompt = self._agent_prompt(question, docs)
+        tools = self._agent_tools(client)
         self._configure_llm_env()
-        answer = self._completion(self.retrieve_model or self.model, prompt)
+        answer = self._agent_runner(
+            self._model_for_litellm(self.retrieve_model or self.model),
+            self.base_url,
+            self.api_key,
+            tools,
+            prompt,
+        )
         return AskResult(answer=answer, chunks=chunks, session_id=session_id), (chat_id or "")
+
+    def _agent_prompt(self, question: str, docs: dict[str, dict[str, Any]]) -> str:
+        doc_lines = []
+        for backend_doc_id, doc in docs.items():
+            doc_lines.append(
+                f"- doc_id: {backend_doc_id}; filename: {doc.get('filename') or backend_doc_id}"
+            )
+        available_docs = "\n".join(doc_lines) if doc_lines else "- no indexed documents"
+        return (
+            "Available PageIndex documents:\n"
+            f"{available_docs}\n\n"
+            f"Question:\n{question}"
+        )
+
+    def _agent_tools(self, client: Any) -> dict[str, Callable[..., str]]:
+        def _stringify(value: Any) -> str:
+            if isinstance(value, str):
+                return value
+            return json.dumps(value, ensure_ascii=False)
+
+        def get_document(doc_id: str) -> str:
+            if hasattr(client, "get_document"):
+                return _stringify(client.get_document(doc_id))
+            return json.dumps({"doc_id": doc_id}, ensure_ascii=False)
+
+        def get_document_structure(doc_id: str) -> str:
+            return _stringify(client.get_document_structure(doc_id))
+
+        def get_page_content(doc_id: str, pages: str) -> str:
+            if hasattr(client, "get_page_content"):
+                return _stringify(client.get_page_content(doc_id, pages))
+            return get_document_structure(doc_id)
+
+        return {
+            "get_document": get_document,
+            "get_document_structure": get_document_structure,
+            "get_page_content": get_page_content,
+        }
 
     def _prepare_index_file(
         self,
@@ -254,7 +402,11 @@ class PageIndexBackend:
     def _candidate_contents(self, client: Any, backend_doc_id: str) -> list[str]:
         try:
             raw_structure = client.get_document_structure(backend_doc_id)
-            structure = json.loads(raw_structure)
+            structure = (
+                json.loads(raw_structure)
+                if isinstance(raw_structure, str)
+                else raw_structure
+            )
         except Exception:
             return []
         contents: list[str] = []
@@ -287,13 +439,45 @@ class PageIndexBackend:
         if backend_kb_id not in self._clients:
             self._configure_llm_env()
             client_class = self._client_class or _default_pageindex_client_class()
-            self._clients[backend_kb_id] = client_class(
-                api_key=self.api_key,
-                model=self.model,
-                retrieve_model=self.retrieve_model,
-                workspace=str(self._kb_dir(backend_kb_id) / "workspace"),
+            workspace = str(self._kb_dir(backend_kb_id) / "workspace")
+            self._clients[backend_kb_id] = self._create_client(
+                client_class,
+                workspace=workspace,
             )
         return self._clients[backend_kb_id]
+
+    def _create_client(self, client_class: type, *, workspace: str):
+        try:
+            parameters = inspect.signature(client_class).parameters
+        except (TypeError, ValueError):
+            parameters = inspect.signature(client_class.__init__).parameters
+
+        if "workspace" in parameters:
+            return client_class(
+                api_key=self.api_key,
+                model=self._model_for_litellm(self.model),
+                retrieve_model=self._model_for_litellm(self.retrieve_model),
+                workspace=workspace,
+            )
+
+        if "storage_path" in parameters:
+            client = client_class(
+                model=self._model_for_litellm(self.model),
+                retrieve_model=self._model_for_litellm(self.retrieve_model),
+                storage_path=workspace,
+            )
+            if hasattr(client, "collection"):
+                return _PageIndexCollectionClient(client.collection("default"))
+            return client
+
+        raise RuntimeError(
+            "incompatible PageIndex SDK: this backend requires the local PageIndex "
+            "client interface (workspace/index or storage_path/collection). "
+            "The installed pageindex package appears to be the cloud-only API SDK."
+        )
+
+    def _model_for_litellm(self, model: str | None) -> str | None:
+        return _litellm_gateway_model(model, self.base_url)
 
     def _configure_llm_env(self) -> None:
         if self.api_key:
