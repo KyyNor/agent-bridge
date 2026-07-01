@@ -84,6 +84,18 @@ def _litellm_gateway_model(model: str | None, base_url: str | None) -> str | Non
     return f"openai/{model}"
 
 
+def _has_markdown_heading(markdown: str) -> bool:
+    return re.search(r"^#{1,6}\s+\S", markdown, flags=re.MULTILINE) is not None
+
+
+def _ensure_markdown_heading(markdown: str, fallback_title: str) -> str:
+    if _has_markdown_heading(markdown):
+        return markdown
+    title = fallback_title.strip() or "Document"
+    body = markdown.strip()
+    return f"# {title}\n\n{body}" if body else f"# {title}\n"
+
+
 def _run_coroutine(coro):
     try:
         asyncio.get_running_loop()
@@ -381,6 +393,13 @@ class PageIndexBackend:
         if suffix == ".pdf":
             return file_path, "pdf", "pdf"
         if suffix in {".md", ".markdown"}:
+            markdown = file_path.read_text(encoding="utf-8")
+            normalized = _ensure_markdown_heading(markdown, Path(filename).stem or doc_slug)
+            if normalized != markdown:
+                converted_path = self._kb_dir(backend_kb_id) / "converted" / f"{doc_slug}.md"
+                converted_path.parent.mkdir(parents=True, exist_ok=True)
+                converted_path.write_text(normalized, encoding="utf-8")
+                return converted_path, "md", "markdown:normalized"
             return file_path, "md", "markdown"
         if suffix in _MARKITDOWN_EXTENSIONS:
             converter = (
@@ -390,6 +409,7 @@ class PageIndexBackend:
             )
             result = converter.convert_local(str(file_path))
             markdown = getattr(result, "text_content", "")
+            markdown = _ensure_markdown_heading(markdown, Path(filename).stem or doc_slug)
             converted_path = self._kb_dir(backend_kb_id) / "converted" / f"{doc_slug}.md"
             converted_path.parent.mkdir(parents=True, exist_ok=True)
             converted_path.write_text(markdown, encoding="utf-8")

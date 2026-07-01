@@ -267,6 +267,36 @@ def test_upload_docx_converts_with_markitdown_before_indexing(tmp_path: Path) ->
     assert FakePageIndexClient.created[-1].indexed == [(str(converted_path), "md")]
 
 
+def test_upload_converted_plain_text_adds_markdown_heading(tmp_path: Path) -> None:
+    converter = FakeMarkItDown("Plain text without markdown headings")
+    backend = _backend(tmp_path, markitdown_factory=lambda: converter)
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / "plain.docx"
+    source.write_bytes(b"docx")
+
+    backend.upload("docs", "plain-doc", source, "plain.docx")
+
+    converted_path = tmp_path / "pageindex" / "docs" / "converted" / "plain-doc.md"
+    assert converted_path.read_text(encoding="utf-8").startswith(
+        "# plain\n\nPlain text without markdown headings"
+    )
+
+
+def test_upload_plain_markdown_indexes_normalized_copy(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / "notes.md"
+    source.write_text("Plain text without markdown headings", encoding="utf-8")
+
+    backend.upload("docs", "notes", source, "notes.md")
+
+    normalized_path = tmp_path / "pageindex" / "docs" / "converted" / "notes.md"
+    assert normalized_path.read_text(encoding="utf-8").startswith(
+        "# notes\n\nPlain text without markdown headings"
+    )
+    assert FakePageIndexClient.created[-1].indexed == [(str(normalized_path), "md")]
+
+
 def test_upload_unsupported_format_raises_clear_error(tmp_path: Path) -> None:
     backend = _backend(tmp_path)
     backend.create_kb("docs", "Docs")

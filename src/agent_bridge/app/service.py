@@ -906,10 +906,10 @@ class AgentBridgeService:
                     logger.info("文档同步任务 #%d: 后端 KB 已重建，%d 个文档已重新调度", job["id"], doc_count)
                     return True
                 except Exception as rebuild_exc:
-                    logger.error("文档同步任务 #%d: 重建失败 — %s", job["id"], rebuild_exc)
+                    logger.exception("文档同步任务 #%d: 重建失败 — %s", job["id"], rebuild_exc)
                     self.store.update_job_status(job["id"], SyncJobStatus.failed, error=str(exc))
                 return False
-            logger.error("文档同步任务 #%d: 失败 — %s", job["id"], exc)
+            logger.exception("文档同步任务 #%d: 失败 — %s", job["id"], exc)
             failed_status = (
                 SyncStateStatus.delete_failed if job["operation"] == "delete" else SyncStateStatus.sync_failed
             )
