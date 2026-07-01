@@ -265,6 +265,8 @@ class AgentBridgeService:
         kb_slugs: list[str],
         later: bool,
         original_filename: str | None = None,
+        source_type: str = "manual",
+        source_repo_key: str = "",
     ) -> dict[str, Any]:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
@@ -275,7 +277,10 @@ class AgentBridgeService:
         display_name = original_filename or source.name
         slug = unique_slug(make_slug(display_name), self.store.list_document_slugs())
         archived = self.archive.store(source)
-        doc = self.store.create_document(slug=slug, title=Path(display_name).stem, owner_user=actor)
+        doc = self.store.create_document(
+            slug=slug, title=Path(display_name).stem, owner_user=actor,
+            source_type=source_type, source_repo_key=source_repo_key,
+        )
         version = self.store.create_document_version(
             doc_id=doc["id"],
             original_filename=display_name,
