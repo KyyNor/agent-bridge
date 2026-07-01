@@ -353,7 +353,7 @@ def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: AgentBri
 
     assert [tool["tool"] for tool in service.list_tools("alice", "docs-api")] == ["list_docs"]
     assert [item["tool"] for item in service.search("alice", "docs-api", None)["items"]] == ["list_docs"]
-    with pytest.raises(NotFound, match="tool not found"):
+    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[list_docs\] .*log_id: call_"):
         asyncio.run(service.execute("alice", "docs-api", "get_doc", {"doc_id": "doc-1"}))
 
 
@@ -687,34 +687,86 @@ def test_execute_unwraps_exceptiongroup_from_mcp_client(wm_paths: AgentBridgePat
 def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
     service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
+    service.register_service("root", "docs-admin", "Docs Admin", "https://example.test/admin", {}, "Admin document capabilities", ["docs", "admin"])
+    service.register_service("root", "docs-archive", "Docs Archive", "https://example.test/archive", {}, "Archive document capabilities", ["docs", "archive"])
+    service.register_service("root", "reports-api", "Reports API", "https://example.test/reports", {}, "Report capabilities", ["reports"])
+    asyncio.run(service.sync_tools("root", "docs-api"))
+    service.store.upsert_mcp_tool(
+        service_key="docs-api",
+        tool_name="search_documents",
+        display_name="search_documents",
+        description="Search documents with advanced filters",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        tool_type=ToolType.search.value,
+        tags=["docs"],
+        examples=[],
+    )
+    service.store.upsert_mcp_tool(
+        service_key="docs-api",
+        tool_name="research_docs",
+        display_name="research_docs",
+        description="Research document corpus",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        tool_type=ToolType.search.value,
+        tags=["docs"],
+        examples=[],
+    )
 
-    with pytest.raises(NotFound, match=r"service not found .*log_id: call_") as missing_service_exc:
-        asyncio.run(service.execute("alice", "missing", "search_docs", {}))
-    with pytest.raises(NotFound, match=r"tool not found .*log_id: call_") as missing_tool_exc:
-        asyncio.run(service.execute("alice", "docs-api", "missing", {}))
+    with pytest.raises(NotFound, match=r"service_not_found，可用的类似服务有：\[docs-api, docs-admin, docs-archive\] .*log_id: call_") as missing_service_exc:
+        asyncio.run(service.execute("alice", "docs-ap", "search_docs", {}))
+    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[search_docs, search_documents, research_docs\] .*log_id: call_") as missing_tool_exc:
+        asyncio.run(service.execute("alice", "docs-api", "search_doc", {}))
 
     logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
-    missing_service_log = next(log for log in logs if log["source_key"] == "missing")
-    missing_tool_log = next(log for log in logs if log["source_key"] == "docs-api" and log["tool_name"] == "missing")
+    missing_service_log = next(log for log in logs if log["source_key"] == "docs-ap")
+    missing_tool_log = next(log for log in logs if log["source_key"] == "docs-api" and log["tool_name"] == "search_doc")
     assert missing_service_log["log_id"] in str(missing_service_exc.value)
-    assert missing_service_log["source_key"] == "missing"
+    assert missing_service_log["source_key"] == "docs-ap"
     assert missing_service_log["tool_name"] == "search_docs"
     assert json.loads(missing_service_log["request_json"]) == {
-        "service": "missing",
+        "service": "docs-ap",
         "tool_name": "search_docs",
         "params": {},
         "profile_key": None,
     }
-    assert json.loads(missing_service_log["response_json"])["error"] == "service not found"
-    assert missing_service_log["error_message"] == "service not found"
+    expected_service_error = "service_not_found，可用的类似服务有：[docs-api, docs-admin, docs-archive]"
+    assert json.loads(missing_service_log["response_json"])["error"] == expected_service_error
+    assert missing_service_log["error_message"] == expected_service_error
     assert missing_tool_log["log_id"] in str(missing_tool_exc.value)
     assert missing_tool_log["source_key"] == "docs-api"
-    assert missing_tool_log["tool_name"] == "missing"
+    assert missing_tool_log["tool_name"] == "search_doc"
     assert json.loads(missing_tool_log["request_json"]) == {
         "service": "docs-api",
-        "tool_name": "missing",
+        "tool_name": "search_doc",
         "params": {},
         "profile_key": None,
     }
-    assert json.loads(missing_tool_log["response_json"])["error"] == "tool not found"
-    assert missing_tool_log["error_message"] == "tool not found"
+    expected_tool_error = "tool_not_found，可用的类似工具有：[search_docs, search_documents, research_docs]"
+    assert json.loads(missing_tool_log["response_json"])["error"] == expected_tool_error
+    assert missing_tool_log["error_message"] == expected_tool_error
+
+
+def test_execute_missing_tool_suggestions_stay_within_same_service_and_fall_back_cleanly(wm_paths: AgentBridgePaths) -> None:
+    service, _client = _service(wm_paths)
+    service.register_service("root", "docs-api", "Docs API", "https://example.test/mcp", {}, "Document capabilities", ["docs"])
+    service.register_service("root", "reports-api", "Reports API", "https://example.test/reports", {}, "Report capabilities", ["reports"])
+    asyncio.run(service.sync_tools("root", "docs-api"))
+    asyncio.run(service.sync_tools("root", "reports-api"))
+    service.store.upsert_mcp_tool(
+        service_key="reports-api",
+        tool_name="search_reports",
+        display_name="search_reports",
+        description="Search reports",
+        input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        tool_type=ToolType.search.value,
+        tags=["reports"],
+        examples=[],
+    )
+
+    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[search_docs, delete_doc\] .*log_id: call_") as same_service_exc:
+        asyncio.run(service.execute("alice", "docs-api", "search_doc", {}))
+    with pytest.raises(NotFound, match=r"tool_not_found .*log_id: call_") as no_match_exc:
+        asyncio.run(service.execute("alice", "docs-api", "zzzzzz", {}))
+
+    assert "search_reports" not in str(same_service_exc.value)
+    assert "可用的类似工具有" not in str(no_match_exc.value)

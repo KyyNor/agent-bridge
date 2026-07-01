@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from difflib import SequenceMatcher
 import json
 import logging
 import re
@@ -90,6 +91,44 @@ def _example_value(definition: Any) -> Any:
     if value_type == "object":
         return {}
     return None
+
+
+def _compact_match_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _similarity_score(query: str, candidate: str) -> float:
+    query_lower = query.strip().lower()
+    candidate_lower = candidate.strip().lower()
+    if not query_lower or not candidate_lower:
+        return 0.0
+    compact_query = _compact_match_key(query_lower)
+    compact_candidate = _compact_match_key(candidate_lower)
+    score = SequenceMatcher(None, query_lower, candidate_lower).ratio()
+    if compact_query and compact_candidate:
+        score = max(score, SequenceMatcher(None, compact_query, compact_candidate).ratio())
+    if candidate_lower.startswith(query_lower) or (compact_query and compact_candidate.startswith(compact_query)):
+        score = max(score, 0.98)
+    elif query_lower in candidate_lower or (compact_query and compact_query in compact_candidate):
+        score = max(score, 0.92)
+    return score
+
+
+def _top_similar_names(query: str, candidates: list[str], *, limit: int = 3, cutoff: float = 0.45) -> list[str]:
+    ranked: list[tuple[float, str]] = []
+    for candidate in dict.fromkeys(candidates):
+        score = _similarity_score(query, candidate)
+        if score >= cutoff:
+            ranked.append((score, candidate))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [candidate for _, candidate in ranked[:limit]]
+
+
+def _friendly_not_found_message(kind: str, noun: str, suggestions: list[str]) -> str:
+    base = f"{kind}_not_found"
+    if not suggestions:
+        return base
+    return f"{base}，可用的类似{noun}有：[{', '.join(suggestions)}]"
 
 
 def _attach_log_id(exc: Exception, log_id: str) -> None:
@@ -693,6 +732,7 @@ class CapabilityService:
                     service,
                     tool_name,
                     params,
+                    profile_key,
                 )
             elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
                 # 分支 3a：MCP 能力，来源级策略校验未通过
@@ -714,7 +754,7 @@ class CapabilityService:
             else:
                 # 分支 3b：MCP 能力正常执行
                 logger.debug("能力分发 mcp service=%s tool=%s", service, tool_name)
-                result = await self._execute_without_log(actor, service, tool_name, params)
+                result = await self._execute_without_log(actor, service, tool_name, params, profile_key)
             log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
@@ -808,10 +848,24 @@ class CapabilityService:
         service: str,
         tool_name: str,
         params: dict[str, Any],
+        profile_key: str | None,
     ) -> dict[str, Any]:
-        service_payload = self._require_enabled_service(service)
+        service_payload = self._require_enabled_service(
+            service,
+            actor=actor,
+            profile_key=profile_key,
+            friendly_not_found=True,
+        )
         tool_payload = self.store.get_mcp_tool(service, tool_name)
-        self._assert_tool_executable(tool_payload)
+        self._assert_tool_executable(
+            tool_payload,
+            actor=actor,
+            service_key=service,
+            tool_name=tool_name,
+            profile_key=profile_key,
+            source_type=SourceType.mcp_service.value,
+            friendly_not_found=True,
+        )
 
         headers = _json_loads(service_payload.get("headers_json"), {})
         try:
@@ -850,10 +904,24 @@ class CapabilityService:
         service: str,
         tool_name: str,
         params: dict[str, Any],
+        profile_key: str | None,
     ) -> dict[str, Any]:
-        service_payload = self._require_enabled_openapi_service(service)
+        service_payload = self._require_enabled_openapi_service(
+            service,
+            actor=actor,
+            profile_key=profile_key,
+            friendly_not_found=True,
+        )
         tool_payload = self.store.get_openapi_tool(service, tool_name)
-        self._assert_tool_executable(tool_payload)
+        self._assert_tool_executable(
+            tool_payload,
+            actor=actor,
+            service_key=service,
+            tool_name=tool_name,
+            profile_key=profile_key,
+            source_type=SourceType.openapi_service.value,
+            friendly_not_found=True,
+        )
         try:
             result = self.openapi_client.call_tool(
                 self._openapi_service_payload(service_payload),
@@ -881,11 +949,22 @@ class CapabilityService:
         service_key: str,
         getter: Callable[[str], dict[str, Any] | None],
         disabled_message: str,
+        *,
+        actor: str | None = None,
+        profile_key: str | None = None,
+        friendly_not_found: bool = False,
     ) -> dict[str, Any]:
         service = getter(service_key)
         if service is None:
+            message = "service not found"
+            if friendly_not_found and actor is not None:
+                message = _friendly_not_found_message(
+                    "service",
+                    "服务",
+                    self._similar_service_names(actor, service_key, profile_key),
+                )
             raise mark_builtin_failure(
-                NotFound("service not found"),
+                NotFound(message),
                 stage=FailureStage.capability_registry.value,
                 owner=FailureOwner.platform.value,
                 error_type="capability_registry_error",
@@ -899,16 +978,61 @@ class CapabilityService:
             )
         return service
 
-    def _require_enabled_service(self, service_key: str) -> dict[str, Any]:
-        return self._require_enabled(service_key, self.store.get_mcp_service, "MCP service is not enabled")
+    def _require_enabled_service(
+        self,
+        service_key: str,
+        *,
+        actor: str | None = None,
+        profile_key: str | None = None,
+        friendly_not_found: bool = False,
+    ) -> dict[str, Any]:
+        return self._require_enabled(
+            service_key,
+            self.store.get_mcp_service,
+            "MCP service is not enabled",
+            actor=actor,
+            profile_key=profile_key,
+            friendly_not_found=friendly_not_found,
+        )
 
-    def _require_enabled_openapi_service(self, service_key: str) -> dict[str, Any]:
-        return self._require_enabled(service_key, self.store.get_openapi_service, "OpenAPI service is not enabled")
+    def _require_enabled_openapi_service(
+        self,
+        service_key: str,
+        *,
+        actor: str | None = None,
+        profile_key: str | None = None,
+        friendly_not_found: bool = False,
+    ) -> dict[str, Any]:
+        return self._require_enabled(
+            service_key,
+            self.store.get_openapi_service,
+            "OpenAPI service is not enabled",
+            actor=actor,
+            profile_key=profile_key,
+            friendly_not_found=friendly_not_found,
+        )
 
-    def _assert_tool_executable(self, tool_payload: dict[str, Any] | None) -> None:
+    def _assert_tool_executable(
+        self,
+        tool_payload: dict[str, Any] | None,
+        *,
+        actor: str | None = None,
+        service_key: str | None = None,
+        tool_name: str | None = None,
+        profile_key: str | None = None,
+        source_type: str = SourceType.mcp_service.value,
+        friendly_not_found: bool = False,
+    ) -> None:
         if tool_payload is None or tool_payload.get("status") != "active":
+            message = "tool not found"
+            if friendly_not_found and actor is not None and service_key is not None and tool_name is not None:
+                message = _friendly_not_found_message(
+                    "tool",
+                    "工具",
+                    self._similar_tool_names(actor, service_key, tool_name, profile_key, source_type),
+                )
             raise mark_builtin_failure(
-                NotFound("tool not found"),
+                NotFound(message),
                 stage=FailureStage.capability_registry.value,
                 owner=FailureOwner.platform.value,
                 error_type="capability_registry_error",
@@ -1016,6 +1140,52 @@ class CapabilityService:
             if service["service_key"] in visible_openapi_keys
         ]
         return builtin_items + external_items + openapi_items
+
+    def _similar_service_names(self, actor: str, service_key: str, profile_key: str | None) -> list[str]:
+        builtin_names = [
+            provider.source_key
+            for provider in self.builtin_providers.values()
+            if provider.list_tools(actor, profile_key)
+        ]
+        enabled_mcp_names = [
+            service["service_key"]
+            for service in self.store.list_mcp_services()
+            if service["status"] == McpServiceStatus.enabled.value and service["service_key"] not in self.builtin_providers
+        ]
+        enabled_openapi_names = [
+            service["service_key"]
+            for service in self.store.list_openapi_services()
+            if service["status"] == McpServiceStatus.enabled.value
+        ]
+        visible_mcp_names = self.governance.filter_source_keys(
+            actor=actor,
+            profile_key=profile_key,
+            source_type=SourceType.mcp_service.value,
+            source_keys=enabled_mcp_names,
+        )
+        visible_openapi_names = self.governance.filter_source_keys(
+            actor=actor,
+            profile_key=profile_key,
+            source_type=SourceType.openapi_service.value,
+            source_keys=enabled_openapi_names,
+        )
+        return _top_similar_names(service_key, builtin_names + visible_mcp_names + visible_openapi_names)
+
+    def _similar_tool_names(
+        self,
+        actor: str,
+        service_key: str,
+        tool_name: str,
+        profile_key: str | None,
+        source_type: str,
+    ) -> list[str]:
+        if source_type == SourceType.openapi_service.value:
+            candidates = [tool["tool_name"] for tool in self._active_openapi_tools(service_key)]
+        elif source_type == SourceType.builtin.value and service_key in self.builtin_providers:
+            candidates = [tool.tool for tool in self.builtin_providers[service_key].list_tools(actor, profile_key)]
+        else:
+            candidates = [tool["tool_name"] for tool in self._active_tools(service_key)]
+        return _top_similar_names(tool_name, candidates)
 
     def _active_tools(self, service_key: str) -> list[dict[str, Any]]:
         return [tool for tool in self.store.list_mcp_tools(service_key) if tool.get("status") == "active"]
