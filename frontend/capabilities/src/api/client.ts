@@ -284,6 +284,22 @@ export const api = {
     return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`)
   },
   runWorkflow: (key: string) => post<{ status: string; run_id?: string }>(`/workflows/${key}/run`),
+  executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string) => {
+    const qs = new URLSearchParams()
+    if (taskVersion) qs.set('task_version', taskVersion)
+    const tail = qs.toString() ? `?${qs}` : ''
+    return post<{ workflow_key: string; task_key: string; priority: boolean; run_id?: string; run_status?: string }>(
+      `/workflows/${workflowKey}/tasks/${encodeURIComponent(taskKey)}/execute${tail}`,
+    )
+  },
+  resetWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string) => {
+    const qs = new URLSearchParams()
+    if (taskVersion) qs.set('task_version', taskVersion)
+    const tail = qs.toString() ? `?${qs}` : ''
+    return post<{ workflow_key: string; task_key: string; status: string }>(
+      `/workflows/${workflowKey}/tasks/${encodeURIComponent(taskKey)}/reset${tail}`,
+    )
+  },
   getWorkflowRun: (runId: string) => get<WorkflowRun>(`/workflow-runs/${runId}`),
 
   // Logs

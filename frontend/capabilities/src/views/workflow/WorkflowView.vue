@@ -76,6 +76,11 @@ const expandedArtifactIds = ref<Set<string>>(new Set())
 const taskArtifacts = ref<Record<string, WorkflowArtifact[]>>({})
 const taskArtifactLoading = ref<Set<string>>(new Set())
 const taskArtifactError = ref('')
+// Execute (priority run) / reset (feature 3 & 4).
+const taskActionLoading = ref<Set<string>>(new Set())
+const taskActionError = ref('')
+const resetTarget = ref<WorkflowTask | null>(null)
+const resetting = ref(false)
 const taskArtifactActive = ref<Record<string, string>>({})
 let taskSearchDebounce: ReturnType<typeof setTimeout> | null = null
 const testing = ref(false)
@@ -721,6 +726,67 @@ async function toggleTaskArtifacts(task: WorkflowTask) {
   }
 }
 
+/** Whether a task can be priority-executed right now (pending, or running
+ *  with an expired lease). Mirrors the server-side leasability check. */
+function canExecuteTask(task: WorkflowTask): boolean {
+  if (task.status === 'pending') return true
+  if (task.status === 'running' && task.lease_expires_at) {
+    return new Date(task.lease_expires_at).getTime() < Date.now()
+  }
+  return false
+}
+
+function taskActionKey(task: WorkflowTask) {
+  return taskId(task)
+}
+
+function isTaskActionLoading(task: WorkflowTask) {
+  return taskActionLoading.value.has(taskActionKey(task))
+}
+
+async function executeTask(task: WorkflowTask) {
+  const key = taskActionKey(task)
+  if (isTaskActionLoading(task)) return
+  const loading = new Set(taskActionLoading.value)
+  loading.add(key)
+  taskActionLoading.value = loading
+  taskActionError.value = ''
+  try {
+    await api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined)
+    await loadTasks(task.workflow_key)
+  } catch (e: unknown) {
+    taskActionError.value = errorMessage(e)
+  } finally {
+    const done = new Set(taskActionLoading.value)
+    done.delete(key)
+    taskActionLoading.value = done
+  }
+}
+
+function openResetConfirm(task: WorkflowTask) {
+  resetTarget.value = task
+}
+
+function closeResetConfirm() {
+  resetTarget.value = null
+}
+
+async function confirmResetTask() {
+  const task = resetTarget.value
+  if (!task || resetting.value) return
+  resetting.value = true
+  taskActionError.value = ''
+  try {
+    await api.resetWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined)
+    resetTarget.value = null
+    await loadTasks(task.workflow_key)
+  } catch (e: unknown) {
+    taskActionError.value = errorMessage(e)
+  } finally {
+    resetting.value = false
+  }
+}
+
 async function loadLogs(options: { quiet?: boolean } = {}) {
   if (!selectedRunId.value) {
     runLogs.value = []
@@ -946,6 +1012,9 @@ async function confirmClearWorkflow() {
     expandedArtifactIds.value = new Set()
     taskArtifacts.value = {}
     taskArtifactActive.value = {}
+    taskActionLoading.value = new Set()
+    taskActionError.value = ''
+    resetTarget.value = null
     await Promise.all([
       loadRunsForWorkflows(),
       loadTasks(wf.workflow_key),
@@ -1270,6 +1339,31 @@ async function confirmClearWorkflow() {
       </DialogContent>
     </Dialog>
 
+    <Dialog :open="resetTarget !== null" @update:open="(v) => { if (!v) closeResetConfirm() }">
+      <DialogContent class="max-w-[480px] sm:max-w-[480px]">
+        <DialogHeader>
+          <DialogTitle>重置任务</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-3 text-sm text-muted-foreground">
+          <p>
+            确定重置任务
+            <span class="font-mono font-medium text-foreground">「{{ resetTarget?.task_key }}」</span>
+            <span v-if="resetTarget?.task_version" class="text-foreground">（{{ resetTarget.task_version }}）</span>
+            吗？
+          </p>
+          <div class="rounded-md border bg-muted/30 px-3 py-2 text-xs leading-5">
+            重置后该任务会回到待处理状态，可被再次领取执行；不会立即触发执行，也不会改变其他任务的执行顺序。历史尝试次数和错误信息会保留。
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" :disabled="resetting" @click="closeResetConfirm">取消</Button>
+          <Button variant="destructive" :disabled="resetting" @click="confirmResetTask">
+            {{ resetting ? '重置中' : '确认重置' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <section v-if="routeMode === 'tasks' && !routeError" class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
@@ -1363,6 +1457,9 @@ async function confirmClearWorkflow() {
           <div v-if="taskError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {{ taskError }}
           </div>
+          <div v-if="taskActionError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {{ taskActionError }}
+          </div>
           <div v-if="tasksLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!tasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无任务</div>
           <div v-else-if="!filteredTasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">没有符合筛选条件的任务</div>
@@ -1373,6 +1470,7 @@ async function confirmClearWorkflow() {
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="font-mono text-sm font-medium text-foreground">{{ task.task_key }}</span>
                     <Badge variant="outline" :class="taskBadgeClass(task.status)">{{ taskStatusLabel(task.status) }}</Badge>
+                    <Badge v-if="task.priority_flag" variant="outline" class="bg-blue-50 text-blue-700">优先执行</Badge>
                     <Badge v-if="task.type" variant="outline">{{ task.type }}</Badge>
                     <Badge v-if="task.task_version" variant="outline">{{ task.task_version }}</Badge>
                   </div>
@@ -1388,12 +1486,32 @@ async function confirmClearWorkflow() {
                   </div>
                 </div>
                 <div class="flex items-center gap-1">
+                  <Button
+                    v-if="canExecuteTask(task)"
+                    variant="ghost"
+                    size="sm"
+                    class="h-8 text-xs text-blue-600"
+                    :disabled="isTaskActionLoading(task)"
+                    @click="executeTask(task)"
+                  >
+                    {{ isTaskActionLoading(task) ? '执行中' : '执行' }}
+                  </Button>
                   <Button variant="ghost" size="sm" class="h-8 text-xs" @click="toggleTaskArtifacts(task)">
                     {{ isTaskArtifactExpanded(task) ? '收起产出物' : '产出物' }}
                     <Badge v-if="taskArtifactsOf(task).length" variant="outline" class="ml-1">{{ taskArtifactsOf(task).length }}</Badge>
                   </Button>
                   <Button variant="ghost" size="sm" class="h-8 text-xs" @click="toggleTaskLogs(task)">
                     {{ expandedTaskIds.has(taskId(task)) ? '收起日志' : '展开日志' }}
+                  </Button>
+                  <Button
+                    v-if="task.status === 'completed' || task.status === 'failed' || task.status === 'abandoned' || task.status === 'running'"
+                    variant="ghost"
+                    size="sm"
+                    class="h-8 text-xs text-amber-600"
+                    :disabled="isTaskActionLoading(task)"
+                    @click="openResetConfirm(task)"
+                  >
+                    重置
                   </Button>
                 </div>
               </div>

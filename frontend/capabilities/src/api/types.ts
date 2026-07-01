@@ -277,6 +277,7 @@ export interface WorkflowTask {
   lease_expires_at: string | null
   attempt_count: number
   last_error: string | null
+  priority_flag: string | null
   created_at: string
   updated_at: string
   completed_at: string | null

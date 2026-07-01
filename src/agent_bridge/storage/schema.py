@@ -468,6 +468,7 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at TEXT,
+  priority_flag TEXT,
   UNIQUE (workflow_key, task_key, task_version)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_tasks_pick

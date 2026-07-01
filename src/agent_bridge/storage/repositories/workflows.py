@@ -313,7 +313,7 @@ class WorkflowsRepository:
                     status = 'pending'
                     OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
                   )
-                ORDER BY id
+                ORDER BY (priority_flag IS NULL), priority_flag ASC, id
                 LIMIT 1
                 """,
                 (workflow_key, now),
@@ -327,6 +327,7 @@ class WorkflowsRepository:
                     lease_run_id = ?,
                     lease_expires_at = ?,
                     attempt_count = attempt_count + 1,
+                    priority_flag = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
@@ -346,6 +347,86 @@ class WorkflowsRepository:
             )
             leased = conn.execute("SELECT * FROM workflow_tasks WHERE id = ?", (row["id"],)).fetchone()
             return _row_payload(leased)
+
+    def set_priority_for_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        *,
+        task_version: str | None = None,
+        flagged_at: str | None = None,
+    ) -> bool:
+        """Stamp a one-shot priority flag on a task so the next lease picks it
+        ahead of normal id ordering. ``flagged_at`` defaults to now (UTC ISO);
+        the timestamp lets multiple flags be ordered chronologically. Returns
+        whether a row was updated.
+        """
+        flag = flagged_at or _now_iso()
+        with self._connect() as conn:
+            if task_version is not None:
+                cursor = conn.execute(
+                    """
+                    UPDATE workflow_tasks
+                    SET priority_flag = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE workflow_key = ? AND task_key = ? AND task_version = ?
+                    """,
+                    (flag, workflow_key, task_key, task_version),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE workflow_tasks
+                    SET priority_flag = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE workflow_key = ? AND task_key = ?
+                    """,
+                    (flag, workflow_key, task_key),
+                )
+            return cursor.rowcount > 0
+
+    def reset_workflow_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        *,
+        task_version: str | None = None,
+    ) -> bool:
+        """Restore a task to a leasable state without triggering execution.
+
+        Flips status to pending and clears the lease / completion / priority
+        fields. ``attempt_count`` and ``last_error`` are deliberately preserved
+        as an audit trail (a separate re-run does not erase retry history).
+        Returns whether a row was updated.
+        """
+        with self._connect() as conn:
+            if task_version is not None:
+                cursor = conn.execute(
+                    """
+                    UPDATE workflow_tasks
+                    SET status = 'pending',
+                        lease_run_id = NULL,
+                        lease_expires_at = NULL,
+                        completed_at = NULL,
+                        priority_flag = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE workflow_key = ? AND task_key = ? AND task_version = ?
+                    """,
+                    (workflow_key, task_key, task_version),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE workflow_tasks
+                    SET status = 'pending',
+                        lease_run_id = NULL,
+                        lease_expires_at = NULL,
+                        completed_at = NULL,
+                        priority_flag = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE workflow_key = ? AND task_key = ?
+                    """,
+                    (workflow_key, task_key),
+                )
+            return cursor.rowcount > 0
 
     def complete_workflow_task(
         self,
