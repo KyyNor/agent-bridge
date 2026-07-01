@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS documents (
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted_at TEXT
+  deleted_at TEXT,
+  source_type TEXT NOT NULL DEFAULT 'manual',
+  source_repo_key TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS document_versions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

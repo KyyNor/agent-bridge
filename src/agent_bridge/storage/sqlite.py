@@ -110,6 +110,14 @@ class SQLiteStore:
                     "default_agent_id": "TEXT",
                 },
             )
+            self._ensure_columns(
+                conn,
+                "documents",
+                {
+                    "source_type": "TEXT NOT NULL DEFAULT 'manual'",
+                    "source_repo_key": "TEXT NOT NULL DEFAULT ''",
+                },
+            )
 
             self.governance._migrate_tool_call_logs_nullable_profile(conn)
             self._ensure_columns(

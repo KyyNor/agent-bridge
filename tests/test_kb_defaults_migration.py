@@ -53,3 +53,31 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
 
     # Idempotent: running the migration again is a no-op.
     store.migrate_phase2()
+
+
+def test_migrate_phase2_adds_documents_source_columns(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+
+    # Simulate an upgrade from a DB created before these columns existed.
+    with store.connect() as conn:
+        assert "source_type" in _columns(conn, "documents")
+        conn.execute("ALTER TABLE documents DROP COLUMN source_type")
+        conn.execute("ALTER TABLE documents DROP COLUMN source_repo_key")
+        assert "source_type" not in _columns(conn, "documents")
+
+    # The startup migration repairs the schema.
+    store.migrate_phase2()
+    with store.connect() as conn:
+        cols = _columns(conn, "documents")
+        assert "source_type" in cols
+        assert "source_repo_key" in cols
+        # 默认值正确:不显式指定时为 manual / 空
+        conn.execute(
+            "INSERT INTO documents (slug, title, owner_user) VALUES ('t', 'T', 'root')"
+        )
+        row = conn.execute(
+            "SELECT source_type, source_repo_key FROM documents WHERE slug='t'"
+        ).fetchone()
+        assert row[0] == "manual"
+        assert row[1] == ""
