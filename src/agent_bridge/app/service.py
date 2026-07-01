@@ -480,6 +480,23 @@ class AgentBridgeService:
         """手动同步:转发到增量 diff 逻辑(行为与定时同步一致)。"""
         return self.sync_kb_repo_source_changes(actor, kb_slug, repo_key)
 
+    def delete_kb_repo_source(self, actor: str, kb_slug: str, repo_key: str) -> dict[str, Any]:
+        """删除 KB 的 git 数据源:解绑关联 + 软删除该 repo 提供的文档 + 生成 delete 同步任务。
+
+        遵循 delete_document 的顺序:先生成 Operation.delete 任务再 soft_delete。
+        保留 code_repositories 记录和本地克隆(其他 KB 可能引用)。
+        """
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        source = self.store.get_kb_repo_source(kb["id"], repo_key)
+        if source is None:
+            raise NotFound("knowledge repo source not found")
+        git_docs = self.store.list_git_docs_for_repo(kb["id"], repo_key)
+        for doc in git_docs:
+            self.delete_document(actor, doc["slug"], later=True)
+        self.store.delete_kb_repo_source(kb["id"], repo_key)
+        logger.info("git 数据源已删除 kb=%s repo=%s 删除文档数=%d", kb_slug, repo_key, len(git_docs))
+        return {"kb_slug": kb_slug, "repo_key": repo_key, "deleted_docs": len(git_docs)}
+
     def sync_kb_repo_source_changes(self, actor: str, kb_slug: str, repo_key: str) -> dict[str, Any]:
         """增量同步:对比仓库文件与已导入文档,生成 create/delete 同步任务。
 

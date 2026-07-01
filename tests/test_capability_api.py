@@ -655,7 +655,8 @@ def test_kb_repo_source_api_saves_config_and_syncs_filtered_files(wm_paths, tmp_
     assert listed.status_code == 200
     assert listed.json()[0]["repo_key"] == "docs-repo"
     assert synced.status_code == 200, synced.text
-    assert synced.json()["matched"] == 2
+    assert synced.json()["added"] == 2
+    assert synced.json()["removed"] == 0
     assert {item["title"] for item in docs.json()} == {"guide", "notes"}
 
 
@@ -1137,3 +1138,28 @@ def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:
     # 应生成 delete 同步任务
     jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
     assert any(j["operation"] == "delete" for j in jobs)
+
+
+def test_delete_kb_repo_source_removes_docs_and_generates_delete_jobs(wm_paths, tmp_path: Path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    _setup_repo_and_kb(tmp_path, client)
+    # 建 mock backend target 以便删除时生成 sync job
+    store = SQLiteStore(wm_paths.db_path)
+    kb = store.get_kb_by_slug("docs")
+    store.ensure_backend_target(kb["id"], "mock", "mock")
+    # 导入 git 文档
+    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    # 删除数据源
+    r = client.post("/kbs/docs/repo-sources/r1/delete", headers={"X-Agent-Bridge-User": "root"})
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted_docs"] == 1
+    # active 文档清空
+    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    assert docs == []
+    # 生成 delete 同步任务
+    jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
+    assert any(j["operation"] == "delete" for j in jobs)
+    # 数据源已解绑(list 为空)
+    sources = client.get("/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"}).json()
+    assert sources == []

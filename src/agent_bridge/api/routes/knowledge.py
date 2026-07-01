@@ -97,6 +97,10 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
     def sync_kb_repo_source(kb_slug: str, repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.sync_kb_repo_source(current_actor, kb_slug, repo_key)
 
+    @router.post("/kbs/{kb_slug}/repo-sources/{repo_key}/delete")
+    def delete_kb_repo_source(kb_slug: str, repo_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.delete_kb_repo_source(current_actor, kb_slug, repo_key)
+
     @router.post("/docs")
     def add_document(
         current_actor: str = Depends(actor),
