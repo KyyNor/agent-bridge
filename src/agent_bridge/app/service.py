@@ -477,6 +477,18 @@ class AgentBridgeService:
         return self.store.upsert_kb_repo_source(kb["id"], repo_key, suffixes)
 
     def sync_kb_repo_source(self, actor: str, kb_slug: str, repo_key: str) -> dict[str, Any]:
+        """手动同步:转发到增量 diff 逻辑(行为与定时同步一致)。"""
+        return self.sync_kb_repo_source_changes(actor, kb_slug, repo_key)
+
+    def sync_kb_repo_source_changes(self, actor: str, kb_slug: str, repo_key: str) -> dict[str, Any]:
+        """增量同步:对比仓库文件与已导入文档,生成 create/delete 同步任务。
+
+        diff 口径:按 slug + repo_key 匹配。
+        - 新增文件 → add_document(source_type='git')
+        - 仓库已删除 → delete_document(先生成 Operation.delete 任务再 soft_delete)
+        - 内容修改 → 先删后加(doc_id 变化)
+        - 内容不变 → 跳过
+        """
         kb = self._require_kb_admin_visible(actor, kb_slug)
         source = self.store.get_kb_repo_source(kb["id"], repo_key)
         if source is None:
@@ -495,9 +507,15 @@ class AgentBridgeService:
                 raise ValidationError("code repository has not been synced")
 
             suffixes = set(source["include_suffixes"])
-            matched = 0
-            imported = 0
-            skipped = 0
+            # existing: {slug: content_hash}
+            existing = {
+                d["slug"]: (d.get("content_hash") or "")
+                for d in self.store.list_git_docs_for_repo(kb["id"], repo_key)
+            }
+            existing_slugs = set(existing.keys())
+
+            # current: 扫描仓库,计算每个文件的 (slug, content_hash)
+            current: dict[str, str] = {}
             for path in sorted(local_path.rglob("*")):
                 if path.is_symlink() or not path.is_file():
                     continue
@@ -509,18 +527,76 @@ class AgentBridgeService:
                     continue
                 if path.suffix.lower() not in suffixes:
                     continue
-                matched += 1
                 if path.suffix.lower() not in ALLOWED_EXTENSIONS:
-                    skipped += 1
                     continue
-                self.add_document(actor, path, [kb_slug], later=True, original_filename=path.name)
-                imported += 1
+                slug = make_slug(Path(path.name).stem)
+                current[slug] = self._sha256_file(path)
+
+            added = removed = updated = unchanged = 0
+            # 新增 + 修改
+            for slug, content_hash in current.items():
+                if slug not in existing_slugs:
+                    self._import_repo_file(actor, kb_slug, repo_key, local_path, suffixes, slug)
+                    added += 1
+                elif existing[slug] != content_hash:
+                    # 修改:先删后加
+                    self.delete_document(actor, slug, later=True)
+                    self._import_repo_file(actor, kb_slug, repo_key, local_path, suffixes, slug)
+                    updated += 1
+                else:
+                    unchanged += 1
+            # 删除
+            for slug in existing_slugs - set(current.keys()):
+                self.delete_document(actor, slug, later=True)
+                removed += 1
 
             self.store.mark_kb_repo_source_sync(kb["id"], repo_key, success=True)
-            return {"kb_slug": kb_slug, "repo_key": repo_key, "matched": matched, "imported": imported, "skipped": skipped}
+            return {
+                "kb_slug": kb_slug, "repo_key": repo_key,
+                "added": added, "removed": removed, "updated": updated, "unchanged": unchanged,
+            }
         except Exception as exc:
             self.store.mark_kb_repo_source_sync(kb["id"], repo_key, success=False, error=str(exc))
             raise
+
+    def _import_repo_file(
+        self,
+        actor: str,
+        kb_slug: str,
+        repo_key: str,
+        local_path: Path,
+        suffixes: set[str],
+        target_slug: str,
+    ) -> None:
+        """按 slug 找到仓库内第一个匹配文件并导入为 git 文档。"""
+        for path in sorted(local_path.rglob("*")):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                relative_parts = path.relative_to(local_path).parts
+            except ValueError:
+                continue
+            if ".git" in relative_parts:
+                continue
+            if path.suffix.lower() not in suffixes or path.suffix.lower() not in ALLOWED_EXTENSIONS:
+                continue
+            if make_slug(Path(path.name).stem) == target_slug:
+                self.add_document(
+                    actor, path, [kb_slug], later=True,
+                    original_filename=path.name,
+                    source_type="git", source_repo_key=repo_key,
+                )
+                return
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        import hashlib
+
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @staticmethod
     def _normalize_repo_source_suffixes(suffixes: list[str]) -> list[str]:

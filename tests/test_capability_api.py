@@ -23,6 +23,27 @@ def _git_repo(path: Path) -> Path:
     return path
 
 
+def _setup_repo_and_kb(tmp_path: Path, client: TestClient):
+    """建一个带 guide.md 的 git 仓库 + KB docs + repo-source r1,返回 repo 路径。"""
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "add guide"], cwd=repo, check=True, capture_output=True)
+    client.post("/kbs", json={"slug": "docs", "name": "Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
+    client.post(
+        "/code-repo/repositories",
+        json={"repo_key": "r1", "name": "R1", "git_url": str(repo), "branch": "master"},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    client.post("/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post(
+        "/kbs/docs/repo-sources",
+        json={"repo_key": "r1", "include_suffixes": [".md"]},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    return repo
+
+
 def test_mcp_service_registration_api(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -1056,3 +1077,17 @@ def test_frontend_tool_debug_view_exposes_profile_scoped_execute_debugging() -> 
     assert "api.executeCapability" in view_source
     assert "X-Agent-Bridge-MetaMCP-Profile" in client_source
     assert "executeCapability" in client_source
+
+
+def test_sync_changes_imports_new_files(wm_paths, tmp_path: Path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    repo = _setup_repo_and_kb(tmp_path, client)
+    # 首次同步:guide.md 是新文件(app.py 不在 include_suffixes,被跳过)
+    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    assert r.status_code == 200, r.text
+    assert r.json()["added"] == 1
+    assert r.json()["removed"] == 0
+    assert r.json()["updated"] == 0
+    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    assert {d["title"] for d in docs} == {"guide"}
