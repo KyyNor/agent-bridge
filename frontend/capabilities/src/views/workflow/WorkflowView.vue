@@ -1434,10 +1434,6 @@ async function confirmClearWorkflow() {
         </div>
       </div>
       <div class="space-y-4">
-          <div class="flex flex-wrap items-center gap-2 border-b pb-4">
-            <Badge v-if="taskWorkflow" variant="outline">{{ taskWorkflow.workflow_key }}</Badge>
-          </div>
-
           <!-- 筛选 / 搜索 / 排序 -->
           <div class="flex flex-wrap items-center gap-2">
             <Input
