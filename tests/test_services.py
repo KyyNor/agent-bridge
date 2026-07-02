@@ -256,6 +256,44 @@ def test_delete_creates_delete_job_and_sync_marks_deleted(wm_paths, tmp_path: Pa
     assert sync_state["status"] == "deleted"
 
 
+def test_delete_cancels_unsynced_pending_create_without_delete_job(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["frontend-docs"], later=True)
+
+    service.delete_document("root", doc["slug"])
+
+    jobs = service.status(actor="root")["jobs"]
+    assert [(job["operation"], job["status"]) for job in jobs] == [("create", "cancelled")]
+    assert service.sync(actor="root", all_users=False)["processed"] == 0
+
+
+def test_delete_cancels_pending_update_but_keeps_delete_for_synced_doc(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["frontend-docs"], later=False)
+    update = tmp_path / "Guide-v2.pdf"
+    update.write_bytes(b"two")
+    service.update_document("root", doc["slug"], update, later=True)
+
+    service.delete_document("root", doc["slug"])
+
+    jobs = service.status(actor="root")["jobs"]
+    assert [(job["operation"], job["status"]) for job in jobs] == [
+        ("create", "succeeded"),
+        ("update", "cancelled"),
+        ("delete", "pending"),
+    ]
+    service.sync(actor="root", all_users=False)
+    sync_state = service.store.get_sync_state(doc["id"], kb["id"], backend_slug="mock")
+    assert sync_state is not None
+    assert sync_state["status"] == "deleted"
+
+
 def test_delete_with_later_false_syncs_immediately(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")

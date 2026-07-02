@@ -398,6 +398,46 @@ class KnowledgeRepository:
                 (status.value, error, job_id),
             )
 
+    def cancel_runnable_create_update_jobs(self, doc_id: int, kb_id: int, backend_slug: str) -> dict[str, int]:
+        with self._connect() as conn:
+            running = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM sync_jobs
+                WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                  AND operation IN (?, ?)
+                  AND status = ?
+                """,
+                (
+                    doc_id,
+                    kb_id,
+                    backend_slug,
+                    Operation.create.value,
+                    Operation.update.value,
+                    SyncJobStatus.running.value,
+                ),
+            ).fetchone()
+            cursor = conn.execute(
+                """
+                UPDATE sync_jobs
+                SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                  AND operation IN (?, ?)
+                  AND status IN (?, ?)
+                """,
+                (
+                    SyncJobStatus.cancelled.value,
+                    doc_id,
+                    kb_id,
+                    backend_slug,
+                    Operation.create.value,
+                    Operation.update.value,
+                    SyncJobStatus.pending.value,
+                    SyncJobStatus.failed.value,
+                ),
+            )
+            return {"cancelled": cursor.rowcount, "running": int(running["count"])}
+
     def list_jobs_for_user(self, linux_user: str, backend_slug: str | None = None) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(

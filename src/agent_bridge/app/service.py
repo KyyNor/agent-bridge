@@ -390,10 +390,16 @@ class AgentBridgeService:
             targets = self.store.list_backend_targets(kb["id"])
             for target in targets:
                 if target["status"] == "active":
-                    self.store.create_sync_job(
-                        doc["id"], kb["id"], Operation.delete, doc["current_version_id"],
-                        backend_slug=target["slug"],
+                    compacted = self.store.cancel_runnable_create_update_jobs(
+                        doc["id"], kb["id"], target["slug"]
                     )
+                    sync_state = self.store.get_sync_state(doc["id"], kb["id"], target["slug"])
+                    remote_exists = bool(sync_state and sync_state.get("backend_doc_id"))
+                    if remote_exists or compacted["running"] > 0:
+                        self.store.create_sync_job(
+                            doc["id"], kb["id"], Operation.delete, doc["current_version_id"],
+                            backend_slug=target["slug"],
+                        )
         self.store.soft_delete_document(doc["id"])
         if not later:
             self.sync(actor=actor, all_users=False)

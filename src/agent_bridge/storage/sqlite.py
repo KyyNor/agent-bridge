@@ -1383,6 +1383,9 @@ class SQLiteStore:
     def update_job_status(self, job_id: int, status: SyncJobStatus, error: str | None = None) -> None:
         return self.knowledge.update_job_status(job_id=job_id, status=status, error=error)
 
+    def cancel_runnable_create_update_jobs(self, doc_id: int, kb_id: int, backend_slug: str) -> dict[str, int]:
+        return self.knowledge.cancel_runnable_create_update_jobs(doc_id=doc_id, kb_id=kb_id, backend_slug=backend_slug)
+
     def upsert_sync_state(
         self,
         doc_id: int,

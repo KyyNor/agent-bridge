@@ -1181,6 +1181,7 @@ def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:
     kb = store.get_kb_by_slug("docs")
     store.ensure_backend_target(kb["id"], "mock", "mock")
     client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     # 删除文件
     (repo / "guide.md").unlink()
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
@@ -1196,7 +1197,7 @@ def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:
     assert any(j["operation"] == "delete" for j in jobs)
 
 
-def test_delete_kb_repo_source_removes_docs_and_generates_delete_jobs(wm_paths, tmp_path: Path) -> None:
+def test_delete_kb_repo_source_cancels_pending_create_without_delete_job(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     _setup_repo_and_kb(tmp_path, client)
@@ -1213,7 +1214,31 @@ def test_delete_kb_repo_source_removes_docs_and_generates_delete_jobs(wm_paths, 
     # active 文档清空
     docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     assert docs == []
-    # 生成 delete 同步任务
+    # 还没上传过后端:取消 create,不生成 delete
+    jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
+    assert [(j["operation"], j["status"]) for j in jobs] == [("create", "cancelled")]
+    assert not any(j["operation"] == "delete" for j in jobs)
+    # 数据源已解绑(list 为空)
+    sources = client.get("/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"}).json()
+    assert sources == []
+
+
+def test_delete_kb_repo_source_removes_synced_docs_and_generates_delete_jobs(wm_paths, tmp_path: Path) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    _setup_repo_and_kb(tmp_path, client)
+    store = SQLiteStore(wm_paths.db_path)
+    kb = store.get_kb_by_slug("docs")
+    store.ensure_backend_target(kb["id"], "mock", "mock")
+    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+
+    r = client.post("/kbs/docs/repo-sources/r1/delete", headers={"X-Agent-Bridge-User": "root"})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted_docs"] == 1
+    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    assert docs == []
     jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
     assert any(j["operation"] == "delete" for j in jobs)
     # 数据源已解绑(list 为空)
