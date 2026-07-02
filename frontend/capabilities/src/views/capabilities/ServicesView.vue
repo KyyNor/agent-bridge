@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import { confirm, alert } from '../../composables/useConfirm'
 import {
   buildOpenApiServicePayload,
   buildServicePayload,
@@ -214,13 +215,13 @@ async function toggleStatus(svc: CapabilityServiceSource) {
 }
 
 async function deleteService(svc: CapabilityServiceSource) {
-  if (!confirm(`确定删除能力服务「${svc.service_key}」？其下所有工具及能力平面相关规则将一并清除，且不可恢复。`)) return
+  if (!await confirm({ title: '删除能力服务', description: `确定删除能力服务「${svc.service_key}」？其下所有工具及能力平面相关规则将一并清除，且不可恢复。`, destructive: true, confirmText: '删除' })) return
   try {
     if (svc.source_type === 'openapi_service') await api.deleteOpenApiService(svc.service_key)
     else await api.deleteMcpService(svc.service_key)
     await loadServices()
   } catch (e: any) {
-    alert(e.message || '删除失败')
+    await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
   }
 }
 

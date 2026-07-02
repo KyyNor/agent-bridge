@@ -2,6 +2,7 @@
 import { defineAsyncComponent, ref, computed } from 'vue'
 import AppShell from './components/AppShell.vue'
 import type { NavGroup } from './components/AppShell.vue'
+import ConfirmDialog from './components/ui/dialog/ConfirmDialog.vue'
 import { shouldShowPageHeader } from './lib/navigation'
 
 const DashboardView = defineAsyncComponent(() => import('./views/dashboard/DashboardView.vue'))
@@ -99,7 +100,7 @@ const view = computed(() => activeNavKey.value)
         <ProfilesView v-else-if="view === 'profiles'" />
         <ToolDebugView v-else-if="view === 'tool-debug'" />
         <CodeRepoView v-else-if="view === 'code-repos'" />
-        <KnowledgeView v-else-if="view === 'knowledge'" />
+        <KnowledgeView v-else-if="view === 'knowledge'" :route-key="subRoute" />
         <MemoryView v-else-if="view === 'memory'" :route-key="subRoute" />
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
         <SkillManagementView v-else-if="view === 'skills'" />
@@ -110,5 +111,6 @@ const view = computed(() => activeNavKey.value)
         <StatsView v-else-if="view === 'stats'" />
       </div>
     </div>
+    <ConfirmDialog />
   </AppShell>
 </template>

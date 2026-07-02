@@ -11,6 +11,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import { confirm, alert } from '../../composables/useConfirm'
 
 const repos = ref<CodeRepository[]>([])
 const loading = ref(true)
@@ -198,12 +199,12 @@ async function syncRepo(key: string) {
 }
 
 async function deleteRepo(r: CodeRepository) {
-  if (!confirm(`确定删除代码知识库「${r.name}」？将清除本地代码镜像、索引与知识图谱产物，且不可恢复。`)) return
+  if (!await confirm({ title: '删除代码知识库', description: `确定删除代码知识库「${r.name}」？将清除本地代码镜像、索引与知识图谱产物，且不可恢复。`, destructive: true, confirmText: '删除' })) return
   try {
     await api.deleteCodeRepo(r.repo_key)
     await loadRepos()
   } catch (e: any) {
-    alert(e.message || '删除失败')
+    await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
   }
 }
 

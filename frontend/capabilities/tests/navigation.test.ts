@@ -16,7 +16,7 @@ test('shouldShowPageHeader hides the page title on service and workflow detail r
   assert.equal(shouldShowPageHeader('services', 'new'), false)
   assert.equal(shouldShowPageHeader('services', 'edit/mcp_service/mysql'), false)
   assert.equal(shouldShowPageHeader('memory', 'dev-memory'), false)
-  assert.equal(shouldShowPageHeader('workflow', 'new'), false)
+  assert.equal(shouldShowPageHeader('knowledge', 'my-kb'), false)
   assert.equal(shouldShowPageHeader('workflow', 'sales_report/detail'), false)
   assert.equal(shouldShowPageHeader('workflow', 'sales_report/edit'), false)
   assert.equal(shouldShowPageHeader('workflow', 'sales_report/tasks'), false)
@@ -26,6 +26,7 @@ test('shouldShowPageHeader hides the page title on service and workflow detail r
 test('shouldShowPageHeader keeps the page title for plain non-script routes', () => {
   assert.equal(shouldShowPageHeader('workflow', ''), true)
   assert.equal(shouldShowPageHeader('services', ''), true)
+  assert.equal(shouldShowPageHeader('knowledge', ''), true)
   assert.equal(shouldShowPageHeader('tool-debug', ''), true)
 })
 

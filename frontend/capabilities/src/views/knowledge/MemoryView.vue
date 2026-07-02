@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
+import { confirm, alert } from '../../composables/useConfirm'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -85,12 +86,12 @@ async function loadBlocks() {
 }
 
 async function deleteBlock(block: MemoryBlock) {
-  if (!confirm(`确定删除记忆区块「${block.name}」？将停止 worker 进程并清除该区块的全部记忆数据，且不可恢复。`)) return
+  if (!await confirm({ title: '删除记忆区块', description: `确定删除记忆区块「${block.name}」？将停止 worker 进程并清除该区块的全部记忆数据，且不可恢复。`, destructive: true, confirmText: '删除' })) return
   try {
     await api.deleteMemoryBlock(block.block_key)
     await loadBlocks()
   } catch (e: unknown) {
-    alert(errorMessage(e))
+    await alert({ title: '删除失败', description: errorMessage(e), destructive: true })
   }
 }
 

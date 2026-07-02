@@ -7,6 +7,7 @@ import type { SkillPrompt } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
+import { confirm } from '../../composables/useConfirm'
 
 const skills = ref<SkillPrompt[]>([])
 const selectedName = ref('')
@@ -77,7 +78,7 @@ async function saveSkill() {
 
 async function resetSkill() {
   if (!selected.value || saving.value) return
-  if (!confirm(`恢复「${selected.value.name}」的默认提示词？当前自定义内容会被移除。`)) return
+  if (!await confirm({ title: '恢复默认提示词', description: `恢复「${selected.value.name}」的默认提示词？当前自定义内容会被移除。`, confirmText: '恢复' })) return
   saving.value = true
   message.value = ''
   error.value = ''

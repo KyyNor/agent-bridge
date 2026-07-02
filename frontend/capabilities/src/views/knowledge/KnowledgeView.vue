@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Plus, RotateCw, Upload, File, Folder, Trash2, GitBranch } from 'lucide-vue-next'
-import { computed, onMounted, ref } from 'vue'
+import { Plus, RotateCw, Upload, File, Folder, Trash2, GitBranch, ArrowLeft } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
@@ -9,6 +9,11 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
+import { confirm, alert } from '../../composables/useConfirm'
+
+const props = defineProps<{ routeKey: string }>()
+
+const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
 
 const kbs = ref<KnowledgeBaseSummary[]>([])
 const loading = ref(true)
@@ -17,14 +22,18 @@ const createForm = ref({ slug: '', name: '', description: '' })
 const createSaving = ref(false)
 const createError = ref('')
 
-// Detail dialog
-const showDetail = ref(false)
+// Detail (secondary page driven by hash route)
 const detailKb = ref<KnowledgeBaseSummary | null>(null)
 const detailTab = ref<'docs' | 'sync' | 'sources' | 'search'>('docs')
 const detailDocs = ref<Document[]>([])
 const detailSyncJobs = ref<SyncJob[]>([])
 const detailRepoSources = ref<KbRepoSource[]>([])
 const detailLoading = ref(false)
+const routeError = ref('')
+// Batch document delete
+const selectedDocSlugs = ref<Set<string>>(new Set())
+const allDocsSelected = computed(() => detailDocs.value.length > 0 && detailDocs.value.every(d => selectedDocSlugs.value.has(d.slug)))
+const someDocsSelected = computed(() => detailDocs.value.some(d => selectedDocSlugs.value.has(d.slug)))
 // Sync
 const syncing = ref(false)
 // Git repo sources
@@ -92,6 +101,14 @@ const agentsByBackend = ref<Record<string, BackendAgent[]>>({})
 onMounted(async () => {
   await Promise.all([loadKbs(), loadBackends()])
   loading.value = false
+  await loadDetail()
+})
+
+// Route-driven detail loading: entering #knowledge/<slug> loads that kb's data.
+watch(() => props.routeKey, () => { void loadDetail() })
+
+watch(() => detailTab.value, () => {
+  if (detailTab.value !== 'docs') selectedDocSlugs.value = new Set()
 })
 
 async function loadKbs() {
@@ -99,12 +116,18 @@ async function loadKbs() {
 }
 
 async function deleteKb(kb: KnowledgeBaseSummary) {
-  if (!confirm(`确定删除文档知识库「${kb.name}」？若其下仍有文档将被拒绝，请先清空文档。`)) return
+  const ok = await confirm({
+    title: '删除文档知识库',
+    description: `确定删除文档知识库「${kb.name}」？若其下仍有文档将被拒绝，请先清空文档。`,
+    destructive: true,
+    confirmText: '删除',
+  })
+  if (!ok) return
   try {
     await api.deleteKnowledgeBase(kb.slug)
     await loadKbs()
   } catch (e: any) {
-    alert(e.message || '删除失败')
+    await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
   }
 }
 
@@ -156,9 +179,31 @@ async function createKb() {
   createSaving.value = false
 }
 
+function goList() {
+  window.location.hash = 'knowledge'
+}
+
 async function openDetail(kb: KnowledgeBaseSummary) {
+  window.location.hash = 'knowledge/' + kb.slug
+}
+
+// Load detail data for the kb referenced by the current route (props.routeKey).
+async function loadDetail() {
+  if (!props.routeKey) {
+    detailKb.value = null
+    routeError.value = ''
+    selectedDocSlugs.value = new Set()
+    return
+  }
+  const kb = kbs.value.find(k => k.slug === props.routeKey) || null
+  if (!kb) {
+    detailKb.value = null
+    routeError.value = '无法加载该知识库（可能已被删除或不存在）'
+    selectedDocSlugs.value = new Set()
+    return
+  }
   detailKb.value = kb
-  showDetail.value = true
+  routeError.value = ''
   detailTab.value = 'docs'
   editingDefaultBackend.value = false
   defaultBackendSlug.value = kb.default_backend_slug || ''
@@ -171,6 +216,7 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   detailRepoSources.value = []
   repoSourceError.value = ''
   repoSourceMessage.value = ''
+  selectedDocSlugs.value = new Set()
   try {
     const [docs, syncStatus, repoSources, repos] = await Promise.allSettled([
       api.listDocs(kb.slug),
@@ -190,13 +236,64 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   detailLoading.value = false
 }
 
+function toggleDocSelected(slug: string) {
+  const next = new Set(selectedDocSlugs.value)
+  if (next.has(slug)) next.delete(slug)
+  else next.add(slug)
+  selectedDocSlugs.value = next
+}
+
+function toggleAllDocs() {
+  if (allDocsSelected.value) {
+    selectedDocSlugs.value = new Set()
+  } else {
+    selectedDocSlugs.value = new Set(detailDocs.value.map(d => d.slug))
+  }
+}
+
 async function deleteDoc(slug: string, docTitle: string) {
   if (!detailKb.value) return
-  if (!confirm(`确定删除文档「${docTitle}」？删除后将从当前知识库中移除，并等待后端同步删除。`)) return
+  const ok = await confirm({
+    title: '删除文档',
+    description: `确定删除文档「${docTitle}」？删除后将从当前知识库中移除，并等待后端同步删除。`,
+    destructive: true,
+    confirmText: '删除',
+  })
+  if (!ok) return
   try {
     await api.deleteDocument(slug)
     detailDocs.value = await api.listDocs(detailKb.value.slug)
-  } catch { /* ignore */ }
+    selectedDocSlugs.value = new Set([...selectedDocSlugs.value].filter(s => s !== slug))
+  } catch (e: any) {
+    await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
+  }
+}
+
+async function batchDeleteDocs() {
+  if (!detailKb.value) return
+  const slugs = [...selectedDocSlugs.value]
+  if (slugs.length === 0) return
+  const ok = await confirm({
+    title: '批量删除文档',
+    description: `确定删除选中的 ${slugs.length} 个文档？删除后将从当前知识库中移除，并等待后端同步删除。`,
+    destructive: true,
+    confirmText: '删除',
+  })
+  if (!ok) return
+  const results = await Promise.allSettled(slugs.map(slug => api.deleteDocument(slug)))
+  const failed = results.filter(r => r.status === 'rejected').length
+  const succeeded = results.length - failed
+  detailDocs.value = await api.listDocs(detailKb.value.slug)
+  selectedDocSlugs.value = new Set()
+  if (failed > 0) {
+    await alert({
+      title: '部分删除失败',
+      description: `成功删除 ${succeeded} 个，失败 ${failed} 个。`,
+      destructive: true,
+    })
+  } else {
+    await alert({ title: '删除完成', description: `已删除 ${succeeded} 个文档。` })
+  }
 }
 
 async function triggerSync() {
@@ -288,7 +385,13 @@ async function syncRepoSource(source: KbRepoSource) {
 
 async function deleteRepoSource(source: KbRepoSource) {
   if (!detailKb.value) return
-  if (!confirm(`确定移除数据源「${source.repo_name || source.repo_key}」？将从该知识库删除 ${source.doc_count} 个由它提供的文档，并在后端同步删除。此操作不会删除 git 仓库本身。`)) return
+  const ok = await confirm({
+    title: '移除数据源',
+    description: `确定移除数据源「${source.repo_name || source.repo_key}」？将从该知识库删除 ${source.doc_count} 个由它提供的文档，并在后端同步删除。此操作不会删除 git 仓库本身。`,
+    destructive: true,
+    confirmText: '移除',
+  })
+  if (!ok) return
   repoSourceError.value = ''
   repoSourceMessage.value = ''
   repoSourceDeleting.value = { ...repoSourceDeleting.value, [source.repo_key]: true }
@@ -534,6 +637,8 @@ async function savePlaneProfiles() {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
+    <!-- LIST MODE -->
+    <template v-if="mode === 'list'">
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
       <Button @click="showCreate = true">
@@ -592,6 +697,255 @@ async function savePlaneProfiles() {
       </CardContent>
     </Card>
     <div class="text-sm text-muted-foreground">共 {{ kbs.length }} 个文档知识</div>
+    </template>
+
+    <!-- DETAIL MODE (secondary page) -->
+    <template v-else>
+      <!-- Route error -->
+      <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+        {{ routeError }}。请<a class="underline" href="#knowledge" @click.prevent="goList">返回列表</a>。
+      </div>
+
+      <!-- Back button -->
+      <div v-else class="flex flex-wrap items-center justify-between gap-3">
+        <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+          <ArrowLeft :size="14" class="mr-1.5" />
+          返回
+        </Button>
+        <div class="flex flex-wrap gap-2">
+          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openUploadDialog(detailKb)">
+            <Upload :size="12" class="mr-1" />
+            上传
+          </Button>
+          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openPlaneDialog(detailKb)">能力平面</Button>
+        </div>
+      </div>
+
+      <!-- KB name header -->
+      <div v-if="detailKb && !routeError">
+        <h2 class="text-lg font-semibold text-foreground">{{ detailKb.name }}</h2>
+        <p class="font-mono text-xs text-muted-foreground">{{ detailKb.slug }}</p>
+      </div>
+
+      <div v-if="detailKb" v-show="!detailLoading" class="space-y-4">
+        <!-- Default Backend & Agent -->
+        <div class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
+          <span class="text-xs text-muted-foreground shrink-0">默认检索后端</span>
+          <template v-if="!editingDefaultBackend">
+            <span class="text-sm font-medium">{{ detailKb?.default_backend_slug || '自动（跟随系统）' }}</span>
+            <template v-if="detailKb?.default_agent_id">
+              <span class="text-xs text-muted-foreground">· 默认 Agent:</span>
+              <span class="text-sm font-medium">{{ detailAgentLabel }}</span>
+            </template>
+            <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="editingDefaultBackend = true">修改</Button>
+          </template>
+          <template v-else>
+            <select v-model="defaultBackendSlug" @change="onDetailBackendChange" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
+              <option value="">自动（跟随系统）</option>
+              <option v-for="b in backends" :key="b.slug" :value="b.slug">{{ b.slug }} ({{ b.backend_type }})</option>
+            </select>
+            <select v-if="isWeknoraBackend(defaultBackendSlug)" v-model="defaultAgentId" :disabled="detailAgentsLoading" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
+              <option value="">无（使用后端默认问答）</option>
+              <option v-for="a in detailAgents" :key="a.agent_id" :value="a.agent_id">{{ a.name }}{{ a.agent_type ? ' · ' + a.agent_type : '' }}</option>
+            </select>
+            <Button variant="ghost" size="sm" class="h-6 text-xs" @click="editingDefaultBackend = false">取消</Button>
+            <Button size="sm" class="h-6 text-xs" @click="saveDefaultBackend" :disabled="savingDefaultBackend">
+              {{ savingDefaultBackend ? '保存中...' : '保存' }}
+            </Button>
+          </template>
+        </div>
+        <!-- Tabs -->
+        <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
+          <button v-for="t in [
+            { key: 'docs', label: `文档 (${detailDocs.length})` },
+            { key: 'sync', label: `同步 (${detailSyncJobs.length})` },
+            { key: 'sources', label: `Git 数据源 (${detailRepoSources.length})` },
+            { key: 'search', label: '检索' },
+          ]" :key="t.key"
+            :class="['rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', detailTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
+            @click="detailTab = t.key as any">{{ t.label }}</button>
+        </div>
+
+        <!-- Documents Tab -->
+        <div v-if="detailTab === 'docs'" class="space-y-3">
+          <div class="text-xs text-muted-foreground">点击右上角「上传」按钮添加文档，上传后由定时任务自动同步</div>
+          <!-- Batch toolbar -->
+          <div v-if="selectedDocSlugs.size > 0" class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+            <span class="text-sm font-medium">已选 {{ selectedDocSlugs.size }} 项</span>
+            <Button variant="destructive" size="sm" class="h-7 text-xs" @click="batchDeleteDocs">
+              <Trash2 :size="12" class="mr-1" />
+              批量删除
+            </Button>
+            <Button variant="ghost" size="sm" class="h-7 text-xs text-muted-foreground" @click="selectedDocSlugs = new Set()">取消选择</Button>
+          </div>
+          <div v-if="detailDocs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无文档</div>
+          <table v-else class="w-full">
+            <thead><tr class="border-b border-border">
+              <th class="px-3 py-2 text-left" style="width: 28px;">
+                <input type="checkbox" class="size-4 rounded" :checked="allDocsSelected"
+                  :indeterminate.prop="someDocsSelected && !allDocsSelected" @change="toggleAllDocs" />
+              </th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">上传者</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
+            </tr></thead>
+            <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+              <td class="px-3 py-2">
+                <input type="checkbox" class="size-4 rounded" :value="d.slug"
+                  :checked="selectedDocSlugs.has(d.slug)" @change="toggleDocSelected(d.slug)" />
+              </td>
+              <td class="px-3 py-2 text-sm font-medium">{{ d.title }}</td>
+              <td class="px-3 py-2 text-xs text-muted-foreground">{{ d.owner_user }}</td>
+              <td class="px-3 py-2 text-xs tabular-nums">v{{ d.current_version_no || 0 }}</td>
+              <td class="px-3 py-2">
+                <Badge variant="secondary" class="text-[11px]"
+                  :class="d.sync_status === 'synced' ? 'bg-green-50 text-green-700' : d.sync_status === 'sync_failed' ? 'bg-red-50 text-red-700' : ''">
+                  {{ d.sync_status || d.status }}
+                </Badge>
+              </td>
+              <td class="px-3 py-2">
+                <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(d.slug, d.title)">删除</Button>
+              </td>
+            </tr></tbody>
+          </table>
+        </div>
+
+        <!-- Sync Tab -->
+        <div v-if="detailTab === 'sync'" class="space-y-3">
+          <div class="flex items-center gap-3">
+            <Button size="sm" @click="triggerSync" :disabled="syncing">{{ syncing ? '同步中...' : '立即同步' }}</Button>
+            <span class="text-sm text-muted-foreground">处理所有待处理和失败的同步任务</span>
+          </div>
+          <div v-if="detailSyncJobs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无同步任务</div>
+          <table v-else class="w-full">
+            <thead><tr class="border-b border-border">
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">文档</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">操作</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">后端</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">时间</th>
+            </tr></thead>
+            <tbody><tr v-for="j in detailSyncJobs" :key="j.id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+              <td class="px-3 py-2 text-sm">{{ j.doc_title }}</td>
+              <td class="px-3 py-2 text-xs">{{ j.operation }}</td>
+              <td class="px-3 py-2">
+                <Badge variant="secondary" class="text-[11px]"
+                  :class="j.status === 'succeeded' ? 'bg-green-50 text-green-700' : j.status === 'failed' ? 'bg-red-50 text-red-700' : ''">
+                  {{ j.status }}
+                </Badge>
+              </td>
+              <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.backend_slug }}</td>
+              <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-red-600" :title="j.error ?? ''">{{ j.error || '—' }}</td>
+              <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ formatLocalDatetime(j.updated_at) }}</td>
+            </tr></tbody>
+          </table>
+        </div>
+
+        <!-- Git Sources Tab -->
+        <div v-if="detailTab === 'sources'" class="space-y-4">
+          <div class="rounded-lg border border-border p-4">
+            <div class="mb-3 flex items-center gap-2">
+              <GitBranch :size="15" class="text-muted-foreground" />
+              <h4 class="text-sm font-medium">Git 数据源</h4>
+            </div>
+            <div v-if="codeRepos.length === 0" class="py-4 text-sm text-muted-foreground">暂无已登记的代码仓库，请先在代码知识中添加仓库。</div>
+            <div v-else class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <div class="space-y-1.5">
+                <label class="text-xs font-medium text-muted-foreground">代码仓库</label>
+                <select v-model="repoSourceForm.repo_key" @change="onRepoSourceSelect" class="h-9 w-full rounded-md border border-border bg-background px-2 text-sm">
+                  <option v-for="repo in codeRepos" :key="repo.repo_key" :value="repo.repo_key">{{ repo.name || repo.repo_key }}</option>
+                </select>
+              </div>
+              <div class="space-y-1.5">
+                <label class="text-xs font-medium text-muted-foreground">后缀过滤</label>
+                <Input v-model="repoSourceForm.include_suffixes" placeholder=".md, .txt" />
+              </div>
+              <div class="flex items-end">
+                <Button class="h-9" @click="saveRepoSource" :disabled="repoSourceSaving || !repoSourceForm.repo_key">
+                  {{ repoSourceSaving ? '保存中...' : '保存' }}
+                </Button>
+              </div>
+            </div>
+            <div v-if="repoSourceError" class="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{{ repoSourceError }}</div>
+            <div v-if="repoSourceMessage" class="mt-3 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">{{ repoSourceMessage }}</div>
+          </div>
+
+          <div v-if="detailRepoSources.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无 Git 数据源</div>
+          <table v-else class="w-full">
+            <thead><tr class="border-b border-border">
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">include_suffixes</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">最近同步</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
+            </tr></thead>
+            <tbody><tr v-for="source in detailRepoSources" :key="source.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+              <td class="px-3 py-2">
+                <div class="text-sm font-medium">{{ source.repo_name || source.repo_key }}</div>
+                <div class="font-mono text-xs text-muted-foreground">{{ source.repo_key }}</div>
+              </td>
+              <td class="px-3 py-2">
+                <div class="flex flex-wrap gap-1">
+                  <Badge v-for="suffix in source.include_suffixes" :key="suffix" variant="secondary" class="font-mono text-[11px]">{{ suffix }}</Badge>
+                </div>
+              </td>
+              <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ source.last_synced_at ? formatLocalDatetime(source.last_synced_at) : '未同步' }}</td>
+              <td class="px-3 py-2 max-w-[180px] overflow-hidden text-ellipsis text-xs text-red-600" :title="source.last_error ?? ''">{{ source.last_error || '—' }}</td>
+              <td class="px-3 py-2 text-right">
+                <div class="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="repoSourceSyncing[source.repo_key]">
+                    {{ repoSourceSyncing[source.repo_key] ? '同步中...' : '立即同步' }}
+                  </Button>
+                  <Button variant="outline" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteRepoSource(source)" :disabled="repoSourceDeleting[source.repo_key]">
+                    {{ repoSourceDeleting[source.repo_key] ? '删除中...' : '删除' }}
+                  </Button>
+                </div>
+              </td>
+            </tr></tbody>
+          </table>
+        </div>
+
+        <!-- Search/Q&A Tab -->
+        <div v-if="detailTab === 'search'" class="space-y-4">
+          <!-- Search -->
+          <div class="space-y-2">
+            <h4 class="text-sm font-medium">检索</h4>
+            <div class="flex gap-2">
+              <Input v-model="searchQuery" placeholder="输入检索关键词" class="flex-1" @keydown.enter="doSearch" />
+              <Button size="sm" @click="doSearch" :disabled="searchSearching || !searchQuery.trim()">{{ searchSearching ? '搜索中...' : '搜索' }}</Button>
+            </div>
+            <div v-if="searchResults.length > 0" class="space-y-2">
+              <div v-for="(chunk, i) in searchResults" :key="i" class="rounded-lg border border-border p-3">
+                <div class="mb-1 text-xs text-muted-foreground">{{ chunk.document_name }} · 相似度 {{ (chunk.similarity * 100).toFixed(1) }}%</div>
+                <div class="text-sm whitespace-pre-wrap">{{ chunk.content }}</div>
+              </div>
+            </div>
+          </div>
+          <hr class="border-border" />
+          <!-- Ask -->
+          <div class="space-y-2">
+            <h4 class="text-sm font-medium">问答</h4>
+            <div class="flex gap-2">
+              <Input v-model="askQuestion" placeholder="输入问题" class="flex-1" @keydown.enter="doAsk" />
+              <Button size="sm" @click="doAsk" :disabled="asking || !askQuestion.trim()">{{ asking ? '思考中...' : '提问' }}</Button>
+            </div>
+            <div v-if="askAnswer" class="rounded-lg border border-border bg-secondary/30 p-4">
+              <div class="text-sm whitespace-pre-wrap">{{ askAnswer }}</div>
+            </div>
+            <div v-if="askChunks.length > 0" class="space-y-1">
+              <div class="text-xs text-muted-foreground">引用 ({{ askChunks.length }})</div>
+              <div v-for="(chunk, i) in askChunks" :key="i" class="rounded border border-border/60 p-2 text-xs text-muted-foreground">
+                {{ chunk.document_name }}: {{ chunk.content.slice(0, 100) }}...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
+    </template>
 
     <!-- Create KB Dialog -->
     <Dialog :open="showCreate" @update:open="showCreate = $event">
@@ -664,219 +1018,6 @@ async function savePlaneProfiles() {
         <DialogFooter>
           <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
           <Button @click="savePlaneProfiles" :disabled="planeSaving">{{ planeSaving ? '保存中...' : '确认' }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <!-- KB Detail Dialog -->
-    <Dialog :open="showDetail" @update:open="showDetail = $event">
-      <DialogContent class="sm:max-w-[800px] max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{{ detailKb?.name || '' }}</DialogTitle>
-        </DialogHeader>
-        <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
-        <div v-else class="space-y-4">
-          <!-- Default Backend & Agent -->
-          <div class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
-            <span class="text-xs text-muted-foreground shrink-0">默认检索后端</span>
-            <template v-if="!editingDefaultBackend">
-              <span class="text-sm font-medium">{{ detailKb?.default_backend_slug || '自动（跟随系统）' }}</span>
-              <template v-if="detailKb?.default_agent_id">
-                <span class="text-xs text-muted-foreground">· 默认 Agent:</span>
-                <span class="text-sm font-medium">{{ detailAgentLabel }}</span>
-              </template>
-              <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="editingDefaultBackend = true">修改</Button>
-            </template>
-            <template v-else>
-              <select v-model="defaultBackendSlug" @change="onDetailBackendChange" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
-                <option value="">自动（跟随系统）</option>
-                <option v-for="b in backends" :key="b.slug" :value="b.slug">{{ b.slug }} ({{ b.backend_type }})</option>
-              </select>
-              <select v-if="isWeknoraBackend(defaultBackendSlug)" v-model="defaultAgentId" :disabled="detailAgentsLoading" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
-                <option value="">无（使用后端默认问答）</option>
-                <option v-for="a in detailAgents" :key="a.agent_id" :value="a.agent_id">{{ a.name }}{{ a.agent_type ? ' · ' + a.agent_type : '' }}</option>
-              </select>
-              <Button variant="ghost" size="sm" class="h-6 text-xs" @click="editingDefaultBackend = false">取消</Button>
-              <Button size="sm" class="h-6 text-xs" @click="saveDefaultBackend" :disabled="savingDefaultBackend">
-                {{ savingDefaultBackend ? '保存中...' : '保存' }}
-              </Button>
-            </template>
-          </div>
-          <!-- Tabs -->
-          <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-            <button v-for="t in [
-              { key: 'docs', label: `文档 (${detailDocs.length})` },
-              { key: 'sync', label: `同步 (${detailSyncJobs.length})` },
-              { key: 'sources', label: `Git 数据源 (${detailRepoSources.length})` },
-              { key: 'search', label: '检索' },
-            ]" :key="t.key"
-              :class="['rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', detailTab === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground']"
-              @click="detailTab = t.key as any">{{ t.label }}</button>
-          </div>
-
-          <!-- Documents Tab -->
-          <div v-if="detailTab === 'docs'" class="space-y-3">
-            <div class="text-xs text-muted-foreground">点击知识库列表中的「上传」按钮添加文档，上传后由定时任务自动同步</div>
-            <div v-if="detailDocs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无文档</div>
-            <table v-else class="w-full">
-              <thead><tr class="border-b border-border">
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">上传者</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
-              </tr></thead>
-              <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-                <td class="px-3 py-2 text-sm font-medium">{{ d.title }}</td>
-                <td class="px-3 py-2 text-xs text-muted-foreground">{{ d.owner_user }}</td>
-                <td class="px-3 py-2 text-xs tabular-nums">v{{ d.current_version_no || 0 }}</td>
-                <td class="px-3 py-2">
-                  <Badge variant="secondary" class="text-[11px]"
-                    :class="d.sync_status === 'synced' ? 'bg-green-50 text-green-700' : d.sync_status === 'sync_failed' ? 'bg-red-50 text-red-700' : ''">
-                    {{ d.sync_status || d.status }}
-                  </Badge>
-                </td>
-                <td class="px-3 py-2">
-                  <Button variant="ghost" size="sm" class="h-7 text-xs text-red-600 hover:text-red-700" @click="deleteDoc(d.slug, d.title)">删除</Button>
-                </td>
-              </tr></tbody>
-            </table>
-          </div>
-
-          <!-- Sync Tab -->
-          <div v-if="detailTab === 'sync'" class="space-y-3">
-            <div class="flex items-center gap-3">
-              <Button size="sm" @click="triggerSync" :disabled="syncing">{{ syncing ? '同步中...' : '立即同步' }}</Button>
-              <span class="text-sm text-muted-foreground">处理所有待处理和失败的同步任务</span>
-            </div>
-            <div v-if="detailSyncJobs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无同步任务</div>
-            <table v-else class="w-full">
-              <thead><tr class="border-b border-border">
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">文档</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">操作</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">后端</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">时间</th>
-              </tr></thead>
-              <tbody><tr v-for="j in detailSyncJobs" :key="j.id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-                <td class="px-3 py-2 text-sm">{{ j.doc_title }}</td>
-                <td class="px-3 py-2 text-xs">{{ j.operation }}</td>
-                <td class="px-3 py-2">
-                  <Badge variant="secondary" class="text-[11px]"
-                    :class="j.status === 'succeeded' ? 'bg-green-50 text-green-700' : j.status === 'failed' ? 'bg-red-50 text-red-700' : ''">
-                    {{ j.status }}
-                  </Badge>
-                </td>
-                <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.backend_slug }}</td>
-                <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-red-600" :title="j.error ?? ''">{{ j.error || '—' }}</td>
-                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ formatLocalDatetime(j.updated_at) }}</td>
-              </tr></tbody>
-            </table>
-          </div>
-
-          <!-- Git Sources Tab -->
-          <div v-if="detailTab === 'sources'" class="space-y-4">
-            <div class="rounded-lg border border-border p-4">
-              <div class="mb-3 flex items-center gap-2">
-                <GitBranch :size="15" class="text-muted-foreground" />
-                <h4 class="text-sm font-medium">Git 数据源</h4>
-              </div>
-              <div v-if="codeRepos.length === 0" class="py-4 text-sm text-muted-foreground">暂无已登记的代码仓库，请先在代码知识中添加仓库。</div>
-              <div v-else class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                <div class="space-y-1.5">
-                  <label class="text-xs font-medium text-muted-foreground">代码仓库</label>
-                  <select v-model="repoSourceForm.repo_key" @change="onRepoSourceSelect" class="h-9 w-full rounded-md border border-border bg-background px-2 text-sm">
-                    <option v-for="repo in codeRepos" :key="repo.repo_key" :value="repo.repo_key">{{ repo.name || repo.repo_key }}</option>
-                  </select>
-                </div>
-                <div class="space-y-1.5">
-                  <label class="text-xs font-medium text-muted-foreground">后缀过滤</label>
-                  <Input v-model="repoSourceForm.include_suffixes" placeholder=".md, .txt" />
-                </div>
-                <div class="flex items-end">
-                  <Button class="h-9" @click="saveRepoSource" :disabled="repoSourceSaving || !repoSourceForm.repo_key">
-                    {{ repoSourceSaving ? '保存中...' : '保存' }}
-                  </Button>
-                </div>
-              </div>
-              <div v-if="repoSourceError" class="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{{ repoSourceError }}</div>
-              <div v-if="repoSourceMessage" class="mt-3 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">{{ repoSourceMessage }}</div>
-            </div>
-
-            <div v-if="detailRepoSources.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无 Git 数据源</div>
-            <table v-else class="w-full">
-              <thead><tr class="border-b border-border">
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">仓库</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">include_suffixes</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">最近同步</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
-                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
-              </tr></thead>
-              <tbody><tr v-for="source in detailRepoSources" :key="source.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-                <td class="px-3 py-2">
-                  <div class="text-sm font-medium">{{ source.repo_name || source.repo_key }}</div>
-                  <div class="font-mono text-xs text-muted-foreground">{{ source.repo_key }}</div>
-                </td>
-                <td class="px-3 py-2">
-                  <div class="flex flex-wrap gap-1">
-                    <Badge v-for="suffix in source.include_suffixes" :key="suffix" variant="secondary" class="font-mono text-[11px]">{{ suffix }}</Badge>
-                  </div>
-                </td>
-                <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ source.last_synced_at ? formatLocalDatetime(source.last_synced_at) : '未同步' }}</td>
-                <td class="px-3 py-2 max-w-[180px] overflow-hidden text-ellipsis text-xs text-red-600" :title="source.last_error ?? ''">{{ source.last_error || '—' }}</td>
-                <td class="px-3 py-2 text-right">
-                  <div class="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="repoSourceSyncing[source.repo_key]">
-                      {{ repoSourceSyncing[source.repo_key] ? '同步中...' : '立即同步' }}
-                    </Button>
-                    <Button variant="outline" size="sm" class="h-7 text-xs text-red-600 hover:text-red-700" @click="deleteRepoSource(source)" :disabled="repoSourceDeleting[source.repo_key]">
-                      {{ repoSourceDeleting[source.repo_key] ? '删除中...' : '删除' }}
-                    </Button>
-                  </div>
-                </td>
-              </tr></tbody>
-            </table>
-          </div>
-
-          <!-- Search/Q&A Tab -->
-          <div v-if="detailTab === 'search'" class="space-y-4">
-            <!-- Search -->
-            <div class="space-y-2">
-              <h4 class="text-sm font-medium">检索</h4>
-              <div class="flex gap-2">
-                <Input v-model="searchQuery" placeholder="输入检索关键词" class="flex-1" @keydown.enter="doSearch" />
-                <Button size="sm" @click="doSearch" :disabled="searchSearching || !searchQuery.trim()">{{ searchSearching ? '搜索中...' : '搜索' }}</Button>
-              </div>
-              <div v-if="searchResults.length > 0" class="space-y-2">
-                <div v-for="(chunk, i) in searchResults" :key="i" class="rounded-lg border border-border p-3">
-                  <div class="mb-1 text-xs text-muted-foreground">{{ chunk.document_name }} · 相似度 {{ (chunk.similarity * 100).toFixed(1) }}%</div>
-                  <div class="text-sm whitespace-pre-wrap">{{ chunk.content }}</div>
-                </div>
-              </div>
-            </div>
-            <hr class="border-border" />
-            <!-- Ask -->
-            <div class="space-y-2">
-              <h4 class="text-sm font-medium">问答</h4>
-              <div class="flex gap-2">
-                <Input v-model="askQuestion" placeholder="输入问题" class="flex-1" @keydown.enter="doAsk" />
-                <Button size="sm" @click="doAsk" :disabled="asking || !askQuestion.trim()">{{ asking ? '思考中...' : '提问' }}</Button>
-              </div>
-              <div v-if="askAnswer" class="rounded-lg border border-border bg-secondary/30 p-4">
-                <div class="text-sm whitespace-pre-wrap">{{ askAnswer }}</div>
-              </div>
-              <div v-if="askChunks.length > 0" class="space-y-1">
-                <div class="text-xs text-muted-foreground">引用 ({{ askChunks.length }})</div>
-                <div v-for="(chunk, i) in askChunks" :key="i" class="rounded border border-border/60 p-2 text-xs text-muted-foreground">
-                  {{ chunk.document_name }}: {{ chunk.content.slice(0, 100) }}...
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <DialogClose as-child><Button variant="outline">关闭</Button></DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
+import { confirm } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import { parseWorkflowDag } from './workflowDag'
@@ -1025,7 +1026,7 @@ async function pollTestRun() {
 async function deleteCurrent() {
   const wf = selectedWorkflow.value
   if (!wf) return
-  if (!confirm(`确定删除工作流「${wf.name}」？其运行记录与产物将一并清除。`)) return
+  if (!await confirm({ title: '删除工作流', description: `确定删除工作流「${wf.name}」？其运行记录与产物将一并清除。`, destructive: true, confirmText: '删除' })) return
   try {
     await api.deleteWorkflow(wf.workflow_key)
     workflows.value = await api.listWorkflows()

@@ -10,6 +10,7 @@ import CodeMirror from '../../components/CodeMirror.vue'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { Textarea } from '../../components/ui/textarea'
+import { confirm } from '../../composables/useConfirm'
 import {
   Select,
   SelectContent,
@@ -161,7 +162,7 @@ function openEdit(item: ManagedScript) {
 }
 
 async function deleteScript(item: ManagedScript) {
-  if (!confirm(`确定删除脚本「${item.name}」？其运行记录将一并清除。`)) return
+  if (!await confirm({ title: '删除脚本', description: `确定删除脚本「${item.name}」？其运行记录将一并清除。`, destructive: true, confirmText: '删除' })) return
   error.value = ''
   try {
     await api.deleteScript(item.script_key)
