@@ -27,6 +27,7 @@ import {
   subagentUsage,
   subagentStatus,
 } from '../../lib/workflowEvents'
+import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
 
 const artifactToolName = 'artifacts_search'
 const WORKFLOW_RUN_LIMIT = 200
@@ -772,7 +773,11 @@ async function executeTask(task: WorkflowTask) {
   taskActionLoading.value = loading
   taskActionError.value = ''
   try {
-    await api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined)
+    const result = await api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined)
+    if (result.run_id) {
+      window.location.hash = buildWorkflowTaskProgressHash(task.workflow_key, result.run_id)
+      return
+    }
     await loadTasks(task.workflow_key)
   } catch (e: unknown) {
     taskActionError.value = errorMessage(e)

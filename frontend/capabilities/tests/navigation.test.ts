@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { shouldShowPageHeader } from '../src/lib/navigation.ts'
+import { buildWorkflowTaskProgressHash, shouldShowPageHeader } from '../src/lib/navigation.ts'
 
 test('shouldShowPageHeader keeps the page title on the scripts list route', () => {
   assert.equal(shouldShowPageHeader('scripts', ''), true)
@@ -27,4 +27,11 @@ test('shouldShowPageHeader keeps the page title for plain non-script routes', ()
   assert.equal(shouldShowPageHeader('workflow', ''), true)
   assert.equal(shouldShowPageHeader('services', ''), true)
   assert.equal(shouldShowPageHeader('tool-debug', ''), true)
+})
+
+test('buildWorkflowTaskProgressHash returns the progress route when a task execution starts a run', () => {
+  assert.equal(
+    buildWorkflowTaskProgressHash('github-repo', 'github-repo_019f20752fa774fba90c58cd90832ab0'),
+    'workflow/github-repo/progress/github-repo_019f20752fa774fba90c58cd90832ab0',
+  )
 })
