@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { ArrowLeft, Check, HelpCircle, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
@@ -127,6 +127,28 @@ const form = ref({
 const selectedWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === selectedKey.value) || workflows.value[0] || null
 )
+
+/** Whether the edit form has unsaved changes (any field touched since load). */
+const formDirty = ref(false)
+/** Suppress the dirty watcher while the form is being programmatically reset. */
+let suppressDirty = false
+watch(
+  form,
+  () => {
+    if (suppressDirty) return
+    formDirty.value = true
+  },
+  { deep: true },
+)
+function resetForm(next: typeof form.value) {
+  suppressDirty = true
+  form.value = { ...next }
+  formDirty.value = false
+  // let the deep watcher's synchronous flush pass before re-enabling
+  void nextTick(() => {
+    suppressDirty = false
+  })
+}
 const routeParts = computed(() => props.routeKey.split('/').filter(Boolean))
 const routeWorkflowKey = computed(() => routeParts.value[0] || '')
 const routeMode = computed<'list' | 'new' | 'edit' | 'detail' | 'tasks' | 'progress'>(() => {
@@ -331,14 +353,14 @@ function openCreate() {
 }
 
 function prepareCreateForm() {
-  form.value = {
+  resetForm({
     workflow_key: '',
     name: '',
     description: '',
     profile_key: profiles.value[0]?.profile_key || '',
     status: 'active',
     workflow_js: '',
-  }
+  })
   formError.value = ''
 }
 
@@ -347,14 +369,14 @@ function openEdit(item: WorkflowDefinition) {
 }
 
 function prepareEditForm(item: WorkflowDefinition) {
-  form.value = {
+  resetForm({
     workflow_key: item.workflow_key,
     name: item.name,
     description: item.description,
     profile_key: item.profile_key,
     status: item.status,
     workflow_js: item.workflow_js,
-  }
+  })
   formError.value = ''
 }
 
@@ -460,6 +482,46 @@ async function prepareDetail(item: WorkflowDefinition) {
 
 function goList() {
   window.location.hash = 'workflow'
+}
+
+/** Navigate back to the detail page of the current workflow — the hub for
+ *  tasks / progress / edit so those sub-pages return to detail, not the list. */
+function goDetail() {
+  const key = routeWorkflowKey.value
+  if (!key || routeMode.value === 'new') {
+    // No parent detail (e.g. an orphaned entry): fall back to the list.
+    goList()
+    return
+  }
+  window.location.hash = `workflow/${key}/detail`
+}
+
+/** Return from the edit/new page: confirm if there are unsaved edits. */
+async function backFromForm() {
+  // 'new' has no parent detail → list. 'edit' returns to detail.
+  if (routeMode.value === 'new') {
+    if (formDirty.value) {
+      const ok = await confirm({
+        title: '放弃新建',
+        description: '当前表单有未保存内容，确认离开？',
+        destructive: true,
+        confirmText: '离开',
+      })
+      if (!ok) return
+    }
+    goList()
+    return
+  }
+  if (formDirty.value) {
+    const ok = await confirm({
+      title: '放弃修改',
+      description: '当前工作流有未保存的改动，确认离开？',
+      destructive: true,
+      confirmText: '离开',
+    })
+    if (!ok) return
+  }
+  goDetail()
 }
 
 async function applyRoute() {
@@ -1236,37 +1298,36 @@ async function confirmClearWorkflow() {
             <p class="font-mono text-xs text-muted-foreground">{{ selectedWorkflow?.workflow_key || routeWorkflowKey }}</p>
           </div>
         </div>
+        <div v-if="selectedWorkflow" class="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" @click="openTasks(selectedWorkflow)">任务进度</Button>
+          <Button variant="outline" size="sm" @click="openEdit(selectedWorkflow)">编辑</Button>
+          <Button
+            v-if="runningRunFor(selectedWorkflow.workflow_key)"
+            variant="default"
+            size="sm"
+            @click="openProgress(selectedWorkflow, runningRunFor(selectedWorkflow.workflow_key)?.run_id)"
+          >
+            运行中...
+          </Button>
+          <Button
+            v-else
+            size="sm"
+            :disabled="hasAnyRunningRun"
+            @click="runWorkflow(selectedWorkflow)"
+          >
+            运行
+          </Button>
+          <Button variant="ghost" size="sm" class="text-destructive" @click="requestClearWorkflow(selectedWorkflow)">清空</Button>
+        </div>
       </div>
       <div v-if="selectedWorkflow" class="space-y-5">
-          <div class="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+          <div class="flex flex-wrap items-start gap-3 border-b pb-4">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <Badge>{{ selectedWorkflow.workflow_key }}</Badge>
                 <Badge variant="outline">{{ statusLabel(selectedWorkflow.status) }}</Badge>
               </div>
               <p class="mt-2 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <Button
-                v-if="runningRunFor(selectedWorkflow.workflow_key)"
-                variant="outline"
-                size="sm"
-                @click="openProgress(selectedWorkflow, runningRunFor(selectedWorkflow.workflow_key)?.run_id)"
-              >
-                运行中...
-              </Button>
-              <Button
-                v-else
-                variant="outline"
-                size="sm"
-                :disabled="hasAnyRunningRun"
-                @click="runWorkflow(selectedWorkflow)"
-              >
-                运行
-              </Button>
-              <Button variant="outline" size="sm" @click="openTasks(selectedWorkflow)">任务进度</Button>
-              <Button variant="outline" size="sm" @click="openEdit(selectedWorkflow)">编辑</Button>
-              <Button variant="ghost" size="sm" class="text-destructive" @click="requestClearWorkflow(selectedWorkflow)">清空</Button>
             </div>
           </div>
 
@@ -1423,7 +1484,7 @@ async function confirmClearWorkflow() {
     <section v-if="routeMode === 'tasks' && !routeError" class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
-          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goDetail">
             <ArrowLeft class="mr-1 h-4 w-4" />
             返回
           </Button>
@@ -1689,7 +1750,7 @@ async function confirmClearWorkflow() {
     <section v-if="routeMode === 'progress' && !routeError" class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
-          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goDetail">
             <ArrowLeft class="mr-1 h-4 w-4" />
             返回
           </Button>
@@ -1698,6 +1759,9 @@ async function confirmClearWorkflow() {
             <p class="font-mono text-xs text-muted-foreground">{{ progressRunId || '暂无运行 ID' }}</p>
           </div>
         </div>
+        <Button v-if="progressWorkflow" variant="outline" size="sm" @click="progressWorkflow && openTasks(progressWorkflow)">
+          任务进度
+        </Button>
       </div>
       <div class="space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
@@ -1758,7 +1822,7 @@ async function confirmClearWorkflow() {
     <section v-if="isWorkflowFormPage && !routeError" class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
-          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="backFromForm">
             <ArrowLeft class="mr-1 h-4 w-4" />
             返回
           </Button>
