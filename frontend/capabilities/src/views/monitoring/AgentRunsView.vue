@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { Search, RotateCw } from 'lucide-vue-next'
+import { Search, RotateCw, ChevronDown, ChevronRight, Bot } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { AgentRun, AgentRunEvent } from '../../api/types'
+import type { AgentRun, AgentRunEvent, WorkflowRunEvent } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
+import {
+  groupEventsByActor,
+  subagentStatus,
+  subagentUsage,
+} from '../../lib/workflowEvents'
 
 const runs = ref<AgentRun[]>([])
 const loading = ref(false)
@@ -18,6 +23,14 @@ const search = ref('')
 const showDetail = ref(false)
 const detailRun = ref<AgentRun | null>(null)
 const detailLoading = ref(false)
+/** Collapsed subagent task ids, per run_key. */
+const collapsedSubagents = ref<Record<string, Set<string>>>({})
+
+/** Group the current detail run's events by actor (main + each subagent). */
+const detailEventGroups = computed(() => {
+  if (!detailRun.value?.events?.length) return []
+  return groupEventsByActor(detailRun.value.events as WorkflowRunEvent[])
+})
 
 function formatDate(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -51,6 +64,8 @@ async function openDetail(run: AgentRun) {
   detailRun.value = run
   showDetail.value = true
   detailLoading.value = true
+  // Collapse all subagents by default on open.
+  collapsedSubagents.value = { ...collapsedSubagents.value, [run.run_key]: new Set() }
   try {
     detailRun.value = await api.getAgentRun(run.run_key)
   } catch {
@@ -98,20 +113,28 @@ function pretty(value: unknown): string {
   }
 }
 
-function eventKindLabel(kind: string): string {
+function eventKindLabel(kind: string, status?: string): string {
   switch (kind) {
     case 'agent_message':
       return '消息'
     case 'tool_call':
       return '调用工具'
     case 'tool_result':
-      return '工具结果'
+      return status === 'failed' ? '工具失败' : '工具完成'
     case 'status':
       return '状态'
     case 'result':
-      return '完成'
+      return status === 'failed' ? '运行失败' : '完成'
     case 'error':
       return '错误'
+    case 'subagent_start':
+      return '子 Agent 启动'
+    case 'subagent_progress':
+      return '子 Agent 进度'
+    case 'subagent_end':
+      return status === 'failed' ? '子 Agent 失败' : '子 Agent 完成'
+    case 'subagent_updated':
+      return '子 Agent 更新'
     default:
       return kind
   }
@@ -122,7 +145,58 @@ function eventKindClass(kind: string, status?: string): string {
   if (kind === 'result' || status === 'success') return 'bg-green-50 text-green-700'
   if (kind === 'tool_call') return 'bg-blue-50 text-blue-700'
   if (kind === 'tool_result') return 'bg-violet-50 text-violet-700'
+  if (kind === 'subagent_end' && status !== 'failed') return 'bg-green-50 text-green-700'
+  if (kind === 'subagent_end' && status === 'failed') return 'bg-red-50 text-red-700'
   return 'bg-secondary text-muted-foreground'
+}
+
+/** Build a readable message for an event, filling in the blank that made
+ *  subagent_progress rows render empty (they carry no `message` field). */
+function eventMessage(ev: WorkflowRunEvent): string {
+  if (ev.message) return ev.message
+  if (ev.kind === 'tool_call' && ev.tool_name) return `调用工具 ${ev.tool_name}`
+  if (ev.kind === 'tool_result' && ev.tool_name) {
+    return `工具 ${ev.tool_name} 调用${ev.status === 'failed' ? '失败' : '成功'}`
+  }
+  if (ev.kind === 'subagent_progress') {
+    const parts: string[] = []
+    if (ev.last_tool_name) parts.push(`当前工具: ${ev.last_tool_name}`)
+    if (ev.usage) {
+      const toks = []
+      if (ev.usage.total_tokens != null) toks.push(`${ev.usage.total_tokens} tokens`)
+      if (ev.usage.tool_uses != null) toks.push(`${ev.usage.tool_uses} 次工具`)
+      if (toks.length) parts.push(toks.join(' · '))
+    }
+    if (parts.length) return parts.join(' · ')
+  }
+  return ev.status || ''
+}
+
+function subagentStatusBadgeClass(status: string | null): string {
+  if (!status) return 'bg-blue-50 text-blue-700' // running
+  if (status === 'completed') return 'bg-green-50 text-green-700'
+  if (status === 'failed' || status === 'error') return 'bg-red-50 text-red-700'
+  return 'bg-secondary text-muted-foreground'
+}
+
+function subagentStatusLabel(status: string | null, events: WorkflowRunEvent[], taskId: string): string {
+  if (status) return status === 'completed' ? '完成' : status === 'failed' ? '失败' : status
+  // No terminal status yet: check if it has a start event -> still running.
+  const started = events.some(ev => ev.task_id === taskId && ev.kind === 'subagent_start')
+  return started ? 'running' : '—'
+}
+
+function isSubagentCollapsed(taskId: string): boolean {
+  return !!collapsedSubagents.value[detailRun.value?.run_key ?? '']?.has(taskId)
+}
+
+function toggleSubagent(taskId: string): void {
+  const key = detailRun.value?.run_key ?? ''
+  if (!key) return
+  const set = new Set(collapsedSubagents.value[key] ?? [])
+  if (set.has(taskId)) set.delete(taskId)
+  else set.add(taskId)
+  collapsedSubagents.value = { ...collapsedSubagents.value, [key]: set }
 }
 </script>
 
@@ -302,22 +376,70 @@ function eventKindClass(kind: string, status?: string): string {
             <div class="mb-1 text-xs font-medium text-muted-foreground">
               事件流（{{ detailRun.events.length }}）
             </div>
-            <div class="space-y-1.5">
-              <div
-                v-for="(ev, i) in detailRun.events"
-                :key="i"
-                class="flex items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-xs"
-              >
-                <Badge variant="secondary" :class="eventKindClass(ev.kind, ev.status)">
-                  {{ eventKindLabel(ev.kind) }}
-                </Badge>
-                <div class="flex-1">
-                  <div v-if="ev.message" class="break-all">{{ ev.message }}</div>
-                  <div class="mt-0.5 flex flex-wrap gap-x-3 text-muted-foreground">
-                    <span v-if="ev.tool_name" class="font-mono">{{ ev.tool_name }}</span>
-                    <span v-if="ev.status">状态: {{ ev.status }}</span>
-                    <span v-if="ev.num_turns != null">轮数: {{ ev.num_turns }}</span>
-                    <span v-if="ev.total_cost_usd != null">{{ formatCost(ev.total_cost_usd) }}</span>
+            <div class="space-y-3">
+              <div v-for="group in detailEventGroups" :key="group.actor.id">
+                <!-- Main agent: flat event rows -->
+                <div v-if="group.actor.role === 'main'" class="space-y-1.5">
+                  <div class="text-[11px] font-medium text-muted-foreground">{{ group.actor.label }}</div>
+                  <div
+                    v-for="(ev, i) in group.events"
+                    :key="i"
+                    class="flex items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-xs"
+                  >
+                    <Badge variant="secondary" :class="eventKindClass(ev.kind, ev.status)">
+                      {{ eventKindLabel(ev.kind, ev.status) }}
+                    </Badge>
+                    <div class="flex-1">
+                      <div v-if="eventMessage(ev)" class="break-all">{{ eventMessage(ev) }}</div>
+                      <div class="mt-0.5 flex flex-wrap gap-x-3 text-muted-foreground">
+                        <span v-if="ev.tool_name" class="font-mono">{{ ev.tool_name }}</span>
+                        <span v-if="ev.created_at">{{ ev.created_at }}</span>
+                        <span v-if="ev.num_turns != null">轮数: {{ ev.num_turns }}</span>
+                        <span v-if="ev.total_cost_usd != null">{{ formatCost(ev.total_cost_usd) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Sub-agent: collapsible section, collapsed shows status only -->
+                <div v-else class="rounded-md border border-purple-200/60 bg-purple-50/30 dark:border-purple-900/40 dark:bg-purple-950/20">
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs"
+                    @click="toggleSubagent(group.actor.id)"
+                  >
+                    <component :is="isSubagentCollapsed(group.actor.id) ? ChevronRight : ChevronDown" :size="14" class="shrink-0 text-purple-600 dark:text-purple-400" />
+                    <Bot :size="14" class="shrink-0 text-purple-600 dark:text-purple-400" />
+                    <span class="font-medium text-purple-800 dark:text-purple-300 truncate">{{ group.actor.label }}</span>
+                    <Badge variant="outline" class="text-[10px]">{{ group.events.length }}</Badge>
+                    <span v-if="subagentUsage(detailRun.events as WorkflowRunEvent[], group.actor.id)" class="text-[10px] text-muted-foreground">
+                      {{ subagentUsage(detailRun.events as WorkflowRunEvent[], group.actor.id)?.total_tokens ?? 0 }} tokens · {{ subagentUsage(detailRun.events as WorkflowRunEvent[], group.actor.id)?.tool_uses ?? 0 }} 工具
+                    </span>
+                    <Badge
+                      variant="outline"
+                      :class="subagentStatusBadgeClass(subagentStatus(detailRun.events as WorkflowRunEvent[], group.actor.id))"
+                      class="ml-auto text-[10px]"
+                    >
+                      {{ subagentStatusLabel(subagentStatus(detailRun.events as WorkflowRunEvent[], group.actor.id), detailRun.events as WorkflowRunEvent[], group.actor.id) }}
+                    </Badge>
+                  </button>
+                  <div v-if="!isSubagentCollapsed(group.actor.id)" class="space-y-1.5 border-t border-purple-200/60 px-3 py-2 dark:border-purple-900/40">
+                    <div
+                      v-for="(ev, i) in group.events"
+                      :key="i"
+                      class="flex items-start gap-2 rounded-md border border-border/60 bg-background px-3 py-2 text-xs"
+                    >
+                      <Badge variant="secondary" :class="eventKindClass(ev.kind, ev.status)">
+                        {{ eventKindLabel(ev.kind, ev.status) }}
+                      </Badge>
+                      <div class="flex-1">
+                        <div v-if="eventMessage(ev)" class="break-all">{{ eventMessage(ev) }}</div>
+                        <div class="mt-0.5 flex flex-wrap gap-x-3 text-muted-foreground">
+                          <span v-if="ev.tool_name" class="font-mono">{{ ev.tool_name }}</span>
+                          <span v-if="ev.created_at">{{ ev.created_at }}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
