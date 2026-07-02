@@ -61,6 +61,7 @@ import type {
   WorkflowRun,
   WorkflowRunEvent,
   WorkflowRunLog,
+  WorkflowSubagentDetail,
   WorkflowTasksResult,
   WorkflowTaskListParams,
   ManagedScript,
@@ -234,6 +235,10 @@ export const api = {
   },
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
   getWorkflowRunEvents: (runId: string) => get<WorkflowRunEvent[]>(`/workflow-runs/${runId}/events`),
+  getWorkflowRunSubagentDetail: (runId: string, taskId: string) => {
+    const qs = new URLSearchParams({ task_id: taskId })
+    return get<WorkflowSubagentDetail>(`/workflow-runs/${runId}/subagent-detail?${qs}`)
+  },
   upsertWorkflow: (w: Partial<WorkflowDefinition> & {
     workflow_key: string
     name: string

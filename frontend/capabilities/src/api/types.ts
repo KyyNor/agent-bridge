@@ -333,6 +333,36 @@ export interface WorkflowRunEvent {
   [key: string]: unknown
 }
 
+export interface WorkflowSubagentTranscriptEvent {
+  kind: string
+  role: string
+  created_at?: string
+  uuid?: string
+  agent_id?: string
+  content?: unknown
+  tool_use_id?: unknown
+  tool_name?: unknown
+  input?: unknown
+  is_error?: unknown
+  usage?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface WorkflowSubagentTranscriptAgent {
+  agent_id: string
+  result: unknown
+  events: WorkflowSubagentTranscriptEvent[]
+}
+
+export interface WorkflowSubagentDetail {
+  task_id: string
+  transcript_dir: string | null
+  workflow_subrun_id?: string | null
+  task_output_status?: string | null
+  task_output?: string | null
+  agents: WorkflowSubagentTranscriptAgent[]
+}
+
 export interface WorkflowArtifactDetail {
   artifact_id: string
   workflow_key: string

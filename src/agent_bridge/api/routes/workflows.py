@@ -65,6 +65,14 @@ def create_workflow_routes(service, actor):
     def list_run_events(run_id: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.workflows.list_run_events(current_actor, run_id)
 
+    @router.get("/workflow-runs/{run_id}/subagent-detail")
+    def get_run_subagent_detail(
+        run_id: str,
+        task_id: str,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.get_run_subagent_detail(current_actor, run_id, task_id)
+
     @router.get("/workflow-artifacts")
     def search_artifacts(
         profile_key: str | None = None,

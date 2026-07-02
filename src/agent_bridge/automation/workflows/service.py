@@ -10,6 +10,7 @@ from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, re
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import WorkflowArtifactFormat, WorkflowStatus
 from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
+from agent_bridge.automation.workflows.subagent_details import build_subagent_detail
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,13 @@ class WorkflowService:
             if isinstance(item, dict):
                 events.append(item)
         return events
+
+    def get_run_subagent_detail(self, actor: str, run_id: str, task_id: str) -> dict[str, Any]:
+        run = self.get_run(actor, run_id)
+        temp_dir = run.get("temp_dir")
+        if not temp_dir:
+            return {"task_id": task_id, "transcript_dir": None, "agents": []}
+        return build_subagent_detail(Path(str(temp_dir)), task_id)
 
     def require_workflow_context(
         self,

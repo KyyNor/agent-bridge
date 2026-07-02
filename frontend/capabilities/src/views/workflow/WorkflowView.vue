@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowTask } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -12,6 +12,7 @@ import { Input } from '../../components/ui/input'
 import { confirm } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
+import WorkflowSubagentDetailPanel from './WorkflowSubagentDetailPanel.vue'
 import { parseWorkflowDag } from './workflowDag'
 import {
   ALL_STATUS_SENTINEL,
@@ -72,6 +73,9 @@ const runEvents = ref<WorkflowRunEvent[]>([])
 const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
 const expandedRunSubagents = ref<Record<string, Set<string>>>({})
+const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
+const subagentDetailLoading = ref<Set<string>>(new Set())
+const subagentDetailErrors = ref<Record<string, string>>({})
 const taskError = ref('')
 const clearing = ref(false)
 const clearTarget = ref<WorkflowDefinition | null>(null)
@@ -677,6 +681,10 @@ function eventClass(event: WorkflowRunEvent) {
   return 'border-border'
 }
 
+function hasDetailContent(detail: WorkflowSubagentDetail | null) {
+  return !!detail && (detail.agents.length > 0 || !!detail.task_output)
+}
+
 function runSubagentStatus(taskIdStr: string) {
   return subagentStatus(runEvents.value, taskIdStr)
 }
@@ -689,6 +697,44 @@ function runSubagentUsage(taskIdStr: string) {
   return subagentUsage(runEvents.value, taskIdStr)
 }
 
+function subagentDetailKey(runId: string, taskIdStr: string) {
+  return `${runId}:${taskIdStr}`
+}
+
+async function ensureSubagentDetail(runId: string | null | undefined, taskIdStr: string) {
+  if (!runId) return
+  const key = subagentDetailKey(runId, taskIdStr)
+  if (subagentDetails.value[key] || subagentDetailLoading.value.has(key)) return
+  const loading = new Set(subagentDetailLoading.value)
+  loading.add(key)
+  subagentDetailLoading.value = loading
+  const nextErrors = { ...subagentDetailErrors.value }
+  delete nextErrors[key]
+  subagentDetailErrors.value = nextErrors
+  try {
+    const detail = await api.getWorkflowRunSubagentDetail(runId, taskIdStr)
+    subagentDetails.value = { ...subagentDetails.value, [key]: detail }
+  } catch (e: unknown) {
+    subagentDetailErrors.value = { ...subagentDetailErrors.value, [key]: errorMessage(e) }
+  } finally {
+    const done = new Set(subagentDetailLoading.value)
+    done.delete(key)
+    subagentDetailLoading.value = done
+  }
+}
+
+function subagentDetail(runId: string | null | undefined, taskIdStr: string) {
+  return runId ? subagentDetails.value[subagentDetailKey(runId, taskIdStr)] || null : null
+}
+
+function subagentDetailLoadingFor(runId: string | null | undefined, taskIdStr: string) {
+  return runId ? subagentDetailLoading.value.has(subagentDetailKey(runId, taskIdStr)) : false
+}
+
+function subagentDetailErrorFor(runId: string | null | undefined, taskIdStr: string) {
+  return runId ? subagentDetailErrors.value[subagentDetailKey(runId, taskIdStr)] || '' : ''
+}
+
 function isRunSubagentCollapsed(taskIdStr: string): boolean {
   return !expandedRunSubagents.value[selectedRunId.value]?.has(taskIdStr)
 }
@@ -698,7 +744,10 @@ function toggleRunSubagent(taskIdStr: string) {
   if (!key) return
   const set = new Set(expandedRunSubagents.value[key] ?? [])
   if (set.has(taskIdStr)) set.delete(taskIdStr)
-  else set.add(taskIdStr)
+  else {
+    set.add(taskIdStr)
+    void ensureSubagentDetail(key, taskIdStr)
+  }
   expandedRunSubagents.value = { ...expandedRunSubagents.value, [key]: set }
 }
 
@@ -1031,7 +1080,10 @@ function toggleTaskSubagent(task: WorkflowTask, taskIdStr: string) {
   const key = taskSubagentCollapseKey(task)
   const set = new Set(collapsedTaskSubagents.value[key] ?? [])
   if (set.has(taskIdStr)) set.delete(taskIdStr)
-  else set.add(taskIdStr)
+  else {
+    set.add(taskIdStr)
+    void ensureSubagentDetail(task.lease_run_id, taskIdStr)
+  }
   collapsedTaskSubagents.value = { ...collapsedTaskSubagents.value, [key]: set }
 }
 
@@ -1813,7 +1865,16 @@ async function confirmClearWorkflow() {
                               {{ taskStatusLabelFor(task, group.actor.id) }}
                             </Badge>
                           </button>
-                          <div v-if="!isTaskSubagentCollapsed(task, group.actor.id)" class="space-y-1 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
+                          <div v-if="!isTaskSubagentCollapsed(task, group.actor.id)" class="space-y-3 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
+                            <WorkflowSubagentDetailPanel
+                              :detail="subagentDetail(task.lease_run_id, group.actor.id)"
+                              :loading="subagentDetailLoadingFor(task.lease_run_id, group.actor.id)"
+                              :error="subagentDetailErrorFor(task.lease_run_id, group.actor.id)"
+                            />
+                            <div
+                              v-if="!subagentDetailLoadingFor(task.lease_run_id, group.actor.id) && !hasDetailContent(subagentDetail(task.lease_run_id, group.actor.id))"
+                              class="space-y-1"
+                            >
                             <div v-for="(event, idx) in group.events" :key="taskRunLogKey(task) + ':event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
                               <div class="flex flex-wrap items-center gap-2">
                                 <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
@@ -1821,6 +1882,7 @@ async function confirmClearWorkflow() {
                                 <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
                               </div>
                               <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                            </div>
                             </div>
                           </div>
                         </div>
@@ -1916,7 +1978,16 @@ async function confirmClearWorkflow() {
                         {{ runSubagentStatusLabel(group.actor.id) }}
                       </Badge>
                     </button>
-                    <div v-if="!isRunSubagentCollapsed(group.actor.id)" class="space-y-1 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
+                    <div v-if="!isRunSubagentCollapsed(group.actor.id)" class="space-y-3 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
+                      <WorkflowSubagentDetailPanel
+                        :detail="subagentDetail(selectedRunId, group.actor.id)"
+                        :loading="subagentDetailLoadingFor(selectedRunId, group.actor.id)"
+                        :error="subagentDetailErrorFor(selectedRunId, group.actor.id)"
+                      />
+                      <div
+                        v-if="!subagentDetailLoadingFor(selectedRunId, group.actor.id) && !hasDetailContent(subagentDetail(selectedRunId, group.actor.id))"
+                        class="space-y-1"
+                      >
                       <div v-for="(event, idx) in group.events" :key="'run-event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
@@ -1925,6 +1996,7 @@ async function confirmClearWorkflow() {
                           <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
                         </div>
                         <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                      </div>
                       </div>
                     </div>
                   </div>
