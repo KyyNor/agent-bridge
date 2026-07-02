@@ -8,6 +8,8 @@ import {
   subagentLabel,
   subagentUsage,
   subagentStatus,
+  subagentTaskIds,
+  subagentStatusLabel,
 } from '../src/lib/workflowEvents.ts'
 import type { WorkflowRunEvent } from '../src/api/types.ts'
 
@@ -87,6 +89,23 @@ test('subagentStatus returns terminal status', () => {
 test('subagentStatus returns null when not terminal', () => {
   const inProgress = [ev('subagent_start', { task_id: 't' }), ev('subagent_progress', { task_id: 't' })]
   assert.equal(subagentStatus(inProgress, 't'), null)
+})
+
+test('subagentTaskIds returns only real sub-agent ids in first-seen order', () => {
+  const events = [
+    ev('agent_message', { agent_role: 'main' }),
+    ev('subagent_progress', { task_id: 'task_b', agent_role: 'subagent' }),
+    ev('subagent_progress', { task_id: 'task_a', agent_role: 'subagent' }),
+    ev('subagent_updated', { task_id: 'task_b', agent_role: 'subagent', status: 'completed' }),
+  ]
+  assert.deepEqual(subagentTaskIds(events), ['task_b', 'task_a'])
+})
+
+test('subagentStatusLabel shows running for active sub-agents and completion for terminal ones', () => {
+  assert.equal(subagentStatusLabel([ev('subagent_progress', { task_id: 't' })], 't'), 'running')
+  assert.equal(subagentStatusLabel([ev('subagent_updated', { task_id: 't', status: 'completed' })], 't'), '完成')
+  assert.equal(subagentStatusLabel([ev('subagent_updated', { task_id: 't', status: 'failed' })], 't'), '失败')
+  assert.equal(subagentStatusLabel([ev('agent_message', { agent_role: 'main' })], 't'), '—')
 })
 
 test('a stream with only main events yields a single main group', () => {

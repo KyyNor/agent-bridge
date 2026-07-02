@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../componen
 import {
   groupEventsByActor,
   subagentStatus,
+  subagentStatusLabel,
+  subagentTaskIds,
   subagentUsage,
 } from '../../lib/workflowEvents'
 
@@ -64,10 +66,18 @@ async function openDetail(run: AgentRun) {
   detailRun.value = run
   showDetail.value = true
   detailLoading.value = true
-  // Collapse all subagents by default on open.
-  collapsedSubagents.value = { ...collapsedSubagents.value, [run.run_key]: new Set() }
+  // Collapse subagents by default; refresh the set once full event data loads.
+  collapsedSubagents.value = {
+    ...collapsedSubagents.value,
+    [run.run_key]: new Set(subagentTaskIds((run.events as WorkflowRunEvent[]) || [])),
+  }
   try {
-    detailRun.value = await api.getAgentRun(run.run_key)
+    const fullRun = await api.getAgentRun(run.run_key)
+    detailRun.value = fullRun
+    collapsedSubagents.value = {
+      ...collapsedSubagents.value,
+      [run.run_key]: new Set(subagentTaskIds((fullRun.events as WorkflowRunEvent[]) || [])),
+    }
   } catch {
     /* keep list data as fallback */
   }
@@ -177,13 +187,6 @@ function subagentStatusBadgeClass(status: string | null): string {
   if (status === 'completed') return 'bg-green-50 text-green-700'
   if (status === 'failed' || status === 'error') return 'bg-red-50 text-red-700'
   return 'bg-secondary text-muted-foreground'
-}
-
-function subagentStatusLabel(status: string | null, events: WorkflowRunEvent[], taskId: string): string {
-  if (status) return status === 'completed' ? '完成' : status === 'failed' ? '失败' : status
-  // No terminal status yet: check if it has a start event -> still running.
-  const started = events.some(ev => ev.task_id === taskId && ev.kind === 'subagent_start')
-  return started ? 'running' : '—'
 }
 
 function isSubagentCollapsed(taskId: string): boolean {
@@ -420,7 +423,7 @@ function toggleSubagent(taskId: string): void {
                       :class="subagentStatusBadgeClass(subagentStatus(detailRun.events as WorkflowRunEvent[], group.actor.id))"
                       class="ml-auto text-[10px]"
                     >
-                      {{ subagentStatusLabel(subagentStatus(detailRun.events as WorkflowRunEvent[], group.actor.id), detailRun.events as WorkflowRunEvent[], group.actor.id) }}
+                      {{ subagentStatusLabel(detailRun.events as WorkflowRunEvent[], group.actor.id) }}
                     </Badge>
                   </button>
                   <div v-if="!isSubagentCollapsed(group.actor.id)" class="space-y-1.5 border-t border-purple-200/60 px-3 py-2 dark:border-purple-900/40">

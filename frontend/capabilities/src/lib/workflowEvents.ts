@@ -22,6 +22,10 @@ const MAIN_ACTOR: EventActor = { id: 'main', role: 'main', label: '主 Agent' }
 
 const SUBAGENT_KINDS = new Set(['subagent_start', 'subagent_progress', 'subagent_end', 'subagent_updated'])
 
+function isSubagentEvent(ev: WorkflowRunEvent): boolean {
+  return Boolean(ev.task_id && (ev.agent_role === 'subagent' || SUBAGENT_KINDS.has(ev.kind)))
+}
+
 /** Build a stable label for a sub-agent task id from the lifecycle events. */
 export function subagentLabel(events: WorkflowRunEvent[]): (taskId: string) => string {
   const byTask: Record<string, string> = {}
@@ -40,7 +44,7 @@ export function distinctActors(events: WorkflowRunEvent[]): EventActor[] {
   const seen = new Set<string>()
   const labelFor = subagentLabel(events)
   for (const ev of events) {
-    const id = ev.agent_role === 'subagent' && ev.task_id ? ev.task_id : 'main'
+    const id = isSubagentEvent(ev) && ev.task_id ? ev.task_id : 'main'
     if (seen.has(id)) continue
     seen.add(id)
     actors.push(id === 'main' ? MAIN_ACTOR : { id, role: 'subagent', label: labelFor(id) })
@@ -54,6 +58,18 @@ export function distinctActors(events: WorkflowRunEvent[]): EventActor[] {
   return actors
 }
 
+/** Sub-agent task ids in first-seen order. Used to initialise collapsed groups. */
+export function subagentTaskIds(events: WorkflowRunEvent[]): string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const ev of events) {
+    if (!isSubagentEvent(ev) || !ev.task_id || seen.has(ev.task_id)) continue
+    seen.add(ev.task_id)
+    ids.push(ev.task_id)
+  }
+  return ids
+}
+
 /** Group events by actor. Sub-agent lifecycle events (subagent_*) are attached
  *  to their own task group; everything else is attributed by agent_role/task_id
  *  (falling back to main). */
@@ -61,9 +77,7 @@ export function groupEventsByActor(events: WorkflowRunEvent[]): EventGroup[] {
   const actors = distinctActors(events)
   const buckets: Record<string, WorkflowRunEvent[]> = {}
   for (const ev of events) {
-    const belongsToSubagent = Boolean(
-      ev.task_id && (ev.agent_role === 'subagent' || SUBAGENT_KINDS.has(ev.kind)),
-    )
+    const belongsToSubagent = isSubagentEvent(ev)
     const id = belongsToSubagent ? ev.task_id! : 'main'
     ;(buckets[id] ||= []).push(ev)
   }
@@ -76,9 +90,9 @@ export function groupEventsByActor(events: WorkflowRunEvent[]): EventGroup[] {
 export function filterEventsByActor(events: WorkflowRunEvent[], actorId: string): WorkflowRunEvent[] {
   if (!actorId) return events
   if (actorId === 'main') {
-    return events.filter(ev => !(ev.agent_role === 'subagent' || (SUBAGENT_KINDS.has(ev.kind) && ev.task_id)))
+    return events.filter(ev => !isSubagentEvent(ev))
   }
-  return events.filter(ev => (ev.agent_role === 'subagent' && ev.task_id === actorId) || (SUBAGENT_KINDS.has(ev.kind) && ev.task_id === actorId))
+  return events.filter(ev => isSubagentEvent(ev) && ev.task_id === actorId)
 }
 
 /** Summarise a sub-agent's usage from its latest progress/end event. */
@@ -101,4 +115,13 @@ export function subagentStatus(events: WorkflowRunEvent[], taskId: string): stri
     }
   }
   return null
+}
+
+/** Human-readable sub-agent status for compact collapsed rows. */
+export function subagentStatusLabel(events: WorkflowRunEvent[], taskId: string): string {
+  const status = subagentStatus(events, taskId)
+  if (status === 'completed') return '完成'
+  if (status === 'failed' || status === 'error') return '失败'
+  if (status) return status
+  return events.some(ev => ev.task_id === taskId && isSubagentEvent(ev)) ? 'running' : '—'
 }

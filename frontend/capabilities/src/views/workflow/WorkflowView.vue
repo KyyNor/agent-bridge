@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
-import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowTask } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -28,6 +28,8 @@ import {
   groupEventsByActor,
   subagentUsage,
   subagentStatus,
+  subagentStatusLabel,
+  subagentTaskIds,
 } from '../../lib/workflowEvents'
 import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
 
@@ -69,6 +71,7 @@ const selectedRunId = ref('')
 const runEvents = ref<WorkflowRunEvent[]>([])
 const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
+const expandedRunSubagents = ref<Record<string, Set<string>>>({})
 const taskError = ref('')
 const clearing = ref(false)
 const clearTarget = ref<WorkflowDefinition | null>(null)
@@ -76,6 +79,7 @@ const expandedTaskIds = ref<Set<string>>(new Set())
 const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
 const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
 const taskLogLoading = ref<Set<string>>(new Set())
+const collapsedTaskSubagents = ref<Record<string, Set<string>>>({})
 // Task progress page: client-side filter / search / sort (feature 1).
 const taskStatusFilter = ref(ALL_STATUS_SENTINEL)
 const taskTypeFilter = ref('__all__')
@@ -226,6 +230,7 @@ function resetTaskFilters() {
 const progressRun = computed(() =>
   (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
 )
+const runEventGroups = computed(() => groupEventsByActor(runEvents.value))
 const workflowDesignDraft = computed(() => designResponse.value?.result?.workflow || null)
 
 const collapsedPaths = ref<Set<string>>(new Set())
@@ -650,6 +655,17 @@ function eventMessage(event: WorkflowRunEvent) {
   if (event.message) return event.message
   if (event.tool_name && event.kind === 'tool_call') return `调用工具 ${event.tool_name}`
   if (event.tool_name && event.kind === 'tool_result') return `工具 ${event.tool_name} 调用${event.status === 'failed' ? '失败' : '成功'}`
+  if (event.kind === 'subagent_progress') {
+    const parts: string[] = []
+    if (event.last_tool_name) parts.push(`当前工具: ${event.last_tool_name}`)
+    if (event.usage) {
+      const usageParts: string[] = []
+      if (event.usage.total_tokens != null) usageParts.push(`${event.usage.total_tokens} tokens`)
+      if (event.usage.tool_uses != null) usageParts.push(`${event.usage.tool_uses} 次工具`)
+      if (usageParts.length) parts.push(usageParts.join(' · '))
+    }
+    if (parts.length) return parts.join(' · ')
+  }
   return event.status || ''
 }
 
@@ -659,6 +675,31 @@ function eventClass(event: WorkflowRunEvent) {
   if (event.kind === 'tool_result') return 'border-green-400'
   if (event.kind === 'result') return 'border-foreground/40'
   return 'border-border'
+}
+
+function runSubagentStatus(taskIdStr: string) {
+  return subagentStatus(runEvents.value, taskIdStr)
+}
+
+function runSubagentStatusLabel(taskIdStr: string) {
+  return subagentStatusLabel(runEvents.value, taskIdStr)
+}
+
+function runSubagentUsage(taskIdStr: string) {
+  return subagentUsage(runEvents.value, taskIdStr)
+}
+
+function isRunSubagentCollapsed(taskIdStr: string): boolean {
+  return !expandedRunSubagents.value[selectedRunId.value]?.has(taskIdStr)
+}
+
+function toggleRunSubagent(taskIdStr: string) {
+  const key = selectedRunId.value
+  if (!key) return
+  const set = new Set(expandedRunSubagents.value[key] ?? [])
+  if (set.has(taskIdStr)) set.delete(taskIdStr)
+  else set.add(taskIdStr)
+  expandedRunSubagents.value = { ...expandedRunSubagents.value, [key]: set }
 }
 
 function errorMessage(e: unknown) {
@@ -912,6 +953,10 @@ async function loadLogs(options: { quiet?: boolean } = {}) {
     ])
     runLogs.value = logs
     runEvents.value = events
+    expandedRunSubagents.value = {
+      ...expandedRunSubagents.value,
+      [selectedRunId.value]: expandedRunSubagents.value[selectedRunId.value] ?? new Set(),
+    }
   } catch (e: unknown) {
     if (!options.quiet) {
       runLogs.value = []
@@ -928,6 +973,10 @@ function taskId(task: WorkflowTask) {
 
 function taskRunLogKey(task: WorkflowTask) {
   return task.lease_run_id || taskId(task)
+}
+
+function taskSubagentCollapseKey(task: WorkflowTask) {
+  return `${taskId(task)}:${task.lease_run_id || ''}`
 }
 
 function taskLogs(task: WorkflowTask) {
@@ -970,6 +1019,22 @@ function taskStatusFor(task: WorkflowTask, taskIdStr: string) {
   return subagentStatus(taskEvents(task), taskIdStr)
 }
 
+function taskStatusLabelFor(task: WorkflowTask, taskIdStr: string) {
+  return subagentStatusLabel(taskEvents(task), taskIdStr)
+}
+
+function isTaskSubagentCollapsed(task: WorkflowTask, taskIdStr: string): boolean {
+  return !!collapsedTaskSubagents.value[taskSubagentCollapseKey(task)]?.has(taskIdStr)
+}
+
+function toggleTaskSubagent(task: WorkflowTask, taskIdStr: string) {
+  const key = taskSubagentCollapseKey(task)
+  const set = new Set(collapsedTaskSubagents.value[key] ?? [])
+  if (set.has(taskIdStr)) set.delete(taskIdStr)
+  else set.add(taskIdStr)
+  collapsedTaskSubagents.value = { ...collapsedTaskSubagents.value, [key]: set }
+}
+
 function isTaskLogLoading(task: WorkflowTask) {
   return task.lease_run_id ? taskLogLoading.value.has(task.lease_run_id) : false
 }
@@ -1005,6 +1070,10 @@ async function toggleTaskLogs(task: WorkflowTask) {
     ])
     taskRunLogs.value = { ...taskRunLogs.value, [task.lease_run_id]: logs }
     taskRunEvents.value = { ...taskRunEvents.value, [task.lease_run_id]: events }
+    collapsedTaskSubagents.value = {
+      ...collapsedTaskSubagents.value,
+      [taskSubagentCollapseKey(task)]: new Set(subagentTaskIds(events)),
+    }
   } catch (e: unknown) {
     taskError.value = errorMessage(e)
   } finally {
@@ -1144,12 +1213,14 @@ async function confirmClearWorkflow() {
     artifactDetail.value = null
     artifactHistory.value = []
     runEvents.value = []
+    expandedRunSubagents.value = {}
     runLogs.value = []
     selectedRunId.value = ''
     progressRunId.value = ''
     expandedTaskIds.value = new Set()
     taskRunLogs.value = {}
     taskRunEvents.value = {}
+    collapsedTaskSubagents.value = {}
     resetTaskFilters()
     expandedArtifactIds.value = new Set()
     taskArtifacts.value = {}
@@ -1719,23 +1790,39 @@ async function confirmClearWorkflow() {
                     <div v-if="!taskEvents(task).length" class="text-sm text-muted-foreground">暂无 agent 输出</div>
                     <div v-else class="max-h-80 space-y-3 overflow-auto text-xs">
                       <div v-for="group in taskEventGroups(task)" :key="taskRunLogKey(task) + ':actor:' + group.actor.id" class="space-y-1">
-                        <div v-if="group.actor.role === 'subagent'" class="flex flex-wrap items-center gap-2 rounded bg-purple-50/60 px-2 py-1 dark:bg-purple-950/30">
-                          <span class="font-medium text-purple-700 dark:text-purple-300">{{ group.actor.label }}</span>
-                          <Badge variant="outline" class="text-[10px]">{{ group.events.length }}</Badge>
-                          <span v-if="taskUsageFor(task, group.actor.id)" class="text-[10px] text-muted-foreground">
-                            {{ taskUsageFor(task, group.actor.id)?.total_tokens ?? 0 }} tokens · {{ taskUsageFor(task, group.actor.id)?.tool_uses ?? 0 }} 工具
-                          </span>
-                          <Badge v-if="taskStatusFor(task, group.actor.id)" variant="outline" :class="taskStatusFor(task, group.actor.id) === 'completed' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'" class="text-[10px]">
-                            {{ taskStatusFor(task, group.actor.id) }}
-                          </Badge>
-                        </div>
-                        <div v-for="(event, idx) in group.events" :key="taskRunLogKey(task) + ':event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                            <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                            <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                        <template v-if="group.actor.role === 'main'">
+                          <div v-for="(event, idx) in group.events" :key="taskRunLogKey(task) + ':event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                              <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                              <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                            </div>
+                            <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
                           </div>
-                          <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                        </template>
+                        <div v-else class="rounded-md border border-purple-200/60 bg-purple-50/30 dark:border-purple-900/40 dark:bg-purple-950/20">
+                          <button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left" @click="toggleTaskSubagent(task, group.actor.id)">
+                            <component :is="isTaskSubagentCollapsed(task, group.actor.id) ? ChevronRight : ChevronDown" :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
+                            <Bot :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
+                            <span class="truncate font-medium text-purple-700 dark:text-purple-300">{{ group.actor.label }}</span>
+                            <Badge variant="outline" class="text-[10px]">{{ group.events.length }}</Badge>
+                            <span v-if="taskUsageFor(task, group.actor.id)" class="text-[10px] text-muted-foreground">
+                              {{ taskUsageFor(task, group.actor.id)?.total_tokens ?? 0 }} tokens · {{ taskUsageFor(task, group.actor.id)?.tool_uses ?? 0 }} 工具
+                            </span>
+                            <Badge variant="outline" :class="taskStatusFor(task, group.actor.id) === 'completed' ? 'bg-green-50 text-green-700' : taskStatusFor(task, group.actor.id) ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'" class="ml-auto text-[10px]">
+                              {{ taskStatusLabelFor(task, group.actor.id) }}
+                            </Badge>
+                          </button>
+                          <div v-if="!isTaskSubagentCollapsed(task, group.actor.id)" class="space-y-1 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
+                            <div v-for="(event, idx) in group.events" :key="taskRunLogKey(task) + ':event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                              <div class="flex flex-wrap items-center gap-2">
+                                <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                                <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                                <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                              </div>
+                              <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1804,14 +1891,43 @@ async function confirmClearWorkflow() {
               </div>
               <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无 agent 输出</div>
               <div v-else class="max-h-[28rem] space-y-2 overflow-auto rounded-md border bg-background p-3 text-xs">
-                <div v-for="(event, idx) in runEvents" :key="idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                    <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
-                    <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                    <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                <div v-for="group in runEventGroups" :key="'run-actor:' + group.actor.id" class="space-y-1">
+                  <template v-if="group.actor.role === 'main'">
+                    <div v-for="(event, idx) in group.events" :key="'run-event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                        <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
+                        <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                        <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                      </div>
+                      <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                    </div>
+                  </template>
+                  <div v-else class="rounded-md border border-purple-200/60 bg-purple-50/30 dark:border-purple-900/40 dark:bg-purple-950/20">
+                    <button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left" @click="toggleRunSubagent(group.actor.id)">
+                      <component :is="isRunSubagentCollapsed(group.actor.id) ? ChevronRight : ChevronDown" :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
+                      <Bot :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
+                      <span class="truncate font-medium text-purple-700 dark:text-purple-300">{{ group.actor.label }}</span>
+                      <Badge variant="outline" class="text-[10px]">{{ group.events.length }}</Badge>
+                      <span v-if="runSubagentUsage(group.actor.id)" class="text-[10px] text-muted-foreground">
+                        {{ runSubagentUsage(group.actor.id)?.total_tokens ?? 0 }} tokens · {{ runSubagentUsage(group.actor.id)?.tool_uses ?? 0 }} 工具
+                      </span>
+                      <Badge variant="outline" :class="runSubagentStatus(group.actor.id) === 'completed' ? 'bg-green-50 text-green-700' : runSubagentStatus(group.actor.id) ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'" class="ml-auto text-[10px]">
+                        {{ runSubagentStatusLabel(group.actor.id) }}
+                      </Badge>
+                    </button>
+                    <div v-if="!isRunSubagentCollapsed(group.actor.id)" class="space-y-1 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
+                      <div v-for="(event, idx) in group.events" :key="'run-event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
+                          <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
+                          <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
+                          <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
+                        </div>
+                        <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
                 </div>
               </div>
             </section>
