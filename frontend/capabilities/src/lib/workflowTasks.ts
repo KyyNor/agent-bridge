@@ -7,14 +7,16 @@
 import type { WorkflowTask } from '../api/types'
 
 export interface WorkflowTaskFilters {
+  /** Sentinel {@link ALL_STATUS_SENTINEL} means "no status filter" (reka-ui Select rejects empty values). */
   status: string
-  /** Sentinel `__all__` means "no type filter" (reka-ui Select rejects empty values). */
+  /** Sentinel {@link ALL_TYPE_SENTINEL} means "no type filter" (reka-ui Select rejects empty values). */
   type: string
   search: string
   /** Recognised: default | task_key_asc | task_key_desc | set_at_asc | set_at_desc | updated_at_desc */
   sort: string
 }
 
+export const ALL_STATUS_SENTINEL = '__all_status__'
 export const ALL_TYPE_SENTINEL = '__all__'
 
 /** Canonical display order for task statuses. */
@@ -53,7 +55,7 @@ export function taskStats(tasks: WorkflowTask[]): Record<string, number> {
 
 /** Whether a single task passes the active status/type/search filters. */
 export function matchTaskFilter(task: WorkflowTask, filters: WorkflowTaskFilters): boolean {
-  if (filters.status && task.status !== filters.status) return false
+  if (filters.status && filters.status !== ALL_STATUS_SENTINEL && task.status !== filters.status) return false
   if (filters.type && filters.type !== ALL_TYPE_SENTINEL && task.type !== filters.type) return false
   const q = filters.search.trim().toLowerCase()
   if (q && !(task.task_key.toLowerCase().includes(q) || (task.type || '').toLowerCase().includes(q))) return false

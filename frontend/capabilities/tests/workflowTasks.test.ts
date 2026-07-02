@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
   filterAndSortTasks,
   distinctStatuses,
@@ -40,7 +41,7 @@ const sample = [
 
 function filters(overrides: Partial<{ status: string; type: string; search: string; sort: string }> = {}) {
   return {
-    status: '',
+    status: ALL_STATUS_SENTINEL,
     type: ALL_TYPE_SENTINEL,
     search: '',
     sort: 'default',
@@ -77,6 +78,12 @@ test('filterAndSortTasks with no filters returns all unchanged (server order pre
 test('filterAndSortTasks filters by status', () => {
   const result = filterAndSortTasks(sample, filters({ status: 'completed' }))
   assert.deepEqual(result.map(t => t.task_key), ['page:beta'])
+})
+
+test('filterAndSortTasks treats ALL_STATUS_SENTINEL like no status filter', () => {
+  // Both the sentinel and the legacy empty string must mean "all statuses".
+  assert.equal(filterAndSortTasks(sample, filters({ status: ALL_STATUS_SENTINEL })).length, 3)
+  assert.equal(filterAndSortTasks(sample, filters({ status: '' })).length, 3)
 })
 
 test('filterAndSortTasks filters by type, respecting the __all__ sentinel', () => {

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import { parseWorkflowDag } from './workflowDag'
 import {
+  ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
   filterAndSortTasks,
   distinctStatuses,
@@ -75,7 +76,7 @@ const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
 const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
 const taskLogLoading = ref<Set<string>>(new Set())
 // Task progress page: client-side filter / search / sort (feature 1).
-const taskStatusFilter = ref('')
+const taskStatusFilter = ref(ALL_STATUS_SENTINEL)
 const taskTypeFilter = ref('__all__')
 const taskSearchInput = ref('')
 const taskSearch = ref('')
@@ -169,11 +170,8 @@ const filteredTasks = computed(() =>
     sort: taskSort.value,
   }),
 )
-function toggleStatusFilter(status: string) {
-  taskStatusFilter.value = taskStatusFilter.value === status ? '' : status
-}
 function resetTaskFilters() {
-  taskStatusFilter.value = ''
+  taskStatusFilter.value = ALL_STATUS_SENTINEL
   taskTypeFilter.value = ALL_TYPE_SENTINEL
   taskSearchInput.value = ''
   taskSearch.value = ''
@@ -1436,35 +1434,8 @@ async function confirmClearWorkflow() {
         </div>
       </div>
       <div class="space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
-            <div class="min-w-0 space-y-2">
-              <div class="flex flex-wrap items-center gap-2">
-                <Badge v-if="taskWorkflow" variant="outline">{{ taskWorkflow.workflow_key }}</Badge>
-                <button type="button" class="cursor-pointer" @click="toggleStatusFilter('')">
-                  <Badge :variant="taskStatusFilter === '' ? 'default' : 'outline'">全部 {{ tasks.length }}</Badge>
-                </button>
-                <button
-                  v-for="status in taskStatuses"
-                  :key="status"
-                  type="button"
-                  class="cursor-pointer"
-                  @click="toggleStatusFilter(status)"
-                >
-                  <Badge :variant="taskStatusFilter === status ? 'default' : 'outline'" :class="taskBadgeClass(status)">
-                    {{ taskStatusLabel(status) }} {{ taskStats[status] || 0 }}
-                  </Badge>
-                </button>
-              </div>
-              <div class="text-xs text-muted-foreground">展开任务可查看产出物与关联运行的日志；点击上方状态可按状态筛选。</div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="tasksLoading || !taskWorkflow"
-              @click="taskWorkflow && loadTasks(taskWorkflow.workflow_key)"
-            >
-              {{ tasksLoading ? '刷新中' : '刷新' }}
-            </Button>
+          <div class="flex flex-wrap items-center gap-2 border-b pb-4">
+            <Badge v-if="taskWorkflow" variant="outline">{{ taskWorkflow.workflow_key }}</Badge>
           </div>
 
           <!-- 筛选 / 搜索 / 排序 -->
@@ -1476,6 +1447,17 @@ async function confirmClearWorkflow() {
               class="h-8 w-56 text-xs"
               @input="onTaskSearchInput"
             />
+            <Select v-model="taskStatusFilter">
+              <SelectTrigger class="h-8 w-[140px] text-xs">
+                <SelectValue placeholder="全部状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all_status__">全部状态</SelectItem>
+                <SelectItem v-for="status in taskStatuses" :key="status" :value="status">
+                  {{ taskStatusLabel(status) }} {{ taskStats[status] || 0 }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
             <Select v-model="taskTypeFilter">
               <SelectTrigger class="h-8 w-[140px] text-xs">
                 <SelectValue placeholder="全部类型" />
@@ -1499,7 +1481,7 @@ async function confirmClearWorkflow() {
               </SelectContent>
             </Select>
             <Button
-              v-if="taskStatusFilter || taskTypeFilter || taskSearch || taskSort !== 'default'"
+              v-if="taskStatusFilter !== ALL_STATUS_SENTINEL || taskTypeFilter !== ALL_TYPE_SENTINEL || taskSearch || taskSort !== 'default'"
               variant="ghost"
               size="sm"
               class="h-8 text-xs"
@@ -1507,8 +1489,19 @@ async function confirmClearWorkflow() {
             >
               重置筛选
             </Button>
-            <div class="ml-auto text-xs text-muted-foreground">
-              {{ filteredTasks.length }} / {{ tasks.length }}
+            <div class="ml-auto flex items-center gap-3">
+              <span class="text-xs text-muted-foreground">
+                {{ filteredTasks.length }} / {{ tasks.length }}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-8 text-xs"
+                :disabled="tasksLoading || !taskWorkflow"
+                @click="taskWorkflow && loadTasks(taskWorkflow.workflow_key)"
+              >
+                {{ tasksLoading ? '刷新中' : '刷新' }}
+              </Button>
             </div>
           </div>
 
