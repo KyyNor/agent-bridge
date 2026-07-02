@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { marked } from 'marked'
-import { ArrowLeft, Check, HelpCircle, Save, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowTask } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -55,6 +55,7 @@ const detailLoading = ref(false)
 const historyLoading = ref(false)
 const showArtifact = ref(false)
 const showArtifactHistory = ref(false)
+const fullscreenArtifact = ref<{ title: string; path: string; summary: string; tags: string[]; content: string } | null>(null)
 const showGuide = ref(false)
 const showClearConfirm = ref(false)
 const progressWorkflowKey = ref('')
@@ -114,6 +115,29 @@ const artifactHtml = computed(() =>
 function renderMarkdown(content: string) {
   return marked.parse(content, { async: false }) as string
 }
+
+function openArtifactFullscreen(artifact: WorkflowArtifact | WorkflowArtifactDetail) {
+  fullscreenArtifact.value = {
+    title: artifact.title,
+    path: artifact.path,
+    summary: artifact.summary,
+    tags: artifact.tags,
+    content: artifact.content || '',
+  }
+}
+
+function openTaskArtifactFullscreen(task: WorkflowTask) {
+  const artifact = activeTaskArtifact(task)
+  if (artifact) openArtifactFullscreen(artifact)
+}
+
+function closeArtifactFullscreen() {
+  fullscreenArtifact.value = null
+}
+
+const fullscreenArtifactHtml = computed(() =>
+  fullscreenArtifact.value ? marked.parse(fullscreenArtifact.value.content, { async: false }) as string : '',
+)
 
 const form = ref({
   workflow_key: '',
@@ -645,6 +669,7 @@ async function openArtifact(item: WorkflowArtifact) {
   detailLoading.value = true
   showArtifact.value = true
   artifactDetail.value = null
+  fullscreenArtifact.value = null
   try {
     artifactDetail.value = await api.getWorkflowArtifact(
       item.artifact_id,
@@ -1635,6 +1660,16 @@ async function confirmClearWorkflow() {
                         <span class="text-sm font-medium text-foreground">{{ activeTaskArtifact(task)?.title }}</span>
                         <Badge variant="outline">{{ activeTaskArtifact(task)?.path }}</Badge>
                         <span class="text-xs text-muted-foreground">更新 {{ activeTaskArtifact(task)?.updated_at }}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          class="ml-auto h-6 gap-1 px-2 text-xs"
+                          title="全屏查看"
+                          @click="openTaskArtifactFullscreen(task)"
+                        >
+                          <Maximize2 :size="12" />
+                          全屏
+                        </Button>
                       </div>
                       <div v-if="activeTaskArtifact(task)?.summary" class="mb-2 text-xs text-muted-foreground">
                         {{ activeTaskArtifact(task)?.summary }}
@@ -1946,7 +1981,7 @@ async function confirmClearWorkflow() {
       </aside>
     </section>
 
-    <Dialog v-model:open="showArtifact">
+    <Dialog v-model:open="showArtifact" @update:open="(v: boolean) => { if (!v) closeArtifactFullscreen() }">
       <DialogContent class="max-w-[900px] sm:max-w-[900px]">
         <DialogHeader>
           <DialogTitle>{{ artifactDetail?.title || '产物详情' }}</DialogTitle>
@@ -1964,10 +1999,40 @@ async function confirmClearWorkflow() {
           <div v-else class="py-8 text-center text-sm text-muted-foreground">无内容</div>
         </div>
         <DialogFooter>
+          <Button
+            v-if="artifactDetail"
+            variant="outline"
+            class="mr-auto"
+            title="全屏查看"
+            @click="openArtifactFullscreen(artifactDetail)"
+          >
+            <Maximize2 :size="14" />
+            全屏
+          </Button>
           <Button variant="outline" @click="showArtifact = false">关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Teleport to="body">
+      <div v-if="fullscreenArtifact" class="fixed inset-0 z-[10000] flex flex-col bg-background pointer-events-auto">
+        <div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="truncate text-sm font-medium">{{ fullscreenArtifact.title || '产物详情' }}</span>
+            <Badge variant="outline" class="shrink-0 font-mono text-xs">{{ fullscreenArtifact.path }}</Badge>
+            <Badge v-for="tag in fullscreenArtifact.tags" :key="tag" variant="outline" class="shrink-0 text-xs">{{ tag }}</Badge>
+          </div>
+          <Button variant="ghost" size="sm" class="h-8 w-8 shrink-0 p-0" title="退出全屏" @click="closeArtifactFullscreen()">
+            <Minimize2 :size="16" />
+          </Button>
+        </div>
+        <div class="flex-1 overflow-auto px-6 py-4">
+          <div class="mx-auto max-w-4xl space-y-4">
+            <div v-if="fullscreenArtifact.summary" class="text-sm text-muted-foreground">{{ fullscreenArtifact.summary }}</div>
+            <div class="prose prose-sm max-w-none" v-html="fullscreenArtifactHtml"></div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
     <Dialog v-model:open="showArtifactHistory">
       <DialogContent class="max-w-[980px] sm:max-w-[980px]">
         <DialogHeader>
