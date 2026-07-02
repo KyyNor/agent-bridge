@@ -1254,29 +1254,7 @@ async function confirmClearWorkflow() {
               <div class="mt-1">{{ (workflowRuns[item.workflow_key] || []).length }} 次运行记录</div>
             </div>
             <div class="flex flex-wrap justify-start gap-2 lg:justify-end">
-              <Button
-                v-if="runningRunFor(item.workflow_key)"
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs"
-                @click="openProgress(item, runningRunFor(item.workflow_key)?.run_id)"
-              >
-                运行中...
-              </Button>
-              <Button
-                v-else
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs"
-                :disabled="hasAnyRunningRun"
-                @click="runWorkflow(item)"
-              >
-                运行
-              </Button>
-              <Button variant="outline" size="sm" class="h-8 text-xs" @click="openEdit(item)">编辑</Button>
               <Button variant="outline" size="sm" class="h-8 text-xs" @click="openDetail(item)">详情</Button>
-              <Button variant="outline" size="sm" class="h-8 text-xs" @click="openTasks(item)">任务进度</Button>
-              <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" @click="requestClearWorkflow(item)">清空</Button>
               <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" @click="deleteWorkflow(item)">删除</Button>
             </div>
           </div>
@@ -1318,6 +1296,7 @@ async function confirmClearWorkflow() {
             运行
           </Button>
           <Button variant="ghost" size="sm" class="text-destructive" @click="requestClearWorkflow(selectedWorkflow)">清空</Button>
+          <Button variant="ghost" size="sm" class="text-destructive" @click="deleteWorkflow(selectedWorkflow)">删除</Button>
         </div>
       </div>
       <div v-if="selectedWorkflow" class="space-y-5">
