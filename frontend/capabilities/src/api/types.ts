@@ -350,6 +350,9 @@ export interface WorkflowSubagentTranscriptEvent {
 
 export interface WorkflowSubagentTranscriptAgent {
   agent_id: string
+  index?: number
+  label?: string
+  prompt_preview?: string
   result: unknown
   events: WorkflowSubagentTranscriptEvent[]
 }
@@ -360,6 +363,7 @@ export interface WorkflowSubagentDetail {
   workflow_subrun_id?: string | null
   task_output_status?: string | null
   task_output?: string | null
+  agent_count?: number
   agents: WorkflowSubagentTranscriptAgent[]
 }
 

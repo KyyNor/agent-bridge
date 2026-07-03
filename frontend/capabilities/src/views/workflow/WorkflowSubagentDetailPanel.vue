@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 
@@ -8,8 +10,21 @@ const props = defineProps<{
   error: string
 }>()
 
+const expandedAgents = ref<Set<string>>(new Set())
+
 function shortAgentId(agentId: string) {
   return agentId.length > 12 ? `${agentId.slice(0, 8)}…${agentId.slice(-4)}` : agentId
+}
+
+function toggleAgent(agentId: string) {
+  const next = new Set(expandedAgents.value)
+  if (next.has(agentId)) next.delete(agentId)
+  else next.add(agentId)
+  expandedAgents.value = next
+}
+
+function isAgentExpanded(agentId: string) {
+  return expandedAgents.value.has(agentId)
 }
 
 /** Map a transcript event.kind into a timeline visual family. */
@@ -50,8 +65,24 @@ function eventBody(event: WorkflowSubagentTranscriptEvent) {
   return formatValue(event.content)
 }
 
+function promptEvents(agent: WorkflowSubagentTranscriptAgent) {
+  return agent.events.filter(event => event.kind === 'prompt')
+}
+
 function processEvents(agent: WorkflowSubagentTranscriptAgent) {
   return agent.events.filter(event => event.kind !== 'prompt')
+}
+
+function agentLabel(agent: WorkflowSubagentTranscriptAgent) {
+  return agent.label || `子 Agent #${agent.index || '?'}`
+}
+
+function agentStatus(agent: WorkflowSubagentTranscriptAgent) {
+  return agent.result == null ? 'running' : 'completed'
+}
+
+function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
+  return agentStatus(agent) === 'completed' ? '完成' : '运行中'
 }
 </script>
 
@@ -75,6 +106,15 @@ function processEvents(agent: WorkflowSubagentTranscriptAgent) {
         <div class="tl-mini-content">没有在 stdout.log 里找到该子 Agent 的 transcript 目录，下面显示原始进度事件。</div>
       </div>
 
+      <div v-if="props.detail.agents.length" class="tl-mini-event">
+        <div class="tl-mavatar" />
+        <div class="tl-mini-head">
+          <span class="tl-mini-kind" style="background:var(--muted);color:var(--muted-foreground)">内部子 Agent</span>
+          <span class="tl-mini-target"><b>{{ props.detail.agent_count || props.detail.agents.length }}</b> 个</span>
+        </div>
+        <div class="tl-mini-content">Workflow 工具只产生一个外层 Task；这里按 Claude transcript 里的内部 agent 拆开。</div>
+      </div>
+
       <!-- 返回主 Agent 的结果（thread card 顶部高亮块） -->
       <div v-if="props.detail.task_output" class="tl-result">
         <div class="tl-result-label">返回主 Agent</div>
@@ -83,30 +123,60 @@ function processEvents(agent: WorkflowSubagentTranscriptAgent) {
         </div>
       </div>
 
-      <!-- 每个 agent 的内部 mini-timeline -->
-      <div v-for="agent in props.detail.agents" :key="agent.agent_id" class="tl-mini">
-        <div
-          v-for="(event, idx) in processEvents(agent)"
-          :key="agent.agent_id + ':event:' + idx"
-          class="tl-mini-event"
-          :class="'k-' + miniKind(event)"
-        >
-          <div class="tl-mavatar" />
-          <div class="tl-mini-head">
-            <span class="tl-mini-kind">{{ miniLabel(event) }}</span>
-            <span v-if="event.tool_name" class="tl-mini-target"><b>{{ event.tool_name }}</b></span>
-            <span v-if="event.created_at" class="tl-mini-time">{{ formatLocalDatetime(event.created_at) }}</span>
-          </div>
-          <div v-if="eventBody(event)" class="tl-mini-content" :class="isDump(event) ? 'tl-dump' : ''">
-            {{ eventBody(event) }}
-          </div>
-        </div>
+      <!-- 每个 workflow 内部 agent 独立折叠，避免看起来像只有一个子 Agent。 -->
+      <div v-for="agent in props.detail.agents" :key="agent.agent_id" class="rounded-sm border bg-background">
+        <button type="button" class="flex w-full min-w-0 items-center gap-2 px-2 py-2 text-left text-xs" @click="toggleAgent(agent.agent_id)">
+          <component :is="isAgentExpanded(agent.agent_id) ? ChevronDown : ChevronRight" :size="13" class="shrink-0 text-muted-foreground" />
+          <span class="shrink-0 font-medium text-foreground">{{ agentLabel(agent) }}</span>
+          <span class="shrink-0 font-mono text-[11px] text-muted-foreground">{{ shortAgentId(agent.agent_id) }}</span>
+          <span class="shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px]" :class="agentStatus(agent) === 'completed' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'">
+            {{ agentStatusLabel(agent) }}
+          </span>
+          <span class="shrink-0 text-[10px] text-muted-foreground">{{ agent.events.length }} events</span>
+          <span v-if="agent.prompt_preview" class="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{{ agent.prompt_preview }}</span>
+        </button>
 
-        <!-- 结构化结果（如果与 task_output 不同） -->
-        <div v-if="agent.result != null && formatValue(agent.result) !== formatValue(props.detail.task_output)" class="tl-result" style="margin-top:10px">
-          <div class="tl-result-label">结构化结果 · {{ shortAgentId(agent.agent_id) }}</div>
-          <div class="tl-result-text">
-            <pre>{{ formatValue(agent.result) }}</pre>
+        <div v-if="isAgentExpanded(agent.agent_id)" class="space-y-3 border-t px-2 py-2">
+          <div v-if="promptEvents(agent).length" class="tl-mini">
+            <div
+              v-for="(event, idx) in promptEvents(agent)"
+              :key="agent.agent_id + ':prompt:' + idx"
+              class="tl-mini-event"
+            >
+              <div class="tl-mavatar" />
+              <div class="tl-mini-head">
+                <span class="tl-mini-kind" style="background:var(--muted);color:var(--muted-foreground)">提示词</span>
+                <span v-if="event.created_at" class="tl-mini-time">{{ formatLocalDatetime(event.created_at) }}</span>
+              </div>
+              <div class="tl-mini-content">{{ formatValue(event.content) }}</div>
+            </div>
+          </div>
+
+          <div v-if="processEvents(agent).length" class="tl-mini">
+            <div
+              v-for="(event, idx) in processEvents(agent)"
+              :key="agent.agent_id + ':event:' + idx"
+              class="tl-mini-event"
+              :class="'k-' + miniKind(event)"
+            >
+              <div class="tl-mavatar" />
+              <div class="tl-mini-head">
+                <span class="tl-mini-kind">{{ miniLabel(event) }}</span>
+                <span v-if="event.tool_name" class="tl-mini-target"><b>{{ event.tool_name }}</b></span>
+                <span v-if="event.created_at" class="tl-mini-time">{{ formatLocalDatetime(event.created_at) }}</span>
+              </div>
+              <div v-if="eventBody(event)" class="tl-mini-content" :class="isDump(event) ? 'tl-dump' : ''">
+                {{ eventBody(event) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 结构化结果（如果与 task_output 不同） -->
+          <div v-if="agent.result != null && formatValue(agent.result) !== formatValue(props.detail.task_output)" class="tl-result" style="margin-top:10px">
+            <div class="tl-result-label">结构化结果 · {{ shortAgentId(agent.agent_id) }}</div>
+            <div class="tl-result-text">
+              <pre>{{ formatValue(agent.result) }}</pre>
+            </div>
           </div>
         </div>
       </div>

@@ -107,8 +107,12 @@ def test_build_subagent_detail_reads_claude_transcript_and_task_output(tmp_path:
 
     assert detail["task_id"] == task_id
     assert detail["transcript_dir"].endswith("/subagents/workflows/wf_123")
+    assert detail["agent_count"] == 1
     assert detail["task_output_status"] == "completed"
     assert detail["task_output"] == '{"ok": true, "answer": "done"}'
+    assert detail["agents"][0]["index"] == 1
+    assert detail["agents"][0]["label"] == "子 Agent #1"
+    assert detail["agents"][0]["prompt_preview"] == "请调用工具并返回结果"
     assert detail["agents"][0]["agent_id"] == "agent-one"
     assert detail["agents"][0]["result"] == {"answer": "done"}
     events = detail["agents"][0]["events"]

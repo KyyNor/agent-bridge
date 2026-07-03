@@ -162,6 +162,18 @@ def _agent_id_from_path(path: Path) -> str:
     return stem.removeprefix("agent-")
 
 
+def _compact_text(value: str, *, limit: int = 96) -> str:
+    text = " ".join(value.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _prompt_preview(events: list[dict[str, Any]]) -> str:
+    for event in events:
+        if event.get("kind") == "prompt" and isinstance(event.get("content"), str):
+            return _compact_text(str(event["content"]))
+    return ""
+
+
 def _agent_detail(path: Path, result: Any) -> dict[str, Any]:
     events: list[dict[str, Any]] = []
     agent_id = _agent_id_from_path(path)
@@ -193,6 +205,7 @@ def build_subagent_detail(run_dir: Path, task_id: str) -> dict[str, Any]:
         "workflow_subrun_id": refs.get("workflow_subrun_id"),
         "task_output_status": refs.get("task_output_status"),
         "task_output": refs.get("task_output"),
+        "agent_count": 0,
         "agents": [],
     }
     if not transcript_dir_value:
@@ -210,5 +223,11 @@ def build_subagent_detail(run_dir: Path, task_id: str) -> dict[str, Any]:
         by_agent_id[parsed["agent_id"]] = parsed
     ordered_ids = [agent_id for agent_id in journal_order if agent_id in by_agent_id]
     ordered_ids.extend(agent_id for agent_id in by_agent_id if agent_id not in ordered_ids)
-    detail["agents"] = [by_agent_id[agent_id] for agent_id in ordered_ids]
+    agents = [by_agent_id[agent_id] for agent_id in ordered_ids]
+    for index, agent in enumerate(agents, start=1):
+        agent["index"] = index
+        agent["label"] = f"子 Agent #{index}"
+        agent["prompt_preview"] = _prompt_preview(agent.get("events") or [])
+    detail["agent_count"] = len(agents)
+    detail["agents"] = agents
     return detail
