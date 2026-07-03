@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { marked } from 'marked'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
+
+function renderMarkdown(content: string) {
+  return marked.parse(content, { async: false }) as string
+}
 
 const props = defineProps<{
   detail: WorkflowSubagentDetail | null
@@ -58,6 +63,11 @@ function formatValue(value: unknown) {
 /** Whether an event's body should render as monospace dump (code/json) vs prose. */
 function isDump(event: WorkflowSubagentTranscriptEvent) {
   return event.kind === 'tool_call' || event.kind === 'tool_result'
+}
+
+/** Whether an event's body is free-form agent text worth rendering as markdown. */
+function isMarkdown(event: WorkflowSubagentTranscriptEvent) {
+  return event.kind === 'text'
 }
 
 function eventBody(event: WorkflowSubagentTranscriptEvent) {
@@ -166,7 +176,12 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
                 <span v-if="event.created_at" class="tl-mini-time">{{ formatLocalDatetime(event.created_at) }}</span>
               </div>
               <div v-if="eventBody(event)" class="tl-mini-content" :class="isDump(event) ? 'tl-dump' : ''">
-                {{ eventBody(event) }}
+                <div
+                  v-if="isMarkdown(event)"
+                  class="tl-md"
+                  v-html="renderMarkdown(eventBody(event))"
+                />
+                <template v-else>{{ eventBody(event) }}</template>
               </div>
             </div>
           </div>

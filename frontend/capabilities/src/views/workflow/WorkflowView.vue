@@ -1910,7 +1910,12 @@ async function confirmClearWorkflow() {
                             <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
                           </div>
                           <div v-if="eventMessage(entry.event)" class="tl-content">
-                            <p>{{ eventMessage(entry.event) }}</p>
+                            <div
+                              v-if="entry.event.kind === 'agent_message' && entry.event.message"
+                              class="tl-md"
+                              v-html="renderMarkdown(entry.event.message)"
+                            />
+                            <p v-else>{{ eventMessage(entry.event) }}</p>
                           </div>
                         </div>
                       </div>
@@ -2024,7 +2029,12 @@ async function confirmClearWorkflow() {
                       <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
                     </div>
                     <div v-if="eventMessage(entry.event)" class="tl-content">
-                      <p>{{ eventMessage(entry.event) }}</p>
+                      <div
+                        v-if="entry.event.kind === 'agent_message' && entry.event.message"
+                        class="tl-md"
+                        v-html="renderMarkdown(entry.event.message)"
+                      />
+                      <p v-else>{{ eventMessage(entry.event) }}</p>
                     </div>
                   </div>
                 </div>
@@ -2362,6 +2372,33 @@ async function confirmClearWorkflow() {
 .k-message .tl-content{font-size:14px;line-height:1.65}
 .tl-content pre{margin:8px 0 0;background:var(--muted);border-radius:6px;padding:10px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:var(--foreground);overflow:auto;max-height:220px;white-space:pre-wrap}
 
+/* ===== Markdown rendered inside timeline (.tl-md) ===== */
+/* Scoped so it blends with the card instead of behaving like a heavy prose block. */
+.tl-md{font-size:inherit;line-height:inherit;color:inherit;word-break:break-word}
+.tl-md>:first-child{margin-top:0}
+.tl-md>:last-child{margin-bottom:0}
+.tl-md p{margin:0 0 6px}
+.tl-md p:last-child{margin-bottom:0}
+.tl-md h1,.tl-md h2,.tl-md h3,.tl-md h4{font-weight:600;line-height:1.3;margin:14px 0 6px;color:var(--foreground)}
+.tl-md h1{font-size:1.18em}
+.tl-md h2{font-size:1.1em}
+.tl-md h3{font-size:1.02em}
+.tl-md h4{font-size:.96em}
+.tl-md ul,.tl-md ol{margin:4px 0 6px;padding-left:20px}
+.tl-md li{margin:2px 0}
+.tl-md li::marker{color:var(--muted-foreground)}
+.tl-md a{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
+.tl-md a:hover{opacity:.8}
+.tl-md blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid var(--border);color:var(--muted-foreground)}
+.tl-md blockquote p{margin:2px 0}
+.tl-md hr{border:none;border-top:1px solid var(--border);margin:10px 0}
+.tl-md code{font-family:var(--font-mono);font-size:.88em;background:var(--muted);padding:1px 5px;border-radius:4px;color:var(--foreground)}
+.tl-md pre{margin:8px 0;background:var(--muted);border-radius:6px;padding:10px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:var(--foreground);overflow:auto;max-height:260px;white-space:pre-wrap}
+.tl-md pre code{background:transparent;padding:0;font-size:inherit;border-radius:0}
+.tl-md table{width:100%;border-collapse:collapse;margin:8px 0;font-size:.95em}
+.tl-md th,.tl-md td{border:1px solid var(--border);padding:5px 8px;text-align:left}
+.tl-md th{background:var(--muted);font-weight:600}
+
 /* ===== Subagent thread card ===== */
 .tl-sub{position:relative;background:color-mix(in oklch,#7c3aed 7%,var(--card));border:1px solid color-mix(in oklch,#7c3aed 24%,var(--border));border-radius:10px;overflow:hidden;transition:border-color .12s ease}
 :root.dark .tl-sub{background:color-mix(in oklch,#7c3aed 14%,var(--card))}
@@ -2409,6 +2446,9 @@ async function confirmClearWorkflow() {
 .tl-mini-time{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);opacity:.8}
 .tl-mini-content{font-size:12.5px;color:var(--muted-foreground);line-height:1.55;white-space:pre-wrap}
 .tl-mini-content.tl-dump{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);background:var(--muted);padding:6px 9px;border-radius:4px;margin-top:4px;white-space:pre-wrap;overflow:auto;max-height:160px}
+/* Markdown output inside mini timeline: free-form agent text renders as solid
+   prose (not muted, not pre-wrapped) so headings/lists/code read correctly. */
+.tl-mini-content > .tl-md{color:var(--foreground);white-space:normal;word-break:break-word}
 
 @media (prefers-reduced-motion: reduce){
   .tl-body,.tl-sub,.tl-chevron{transition:none}
