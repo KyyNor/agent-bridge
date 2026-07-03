@@ -90,7 +90,7 @@ const taskTypeFilter = ref('__all__')
 const taskSearchInput = ref('')
 const taskSearch = ref('')
 const taskSort = ref('default')
-// Per-task artifacts fetched on demand (feature 2 — view outputs from tasks page).
+// Per-task artifacts fetched on demand (feature 2, view outputs from tasks page).
 const expandedArtifactIds = ref<Set<string>>(new Set())
 const taskArtifacts = ref<Record<string, WorkflowArtifact[]>>({})
 const taskArtifactLoading = ref<Set<string>>(new Set())
@@ -235,6 +235,8 @@ const progressRun = computed(() =>
   (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
 )
 const runEventGroups = computed(() => groupEventsByActor(runEvents.value))
+/** Single-column interleaved timeline for the run-progress view. */
+const runTimeline = computed(() => buildTimeline(runEventGroups.value))
 const workflowDesignDraft = computed(() => designResponse.value?.result?.workflow || null)
 
 const collapsedPaths = ref<Set<string>>(new Set())
@@ -517,7 +519,7 @@ function goList() {
   window.location.hash = 'workflow'
 }
 
-/** Navigate back to the detail page of the current workflow — the hub for
+/** Navigate back to the detail page of the current workflow, the hub for
  *  tasks / progress / edit so those sub-pages return to detail, not the list. */
 function goDetail() {
   const key = routeWorkflowKey.value
@@ -676,9 +678,59 @@ function eventMessage(event: WorkflowRunEvent) {
 function eventClass(event: WorkflowRunEvent) {
   if (event.kind === 'error' || event.status === 'failed') return 'border-red-400'
   if (event.kind === 'tool_call') return 'border-blue-400'
-  if (event.kind === 'tool_result') return 'border-green-400'
+  if (event.kind === 'tool_result') return event.status === 'failed' ? 'border-red-400' : 'border-green-400'
   if (event.kind === 'result') return 'border-foreground/40'
   return 'border-border'
+}
+
+/** Semantic kind for timeline styling. Groups the many event.kind values into
+ *  a small visual family: message / think / tool / result / error / status. */
+type TimelineKind = 'message' | 'think' | 'tool' | 'result' | 'error' | 'status'
+
+function timelineKind(event: WorkflowRunEvent): TimelineKind {
+  if (event.kind === 'error' || event.status === 'failed') return 'error'
+  if (event.kind === 'tool_call') return 'tool'
+  if (event.kind === 'tool_result') return event.status === 'failed' ? 'error' : 'result'
+  if (event.kind === 'result') return event.status === 'failed' ? 'error' : 'result'
+  if (event.kind === 'status') return 'status'
+  return 'message'
+}
+
+/** Interleave main-agent and subagent events into a single reading order.
+ *  - Main events stay as individual timeline nodes (in order).
+ *  - For each subagent, only the FIRST lifecycle event (usually subagent_start)
+ *    becomes a timeline node; it carries the actor so the UI can render the
+ *    whole subagent thread inline. Later subagent lifecycle events are dropped
+ *    from the top-level list (they live inside the thread card). */
+interface TimelineEntry {
+  actor: { id: string; role: 'main' | 'subagent'; label: string }
+  event: WorkflowRunEvent
+}
+
+function buildTimeline(groups: { actor: { id: string; role: 'main' | 'subagent'; label: string }; events: WorkflowRunEvent[] }[]): TimelineEntry[] {
+  const subFirstSeen = new Set<string>()
+  const entries: TimelineEntry[] = []
+  // Re-walk all events in original order. We need the raw stream; rebuild it
+  // from groups by stable merge is complex, so we rely on each group preserving
+  // its own order and interleave by created_at when available.
+  const all: { actor: TimelineEntry['actor']; event: WorkflowRunEvent }[] = []
+  for (const g of groups) {
+    for (const e of g.events) all.push({ actor: g.actor, event: e })
+  }
+  all.sort((a, b) => {
+    const ta = a.event.created_at ? Date.parse(a.event.created_at) : NaN
+    const tb = b.event.created_at ? Date.parse(b.event.created_at) : NaN
+    if (!Number.isNaN(ta) && !Number.isNaN(tb)) return ta - tb
+    return 0 // keep original order when timestamps missing
+  })
+  for (const item of all) {
+    if (item.actor.role === 'subagent') {
+      if (subFirstSeen.has(item.actor.id)) continue // only the first becomes a node
+      subFirstSeen.add(item.actor.id)
+    }
+    entries.push(item)
+  }
+  return entries
 }
 
 function hasDetailContent(detail: WorkflowSubagentDetail | null) {
@@ -1058,6 +1110,11 @@ function taskFilteredEvents(task: WorkflowTask) {
 /** Filtered events grouped by actor (main + each sub-agent). */
 function taskEventGroups(task: WorkflowTask) {
   return groupEventsByActor(taskFilteredEvents(task))
+}
+
+/** Single-column interleaved timeline for a task's expanded panel. */
+function taskTimeline(task: WorkflowTask) {
+  return buildTimeline(taskEventGroups(task))
 }
 
 function taskUsageFor(task: WorkflowTask, taskIdStr: string) {
@@ -1816,12 +1873,9 @@ async function confirmClearWorkflow() {
                 <div v-else-if="isTaskLogLoading(task)" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">
                   日志加载中
                 </div>
-                <div v-else class="grid gap-3 lg:grid-cols-2">
-                  <section class="space-y-2 rounded-md border bg-background p-3">
-                    <div class="flex items-center justify-between">
-                      <div class="text-xs font-semibold text-foreground">Agent 输出</div>
-                      <Badge variant="outline">{{ taskEvents(task).length }}</Badge>
-                    </div>
+                <div v-else class="space-y-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="text-xs font-semibold text-foreground">Agent 输出</div>
                     <!-- 子 Agent 筛选（feature 5） -->
                     <div v-if="taskActors(task).length > 1" class="flex flex-wrap items-center gap-1">
                       <button type="button" class="cursor-pointer" @click="setTaskActorFilter(task, '')">
@@ -1834,75 +1888,78 @@ async function confirmClearWorkflow() {
                         class="cursor-pointer"
                         @click="setTaskActorFilter(task, actor.id)"
                       >
-                        <Badge :variant="taskActorFilterFor(task) === actor.id ? 'default' : 'outline'" :class="actor.role === 'subagent' ? 'bg-purple-50 text-purple-700' : ''">
+                        <Badge :variant="taskActorFilterFor(task) === actor.id ? 'default' : 'outline'">
                           {{ actor.label }}
                         </Badge>
                       </button>
                     </div>
-                    <div v-if="!taskEvents(task).length" class="text-sm text-muted-foreground">暂无 agent 输出</div>
-                    <div v-else class="max-h-80 space-y-3 overflow-auto text-xs">
-                      <div v-for="group in taskEventGroups(task)" :key="taskRunLogKey(task) + ':actor:' + group.actor.id" class="space-y-1">
-                        <template v-if="group.actor.role === 'main'">
-                          <div v-for="(event, idx) in group.events" :key="taskRunLogKey(task) + ':event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                            <div class="flex flex-wrap items-center gap-2">
-                              <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                              <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                              <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
-                            </div>
-                            <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+                  </div>
+                  <div v-if="!taskEvents(task).length" class="rounded-md border bg-background px-3 py-6 text-center text-sm text-muted-foreground">
+                    还没有 Agent 输出，任务被领取执行后这里会按时间顺序显示对话流。
+                  </div>
+                  <div v-else class="tl-timeline max-h-[30rem] overflow-auto pr-1">
+                    <template v-for="(entry, idx) in taskTimeline(task)" :key="taskRunLogKey(task) + ':tl:' + idx">
+                      <!-- 主 Agent 事件 -->
+                      <div v-if="entry.actor.role === 'main'" class="tl-event" :class="'k-' + timelineKind(entry.event)">
+                        <div class="tl-avatar" />
+                        <div class="tl-body">
+                          <div class="tl-head">
+                            <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
+                            <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
+                            <span v-if="entry.event.created_at" class="tl-time">{{ entry.event.created_at }}</span>
                           </div>
-                        </template>
-                        <div v-else class="rounded-md border border-purple-200/60 bg-purple-50/30 dark:border-purple-900/40 dark:bg-purple-950/20">
-                          <button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left" @click="toggleTaskSubagent(task, group.actor.id)">
-                            <component :is="isTaskSubagentCollapsed(task, group.actor.id) ? ChevronRight : ChevronDown" :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
-                            <Bot :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
-                            <span class="truncate font-medium text-purple-700 dark:text-purple-300">{{ group.actor.label }}</span>
-                            <Badge variant="outline" class="text-[10px]">{{ group.events.length }}</Badge>
-                            <span v-if="taskUsageFor(task, group.actor.id)" class="text-[10px] text-muted-foreground">
-                              {{ taskUsageFor(task, group.actor.id)?.total_tokens ?? 0 }} tokens · {{ taskUsageFor(task, group.actor.id)?.tool_uses ?? 0 }} 工具
-                            </span>
-                            <Badge variant="outline" :class="taskStatusFor(task, group.actor.id) === 'completed' ? 'bg-green-50 text-green-700' : taskStatusFor(task, group.actor.id) ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'" class="ml-auto text-[10px]">
-                              {{ taskStatusLabelFor(task, group.actor.id) }}
-                            </Badge>
-                          </button>
-                          <div v-if="!isTaskSubagentCollapsed(task, group.actor.id)" class="space-y-3 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
-                            <WorkflowSubagentDetailPanel
-                              :detail="subagentDetail(task.lease_run_id, group.actor.id)"
-                              :loading="subagentDetailLoadingFor(task.lease_run_id, group.actor.id)"
-                              :error="subagentDetailErrorFor(task.lease_run_id, group.actor.id)"
-                            />
-                            <div
-                              v-if="!subagentDetailLoadingFor(task.lease_run_id, group.actor.id) && !hasDetailContent(subagentDetail(task.lease_run_id, group.actor.id))"
-                              class="space-y-1"
-                            >
-                            <div v-for="(event, idx) in group.events" :key="taskRunLogKey(task) + ':event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                              <div class="flex flex-wrap items-center gap-2">
-                                <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                                <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                                <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
-                              </div>
-                              <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
-                            </div>
-                            </div>
+                          <div v-if="eventMessage(entry.event)" class="tl-content">
+                            <p>{{ eventMessage(entry.event) }}</p>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </section>
-
-                  <section class="space-y-2 rounded-md border bg-background p-3">
-                    <div class="flex items-center justify-between">
-                      <div class="text-xs font-semibold text-foreground">业务日志</div>
-                      <Badge variant="outline">{{ taskLogs(task).length }}</Badge>
-                    </div>
-                    <div v-if="!taskLogs(task).length" class="text-sm text-muted-foreground">暂无业务日志</div>
-                    <div v-else class="max-h-72 space-y-2 overflow-auto font-mono text-xs">
-                      <div v-for="(log, idx) in taskLogs(task)" :key="taskRunLogKey(task) + ':log:' + idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
-                        <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
-                        <span class="ml-1">{{ log.message }}</span>
+                      <!-- 子 Agent 线程卡片（默认折叠） -->
+                      <div v-else class="tl-event">
+                        <div class="tl-avatar" style="border-color:#7c3aed" />
+                        <div
+                          class="tl-sub"
+                          :class="{
+                            open: !isTaskSubagentCollapsed(task, entry.actor.id),
+                            'is-failed': taskStatusFor(task, entry.actor.id) === 'failed' || taskStatusFor(task, entry.actor.id) === 'error',
+                          }"
+                        >
+                          <button type="button" class="tl-sub-head" @click="toggleTaskSubagent(task, entry.actor.id)">
+                            <span class="tl-bot">
+                              <Bot :size="14" />
+                            </span>
+                            <span>
+                              <span class="tl-sub-id block leading-tight">{{ entry.actor.label }}</span>
+                              <span class="tl-sub-desc block">task {{ entry.actor.id.slice(0, 8) }}</span>
+                            </span>
+                            <span class="tl-sub-stats">
+                              <span v-if="taskUsageFor(task, entry.actor.id)">
+                                <b>{{ taskUsageFor(task, entry.actor.id)?.total_tokens ?? 0 }}</b> tokens · <b>{{ taskUsageFor(task, entry.actor.id)?.tool_uses ?? 0 }}</b> 工具
+                              </span>
+                              <Badge
+                                variant="outline"
+                                :class="taskStatusFor(task, entry.actor.id) === 'completed'
+                                  ? 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300'
+                                  : (taskStatusFor(task, entry.actor.id) === 'failed' || taskStatusFor(task, entry.actor.id) === 'error')
+                                    ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                                    : 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'"
+                                class="text-[10px]"
+                              >
+                                {{ taskStatusLabelFor(task, entry.actor.id) }}
+                              </Badge>
+                              <ChevronRight :size="14" class="tl-chevron" />
+                            </span>
+                          </button>
+                          <div v-if="!isTaskSubagentCollapsed(task, entry.actor.id)" class="tl-sub-body">
+                            <WorkflowSubagentDetailPanel
+                              :detail="subagentDetail(task.lease_run_id, entry.actor.id)"
+                              :loading="subagentDetailLoadingFor(task.lease_run_id, entry.actor.id)"
+                              :error="subagentDetailErrorFor(task.lease_run_id, entry.actor.id)"
+                            />
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </section>
+                    </template>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1945,78 +2002,78 @@ async function confirmClearWorkflow() {
 
           <div v-if="logsLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!selectedRunId" class="py-8 text-center text-sm text-muted-foreground">暂无运行记录</div>
-          <div v-else class="grid gap-4 lg:grid-cols-2">
-            <section class="space-y-3 rounded-md border bg-muted/20 p-3">
-              <div class="flex items-center justify-between gap-2">
-                <div class="text-xs font-semibold text-foreground">Agent 输出</div>
-                <Badge variant="outline">{{ runEvents.length }}</Badge>
-              </div>
-              <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无 agent 输出</div>
-              <div v-else class="max-h-[28rem] space-y-2 overflow-auto rounded-md border bg-background p-3 text-xs">
-                <div v-for="group in runEventGroups" :key="'run-actor:' + group.actor.id" class="space-y-1">
-                  <template v-if="group.actor.role === 'main'">
-                    <div v-for="(event, idx) in group.events" :key="'run-event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                        <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
-                        <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                        <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
-                      </div>
-                      <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
+          <div v-else class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-xs font-semibold text-foreground">Agent 输出</div>
+              <Badge variant="outline">{{ runEvents.length }}</Badge>
+            </div>
+            <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
+              还没有 Agent 输出，任务被领取执行后这里会按时间顺序显示对话流。
+            </div>
+            <div v-else class="tl-timeline max-h-[32rem] overflow-auto pr-1">
+              <template v-for="(entry, idx) in runTimeline" :key="'run-tl:' + idx">
+                <!-- 主 Agent 事件 -->
+                <div v-if="entry.actor.role === 'main'" class="tl-event" :class="'k-' + timelineKind(entry.event)">
+                  <div class="tl-avatar" />
+                  <div class="tl-body">
+                    <div class="tl-head">
+                      <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
+                      <span v-if="entry.event.agent_name" class="tl-target">{{ entry.event.agent_name }}</span>
+                      <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
+                      <span v-if="entry.event.created_at" class="tl-time">{{ entry.event.created_at }}</span>
                     </div>
-                  </template>
-                  <div v-else class="rounded-md border border-purple-200/60 bg-purple-50/30 dark:border-purple-900/40 dark:bg-purple-950/20">
-                    <button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left" @click="toggleRunSubagent(group.actor.id)">
-                      <component :is="isRunSubagentCollapsed(group.actor.id) ? ChevronRight : ChevronDown" :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
-                      <Bot :size="13" class="shrink-0 text-purple-600 dark:text-purple-400" />
-                      <span class="truncate font-medium text-purple-700 dark:text-purple-300">{{ group.actor.label }}</span>
-                      <Badge variant="outline" class="text-[10px]">{{ group.events.length }}</Badge>
-                      <span v-if="runSubagentUsage(group.actor.id)" class="text-[10px] text-muted-foreground">
-                        {{ runSubagentUsage(group.actor.id)?.total_tokens ?? 0 }} tokens · {{ runSubagentUsage(group.actor.id)?.tool_uses ?? 0 }} 工具
-                      </span>
-                      <Badge variant="outline" :class="runSubagentStatus(group.actor.id) === 'completed' ? 'bg-green-50 text-green-700' : runSubagentStatus(group.actor.id) ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'" class="ml-auto text-[10px]">
-                        {{ runSubagentStatusLabel(group.actor.id) }}
-                      </Badge>
-                    </button>
-                    <div v-if="!isRunSubagentCollapsed(group.actor.id)" class="space-y-3 border-t border-purple-200/60 px-2 py-2 dark:border-purple-900/40">
-                      <WorkflowSubagentDetailPanel
-                        :detail="subagentDetail(selectedRunId, group.actor.id)"
-                        :loading="subagentDetailLoadingFor(selectedRunId, group.actor.id)"
-                        :error="subagentDetailErrorFor(selectedRunId, group.actor.id)"
-                      />
-                      <div
-                        v-if="!subagentDetailLoadingFor(selectedRunId, group.actor.id) && !hasDetailContent(subagentDetail(selectedRunId, group.actor.id))"
-                        class="space-y-1"
-                      >
-                      <div v-for="(event, idx) in group.events" :key="'run-event:' + group.actor.id + ':' + idx" class="border-l-2 pl-2" :class="eventClass(event)">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="font-medium text-foreground">{{ eventKindLabel(event) }}</span>
-                          <span v-if="event.agent_name" class="font-mono text-muted-foreground">{{ event.agent_name }}</span>
-                          <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-                          <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
-                        </div>
-                        <div class="mt-1 whitespace-pre-wrap text-foreground">{{ eventMessage(event) }}</div>
-                      </div>
-                      </div>
+                    <div v-if="eventMessage(entry.event)" class="tl-content">
+                      <p>{{ eventMessage(entry.event) }}</p>
                     </div>
                   </div>
                 </div>
-              </div>
-            </section>
-
-            <section class="space-y-3 rounded-md border bg-muted/20 p-3">
-              <div class="flex items-center justify-between gap-2">
-                <div class="text-xs font-semibold text-foreground">业务日志</div>
-                <Badge variant="outline">{{ runLogs.length }}</Badge>
-              </div>
-              <div v-if="!runLogs.length" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">暂无业务日志</div>
-              <div v-else class="max-h-[28rem] space-y-2 overflow-auto rounded-md border bg-background p-3 font-mono text-xs">
-                <div v-for="(log, idx) in runLogs" :key="idx" class="border-l-2 pl-2" :class="logLevelClass(log.level)">
-                  <span class="text-muted-foreground">[{{ log.level }}]{{ log.stage ? ' ' + log.stage : '' }}</span>
-                  <span class="ml-1">{{ log.message }}</span>
+                <!-- 子 Agent 线程卡片（默认折叠） -->
+                <div v-else class="tl-event">
+                  <div class="tl-avatar" style="border-color:#7c3aed" />
+                  <div
+                    class="tl-sub"
+                    :class="{
+                      open: !isRunSubagentCollapsed(entry.actor.id),
+                      'is-failed': runSubagentStatus(entry.actor.id) === 'failed' || runSubagentStatus(entry.actor.id) === 'error',
+                    }"
+                  >
+                    <button type="button" class="tl-sub-head" @click="toggleRunSubagent(entry.actor.id)">
+                      <span class="tl-bot">
+                        <Bot :size="14" />
+                      </span>
+                      <span>
+                        <span class="tl-sub-id block leading-tight">{{ entry.actor.label }}</span>
+                        <span class="tl-sub-desc block">task {{ entry.actor.id.slice(0, 8) }}</span>
+                      </span>
+                      <span class="tl-sub-stats">
+                        <span v-if="runSubagentUsage(entry.actor.id)">
+                          <b>{{ runSubagentUsage(entry.actor.id)?.total_tokens ?? 0 }}</b> tokens · <b>{{ runSubagentUsage(entry.actor.id)?.tool_uses ?? 0 }}</b> 工具
+                        </span>
+                        <Badge
+                          variant="outline"
+                          :class="runSubagentStatus(entry.actor.id) === 'completed'
+                            ? 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300'
+                            : (runSubagentStatus(entry.actor.id) === 'failed' || runSubagentStatus(entry.actor.id) === 'error')
+                              ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                              : 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'"
+                          class="text-[10px]"
+                        >
+                          {{ runSubagentStatusLabel(entry.actor.id) }}
+                        </Badge>
+                        <ChevronRight :size="14" class="tl-chevron" />
+                      </span>
+                    </button>
+                    <div v-if="!isRunSubagentCollapsed(entry.actor.id)" class="tl-sub-body">
+                      <WorkflowSubagentDetailPanel
+                        :detail="subagentDetail(selectedRunId, entry.actor.id)"
+                        :loading="subagentDetailLoadingFor(selectedRunId, entry.actor.id)"
+                        :error="subagentDetailErrorFor(selectedRunId, entry.actor.id)"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </section>
+              </template>
+            </div>
           </div>
       </div>
     </section>
@@ -2264,3 +2321,95 @@ async function confirmClearWorkflow() {
     </Dialog>
   </div>
 </template>
+
+<style>
+/* ============================================================
+   Agent 输出 时间轴 (timeline)
+   - 用主题 token 变量 (var(--*)) 兼容明暗模式
+   - 命名空间 tl- 避免与其它组件冲突
+   - 一个强调色 (primary 蓝), 子 agent 紫色仅作"角色"语义区分
+   ============================================================ */
+.tl-timeline{position:relative;padding:2px 0 0}
+.tl-timeline::before{content:"";position:absolute;left:18px;top:6px;bottom:6px;width:2px;background:var(--border);border-radius:1px}
+.tl-event{position:relative;padding:0 0 12px 46px}
+.tl-event:last-child{padding-bottom:0}
+.tl-avatar{position:absolute;left:10px;top:2px;width:18px;height:18px;border-radius:50%;background:var(--card);border:2px solid var(--primary);display:flex;align-items:center;justify-content:center;z-index:2}
+.tl-avatar::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--primary)}
+.tl-event.k-think .tl-avatar{border-color:var(--warning)}
+.tl-event.k-think .tl-avatar::after{background:var(--warning)}
+.tl-event.k-tool .tl-avatar{border-color:var(--info)}
+.tl-event.k-tool .tl-avatar::after{background:var(--info)}
+.tl-event.k-result .tl-avatar{border-color:var(--success)}
+.tl-event.k-result .tl-avatar::after{background:var(--success)}
+.tl-event.k-error .tl-avatar{border-color:var(--destructive)}
+.tl-event.k-error .tl-avatar::after{background:var(--destructive)}
+.tl-body{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;transition:border-color .12s ease}
+.tl-body:hover{border-color:var(--input)}
+.tl-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 14px;border-bottom:1px solid var(--border)}
+.tl-kind{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px}
+.k-message .tl-kind{background:var(--accent);color:var(--accent-foreground)}
+.k-think .tl-kind{background:color-mix(in oklch,var(--warning) 16%,transparent);color:var(--warning)}
+.k-tool .tl-kind{background:color-mix(in oklch,var(--info) 16%,transparent);color:var(--info)}
+.k-result .tl-kind{background:color-mix(in oklch,var(--success) 16%,transparent);color:var(--success)}
+.k-error .tl-kind{background:color-mix(in oklch,var(--destructive) 16%,transparent);color:var(--destructive)}
+.tl-target{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
+.tl-target b{color:var(--foreground);font-weight:600}
+.tl-time{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);flex-shrink:0;opacity:.85}
+.tl-content{padding:11px 14px;font-size:13.5px;color:var(--foreground);line-height:1.6}
+.tl-content p{margin:0 0 6px}
+.tl-content p:last-child{margin-bottom:0}
+.k-message .tl-content{font-size:14px;line-height:1.65}
+.tl-content pre{margin:8px 0 0;background:var(--muted);border-radius:6px;padding:10px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:var(--foreground);overflow:auto;max-height:220px;white-space:pre-wrap}
+
+/* ===== Subagent thread card ===== */
+.tl-sub{position:relative;background:color-mix(in oklch,#7c3aed 7%,var(--card));border:1px solid color-mix(in oklch,#7c3aed 24%,var(--border));border-radius:10px;overflow:hidden;transition:border-color .12s ease}
+:root.dark .tl-sub{background:color-mix(in oklch,#7c3aed 14%,var(--card))}
+.tl-sub-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;cursor:pointer;width:100%;text-align:left;background:transparent;border:none}
+.tl-sub-head:hover{background:color-mix(in oklch,#7c3aed 6%,transparent)}
+.tl-bot{width:26px;height:26px;border-radius:7px;flex-shrink:0;background:linear-gradient(135deg,#7c3aed,#9b6cf0);display:flex;align-items:center;justify-content:center;color:#fff}
+.tl-sub.is-failed .tl-bot{background:linear-gradient(135deg,var(--destructive),#e85a5a)}
+.tl-sub-id{font-weight:600;color:#5b21b6;font-size:13.5px}
+:root.dark .tl-sub-id{color:#c4b0fd}
+.tl-sub-desc{font-size:12px;color:var(--muted-foreground)}
+.tl-sub-stats{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--muted-foreground);font-family:var(--font-mono);flex-wrap:wrap}
+.tl-sub-stats b{color:var(--foreground);font-weight:600}
+.tl-chevron{color:#7c3aed;transition:transform .15s ease;flex-shrink:0}
+:root.dark .tl-chevron{color:#a78bfa}
+.tl-sub.open .tl-chevron{transform:rotate(90deg)}
+.tl-sub-body{padding:0 14px 14px;background:var(--card);border-top:1px solid color-mix(in oklch,#7c3aed 18%,var(--border))}
+.tl-result{margin:12px 0 4px;padding:10px 12px;background:color-mix(in oklch,#7c3aed 5%,var(--card));border:1px solid color-mix(in oklch,#7c3aed 22%,var(--border));border-left:3px solid #7c3aed;border-radius:6px}
+.tl-sub.is-failed .tl-result{border-left-color:var(--destructive);background:color-mix(in oklch,var(--destructive) 5%,var(--card));border-color:color-mix(in oklch,var(--destructive) 22%,var(--border))}
+.tl-result-label{font-size:11px;font-weight:600;color:#5b21b6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+:root.dark .tl-result-label{color:#c4b0fd}
+.tl-sub.is-failed .tl-result-label{color:var(--destructive)}
+.tl-result-text{font-size:13px;color:var(--foreground);line-height:1.6}
+.tl-result-text pre{margin:6px 0 0;background:var(--muted);border-radius:6px;padding:8px 10px;font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);overflow:auto;max-height:200px;white-space:pre-wrap}
+
+/* ===== Mini timeline inside subagent ===== */
+.tl-mini{position:relative;padding:6px 0 0 4px;margin-top:10px}
+.tl-mini::before{content:"";position:absolute;left:5px;top:10px;bottom:10px;width:2px;background:color-mix(in oklch,#7c3aed 18%,var(--border));border-radius:1px}
+.tl-mini-event{position:relative;padding:0 0 10px 22px}
+.tl-mini-event:last-child{padding-bottom:0}
+.tl-mavatar{position:absolute;left:0;top:1px;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid #7c3aed;z-index:2}
+.tl-mini-event.k-think .tl-mavatar{border-color:var(--warning)}
+.tl-mini-event.k-tool .tl-mavatar{border-color:var(--info)}
+.tl-mini-event.k-result .tl-mavatar{border-color:var(--success)}
+.tl-mini-event.k-error .tl-mavatar{border-color:var(--destructive)}
+.tl-mini-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:3px}
+.tl-mini-kind{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:999px}
+.tl-mini-event.k-think .tl-mini-kind{background:color-mix(in oklch,var(--warning) 16%,transparent);color:var(--warning)}
+.tl-mini-event.k-tool .tl-mini-kind{background:color-mix(in oklch,var(--info) 16%,transparent);color:var(--info)}
+.tl-mini-event.k-result .tl-mini-kind{background:color-mix(in oklch,var(--success) 16%,transparent);color:var(--success)}
+.tl-mini-event.k-error .tl-mini-kind{background:color-mix(in oklch,var(--destructive) 16%,transparent);color:var(--destructive)}
+.tl-mini-event.k-message .tl-mini-kind{background:color-mix(in oklch,#7c3aed 14%,transparent);color:#5b21b6}
+:root.dark .tl-mini-event.k-message .tl-mini-kind{color:#c4b0fd}
+.tl-mini-target{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+.tl-mini-target b{color:var(--foreground);font-weight:600}
+.tl-mini-time{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);opacity:.8}
+.tl-mini-content{font-size:12.5px;color:var(--muted-foreground);line-height:1.55;white-space:pre-wrap}
+.tl-mini-content.tl-dump{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);background:var(--muted);padding:6px 9px;border-radius:4px;margin-top:4px;white-space:pre-wrap;overflow:auto;max-height:160px}
+
+@media (prefers-reduced-motion: reduce){
+  .tl-body,.tl-sub,.tl-chevron{transition:none}
+}
+</style>

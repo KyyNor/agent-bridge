@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Badge } from '../../components/ui/badge'
 import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../../api/types'
 
 const props = defineProps<{
@@ -9,24 +8,25 @@ const props = defineProps<{
 }>()
 
 function shortAgentId(agentId: string) {
-  return agentId.length > 12 ? `${agentId.slice(0, 8)}...${agentId.slice(-4)}` : agentId
+  return agentId.length > 12 ? `${agentId.slice(0, 8)}…${agentId.slice(-4)}` : agentId
 }
 
-function eventLabel(event: WorkflowSubagentTranscriptEvent) {
+/** Map a transcript event.kind into a timeline visual family. */
+function miniKind(event: WorkflowSubagentTranscriptEvent): 'think' | 'tool' | 'result' | 'error' | 'message' {
+  if (event.kind === 'thinking') return 'think'
+  if (event.kind === 'tool_call') return 'tool'
+  if (event.kind === 'tool_result') return event.is_error ? 'error' : 'result'
+  if (event.kind === 'text') return 'message'
+  return 'message'
+}
+
+function miniLabel(event: WorkflowSubagentTranscriptEvent) {
   if (event.kind === 'prompt') return '提示词'
   if (event.kind === 'thinking') return '思考'
   if (event.kind === 'tool_call') return '工具调用'
-  if (event.kind === 'tool_result') return '工具结果'
+  if (event.kind === 'tool_result') return event.is_error ? '工具失败' : '工具完成'
   if (event.kind === 'text') return '文本输出'
   return event.kind
-}
-
-function eventClass(event: WorkflowSubagentTranscriptEvent) {
-  if (event.kind === 'thinking') return 'border-amber-300'
-  if (event.kind === 'tool_call') return 'border-blue-400'
-  if (event.kind === 'tool_result') return event.is_error ? 'border-red-400' : 'border-green-400'
-  if (event.kind === 'text') return 'border-foreground/40'
-  return 'border-border'
 }
 
 function formatValue(value: unknown) {
@@ -39,85 +39,76 @@ function formatValue(value: unknown) {
   }
 }
 
-function promptEvents(agent: WorkflowSubagentTranscriptAgent) {
-  return agent.events.filter(event => event.kind === 'prompt')
-}
-
-function processEvents(agent: WorkflowSubagentTranscriptAgent) {
-  return agent.events.filter(event => event.kind !== 'prompt')
+/** Whether an event's body should render as monospace dump (code/json) vs prose. */
+function isDump(event: WorkflowSubagentTranscriptEvent) {
+  return event.kind === 'tool_call' || event.kind === 'tool_result'
 }
 
 function eventBody(event: WorkflowSubagentTranscriptEvent) {
   if (event.kind === 'tool_call') return formatValue(event.input)
   return formatValue(event.content)
 }
+
+function processEvents(agent: WorkflowSubagentTranscriptAgent) {
+  return agent.events.filter(event => event.kind !== 'prompt')
+}
 </script>
 
 <template>
   <div class="space-y-3">
-    <div v-if="props.loading" class="rounded-sm border bg-background px-3 py-2 text-xs text-muted-foreground">
-      正在读取 Claude transcript
+    <div v-if="props.loading" class="tl-mini-event">
+      <div class="tl-mavatar" />
+      <div class="tl-mini-head"><span class="tl-mini-kind" style="background:var(--muted);color:var(--muted-foreground)">加载中</span></div>
+      <div class="tl-mini-content">正在读取 Claude transcript…</div>
     </div>
-    <div v-if="props.error" class="rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-      {{ props.error }}
+    <div v-if="props.error" class="tl-mini-event k-error">
+      <div class="tl-mavatar" />
+      <div class="tl-mini-head"><span class="tl-mini-kind">错误</span></div>
+      <div class="tl-mini-content tl-dump" style="background:color-mix(in oklch,var(--destructive) 8%,var(--muted))">{{ props.error }}</div>
     </div>
 
     <template v-if="props.detail">
-      <div v-if="!props.detail.transcript_dir" class="rounded-sm border bg-background px-3 py-2 text-xs text-muted-foreground">
-        没有在 stdout.log 里找到该子 Agent 的 transcript 目录，下面显示原始进度事件。
-      </div>
-      <div v-else class="rounded-sm border bg-background px-3 py-2 text-xs">
-        <div class="font-medium text-foreground">Claude transcript</div>
-        <div class="mt-1 break-all font-mono text-[11px] text-muted-foreground">{{ props.detail.transcript_dir }}</div>
+      <div v-if="!props.detail.transcript_dir" class="tl-mini-event">
+        <div class="tl-mavatar" />
+        <div class="tl-mini-head"><span class="tl-mini-kind" style="background:var(--muted);color:var(--muted-foreground)">提示</span></div>
+        <div class="tl-mini-content">没有在 stdout.log 里找到该子 Agent 的 transcript 目录，下面显示原始进度事件。</div>
       </div>
 
-      <section v-if="props.detail.task_output" class="space-y-1 rounded-sm border bg-background p-3">
-        <div class="flex items-center gap-2">
-          <div class="text-xs font-semibold text-foreground">返回主 Agent</div>
-          <Badge v-if="props.detail.task_output_status" variant="outline" class="text-[10px]">
-            {{ props.detail.task_output_status }}
-          </Badge>
+      <!-- 返回主 Agent 的结果（thread card 顶部高亮块） -->
+      <div v-if="props.detail.task_output" class="tl-result">
+        <div class="tl-result-label">返回主 Agent</div>
+        <div class="tl-result-text">
+          <pre>{{ props.detail.task_output }}</pre>
         </div>
-        <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/50 p-2 text-[11px] leading-relaxed text-foreground">{{ props.detail.task_output }}</pre>
-      </section>
+      </div>
 
-      <section v-for="agent in props.detail.agents" :key="agent.agent_id" class="space-y-3 rounded-sm border bg-background p-3">
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="font-mono text-xs font-semibold text-foreground">{{ shortAgentId(agent.agent_id) }}</div>
-          <Badge variant="outline" class="text-[10px]">{{ agent.events.length }} events</Badge>
-        </div>
-
-        <div v-if="promptEvents(agent).length" class="space-y-1">
-          <div class="text-xs font-semibold text-foreground">提示词</div>
-          <pre
-            v-for="(event, idx) in promptEvents(agent)"
-            :key="agent.agent_id + ':prompt:' + idx"
-            class="max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/50 p-2 text-[11px] leading-relaxed text-foreground"
-          >{{ formatValue(event.content) }}</pre>
-        </div>
-
-        <div v-if="processEvents(agent).length" class="space-y-2">
-          <div class="text-xs font-semibold text-foreground">过程</div>
-          <div
-            v-for="(event, idx) in processEvents(agent)"
-            :key="agent.agent_id + ':event:' + idx"
-            class="border-l-2 pl-2"
-            :class="eventClass(event)"
-          >
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="font-medium text-foreground">{{ eventLabel(event) }}</span>
-              <span v-if="event.tool_name" class="font-mono text-muted-foreground">{{ event.tool_name }}</span>
-              <span v-if="event.created_at" class="text-muted-foreground">{{ event.created_at }}</span>
-            </div>
-            <pre v-if="eventBody(event)" class="mt-1 max-h-56 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/40 p-2 text-[11px] leading-relaxed text-foreground">{{ eventBody(event) }}</pre>
+      <!-- 每个 agent 的内部 mini-timeline -->
+      <div v-for="agent in props.detail.agents" :key="agent.agent_id" class="tl-mini">
+        <div
+          v-for="(event, idx) in processEvents(agent)"
+          :key="agent.agent_id + ':event:' + idx"
+          class="tl-mini-event"
+          :class="'k-' + miniKind(event)"
+        >
+          <div class="tl-mavatar" />
+          <div class="tl-mini-head">
+            <span class="tl-mini-kind">{{ miniLabel(event) }}</span>
+            <span v-if="event.tool_name" class="tl-mini-target"><b>{{ event.tool_name }}</b></span>
+            <span v-if="event.created_at" class="tl-mini-time">{{ event.created_at }}</span>
+          </div>
+          <div v-if="eventBody(event)" class="tl-mini-content" :class="isDump(event) ? 'tl-dump' : ''">
+            {{ eventBody(event) }}
           </div>
         </div>
 
-        <div v-if="agent.result != null" class="space-y-1">
-          <div class="text-xs font-semibold text-foreground">结构化结果</div>
-          <pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded-sm bg-muted/50 p-2 text-[11px] leading-relaxed text-foreground">{{ formatValue(agent.result) }}</pre>
+        <!-- 结构化结果（如果与 task_output 不同） -->
+        <div v-if="agent.result != null && formatValue(agent.result) !== formatValue(props.detail.task_output)" class="tl-result" style="margin-top:10px">
+          <div class="tl-result-label">结构化结果 · {{ shortAgentId(agent.agent_id) }}</div>
+          <div class="tl-result-text">
+            <pre>{{ formatValue(agent.result) }}</pre>
+          </div>
         </div>
-      </section>
+      </div>
     </template>
   </div>
 </template>
