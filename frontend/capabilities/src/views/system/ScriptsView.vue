@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select'
+import { formatLocalDatetime } from '../../lib/time'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -541,7 +542,7 @@ def main(envelope):
             </div>
             <div class="text-xs text-muted-foreground">
               <div>归属：{{ ownerLabel(item) }}</div>
-              <div class="mt-1">更新 {{ item.updated_at }}</div>
+              <div class="mt-1">更新 {{ formatLocalDatetime(item.updated_at) }}</div>
             </div>
             <div class="flex flex-wrap justify-start gap-2 lg:justify-end">
               <Button variant="outline" size="sm" class="h-8 text-xs" :disabled="item.status !== 'active'" @click="openEdit(item)">
@@ -793,7 +794,7 @@ def main(envelope):
                   <span>{{ run.duration_ms }} ms</span>
                   <span v-if="run.exit_code !== null">exit {{ run.exit_code }}</span>
                 </div>
-                <div class="mt-1 text-xs text-muted-foreground">{{ run.created_at }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</div>
               </button>
             </div>
           </CardContent>

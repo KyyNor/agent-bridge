@@ -396,7 +396,7 @@ function toggleSubagent(taskId: string): void {
                       <div v-if="eventMessage(ev)" class="break-all">{{ eventMessage(ev) }}</div>
                       <div class="mt-0.5 flex flex-wrap gap-x-3 text-muted-foreground">
                         <span v-if="ev.tool_name" class="font-mono">{{ ev.tool_name }}</span>
-                        <span v-if="ev.created_at">{{ ev.created_at }}</span>
+                        <span v-if="ev.created_at">{{ formatLocalDatetime(ev.created_at) }}</span>
                         <span v-if="ev.num_turns != null">轮数: {{ ev.num_turns }}</span>
                         <span v-if="ev.total_cost_usd != null">{{ formatCost(ev.total_cost_usd) }}</span>
                       </div>
@@ -439,7 +439,7 @@ function toggleSubagent(taskId: string): void {
                         <div v-if="eventMessage(ev)" class="break-all">{{ eventMessage(ev) }}</div>
                         <div class="mt-0.5 flex flex-wrap gap-x-3 text-muted-foreground">
                           <span v-if="ev.tool_name" class="font-mono">{{ ev.tool_name }}</span>
-                          <span v-if="ev.created_at">{{ ev.created_at }}</span>
+                          <span v-if="ev.created_at">{{ formatLocalDatetime(ev.created_at) }}</span>
                         </div>
                       </div>
                     </div>

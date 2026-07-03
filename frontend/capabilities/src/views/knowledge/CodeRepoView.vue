@@ -820,8 +820,8 @@ watch(showDetail, (open) => {
                   </Badge>
                 </div>
                 <div class="mt-2 grid gap-1 text-xs text-muted-foreground">
-                  <div v-if="uaUnderstandRun.started_at">开始时间: {{ uaUnderstandRun.started_at }}</div>
-                  <div v-if="uaUnderstandRun.finished_at">结束时间: {{ uaUnderstandRun.finished_at }}</div>
+                  <div v-if="uaUnderstandRun.started_at">开始时间: {{ formatLocalDatetime(uaUnderstandRun.started_at) }}</div>
+                  <div v-if="uaUnderstandRun.finished_at">结束时间: {{ formatLocalDatetime(uaUnderstandRun.finished_at) }}</div>
                   <div v-if="uaUnderstandRun.message">{{ uaUnderstandRun.message }}</div>
                   <div v-if="uaUnderstandRun.error" class="text-red-600">错误: {{ uaUnderstandRun.error }}</div>
                 </div>
@@ -901,7 +901,7 @@ watch(showDetail, (open) => {
               <details v-if="uaStatus?.graph_exists" class="rounded-lg border border-border">
                 <summary class="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">诊断信息</summary>
                 <div class="border-t border-border px-4 py-3 text-xs text-muted-foreground space-y-1">
-                  <div v-if="uaStatus?.analyzed_at">分析时间: {{ uaStatus.analyzed_at }}</div>
+                  <div v-if="uaStatus?.analyzed_at">分析时间: {{ formatLocalDatetime(uaStatus.analyzed_at) }}</div>
                   <div v-if="uaStatus?.git_commit">分析 commit: <span class="font-mono">{{ uaStatus.git_commit?.slice(0, 12) }}</span></div>
                   <div v-if="uaStatus?.analyzed_files != null">分析文件数: {{ uaStatus.analyzed_files }}</div>
                   <div v-if="uaStatus?.graph_path">图谱路径: <span class="font-mono text-[11px]">{{ uaStatus.graph_path }}</span></div>

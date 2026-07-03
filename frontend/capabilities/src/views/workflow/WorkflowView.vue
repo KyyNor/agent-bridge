@@ -33,6 +33,7 @@ import {
   subagentTaskIds,
 } from '../../lib/workflowEvents'
 import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
+import { formatLocalDatetime } from '../../lib/time'
 
 const artifactToolName = 'artifacts_search'
 const WORKFLOW_RUN_LIMIT = 200
@@ -1608,7 +1609,7 @@ async function confirmClearWorkflow() {
                   <span class="truncate font-mono text-xs">{{ run.run_id }}</span>
                   <Badge :variant="run.status === 'completed' ? 'secondary' : 'outline'" :class="runBadgeClass(run.status)">{{ runStatusLabel(run.status) }}</Badge>
                 </div>
-                <div class="mt-1 text-xs text-muted-foreground">{{ run.started_at }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">{{ formatLocalDatetime(run.started_at) }}</div>
               </button>
             </div>
           </section>
@@ -1769,9 +1770,9 @@ async function confirmClearWorkflow() {
                   <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>尝试 {{ task.attempt_count }}</span>
                     <span v-if="task.lease_run_id" class="font-mono">run {{ task.lease_run_id }}</span>
-                    <span>set {{ task.set_at }}</span>
-                    <span>更新 {{ task.updated_at }}</span>
-                    <span v-if="task.completed_at">完成 {{ task.completed_at }}</span>
+                    <span>set {{ formatLocalDatetime(task.set_at) }}</span>
+                    <span>更新 {{ formatLocalDatetime(task.updated_at) }}</span>
+                    <span v-if="task.completed_at">完成 {{ formatLocalDatetime(task.completed_at) }}</span>
                   </div>
                   <div v-if="task.last_error" class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
                     {{ task.last_error }}
@@ -1839,7 +1840,7 @@ async function confirmClearWorkflow() {
                       <div class="mb-1 flex flex-wrap items-center gap-2">
                         <span class="text-sm font-medium text-foreground">{{ activeTaskArtifact(task)?.title }}</span>
                         <Badge variant="outline">{{ activeTaskArtifact(task)?.path }}</Badge>
-                        <span class="text-xs text-muted-foreground">更新 {{ activeTaskArtifact(task)?.updated_at }}</span>
+                        <span class="text-xs text-muted-foreground">更新 {{ formatLocalDatetime(activeTaskArtifact(task)?.updated_at ?? null) }}</span>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1906,7 +1907,7 @@ async function confirmClearWorkflow() {
                           <div class="tl-head">
                             <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
                             <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
-                            <span v-if="entry.event.created_at" class="tl-time">{{ entry.event.created_at }}</span>
+                            <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
                           </div>
                           <div v-if="eventMessage(entry.event)" class="tl-content">
                             <p>{{ eventMessage(entry.event) }}</p>
@@ -1993,7 +1994,7 @@ async function confirmClearWorkflow() {
                 </Badge>
               </div>
               <div class="truncate font-mono text-xs text-muted-foreground">{{ progressRunId || '暂无运行 ID' }}</div>
-              <div v-if="progressRun?.started_at" class="text-xs text-muted-foreground">{{ progressRun.started_at }}</div>
+              <div v-if="progressRun?.started_at" class="text-xs text-muted-foreground">{{ formatLocalDatetime(progressRun.started_at) }}</div>
             </div>
             <Button variant="outline" size="sm" :disabled="logsLoading || runsLoading" @click="refreshProgress">
               {{ logsLoading || runsLoading ? '刷新中' : '刷新' }}
@@ -2020,7 +2021,7 @@ async function confirmClearWorkflow() {
                       <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
                       <span v-if="entry.event.agent_name" class="tl-target">{{ entry.event.agent_name }}</span>
                       <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
-                      <span v-if="entry.event.created_at" class="tl-time">{{ entry.event.created_at }}</span>
+                      <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
                     </div>
                     <div v-if="eventMessage(entry.event)" class="tl-content">
                       <p>{{ eventMessage(entry.event) }}</p>
@@ -2296,14 +2297,14 @@ async function confirmClearWorkflow() {
               <summary class="cursor-pointer text-sm font-medium">
                 <span class="font-mono">{{ version.task_version || 'default' }}</span>
                 <Badge v-if="version.is_current" variant="outline" class="ml-2">current</Badge>
-                <span class="ml-2 text-xs font-normal text-muted-foreground">{{ version.updated_at }}</span>
+                <span class="ml-2 text-xs font-normal text-muted-foreground">{{ formatLocalDatetime(version.updated_at) }}</span>
               </summary>
               <div class="mt-3 space-y-3">
                 <div v-for="item in version.artifacts" :key="item.artifact_id" class="space-y-2">
                   <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <Badge variant="outline">{{ item.path }}</Badge>
                     <Badge variant="outline">{{ item.run_id }}</Badge>
-                    <span>{{ item.updated_at }}</span>
+                    <span>{{ formatLocalDatetime(item.updated_at) }}</span>
                     <Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge>
                   </div>
                   <div class="text-sm font-medium">{{ item.title }}</div>

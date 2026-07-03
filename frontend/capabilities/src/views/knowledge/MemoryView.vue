@@ -9,6 +9,7 @@ import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { confirm, alert } from '../../composables/useConfirm'
+import { formatLocalDatetime } from '../../lib/time'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -445,7 +446,7 @@ function errorMessage(e: unknown) {
                 <div class="min-w-0 break-all text-sm font-medium">{{ item.summary || item.id }}</div>
                 <span class="shrink-0 text-xs text-muted-foreground">{{ item.score ?? '-' }}</span>
               </div>
-              <div class="mt-1 text-xs text-muted-foreground">{{ item.timestamp || 'no timestamp' }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">{{ item.timestamp ? formatLocalDatetime(item.timestamp) : 'no timestamp' }}</div>
               <p class="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{{ item.content_preview }}</p>
             </div>
           </div>
@@ -463,7 +464,7 @@ function errorMessage(e: unknown) {
             暂无时间线事件
           </div>
           <div v-for="item in timeline.items" :key="item.id" class="rounded-md border border-border p-3">
-            <div class="text-xs text-muted-foreground">{{ item.timestamp || 'no timestamp' }} · {{ item.event_type }}</div>
+            <div class="text-xs text-muted-foreground">{{ item.timestamp ? formatLocalDatetime(item.timestamp) : 'no timestamp' }} · {{ item.event_type }}</div>
             <div class="mt-1 break-all text-sm text-foreground">{{ item.summary || item.id }}</div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../../api/types'
+import { formatLocalDatetime } from '../../lib/time'
 
 const props = defineProps<{
   detail: WorkflowSubagentDetail | null
@@ -94,7 +95,7 @@ function processEvents(agent: WorkflowSubagentTranscriptAgent) {
           <div class="tl-mini-head">
             <span class="tl-mini-kind">{{ miniLabel(event) }}</span>
             <span v-if="event.tool_name" class="tl-mini-target"><b>{{ event.tool_name }}</b></span>
-            <span v-if="event.created_at" class="tl-mini-time">{{ event.created_at }}</span>
+            <span v-if="event.created_at" class="tl-mini-time">{{ formatLocalDatetime(event.created_at) }}</span>
           </div>
           <div v-if="eventBody(event)" class="tl-mini-content" :class="isDump(event) ? 'tl-dump' : ''">
             {{ eventBody(event) }}
