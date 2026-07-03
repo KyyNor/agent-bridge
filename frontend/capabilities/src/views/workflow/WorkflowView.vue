@@ -1911,7 +1911,7 @@ async function confirmClearWorkflow() {
                           </div>
                           <div v-if="eventMessage(entry.event)" class="tl-content">
                             <div
-                              v-if="entry.event.kind === 'agent_message' && entry.event.message"
+                              v-if="entry.event.message"
                               class="tl-md"
                               v-html="renderMarkdown(entry.event.message)"
                             />
@@ -2030,7 +2030,7 @@ async function confirmClearWorkflow() {
                     </div>
                     <div v-if="eventMessage(entry.event)" class="tl-content">
                       <div
-                        v-if="entry.event.kind === 'agent_message' && entry.event.message"
+                        v-if="entry.event.message"
                         class="tl-md"
                         v-html="renderMarkdown(entry.event.message)"
                       />
