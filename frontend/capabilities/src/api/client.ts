@@ -59,7 +59,6 @@ import type {
   WorkflowClearResult,
   WorkflowDefinition,
   WorkflowRun,
-  WorkflowRunEvent,
   WorkflowRunLog,
   WorkflowSubagentDetail,
   WorkflowTasksResult,
@@ -234,11 +233,8 @@ export const api = {
     return get<WorkflowTasksResult>(`/workflows/${key}/tasks${tail}`)
   },
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
-  getWorkflowRunEvents: (runId: string) => get<WorkflowRunEvent[]>(`/workflow-runs/${runId}/events`),
-  getWorkflowRunSubagentDetail: (runId: string, taskId: string) => {
-    const qs = new URLSearchParams({ task_id: taskId })
-    return get<WorkflowSubagentDetail>(`/workflow-runs/${runId}/subagent-detail?${qs}`)
-  },
+  // Agent run events are unified under /agent-runs — fetch via the workflow_run_id
+  // link that ClaudeWorkflowRunner forwards. getWorkflowRunEvents was removed.
   upsertWorkflow: (w: Partial<WorkflowDefinition> & {
     workflow_key: string
     name: string
@@ -326,6 +322,17 @@ export const api = {
     return get<AgentRun[]>(`/agent-runs?${qs}`)
   },
   getAgentRun: (runKey: string) => get<AgentRun>(`/agent-runs/${runKey}`),
+  getAgentRunSubagentDetail: (runKey: string, taskId: string) => {
+    const qs = new URLSearchParams({ task_id: taskId })
+    return get<WorkflowSubagentDetail>(`/agent-runs/${runKey}/subagent-detail?${qs}`)
+  },
+  /** Fetch the single agent run (with full events) associated with a workflow run. */
+  getAgentRunForWorkflowRun: async (workflowRunId: string): Promise<AgentRun | null> => {
+    const rows = await get<AgentRun[]>(`/agent-runs?workflow_run_id=${encodeURIComponent(workflowRunId)}&limit=1`)
+    if (!rows.length) return null
+    // The list view omits events/result; fetch the full detail.
+    return get<AgentRun>(`/agent-runs/${rows[0].run_key}`)
+  },
   designWorkflow: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
     post<DesignAgentResponse<WorkflowDesignResult>>('/agent-runs/design/workflow', body),
   designScript: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>

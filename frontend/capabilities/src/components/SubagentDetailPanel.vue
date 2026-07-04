@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { marked } from 'marked'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
-import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../../api/types'
-import { formatLocalDatetime } from '../../lib/time'
-
-function renderMarkdown(content: string) {
-  return marked.parse(content, { async: false }) as string
-}
+import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../api/types'
+import { formatLocalDatetime } from '../lib/time'
+import { renderMarkdown } from '../lib/markdown'
 
 const props = defineProps<{
   detail: WorkflowSubagentDetail | null

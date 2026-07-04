@@ -2,13 +2,14 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { Search, RotateCw, ArrowLeft } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { AgentRun } from '../../api/types'
+import type { AgentRun, WorkflowSubagentDetail } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
+import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 
 const props = defineProps<{ routeKey?: string }>()
 
@@ -23,6 +24,48 @@ const search = ref('')
 const detailRun = ref<AgentRun | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
+
+// Sub-agent transcript detail (lazy-loaded when a sub-agent is expanded).
+const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
+const subagentDetailLoading = ref<Set<string>>(new Set())
+const subagentDetailErrors = ref<Record<string, string>>({})
+
+function subagentDetailKey(taskId: string) {
+  return `${activeRunKey.value}:${taskId}`
+}
+
+async function ensureSubagentDetail(taskId: string) {
+  const runKey = activeRunKey.value
+  if (!runKey) return
+  const key = subagentDetailKey(taskId)
+  if (subagentDetails.value[key] || subagentDetailLoading.value.has(key)) return
+  const loading = new Set(subagentDetailLoading.value)
+  loading.add(key)
+  subagentDetailLoading.value = loading
+  const nextErrors = { ...subagentDetailErrors.value }
+  delete nextErrors[key]
+  subagentDetailErrors.value = nextErrors
+  try {
+    const detail = await api.getAgentRunSubagentDetail(runKey, taskId)
+    subagentDetails.value = { ...subagentDetails.value, [key]: detail }
+  } catch (e: unknown) {
+    subagentDetailErrors.value = { ...subagentDetailErrors.value, [key]: e instanceof Error ? e.message : '加载失败' }
+  } finally {
+    const done = new Set(subagentDetailLoading.value)
+    done.delete(key)
+    subagentDetailLoading.value = done
+  }
+}
+
+function subagentDetail(taskId: string) {
+  return subagentDetails.value[subagentDetailKey(taskId)] || null
+}
+function subagentDetailLoadingFor(taskId: string) {
+  return subagentDetailLoading.value.has(subagentDetailKey(taskId))
+}
+function subagentDetailErrorFor(taskId: string) {
+  return subagentDetailErrors.value[subagentDetailKey(taskId)] || ''
+}
 
 /** The run key extracted from the sub-route (e.g. "agent-runs/<runKey>"). */
 const activeRunKey = computed(() => props.routeKey || '')
@@ -226,7 +269,19 @@ function pretty(value: unknown): string {
         <div class="mb-1 text-xs font-medium text-muted-foreground">
           事件流（{{ detailRun.events.length }}）
         </div>
-        <RunEventTimeline :events="detailRun.events" :context-key="detailRun.run_key" />
+        <RunEventTimeline
+          :events="detailRun.events"
+          :context-key="detailRun.run_key"
+          @expand="(taskId: string) => ensureSubagentDetail(taskId)"
+        >
+          <template #subagent-body="{ taskId }">
+            <SubagentDetailPanel
+              :detail="subagentDetail(taskId)"
+              :loading="subagentDetailLoadingFor(taskId)"
+              :error="subagentDetailErrorFor(taskId)"
+            />
+          </template>
+        </RunEventTimeline>
       </div>
     </div>
   </div>

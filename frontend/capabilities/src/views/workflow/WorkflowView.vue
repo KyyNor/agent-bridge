@@ -11,7 +11,7 @@ import { Input } from '../../components/ui/input'
 import { confirm } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
-import WorkflowSubagentDetailPanel from './WorkflowSubagentDetailPanel.vue'
+import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import { parseWorkflowDag } from './workflowDag'
 import {
@@ -79,6 +79,9 @@ const expandedTaskIds = ref<Set<string>>(new Set())
 const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
 const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
 const taskLogLoading = ref<Set<string>>(new Set())
+/** Maps a workflow_run_id to its agent_runs.run_key, so subagent-detail (which is
+ *  keyed by run_key under /agent-runs) can be resolved from the workflow view. */
+const runIdToAgentRunKey = ref<Record<string, string>>({})
 // Task progress page: client-side filter / search / sort (feature 1).
 const taskStatusFilter = ref(ALL_STATUS_SENTINEL)
 const taskTypeFilter = ref('__all__')
@@ -650,7 +653,16 @@ async function ensureSubagentDetail(runId: string | null | undefined, taskIdStr:
   delete nextErrors[key]
   subagentDetailErrors.value = nextErrors
   try {
-    const detail = await api.getWorkflowRunSubagentDetail(runId, taskIdStr)
+    // Subagent detail is unified under /agent-runs/{run_key}; resolve the
+    // workflow_run_id to its agent run_key first (cached when events loaded).
+    let runKey = runIdToAgentRunKey.value[runId]
+    if (!runKey) {
+      const agentRun = await api.getAgentRunForWorkflowRun(runId)
+      if (!agentRun) throw new Error('未找到该运行对应的 agent 记录')
+      runKey = agentRun.run_key
+      runIdToAgentRunKey.value = { ...runIdToAgentRunKey.value, [runId]: runKey }
+    }
+    const detail = await api.getAgentRunSubagentDetail(runKey, taskIdStr)
     subagentDetails.value = { ...subagentDetails.value, [key]: detail }
   } catch (e: unknown) {
     subagentDetailErrors.value = { ...subagentDetailErrors.value, [key]: errorMessage(e) }
@@ -918,12 +930,15 @@ async function loadLogs(options: { quiet?: boolean } = {}) {
   }
   if (!options.quiet) logsLoading.value = true
   try {
-    const [logs, events] = await Promise.all([
+    // Logs are workflow-scheduling-specific; agent execution events live under
+    // /agent-runs (unified), fetched via the forwarded workflow_run_id link.
+    const [logs, agentRun] = await Promise.all([
       api.getWorkflowRunLogs(selectedRunId.value),
-      api.getWorkflowRunEvents(selectedRunId.value),
+      api.getAgentRunForWorkflowRun(selectedRunId.value),
     ])
     runLogs.value = logs
-    runEvents.value = events
+    runEvents.value = (agentRun?.events as WorkflowRunEvent[]) || []
+    if (agentRun) runIdToAgentRunKey.value[selectedRunId.value] = agentRun.run_key
   } catch (e: unknown) {
     if (!options.quiet) {
       runLogs.value = []
@@ -998,12 +1013,16 @@ async function toggleTaskLogs(task: WorkflowTask) {
   loading.add(task.lease_run_id)
   taskLogLoading.value = loading
   try {
-    const [logs, events] = await Promise.all([
+    const [logs, agentRun] = await Promise.all([
       api.getWorkflowRunLogs(task.lease_run_id),
-      api.getWorkflowRunEvents(task.lease_run_id),
+      api.getAgentRunForWorkflowRun(task.lease_run_id),
     ])
     taskRunLogs.value = { ...taskRunLogs.value, [task.lease_run_id]: logs }
-    taskRunEvents.value = { ...taskRunEvents.value, [task.lease_run_id]: events }
+    taskRunEvents.value = {
+      ...taskRunEvents.value,
+      [task.lease_run_id]: (agentRun?.events as WorkflowRunEvent[]) || [],
+    }
+    if (agentRun) runIdToAgentRunKey.value[task.lease_run_id] = agentRun.run_key
   } catch (e: unknown) {
     taskError.value = errorMessage(e)
   } finally {
@@ -1723,7 +1742,7 @@ async function confirmClearWorkflow() {
                       @expand="(taskId: string) => ensureSubagentDetail(task.lease_run_id, taskId)"
                     >
                       <template #subagent-body="{ taskId }">
-                        <WorkflowSubagentDetailPanel
+                        <SubagentDetailPanel
                           :detail="subagentDetail(task.lease_run_id, taskId)"
                           :loading="subagentDetailLoadingFor(task.lease_run_id, taskId)"
                           :error="subagentDetailErrorFor(task.lease_run_id, taskId)"
@@ -1789,7 +1808,7 @@ async function confirmClearWorkflow() {
                 @expand="(taskId: string) => ensureSubagentDetail(selectedRunId, taskId)"
               >
                 <template #subagent-body="{ taskId }">
-                  <WorkflowSubagentDetailPanel
+                  <SubagentDetailPanel
                     :detail="subagentDetail(selectedRunId, taskId)"
                     :loading="subagentDetailLoadingFor(selectedRunId, taskId)"
                     :error="subagentDetailErrorFor(selectedRunId, taskId)"
