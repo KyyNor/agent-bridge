@@ -28,6 +28,7 @@ from agent_bridge.agent_runtime.events import (
     is_noisy_partial_message,
     message_events,
     message_log_record,
+    write_event,
 )
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
@@ -256,26 +257,38 @@ class AgentService:
         # run is self-contained: subagent transcript discovery, debugging, and
         # the unified event replay all read from here. This replaces the per-
         # caller on_message file writing the workflow runner used to do.
+        # events.jsonl is the live event stream (one record per semantic event)
+        # so progress polling can read it in real time, before the run finishes
+        # and the full event list is flushed to the agent_runs row.
         raw_log = None
+        event_log = None
         if work_dir is not None:
             try:
                 raw_log = (work_dir / "messages.jsonl").open("a", encoding="utf-8")
+                event_log = (work_dir / "events.jsonl").open("a", encoding="utf-8")
             except OSError:
                 raw_log = None
+                event_log = None
         try:
             async for message in claude_query(prompt=prompt, options=options):
                 if on_message is not None:
                     on_message(message)
-                if raw_log is not None and not is_noisy_partial_message(message):
-                    raw_log.write(json.dumps(message_log_record(message), ensure_ascii=False) + "\n")
-                    raw_log.flush()
                 if not is_noisy_partial_message(message):
-                    events.extend(message_events(message, tool_names, attribution=attribution))
+                    if raw_log is not None:
+                        raw_log.write(json.dumps(message_log_record(message), ensure_ascii=False) + "\n")
+                        raw_log.flush()
+                    new_events = message_events(message, tool_names, attribution=attribution)
+                    if event_log is not None:
+                        for record in new_events:
+                            write_event(event_log, record)
+                    events.extend(new_events)
                 if isinstance(message, ResultMessage):
                     last = message
         finally:
             if raw_log is not None:
                 raw_log.close()
+            if event_log is not None:
+                event_log.close()
         return last
 
     def _build_result(

@@ -2,12 +2,35 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends
 
 from agent_bridge.api.schemas import DesignAgentRequest
 from agent_bridge.core.domain import NotFound, require_admin_user
+
+
+def _read_events_jsonl(path: Path) -> list[dict[str, Any]] | None:
+    """Read a run's live ``events.jsonl``. Returns None if the file is absent
+    (so callers can fall back to the persisted DB events)."""
+    if not path.is_file():
+        return None
+    events: list[dict[str, Any]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+    return events
 
 
 WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
@@ -92,6 +115,24 @@ def create_agent_runs_routes(service, actor):
         if row is None:
             raise NotFound("agent run not found")
         return row
+
+    @router.get("/agent-runs/{run_key}/events")
+    def get_agent_run_events(run_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        """Live event stream for an agent run.
+
+        Reads ``events.jsonl`` from the run's work directory (written in real
+        time as the agent streams), so progress polling sees events before the
+        run finishes. Falls back to the persisted ``events_json`` (flushed at
+        completion) for historical runs whose work directory is gone."""
+        row = service.store.agent_runs.get(run_key)
+        if row is None:
+            raise NotFound("agent run not found")
+        cwd = row.get("cwd")
+        if cwd:
+            events = _read_events_jsonl(Path(str(cwd)) / "events.jsonl")
+            if events is not None:
+                return events
+        return row.get("events") or []
 
     @router.get("/agent-runs/{run_key}/subagent-detail")
     def get_agent_run_subagent_detail(

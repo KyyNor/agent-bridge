@@ -104,3 +104,57 @@ def test_agent_runs_api_filters_by_workflow_run_id(wm_paths) -> None:
     # And filterable by workflow_key returns both.
     rows = client.get("/agent-runs?workflow_key=github-summary", headers=headers).json()
     assert {row["run_key"] for row in rows} == {"workflow_runA", "workflow_runB"}
+
+
+def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path) -> None:
+    """The /agent-runs/{run_key}/events endpoint serves the live events.jsonl
+    (written in real time) when present, falling back to persisted DB events."""
+    import json
+
+    from agent_bridge.app.service import AgentBridgeService
+
+    run_dir = tmp_path / "run_x"
+    run_dir.mkdir()
+    # Simulate a run in flight: AgentService writes events.jsonl as it streams.
+    (run_dir / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"kind": "status", "status": "init"}),
+                json.dumps({"kind": "agent_message", "message": "working"}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    # The placeholder row holds no events yet (they are flushed at completion).
+    svc.store.agent_runs.create(
+        run_key="live_run",
+        agent_name="workflow",
+        cwd=str(run_dir),
+        status="running",
+        ok=False,
+        prompt="",
+        events=[],
+    )
+
+    client = _client(wm_paths)
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    # Live file takes precedence — progress is visible before the run finishes.
+    events = client.get("/agent-runs/live_run/events", headers=headers).json()
+    assert [e["kind"] for e in events] == ["status", "agent_message"]
+    assert events[1]["message"] == "working"
+
+    # When the live file is absent, the persisted DB events are used instead.
+    (run_dir / "events.jsonl").unlink()
+    svc.store.agent_runs.finish_run(
+        "live_run",
+        ok=True,
+        status="completed",
+        events=[{"kind": "result", "message": "done"}],
+    )
+    events = client.get("/agent-runs/live_run/events", headers=headers).json()
+    assert [e["kind"] for e in events] == ["result"]
+

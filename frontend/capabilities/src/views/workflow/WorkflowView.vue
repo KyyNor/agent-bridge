@@ -931,14 +931,24 @@ async function loadLogs(options: { quiet?: boolean } = {}) {
   if (!options.quiet) logsLoading.value = true
   try {
     // Logs are workflow-scheduling-specific; agent execution events live under
-    // /agent-runs (unified), fetched via the forwarded workflow_run_id link.
-    const [logs, agentRun] = await Promise.all([
-      api.getWorkflowRunLogs(selectedRunId.value),
-      api.getAgentRunForWorkflowRun(selectedRunId.value),
+    // /agent-runs (unified). Resolve the run_key once, then stream events from
+    // the live events.jsonl via /agent-runs/{run_key}/events (real time, not
+    // just the DB copy flushed at completion).
+    let runKey = runIdToAgentRunKey.value[selectedRunId.value]
+    const logsPromise = api.getWorkflowRunLogs(selectedRunId.value)
+    if (!runKey) {
+      const agentRun = await api.getAgentRunForWorkflowRun(selectedRunId.value)
+      if (agentRun) {
+        runKey = agentRun.run_key
+        runIdToAgentRunKey.value = { ...runIdToAgentRunKey.value, [selectedRunId.value]: runKey }
+      }
+    }
+    const [logs, events] = await Promise.all([
+      logsPromise,
+      runKey ? api.getAgentRunEvents(runKey) : Promise.resolve([] as WorkflowRunEvent[]),
     ])
     runLogs.value = logs
-    runEvents.value = (agentRun?.events as WorkflowRunEvent[]) || []
-    if (agentRun) runIdToAgentRunKey.value[selectedRunId.value] = agentRun.run_key
+    runEvents.value = events
   } catch (e: unknown) {
     if (!options.quiet) {
       runLogs.value = []
@@ -1013,16 +1023,21 @@ async function toggleTaskLogs(task: WorkflowTask) {
   loading.add(task.lease_run_id)
   taskLogLoading.value = loading
   try {
-    const [logs, agentRun] = await Promise.all([
-      api.getWorkflowRunLogs(task.lease_run_id),
-      api.getAgentRunForWorkflowRun(task.lease_run_id),
+    const logsPromise = api.getWorkflowRunLogs(task.lease_run_id)
+    let runKey = runIdToAgentRunKey.value[task.lease_run_id]
+    if (!runKey) {
+      const agentRun = await api.getAgentRunForWorkflowRun(task.lease_run_id)
+      if (agentRun) {
+        runKey = agentRun.run_key
+        runIdToAgentRunKey.value = { ...runIdToAgentRunKey.value, [task.lease_run_id]: runKey }
+      }
+    }
+    const [logs, events] = await Promise.all([
+      logsPromise,
+      runKey ? api.getAgentRunEvents(runKey) : Promise.resolve([] as WorkflowRunEvent[]),
     ])
     taskRunLogs.value = { ...taskRunLogs.value, [task.lease_run_id]: logs }
-    taskRunEvents.value = {
-      ...taskRunEvents.value,
-      [task.lease_run_id]: (agentRun?.events as WorkflowRunEvent[]) || [],
-    }
-    if (agentRun) runIdToAgentRunKey.value[task.lease_run_id] = agentRun.run_key
+    taskRunEvents.value = { ...taskRunEvents.value, [task.lease_run_id]: events }
   } catch (e: unknown) {
     taskError.value = errorMessage(e)
   } finally {
