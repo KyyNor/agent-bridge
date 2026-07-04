@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import WorkflowArtifactFormat, WorkflowStatus
 from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
-from agent_bridge.automation.workflows.subagent_details import build_subagent_detail
 
 logger = logging.getLogger(__name__)
 
@@ -246,37 +243,6 @@ class WorkflowService:
     def list_run_logs(self, actor: str, run_id: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         return self.store.list_workflow_run_logs(run_id)
-
-    def list_run_events(self, actor: str, run_id: str) -> list[dict[str, Any]]:
-        run = self.get_run(actor, run_id)
-        temp_dir = run.get("temp_dir")
-        if not temp_dir:
-            return []
-        path = Path(str(temp_dir)) / "events.jsonl"
-        if not path.is_file():
-            return []
-        events: list[dict[str, Any]] = []
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(item, dict):
-                events.append(item)
-        return events
-
-    def get_run_subagent_detail(self, actor: str, run_id: str, task_id: str) -> dict[str, Any]:
-        run = self.get_run(actor, run_id)
-        temp_dir = run.get("temp_dir")
-        if not temp_dir:
-            return {"task_id": task_id, "transcript_dir": None, "agents": []}
-        return build_subagent_detail(Path(str(temp_dir)), task_id)
 
     def require_workflow_context(
         self,

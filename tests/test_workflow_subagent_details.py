@@ -99,7 +99,7 @@ def _sample_run(tmp_path: Path) -> tuple[Path, str]:
 
 
 def test_build_subagent_detail_reads_claude_transcript_and_task_output(tmp_path: Path) -> None:
-    from agent_bridge.automation.workflows.subagent_details import build_subagent_detail
+    from agent_bridge.agent_runtime.subagent_details import build_subagent_detail
 
     run_dir, task_id = _sample_run(tmp_path)
 
@@ -124,7 +124,9 @@ def test_build_subagent_detail_reads_claude_transcript_and_task_output(tmp_path:
     assert events[4]["content"] == "完成"
 
 
-def test_workflow_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> None:
+def test_agent_runs_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> None:
+    """The unified /agent-runs/{run_key}/subagent-detail endpoint serves any
+    agent run's sub-agent transcript — workflow or otherwise."""
     from fastapi.testclient import TestClient
 
     from agent_bridge.api.app import create_app
@@ -133,28 +135,22 @@ def test_workflow_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> None:
     run_dir, task_id = _sample_run(tmp_path)
     svc = AgentBridgeService.create(wm_paths, {"root"})
     svc.store.init_schema()
-    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
-    svc.workflows.upsert_definition(
-        actor="root",
+    # Seed an agent_runs row whose cwd points at the run directory; this is
+    # what AgentService persists for every run (workflow or otherwise).
+    svc.store.agent_runs.create(
+        run_key="workflow_runA",
+        agent_name="workflow",
         workflow_key="page-report",
-        name="Page Report",
-        description="",
-        profile_key="report-plane",
-        workflow_js="",
-        status="active",
-    )
-    svc.store.create_workflow_run(
-        run_id="run_1",
-        workflow_key="page-report",
-        profile_key="report-plane",
-        task_key=None,
+        workflow_run_id="run_1",
+        cwd=str(run_dir),
         status="completed",
-        temp_dir=str(run_dir),
+        ok=True,
+        prompt="",
     )
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        f"/workflow-runs/run_1/subagent-detail?task_id={task_id}",
+        f"/agent-runs/workflow_runA/subagent-detail?task_id={task_id}",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -162,3 +158,11 @@ def test_workflow_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> None:
     body = response.json()
     assert body["task_id"] == task_id
     assert body["agents"][0]["events"][0]["content"] == "请调用工具并返回结果"
+
+    # The old workflow-scoped endpoint is gone (404).
+    old = client.get(
+        f"/workflow-runs/run_1/subagent-detail?task_id={task_id}",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert old.status_code == 404
+

@@ -59,6 +59,15 @@ class SQLiteStore:
             conn.executescript(SCHEMA)
             conn.executescript(CODEGRAPH_SCHEMA)
             conn.executescript(WORKFLOW_SCHEMA)
+            self._ensure_columns(
+                conn,
+                "agent_runs",
+                {
+                    "status": "TEXT NOT NULL DEFAULT ''",
+                    "started_at": "TEXT",
+                    "finished_at": "TEXT",
+                },
+            )
             self._drop_column(conn, "workflow_definitions", "manifest_json")
             self._ensure_columns(
                 conn,

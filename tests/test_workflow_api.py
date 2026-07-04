@@ -501,6 +501,9 @@ def test_workflow_api_get_run_404_for_unknown(wm_paths):
 
 
 def test_workflow_api_returns_run_events_from_run_directory(wm_paths, tmp_path):
+    # The /workflow-runs/{run_id}/events endpoint was removed — agent execution
+    # events are now unified under /agent-runs (persisted in the agent_runs
+    # table by AgentService). See test_agent_runs_api.py for the unified coverage.
     import json
 
     from agent_bridge.api.app import create_app
@@ -528,36 +531,10 @@ def test_workflow_api_returns_run_events_from_run_directory(wm_paths, tmp_path):
     )
 
     client = TestClient(create_app(wm_paths, {"root"}))
+    # The workflow-specific events endpoint is gone (404); events are served
+    # from /agent-runs?workflow_run_id= instead.
     response = client.get("/workflow-runs/run_1/events", headers={"X-Agent-Bridge-User": "root"})
-
-    assert response.status_code == 200, response.text
-    assert response.json() == [
-        {"kind": "agent_message", "message": "Reading workflow"},
-        {"kind": "tool_call", "tool_name": "workflow_claim_task", "status": "started"},
-    ]
-
-
-def test_workflow_api_returns_empty_events_for_missing_event_file(wm_paths, tmp_path):
-    from agent_bridge.api.app import create_app
-    from agent_bridge.app.service import AgentBridgeService
-
-    run_dir = tmp_path / "run_1"
-    run_dir.mkdir()
-
-    svc = AgentBridgeService.create(wm_paths, {"root"})
-    svc.store.init_schema()
-    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
-    _seed_workflow(svc)
-    svc.store.create_workflow_run(
-        run_id="run_1", workflow_key="page-report", profile_key="report-plane",
-        task_key=None, status="running", temp_dir=str(run_dir),
-    )
-
-    client = TestClient(create_app(wm_paths, {"root"}))
-    response = client.get("/workflow-runs/run_1/events", headers={"X-Agent-Bridge-User": "root"})
-
-    assert response.status_code == 200, response.text
-    assert response.json() == []
+    assert response.status_code == 404
 
 
 def test_workflow_api_run_returns_409_when_already_running(wm_paths):

@@ -8,14 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from agent_bridge.agent_runtime.events import (
-    Attribution,
-    event_record as _event_record,
-    is_noisy_partial_message as _is_noisy_partial_message,
-    message_events as _message_events,
-    message_log_record as _message_log_record,
-    write_event as _write_event,
-)
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
 
 logger = logging.getLogger(__name__)
@@ -78,7 +70,13 @@ class ClaudeWorkflowRunner:
         self._agent_service = agent_service
 
     def run(self, base_dir: Path, spec: WorkflowRunSpec) -> WorkflowProcessResult:
-        """驱动一个 workflow run：装隔离工作目录 -> 跑 AgentService -> 落地 stdout/stderr/events。"""
+        """Drive a workflow run: prepare an isolated work dir, run AgentService.
+
+        AgentService now persists raw SDK messages (``messages.jsonl``) and the
+        unified event stream (``agent_runs.events_json``) itself, so this runner
+        no longer writes ``events.jsonl``/``stdout.log``. Only process-level
+        stderr (SDK error output) is still captured here for diagnostics.
+        """
         logger.info(
             "Workflow agent 调用开始 workflow=%s run=%s profile=%s",
             spec.workflow_key,
@@ -86,28 +84,9 @@ class ClaudeWorkflowRunner:
             spec.profile_key,
         )
         run_dir = prepare_run_directory(base_dir, spec)
-        stdout_path = run_dir / "stdout.log"
         stderr_path = run_dir / "stderr.log"
-        events_path = run_dir / "events.jsonl"
         started = time.monotonic()
-        with (
-            stdout_path.open("w", encoding="utf-8") as stdout,
-            stderr_path.open("w", encoding="utf-8") as stderr,
-            events_path.open("w", encoding="utf-8") as events,
-        ):
-            tool_names: dict[str, str] = {}
-            attribution = Attribution()
-
-            def on_message(message: Any) -> None:
-                if _is_noisy_partial_message(message):
-                    # Skip noisy streaming partials entirely so they never reach
-                    # the run logs (stdout.log) or event stream (events.jsonl).
-                    return
-                stdout.write(json.dumps(_message_log_record(message), ensure_ascii=False) + "\n")
-                stdout.flush()
-                for record in _message_events(message, tool_names, attribution=attribution):
-                    _write_event(events, record)
-
+        with stderr_path.open("w", encoding="utf-8") as stderr:
             def write_stderr(chunk: str) -> None:
                 stderr.write(chunk)
                 stderr.flush()
@@ -124,20 +103,15 @@ class ClaudeWorkflowRunner:
                     # ``?workflow_run_id=`` (and ``?workflow_key=``).
                     workflow_key=spec.workflow_key,
                     run_id=spec.run_id,
-                    on_message=on_message,
                     stderr=write_stderr,
                     include_partial_messages=True,
                     setting_sources=[],
                     timeout=spec.timeout_seconds,
                 )
             )
-            if res.ok:
-                exit_code = 0
-            else:
-                exit_code = 1
-                error_message = res.error or "unknown error"
-                stderr.write(f"{error_message}\n")
-                _write_event(events, _event_record("error", status="failed", message=error_message))
+            exit_code = 0 if res.ok else 1
+            if not res.ok:
+                stderr.write(f"{res.error or 'unknown error'}\n")
         logger.info(
             "Workflow agent 调用完成 workflow=%s run=%s exit_code=%d 耗时=%dms",
             spec.workflow_key,
@@ -148,7 +122,7 @@ class ClaudeWorkflowRunner:
         return WorkflowProcessResult(
             run_dir=run_dir,
             exit_code=exit_code,
-            stdout_path=stdout_path,
+            stdout_path=stderr_path,  # raw messages now live in messages.jsonl; kept for compat
             stderr_path=stderr_path,
             duration_ms=int((time.monotonic() - started) * 1000),
         )

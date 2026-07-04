@@ -27,22 +27,22 @@ def _patched_runner(wm_paths, monkeypatch, fake_query, *, env=None):
 def test_message_events_skips_thinking_tokens_partial():
     from types import SimpleNamespace
 
-    from agent_bridge.automation.workflows.runner import _message_events
+    from agent_bridge.agent_runtime.events import message_events
 
     # Streaming partials carrying the thinking_tokens subtype are noisy and must
     # not surface in the run event log.
     thinking = SimpleNamespace(subtype="thinking_tokens", session_id="session_1")
-    assert _message_events(thinking, tool_names={}) == []
+    assert message_events(thinking, tool_names={}) == []
 
     # Init remains useful as a lifecycle marker, but high-frequency task progress
     # partials are internal SDK noise and must not surface in the UI event log.
     init = SimpleNamespace(subtype="init", session_id="session_1")
-    init_events = _message_events(init, tool_names={})
+    init_events = message_events(init, tool_names={})
     assert len(init_events) == 1
     assert init_events[0]["kind"] == "status"
     assert init_events[0]["status"] == "init"
     task_progress = SimpleNamespace(subtype="task_progress", session_id="session_1")
-    assert _message_events(task_progress, tool_names={}) == []
+    assert message_events(task_progress, tool_names={}) == []
 
 
 def test_runner_drops_noisy_partial_messages_from_all_logs(wm_paths, tmp_path, monkeypatch):
@@ -81,18 +81,13 @@ def test_runner_drops_noisy_partial_messages_from_all_logs(wm_paths, tmp_path, m
         ),
     )
 
-    stdout_text = result.stdout_path.read_text(encoding="utf-8")
-    events = [
-        json.loads(line)
-        for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
-    # Noisy partials must be absent from both the raw message log and the event stream.
+    stdout_text = (result.run_dir / "messages.jsonl").read_text(encoding="utf-8")
+    # Noisy partials must be absent from the raw message log (AgentService now
+    # writes messages.jsonl; the event stream lives in the agent_runs table).
     assert "thinking_tokens" not in stdout_text
     assert "task_progress" not in stdout_text
-    assert all(event.get("status") != "thinking_tokens" for event in events)
-    assert all(event.get("status") != "task_progress" for event in events)
-    # Other subtypes still flow through.
-    assert any(event.get("status") == "init" for event in events)
+    # Other subtypes still flow through to the raw log.
+    assert "init" in stdout_text
 
 
 def test_runner_prepares_run_directory_with_workflow_files(tmp_path):
@@ -136,7 +131,6 @@ def test_fake_runner_writes_no_task_result(tmp_path):
 
 
 def test_claude_runner_uses_agent_sdk_options_and_logs_messages(wm_paths, tmp_path, monkeypatch):
-    import json
     from types import SimpleNamespace
 
     from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
@@ -172,6 +166,7 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(wm_paths, tmp_pa
     runner, FakeOptions = _patched_runner(
         wm_paths, monkeypatch, fake_query, env={"ANTHROPIC_BASE_URL": "https://example.test"}
     )
+    svc_store = runner._agent_service.store  # noqa: SLF001 — inspect persisted run
 
     result = runner.run(
         tmp_path,
@@ -197,13 +192,16 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(wm_paths, tmp_pa
     assert options["system_prompt"]["type"] == "preset"
     assert options["system_prompt"]["preset"] == "claude_code"
     assert "Agent Bridge workflow" in options["system_prompt"]["append"]
-    stdout = result.stdout_path.read_text(encoding="utf-8")
-    assert "session_1" in stdout
-    assert "workflow complete" in stdout
-    events = [
-        json.loads(line)
-        for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    # Raw SDK messages are now persisted by AgentService to messages.jsonl.
+    messages_text = (result.run_dir / "messages.jsonl").read_text(encoding="utf-8")
+    assert "session_1" in messages_text
+    assert "workflow complete" in messages_text
+    # The unified event stream lives in the agent_runs table (looked up via the
+    # forwarded workflow_run_id), not in a per-run events.jsonl file.
+    runs = svc_store.agent_runs.list(workflow_run_id="run_1")
+    assert len(runs) == 1
+    detail = svc_store.agent_runs.get(runs[0]["run_key"])
+    events = detail["events"]
     assert [event["kind"] for event in events] == [
         "status",
         "agent_message",
@@ -224,7 +222,6 @@ def test_claude_runner_uses_agent_sdk_options_and_logs_messages(wm_paths, tmp_pa
 
 
 def test_claude_runner_returns_failure_when_sdk_raises(wm_paths, tmp_path, monkeypatch):
-    import json
     from types import SimpleNamespace
 
     from agent_bridge.automation.workflows.runner import WorkflowRunSpec
@@ -234,6 +231,7 @@ def test_claude_runner_returns_failure_when_sdk_raises(wm_paths, tmp_path, monke
         raise RuntimeError("sdk failed")
 
     runner, _ = _patched_runner(wm_paths, monkeypatch, fake_query)
+    svc_store = runner._agent_service.store  # noqa: SLF001 — inspect persisted run
 
     result = runner.run(
         tmp_path,
@@ -247,14 +245,13 @@ def test_claude_runner_returns_failure_when_sdk_raises(wm_paths, tmp_path, monke
     )
 
     assert result.exit_code == 1
-    assert "session_1" in result.stdout_path.read_text(encoding="utf-8")
-    stderr = result.stderr_path.read_text(encoding="utf-8")
-    assert "RuntimeError" in stderr
-    assert "sdk failed" in stderr
-    events = [
-        json.loads(line)
-        for line in (result.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    # The raw message log captures the messages streamed before the failure.
+    assert "session_1" in (result.run_dir / "messages.jsonl").read_text(encoding="utf-8")
+    # The error surfaces in the persisted agent_runs event stream (unified DB copy).
+    runs = svc_store.agent_runs.list(workflow_run_id="run_1")
+    assert len(runs) == 1
+    detail = svc_store.agent_runs.get(runs[0]["run_key"])
+    events = detail["events"]
     assert events[-1]["kind"] == "error"
     assert events[-1]["message"] == "RuntimeError: sdk failed"
 

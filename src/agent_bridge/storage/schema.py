@@ -296,6 +296,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   cwd TEXT,
   model TEXT,
   ok INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT '',
   error TEXT,
   duration_ms INTEGER,
   cost_usd REAL,
@@ -304,6 +305,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   output_schema_json TEXT,
   result_json TEXT,
   events_json TEXT NOT NULL DEFAULT '[]',
+  started_at TEXT,
+  finished_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_agent_runs_created_at ON agent_runs(created_at DESC, id DESC);

@@ -25,25 +25,29 @@ class AgentRunsRepository:
         session_id: str | None = None,
         cwd: str | None = None,
         model: str | None = None,
-        ok: bool,
+        ok: bool = False,
+        status: str = "running",
         error: str | None = None,
         duration_ms: int | None = None,
         cost_usd: float | None = None,
         num_turns: int | None = None,
-        prompt: str,
+        prompt: str = "",
         output_schema: dict[str, Any] | None = None,
         result: Any | None = None,
         events: list[dict[str, Any]] | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO agent_runs (
                   run_key, agent_name, profile_key, workflow_key, workflow_run_id,
-                  session_id, cwd, model, ok, error, duration_ms, cost_usd,
-                  num_turns, prompt, output_schema_json, result_json, events_json
+                  session_id, cwd, model, ok, status, error, duration_ms, cost_usd,
+                  num_turns, prompt, output_schema_json, result_json, events_json,
+                  started_at, finished_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_key,
@@ -55,6 +59,7 @@ class AgentRunsRepository:
                     cwd,
                     model,
                     1 if ok else 0,
+                    status,
                     error,
                     duration_ms,
                     cost_usd,
@@ -63,6 +68,8 @@ class AgentRunsRepository:
                     json.dumps(output_schema, ensure_ascii=False) if output_schema else None,
                     json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
                     json.dumps(events or [], ensure_ascii=False, default=str),
+                    started_at,
+                    finished_at,
                 ),
             )
             row = conn.execute(
@@ -75,12 +82,63 @@ class AgentRunsRepository:
             self._prune_callback()
         return self._payload(log)
 
+    def finish_run(
+        self,
+        run_key: str,
+        *,
+        ok: bool,
+        status: str,
+        error: str | None = None,
+        session_id: str | None = None,
+        model: str | None = None,
+        duration_ms: int | None = None,
+        cost_usd: float | None = None,
+        num_turns: int | None = None,
+        result: Any | None = None,
+        events: list[dict[str, Any]] | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        """Backfill a run's outcome. Used when a placeholder ``running`` row was
+        created at start and the run has now reached a terminal state."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE agent_runs SET
+                  ok = ?, status = ?, error = ?, session_id = ?, model = ?,
+                  duration_ms = ?, cost_usd = ?, num_turns = ?,
+                  result_json = ?, events_json = ?, finished_at = ?
+                WHERE run_key = ?
+                """,
+                (
+                    1 if ok else 0,
+                    status,
+                    error,
+                    session_id,
+                    model,
+                    duration_ms,
+                    cost_usd,
+                    num_turns,
+                    json.dumps(result, ensure_ascii=False, default=str) if result is not None else None,
+                    json.dumps(events or [], ensure_ascii=False, default=str),
+                    finished_at,
+                    run_key,
+                ),
+            )
+
     def get(self, run_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM agent_runs WHERE run_key = ?", (run_key,)
             ).fetchone()
             return self._payload(row_to_dict(row))
+
+    def update_cwd(self, run_key: str, cwd: str) -> None:
+        """Backfill the work-dir path on a placeholder row once it is known."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE agent_runs SET cwd = ? WHERE run_key = ?",
+                (cwd, run_key),
+            )
 
     def list(
         self,
@@ -90,6 +148,7 @@ class AgentRunsRepository:
         workflow_key: str | None = None,
         workflow_run_id: str | None = None,
         ok: bool | None = None,
+        status: str | None = None,
         created_from: str | None = None,
         created_to: str | None = None,
         limit: int = 50,
@@ -112,6 +171,9 @@ class AgentRunsRepository:
         if ok is not None:
             clauses.append("ok = ?")
             params.append(1 if ok else 0)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
         if created_from:
             clauses.append("created_at >= ?")
             params.append(created_from)

@@ -93,6 +93,29 @@ def create_agent_runs_routes(service, actor):
             raise NotFound("agent run not found")
         return row
 
+    @router.get("/agent-runs/{run_key}/subagent-detail")
+    def get_agent_run_subagent_detail(
+        run_key: str,
+        task_id: str,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        """Sub-agent (Task) transcript detail for any agent run.
+
+        Works for every ``AgentService`` run — workflow, understand, design —
+        because raw SDK messages are persisted uniformly to ``messages.jsonl``
+        in the run's work directory."""
+        from pathlib import Path
+
+        from agent_bridge.agent_runtime.subagent_details import build_subagent_detail
+
+        row = service.store.agent_runs.get(run_key)
+        if row is None:
+            raise NotFound("agent run not found")
+        cwd = row.get("cwd")
+        if not cwd:
+            return {"task_id": task_id, "transcript_dir": None, "agents": []}
+        return build_subagent_detail(Path(str(cwd)), task_id)
+
     @router.post("/agent-runs/design/workflow")
     async def design_workflow(
         payload: DesignAgentRequest,

@@ -15,6 +15,7 @@ import logging
 import shutil
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,6 +27,7 @@ from agent_bridge.agent_runtime.events import (
     event_record,
     is_noisy_partial_message,
     message_events,
+    message_log_record,
 )
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
@@ -124,6 +126,7 @@ class AgentService:
         """
         timeout_seconds = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
         started = time.monotonic()
+        started_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         work_dir: Path | None = None
         events: list[dict[str, Any]] = []
         tool_names: dict[str, str] = {}
@@ -138,6 +141,26 @@ class AgentService:
             profile,
             ",".join(skills) if skills else "",
         )
+
+        # Reserve the agent_runs row up front (status=running) so the run is
+        # observable while in flight, and capture its run_key for the caller.
+        run_key = new_run_id(agent_name or "agent")
+        try:
+            self.store.agent_runs.create(
+                run_key=run_key,
+                agent_name=agent_name or "agent",
+                profile_key=profile,
+                workflow_key=workflow_key or None,
+                workflow_run_id=run_id if workflow_key else None,
+                cwd=None,  # backfilled below once the work dir is known
+                model=model,
+                status="running",
+                prompt=prompt,
+                output_schema=output_schema,
+                started_at=started_iso,
+            )
+        except Exception:
+            logger.error("Agent run 占位记录创建失败 run_key=%s", run_key, exc_info=True)
 
         try:
             if cwd is not None:
@@ -162,6 +185,7 @@ class AgentService:
                 effective_mcp_servers = (
                     mcp_servers if mcp_servers is not None else work_dir / ".mcp.json"
                 )
+            self._record_cwd(run_key, work_dir)
 
             options = ClaudeAgentOptions(
                 tools={"type": "preset", "preset": "claude_code"},
@@ -189,7 +213,7 @@ class AgentService:
                 max_budget_usd=max_budget_usd,
             )
             result_msg = await asyncio.wait_for(
-                self._drain_query(prompt, options, on_message, events, tool_names, attribution),
+                self._drain_query(prompt, options, work_dir, on_message, events, tool_names, attribution),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
@@ -202,21 +226,16 @@ class AgentService:
             events.append(event_record("error", status="failed", message=error))
 
         result = self._build_result(work_dir, started, result_msg, output_schema, error)
+        result.run_key = run_key
         logger.info(
             "Agent run 完成 agent=%s 成功=%s 耗时=%dms",
             agent_name or "agent",
             result.ok,
             result.duration_ms,
         )
-        self._persist_run(
-            prompt=prompt,
-            output_schema=output_schema,
-            agent_name=agent_name,
-            profile=profile,
-            workflow_key=workflow_key,
-            run_id=run_id,
-            model=model,
-            work_dir=work_dir,
+        self._finish_run(
+            run_key=run_key,
+            started_iso=started_iso,
             result=result,
             events=events,
         )
@@ -226,19 +245,37 @@ class AgentService:
         self,
         prompt: str,
         options: Any,
+        work_dir: Path | None,
         on_message: Callable[[Any], None] | None,
         events: list[dict[str, Any]],
         tool_names: dict[str, str],
         attribution: Attribution,
     ) -> ResultMessage | None:
         last: ResultMessage | None = None
-        async for message in claude_query(prompt=prompt, options=options):
-            if on_message is not None:
-                on_message(message)
-            if not is_noisy_partial_message(message):
-                events.extend(message_events(message, tool_names, attribution=attribution))
-            if isinstance(message, ResultMessage):
-                last = message
+        # Persist every raw SDK message to messages.jsonl in the work dir so the
+        # run is self-contained: subagent transcript discovery, debugging, and
+        # the unified event replay all read from here. This replaces the per-
+        # caller on_message file writing the workflow runner used to do.
+        raw_log = None
+        if work_dir is not None:
+            try:
+                raw_log = (work_dir / "messages.jsonl").open("a", encoding="utf-8")
+            except OSError:
+                raw_log = None
+        try:
+            async for message in claude_query(prompt=prompt, options=options):
+                if on_message is not None:
+                    on_message(message)
+                if raw_log is not None and not is_noisy_partial_message(message):
+                    raw_log.write(json.dumps(message_log_record(message), ensure_ascii=False) + "\n")
+                    raw_log.flush()
+                if not is_noisy_partial_message(message):
+                    events.extend(message_events(message, tool_names, attribution=attribution))
+                if isinstance(message, ResultMessage):
+                    last = message
+        finally:
+            if raw_log is not None:
+                raw_log.close()
         return last
 
     def _build_result(
@@ -277,45 +314,46 @@ class AgentService:
             ok=True, result=_extract_result(result_msg, output_schema), **meta
         )
 
-    def _persist_run(
+    def _record_cwd(self, run_key: str, work_dir: Path | None) -> None:
+        """Backfill the work-dir path on the placeholder row once it is known."""
+        if work_dir is None:
+            return
+        try:
+            self.store.agent_runs.update_cwd(run_key, str(work_dir))
+        except Exception:
+            logger.error("Agent run cwd 回填失败 run_key=%s", run_key, exc_info=True)
+
+    def _finish_run(
         self,
         *,
-        prompt: str,
-        output_schema: dict[str, Any] | None,
-        agent_name: str | None,
-        profile: str | None,
-        workflow_key: str | None,
-        run_id: str | None,
-        model: str | None,
-        work_dir: Path | None,
+        run_key: str,
+        started_iso: str,
         result: AgentRunResult,
         events: list[dict[str, Any]],
     ) -> None:
-        """Record this run in the agent_runs log. Logging failures never break the run."""
+        """Update the placeholder row with the run's terminal outcome.
+
+        Logging failures never break the run. Status maps from the result:
+        success -> completed, failure -> failed."""
+        status = "completed" if result.ok else "failed"
+        finished_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         try:
-            run_key = new_run_id(agent_name or "agent")
-            self.store.agent_runs.create(
-                run_key=run_key,
-                agent_name=agent_name or "agent",
-                profile_key=profile,
-                workflow_key=workflow_key or None,
-                workflow_run_id=run_id if workflow_key else None,
-                session_id=result.session_id,
-                cwd=str(work_dir) if work_dir else None,
-                model=model,
+            self.store.agent_runs.finish_run(
+                run_key,
                 ok=result.ok,
+                status=status,
                 error=result.error,
+                session_id=result.session_id,
+                model=None,
                 duration_ms=result.duration_ms,
                 cost_usd=result.cost_usd,
                 num_turns=result.num_turns,
-                prompt=prompt,
-                output_schema=output_schema,
                 result=result.result,
                 events=events,
+                finished_at=finished_iso,
             )
-            result.run_key = run_key
         except Exception:
-            logger.error("Agent run 日志持久化失败", exc_info=True)
+            logger.error("Agent run 结果回填失败 run_key=%s", run_key, exc_info=True)
 
     def _make_work_dir(self, agent_name: str) -> Path:
         work_dir = self.base_run_dir / new_run_id(agent_name)

@@ -33,18 +33,24 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _stdout_blocks(run_dir: Path) -> list[str]:
-    stdout_path = run_dir / "stdout.log"
-    if not stdout_path.is_file():
-        return []
-    blocks: list[str] = []
-    for row in _read_jsonl(stdout_path):
-        content = row.get("content")
-        if isinstance(content, list):
-            blocks.extend(item for item in content if isinstance(item, str))
-        elif isinstance(content, str):
-            blocks.append(content)
-    return blocks
+def _raw_message_blocks(run_dir: Path) -> list[str]:
+    """Collect textual content blocks from the persisted raw SDK message log.
+
+    ``AgentService`` writes ``messages.jsonl`` for every run. Legacy workflow
+    runs (pre-unification) wrote ``stdout.log`` in the same record shape, so it
+    is read as a fallback for historical data."""
+    for name in ("messages.jsonl", "stdout.log"):
+        path = run_dir / name
+        if path.is_file():
+            blocks: list[str] = []
+            for row in _read_jsonl(path):
+                content = row.get("content")
+                if isinstance(content, list):
+                    blocks.extend(item for item in content if isinstance(item, str))
+                elif isinstance(content, str):
+                    blocks.append(content)
+            return blocks
+    return []
 
 
 def _normalise_block(block: str) -> str:
@@ -53,7 +59,7 @@ def _normalise_block(block: str) -> str:
 
 def _task_refs(run_dir: Path, task_id: str) -> dict[str, Any]:
     refs: dict[str, Any] = {"task_id": task_id}
-    for block in _stdout_blocks(run_dir):
+    for block in _raw_message_blocks(run_dir):
         text = _normalise_block(block)
         launch = _LAUNCH_RE.search(text)
         if launch and launch.group("task_id").strip() == task_id:
@@ -190,11 +196,14 @@ def _agent_detail(path: Path, result: Any) -> dict[str, Any]:
 
 
 def build_subagent_detail(run_dir: Path, task_id: str) -> dict[str, Any]:
-    """Build a UI-friendly view of a Task/Workflow subagent transcript.
+    """Build a UI-friendly view of a sub-agent (Task) transcript.
 
-    The workflow event stream only contains lifecycle summaries. Claude's SDK
+    The unified event stream only carries lifecycle summaries. Claude's SDK
     writes the actual prompt/tool/text transcript under the transcript directory
-    reported by the Task launch result in stdout.log.
+    reported by the Task launch result in the raw message log
+    (``messages.jsonl``). This is agent-agnostic: any ``AgentService`` run that
+    spawns a Task sub-agent records the same raw messages, so the detail is
+    available regardless of whether the run was triggered by a workflow.
     """
 
     refs = _task_refs(run_dir, task_id)
