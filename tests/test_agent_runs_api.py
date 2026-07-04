@@ -62,3 +62,45 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     # 404 for missing
     missing = client.get("/agent-runs/nope", headers=headers)
     assert missing.status_code == 404
+
+
+def test_agent_runs_api_filters_by_workflow_run_id(wm_paths) -> None:
+    """The workflow runner forwards workflow_key/run_id so each produced agent_runs
+    row is lookable by workflow_run_id — the unified query path for run results."""
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="workflow_runA",
+        agent_name="workflow",
+        workflow_key="github-summary",
+        workflow_run_id="run_1",
+        ok=True,
+        prompt="p",
+        result="done",
+        events=[],
+        duration_ms=10,
+    )
+    svc.store.agent_runs.create(
+        run_key="workflow_runB",
+        agent_name="workflow",
+        workflow_key="github-summary",
+        workflow_run_id="run_2",
+        ok=True,
+        prompt="p",
+        result="done",
+        events=[],
+        duration_ms=10,
+    )
+
+    client = _client(wm_paths)
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    # Reverse-lookup by workflow_run_id returns exactly the one matching row.
+    rows = client.get("/agent-runs?workflow_run_id=run_1", headers=headers).json()
+    assert [row["run_key"] for row in rows] == ["workflow_runA"]
+
+    # And filterable by workflow_key returns both.
+    rows = client.get("/agent-runs?workflow_key=github-summary", headers=headers).json()
+    assert {row["run_key"] for row in rows} == {"workflow_runA", "workflow_runB"}

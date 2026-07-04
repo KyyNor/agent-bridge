@@ -468,21 +468,6 @@ export interface ToolCallStats {
   items: Record<string, unknown>[]
 }
 
-export interface AgentRunEvent {
-  created_at: string
-  agent_name: string
-  source: string
-  kind: string
-  status?: string
-  message?: string
-  tool_name?: string
-  tool_use_id?: string
-  session_id?: string
-  total_cost_usd?: number
-  num_turns?: number
-  [key: string]: unknown
-}
-
 export interface AgentRun {
   id: number
   run_key: string
@@ -503,7 +488,10 @@ export interface AgentRun {
   prompt?: string
   result?: unknown
   output_schema?: Record<string, unknown> | null
-  events?: AgentRunEvent[]
+  // Agent run events share the same shape as workflow run events (both are
+  // produced by agent_runtime/events.py); the unified WorkflowRunEvent type is
+  // the canonical one. Sub-agent fields are simply absent for plain agent runs.
+  events?: WorkflowRunEvent[]
 }
 
 export interface WorkflowDesignResult {

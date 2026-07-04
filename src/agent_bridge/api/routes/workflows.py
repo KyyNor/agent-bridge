@@ -63,6 +63,11 @@ def create_workflow_routes(service, actor):
 
     @router.get("/workflow-runs/{run_id}/events")
     def list_run_events(run_id: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        # Reads the run's events.jsonl (raw event stream written by the workflow
+        # runner). The same events are also persisted by AgentService into the
+        # agent_runs table, queryable via ``GET /agent-runs?workflow_run_id={run_id}``.
+        # This endpoint stays for the workflow progress/tasks polling view; for a
+        # unified "agent run result" view prefer the agent_runs dimension.
         return service.workflows.list_run_events(current_actor, run_id)
 
     @router.get("/workflow-runs/{run_id}/subagent-detail")

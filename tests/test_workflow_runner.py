@@ -285,3 +285,7 @@ def test_runner_forwards_timeout_seconds_to_agent_service(tmp_path):
 
     # The configured per-run wall-clock cap must reach AgentService.run as `timeout`.
     assert captured["timeout"] == 1800
+    # Workflow identity is forwarded so the produced agent_runs row can be
+    # looked up via ``?workflow_run_id=`` / ``?workflow_key=``.
+    assert captured["workflow_key"] == "github-summary"
+    assert captured["run_id"] == "run_t"

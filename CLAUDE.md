@@ -93,6 +93,7 @@ npm run typecheck
 - **`AgentService.run`（`agent_runtime/service.py:78`）是通用执行原语**——工作流 run 和 Understand-Anything 分析都走这同一个入口，靠 `agent_name`/`skills`/`prompt` 区分。它有两种模式：托管（自动建隔离工作目录、装 profile 指导和受控 `.mcp.json`）和就地（caller 自管目录，MCP 默认不接入）。
 - **服务端强制工作流契约**（不在 manifest 里）：`result_parser.py` 校验 `result.json` 状态/task_key，`save_artifact` 强制路径不出 run 目录、格式仅限 markdown、profile 匹配。manifest 的头部注释即记录这些约束。
 - **`WorkflowScheduler` 是自定义的**（不继承 `BaseCronScheduler`）：有每日执行时间窗（默认 22:00–07:00，可跨午夜）、并发上限、轮询 tick（60s）。最近的 `839ac44` 修复了「只在活动窗口内调度 tick」。`run_workflow_now` 可绕过窗口做即时测试运行，但仍共享内存中的 `_running` 防并发。
+- **统一「Agent 运行结果查看」**：`agent_runs` 表是所有 agent 执行（工作流 run、understand 分析、design agent 等）的统一基准。`ClaudeWorkflowRunner` 会把 `workflow_key`/`run_id` 透传给 `AgentService.run()`，因此每个 workflow run 产生的 agent_runs 行都能通过 `GET /agent-runs?workflow_run_id={run_id}` 反查。前端有公共组件 `<RunEventTimeline>`（`components/RunEventTimeline.vue`）渲染事件流时间线，workflow 的 progress/tasks 视图和 agent-runs 详情页都复用它；事件渲染 helpers 在 `lib/runEventRender.ts`，子 Agent 折叠状态在 `composables/useSubagentCollapse.ts`。`/workflow-runs/{run_id}/events`（读 `events.jsonl` 文件）保留给 workflow 实时轮询，但事件流查询统一走 agent_runs 维度。
 
 ### 调度器（`knowledge_management/scheduler_base.py`）
 

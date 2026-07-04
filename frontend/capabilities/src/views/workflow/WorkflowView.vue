@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { marked } from 'marked'
-import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -13,6 +12,7 @@ import { confirm } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import WorkflowSubagentDetailPanel from './WorkflowSubagentDetailPanel.vue'
+import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import { parseWorkflowDag } from './workflowDag'
 import {
   ALL_STATUS_SENTINEL,
@@ -26,12 +26,8 @@ import {
 import {
   distinctActors,
   filterEventsByActor,
-  groupEventsByActor,
-  subagentUsage,
-  subagentStatus,
-  subagentStatusLabel,
-  subagentTaskIds,
 } from '../../lib/workflowEvents'
+import { renderMarkdown } from '../../lib/markdown'
 import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
 import { formatLocalDatetime } from '../../lib/time'
 
@@ -73,7 +69,6 @@ const selectedRunId = ref('')
 const runEvents = ref<WorkflowRunEvent[]>([])
 const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
-const expandedRunSubagents = ref<Record<string, Set<string>>>({})
 const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
 const subagentDetailLoading = ref<Set<string>>(new Set())
 const subagentDetailErrors = ref<Record<string, string>>({})
@@ -84,7 +79,6 @@ const expandedTaskIds = ref<Set<string>>(new Set())
 const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
 const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
 const taskLogLoading = ref<Set<string>>(new Set())
-const collapsedTaskSubagents = ref<Record<string, Set<string>>>({})
 // Task progress page: client-side filter / search / sort (feature 1).
 const taskStatusFilter = ref(ALL_STATUS_SENTINEL)
 const taskTypeFilter = ref('__all__')
@@ -118,12 +112,8 @@ const designResponse = ref<DesignAgentResponse<WorkflowDesignResult> | null>(nul
 let testPoll: ReturnType<typeof setInterval> | null = null
 
 const artifactHtml = computed(() =>
-  artifactDetail.value ? marked.parse(artifactDetail.value.content, { async: false }) as string : '',
+  artifactDetail.value ? renderMarkdown(artifactDetail.value.content) : '',
 )
-
-function renderMarkdown(content: string) {
-  return marked.parse(content, { async: false }) as string
-}
 
 function openArtifactFullscreen(artifact: WorkflowArtifact | WorkflowArtifactDetail) {
   fullscreenArtifact.value = {
@@ -145,7 +135,7 @@ function closeArtifactFullscreen() {
 }
 
 const fullscreenArtifactHtml = computed(() =>
-  fullscreenArtifact.value ? marked.parse(fullscreenArtifact.value.content, { async: false }) as string : '',
+  fullscreenArtifact.value ? renderMarkdown(fullscreenArtifact.value.content) : '',
 )
 
 const form = ref({
@@ -235,9 +225,6 @@ function resetTaskFilters() {
 const progressRun = computed(() =>
   (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
 )
-const runEventGroups = computed(() => groupEventsByActor(runEvents.value))
-/** Single-column interleaved timeline for the run-progress view. */
-const runTimeline = computed(() => buildTimeline(runEventGroups.value))
 const workflowDesignDraft = computed(() => designResponse.value?.result?.workflow || null)
 
 const collapsedPaths = ref<Set<string>>(new Set())
@@ -644,110 +631,8 @@ function logLevelClass(level: string) {
   return 'border-border'
 }
 
-function eventKindLabel(event: WorkflowRunEvent) {
-  if (event.kind === 'agent_message') return event.agent_role === 'subagent' ? '子 Agent' : (event.agent_name || 'agent')
-  if (event.kind === 'tool_call') return '工具调用'
-  if (event.kind === 'tool_result') return event.status === 'failed' ? '工具失败' : '工具完成'
-  if (event.kind === 'result') return event.status === 'failed' ? '运行失败' : '运行结果'
-  if (event.kind === 'error') return '异常'
-  if (event.kind === 'status') return '状态'
-  if (event.kind === 'subagent_start') return '子 Agent 启动'
-  if (event.kind === 'subagent_progress') return '子 Agent 进度'
-  if (event.kind === 'subagent_end') return event.status === 'failed' ? '子 Agent 失败' : '子 Agent 完成'
-  if (event.kind === 'subagent_updated') return '子 Agent 更新'
-  return event.kind
-}
-
-function eventMessage(event: WorkflowRunEvent) {
-  if (event.message) return event.message
-  if (event.tool_name && event.kind === 'tool_call') return `调用工具 ${event.tool_name}`
-  if (event.tool_name && event.kind === 'tool_result') return `工具 ${event.tool_name} 调用${event.status === 'failed' ? '失败' : '成功'}`
-  if (event.kind === 'subagent_progress') {
-    const parts: string[] = []
-    if (event.last_tool_name) parts.push(`当前工具: ${event.last_tool_name}`)
-    if (event.usage) {
-      const usageParts: string[] = []
-      if (event.usage.total_tokens != null) usageParts.push(`${event.usage.total_tokens} tokens`)
-      if (event.usage.tool_uses != null) usageParts.push(`${event.usage.tool_uses} 次工具`)
-      if (usageParts.length) parts.push(usageParts.join(' · '))
-    }
-    if (parts.length) return parts.join(' · ')
-  }
-  return event.status || ''
-}
-
-function eventClass(event: WorkflowRunEvent) {
-  if (event.kind === 'error' || event.status === 'failed') return 'border-red-400'
-  if (event.kind === 'tool_call') return 'border-blue-400'
-  if (event.kind === 'tool_result') return event.status === 'failed' ? 'border-red-400' : 'border-green-400'
-  if (event.kind === 'result') return 'border-foreground/40'
-  return 'border-border'
-}
-
-/** Semantic kind for timeline styling. Groups the many event.kind values into
- *  a small visual family: message / think / tool / result / error / status. */
-type TimelineKind = 'message' | 'think' | 'tool' | 'result' | 'error' | 'status'
-
-function timelineKind(event: WorkflowRunEvent): TimelineKind {
-  if (event.kind === 'error' || event.status === 'failed') return 'error'
-  if (event.kind === 'tool_call') return 'tool'
-  if (event.kind === 'tool_result') return event.status === 'failed' ? 'error' : 'result'
-  if (event.kind === 'result') return event.status === 'failed' ? 'error' : 'result'
-  if (event.kind === 'status') return 'status'
-  return 'message'
-}
-
-/** Interleave main-agent and subagent events into a single reading order.
- *  - Main events stay as individual timeline nodes (in order).
- *  - For each subagent, only the FIRST lifecycle event (usually subagent_start)
- *    becomes a timeline node; it carries the actor so the UI can render the
- *    whole subagent thread inline. Later subagent lifecycle events are dropped
- *    from the top-level list (they live inside the thread card). */
-interface TimelineEntry {
-  actor: { id: string; role: 'main' | 'subagent'; label: string }
-  event: WorkflowRunEvent
-}
-
-function buildTimeline(groups: { actor: { id: string; role: 'main' | 'subagent'; label: string }; events: WorkflowRunEvent[] }[]): TimelineEntry[] {
-  const subFirstSeen = new Set<string>()
-  const entries: TimelineEntry[] = []
-  // Re-walk all events in original order. We need the raw stream; rebuild it
-  // from groups by stable merge is complex, so we rely on each group preserving
-  // its own order and interleave by created_at when available.
-  const all: { actor: TimelineEntry['actor']; event: WorkflowRunEvent }[] = []
-  for (const g of groups) {
-    for (const e of g.events) all.push({ actor: g.actor, event: e })
-  }
-  all.sort((a, b) => {
-    const ta = a.event.created_at ? Date.parse(a.event.created_at) : NaN
-    const tb = b.event.created_at ? Date.parse(b.event.created_at) : NaN
-    if (!Number.isNaN(ta) && !Number.isNaN(tb)) return ta - tb
-    return 0 // keep original order when timestamps missing
-  })
-  for (const item of all) {
-    if (item.actor.role === 'subagent') {
-      if (subFirstSeen.has(item.actor.id)) continue // only the first becomes a node
-      subFirstSeen.add(item.actor.id)
-    }
-    entries.push(item)
-  }
-  return entries
-}
-
 function hasDetailContent(detail: WorkflowSubagentDetail | null) {
   return !!detail && (detail.agents.length > 0 || !!detail.task_output)
-}
-
-function runSubagentStatus(taskIdStr: string) {
-  return subagentStatus(runEvents.value, taskIdStr)
-}
-
-function runSubagentStatusLabel(taskIdStr: string) {
-  return subagentStatusLabel(runEvents.value, taskIdStr)
-}
-
-function runSubagentUsage(taskIdStr: string) {
-  return subagentUsage(runEvents.value, taskIdStr)
 }
 
 function subagentDetailKey(runId: string, taskIdStr: string) {
@@ -786,22 +671,6 @@ function subagentDetailLoadingFor(runId: string | null | undefined, taskIdStr: s
 
 function subagentDetailErrorFor(runId: string | null | undefined, taskIdStr: string) {
   return runId ? subagentDetailErrors.value[subagentDetailKey(runId, taskIdStr)] || '' : ''
-}
-
-function isRunSubagentCollapsed(taskIdStr: string): boolean {
-  return !expandedRunSubagents.value[selectedRunId.value]?.has(taskIdStr)
-}
-
-function toggleRunSubagent(taskIdStr: string) {
-  const key = selectedRunId.value
-  if (!key) return
-  const set = new Set(expandedRunSubagents.value[key] ?? [])
-  if (set.has(taskIdStr)) set.delete(taskIdStr)
-  else {
-    set.add(taskIdStr)
-    void ensureSubagentDetail(key, taskIdStr)
-  }
-  expandedRunSubagents.value = { ...expandedRunSubagents.value, [key]: set }
 }
 
 function errorMessage(e: unknown) {
@@ -1055,10 +924,6 @@ async function loadLogs(options: { quiet?: boolean } = {}) {
     ])
     runLogs.value = logs
     runEvents.value = events
-    expandedRunSubagents.value = {
-      ...expandedRunSubagents.value,
-      [selectedRunId.value]: expandedRunSubagents.value[selectedRunId.value] ?? new Set(),
-    }
   } catch (e: unknown) {
     if (!options.quiet) {
       runLogs.value = []
@@ -1075,10 +940,6 @@ function taskId(task: WorkflowTask) {
 
 function taskRunLogKey(task: WorkflowTask) {
   return task.lease_run_id || taskId(task)
-}
-
-function taskSubagentCollapseKey(task: WorkflowTask) {
-  return `${taskId(task)}:${task.lease_run_id || ''}`
 }
 
 function taskLogs(task: WorkflowTask) {
@@ -1106,43 +967,6 @@ function setTaskActorFilter(task: WorkflowTask, actorId: string) {
 /** Events for a task after the per-task actor filter is applied. */
 function taskFilteredEvents(task: WorkflowTask) {
   return filterEventsByActor(taskEvents(task), taskActorFilterFor(task))
-}
-
-/** Filtered events grouped by actor (main + each sub-agent). */
-function taskEventGroups(task: WorkflowTask) {
-  return groupEventsByActor(taskFilteredEvents(task))
-}
-
-/** Single-column interleaved timeline for a task's expanded panel. */
-function taskTimeline(task: WorkflowTask) {
-  return buildTimeline(taskEventGroups(task))
-}
-
-function taskUsageFor(task: WorkflowTask, taskIdStr: string) {
-  return subagentUsage(taskEvents(task), taskIdStr)
-}
-
-function taskStatusFor(task: WorkflowTask, taskIdStr: string) {
-  return subagentStatus(taskEvents(task), taskIdStr)
-}
-
-function taskStatusLabelFor(task: WorkflowTask, taskIdStr: string) {
-  return subagentStatusLabel(taskEvents(task), taskIdStr)
-}
-
-function isTaskSubagentCollapsed(task: WorkflowTask, taskIdStr: string): boolean {
-  return !!collapsedTaskSubagents.value[taskSubagentCollapseKey(task)]?.has(taskIdStr)
-}
-
-function toggleTaskSubagent(task: WorkflowTask, taskIdStr: string) {
-  const key = taskSubagentCollapseKey(task)
-  const set = new Set(collapsedTaskSubagents.value[key] ?? [])
-  if (set.has(taskIdStr)) set.delete(taskIdStr)
-  else {
-    set.add(taskIdStr)
-    void ensureSubagentDetail(task.lease_run_id, taskIdStr)
-  }
-  collapsedTaskSubagents.value = { ...collapsedTaskSubagents.value, [key]: set }
 }
 
 function isTaskLogLoading(task: WorkflowTask) {
@@ -1180,10 +1004,6 @@ async function toggleTaskLogs(task: WorkflowTask) {
     ])
     taskRunLogs.value = { ...taskRunLogs.value, [task.lease_run_id]: logs }
     taskRunEvents.value = { ...taskRunEvents.value, [task.lease_run_id]: events }
-    collapsedTaskSubagents.value = {
-      ...collapsedTaskSubagents.value,
-      [taskSubagentCollapseKey(task)]: new Set(subagentTaskIds(events)),
-    }
   } catch (e: unknown) {
     taskError.value = errorMessage(e)
   } finally {
@@ -1323,14 +1143,12 @@ async function confirmClearWorkflow() {
     artifactDetail.value = null
     artifactHistory.value = []
     runEvents.value = []
-    expandedRunSubagents.value = {}
     runLogs.value = []
     selectedRunId.value = ''
     progressRunId.value = ''
     expandedTaskIds.value = new Set()
     taskRunLogs.value = {}
     taskRunEvents.value = {}
-    collapsedTaskSubagents.value = {}
     resetTaskFilters()
     expandedArtifactIds.value = new Set()
     taskArtifacts.value = {}
@@ -1898,73 +1716,20 @@ async function confirmClearWorkflow() {
                   <div v-if="!taskEvents(task).length" class="rounded-md border bg-background px-3 py-6 text-center text-sm text-muted-foreground">
                     还没有 Agent 输出，任务被领取执行后这里会按时间顺序显示对话流。
                   </div>
-                  <div v-else class="tl-timeline max-h-[30rem] overflow-auto pr-1">
-                    <template v-for="(entry, idx) in taskTimeline(task)" :key="taskRunLogKey(task) + ':tl:' + idx">
-                      <!-- 主 Agent 事件 -->
-                      <div v-if="entry.actor.role === 'main'" class="tl-event" :class="'k-' + timelineKind(entry.event)">
-                        <div class="tl-avatar" />
-                        <div class="tl-body">
-                          <div class="tl-head">
-                            <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
-                            <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
-                            <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
-                          </div>
-                          <div v-if="eventMessage(entry.event)" class="tl-content">
-                            <div
-                              v-if="entry.event.message"
-                              class="tl-md"
-                              v-html="renderMarkdown(entry.event.message)"
-                            />
-                            <p v-else>{{ eventMessage(entry.event) }}</p>
-                          </div>
-                        </div>
-                      </div>
-                      <!-- 子 Agent 线程卡片（默认折叠） -->
-                      <div v-else class="tl-event">
-                        <div class="tl-avatar" style="border-color:#7c3aed" />
-                        <div
-                          class="tl-sub"
-                          :class="{
-                            open: !isTaskSubagentCollapsed(task, entry.actor.id),
-                            'is-failed': taskStatusFor(task, entry.actor.id) === 'failed' || taskStatusFor(task, entry.actor.id) === 'error',
-                          }"
-                        >
-                          <button type="button" class="tl-sub-head" @click="toggleTaskSubagent(task, entry.actor.id)">
-                            <span class="tl-bot">
-                              <Bot :size="14" />
-                            </span>
-                            <span>
-                              <span class="tl-sub-id block leading-tight">{{ entry.actor.label }}</span>
-                              <span class="tl-sub-desc block">task {{ entry.actor.id.slice(0, 8) }}</span>
-                            </span>
-                            <span class="tl-sub-stats">
-                              <span v-if="taskUsageFor(task, entry.actor.id)">
-                                <b>{{ taskUsageFor(task, entry.actor.id)?.total_tokens ?? 0 }}</b> tokens · <b>{{ taskUsageFor(task, entry.actor.id)?.tool_uses ?? 0 }}</b> 工具
-                              </span>
-                              <Badge
-                                variant="outline"
-                                :class="taskStatusFor(task, entry.actor.id) === 'completed'
-                                  ? 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300'
-                                  : (taskStatusFor(task, entry.actor.id) === 'failed' || taskStatusFor(task, entry.actor.id) === 'error')
-                                    ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
-                                    : 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'"
-                                class="text-[10px]"
-                              >
-                                {{ taskStatusLabelFor(task, entry.actor.id) }}
-                              </Badge>
-                              <ChevronRight :size="14" class="tl-chevron" />
-                            </span>
-                          </button>
-                          <div v-if="!isTaskSubagentCollapsed(task, entry.actor.id)" class="tl-sub-body">
-                            <WorkflowSubagentDetailPanel
-                              :detail="subagentDetail(task.lease_run_id, entry.actor.id)"
-                              :loading="subagentDetailLoadingFor(task.lease_run_id, entry.actor.id)"
-                              :error="subagentDetailErrorFor(task.lease_run_id, entry.actor.id)"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </template>
+                  <div v-else class="max-h-[30rem] overflow-auto pr-1">
+                    <RunEventTimeline
+                      :events="taskFilteredEvents(task)"
+                      :context-key="'task:' + taskRunLogKey(task)"
+                      @expand="(taskId: string) => ensureSubagentDetail(task.lease_run_id, taskId)"
+                    >
+                      <template #subagent-body="{ taskId }">
+                        <WorkflowSubagentDetailPanel
+                          :detail="subagentDetail(task.lease_run_id, taskId)"
+                          :loading="subagentDetailLoadingFor(task.lease_run_id, taskId)"
+                          :error="subagentDetailErrorFor(task.lease_run_id, taskId)"
+                        />
+                      </template>
+                    </RunEventTimeline>
                   </div>
                 </div>
               </div>
@@ -2016,74 +1781,21 @@ async function confirmClearWorkflow() {
             <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
               还没有 Agent 输出，任务被领取执行后这里会按时间顺序显示对话流。
             </div>
-            <div v-else class="tl-timeline max-h-[32rem] overflow-auto pr-1">
-              <template v-for="(entry, idx) in runTimeline" :key="'run-tl:' + idx">
-                <!-- 主 Agent 事件 -->
-                <div v-if="entry.actor.role === 'main'" class="tl-event" :class="'k-' + timelineKind(entry.event)">
-                  <div class="tl-avatar" />
-                  <div class="tl-body">
-                    <div class="tl-head">
-                      <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
-                      <span v-if="entry.event.agent_name" class="tl-target">{{ entry.event.agent_name }}</span>
-                      <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
-                      <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
-                    </div>
-                    <div v-if="eventMessage(entry.event)" class="tl-content">
-                      <div
-                        v-if="entry.event.message"
-                        class="tl-md"
-                        v-html="renderMarkdown(entry.event.message)"
-                      />
-                      <p v-else>{{ eventMessage(entry.event) }}</p>
-                    </div>
-                  </div>
-                </div>
-                <!-- 子 Agent 线程卡片（默认折叠） -->
-                <div v-else class="tl-event">
-                  <div class="tl-avatar" style="border-color:#7c3aed" />
-                  <div
-                    class="tl-sub"
-                    :class="{
-                      open: !isRunSubagentCollapsed(entry.actor.id),
-                      'is-failed': runSubagentStatus(entry.actor.id) === 'failed' || runSubagentStatus(entry.actor.id) === 'error',
-                    }"
-                  >
-                    <button type="button" class="tl-sub-head" @click="toggleRunSubagent(entry.actor.id)">
-                      <span class="tl-bot">
-                        <Bot :size="14" />
-                      </span>
-                      <span>
-                        <span class="tl-sub-id block leading-tight">{{ entry.actor.label }}</span>
-                        <span class="tl-sub-desc block">task {{ entry.actor.id.slice(0, 8) }}</span>
-                      </span>
-                      <span class="tl-sub-stats">
-                        <span v-if="runSubagentUsage(entry.actor.id)">
-                          <b>{{ runSubagentUsage(entry.actor.id)?.total_tokens ?? 0 }}</b> tokens · <b>{{ runSubagentUsage(entry.actor.id)?.tool_uses ?? 0 }}</b> 工具
-                        </span>
-                        <Badge
-                          variant="outline"
-                          :class="runSubagentStatus(entry.actor.id) === 'completed'
-                            ? 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300'
-                            : (runSubagentStatus(entry.actor.id) === 'failed' || runSubagentStatus(entry.actor.id) === 'error')
-                              ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300'
-                              : 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'"
-                          class="text-[10px]"
-                        >
-                          {{ runSubagentStatusLabel(entry.actor.id) }}
-                        </Badge>
-                        <ChevronRight :size="14" class="tl-chevron" />
-                      </span>
-                    </button>
-                    <div v-if="!isRunSubagentCollapsed(entry.actor.id)" class="tl-sub-body">
-                      <WorkflowSubagentDetailPanel
-                        :detail="subagentDetail(selectedRunId, entry.actor.id)"
-                        :loading="subagentDetailLoadingFor(selectedRunId, entry.actor.id)"
-                        :error="subagentDetailErrorFor(selectedRunId, entry.actor.id)"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </template>
+            <div v-else class="max-h-[32rem] overflow-auto pr-1">
+              <RunEventTimeline
+                :events="runEvents"
+                :context-key="'run:' + selectedRunId"
+                show-agent-name
+                @expand="(taskId: string) => ensureSubagentDetail(selectedRunId, taskId)"
+              >
+                <template #subagent-body="{ taskId }">
+                  <WorkflowSubagentDetailPanel
+                    :detail="subagentDetail(selectedRunId, taskId)"
+                    :loading="subagentDetailLoadingFor(selectedRunId, taskId)"
+                    :error="subagentDetailErrorFor(selectedRunId, taskId)"
+                  />
+                </template>
+              </RunEventTimeline>
             </div>
           </div>
       </div>
@@ -2333,124 +2045,3 @@ async function confirmClearWorkflow() {
   </div>
 </template>
 
-<style>
-/* ============================================================
-   Agent 输出 时间轴 (timeline)
-   - 用主题 token 变量 (var(--*)) 兼容明暗模式
-   - 命名空间 tl- 避免与其它组件冲突
-   - 一个强调色 (primary 蓝), 子 agent 紫色仅作"角色"语义区分
-   ============================================================ */
-.tl-timeline{position:relative;padding:2px 0 0}
-.tl-timeline::before{content:"";position:absolute;left:18px;top:6px;bottom:6px;width:2px;background:var(--border);border-radius:1px}
-.tl-event{position:relative;padding:0 0 12px 46px}
-.tl-event:last-child{padding-bottom:0}
-.tl-avatar{position:absolute;left:10px;top:2px;width:18px;height:18px;border-radius:50%;background:var(--card);border:2px solid var(--primary);display:flex;align-items:center;justify-content:center;z-index:2}
-.tl-avatar::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--primary)}
-.tl-event.k-think .tl-avatar{border-color:var(--warning)}
-.tl-event.k-think .tl-avatar::after{background:var(--warning)}
-.tl-event.k-tool .tl-avatar{border-color:var(--info)}
-.tl-event.k-tool .tl-avatar::after{background:var(--info)}
-.tl-event.k-result .tl-avatar{border-color:var(--success)}
-.tl-event.k-result .tl-avatar::after{background:var(--success)}
-.tl-event.k-error .tl-avatar{border-color:var(--destructive)}
-.tl-event.k-error .tl-avatar::after{background:var(--destructive)}
-.tl-body{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;transition:border-color .12s ease}
-.tl-body:hover{border-color:var(--input)}
-.tl-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 14px;border-bottom:1px solid var(--border)}
-.tl-kind{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px}
-.k-message .tl-kind{background:var(--accent);color:var(--accent-foreground)}
-.k-think .tl-kind{background:color-mix(in oklch,var(--warning) 16%,transparent);color:var(--warning)}
-.k-tool .tl-kind{background:color-mix(in oklch,var(--info) 16%,transparent);color:var(--info)}
-.k-result .tl-kind{background:color-mix(in oklch,var(--success) 16%,transparent);color:var(--success)}
-.k-error .tl-kind{background:color-mix(in oklch,var(--destructive) 16%,transparent);color:var(--destructive)}
-.tl-target{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
-.tl-target b{color:var(--foreground);font-weight:600}
-.tl-time{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);flex-shrink:0;opacity:.85}
-.tl-content{padding:11px 14px;font-size:13.5px;color:var(--foreground);line-height:1.6}
-.tl-content p{margin:0 0 6px}
-.tl-content p:last-child{margin-bottom:0}
-.k-message .tl-content{font-size:14px;line-height:1.65}
-.tl-content pre{margin:8px 0 0;background:var(--muted);border-radius:6px;padding:10px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:var(--foreground);overflow:auto;max-height:220px;white-space:pre-wrap}
-
-/* ===== Markdown rendered inside timeline (.tl-md) ===== */
-/* Scoped so it blends with the card instead of behaving like a heavy prose block. */
-.tl-md{font-size:inherit;line-height:inherit;color:inherit;word-break:break-word}
-.tl-md>:first-child{margin-top:0}
-.tl-md>:last-child{margin-bottom:0}
-.tl-md p{margin:0 0 6px}
-.tl-md p:last-child{margin-bottom:0}
-.tl-md h1,.tl-md h2,.tl-md h3,.tl-md h4{font-weight:600;line-height:1.3;margin:14px 0 6px;color:var(--foreground)}
-.tl-md h1{font-size:1.18em}
-.tl-md h2{font-size:1.1em}
-.tl-md h3{font-size:1.02em}
-.tl-md h4{font-size:.96em}
-.tl-md ul,.tl-md ol{margin:4px 0 6px;padding-left:20px}
-.tl-md li{margin:2px 0}
-.tl-md li::marker{color:var(--muted-foreground)}
-.tl-md a{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
-.tl-md a:hover{opacity:.8}
-.tl-md blockquote{margin:6px 0;padding:4px 12px;border-left:3px solid var(--border);color:var(--muted-foreground)}
-.tl-md blockquote p{margin:2px 0}
-.tl-md hr{border:none;border-top:1px solid var(--border);margin:10px 0}
-.tl-md code{font-family:var(--font-mono);font-size:.88em;background:var(--muted);padding:1px 5px;border-radius:4px;color:var(--foreground)}
-.tl-md pre{margin:8px 0;background:var(--muted);border-radius:6px;padding:10px 12px;font-family:var(--font-mono);font-size:11.5px;line-height:1.6;color:var(--foreground);overflow:auto;max-height:260px;white-space:pre-wrap}
-.tl-md pre code{background:transparent;padding:0;font-size:inherit;border-radius:0}
-.tl-md table{width:100%;border-collapse:collapse;margin:8px 0;font-size:.95em}
-.tl-md th,.tl-md td{border:1px solid var(--border);padding:5px 8px;text-align:left}
-.tl-md th{background:var(--muted);font-weight:600}
-
-/* ===== Subagent thread card ===== */
-.tl-sub{position:relative;background:color-mix(in oklch,#7c3aed 7%,var(--card));border:1px solid color-mix(in oklch,#7c3aed 24%,var(--border));border-radius:10px;overflow:hidden;transition:border-color .12s ease}
-:root.dark .tl-sub{background:color-mix(in oklch,#7c3aed 14%,var(--card))}
-.tl-sub-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;cursor:pointer;width:100%;text-align:left;background:transparent;border:none}
-.tl-sub-head:hover{background:color-mix(in oklch,#7c3aed 6%,transparent)}
-.tl-bot{width:26px;height:26px;border-radius:7px;flex-shrink:0;background:linear-gradient(135deg,#7c3aed,#9b6cf0);display:flex;align-items:center;justify-content:center;color:#fff}
-.tl-sub.is-failed .tl-bot{background:linear-gradient(135deg,var(--destructive),#e85a5a)}
-.tl-sub-id{font-weight:600;color:#5b21b6;font-size:13.5px}
-:root.dark .tl-sub-id{color:#c4b0fd}
-.tl-sub-desc{font-size:12px;color:var(--muted-foreground)}
-.tl-sub-stats{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--muted-foreground);font-family:var(--font-mono);flex-wrap:wrap}
-.tl-sub-stats b{color:var(--foreground);font-weight:600}
-.tl-chevron{color:#7c3aed;transition:transform .15s ease;flex-shrink:0}
-:root.dark .tl-chevron{color:#a78bfa}
-.tl-sub.open .tl-chevron{transform:rotate(90deg)}
-.tl-sub-body{padding:0 14px 14px;background:var(--card);border-top:1px solid color-mix(in oklch,#7c3aed 18%,var(--border))}
-.tl-result{margin:12px 0 4px;padding:10px 12px;background:color-mix(in oklch,#7c3aed 5%,var(--card));border:1px solid color-mix(in oklch,#7c3aed 22%,var(--border));border-left:3px solid #7c3aed;border-radius:6px}
-.tl-sub.is-failed .tl-result{border-left-color:var(--destructive);background:color-mix(in oklch,var(--destructive) 5%,var(--card));border-color:color-mix(in oklch,var(--destructive) 22%,var(--border))}
-.tl-result-label{font-size:11px;font-weight:600;color:#5b21b6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;display:flex;align-items:center;gap:5px}
-:root.dark .tl-result-label{color:#c4b0fd}
-.tl-sub.is-failed .tl-result-label{color:var(--destructive)}
-.tl-result-text{font-size:13px;color:var(--foreground);line-height:1.6}
-.tl-result-text pre{margin:6px 0 0;background:var(--muted);border-radius:6px;padding:8px 10px;font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);overflow:auto;max-height:200px;white-space:pre-wrap}
-
-/* ===== Mini timeline inside subagent ===== */
-.tl-mini{position:relative;padding:6px 0 0 4px;margin-top:10px}
-.tl-mini::before{content:"";position:absolute;left:5px;top:10px;bottom:10px;width:2px;background:color-mix(in oklch,#7c3aed 18%,var(--border));border-radius:1px}
-.tl-mini-event{position:relative;padding:0 0 10px 22px}
-.tl-mini-event:last-child{padding-bottom:0}
-.tl-mavatar{position:absolute;left:0;top:1px;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid #7c3aed;z-index:2}
-.tl-mini-event.k-think .tl-mavatar{border-color:var(--warning)}
-.tl-mini-event.k-tool .tl-mavatar{border-color:var(--info)}
-.tl-mini-event.k-result .tl-mavatar{border-color:var(--success)}
-.tl-mini-event.k-error .tl-mavatar{border-color:var(--destructive)}
-.tl-mini-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:3px}
-.tl-mini-kind{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:999px}
-.tl-mini-event.k-think .tl-mini-kind{background:color-mix(in oklch,var(--warning) 16%,transparent);color:var(--warning)}
-.tl-mini-event.k-tool .tl-mini-kind{background:color-mix(in oklch,var(--info) 16%,transparent);color:var(--info)}
-.tl-mini-event.k-result .tl-mini-kind{background:color-mix(in oklch,var(--success) 16%,transparent);color:var(--success)}
-.tl-mini-event.k-error .tl-mini-kind{background:color-mix(in oklch,var(--destructive) 16%,transparent);color:var(--destructive)}
-.tl-mini-event.k-message .tl-mini-kind{background:color-mix(in oklch,#7c3aed 14%,transparent);color:#5b21b6}
-:root.dark .tl-mini-event.k-message .tl-mini-kind{color:#c4b0fd}
-.tl-mini-target{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
-.tl-mini-target b{color:var(--foreground);font-weight:600}
-.tl-mini-time{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);opacity:.8}
-.tl-mini-content{font-size:12.5px;color:var(--muted-foreground);line-height:1.55;white-space:pre-wrap}
-.tl-mini-content.tl-dump{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);background:var(--muted);padding:6px 9px;border-radius:4px;margin-top:4px;white-space:pre-wrap;overflow:auto;max-height:160px}
-/* Markdown output inside mini timeline: free-form agent text renders as solid
-   prose (not muted, not pre-wrapped) so headings/lists/code read correctly. */
-.tl-mini-content > .tl-md{color:var(--foreground);white-space:normal;word-break:break-word}
-
-@media (prefers-reduced-motion: reduce){
-  .tl-body,.tl-sub,.tl-chevron{transition:none}
-}
-</style>

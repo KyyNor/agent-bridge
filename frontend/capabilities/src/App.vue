@@ -107,7 +107,7 @@ const view = computed(() => activeNavKey.value)
         <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
         <WorkflowView v-else-if="view === 'workflow'" :route-key="subRoute" />
         <LogsView v-else-if="view === 'logs'" />
-        <AgentRunsView v-else-if="view === 'agent-runs'" />
+        <AgentRunsView v-else-if="view === 'agent-runs'" :route-key="subRoute" />
         <StatsView v-else-if="view === 'stats'" />
       </div>
     </div>

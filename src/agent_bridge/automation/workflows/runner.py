@@ -119,6 +119,11 @@ class ClaudeWorkflowRunner:
                     cwd=run_dir,
                     mcp_servers=run_dir / ".mcp.json",
                     system_prompt_append=WORKFLOW_SYSTEM_PROMPT,
+                    # Pass through the workflow identity so the agent_runs row
+                    # produced by AgentService can be looked up via
+                    # ``?workflow_run_id=`` (and ``?workflow_key=``).
+                    workflow_key=spec.workflow_key,
+                    run_id=spec.run_id,
                     on_message=on_message,
                     stderr=write_stderr,
                     include_partial_messages=True,
