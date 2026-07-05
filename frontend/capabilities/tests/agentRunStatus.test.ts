@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  agentRunStatusLabel,
+  agentRunBadgeVariant,
+  agentRunOkFilterParam,
+  agentRunStatusFilterParam,
+} from '../src/lib/agentRunStatus.ts'
+
+test('agent run status distinguishes running from failed even when ok is false', () => {
+  const running = { ok: false, status: 'running' }
+
+  assert.equal(agentRunStatusLabel(running), '执行中')
+  assert.equal(agentRunBadgeVariant(running), 'running')
+})
+
+test('agent run ok filter excludes running rows from failed filter', () => {
+  assert.equal(agentRunOkFilterParam(''), undefined)
+  assert.equal(agentRunOkFilterParam('success'), true)
+  assert.equal(agentRunOkFilterParam('failed'), false)
+  assert.equal(agentRunOkFilterParam('running'), undefined)
+  assert.equal(agentRunStatusFilterParam('success'), undefined)
+  assert.equal(agentRunStatusFilterParam('failed'), 'failed')
+  assert.equal(agentRunStatusFilterParam('running'), 'running')
+})

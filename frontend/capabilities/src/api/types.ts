@@ -479,6 +479,7 @@ export interface AgentRun {
   cwd: string | null
   model: string | null
   ok: boolean
+  status?: 'running' | 'completed' | 'failed' | string
   error: string | null
   duration_ms: number | null
   cost_usd: number | null

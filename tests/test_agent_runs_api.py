@@ -28,9 +28,18 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
         run_key="failer_def",
         agent_name="failer",
         ok=False,
+        status="failed",
         prompt="x",
         error="boom",
         events=[{"kind": "error", "message": "boom"}],
+    )
+    svc.store.agent_runs.create(
+        run_key="runner_xyz",
+        agent_name="runner",
+        ok=False,
+        status="running",
+        prompt="still working",
+        events=[],
     )
 
     client = _client(wm_paths)
@@ -39,7 +48,7 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     listed = client.get("/agent-runs", headers=headers)
     assert listed.status_code == 200
     keys = {row["run_key"] for row in listed.json()}
-    assert keys == {"greeter_abc", "failer_def"}
+    assert keys == {"greeter_abc", "failer_def", "runner_xyz"}
     # list (summary) view drops heavy columns
     assert "prompt" not in listed.json()[0]
     assert "events" not in listed.json()[0]
@@ -51,6 +60,10 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     # filter by agent_name
     one = client.get("/agent-runs?agent_name=failer", headers=headers).json()
     assert [row["run_key"] for row in one] == ["failer_def"]
+
+    # filter by terminal status, so running placeholders are not treated as failed.
+    failed_only = client.get("/agent-runs?status=failed", headers=headers).json()
+    assert [row["run_key"] for row in failed_only] == ["failer_def"]
 
     # detail includes prompt / result / events
     detail = client.get("/agent-runs/greeter_abc", headers=headers).json()
@@ -158,3 +171,74 @@ def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path
     events = client.get("/agent-runs/live_run/events", headers=headers).json()
     assert [e["kind"] for e in events] == ["result"]
 
+
+def test_agent_run_events_includes_terminal_db_events_when_live_jsonl_is_stale(wm_paths, tmp_path) -> None:
+    """If a run fails after the streaming file was closed, the terminal DB error
+    must still appear even though events.jsonl exists."""
+    import json
+
+    from agent_bridge.app.service import AgentBridgeService
+
+    run_dir = tmp_path / "run_failed"
+    run_dir.mkdir()
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"kind": "status", "status": "init"}) + "\n",
+        encoding="utf-8",
+    )
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="failed_live_run",
+        agent_name="workflow",
+        cwd=str(run_dir),
+        status="running",
+        ok=False,
+        prompt="",
+        events=[],
+    )
+    svc.store.agent_runs.finish_run(
+        "failed_live_run",
+        ok=False,
+        status="failed",
+        error="RuntimeError: sdk failed",
+        events=[
+            {"kind": "status", "status": "init"},
+            {"kind": "error", "status": "failed", "message": "RuntimeError: sdk failed"},
+        ],
+    )
+
+    client = _client(wm_paths)
+    events = client.get(
+        "/agent-runs/failed_live_run/events",
+        headers={"X-Agent-Bridge-User": "root"},
+    ).json()
+
+    assert [event["kind"] for event in events] == ["status", "error"]
+    assert events[-1]["message"] == "RuntimeError: sdk failed"
+
+
+def test_agent_run_finish_preserves_existing_model_when_not_replaced(wm_paths) -> None:
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="model_run",
+        agent_name="design_script",
+        model="claude-sonnet-4-5",
+        status="running",
+        ok=False,
+        prompt="",
+        events=[],
+    )
+
+    svc.store.agent_runs.finish_run(
+        "model_run",
+        ok=True,
+        status="completed",
+        model=None,
+        events=[{"kind": "result", "status": "success"}],
+    )
+
+    assert svc.store.agent_runs.get("model_run")["model"] == "claude-sonnet-4-5"

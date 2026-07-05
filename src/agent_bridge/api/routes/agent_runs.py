@@ -91,6 +91,7 @@ def create_agent_runs_routes(service, actor):
         workflow_key: str | None = None,
         workflow_run_id: str | None = None,
         ok: bool | None = None,
+        status: str | None = None,
         created_from: str | None = None,
         created_to: str | None = None,
         limit: int = 50,
@@ -103,6 +104,7 @@ def create_agent_runs_routes(service, actor):
             workflow_key=workflow_key,
             workflow_run_id=workflow_run_id,
             ok=ok,
+            status=status,
             created_from=created_from,
             created_to=created_to,
             limit=limit,
@@ -131,6 +133,9 @@ def create_agent_runs_routes(service, actor):
         if cwd:
             events = _read_events_jsonl(Path(str(cwd)) / "events.jsonl")
             if events is not None:
+                persisted = row.get("events") or []
+                if row.get("status") != "running" and len(persisted) > len(events):
+                    return persisted
                 return events
         return row.get("events") or []
 

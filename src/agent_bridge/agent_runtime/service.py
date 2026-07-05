@@ -220,11 +220,15 @@ class AgentService:
         except TimeoutError:
             error = f"agent timed out after {timeout_seconds}s"
             logger.warning("Agent run 超时 agent=%s 超时=%ss", agent_name or "agent", timeout_seconds)
-            events.append(event_record("error", status="failed", message=error))
+            error_event = event_record("error", status="failed", message=error)
+            events.append(error_event)
+            self._append_live_event(work_dir, error_event)
         except Exception as exc:
             logger.error("Agent run 失败 agent=%s 原因=%s", agent_name or "agent", exc, exc_info=True)
             error = f"{type(exc).__name__}: {exc}"
-            events.append(event_record("error", status="failed", message=error))
+            error_event = event_record("error", status="failed", message=error)
+            events.append(error_event)
+            self._append_live_event(work_dir, error_event)
 
         result = self._build_result(work_dir, started, result_msg, output_schema, error)
         result.run_key = run_key
@@ -335,6 +339,16 @@ class AgentService:
             self.store.agent_runs.update_cwd(run_key, str(work_dir))
         except Exception:
             logger.error("Agent run cwd 回填失败 run_key=%s", run_key, exc_info=True)
+
+    def _append_live_event(self, work_dir: Path | None, record: dict[str, Any]) -> None:
+        """Append a terminal event after the streaming loop has closed its file."""
+        if work_dir is None:
+            return
+        try:
+            with (work_dir / "events.jsonl").open("a", encoding="utf-8") as event_log:
+                write_event(event_log, record)
+        except OSError:
+            logger.error("Agent run 实时事件补写失败 work_dir=%s", work_dir, exc_info=True)
 
     def _finish_run(
         self,

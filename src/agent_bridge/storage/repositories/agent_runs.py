@@ -104,7 +104,7 @@ class AgentRunsRepository:
             conn.execute(
                 """
                 UPDATE agent_runs SET
-                  ok = ?, status = ?, error = ?, session_id = ?, model = ?,
+                  ok = ?, status = ?, error = ?, session_id = ?, model = COALESCE(?, model),
                   duration_ms = ?, cost_usd = ?, num_turns = ?,
                   result_json = ?, events_json = ?, finished_at = ?
                 WHERE run_key = ?

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { Search, RotateCw, ArrowLeft } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { AgentRun, WorkflowSubagentDetail } from '../../api/types'
@@ -10,12 +10,20 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
+import {
+  agentRunBadgeVariant,
+  agentRunOkFilterParam,
+  agentRunStatusFilterParam,
+  agentRunStatusLabel,
+  type AgentRunFilter,
+} from '../../lib/agentRunStatus'
+import type { WorkflowRunEvent } from '../../api/types'
 
 const props = defineProps<{ routeKey?: string }>()
 
 const runs = ref<AgentRun[]>([])
 const loading = ref(false)
-const okFilter = ref<'' | 'success' | 'failed'>('')
+const okFilter = ref<AgentRunFilter>('')
 const search = ref('')
 
 // Detail (sub-route) state. When routeKey is set we show a detail panel instead
@@ -24,6 +32,8 @@ const search = ref('')
 const detailRun = ref<AgentRun | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
+const detailEvents = ref<WorkflowRunEvent[]>([])
+let detailEventsPoll: ReturnType<typeof setInterval> | null = null
 
 // Sub-agent transcript detail (lazy-loaded when a sub-agent is expanded).
 const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
@@ -81,11 +91,15 @@ onMounted(() => {
   if (activeRunKey.value) loadDetail(activeRunKey.value)
 })
 
+onUnmounted(() => stopDetailEventsPolling())
+
 async function loadRuns() {
   loading.value = true
   const params: Record<string, string | number | boolean> = { limit: 100 }
-  if (okFilter.value === 'success') params.ok = true
-  if (okFilter.value === 'failed') params.ok = false
+  const okParam = agentRunOkFilterParam(okFilter.value)
+  const statusParam = agentRunStatusFilterParam(okFilter.value)
+  if (okParam != null) params.ok = okParam
+  if (statusParam) params.status = statusParam
   if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
   if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
   try {
@@ -96,7 +110,7 @@ async function loadRuns() {
   loading.value = false
 }
 
-function applyOkFilter(key: '' | 'success' | 'failed') {
+function applyOkFilter(key: AgentRunFilter) {
   okFilter.value = key
   loadRuns()
 }
@@ -111,19 +125,50 @@ function openDetail(run: AgentRun) {
 function backToList() {
   detailRun.value = null
   detailError.value = ''
+  detailEvents.value = []
+  stopDetailEventsPolling()
   window.location.hash = 'agent-runs'
 }
 
 async function loadDetail(runKey: string) {
   detailLoading.value = true
   detailError.value = ''
+  stopDetailEventsPolling()
   try {
     detailRun.value = await api.getAgentRun(runKey)
+    await loadDetailEvents(runKey)
+    if (detailRun.value?.status === 'running') {
+      detailEventsPoll = setInterval(() => loadDetailEvents(runKey, { quiet: true }), 1500)
+    }
   } catch (e: unknown) {
     detailRun.value = null
+    detailEvents.value = []
     detailError.value = e instanceof Error ? e.message : '加载失败'
   }
   detailLoading.value = false
+}
+
+async function loadDetailEvents(runKey: string, options: { quiet?: boolean } = {}) {
+  try {
+    detailEvents.value = await api.getAgentRunEvents(runKey)
+    if (detailRun.value?.run_key === runKey && detailRun.value.status === 'running') {
+      const refreshed = await api.getAgentRun(runKey)
+      detailRun.value = refreshed
+      if (refreshed.status !== 'running') stopDetailEventsPolling()
+    }
+  } catch (e: unknown) {
+    if (!options.quiet) {
+      detailEvents.value = []
+      detailError.value = e instanceof Error ? e.message : '事件流加载失败'
+    }
+  }
+}
+
+function stopDetailEventsPolling() {
+  if (detailEventsPoll) {
+    clearInterval(detailEventsPoll)
+    detailEventsPoll = null
+  }
 }
 
 // React to sub-route changes (browser back/forward, manual hash edit).
@@ -136,7 +181,9 @@ watch(activeRunKey, (key) => {
     loadDetail(key)
   } else {
     detailRun.value = null
+    detailEvents.value = []
     detailError.value = ''
+    stopDetailEventsPolling()
   }
 })
 
@@ -154,8 +201,9 @@ const displayRuns = computed(() => {
 
 const filterTabs = computed(() => [
   { key: '' as const, label: '全部', count: runs.value.length },
-  { key: 'success' as const, label: '成功', count: runs.value.filter(r => r.ok).length },
-  { key: 'failed' as const, label: '失败', count: runs.value.filter(r => !r.ok).length },
+  { key: 'running' as const, label: '执行中', count: runs.value.filter(r => r.status === 'running').length },
+  { key: 'success' as const, label: '成功', count: runs.value.filter(r => agentRunBadgeVariant(r) === 'success').length },
+  { key: 'failed' as const, label: '失败', count: runs.value.filter(r => agentRunBadgeVariant(r) === 'failed').length },
 ])
 
 function formatCost(v: number | null | undefined): string {
@@ -207,8 +255,16 @@ function pretty(value: unknown): string {
         <div>
           <span class="text-muted-foreground">状态</span>
           <div>
-            <Badge v-if="detailRun.ok" variant="secondary" class="bg-green-50 text-green-700">成功</Badge>
-            <Badge v-else variant="destructive">失败</Badge>
+            <Badge
+              variant="secondary"
+              :class="agentRunBadgeVariant(detailRun) === 'success'
+                ? 'bg-green-50 text-green-700'
+                : agentRunBadgeVariant(detailRun) === 'running'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'bg-red-50 text-red-700'"
+            >
+              {{ agentRunStatusLabel(detailRun) }}
+            </Badge>
           </div>
         </div>
         <div>
@@ -265,12 +321,12 @@ function pretty(value: unknown): string {
         <pre class="max-h-[240px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ pretty(detailRun.result) }}</pre>
       </div>
 
-      <div v-if="detailRun.events && detailRun.events.length">
+      <div v-if="detailEvents.length">
         <div class="mb-1 text-xs font-medium text-muted-foreground">
-          事件流（{{ detailRun.events.length }}）
+          事件流（{{ detailEvents.length }}）
         </div>
         <RunEventTimeline
-          :events="detailRun.events"
+          :events="detailEvents"
           :context-key="detailRun.run_key"
           @expand="(taskId: string) => ensureSubagentDetail(taskId)"
         >
@@ -369,8 +425,16 @@ function pretty(value: unknown): string {
                 {{ r.num_turns ?? '—' }}
               </td>
               <td class="px-4 py-3">
-                <Badge v-if="r.ok" variant="secondary" class="bg-green-50 text-green-700">成功</Badge>
-                <Badge v-else variant="destructive">失败</Badge>
+                <Badge
+                  variant="secondary"
+                  :class="agentRunBadgeVariant(r) === 'success'
+                    ? 'bg-green-50 text-green-700'
+                    : agentRunBadgeVariant(r) === 'running'
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'bg-red-50 text-red-700'"
+                >
+                  {{ agentRunStatusLabel(r) }}
+                </Badge>
               </td>
               <td class="px-4 py-3 text-right">
                 <Button variant="ghost" size="sm" class="h-8 text-xs" @click.stop="openDetail(r)">详情</Button>
