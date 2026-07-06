@@ -9,11 +9,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
-
+from agent_bridge.knowledge_management.docs_knowledge.backends._office_convert import (
+    SOFFICE_TARGETS,
+    convert_via_soffice,
+)
 
 _DOCS_INDEX = "documents.json"
 _KB_META = "kb.json"
 _DIRECT_EXTENSIONS = {".pdf", ".md", ".markdown"}
+# Formats markitdown can convert directly to Markdown.
 _MARKITDOWN_EXTENSIONS = {
     ".csv",
     ".docx",
@@ -26,6 +30,9 @@ _MARKITDOWN_EXTENSIONS = {
     ".xlsx",
     ".xml",
 }
+# Legacy binary Office formats that must be pre-converted to their OOXML
+# counterpart (via LibreOffice) before markitdown can read them.
+_SOFFICE_PRE_EXTENSIONS = SOFFICE_TARGETS
 
 def _default_pageindex_client_class():
     try:
@@ -293,23 +300,54 @@ class PageIndexBackend:
                 converted_path.write_text(normalized, encoding="utf-8")
                 return converted_path, "md", "markdown:normalized"
             return file_path, "md", "markdown"
-        if suffix in _MARKITDOWN_EXTENSIONS:
-            converter = (
-                self._markitdown_factory()
-                if self._markitdown_factory is not None
-                else _default_markitdown_factory()
+        if suffix in _SOFFICE_PRE_EXTENSIONS:
+            # Legacy .doc/.ppt → OOXML via LibreOffice, then markitdown → Markdown.
+            outdir = self._kb_dir(backend_kb_id) / "converted"
+            converted_ooxml = convert_via_soffice(
+                file_path, _SOFFICE_PRE_EXTENSIONS[suffix], outdir
             )
-            result = converter.convert_local(str(file_path))
-            markdown = getattr(result, "text_content", "")
-            markdown = _ensure_markdown_heading(markdown, Path(filename).stem or doc_slug)
-            converted_path = self._kb_dir(backend_kb_id) / "converted" / f"{doc_slug}.md"
-            converted_path.parent.mkdir(parents=True, exist_ok=True)
-            converted_path.write_text(markdown, encoding="utf-8")
+            converted_path = self._run_markitdown(
+                backend_kb_id, doc_slug, converted_ooxml, Path(filename).stem
+            )
+            return converted_path, "md", f"soffice+markitdown:{suffix.removeprefix('.')}"
+        if suffix in _MARKITDOWN_EXTENSIONS:
+            converted_path = self._run_markitdown(
+                backend_kb_id, doc_slug, file_path, Path(filename).stem
+            )
             return converted_path, "md", f"markitdown:{suffix.removeprefix('.')}"
-        supported = ", ".join(sorted(_DIRECT_EXTENSIONS | _MARKITDOWN_EXTENSIONS))
+        supported = ", ".join(
+            sorted(_DIRECT_EXTENSIONS | _MARKITDOWN_EXTENSIONS | set(_SOFFICE_PRE_EXTENSIONS))
+        )
         raise ValueError(
             f"unsupported PageIndex file format: {suffix or '<none>'}; supported: {supported}"
         )
+
+    def _run_markitdown(
+        self,
+        backend_kb_id: str,
+        doc_slug: str,
+        source: Path,
+        fallback_title: str,
+    ) -> Path:
+        """Run markitdown on ``source`` and persist the Markdown output.
+
+        Writes to ``<kb>/converted/<doc_slug>.md`` (creating the dir if
+        needed) and returns that path. ``fallback_title`` is used to ensure
+        the output has at least one top-level heading.
+        """
+        converter = (
+            self._markitdown_factory()
+            if self._markitdown_factory is not None
+            else _default_markitdown_factory()
+        )
+        result = converter.convert_local(str(source))
+        markdown = getattr(result, "text_content", "") or ""
+        title = fallback_title.strip() or doc_slug
+        markdown = _ensure_markdown_heading(markdown, title)
+        converted_path = self._kb_dir(backend_kb_id) / "converted" / f"{doc_slug}.md"
+        converted_path.parent.mkdir(parents=True, exist_ok=True)
+        converted_path.write_text(markdown, encoding="utf-8")
+        return converted_path
 
     def _candidate_contents(self, client: Any, backend_doc_id: str) -> list[str]:
         try:

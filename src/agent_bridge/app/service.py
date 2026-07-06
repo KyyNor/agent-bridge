@@ -45,7 +45,10 @@ from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 from agent_bridge.automation.workflows.service import WorkflowService
 
 
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md"}
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".txt", ".md", ".markdown", ".csv", ".json",
+}
 SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
 
 

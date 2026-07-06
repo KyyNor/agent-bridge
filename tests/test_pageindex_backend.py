@@ -298,11 +298,11 @@ def test_upload_plain_markdown_indexes_normalized_copy(tmp_path: Path) -> None:
 def test_upload_unsupported_format_raises_clear_error(tmp_path: Path) -> None:
     backend = _backend(tmp_path)
     backend.create_kb("docs", "Docs")
-    source = tmp_path / "legacy.doc"
-    source.write_bytes(b"doc")
+    source = tmp_path / "weird.rtf"
+    source.write_bytes(b"rtf")
 
     with pytest.raises(ValueError, match="unsupported PageIndex file format"):
-        backend.upload("docs", "legacy", source, "legacy.doc")
+        backend.upload("docs", "weird", source, "weird.rtf")
 
 
 def test_retrieve_returns_keyword_matching_pageindex_content(tmp_path: Path) -> None:
@@ -375,3 +375,126 @@ def test_ask_requires_official_pageindex_query_interface(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="official PageIndex query"):
         backend.ask("docs", "why did revenue grow?")
+
+
+# ---------------------------------------------------------------------------
+# Legacy Office (.doc/.ppt) → soffice → markitdown pipeline
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_soffice(
+    monkeypatch: pytest.MonkeyPatch, produced_content: bytes = b"OOXML"
+) -> None:
+    """Patch ``convert_via_soffice`` to drop a fake OOXML file in outdir."""
+
+    def _fake(src: Path, target_suffix: str, outdir: Path, **kwargs) -> Path:
+        outdir.mkdir(parents=True, exist_ok=True)
+        out_file = outdir / (src.stem + target_suffix)
+        out_file.write_bytes(produced_content)
+        return out_file
+
+    monkeypatch.setattr(
+        "agent_bridge.knowledge_management.docs_knowledge.backends.pageindex.convert_via_soffice",
+        _fake,
+    )
+
+
+def test_upload_doc_converts_via_soffice_then_markitdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_soffice(monkeypatch)
+    converter = FakeMarkItDown("# Title\n\nFrom legacy doc")
+    backend = _backend(tmp_path, markitdown_factory=lambda: converter)
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / "legacy.doc"
+    source.write_bytes(b"\xd0\xcf\x11\xe0")
+
+    doc_id = backend.upload("docs", "legacy", source, "legacy.doc")
+
+    assert doc_id == "pi-1"
+    # markitdown must have been fed the soffice-produced docx, not the .doc.
+    converted_docx = tmp_path / "pageindex" / "docs" / "converted" / "legacy.docx"
+    assert converter.converted == [str(converted_docx)]
+    # Final indexed artifact is the markdown produced from that docx.
+    md_path = tmp_path / "pageindex" / "docs" / "converted" / "legacy.md"
+    assert md_path.read_text(encoding="utf-8") == "# Title\n\nFrom legacy doc"
+    assert FakePageIndexClient.created[-1].indexed == [(str(md_path), "md")]
+
+
+def test_upload_ppt_converts_via_soffice_then_markitdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_soffice(monkeypatch)
+    converter = FakeMarkItDown("# Slides\n\nSlide one")
+    backend = _backend(tmp_path, markitdown_factory=lambda: converter)
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / "deck.ppt"
+    source.write_bytes(b"\xd0\xcf\x11\xe0")
+
+    doc_id = backend.upload("docs", "deck", source, "deck.ppt")
+
+    assert doc_id == "pi-1"
+    converted_pptx = tmp_path / "pageindex" / "docs" / "converted" / "deck.pptx"
+    assert converter.converted == [str(converted_pptx)]
+    md_path = tmp_path / "pageindex" / "docs" / "converted" / "deck.md"
+    assert md_path.exists()
+
+
+def test_upload_doc_propagates_soffice_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When soffice is unavailable, upload must surface the friendly error."""
+
+    def _raise(src, target_suffix, outdir, **kwargs):
+        from agent_bridge.knowledge_management.docs_knowledge.backends._office_convert import (
+            OfficeConversionError,
+        )
+
+        raise OfficeConversionError("LibreOffice (soffice) is not installed.")
+
+    monkeypatch.setattr(
+        "agent_bridge.knowledge_management.docs_knowledge.backends.pageindex.convert_via_soffice",
+        _raise,
+    )
+    backend = _backend(tmp_path, markitdown_factory=lambda: FakeMarkItDown(""))
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / "legacy.doc"
+    source.write_bytes(b"\xd0\xcf\x11\xe0")
+
+    with pytest.raises(RuntimeError, match="LibreOffice.*not installed"):
+        backend.upload("docs", "legacy", source, "legacy.doc")
+
+
+# ---------------------------------------------------------------------------
+# Newly allowed direct-conversion formats
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("suffix", [".markdown", ".csv", ".json"])
+def test_upload_newly_allowed_formats_route_to_markitdown(
+    tmp_path: Path, suffix: str
+) -> None:
+    converter = FakeMarkItDown("# Heading\n\ncontent")
+    backend = _backend(tmp_path, markitdown_factory=lambda: converter)
+    backend.create_kb("docs", "Docs")
+    source = tmp_path / f"data{suffix}"
+
+    if suffix == ".markdown":
+        source.write_text("plain markdown body", encoding="utf-8")
+    elif suffix == ".csv":
+        source.write_text("a,b\n1,2\n", encoding="utf-8")
+    else:
+        source.write_text('{"k": "v"}', encoding="utf-8")
+
+    doc_id = backend.upload("docs", "data", source, source.name)
+
+    assert doc_id == "pi-1"
+    md_path = tmp_path / "pageindex" / "docs" / "converted" / "data.md"
+    assert md_path.exists()
+    # .markdown is in _DIRECT_EXTENSIONS and normalized in-place (no markitdown
+    # call); .csv/.json go through markitdown.
+    if suffix == ".markdown":
+        assert converter.converted == []
+        assert md_path.read_text(encoding="utf-8").startswith("# data\n\nplain markdown body")
+    else:
+        assert converter.converted == [str(source)]
