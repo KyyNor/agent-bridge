@@ -225,6 +225,7 @@ class WorkflowDefinitionRequest(BaseModel):
     profile_key: str
     workflow_js: str = ""
     status: str = "active"
+    workflow_type: str = "operation"
 
 
 class SkillPromptRequest(BaseModel):

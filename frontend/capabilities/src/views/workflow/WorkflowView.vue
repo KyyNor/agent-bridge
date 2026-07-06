@@ -60,7 +60,7 @@ const detailLoading = ref(false)
 const historyLoading = ref(false)
 const showArtifact = ref(false)
 const showArtifactHistory = ref(false)
-const fullscreenArtifact = ref<{ title: string; path: string; summary: string; tags: string[]; content: string } | null>(null)
+const fullscreenArtifact = ref<{ title: string; path: string; summary: string; tags: string[]; content: string; format: string } | null>(null)
 const showGuide = ref(false)
 const showClearConfirm = ref(false)
 const progressWorkflowKey = ref('')
@@ -136,6 +136,7 @@ function openArtifactFullscreen(artifact: WorkflowArtifact | WorkflowArtifactDet
     summary: artifact.summary,
     tags: artifact.tags,
     content: artifact.content || '',
+    format: artifact.format,
   }
 }
 
@@ -158,6 +159,7 @@ const form = ref({
   description: '',
   profile_key: '',
   status: 'active',
+  workflow_type: 'operation' as 'operation' | 'summary',
   workflow_js: '',
 })
 
@@ -403,6 +405,7 @@ function prepareCreateForm() {
     description: '',
     profile_key: profiles.value[0]?.profile_key || '',
     status: 'active',
+    workflow_type: 'operation',
     workflow_js: '',
   })
   formError.value = ''
@@ -419,6 +422,7 @@ function prepareEditForm(item: WorkflowDefinition) {
     description: item.description,
     profile_key: item.profile_key,
     status: item.status,
+    workflow_type: item.workflow_type === 'summary' ? 'summary' : 'operation',
     workflow_js: item.workflow_js,
   })
   formError.value = ''
@@ -438,6 +442,7 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
       description: form.value.description,
       profile_key: form.value.profile_key,
       status: form.value.status,
+      workflow_type: form.value.workflow_type,
       workflow_js: form.value.workflow_js,
     })
     selectedKey.value = saved.workflow_key
@@ -467,12 +472,14 @@ function workflowDesignerCurrent() {
       description: form.value.description,
       profile_key: form.value.profile_key,
       status: form.value.status,
+      workflow_type: form.value.workflow_type,
       workflow_js: form.value.workflow_js,
     }
   }
   return {
     profile_key: form.value.profile_key,
     status: 'active',
+    workflow_type: form.value.workflow_type,
   }
 }
 
@@ -509,6 +516,7 @@ async function acceptWorkflowDesign() {
     description: draft.description,
     profile_key: draft.profile_key,
     status: draft.status,
+    workflow_type: draft.workflow_type === 'summary' ? 'summary' : 'operation',
     workflow_js: draft.workflow_js,
   }
   const saved = await saveWorkflow()
@@ -1016,6 +1024,7 @@ async function loadProgressArtifacts() {
       run_id: runId,
       include_history: true,
       full: true,
+      format: 'all',
       limit: 50,
     })
     progressRunArtifacts.value = { ...progressRunArtifacts.value, [runId]: result.items }
@@ -1032,6 +1041,16 @@ async function openProgressArtifact() {
   const artifact = progressArtifacts.value.find(item => item.format === 'markdown') || progressArtifacts.value[0]
   if (!artifact) {
     await alert({ title: '暂无产物', description: '本次运行没有可查看的 Markdown 产物。' })
+    return
+  }
+  openArtifactFullscreen(artifact)
+}
+
+async function openProgressHtmlReport() {
+  await loadProgressArtifacts()
+  const artifact = progressArtifacts.value.find(item => item.format === 'html')
+  if (!artifact) {
+    await alert({ title: '暂无 HTML 报告', description: '本次运行没有生成 HTML 报告，或报告仍在生成中。' })
     return
   }
   openArtifactFullscreen(artifact)
@@ -1448,8 +1467,12 @@ async function confirmClearWorkflow() {
               <div class="flex flex-wrap items-center gap-2">
                 <Badge>{{ selectedWorkflow.workflow_key }}</Badge>
                 <Badge variant="outline">{{ statusLabel(selectedWorkflow.status) }}</Badge>
+                <Badge v-if="selectedWorkflow.workflow_type === 'summary'" variant="outline">总结类</Badge>
               </div>
-              <p class="mt-2 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
+              <p class="mt-2 text-sm text-muted-foreground">
+                {{ selectedWorkflow.description || '无描述' }}
+                <span v-if="selectedWorkflow.workflow_type === 'summary'" class="ml-1 text-xs">· 结束后自动生成 HTML 报告</span>
+              </p>
             </div>
           </div>
 
@@ -1509,6 +1532,8 @@ async function confirmClearWorkflow() {
                     </div>
                     <div class="flex flex-wrap items-center gap-1">
                       <Badge v-if="row.artifact?.is_current" variant="outline">current</Badge>
+                      <Badge v-if="row.artifact?.format === 'html'" variant="secondary" class="text-xs">人类阅读</Badge>
+                      <Badge v-else variant="secondary" class="text-xs">AI 检索</Badge>
                       <Badge v-for="tag in row.artifact?.tags || []" :key="tag" variant="outline">{{ tag }}</Badge>
                       <Button
                         v-if="row.artifact?.task_key"
@@ -1893,6 +1918,15 @@ async function confirmClearWorkflow() {
           >
             {{ progressArtifactsLoading ? '加载产物中' : '查看产物' }}
           </Button>
+          <Button
+            v-if="progressFinished && progressWorkflow?.workflow_type === 'summary'"
+            variant="outline"
+            size="sm"
+            :disabled="progressArtifactsLoading"
+            @click="openProgressHtmlReport"
+          >
+            {{ progressArtifactsLoading ? '加载中' : '查看 HTML 报告' }}
+          </Button>
         </div>
       </div>
       <div class="space-y-4">
@@ -1989,6 +2023,13 @@ async function confirmClearWorkflow() {
               <select v-model="form.status" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
                 <option value="active">启用</option>
                 <option value="disabled">停用</option>
+              </select>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-muted-foreground">类型</label>
+              <select v-model="form.workflow_type" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
+                <option value="operation">操作</option>
+                <option value="summary">总结</option>
               </select>
             </div>
             <div class="lg:col-span-4">
@@ -2135,7 +2176,15 @@ async function confirmClearWorkflow() {
           </Button>
         </div>
         <div class="flex-1 overflow-auto px-6 py-4">
-          <div class="mx-auto max-w-4xl space-y-4">
+          <div v-if="fullscreenArtifact.format === 'html'" class="mx-auto h-full max-w-5xl">
+            <iframe
+              :srcdoc="fullscreenArtifact.content"
+              sandbox="allow-same-origin"
+              class="h-full min-h-[70vh] w-full rounded-md border bg-white"
+              :title="fullscreenArtifact.title || 'HTML 报告'"
+            />
+          </div>
+          <div v-else class="mx-auto max-w-4xl space-y-4">
             <div v-if="fullscreenArtifact.summary" class="text-sm text-muted-foreground">{{ fullscreenArtifact.summary }}</div>
             <div class="prose prose-sm max-w-none" v-html="fullscreenArtifactHtml"></div>
           </div>

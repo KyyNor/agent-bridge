@@ -74,20 +74,22 @@ class WorkflowsRepository:
         workflow_js: str,
         status: str,
         created_by: str,
+        workflow_type: str = "operation",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO workflow_definitions (
-                  workflow_key, name, description, profile_key, workflow_js, status, created_by
+                  workflow_key, name, description, profile_key, workflow_js, status, workflow_type, created_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
                   profile_key = excluded.profile_key,
                   workflow_js = excluded.workflow_js,
                   status = excluded.status,
+                  workflow_type = excluded.workflow_type,
                   updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -97,6 +99,7 @@ class WorkflowsRepository:
                     profile_key,
                     workflow_js,
                     status,
+                    workflow_type,
                     created_by,
                 ),
             )
@@ -787,6 +790,7 @@ class WorkflowsRepository:
         task_version: str | None = None,
         run_id: str | None = None,
         include_history: bool = False,
+        format: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = []
         params: list[Any] = []
@@ -810,6 +814,14 @@ class WorkflowsRepository:
         if path:
             clauses.append("path LIKE ?")
             params.append(f"{path}%")
+        # Format filter: by default (None) only markdown is returned so that
+        # derived artifacts like HTML reports never leak into agent retrieval.
+        # Pass format="all" (or "") to disable the filter.
+        if format and format != "all":
+            clauses.append("format = ?")
+            params.append(format)
+        elif format is None:
+            clauses.append("format = 'markdown'")
         for tag in tags:
             clauses.append(
                 "EXISTS (SELECT 1 FROM json_each(workflow_artifacts.tags_json) WHERE json_each.value = ?)"

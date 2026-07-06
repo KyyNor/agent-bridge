@@ -162,6 +162,7 @@ export interface WorkflowDefinition {
   profile_key: string
   workflow_js: string
   status: string
+  workflow_type?: 'operation' | 'summary'
   created_by: string
   created_at: string
   updated_at: string
@@ -504,6 +505,7 @@ export interface WorkflowDesignResult {
     description: string
     profile_key: string
     status: string
+    workflow_type?: 'operation' | 'summary'
     workflow_js: string
   }
 }

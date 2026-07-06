@@ -451,6 +451,7 @@ CREATE TABLE IF NOT EXISTS workflow_definitions (
   profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE RESTRICT,
   workflow_js TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active',
+  workflow_type TEXT NOT NULL DEFAULT 'operation',
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

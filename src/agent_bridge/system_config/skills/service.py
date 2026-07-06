@@ -33,7 +33,13 @@ class SkillService:
                 name="Design Workflow",
                 description="编写 Agent Bridge workflow.js 的提示词。",
                 default_path=defaults / "design_workflow.md",
-            )
+            ),
+            "design_html_report": SkillDefinition(
+                skill_name="design_html_report",
+                name="Design HTML Report",
+                description="为 workflow 总结类产物生成面向人类阅读的 HTML 报告。",
+                default_path=defaults / "design_html_report.md",
+            ),
         }
 
     def list_skills(self, actor: str) -> list[dict[str, Any]]:

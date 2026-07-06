@@ -76,6 +76,11 @@ class AgentBridgeService:
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
         self.workflows = WorkflowService(store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
+        # The workflow service generates HTML reports for summary runs, which
+        # requires driving an agent run and reading the design skill. Wire
+        # those collaborators now that both services exist.
+        self.workflows.agent_service = self.agents
+        self.workflows.skills = self.skills
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)

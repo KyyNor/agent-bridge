@@ -71,6 +71,11 @@ class SQLiteStore:
             self._drop_column(conn, "workflow_definitions", "manifest_json")
             self._ensure_columns(
                 conn,
+                "workflow_definitions",
+                {"workflow_type": "TEXT NOT NULL DEFAULT 'operation'"},
+            )
+            self._ensure_columns(
+                conn,
                 "workflow_tasks",
                 {
                     "task_version": "TEXT NOT NULL DEFAULT ''",
@@ -599,6 +604,7 @@ class SQLiteStore:
         workflow_js: str,
         status: str,
         created_by: str,
+        workflow_type: str = "operation",
     ) -> dict[str, Any]:
         return self.workflows.upsert_workflow_definition(
             workflow_key=workflow_key,
@@ -608,6 +614,7 @@ class SQLiteStore:
             workflow_js=workflow_js,
             status=status,
             created_by=created_by,
+            workflow_type=workflow_type,
         )
 
     def get_workflow_definition(self, workflow_key: str) -> dict[str, Any] | None:
@@ -841,6 +848,7 @@ class SQLiteStore:
         task_version: str | None = None,
         run_id: str | None = None,
         include_history: bool = False,
+        format: str | None = None,
     ) -> list[dict[str, Any]]:
         return self.workflows.search_workflow_artifacts(
             profile_key=profile_key,
@@ -853,6 +861,7 @@ class SQLiteStore:
             run_id=run_id,
             include_history=include_history,
             limit=limit,
+            format=format,
         )
 
     def create_mcp_service(

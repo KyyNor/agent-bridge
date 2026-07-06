@@ -252,6 +252,7 @@ export const api = {
     include_history?: boolean
     full?: boolean
     tags?: string[]
+    format?: string
     limit?: number
   } = {}) => {
     const qs = new URLSearchParams()
@@ -264,6 +265,7 @@ export const api = {
     if (params.run_id) qs.set('run_id', params.run_id)
     if (params.include_history) qs.set('include_history', 'true')
     if (params.full) qs.set('full', 'true')
+    if (params.format) qs.set('format', params.format)
     if (params.limit) qs.set('limit', String(params.limit))
     ;(params.tags || []).forEach(tag => qs.append('tags', tag))
     return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)

@@ -26,3 +26,9 @@ class WorkflowTaskStatus(str, Enum):
 
 class WorkflowArtifactFormat(str, Enum):
     markdown = "markdown"
+    html = "html"
+
+
+class WorkflowType(str, Enum):
+    operation = "operation"
+    summary = "summary"

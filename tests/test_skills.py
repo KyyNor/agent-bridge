@@ -34,7 +34,14 @@ def test_list_skills_includes_design_script(wm_paths):
 
     skills = svc.skills.list_skills("root")
 
-    assert [item["skill_name"] for item in skills] == ["design_script", "design_workflow"]
+    assert [item["skill_name"] for item in skills] == [
+        "design_html_report",
+        "design_script",
+        "design_workflow",
+    ]
+    html_skill = svc.skills.get_skill("root", "design_html_report")
+    assert html_skill["source"] == "default"
+    assert "<!doctype html>" in html_skill["prompt"]
 
 
 def test_skill_management_only_allows_known_skills(wm_paths):

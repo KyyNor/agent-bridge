@@ -6,7 +6,11 @@ from typing import Any
 
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
-from agent_bridge.automation.workflows.models import WorkflowArtifactFormat, WorkflowStatus
+from agent_bridge.automation.workflows.models import (
+    WorkflowArtifactFormat,
+    WorkflowStatus,
+    WorkflowType,
+)
 from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
 
 logger = logging.getLogger(__name__)
@@ -24,9 +28,21 @@ def _snippet(content: str, query: str | None, size: int = 220) -> str:
 
 
 class WorkflowService:
-    def __init__(self, *, store: SQLiteStore, admins: set[str]) -> None:
+    def __init__(
+        self,
+        *,
+        store: SQLiteStore,
+        admins: set[str],
+        agent_service: Any = None,
+        skills: Any = None,
+    ) -> None:
         self.store = store
         self.admins = admins
+        # Late-wired collaborators (set by AgentBridgeService after both the
+        # agent service and skill service are constructed). Kept optional so
+        # this service stays usable in isolated tests.
+        self.agent_service = agent_service
+        self.skills = skills
 
     def upsert_definition(
         self,
@@ -38,12 +54,17 @@ class WorkflowService:
         profile_key: str,
         workflow_js: str,
         status: str,
+        workflow_type: str = "operation",
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise ValidationError("profile not found")
         try:
             next_status = WorkflowStatus(status).value
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        try:
+            next_type = WorkflowType(workflow_type).value
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         result = self.store.upsert_workflow_definition(
@@ -53,13 +74,15 @@ class WorkflowService:
             profile_key=profile_key,
             workflow_js=workflow_js,
             status=next_status,
+            workflow_type=next_type,
             created_by=actor,
         )
         logger.info(
-            "Workflow 定义已保存 workflow=%s profile=%s 状态=%s actor=%s",
+            "Workflow 定义已保存 workflow=%s profile=%s 状态=%s 类型=%s actor=%s",
             workflow_key,
             profile_key,
             next_status,
+            next_type,
             actor,
         )
         return result
@@ -332,8 +355,6 @@ class WorkflowService:
             raise ValidationError("unsupported artifact format") from exc
         if not path or path.startswith("/") or ".." in path.split("/"):
             raise ValidationError("invalid artifact path")
-        if artifact_format != WorkflowArtifactFormat.markdown.value:
-            raise ValidationError("unsupported artifact format")
         saved = self.store.upsert_workflow_artifact(
             workflow_key=workflow_key,
             profile_key=profile_key,
@@ -397,6 +418,140 @@ class WorkflowService:
             raise ValidationError("workflow task lease mismatch")
         return {"status": "completed", "artifact_count": len(saved), "artifacts": saved}
 
+    def generate_html_report_for_run(
+        self,
+        *,
+        workflow_key: str,
+        profile_key: str,
+        run_id: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Generate a human-readable HTML report for a completed summary run.
+
+        Only fires for ``workflow_type='summary'`` workflows that produced at
+        least one Markdown artifact this run. The report is one consolidated
+        HTML document stored at ``out/report.html`` (overwriting any previous
+        report for the same task via the existing ``is_current`` mechanism).
+
+        Failures here must NOT alter the main workflow run status — callers
+        (the scheduler) wrap this in try/except and log a warning.
+        """
+        # Local import to avoid a module-load cycle (reporter -> models).
+        from agent_bridge.automation.workflows.reporter import (
+            HTML_MAX_BYTES,
+            HTML_REPORT_SCHEMA,
+            build_report_prompt,
+            looks_like_html,
+            summarize_agent_events,
+        )
+        from agent_bridge.automation.workflows.models import WorkflowType
+
+        workflow = self.store.get_workflow_definition(workflow_key)
+        if workflow is None:
+            return {"status": "skipped", "reason": "workflow not found"}
+        if (workflow.get("workflow_type") or WorkflowType.operation.value) != WorkflowType.summary.value:
+            return {"status": "skipped", "reason": "not a summary workflow"}
+
+        markdown_items = self.store.search_workflow_artifacts(
+            profile_key=profile_key,
+            query=None,
+            tags=[],
+            path=None,
+            workflow_key=workflow_key,
+            run_id=run_id,
+            include_history=False,
+            format="markdown",
+            limit=50,
+        )
+        if not markdown_items:
+            return {"status": "no_markdown"}
+
+        # Derive the task_key from the markdown artifacts so the HTML report
+        # shares it (and thus participates in the same is_current overwrite).
+        task_key = markdown_items[0].get("task_key")
+        task_version = markdown_items[0].get("task_version") or ""
+
+        run_logs = self.store.list_workflow_run_logs(run_id)
+        agent_runs = self.store.agent_runs.list(
+            workflow_key=workflow_key, workflow_run_id=run_id, limit=50
+        )
+        agent_events_summary = summarize_agent_events(agent_runs)
+
+        if self.agent_service is None:
+            raise ValidationError("agent service is not configured")
+        if self.skills is None:
+            raise ValidationError("skill service is not configured")
+
+        skill_payload = self.skills.get_skill(actor, "design_html_report")
+        skill_prompt = skill_payload["prompt"]
+        run_row = self.store.get_workflow_run(run_id) or {}
+
+        prompt = build_report_prompt(
+            skill_name="design_html_report",
+            skill_prompt=skill_prompt,
+            workflow=workflow,
+            run={"run_id": run_id, "task_key": task_key},
+            markdown_artifacts=markdown_items,
+            run_logs=run_logs,
+            agent_events_summary=agent_events_summary,
+        )
+
+        import asyncio
+
+        result = asyncio.run(
+            self.agent_service.run(
+                prompt=prompt,
+                agent_name="workflow_html_reporter",
+                profile=profile_key,
+                output_schema=HTML_REPORT_SCHEMA,
+                actor=actor,
+                workflow_key=workflow_key,
+                run_id=run_id,
+                timeout=900,
+            )
+        )
+
+        if not result.ok:
+            raise ValidationError(f"html report agent failed: {result.error or 'unknown'}")
+        payload = result.result or {}
+        if not isinstance(payload, dict):
+            raise ValidationError("html report agent returned non-object result")
+
+        html = str(payload.get("html") or "")
+        if not looks_like_html(html):
+            raise ValidationError("html report agent output is not a valid HTML document")
+        if len(html.encode("utf-8")) > HTML_MAX_BYTES:
+            raise ValidationError("html report exceeds size limit")
+
+        title = str(payload.get("title") or "Workflow 报告")[:200]
+        summary = str(payload.get("summary") or "")[:2000]
+        source_ids = [str(x) for x in payload.get("source_artifact_ids") or [] if isinstance(x, str)]
+
+        saved = self.save_artifact(
+            workflow_key=workflow_key,
+            profile_key=profile_key,
+            run_id=run_id,
+            task_key=task_key,
+            task_version=task_version,
+            title=title,
+            path="out/report.html",
+            tags=["html-report"],
+            format="html",
+            summary=summary,
+            content=html,
+            metadata={
+                "derived_from_artifact_ids": source_ids,
+                "report_kind": "human_html",
+            },
+        )
+        logger.info(
+            "Workflow HTML 报告已生成 run_id=%s workflow=%s bytes=%d",
+            run_id,
+            workflow_key,
+            len(html.encode("utf-8")),
+        )
+        return {"status": "generated", "artifact": saved}
+
     def get_artifact(
         self,
         *,
@@ -450,6 +605,7 @@ class WorkflowService:
         include_history: bool = False,
         trusted_profile_context: bool = False,
         full: bool = False,
+        format: str | None = None,
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
             raise AccessDenied("capability profile is required")
@@ -475,6 +631,7 @@ class WorkflowService:
             run_id=run_id,
             include_history=include_history,
             limit=bounded_limit,
+            format=format,
         )
         def _entry(item: dict[str, Any]) -> dict[str, Any]:
             entry = {

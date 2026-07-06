@@ -370,6 +370,11 @@ class WorkflowScheduler:
             final_status = ingested["status"]
             if final_status == "no_task":
                 self.finished_today.add(workflow_key)
+            # For summary workflows, append a derived HTML report for human
+            # consumption. This is best-effort: a failure here must NOT change
+            # the main run status (kept completed) — it only records a warning.
+            if final_status == "completed":
+                self._maybe_generate_html_report(workflow_key, workflow, run_id)
             self._store.finish_workflow_run(
                 run_id,
                 status=final_status,
@@ -416,6 +421,72 @@ class WorkflowScheduler:
             )
         except Exception:
             logger.exception("释放工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
+
+    def _maybe_generate_html_report(
+        self,
+        workflow_key: str,
+        workflow: dict[str, Any],
+        run_id: str,
+    ) -> None:
+        """Best-effort HTML report generation for summary workflows.
+
+        Any error is swallowed (logged + recorded as a warning run log) so the
+        main workflow run stays completed. Uses an admin actor so the reporter
+        agent can call ``load_skill``.
+        """
+        if (workflow.get("workflow_type") or "operation") != "summary":
+            return
+        actor = sorted(self._admins)[0] if self._admins else "root"
+        try:
+            outcome = self._service.generate_html_report_for_run(
+                workflow_key=workflow_key,
+                profile_key=workflow["profile_key"],
+                run_id=run_id,
+                actor=actor,
+            )
+            status = outcome.get("status")
+            if status == "generated":
+                self._store.append_workflow_run_log(
+                    run_id=run_id,
+                    workflow_key=workflow_key,
+                    task_key=None,
+                    level="info",
+                    stage="html_report",
+                    message="HTML 报告已生成",
+                    payload=outcome,
+                )
+            elif status == "skipped":
+                logger.debug("HTML 报告跳过 workflow=%s run=%s 原因=%s", workflow_key, run_id, outcome.get("reason"))
+            elif status == "no_markdown":
+                self._store.append_workflow_run_log(
+                    run_id=run_id,
+                    workflow_key=workflow_key,
+                    task_key=None,
+                    level="warning",
+                    stage="html_report",
+                    message="本轮无 Markdown 产物，未生成 HTML 报告",
+                    payload={},
+                )
+        except Exception as exc:
+            logger.warning(
+                "HTML 报告生成失败 workflow=%s run=%s error=%s",
+                workflow_key,
+                run_id,
+                exc,
+                exc_info=True,
+            )
+            try:
+                self._store.append_workflow_run_log(
+                    run_id=run_id,
+                    workflow_key=workflow_key,
+                    task_key=None,
+                    level="warning",
+                    stage="html_report",
+                    message=f"HTML 报告生成失败：{exc}",
+                    payload={},
+                )
+            except Exception:
+                logger.exception("写入 HTML 报告失败日志失败 workflow=%s run=%s", workflow_key, run_id)
 
     def _finish_failed(self, workflow_key: str, run_id: str, result: Any, error: str) -> dict[str, Any]:
         self._store.finish_workflow_run(
