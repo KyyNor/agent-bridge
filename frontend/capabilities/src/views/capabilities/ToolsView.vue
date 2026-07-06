@@ -7,6 +7,8 @@ import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Input } from '../../components/ui/input'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 type ToolWithService = CapabilityTool & {
   source_type: 'mcp_service' | 'openapi_service'
@@ -19,6 +21,8 @@ const selectedService = ref('__all__')
 const loading = ref(false)
 const search = ref('')
 const typeFilter = ref('')
+const page = ref(1)
+const pageSize = ref(10)
 
 onMounted(async () => {
   loading.value = true
@@ -65,6 +69,7 @@ const displayTools = computed(() => {
   }
   return list
 })
+const pagedTools = computed(() => paginate(displayTools.value, page.value, pageSize.value))
 
 const toolTypes = [
   { value: 'overview', label: '概览', color: 'bg-blue-50 text-blue-700' },
@@ -105,10 +110,10 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
               ? 'bg-card text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'
           ]"
-          @click="typeFilter = tab.key"
+          @click="() => { typeFilter = tab.key; page = 1 }"
         >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
       </div>
-      <Select v-model="selectedService">
+      <Select v-model="selectedService" @update:model-value="page = 1">
         <SelectTrigger class="w-[200px]">
           <SelectValue placeholder="全部服务" />
         </SelectTrigger>
@@ -139,7 +144,7 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
             </tr>
           </thead>
           <tbody>
-            <tr v-for="t in displayTools" :key="`${t.service_key}:${t.tool_name}`" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="t in pagedTools" :key="`${t.service_key}:${t.tool_name}`" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <span class="font-mono text-[13px] font-semibold text-foreground">{{ t.tool_name }}</span>
               </td>
@@ -175,8 +180,11 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
       </CardContent>
     </Card>
 
-    <div class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>共 {{ displayTools.length }} 条记录</span>
-    </div>
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="displayTools.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
   </div>
 </template>

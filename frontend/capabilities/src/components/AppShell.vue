@@ -83,7 +83,7 @@ function navigate(key: string) {
     </aside>
 
     <!-- Main Content -->
-    <div class="ml-[210px] flex min-h-screen flex-1 flex-col">
+    <div class="ml-[210px] flex min-h-screen min-w-0 flex-1 flex-col">
       <slot />
     </div>
   </div>

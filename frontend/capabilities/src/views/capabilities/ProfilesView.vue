@@ -20,11 +20,15 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const profiles = ref<ProjectProfile[]>([])
 const loading = ref(true)
 const search = ref('')
 const statusFilter = ref('all')
+const page = ref(1)
+const pageSize = ref(10)
 
 const showAdd = ref(false)
 const form = ref({ profile_key: '', name: '', description: '', status: 'active' })
@@ -83,6 +87,7 @@ const filtered = computed(() => {
   }
   return list
 })
+const pagedProfiles = computed(() => paginate(filtered.value, page.value, pageSize.value))
 
 const filterTabs = computed(() => [
   { key: 'all', label: '全部', count: profiles.value.length },
@@ -454,7 +459,7 @@ async function refreshProfileDoc(raiseError = false) {
               ? 'bg-card text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'
           ]"
-          @click="statusFilter = tab.key"
+          @click="() => { statusFilter = tab.key; page = 1 }"
         >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
       </div>
       <Button @click="showAdd = true">
@@ -479,7 +484,7 @@ async function refreshProfileDoc(raiseError = false) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in filtered" :key="p.profile_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="p in pagedProfiles" :key="p.profile_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="min-w-0 px-4 py-3">
                 <span class="block break-all text-[13px] font-medium text-foreground">{{ p.profile_key }}</span>
                 <div class="mt-0.5 break-all text-xs text-muted-foreground">{{ p.name }}</div>
@@ -509,9 +514,12 @@ async function refreshProfileDoc(raiseError = false) {
       </CardContent>
     </Card>
 
-    <div class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>共 {{ filtered.length }} 条记录</span>
-    </div>
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="filtered.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
 
     <!-- Add Dialog -->
     <Dialog :open="showAdd" @update:open="showAdd = $event">

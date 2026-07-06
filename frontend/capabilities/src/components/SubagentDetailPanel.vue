@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../api/types'
 import { formatLocalDatetime } from '../lib/time'
 import { renderMarkdown } from '../lib/markdown'
+import JsonViewer from './JsonViewer.vue'
 
 const props = defineProps<{
   detail: WorkflowSubagentDetail | null
@@ -186,7 +187,7 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
           <div v-if="agent.result != null && formatValue(agent.result) !== formatValue(props.detail.task_output)" class="tl-result" style="margin-top:10px">
             <div class="tl-result-label">结构化结果 · {{ shortAgentId(agent.agent_id) }}</div>
             <div class="tl-result-text">
-              <pre>{{ formatValue(agent.result) }}</pre>
+              <JsonViewer :value="agent.result" max-height="200px" />
             </div>
           </div>
         </div>

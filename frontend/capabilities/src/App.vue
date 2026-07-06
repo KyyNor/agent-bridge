@@ -86,14 +86,14 @@ const view = computed(() => activeNavKey.value)
 
 <template>
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
-    <div class="flex-1 overflow-y-auto">
+    <div class="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
       <!-- Page Header -->
       <div v-if="showPageHeader" class="bg-card px-7 py-5">
         <h1 class="text-base font-semibold text-foreground">{{ currentNav?.label || 'Agent Bridge' }}</h1>
         <p v-if="currentNav?.description" class="mt-0.5 text-[13px] text-muted-foreground">{{ currentNav.description }}</p>
       </div>
       <!-- Content -->
-      <div class="p-7">
+      <div class="min-w-0 p-7">
         <DashboardView v-if="view === 'dashboard'" />
         <ServicesView v-else-if="view === 'services'" :route-key="subRoute" />
         <ToolsView v-else-if="view === 'tools'" />

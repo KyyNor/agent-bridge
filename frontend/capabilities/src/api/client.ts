@@ -248,6 +248,7 @@ export const api = {
     path?: string
     task_key?: string
     task_version?: string
+    run_id?: string
     include_history?: boolean
     full?: boolean
     tags?: string[]
@@ -260,6 +261,7 @@ export const api = {
     if (params.path) qs.set('path', params.path)
     if (params.task_key) qs.set('task_key', params.task_key)
     if (params.task_version) qs.set('task_version', params.task_version)
+    if (params.run_id) qs.set('run_id', params.run_id)
     if (params.include_history) qs.set('include_history', 'true')
     if (params.full) qs.set('full', 'true')
     if (params.limit) qs.set('limit', String(params.limit))

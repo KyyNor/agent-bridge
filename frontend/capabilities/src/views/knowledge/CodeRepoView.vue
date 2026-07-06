@@ -11,12 +11,17 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import JsonViewer from '../../components/JsonViewer.vue'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { confirm, alert } from '../../composables/useConfirm'
 
 const repos = ref<CodeRepository[]>([])
 const loading = ref(true)
 const searchQuery = ref('')
 const filterCategory = ref('__all__')
+const page = ref(1)
+const pageSize = ref(10)
 
 // Categories
 const categories = ref<CodeRepoCategory[]>([])
@@ -290,6 +295,7 @@ const filteredRepos = computed(() => {
   }
   return list
 })
+const pagedRepos = computed(() => paginate(filteredRepos.value, page.value, pageSize.value))
 
 async function openPlaneDialog(r: CodeRepository) {
   planeRepo.value = r
@@ -455,7 +461,7 @@ watch(showDetail, (open) => {
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         <Input v-model="searchQuery" placeholder="搜索仓库名称、标识或地址..." class="pl-8" />
       </div>
-      <Select v-model="filterCategory">
+      <Select v-model="filterCategory" @update:model-value="page = 1">
         <SelectTrigger class="w-[160px]">
           <SelectValue placeholder="全部分类" />
         </SelectTrigger>
@@ -492,7 +498,7 @@ watch(showDetail, (open) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in filteredRepos" :key="r.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="r in pagedRepos" :key="r.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ r.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ r.repo_key }}</div>
@@ -528,7 +534,12 @@ watch(showDetail, (open) => {
         </table>
       </CardContent>
     </Card>
-    <div class="text-sm text-muted-foreground">共 {{ filteredRepos.length }} / {{ repos.length }} 个仓库</div>
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="filteredRepos.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
 
     <!-- Add/Edit Repo Dialog -->
     <Dialog :open="showRepoForm" @update:open="showRepoForm = $event">
@@ -771,12 +782,12 @@ watch(showDetail, (open) => {
             <div v-else-if="detailExploreResult" class="space-y-3">
               <div v-if="detailExploreResult.mcp_result.structured" class="rounded-lg border border-border p-3">
                 <div class="mb-2 text-xs font-medium text-muted-foreground">Structured</div>
-                <pre class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ JSON.stringify(detailExploreResult.mcp_result.structured, null, 2) }}</pre>
+                <JsonViewer :value="detailExploreResult.mcp_result.structured" max-height="260px" />
               </div>
               <div class="rounded-lg border border-border p-3">
                 <div class="mb-2 text-xs font-medium text-muted-foreground">Content</div>
                 <div v-if="exploreMarkdownHtml" class="prose prose-sm max-w-none max-h-[500px] overflow-y-auto" v-html="exploreMarkdownHtml"></div>
-                <pre v-else class="max-h-[260px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-5">{{ JSON.stringify(detailExploreResult.mcp_result.content, null, 2) }}</pre>
+                <JsonViewer v-else :value="detailExploreResult.mcp_result.content" max-height="260px" />
               </div>
             </div>
           </div>

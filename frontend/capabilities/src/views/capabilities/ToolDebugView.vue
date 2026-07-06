@@ -14,6 +14,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Textarea } from '../../components/ui/textarea'
+import JsonViewer from '../../components/JsonViewer.vue'
 
 type ToolDebugSourceType = 'mcp_service' | 'openapi_service'
 
@@ -407,7 +408,7 @@ function errorMessage(e: unknown) {
                 <div>工具：<span class="font-mono text-foreground">{{ result.tool_name }}</span></div>
                 <div>来源：<span class="font-mono text-foreground">{{ sourceLabel(selectedTool.source_type) }}</span></div>
               </div>
-              <pre class="overflow-auto rounded-md border bg-slate-950 p-4 text-xs leading-6 text-slate-100">{{ prettyJson(result.result) }}</pre>
+              <JsonViewer :value="result.result" max-height="420px" />
             </div>
           </CardContent>
         </Card>
@@ -417,14 +418,14 @@ function errorMessage(e: unknown) {
         <Card>
           <CardContent class="space-y-3 p-5">
             <div class="text-sm font-medium text-foreground">输入 Schema</div>
-            <pre class="overflow-auto rounded-md border bg-muted p-4 text-xs leading-6 text-foreground">{{ selectedToolSchemaText }}</pre>
+            <JsonViewer :value="selectedTool.input_schema" max-height="420px" />
           </CardContent>
         </Card>
 
         <Card>
           <CardContent class="space-y-3 p-5">
             <div class="text-sm font-medium text-foreground">示例参数</div>
-            <pre class="overflow-auto rounded-md border bg-muted p-4 text-xs leading-6 text-foreground">{{ selectedToolExamplesText }}</pre>
+            <JsonViewer :value="selectedTool.examples" max-height="420px" />
           </CardContent>
         </Card>
       </div>

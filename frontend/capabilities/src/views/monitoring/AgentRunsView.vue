@@ -10,6 +10,8 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
+import JsonViewer from '../../components/JsonViewer.vue'
+import PaginationBar from '../../components/PaginationBar.vue'
 import {
   agentRunBadgeVariant,
   agentRunOkFilterParam,
@@ -17,14 +19,19 @@ import {
   agentRunStatusLabel,
   type AgentRunFilter,
 } from '../../lib/agentRunStatus'
+import { countAgentRunTabs } from '../../lib/filterTabs'
+import { LOG_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import type { WorkflowRunEvent } from '../../api/types'
 
 const props = defineProps<{ routeKey?: string }>()
 
 const runs = ref<AgentRun[]>([])
+const runTabBase = ref<AgentRun[]>([])
 const loading = ref(false)
 const okFilter = ref<AgentRunFilter>('')
 const search = ref('')
+const page = ref(1)
+const pageSize = ref(50)
 
 // Detail (sub-route) state. When routeKey is set we show a detail panel instead
 // of the list — enabling deep links (#agent-runs/{runKey}) aligned with how the
@@ -87,21 +94,26 @@ const dateFrom = ref(formatDate(new Date(Date.now() - 86400000 * 3)))
 const dateTo = ref(formatDate(new Date()))
 
 onMounted(() => {
-  loadRuns()
+  loadRunData()
   if (activeRunKey.value) loadDetail(activeRunKey.value)
 })
 
 onUnmounted(() => stopDetailEventsPolling())
 
+function baseRunParams(): Record<string, string | number | boolean> {
+  const params: Record<string, string | number | boolean> = { limit: Math.max(...LOG_PAGE_SIZE_OPTIONS) }
+  if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
+  if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
+  return params
+}
+
 async function loadRuns() {
   loading.value = true
-  const params: Record<string, string | number | boolean> = { limit: 100 }
+  const params = baseRunParams()
   const okParam = agentRunOkFilterParam(okFilter.value)
   const statusParam = agentRunStatusFilterParam(okFilter.value)
   if (okParam != null) params.ok = okParam
   if (statusParam) params.status = statusParam
-  if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
-  if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
   try {
     runs.value = await api.listAgentRuns(params)
   } catch {
@@ -110,8 +122,32 @@ async function loadRuns() {
   loading.value = false
 }
 
+async function loadRunData() {
+  loading.value = true
+  try {
+    const params = baseRunParams()
+    const activeParams = { ...params }
+    const okParam = agentRunOkFilterParam(okFilter.value)
+    const statusParam = agentRunStatusFilterParam(okFilter.value)
+    if (okParam != null) activeParams.ok = okParam
+    if (statusParam) activeParams.status = statusParam
+    const [baseRows, activeRows] = await Promise.all([
+      api.listAgentRuns(params),
+      api.listAgentRuns(activeParams),
+    ])
+    runTabBase.value = baseRows
+    runs.value = activeRows
+  } catch {
+    runTabBase.value = []
+    runs.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
 function applyOkFilter(key: AgentRunFilter) {
   okFilter.value = key
+  page.value = 1
   loadRuns()
 }
 
@@ -151,6 +187,7 @@ async function loadDetail(runKey: string) {
 async function loadDetailEvents(runKey: string, options: { quiet?: boolean } = {}) {
   try {
     detailEvents.value = await api.getAgentRunEvents(runKey)
+    if (options.quiet) await refreshLoadedSubagentDetails(runKey)
     if (detailRun.value?.run_key === runKey && detailRun.value.status === 'running') {
       const refreshed = await api.getAgentRun(runKey)
       detailRun.value = refreshed
@@ -162,6 +199,27 @@ async function loadDetailEvents(runKey: string, options: { quiet?: boolean } = {
       detailError.value = e instanceof Error ? e.message : '事件流加载失败'
     }
   }
+}
+
+async function refreshLoadedSubagentDetails(runKey: string) {
+  const taskIds = Object.keys(subagentDetails.value)
+    .filter(key => key.startsWith(`${runKey}:`))
+    .map(key => key.slice(runKey.length + 1))
+  if (!taskIds.length) return
+  const entries = await Promise.all(
+    taskIds.map(async taskId => {
+      try {
+        return [subagentDetailKey(taskId), await api.getAgentRunSubagentDetail(runKey, taskId)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  const next = { ...subagentDetails.value }
+  for (const entry of entries) {
+    if (entry) next[entry[0]] = entry[1]
+  }
+  subagentDetails.value = next
 }
 
 function stopDetailEventsPolling() {
@@ -199,33 +257,14 @@ const displayRuns = computed(() => {
   )
 })
 
-const filterTabs = computed(() => [
-  { key: '' as const, label: '全部', count: runs.value.length },
-  { key: 'running' as const, label: '执行中', count: runs.value.filter(r => r.status === 'running').length },
-  { key: 'success' as const, label: '成功', count: runs.value.filter(r => agentRunBadgeVariant(r) === 'success').length },
-  { key: 'failed' as const, label: '失败', count: runs.value.filter(r => agentRunBadgeVariant(r) === 'failed').length },
-])
+const filterTabs = computed(() => countAgentRunTabs(runTabBase.value, runs.value))
+const pagedRuns = computed(() => paginate(displayRuns.value, page.value, pageSize.value))
 
 function formatCost(v: number | null | undefined): string {
   if (v == null) return '—'
   return `$${Number(v).toFixed(4)}`
 }
 
-function pretty(value: unknown): string {
-  if (value == null) return ''
-  if (typeof value === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2)
-    } catch {
-      return value
-    }
-  }
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
 </script>
 
 <template>
@@ -318,7 +357,7 @@ function pretty(value: unknown): string {
 
       <div v-if="detailRun.result != null">
         <div class="mb-1 text-xs font-medium text-muted-foreground">结果</div>
-        <pre class="max-h-[240px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ pretty(detailRun.result) }}</pre>
+        <JsonViewer :value="detailRun.result" max-height="240px" />
       </div>
 
       <div v-if="detailEvents.length">
@@ -354,9 +393,9 @@ function pretty(value: unknown): string {
         <Input v-model="search" placeholder="搜索 Agent、Profile 或工作流..." class="pl-8" />
       </div>
       <div class="flex items-center gap-2 text-sm">
-        <Input v-model="dateFrom" type="date" class="w-[140px]" @change="loadRuns" />
+        <Input v-model="dateFrom" type="date" class="w-[140px]" @change="() => { page = 1; loadRunData() }" />
         <span class="text-muted-foreground">至</span>
-        <Input v-model="dateTo" type="date" class="w-[140px]" @change="loadRuns" />
+        <Input v-model="dateTo" type="date" class="w-[140px]" @change="() => { page = 1; loadRunData() }" />
       </div>
       <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
         <button
@@ -373,7 +412,7 @@ function pretty(value: unknown): string {
           {{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span>
         </button>
       </div>
-      <Button variant="outline" @click="loadRuns">
+      <Button variant="outline" @click="loadRunData">
         <RotateCw :size="14" class="mr-1.5" />
         刷新
       </Button>
@@ -401,7 +440,7 @@ function pretty(value: unknown): string {
           </thead>
           <tbody>
             <tr
-              v-for="r in displayRuns"
+              v-for="r in pagedRuns"
               :key="r.run_key"
               class="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
               @click="openDetail(r)"
@@ -445,8 +484,11 @@ function pretty(value: unknown): string {
       </CardContent>
     </Card>
 
-    <div class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>共 {{ displayRuns.length }} 条记录</span>
-    </div>
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="displayRuns.length"
+      :page-size-options="LOG_PAGE_SIZE_OPTIONS"
+    />
   </div>
 </template>

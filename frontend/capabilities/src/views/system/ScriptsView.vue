@@ -19,6 +19,9 @@ import {
   SelectValue,
 } from '../../components/ui/select'
 import { formatLocalDatetime } from '../../lib/time'
+import JsonViewer from '../../components/JsonViewer.vue'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -28,6 +31,8 @@ const workflows = ref<WorkflowDefinition[]>([])
 const loading = ref(true)
 const error = ref('')
 const showGuide = ref(false)
+const scriptPage = ref(1)
+const scriptPageSize = ref(10)
 
 // 编辑模式表单状态
 const form = ref(emptyForm())
@@ -38,6 +43,8 @@ const scriptNotFound = ref(false)
 
 // 运行状态
 const runs = ref<ScriptRun[]>([])
+const runPage = ref(1)
+const runPageSize = ref(10)
 const runsLoading = ref(false)
 const runError = ref('')
 const testing = ref(false)
@@ -70,6 +77,8 @@ const editingScript = computed(() =>
   editingKey.value ? scripts.value.find(s => s.script_key === editingKey.value) || null : null,
 )
 const scriptDesignDraft = computed(() => designResponse.value?.result?.script || null)
+const pagedScripts = computed(() => paginate(scripts.value, scriptPage.value, scriptPageSize.value))
+const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 
 onMounted(async () => {
   await loadAll()
@@ -530,7 +539,7 @@ def main(envelope):
         <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
         <div v-else-if="!scripts.length" class="px-4 py-8 text-sm text-muted-foreground">暂无脚本</div>
         <div v-else class="divide-y">
-          <div v-for="item in scripts" :key="item.script_key" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_240px_220px] lg:items-center">
+          <div v-for="item in pagedScripts" :key="item.script_key" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_240px_220px] lg:items-center">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
@@ -558,6 +567,13 @@ def main(envelope):
         </div>
       </CardContent>
     </Card>
+    <PaginationBar
+      v-if="scripts.length"
+      v-model:page="scriptPage"
+      v-model:page-size="scriptPageSize"
+      :total="scripts.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
   </div>
 
   <!-- 编辑/运行二级页面 -->
@@ -750,7 +766,7 @@ def main(envelope):
               </div>
               <section class="rounded-md border bg-muted/20 p-3">
                 <div class="mb-2 text-xs font-semibold text-foreground">result</div>
-                <pre class="max-h-48 overflow-auto rounded bg-background p-2 text-xs">{{ prettyJson(runDetail.result) }}</pre>
+                <JsonViewer :value="runDetail.result" max-height="192px" />
               </section>
               <section class="rounded-md border bg-muted/20 p-3">
                 <div class="mb-2 text-xs font-semibold text-foreground">stdout</div>
@@ -779,7 +795,7 @@ def main(envelope):
             <div v-else-if="!runs.length" class="rounded-md border px-3 py-4 text-sm text-muted-foreground">暂无运行记录</div>
             <div v-else class="grid gap-2">
               <button
-                v-for="run in runs"
+                v-for="run in pagedRuns"
                 :key="run.run_id"
                 class="rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
                 :class="runDetail?.run_id === run.run_id ? 'border-primary/40 bg-primary/5' : ''"
@@ -797,6 +813,13 @@ def main(envelope):
                 <div class="mt-1 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</div>
               </button>
             </div>
+            <PaginationBar
+              v-if="runs.length"
+              v-model:page="runPage"
+              v-model:page-size="runPageSize"
+              :total="runs.length"
+              :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+            />
           </CardContent>
         </Card>
       </div>

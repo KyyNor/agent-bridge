@@ -4,10 +4,14 @@ import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const stats = ref<Record<string, unknown>[]>([])
 const loading = ref(false)
 const dimension = ref('profile_key,source_key,tool_name')
+const page = ref(1)
+const pageSize = ref(10)
 
 const dimensions = [
   { key: 'profile_key,source_key,tool_name', label: '全部维度' },
@@ -30,6 +34,7 @@ async function loadStats() {
 
 function applyDimension(key: string) {
   dimension.value = key
+  page.value = 1
   loadStats()
 }
 
@@ -57,6 +62,7 @@ function callCount(s: Record<string, unknown>) {
 
 const totalCount = computed(() => stats.value.reduce((sum, s) => sum + callCount(s), 0))
 const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map(callCount)) : 0)
+const pagedStats = computed(() => paginate(stats.value, page.value, pageSize.value))
 </script>
 
 <template>
@@ -115,7 +121,7 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(s, i) in stats" :key="i" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="(s, i) in pagedStats" :key="i" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td v-for="col in columns" :key="col" class="px-4 py-3 text-sm">{{ (s as Record<string, unknown>)[col] || '—' }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-3">
@@ -129,5 +135,12 @@ const maxCount = computed(() => stats.value.length ? Math.max(...stats.value.map
         </table>
       </CardContent>
     </Card>
+    <PaginationBar
+      v-if="stats.length"
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="stats.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
   </div>
 </template>

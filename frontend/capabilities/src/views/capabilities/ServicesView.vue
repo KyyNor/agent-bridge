@@ -11,6 +11,8 @@ import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { confirm, alert } from '../../composables/useConfirm'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import {
   buildOpenApiServicePayload,
   buildServicePayload,
@@ -38,6 +40,8 @@ const loading = ref(true)
 const search = ref('')
 const statusFilter = ref('all')
 const sourceFilter = ref<'all' | ServiceSourceType>('all')
+const page = ref(1)
+const pageSize = ref(10)
 
 const formMode = ref<ServiceFormMode>('create')
 const sourceType = ref<ServiceSourceType>('mcp_service')
@@ -132,6 +136,7 @@ const filtered = computed(() => {
   }
   return list
 })
+const pagedServices = computed(() => paginate(filtered.value, page.value, pageSize.value))
 
 const filterTabs = computed(() => [
   { key: 'all', label: '全部', count: services.value.length },
@@ -406,10 +411,10 @@ const toolTypeOptions = [
             'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
             statusFilter === tab.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
           ]"
-          @click="statusFilter = tab.key"
+          @click="() => { statusFilter = tab.key; page = 1 }"
         >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
       </div>
-      <Select v-model="sourceFilter">
+      <Select v-model="sourceFilter" @update:model-value="page = 1">
         <SelectTrigger class="w-[150px]">
           <SelectValue />
         </SelectTrigger>
@@ -443,7 +448,7 @@ const toolTypeOptions = [
             </tr>
           </thead>
           <tbody>
-            <tr v-for="s in filtered" :key="serviceCountKey(s)" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="s in pagedServices" :key="serviceCountKey(s)" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <span class="text-[13px] font-medium text-foreground">{{ s.service_key }}</span>
                 <div class="mt-0.5 text-xs text-muted-foreground">{{ s.description || s.name }}</div>
@@ -490,9 +495,12 @@ const toolTypeOptions = [
       </CardContent>
     </Card>
 
-    <div class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>共 {{ filtered.length }} 条记录</span>
-    </div>
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="filtered.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
 
     <Dialog :open="showImport" @update:open="showImport = $event">
       <DialogContent class="sm:max-w-[920px]">

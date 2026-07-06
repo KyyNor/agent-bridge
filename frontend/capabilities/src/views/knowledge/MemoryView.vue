@@ -8,12 +8,17 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
+import JsonViewer from '../../components/JsonViewer.vue'
+import PaginationBar from '../../components/PaginationBar.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { formatLocalDatetime } from '../../lib/time'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const props = defineProps<{ routeKey: string }>()
 
 const blocks = ref<MemoryBlock[]>([])
+const page = ref(1)
+const pageSize = ref(10)
 const loading = ref(true)
 const error = ref('')
 const showCreate = ref(false)
@@ -39,6 +44,7 @@ const dashboardMaximized = ref(false)
 let dashboardTouchTimer: ReturnType<typeof setInterval> | null = null
 
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
+const pagedBlocks = computed(() => paginate(blocks.value, page.value, pageSize.value))
 const selected = computed(() => blocks.value.find(block => block.block_key === props.routeKey) || null)
 const healthStatus = computed(() => {
   const health = selectedHealth.value || selected.value?.last_health || {}
@@ -286,7 +292,7 @@ function errorMessage(e: unknown) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="block in blocks" :key="block.block_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="block in pagedBlocks" :key="block.block_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ block.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ block.description }}</div>
@@ -310,6 +316,13 @@ function errorMessage(e: unknown) {
         </table>
       </CardContent>
     </Card>
+
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="blocks.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
 
     <Dialog :open="showCreate" @update:open="showCreate = $event">
       <DialogContent class="sm:max-w-[450px]">
@@ -390,7 +403,7 @@ function errorMessage(e: unknown) {
             </Button>
           </div>
           <div v-if="healthError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ healthError }}</div>
-          <pre class="max-h-[160px] overflow-auto rounded-md bg-secondary p-3 text-xs leading-relaxed text-foreground">{{ healthPreview }}</pre>
+          <JsonViewer :value="healthPreview" max-height="160px" />
         </div>
 
         <div class="space-y-2">

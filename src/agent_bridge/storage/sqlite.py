@@ -839,6 +839,7 @@ class SQLiteStore:
         limit: int,
         task_key: str | None = None,
         task_version: str | None = None,
+        run_id: str | None = None,
         include_history: bool = False,
     ) -> list[dict[str, Any]]:
         return self.workflows.search_workflow_artifacts(
@@ -849,6 +850,7 @@ class SQLiteStore:
             workflow_key=workflow_key,
             task_key=task_key,
             task_version=task_version,
+            run_id=run_id,
             include_history=include_history,
             limit=limit,
         )

@@ -8,11 +8,13 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
-import { confirm } from '../../composables/useConfirm'
+import { confirm, alert } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
+import JsonViewer from '../../components/JsonViewer.vue'
+import PaginationBar from '../../components/PaginationBar.vue'
 import { parseWorkflowDag } from './workflowDag'
 import {
   ALL_STATUS_SENTINEL,
@@ -30,6 +32,7 @@ import {
 import { renderMarkdown } from '../../lib/markdown'
 import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
 import { formatLocalDatetime } from '../../lib/time'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const artifactToolName = 'artifacts_search'
 const WORKFLOW_RUN_LIMIT = 200
@@ -40,6 +43,8 @@ const profiles = ref<ProjectProfile[]>([])
 const artifacts = ref<WorkflowArtifact[]>([])
 const selectedKey = ref('')
 const loading = ref(true)
+const workflowPage = ref(1)
+const workflowPageSize = ref(10)
 const artifactLoading = ref(false)
 const error = ref('')
 const artifactError = ref('')
@@ -69,6 +74,8 @@ const selectedRunId = ref('')
 const runEvents = ref<WorkflowRunEvent[]>([])
 const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
+const progressRunArtifacts = ref<Record<string, WorkflowArtifact[]>>({})
+const progressArtifactsLoading = ref(false)
 const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
 const subagentDetailLoading = ref<Set<string>>(new Set())
 const subagentDetailErrors = ref<Record<string, string>>({})
@@ -79,6 +86,10 @@ const expandedTaskIds = ref<Set<string>>(new Set())
 const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
 const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
 const taskLogLoading = ref<Set<string>>(new Set())
+const taskPage = ref(1)
+const taskPageSize = ref(10)
+const runPage = ref(1)
+const runPageSize = ref(10)
 /** Maps a workflow_run_id to its agent_runs.run_key, so subagent-detail (which is
  *  keyed by run_key under /agent-runs) can be resolved from the workflow view. */
 const runIdToAgentRunKey = ref<Record<string, string>>({})
@@ -218,6 +229,9 @@ const filteredTasks = computed(() =>
     sort: taskSort.value,
   }),
 )
+const pagedWorkflows = computed(() => paginate(workflows.value, workflowPage.value, workflowPageSize.value))
+const pagedTasks = computed(() => paginate(filteredTasks.value, taskPage.value, taskPageSize.value))
+const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 function resetTaskFilters() {
   taskStatusFilter.value = ALL_STATUS_SENTINEL
   taskTypeFilter.value = ALL_TYPE_SENTINEL
@@ -227,6 +241,10 @@ function resetTaskFilters() {
 }
 const progressRun = computed(() =>
   (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
+)
+const progressArtifacts = computed(() => progressRunArtifacts.value[progressRunId.value] || [])
+const progressFinished = computed(() =>
+  !!progressRun.value && ['completed', 'no_task', 'failed', 'stopped'].includes(progressRun.value.status),
 )
 const workflowDesignDraft = computed(() => designResponse.value?.result?.workflow || null)
 
@@ -949,6 +967,9 @@ async function loadLogs(options: { quiet?: boolean } = {}) {
     ])
     runLogs.value = logs
     runEvents.value = events
+    if (options.quiet) {
+      await refreshLoadedSubagentDetailsForRun(selectedRunId.value)
+    }
   } catch (e: unknown) {
     if (!options.quiet) {
       runLogs.value = []
@@ -957,6 +978,63 @@ async function loadLogs(options: { quiet?: boolean } = {}) {
   } finally {
     if (!options.quiet) logsLoading.value = false
   }
+}
+
+async function refreshLoadedSubagentDetailsForRun(runId: string) {
+  if (!runId) return
+  const runKey = runIdToAgentRunKey.value[runId]
+  if (!runKey) return
+  const taskIds = Object.keys(subagentDetails.value)
+    .filter(key => key.startsWith(`${runId}:`))
+    .map(key => key.slice(runId.length + 1))
+  if (!taskIds.length) return
+  const entries = await Promise.all(
+    taskIds.map(async taskIdStr => {
+      try {
+        return [subagentDetailKey(runId, taskIdStr), await api.getAgentRunSubagentDetail(runKey, taskIdStr)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  const next = { ...subagentDetails.value }
+  for (const entry of entries) {
+    if (entry) next[entry[0]] = entry[1]
+  }
+  subagentDetails.value = next
+}
+
+async function loadProgressArtifacts() {
+  const runId = progressRunId.value
+  const workflowKey = progressWorkflowKey.value
+  if (!runId || !workflowKey) return
+  if (progressRunArtifacts.value[runId]) return
+  progressArtifactsLoading.value = true
+  try {
+    const result = await api.searchWorkflowArtifacts({
+      workflow_key: workflowKey,
+      run_id: runId,
+      include_history: true,
+      full: true,
+      limit: 50,
+    })
+    progressRunArtifacts.value = { ...progressRunArtifacts.value, [runId]: result.items }
+  } catch (e: unknown) {
+    artifactError.value = errorMessage(e)
+    progressRunArtifacts.value = { ...progressRunArtifacts.value, [runId]: [] }
+  } finally {
+    progressArtifactsLoading.value = false
+  }
+}
+
+async function openProgressArtifact() {
+  await loadProgressArtifacts()
+  const artifact = progressArtifacts.value.find(item => item.format === 'markdown') || progressArtifacts.value[0]
+  if (!artifact) {
+    await alert({ title: '暂无产物', description: '本次运行没有可查看的 Markdown 产物。' })
+    return
+  }
+  openArtifactFullscreen(artifact)
 }
 
 function taskId(task: WorkflowTask) {
@@ -1297,7 +1375,7 @@ async function confirmClearWorkflow() {
         <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
         <div v-else-if="!workflows.length" class="px-4 py-8 text-sm text-muted-foreground">暂无工作流</div>
         <div v-else class="divide-y">
-          <div v-for="item in workflows" :key="item.workflow_key" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_220px_340px] lg:items-center">
+          <div v-for="item in pagedWorkflows" :key="item.workflow_key" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_220px_340px] lg:items-center">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
@@ -1320,6 +1398,13 @@ async function confirmClearWorkflow() {
         <div v-if="testError" class="border-t px-4 py-3 text-xs text-destructive">{{ testError }}</div>
       </CardContent>
     </Card>
+    <PaginationBar
+      v-if="workflows.length"
+      v-model:page="workflowPage"
+      v-model:page-size="workflowPageSize"
+      :total="workflows.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
     </template>
 
     <section v-if="routeMode === 'detail' && !routeError" class="space-y-4">
@@ -1452,7 +1537,7 @@ async function confirmClearWorkflow() {
             <div v-else-if="!runs.length" class="rounded-md border px-4 py-6 text-sm text-muted-foreground">暂无运行记录</div>
             <div v-else class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               <button
-                v-for="run in runs"
+                v-for="run in pagedRuns"
                 :key="run.run_id"
                 class="rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
                 @click="openProgress(selectedWorkflow, run.run_id)"
@@ -1464,6 +1549,13 @@ async function confirmClearWorkflow() {
                 <div class="mt-1 text-xs text-muted-foreground">{{ formatLocalDatetime(run.started_at) }}</div>
               </button>
             </div>
+            <PaginationBar
+              v-if="runs.length"
+              v-model:page="runPage"
+              v-model:page-size="runPageSize"
+              :total="runs.length"
+              :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+            />
           </section>
       </div>
       <div v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</div>
@@ -1494,22 +1586,22 @@ async function confirmClearWorkflow() {
     </Dialog>
 
     <Dialog :open="resetTarget !== null" @update:open="(v) => { if (!v) closeResetConfirm() }">
-      <DialogContent class="max-w-[480px] sm:max-w-[480px]">
+      <DialogContent class="w-[min(560px,calc(100vw-2rem))] max-w-[560px] sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>重置任务</DialogTitle>
         </DialogHeader>
-        <div class="space-y-3 text-sm text-muted-foreground">
+        <div class="min-w-0 space-y-3 text-sm text-muted-foreground">
           <p>
             确定重置任务
-            <span class="font-mono font-medium text-foreground">「{{ resetTarget?.task_key }}」</span>
-            <span v-if="resetTarget?.task_version" class="text-foreground">（{{ resetTarget.task_version }}）</span>
+            <span class="break-all font-mono font-medium text-foreground">「{{ resetTarget?.task_key }}」</span>
+            <span v-if="resetTarget?.task_version" class="break-all text-foreground">（{{ resetTarget.task_version }}）</span>
             吗？
           </p>
           <div class="rounded-md border bg-muted/30 px-3 py-2 text-xs leading-5">
             重置后该任务会回到待处理状态，可被再次领取执行；不会立即触发执行，也不会改变其他任务的执行顺序。历史尝试次数和错误信息会保留。
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter class="flex-wrap gap-2">
           <Button variant="outline" :disabled="resetting" @click="closeResetConfirm">取消</Button>
           <Button variant="destructive" :disabled="resetting" @click="confirmResetTask">
             {{ resetting ? '重置中' : '确认重置' }}
@@ -1609,7 +1701,7 @@ async function confirmClearWorkflow() {
           <div v-else-if="!tasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无任务</div>
           <div v-else-if="!filteredTasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">没有符合筛选条件的任务</div>
           <div v-else class="space-y-2">
-            <div v-for="task in filteredTasks" :key="taskId(task)" class="rounded-md border">
+            <div v-for="task in pagedTasks" :key="taskId(task)" class="rounded-md border">
               <div class="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
@@ -1718,7 +1810,7 @@ async function confirmClearWorkflow() {
               <div v-if="expandedTaskIds.has(taskId(task))" class="space-y-3 border-t bg-muted/20 px-3 py-3">
                 <div class="rounded-md border bg-background p-3">
                   <div class="mb-2 text-xs font-semibold text-foreground">任务参数</div>
-                  <pre class="max-h-44 overflow-auto rounded bg-muted p-2 text-xs">{{ JSON.stringify(task.payload, null, 2) }}</pre>
+                  <JsonViewer :value="task.payload" max-height="176px" />
                 </div>
                 <div v-if="!task.lease_run_id" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">
                   暂无运行日志：该任务还没有被领取执行。
@@ -1769,6 +1861,13 @@ async function confirmClearWorkflow() {
               </div>
             </div>
           </div>
+          <PaginationBar
+            v-if="filteredTasks.length"
+            v-model:page="taskPage"
+            v-model:page-size="taskPageSize"
+            :total="filteredTasks.length"
+            :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+          />
       </div>
     </section>
 
@@ -1784,9 +1883,17 @@ async function confirmClearWorkflow() {
             <p class="font-mono text-xs text-muted-foreground">{{ progressRunId || '暂无运行 ID' }}</p>
           </div>
         </div>
-        <Button v-if="progressWorkflow" variant="outline" size="sm" @click="progressWorkflow && openTasks(progressWorkflow)">
-          任务进度
-        </Button>
+        <div class="flex flex-wrap gap-2">
+          <Button
+            v-if="progressFinished"
+            variant="outline"
+            size="sm"
+            :disabled="progressArtifactsLoading"
+            @click="openProgressArtifact"
+          >
+            {{ progressArtifactsLoading ? '加载产物中' : '查看产物' }}
+          </Button>
+        </div>
       </div>
       <div class="space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
@@ -1815,7 +1922,7 @@ async function confirmClearWorkflow() {
             <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
               还没有 Agent 输出，任务被领取执行后这里会按时间顺序显示对话流。
             </div>
-            <div v-else class="max-h-[32rem] overflow-auto pr-1">
+            <div v-else class="min-h-[calc(100vh-260px)] overflow-x-hidden overflow-y-visible pr-1">
               <RunEventTimeline
                 :events="runEvents"
                 :context-key="'run:' + selectedRunId"
@@ -2078,4 +2185,3 @@ async function confirmClearWorkflow() {
     </Dialog>
   </div>
 </template>
-

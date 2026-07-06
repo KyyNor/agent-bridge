@@ -10,12 +10,19 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import JsonViewer from '../../components/JsonViewer.vue'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { countToolCallTabs } from '../../lib/filterTabs'
+import { LOG_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const logs = ref<ToolCallLog[]>([])
+const logTabBase = ref<ToolCallLog[]>([])
 const loading = ref(false)
 const statusFilter = ref('')
 const sourceFilter = ref('__all__')
 const search = ref('')
+const page = ref(1)
+const pageSize = ref(100)
 
 const showDetail = ref(false)
 const detailLog = ref<ToolCallLog | null>(null)
@@ -38,26 +45,57 @@ function formatDate(d: Date) {
 const dateFrom = ref(formatDate(new Date(Date.now() - 86400000)))
 const dateTo = ref(formatDate(new Date()))
 
-onMounted(() => loadLogs())
+onMounted(() => loadLogData())
 
-async function loadLogs() {
-  loading.value = true
-  const params: Record<string, string | number> = { limit: 100 }
-  if (statusFilter.value) params.status = statusFilter.value
+function baseParams(): Record<string, string | number> {
+  const params: Record<string, string | number> = { limit: Math.max(...LOG_PAGE_SIZE_OPTIONS) }
   if (sourceFilter.value !== '__all__') params.source_type = sourceFilter.value
   if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
   if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
+  return params
+}
+
+async function loadLogs() {
+  loading.value = true
+  const params = baseParams()
+  if (statusFilter.value) params.status = statusFilter.value
   try { logs.value = await api.listLogs(params) } catch { logs.value = [] }
   loading.value = false
 }
 
+async function loadLogTabBase() {
+  try { logTabBase.value = await api.listLogs(baseParams()) } catch { logTabBase.value = [] }
+}
+
+async function loadLogData() {
+  loading.value = true
+  try {
+    const params = baseParams()
+    const activeParams = { ...params }
+    if (statusFilter.value) activeParams.status = statusFilter.value
+    const [baseRows, activeRows] = await Promise.all([
+      api.listLogs(params),
+      api.listLogs(activeParams),
+    ])
+    logTabBase.value = baseRows
+    logs.value = activeRows
+  } catch {
+    logTabBase.value = []
+    logs.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
 function applyFilter(status: string) {
   statusFilter.value = status
+  page.value = 1
   loadLogs()
 }
 
 function applyDateFilter() {
-  loadLogs()
+  page.value = 1
+  loadLogData()
 }
 
 async function openDetail(log: ToolCallLog) {
@@ -82,17 +120,8 @@ const displayLogs = computed(() => {
   )
 })
 
-function formatJson(str: string | undefined): string {
-  if (!str) return ''
-  try { return JSON.stringify(JSON.parse(str), null, 2) } catch { return str }
-}
-
-const filterTabs = computed(() => [
-  { key: '', label: '全部', count: logs.value.length },
-  { key: 'success', label: '成功', count: logs.value.filter(l => l.status === 'success').length },
-  { key: 'error', label: '失败', count: logs.value.filter(l => l.status === 'error').length },
-  { key: 'blocked', label: '拦截', count: logs.value.filter(l => l.status === 'blocked').length },
-])
+const filterTabs = computed(() => countToolCallTabs(logTabBase.value, logs.value))
+const pagedLogs = computed(() => paginate(displayLogs.value, page.value, pageSize.value))
 
 const sourceOptions = [
   { value: '__all__', label: '全部来源' },
@@ -155,7 +184,7 @@ function entrypointLabel(entrypoint: string): string {
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
         <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" />
       </div>
-      <Select v-model="sourceFilter" @update:model-value="loadLogs">
+      <Select v-model="sourceFilter" @update:model-value="() => { page = 1; loadLogData() }">
         <SelectTrigger class="w-[160px]">
           <SelectValue placeholder="全部来源" />
         </SelectTrigger>
@@ -180,7 +209,7 @@ function entrypointLabel(entrypoint: string): string {
           @click="applyFilter(tab.key)"
         >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
       </div>
-      <Button variant="outline" @click="loadLogs">
+      <Button variant="outline" @click="loadLogData">
         <RotateCw :size="14" class="mr-1.5" />
         刷新
       </Button>
@@ -204,7 +233,7 @@ function entrypointLabel(entrypoint: string): string {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="l in displayLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="l in pagedLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(l.created_at) }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
@@ -231,18 +260,21 @@ function entrypointLabel(entrypoint: string): string {
       </CardContent>
     </Card>
 
-    <div class="flex items-center justify-between text-sm text-muted-foreground">
-      <span>共 {{ displayLogs.length }} 条记录</span>
-    </div>
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="displayLogs.length"
+      :page-size-options="LOG_PAGE_SIZE_OPTIONS"
+    />
 
     <!-- Detail Dialog -->
     <Dialog :open="showDetail" @update:open="showDetail = $event">
-      <DialogContent class="sm:max-w-[700px]">
+      <DialogContent class="w-[min(1180px,calc(100vw-2rem))] sm:max-w-[1180px] overflow-hidden">
         <DialogHeader>
           <DialogTitle>调用详情</DialogTitle>
         </DialogHeader>
         <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
-        <div v-else-if="detailLog" class="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
+        <div v-else-if="detailLog" class="min-w-0 space-y-4">
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div><span class="text-muted-foreground">调用者</span><div class="font-medium">{{ detailLog.actor }}</div></div>
             <div><span class="text-muted-foreground">入口</span><div class="font-medium">{{ entrypointLabel(detailLog.entrypoint) }}</div></div>
@@ -279,12 +311,12 @@ function entrypointLabel(entrypoint: string): string {
 
           <div v-if="detailLog.request_json">
             <div class="mb-1 text-xs font-medium text-muted-foreground">请求</div>
-            <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ formatJson(detailLog.request_json) }}</pre>
+            <JsonViewer :value="detailLog.request_json" max-height="260px" />
           </div>
 
           <div v-if="detailLog.response_json">
             <div class="mb-1 text-xs font-medium text-muted-foreground">响应</div>
-            <pre class="max-h-[200px] overflow-auto rounded-lg bg-secondary px-4 py-3 text-xs">{{ formatJson(detailLog.response_json) }}</pre>
+            <JsonViewer :value="detailLog.response_json" max-height="260px" />
           </div>
         </div>
       </DialogContent>

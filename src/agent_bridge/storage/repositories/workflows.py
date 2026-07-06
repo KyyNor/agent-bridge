@@ -785,6 +785,7 @@ class WorkflowsRepository:
         limit: int,
         task_key: str | None = None,
         task_version: str | None = None,
+        run_id: str | None = None,
         include_history: bool = False,
     ) -> list[dict[str, Any]]:
         clauses = []
@@ -803,6 +804,9 @@ class WorkflowsRepository:
         if task_version is not None:
             clauses.append("task_version = ?")
             params.append(task_version)
+        if run_id:
+            clauses.append("run_id = ?")
+            params.append(run_id)
         if path:
             clauses.append("path LIKE ?")
             params.append(f"{path}%")

@@ -8,6 +8,8 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { confirm } from '../../composables/useConfirm'
+import PaginationBar from '../../components/PaginationBar.vue'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const skills = ref<SkillPrompt[]>([])
 const selectedName = ref('')
@@ -20,10 +22,13 @@ const error = ref('')
 const message = ref('')
 const previewTab = ref<'edit' | 'preview'>('preview')
 const copied = ref(false)
+const page = ref(1)
+const pageSize = ref(10)
 
 const hasChanges = computed(() => selected.value ? prompt.value !== (selected.value.prompt || '') : false)
 const sourceLabel = computed(() => selected.value?.source === 'database' ? '已自定义' : '默认提示词')
 const previewHtml = computed(() => marked.parse(prompt.value, { async: false }) as string)
+const pagedSkills = computed(() => paginate(skills.value, page.value, pageSize.value))
 
 onMounted(async () => {
   await loadSkills()
@@ -136,7 +141,7 @@ function errorMessage(e: unknown) {
           <div v-else-if="!skills.length" class="px-4 py-8 text-sm text-muted-foreground">暂无 Skill</div>
           <div v-else class="divide-y">
             <button
-              v-for="item in skills"
+              v-for="item in pagedSkills"
               :key="item.skill_name"
               class="w-full px-4 py-3 text-left transition hover:bg-muted/50"
               :class="selectedName === item.skill_name ? 'bg-muted/60' : ''"
@@ -149,6 +154,14 @@ function errorMessage(e: unknown) {
               <div class="mt-1 font-mono text-xs text-muted-foreground">{{ item.skill_name }}</div>
               <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description }}</p>
             </button>
+          </div>
+          <div v-if="skills.length" class="border-t px-4 py-3">
+            <PaginationBar
+              v-model:page="page"
+              v-model:page-size="pageSize"
+              :total="skills.length"
+              :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+            />
           </div>
         </CardContent>
       </Card>

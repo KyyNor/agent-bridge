@@ -9,13 +9,18 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
+import PaginationBar from '../../components/PaginationBar.vue'
 import { confirm, alert } from '../../composables/useConfirm'
+import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const props = defineProps<{ routeKey: string }>()
 
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
+const pagedKbs = computed(() => paginate(kbs.value, page.value, pageSize.value))
 
 const kbs = ref<KnowledgeBaseSummary[]>([])
+const page = ref(1)
+const pageSize = ref(10)
 const loading = ref(true)
 const showCreate = ref(false)
 const createForm = ref({ slug: '', name: '', description: '' })
@@ -666,7 +671,7 @@ async function savePlaneProfiles() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="k in kbs" :key="k.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="k in pagedKbs" :key="k.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ k.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ k.description }}</div>
@@ -696,7 +701,12 @@ async function savePlaneProfiles() {
         </table>
       </CardContent>
     </Card>
-    <div class="text-sm text-muted-foreground">共 {{ kbs.length }} 个文档知识</div>
+    <PaginationBar
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :total="kbs.length"
+      :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+    />
     </template>
 
     <!-- DETAIL MODE (secondary page) -->
