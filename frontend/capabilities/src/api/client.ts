@@ -336,7 +336,11 @@ export const api = {
   },
   /** Fetch the single agent run (with full events) associated with a workflow run. */
   getAgentRunForWorkflowRun: async (workflowRunId: string): Promise<AgentRun | null> => {
-    const rows = await get<AgentRun[]>(`/agent-runs?workflow_run_id=${encodeURIComponent(workflowRunId)}&limit=1`)
+    // A summary workflow_run may have multiple agent runs (the main workflow
+    // agent plus a derived html-report agent). We want the MAIN workflow
+    // agent's logs, so filter by agent_name=workflow rather than taking the
+    // newest (which would be the report agent created afterwards).
+    const rows = await get<AgentRun[]>(`/agent-runs?workflow_run_id=${encodeURIComponent(workflowRunId)}&agent_name=workflow&limit=1`)
     if (!rows.length) return null
     // The list view omits events/result; fetch the full detail.
     return get<AgentRun>(`/agent-runs/${rows[0].run_key}`)

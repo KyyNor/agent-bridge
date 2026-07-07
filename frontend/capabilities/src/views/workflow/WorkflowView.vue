@@ -383,6 +383,7 @@ async function searchArtifacts() {
       query: artifactQuery.value || undefined,
       path: artifactPath.value || undefined,
       tags: artifactTags.value.split(',').map(tag => tag.trim()).filter(Boolean),
+      format: 'all',
       limit: 30,
     })
     artifacts.value = result.items
@@ -867,6 +868,7 @@ async function toggleTaskArtifacts(task: WorkflowTask) {
       task_key: task.task_key,
       include_history: true,
       full: true,
+      format: 'all',
       limit: 50,
     })
     taskArtifacts.value = { ...taskArtifacts.value, [key]: result.items }
@@ -1828,7 +1830,15 @@ async function confirmClearWorkflow() {
                       <div v-if="activeTaskArtifact(task)?.summary" class="mb-2 text-xs text-muted-foreground">
                         {{ activeTaskArtifact(task)?.summary }}
                       </div>
+                      <iframe
+                        v-if="activeTaskArtifact(task)?.format === 'html'"
+                        :srcdoc="activeTaskArtifact(task)?.content || ''"
+                        sandbox="allow-same-origin"
+                        class="min-h-[40vh] w-full rounded border bg-white text-xs"
+                        :title="activeTaskArtifact(task)?.title || 'HTML 报告'"
+                      />
                       <div
+                        v-else
                         class="prose prose-sm max-w-none overflow-auto rounded bg-muted p-2 text-xs"
                         v-html="renderMarkdown(activeTaskArtifact(task)?.content || '')"
                       />
@@ -2161,7 +2171,14 @@ async function confirmClearWorkflow() {
               <Badge v-for="tag in artifactDetail.tags" :key="tag" variant="outline">{{ tag }}</Badge>
             </div>
             <p v-if="artifactDetail.summary" class="text-sm text-muted-foreground">{{ artifactDetail.summary }}</p>
-            <div class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="artifactHtml"></div>
+            <iframe
+              v-if="artifactDetail.format === 'html'"
+              :srcdoc="artifactDetail.content"
+              sandbox="allow-same-origin"
+              class="min-h-[60vh] w-full rounded-md border bg-white"
+              :title="artifactDetail.title || 'HTML 报告'"
+            />
+            <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="artifactHtml"></div>
           </template>
           <div v-else class="py-8 text-center text-sm text-muted-foreground">无内容</div>
         </div>
@@ -2238,7 +2255,14 @@ async function confirmClearWorkflow() {
                   </div>
                   <div class="text-sm font-medium">{{ item.title }}</div>
                   <p v-if="item.summary" class="text-sm text-muted-foreground">{{ item.summary }}</p>
-                  <div class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="renderMarkdown(item.content)"></div>
+                  <iframe
+                    v-if="item.format === 'html'"
+                    :srcdoc="item.content"
+                    sandbox="allow-same-origin"
+                    class="min-h-[50vh] w-full rounded-md border bg-white"
+                    :title="item.title || 'HTML 报告'"
+                  />
+                  <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="renderMarkdown(item.content)"></div>
                 </div>
               </div>
             </details>
