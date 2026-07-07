@@ -34,7 +34,6 @@ import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
-const artifactToolName = 'artifacts_search'
 const WORKFLOW_RUN_LIMIT = 200
 const props = defineProps<{ routeKey: string }>()
 
@@ -622,6 +621,11 @@ function statusLabel(status: string) {
   if (status === 'active') return '启用'
   if (status === 'disabled') return '停用'
   return status
+}
+
+function workflowTypeLabel(workflowType?: string) {
+  if (workflowType === 'summary') return '总结（自动生成 HTML 报告）'
+  return '操作'
 }
 
 function runStatusLabel(status: string) {
@@ -1482,8 +1486,8 @@ async function confirmClearWorkflow() {
               <div class="mt-1 truncate text-sm font-medium">{{ selectedProfileName }}</div>
             </div>
             <div class="rounded-md border px-3 py-2">
-              <div class="text-xs text-muted-foreground">产物工具</div>
-              <div class="mt-1 text-sm font-medium">{{ artifactToolName }}</div>
+              <div class="text-xs text-muted-foreground">工作流类型</div>
+              <div class="mt-1 text-sm font-medium">{{ workflowTypeLabel(selectedWorkflow.workflow_type) }}</div>
             </div>
           </div>
 
@@ -2001,7 +2005,7 @@ async function confirmClearWorkflow() {
       </div>
       <Card>
         <CardContent class="space-y-5 p-4">
-          <div class="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_0.7fr]">
+          <div class="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr]">
             <div class="lg:col-span-1">
               <label class="mb-1 block text-xs text-muted-foreground">workflow_id</label>
               <Input v-model="form.workflow_key" class="h-9" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
@@ -2018,6 +2022,13 @@ async function confirmClearWorkflow() {
                 </option>
               </select>
             </div>
+            <div class="lg:col-span-3">
+              <label class="mb-1 block text-xs text-muted-foreground">描述</label>
+              <Input v-model="form.description" class="h-9" />
+            </div>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr]">
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">状态</label>
               <select v-model="form.status" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
@@ -2026,15 +2037,21 @@ async function confirmClearWorkflow() {
               </select>
             </div>
             <div>
-              <label class="mb-1 block text-xs text-muted-foreground">类型</label>
+              <label class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                类型
+                <span class="relative inline-flex cursor-help items-center text-muted-foreground/70 group" tabindex="0">
+                  <HelpCircle class="h-3.5 w-3.5" />
+                  <span
+                    class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-64 -translate-x-1/2 translate-y-1 rounded-md border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
+                  >
+                    选择「总结」后：工作流需按 result.json 规范产出 Markdown 产物，run 完成后会自动调用报告 agent 生成面向人类阅读的 HTML 报告。「操作」类不生成 HTML 报告。
+                  </span>
+                </span>
+              </label>
               <select v-model="form.workflow_type" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
                 <option value="operation">操作</option>
                 <option value="summary">总结</option>
               </select>
-            </div>
-            <div class="lg:col-span-4">
-              <label class="mb-1 block text-xs text-muted-foreground">描述</label>
-              <Input v-model="form.description" class="h-9" />
             </div>
           </div>
 
