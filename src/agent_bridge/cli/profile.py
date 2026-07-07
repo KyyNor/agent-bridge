@@ -7,6 +7,9 @@ from typing import Annotated, Any
 
 import typer
 
+from agent_bridge.capability_hub.profiles.docs import pointer_block, replace_agent_bridge_block
+from agent_bridge.core.slug import make_slug
+
 profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
 pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=True)
 profile_app.add_typer(pins_app, name="pins")
@@ -31,6 +34,9 @@ CLAUDE_MEM_COMPATIBLE_HOOKS = {
     ],
     "Stop": [
         {"matcher": None, "actions": [("summarize", 120)]},
+    ],
+    "SessionEnd": [
+        {"matcher": None, "actions": [("session-end", 60)]},
     ],
 }
 
@@ -179,6 +185,22 @@ def _write_memory_hooks(scope: str, *, profile: str, server_url: str, enabled: b
     return settings_path
 
 
+def _agent_bridge_profile_doc_path(profile: str) -> Path:
+    return Path.home() / ".agent-bridge" / "profiles" / f"{make_slug(profile)}.md"
+
+
+def _write_claude_profile_pointer(scope: str, *, profile: str) -> Path:
+    if scope == "project":
+        claude_path = Path.cwd() / "CLAUDE.md"
+    elif scope == "user":
+        claude_path = Path.home() / ".claude" / "CLAUDE.md"
+    else:
+        raise ValueError("scope 必须是 project 或 user")
+    profile_path = _agent_bridge_profile_doc_path(profile).resolve()
+    replace_agent_bridge_block(claude_path, pointer_block(f"@{profile_path}"))
+    return claude_path
+
+
 @profile_app.command("create")
 def profile_create(
     profile_key: Annotated[str, typer.Argument(help="Profile 标识")],
@@ -270,11 +292,13 @@ def profile_use(
             server_url=_server_url_from_mcp_url(url),
             enabled=True,
         )
+        claude_path = _write_claude_profile_pointer(resolved_scope, profile=profile)
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)
         raise typer.Exit(1) from None
     typer.echo(f"已写入: {path}")
     typer.echo(f"已写入: {hooks_path}")
+    typer.echo(f"已写入: {claude_path}")
 
 
 @pins_app.command("refresh")

@@ -188,6 +188,30 @@ def test_session_start_hook_injects_profile_even_without_memory_binding(wm_paths
     assert fake_worker.calls == []
 
 
+def test_session_end_hook_writes_profile_context_file(wm_paths):
+    service = _service(wm_paths)
+    fake_worker = FakeContextWorkerService()
+    service.memory.worker_service = fake_worker
+    service.memory.hooks.worker_service = fake_worker
+
+    result = service.memory.hooks.handle_claude_code_hook(
+        actor="root",
+        profile_key="dev",
+        action="session-end",
+        event_name="SessionEnd",
+        matcher=None,
+        payload={"hook_event_name": "SessionEnd"},
+        timeout_seconds=60,
+    )
+
+    profile_path = wm_paths.root / "profiles" / "dev.md"
+    written = profile_path.read_text(encoding="utf-8")
+    assert result == {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": "ok"}
+    assert "# Agent Bridge Profile：Dev" in written
+    assert "Memory context from claude-mem." in written
+    assert profile_path.stat().st_mode & 0o777 == 0o666
+
+
 def test_worker_executes_original_claude_mem_hook_command_with_block_data_dir(wm_paths, tmp_path, monkeypatch):
     plugin_dir = tmp_path / "claude-mem"
     scripts = plugin_dir / "scripts"

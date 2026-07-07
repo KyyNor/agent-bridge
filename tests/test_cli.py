@@ -258,7 +258,9 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
 
 
 def test_profile_use_writes_stable_channel_without_profile_files(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     class FakeClient:
         def render_profile_doc(self, profile_key):
@@ -275,7 +277,9 @@ def test_profile_use_writes_stable_channel_without_profile_files(monkeypatch, tm
     assert "agent-bridge" in data["mcpServers"]
     assert "agent-capability-hub" not in data["mcpServers"]
     assert not (tmp_path / ".agent-bridge" / "profiles" / "safe.md").exists()
-    assert not (tmp_path / "CLAUDE.md").exists()
+    assert f"@{home / '.agent-bridge' / 'profiles' / 'safe.md'}" in (tmp_path / "CLAUDE.md").read_text(
+        encoding="utf-8"
+    )
     assert not (tmp_path / "AGENTS.md").exists()
 
 
@@ -313,6 +317,30 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     assert hooks["PostToolUse"][0]["matcher"] == "*"
     assert hooks["PreToolUse"][0]["matcher"] == "Read"
     assert hooks["Stop"][0]["hooks"][0]["timeout"] == 120
+    assert hooks["SessionEnd"][0]["hooks"][0]["timeout"] == 60
+    session_end_argv = shlex.split(hooks["SessionEnd"][0]["hooks"][0]["command"])
+    assert session_end_argv[4] == "session-end"
+
+
+def test_profile_use_adds_absolute_profile_pointer_to_claude_md(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+
+    class FakeClient:
+        def render_profile_doc(self, profile_key):
+            raise AssertionError("profile use should not render profile docs during install")
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(
+        app,
+        ["profile", "use", "safe-readonly", "--scope", "project", "--url", "http://127.0.0.1:8765/mcp"],
+    )
+
+    claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert result.exit_code == 0
+    assert f"@{home / '.agent-bridge' / 'profiles' / 'safe-readonly.md'}" in claude_md
+    assert "agent-bridge:profile-pointer" in claude_md
 
 
 def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
@@ -391,7 +419,9 @@ def test_profile_use_writes_user_scope_channel_without_profile_files(monkeypatch
     data = json.loads((home / ".mcp.json").read_text(encoding="utf-8"))
     assert "agent-bridge" in data["mcpServers"]
     assert not (home / ".agent-bridge" / "profiles" / "safe.md").exists()
-    assert not (home / ".claude" / "CLAUDE.md").exists()
+    assert f"@{home / '.agent-bridge' / 'profiles' / 'safe.md'}" in (
+        home / ".claude" / "CLAUDE.md"
+    ).read_text(encoding="utf-8")
     assert not (home / ".codex" / "AGENTS.md").exists()
 
 
@@ -424,8 +454,10 @@ def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, 
     assert "agent-capability-hub" not in data["mcpServers"]
 
 
-def test_profile_use_does_not_modify_existing_claude_or_agents_files(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_replaces_claude_pointer_and_preserves_agents_file(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
     (tmp_path / "CLAUDE.md").write_text(
         "keep me\n<!-- agent-bridge:profile-pointer start -->\n@/old/profile.md\n"
         "<!-- agent-bridge:profile-pointer end -->\n",
@@ -448,7 +480,7 @@ def test_profile_use_does_not_modify_existing_claude_or_agents_files(monkeypatch
     claude = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert "keep me" in claude
-    assert "@/old/profile.md" in claude
+    assert f"@{home / '.agent-bridge' / 'profiles' / 'new-profile.md'}" in claude
     assert "keep agents" in agents
     assert "old pointer" in agents
     assert not (tmp_path / ".agent-bridge" / "profiles" / "new-profile.md").exists()

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
 from agent_bridge.capability_hub.models import CallLogStatus, SourceType
+from agent_bridge.core.slug import make_slug
 from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
@@ -13,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 SESSION_START_ACTION = "session-start"
+SESSION_END_ACTION = "session-end"
 NO_MEMORY_CONTEXT = "No active Agent Bridge memory block is bound to this profile."
 
 CLAUDE_MEM_HOOK_ACTIONS = {
@@ -20,6 +23,7 @@ CLAUDE_MEM_HOOK_ACTIONS = {
     "start",
     "context",
     SESSION_START_ACTION,
+    SESSION_END_ACTION,
     "session-init",
     "observation",
     "file-context",
@@ -120,6 +124,15 @@ class MemoryHookService:
                 payload=payload,
                 timeout_seconds=timeout_seconds,
             )
+        if action == SESSION_END_ACTION:
+            return self._handle_session_end(
+                actor=actor,
+                profile_key=profile_key,
+                event_name=event_name,
+                matcher=matcher,
+                payload=payload,
+                timeout_seconds=timeout_seconds,
+            )
         resolved = self.memory_service.resolve_profile_block(actor, profile_key)
         if resolved["status"] != "ok":
             logger.info("memory hook 未绑定记忆块 actor=%s profile=%s status=%s", actor, profile_key, resolved["status"])
@@ -210,6 +223,54 @@ class MemoryHookService:
         timeout_seconds: int,
     ) -> dict[str, Any]:
         """SessionStart 同步：拼装 profile 指导 + claude-mem 记忆上下文，作为 additionalContext 注入会话。"""
+        context, final_status, _block_key = self._build_session_context(
+            actor=actor,
+            profile_key=profile_key,
+            event_name=event_name,
+            matcher=matcher,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+        )
+        return {
+            "stdout": self._session_start_stdout(context),
+            "stderr": "",
+            "exit_code": 0,
+            "status": final_status,
+        }
+
+    def _handle_session_end(
+        self,
+        *,
+        actor: str,
+        profile_key: str,
+        event_name: str | None,
+        matcher: str | None,
+        payload: dict[str, Any],
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        """SessionEnd 兜底：把同一份上下文写入可被 CLAUDE.md @ 导入的 profile 文件。"""
+        context, final_status, _block_key = self._build_session_context(
+            actor=actor,
+            profile_key=profile_key,
+            event_name=event_name,
+            matcher=matcher,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+        )
+        path = self._write_profile_context_file(profile_key, context)
+        logger.info("Agent Bridge profile 上下文已写入 %s", path)
+        return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": final_status}
+
+    def _build_session_context(
+        self,
+        *,
+        actor: str,
+        profile_key: str,
+        event_name: str | None,
+        matcher: str | None,
+        payload: dict[str, Any],
+        timeout_seconds: int,
+    ) -> tuple[str, str, str | None]:
         resolved = self.memory_service.resolve_profile_block(actor, profile_key)
         block = resolved.get("block") if resolved["status"] == "ok" else None
         block_key = block.get("block_key") if isinstance(block, dict) else None
@@ -248,12 +309,19 @@ class MemoryHookService:
             logger.info("claude-mem 同步完成 block=%s", block_key)
         else:
             logger.warning("claude-mem 同步未就绪 block=%s status=%s", block_key, final_status)
-        return {
-            "stdout": self._session_start_stdout(context),
-            "stderr": "",
-            "exit_code": 0,
-            "status": final_status,
-        }
+        return context, final_status, str(block_key) if block_key else None
+
+    def _write_profile_context_file(self, profile_key: str, context: str):
+        paths = self.memory_service.paths
+        profiles_dir = getattr(paths, "profiles_dir", paths.root / "profiles")
+        path = profiles_dir / f"{make_slug(profile_key)}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+        tmp_path.write_text(context, encoding="utf-8")
+        os.chmod(tmp_path, 0o666)
+        tmp_path.replace(path)
+        os.chmod(path, 0o666)
+        return path
 
     def _profile_context(self, actor: str, profile_key: str) -> str:
         if self.governance_service is None:

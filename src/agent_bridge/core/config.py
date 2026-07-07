@@ -61,6 +61,10 @@ class AgentBridgePaths:
     def plugins_dir(self) -> Path:
         return self.root / "plugins"
 
+    @property
+    def profiles_dir(self) -> Path:
+        return self.root / "profiles"
+
 
 @dataclass(frozen=True)
 class ServerConfig:
@@ -115,6 +119,7 @@ def ensure_directories(paths: AgentBridgePaths) -> None:
         paths.mock_backend_dir,
         paths.repos_dir,
         paths.plugins_dir,
+        paths.profiles_dir,
         paths.logs_dir,
         paths.run_dir,
     ):
