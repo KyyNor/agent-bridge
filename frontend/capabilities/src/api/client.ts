@@ -345,6 +345,13 @@ export const api = {
     // The list view omits events/result; fetch the full detail.
     return get<AgentRun>(`/agent-runs/${rows[0].run_key}`)
   },
+  listAgentRunsForWorkflowRun: async (workflowRunId: string): Promise<AgentRun[]> => {
+    // All agent runs attached to a workflow_run (main workflow agent plus any
+    // derived agents like the html reporter). Ordered oldest-first so the
+    // main workflow agent (created first) is the natural default.
+    const rows = await get<AgentRun[]>(`/agent-runs?workflow_run_id=${encodeURIComponent(workflowRunId)}&limit=50`)
+    return rows
+  },
   designWorkflow: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
     post<DesignAgentResponse<WorkflowDesignResult>>('/agent-runs/design/workflow', body),
   designScript: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>

@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, AgentRun } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -89,6 +89,10 @@ const taskPage = ref(1)
 const taskPageSize = ref(10)
 const runPage = ref(1)
 const runPageSize = ref(10)
+// Progress page: multiple agent runs (e.g. workflow + html_reporter).
+const progressAgentRuns = ref<AgentRun[]>([])
+const progressAgentRunKey = ref('')
+const progressAgentRunsLoading = ref(false)
 /** Maps a workflow_run_id to its agent_runs.run_key, so subagent-detail (which is
  *  keyed by run_key under /agent-runs) can be resolved from the workflow view. */
 const runIdToAgentRunKey = ref<Record<string, string>>({})
@@ -601,8 +605,12 @@ async function applyRoute() {
     progressWorkflowKey.value = workflow.workflow_key
     progressRunId.value = runId
     selectedRunId.value = runId
+    progressAgentRunKey.value = ''
     await loadRuns(workflow.workflow_key)
-    if (runId) await loadLogs()
+    if (runId) {
+      await loadProgressAgentRuns()
+      await loadProgressAgentEvents()
+    }
     const run = (workflowRuns.value[workflow.workflow_key] || []).find(item => item.run_id === runId)
     if (run?.status === 'running') {
       testing.value = true
@@ -1018,6 +1026,135 @@ async function refreshLoadedSubagentDetailsForRun(runId: string) {
   subagentDetails.value = next
 }
 
+// ===== Progress page: multi agent-run support =====
+
+/** Key used to index subagent details by agent run_key (progress page only). */
+function progressSubagentDetailKey(agentRunKey: string, taskIdStr: string) {
+  return `progress:${agentRunKey}:${taskIdStr}`
+}
+
+/** Load all agent runs associated with the current progress workflow run. */
+async function loadProgressAgentRuns() {
+  const workflowRunId = progressRunId.value
+  if (!workflowRunId) {
+    progressAgentRuns.value = []
+    progressAgentRunKey.value = ''
+    return
+  }
+  progressAgentRunsLoading.value = true
+  try {
+    const runs = await api.listAgentRunsForWorkflowRun(workflowRunId)
+    progressAgentRuns.value = runs
+    // Default to the first agent run (oldest = main workflow agent).
+    if (!progressAgentRunKey.value || !runs.some(r => r.run_key === progressAgentRunKey.value)) {
+      progressAgentRunKey.value = runs[0]?.run_key || ''
+    }
+  } catch (e: unknown) {
+    progressAgentRuns.value = []
+    progressAgentRunKey.value = ''
+  } finally {
+    progressAgentRunsLoading.value = false
+  }
+}
+
+/** Load events for the currently selected progress agent run. */
+async function loadProgressAgentEvents(options: { quiet?: boolean } = {}) {
+  const agentRunKey = progressAgentRunKey.value
+  if (!agentRunKey) {
+    runEvents.value = []
+    return
+  }
+  if (!options.quiet) logsLoading.value = true
+  try {
+    const events = await api.getAgentRunEvents(agentRunKey)
+    runEvents.value = events
+    if (options.quiet) {
+      await refreshProgressSubagentDetails(agentRunKey)
+    }
+  } catch (e: unknown) {
+    if (!options.quiet) {
+      runEvents.value = []
+    }
+  } finally {
+    if (!options.quiet) logsLoading.value = false
+  }
+}
+
+async function refreshProgressSubagentDetails(agentRunKey: string) {
+  if (!agentRunKey) return
+  const prefix = progressSubagentDetailKey(agentRunKey, '')
+  const taskIds = Object.keys(subagentDetails.value)
+    .filter(key => key.startsWith(prefix))
+    .map(key => key.slice(prefix.length))
+  if (!taskIds.length) return
+  const entries = await Promise.all(
+    taskIds.map(async taskIdStr => {
+      try {
+        return [progressSubagentDetailKey(agentRunKey, taskIdStr), await api.getAgentRunSubagentDetail(agentRunKey, taskIdStr)] as const
+      } catch {
+        return null
+      }
+    }),
+  )
+  const next = { ...subagentDetails.value }
+  for (const entry of entries) {
+    if (entry) next[entry[0]] = entry[1]
+  }
+  subagentDetails.value = next
+}
+
+/** Switch to a different agent run in the progress page. */
+async function selectProgressAgentRun(agentRunKey: string) {
+  if (agentRunKey === progressAgentRunKey.value) return
+  progressAgentRunKey.value = agentRunKey
+  await loadProgressAgentEvents()
+}
+
+/** Subagent detail for the currently selected progress agent run. */
+function progressSubagentDetail(taskIdStr: string) {
+  const key = progressAgentRunKey.value ? progressSubagentDetailKey(progressAgentRunKey.value, taskIdStr) : ''
+  return key ? subagentDetails.value[key] || null : null
+}
+
+function progressSubagentDetailLoading(taskIdStr: string) {
+  const key = progressAgentRunKey.value ? progressSubagentDetailKey(progressAgentRunKey.value, taskIdStr) : ''
+  return key ? subagentDetailLoading.value.has(key) : false
+}
+
+function progressSubagentDetailError(taskIdStr: string) {
+  const key = progressAgentRunKey.value ? progressSubagentDetailKey(progressAgentRunKey.value, taskIdStr) : ''
+  return key ? subagentDetailErrors.value[key] || '' : ''
+}
+
+async function ensureProgressSubagentDetail(taskIdStr: string) {
+  const agentRunKey = progressAgentRunKey.value
+  if (!agentRunKey) return
+  const key = progressSubagentDetailKey(agentRunKey, taskIdStr)
+  if (subagentDetails.value[key] || subagentDetailLoading.value.has(key)) return
+  const loading = new Set(subagentDetailLoading.value)
+  loading.add(key)
+  subagentDetailLoading.value = loading
+  const nextErrors = { ...subagentDetailErrors.value }
+  delete nextErrors[key]
+  subagentDetailErrors.value = nextErrors
+  try {
+    const detail = await api.getAgentRunSubagentDetail(agentRunKey, taskIdStr)
+    subagentDetails.value = { ...subagentDetails.value, [key]: detail }
+  } catch (e: unknown) {
+    subagentDetailErrors.value = { ...subagentDetailErrors.value, [key]: errorMessage(e) }
+  } finally {
+    const done = new Set(subagentDetailLoading.value)
+    done.delete(key)
+    subagentDetailLoading.value = done
+  }
+}
+
+function agentRunLabel(run: AgentRun): string {
+  if (run.agent_name === 'workflow') return 'Workflow Agent'
+  if (run.agent_name === 'workflow_html_reporter') return 'HTML Reporter'
+  return run.agent_name || 'Agent'
+}
+
 async function loadProgressArtifacts() {
   const runId = progressRunId.value
   const workflowKey = progressWorkflowKey.value
@@ -1179,8 +1316,10 @@ async function runWorkflow(item: WorkflowDefinition) {
       progressRunId.value = res.run_id
       selectedKey.value = wf.workflow_key
       selectedRunId.value = res.run_id
+      progressAgentRunKey.value = ''
       await loadRuns(wf.workflow_key)
-      await loadLogs()
+      await loadProgressAgentRuns()
+      await loadProgressAgentEvents()
       stopTestPolling()
       testPoll = setInterval(pollTestRun, 1500)
       window.location.hash = `workflow/${wf.workflow_key}/progress/${res.run_id}`
@@ -1206,7 +1345,9 @@ async function prepareProgress(item: WorkflowDefinition, runId?: string) {
   progressWorkflowKey.value = item.workflow_key
   progressRunId.value = run.run_id
   selectedRunId.value = run.run_id
-  await loadLogs()
+  progressAgentRunKey.value = ''
+  await loadProgressAgentRuns()
+  await loadProgressAgentEvents()
   if (run.status === 'running') {
     testing.value = true
     testingRunId.value = run.run_id
@@ -1219,7 +1360,8 @@ async function refreshProgress() {
   if (progressWorkflowKey.value) {
     await loadRuns(progressWorkflowKey.value)
   }
-  await loadLogs()
+  await loadProgressAgentRuns()
+  await loadProgressAgentEvents()
 }
 
 async function pollTestRun() {
@@ -1228,7 +1370,10 @@ async function pollTestRun() {
   try {
     const run = await api.getWorkflowRun(runId)
     mergeWorkflowRun(run)
-    await loadLogs({ quiet: true })
+    // Refresh agent runs list (to pick up html reporter when it starts) and
+    // refresh events for the currently selected agent run.
+    await loadProgressAgentRuns()
+    await loadProgressAgentEvents({ quiet: true })
     if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) {
       stopTestPolling()
       testing.value = false
@@ -1955,9 +2100,24 @@ async function confirmClearWorkflow() {
               <div class="truncate font-mono text-xs text-muted-foreground">{{ progressRunId || '暂无运行 ID' }}</div>
               <div v-if="progressRun?.started_at" class="text-xs text-muted-foreground">{{ formatLocalDatetime(progressRun.started_at) }}</div>
             </div>
-            <Button variant="outline" size="sm" :disabled="logsLoading || runsLoading" @click="refreshProgress">
-              {{ logsLoading || runsLoading ? '刷新中' : '刷新' }}
-            </Button>
+            <div class="flex flex-wrap items-center gap-2">
+              <div v-if="progressAgentRuns.length > 1" class="flex flex-wrap items-center gap-1">
+                <button
+                  v-for="agentRun in progressAgentRuns"
+                  :key="agentRun.run_key"
+                  type="button"
+                  class="cursor-pointer"
+                  @click="selectProgressAgentRun(agentRun.run_key)"
+                >
+                  <Badge :variant="progressAgentRunKey === agentRun.run_key ? 'default' : 'outline'">
+                    {{ agentRunLabel(agentRun) }}
+                  </Badge>
+                </button>
+              </div>
+              <Button variant="outline" size="sm" :disabled="logsLoading || runsLoading || progressAgentRunsLoading" @click="refreshProgress">
+                {{ logsLoading || runsLoading || progressAgentRunsLoading ? '刷新中' : '刷新' }}
+              </Button>
+            </div>
           </div>
 
           <div v-if="logsLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
@@ -1973,15 +2133,15 @@ async function confirmClearWorkflow() {
             <div v-else class="min-h-[calc(100vh-260px)] overflow-x-hidden overflow-y-visible pr-1">
               <RunEventTimeline
                 :events="runEvents"
-                :context-key="'run:' + selectedRunId"
+                :context-key="'run:' + progressAgentRunKey"
                 show-agent-name
-                @expand="(taskId: string) => ensureSubagentDetail(selectedRunId, taskId)"
+                @expand="(taskId: string) => ensureProgressSubagentDetail(taskId)"
               >
                 <template #subagent-body="{ taskId }">
                   <SubagentDetailPanel
-                    :detail="subagentDetail(selectedRunId, taskId)"
-                    :loading="subagentDetailLoadingFor(selectedRunId, taskId)"
-                    :error="subagentDetailErrorFor(selectedRunId, taskId)"
+                    :detail="progressSubagentDetail(taskId)"
+                    :loading="progressSubagentDetailLoading(taskId)"
+                    :error="progressSubagentDetailError(taskId)"
                   />
                 </template>
               </RunEventTimeline>
