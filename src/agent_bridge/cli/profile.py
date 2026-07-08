@@ -285,7 +285,7 @@ def profile_use(
         path = _claude_config_path(resolved_scope)
         existing = _load_json_file(path)
         _confirm_overwrite(existing, yes)
-        rendered_doc = _run_client(lambda client: client.render_profile_doc(profile))
+        rendered_doc = _run_client(lambda client: client.refresh_profile_doc_context_file(profile))
         profile_path = _server_profile_doc_path(rendered_doc)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(

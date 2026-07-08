@@ -139,6 +139,9 @@ class AgentBridgeClient:
     def render_profile_doc(self, profile_key: str) -> dict[str, Any]:
         return self._request("POST", f"/capability-profiles/{profile_key}/doc/render").json()
 
+    def refresh_profile_doc_context_file(self, profile_key: str) -> dict[str, Any]:
+        return self._request("POST", f"/capability-profiles/{profile_key}/doc/context-file").json()
+
     def list_memory_blocks(self) -> list[dict[str, Any]]:
         return self._request("GET", "/memory/blocks").json()
 

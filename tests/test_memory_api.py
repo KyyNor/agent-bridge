@@ -5,6 +5,19 @@ from fastapi.testclient import TestClient
 from agent_bridge.api.app import create_app
 
 
+class FakeContextWorkerService:
+    def handle_hook(self, block, *, action, payload, event_name, matcher, timeout_seconds):
+        return {
+            "stdout": (
+                '{"hookSpecificOutput":{"hookEventName":"SessionStart",'
+                '"additionalContext":"Memory context from claude-mem."}}'
+            ),
+            "stderr": "",
+            "exit_code": 0,
+            "status": "ok",
+        }
+
+
 def _client(wm_paths):
     app = create_app(paths=wm_paths, admins={"root"})
     return TestClient(app)
@@ -65,6 +78,36 @@ def test_memory_hook_api_returns_noop_when_unbound(wm_paths):
     assert response.status_code == 200
     assert response.json()["status"] == "not_configured"
     assert response.json()["exit_code"] == 0
+
+
+def test_profile_doc_context_file_api_refreshes_memory_context(wm_paths):
+    app = create_app(paths=wm_paths, admins={"root"})
+    app.state.agent_bridge_service.memory.worker_service = FakeContextWorkerService()
+    app.state.agent_bridge_service.memory.hooks.worker_service = FakeContextWorkerService()
+    client = TestClient(app)
+    headers = {"X-Agent-Bridge-User": "root"}
+    client.post(
+        "/capability-profiles",
+        json={"profile_key": "dev", "name": "Dev", "description": "", "status": "active"},
+        headers=headers,
+    )
+    client.post(
+        "/memory/blocks",
+        json={"block_key": "dev-memory", "name": "Dev Memory", "description": "Project memory"},
+        headers=headers,
+    )
+    client.put(
+        "/capability-profiles/dev/memory",
+        json={"block_key": "dev-memory", "enabled": True},
+        headers=headers,
+    )
+
+    response = client.post("/capability-profiles/dev/doc/context-file", headers=headers)
+
+    profile_path = wm_paths.profiles_dir / "dev.md"
+    assert response.status_code == 200
+    assert response.json()["profile_doc_path"] == str(profile_path)
+    assert "Memory context from claude-mem." in profile_path.read_text(encoding="utf-8")
 
 
 def test_memory_dashboard_api_starts_worker_and_returns_embedded_url(wm_paths):

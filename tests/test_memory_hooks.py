@@ -212,6 +212,29 @@ def test_session_end_hook_writes_profile_context_file(wm_paths):
     assert profile_path.stat().st_mode & 0o777 == 0o666
 
 
+def test_refresh_profile_context_file_writes_profile_and_memory_context(wm_paths):
+    service = _service(wm_paths)
+    fake_worker = FakeContextWorkerService()
+    service.memory.worker_service = fake_worker
+    service.memory.hooks.worker_service = fake_worker
+
+    result = service.memory.hooks.refresh_profile_context_file(
+        actor="root",
+        profile_key="dev",
+        event_name="ProfileUse",
+        matcher=None,
+        payload={"source": "profile-use"},
+        timeout_seconds=60,
+    )
+
+    profile_path = wm_paths.root / "profiles" / "dev.md"
+    written = profile_path.read_text(encoding="utf-8")
+    assert result["profile_doc_path"] == str(profile_path)
+    assert result["status"] == "ok"
+    assert "# Agent Bridge Profile：Dev" in written
+    assert "Memory context from claude-mem." in written
+
+
 def test_worker_executes_original_claude_mem_hook_command_with_block_data_dir(wm_paths, tmp_path, monkeypatch):
     plugin_dir = tmp_path / "claude-mem"
     scripts = plugin_dir / "scripts"

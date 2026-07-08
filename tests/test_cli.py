@@ -205,7 +205,7 @@ def test_profile_use_writes_project_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -237,7 +237,7 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
     )
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -267,7 +267,7 @@ def test_profile_use_writes_stable_channel_without_profile_files(monkeypatch, tm
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -289,7 +289,7 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
         def get_profile_memory(self, profile_key):
@@ -330,7 +330,7 @@ def test_profile_use_adds_absolute_profile_pointer_to_claude_md(monkeypatch, tmp
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -355,7 +355,7 @@ def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
     )
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
         def get_profile_memory(self, profile_key):
@@ -377,7 +377,7 @@ def test_profile_use_gets_profile_doc_path_from_server(monkeypatch, tmp_path: Pa
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -394,7 +394,7 @@ def test_profile_use_gets_profile_doc_path_when_preserving_config(monkeypatch, t
     config.write_text(json.dumps(original), encoding="utf-8")
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -411,7 +411,7 @@ def test_profile_use_writes_user_scope_channel_without_profile_files(monkeypatch
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -441,7 +441,7 @@ def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, 
     )
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -470,7 +470,7 @@ def test_profile_use_replaces_claude_pointer_and_preserves_agents_file(monkeypat
     )
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -493,7 +493,7 @@ def test_profile_use_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path)
     monkeypatch.setattr("questionary.select", lambda *args, **kwargs: type("Prompt", (), {"ask": lambda self: "project"})())
 
     class FakeClient:
-        def render_profile_doc(self, profile_key):
+        def refresh_profile_doc_context_file(self, profile_key):
             return _server_profile_doc(profile_key)
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
@@ -615,6 +615,26 @@ def test_client_render_profile_doc_posts_render_endpoint(monkeypatch) -> None:
     assert result == {"markdown": "# Safe\n"}
     assert captured == {
         "url": "http://example.test/capability-profiles/safe/doc/render",
+        "headers": {"X-Agent-Bridge-User": "root"},
+        "timeout": 10.0,
+    }
+
+
+def test_client_refresh_profile_doc_context_file_posts_refresh_endpoint(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(url, headers, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return httpx.Response(200, json={"profile_doc_path": "/server/profiles/safe.md"})
+
+    monkeypatch.setattr("agent_bridge.client.httpx.post", fake_post)
+    result = AgentBridgeClient("http://example.test/", "root").refresh_profile_doc_context_file("safe")
+
+    assert result == {"profile_doc_path": "/server/profiles/safe.md"}
+    assert captured == {
+        "url": "http://example.test/capability-profiles/safe/doc/context-file",
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
     }

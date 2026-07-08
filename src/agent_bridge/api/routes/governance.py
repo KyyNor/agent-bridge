@@ -68,6 +68,18 @@ def create_governance_routes(service, actor):
         rendered["profile_doc_path"] = str((service.paths.profiles_dir / f"{make_slug(profile_key)}.md").resolve())
         return rendered
 
+    @router.post("/capability-profiles/{profile_key}/doc/context-file")
+    def refresh_profile_context_file(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        service.governance.render_profile_markdown(current_actor, profile_key)
+        return service.memory.hooks.refresh_profile_context_file(
+            actor=current_actor,
+            profile_key=profile_key,
+            event_name="ProfileUse",
+            matcher=None,
+            payload={"source": "profile-use"},
+            timeout_seconds=60,
+        )
+
     @router.put("/capability-profiles/{profile_key}/doc/manual-notes")
     def update_profile_manual_notes(profile_key: str, payload: ProfileManualNotesRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.governance.update_profile_manual_notes(current_actor, profile_key, payload.manual_notes)

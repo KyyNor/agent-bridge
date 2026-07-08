@@ -261,6 +261,34 @@ class MemoryHookService:
         logger.info("Agent Bridge profile 上下文已写入 %s", path)
         return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": final_status}
 
+    def refresh_profile_context_file(
+        self,
+        *,
+        actor: str,
+        profile_key: str,
+        event_name: str | None,
+        matcher: str | None,
+        payload: dict[str, Any],
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        """Refresh the markdown file imported by CLAUDE.md with profile + memory context."""
+        context, final_status, block_key = self._build_session_context(
+            actor=actor,
+            profile_key=profile_key,
+            event_name=event_name,
+            matcher=matcher,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+        )
+        path = self._write_profile_context_file(profile_key, context)
+        logger.info("Agent Bridge profile 上下文已刷新 %s", path)
+        return {
+            "profile_key": profile_key,
+            "profile_doc_path": str(path),
+            "status": final_status,
+            "block_key": block_key,
+        }
+
     def _build_session_context(
         self,
         *,
