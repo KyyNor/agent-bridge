@@ -428,6 +428,7 @@ def test_profile_doc_api_render_and_notes(wm_paths) -> None:
     assert rendered.status_code == 200
     assert "# Agent Bridge Profile：Safe" in rendered.json()["markdown"]
     assert "Manual policy" in rendered.json()["markdown"]
+    assert rendered.json()["profile_doc_path"] == str(wm_paths.profiles_dir / "safe.md")
 
 
 def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
@@ -1030,7 +1031,10 @@ def test_frontend_workflow_view_exposes_workflow_management() -> None:
 
     assert "workflow_key" in source
     assert "profile_key" in source
-    assert "artifacts_search" in source
+    assert "workflow_type" in source
+    assert "工作流类型" in source
+    assert "操作" in source
+    assert "总结" in source
     assert "workflow_js" in source
     assert "Claude Code 工作流" in source
     assert "manifestText" not in source

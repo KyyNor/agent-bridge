@@ -14,6 +14,7 @@ from agent_bridge.api.schemas import (
     ProjectProfileRequest,
     ResourceProfilesRequest,
 )
+from agent_bridge.core.slug import make_slug
 
 
 
@@ -63,7 +64,9 @@ def create_governance_routes(service, actor):
 
     @router.post("/capability-profiles/{profile_key}/doc/render")
     def render_profile_doc(profile_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.governance.render_profile_markdown(current_actor, profile_key)
+        rendered = service.governance.render_profile_markdown(current_actor, profile_key)
+        rendered["profile_doc_path"] = str((service.paths.profiles_dir / f"{make_slug(profile_key)}.md").resolve())
+        return rendered
 
     @router.put("/capability-profiles/{profile_key}/doc/manual-notes")
     def update_profile_manual_notes(profile_key: str, payload: ProfileManualNotesRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
