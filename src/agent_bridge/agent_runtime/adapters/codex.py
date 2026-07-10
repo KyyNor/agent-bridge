@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import subprocess
 import tempfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -38,6 +40,7 @@ class _CodexRun:
         )
         process = await asyncio.create_subprocess_exec(
             *args,
+            stdin=subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -64,7 +67,11 @@ class _CodexRun:
             return_code = await process.wait()
             await stderr_task
             if return_code != 0:
-                message = _stderr_summary(stderr_chunks) or f"codex exited with status {return_code}"
+                message = (
+                    final.result
+                    if final is not None and final.is_error and final.result
+                    else _stderr_summary(stderr_chunks) or f"codex exited with status {return_code}"
+                )
                 yield CodingAgentUpdate(
                     events=[_codex_event("error", status="failed", message=message)],
                     final=CodingAgentFinal(is_error=True, result=message),
@@ -118,8 +125,39 @@ def _write_schema_file(schema: dict[str, Any] | None) -> str | None:
     if not schema:
         return None
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as fh:
-        json.dump(schema, fh, ensure_ascii=False)
+        json.dump(_schema_for_codex(schema), fh, ensure_ascii=False)
         return fh.name
+
+
+def _schema_for_codex(schema: dict[str, Any]) -> dict[str, Any]:
+    """Codex forwards schemas to strict structured output.
+
+    Strict object schemas require every property to be listed in ``required``.
+    Claude's SDK accepts optional properties, so normalize on the Codex side
+    instead of forcing every Agent Bridge schema author to remember this rule.
+    """
+    normalized = copy.deepcopy(schema)
+    _require_all_object_properties(normalized)
+    return normalized
+
+
+def _require_all_object_properties(value: Any) -> None:
+    if isinstance(value, dict):
+        properties = value.get("properties")
+        if value.get("type") == "object" and isinstance(properties, dict):
+            value["required"] = list(properties.keys())
+            for child in properties.values():
+                _require_all_object_properties(child)
+        for key in ("items", "additionalProperties"):
+            _require_all_object_properties(value.get(key))
+        for key in ("anyOf", "oneOf", "allOf"):
+            variants = value.get(key)
+            if isinstance(variants, list):
+                for item in variants:
+                    _require_all_object_properties(item)
+    elif isinstance(value, list):
+        for item in value:
+            _require_all_object_properties(item)
 
 
 def _build_command(

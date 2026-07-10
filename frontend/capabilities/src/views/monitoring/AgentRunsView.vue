@@ -266,6 +266,13 @@ function formatCost(v: number | null | undefined): string {
   return `$${Number(v).toFixed(4)}`
 }
 
+function backendBadgeClass(backend: string | null | undefined): string {
+  if (backend === 'claude') return 'border-sky-200 bg-sky-50 text-sky-700'
+  if (backend === 'opencode') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (backend === 'codex') return 'border-violet-200 bg-violet-50 text-violet-700'
+  return 'border-border bg-muted text-muted-foreground'
+}
+
 </script>
 
 <template>
@@ -294,7 +301,11 @@ function formatCost(v: number | null | undefined): string {
         </div>
         <div>
           <span class="text-muted-foreground">后端</span>
-          <div class="font-mono font-medium">{{ detailRun.backend_key || '—' }}</div>
+          <div>
+            <Badge variant="outline" class="font-mono text-[11px]" :class="backendBadgeClass(detailRun.backend_key)">
+              {{ detailRun.backend_key || 'unknown' }}
+            </Badge>
+          </div>
         </div>
         <div>
           <span class="text-muted-foreground">状态</span>
@@ -455,7 +466,11 @@ function formatCost(v: number | null | undefined): string {
                 {{ formatLocalDatetime(r.created_at) }}
               </td>
               <td class="px-4 py-3 font-mono text-sm">{{ r.agent_name }}</td>
-              <td class="px-4 py-3 font-mono text-sm">{{ r.backend_key || '—' }}</td>
+              <td class="px-4 py-3">
+                <Badge variant="outline" class="font-mono text-[11px]" :class="backendBadgeClass(r.backend_key)">
+                  {{ r.backend_key || 'unknown' }}
+                </Badge>
+              </td>
               <td class="px-4 py-3 text-sm">{{ r.profile_key || '—' }}</td>
               <td class="px-4 py-3 text-sm">
                 <span v-if="r.workflow_key" class="font-mono text-xs">{{ r.workflow_key }}</span>

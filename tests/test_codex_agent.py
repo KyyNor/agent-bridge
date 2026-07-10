@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import subprocess
+from pathlib import Path
+
 from agent_bridge.agent_runtime.adapters.codex import (
     CodexCodingAgent,
     _build_command,
     _events_from_codex_row,
+    _schema_for_codex,
 )
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
+from agent_bridge.agent_runtime.types import CodingAgentRequest
 from agent_bridge.core.config import AgentBackendConfig, AgentRuntimeConfig
 
 
@@ -58,6 +64,67 @@ def test_codex_result_event_maps_to_final() -> None:
     assert final.result == '{"answer": 42}'
     assert final.session_id == "s1"
     assert events[0]["kind"] == "result"
+
+
+def test_codex_schema_requires_all_declared_object_properties() -> None:
+    schema = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {
+            "summary": {"type": "string"},
+            "notes": {"type": "array", "items": {"type": "string"}},
+            "script": {
+                "type": "object",
+                "required": ["code"],
+                "properties": {
+                    "code": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+            },
+        },
+    }
+
+    normalized = _schema_for_codex(schema)
+
+    assert normalized["required"] == ["summary", "notes", "script"]
+    assert normalized["properties"]["script"]["required"] == ["code", "description"]
+    assert schema["required"] == ["summary"]
+
+
+def test_codex_run_closes_stdin(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class _EmptyAsyncPipe:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    class _FakeProcess:
+        stdout = _EmptyAsyncPipe()
+        stderr = _EmptyAsyncPipe()
+        returncode = 0
+
+        async def wait(self):
+            return 0
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return _FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    request = CodingAgentRequest(prompt="hello", cwd=tmp_path, mcp_servers={}, setting_sources=[])
+    run = CodexCodingAgent().start(request)
+
+    async def collect_updates():
+        return [update async for update in run.updates()]
+
+    updates = asyncio.run(collect_updates())
+
+    assert captured["kwargs"]["stdin"] == subprocess.DEVNULL
+    assert updates[-1].final is not None
 
 
 def test_registry_can_create_codex_backend() -> None:
