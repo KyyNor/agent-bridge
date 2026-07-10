@@ -33,6 +33,63 @@ def _read_events_jsonl(path: Path) -> list[dict[str, Any]] | None:
     return events
 
 
+def _normalize_agent_run_result(row: dict[str, Any]) -> dict[str, Any]:
+    """Recover structured output for older non-native-schema agent runs.
+
+    Some adapters stream the useful JSON as an assistant text event while their
+    terminal result row only says ``done``. Keep the stored row immutable, but
+    make detail reads useful by deriving the schema result from the event log.
+    """
+    if not row.get("output_schema"):
+        return row
+    if not _is_generic_result(row.get("result")):
+        return row
+    recovered = _extract_json_from_agent_events(row.get("events") or [])
+    if recovered is None:
+        return row
+    normalized = dict(row)
+    normalized["result"] = recovered
+    return normalized
+
+
+def _is_generic_result(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().lower() in {
+        "",
+        "done",
+        "success",
+        "succeeded",
+        "complete",
+        "completed",
+        "ok",
+    }
+
+
+def _extract_json_from_agent_events(events: list[dict[str, Any]]) -> Any | None:
+    for event in reversed(events):
+        if event.get("kind") != "agent_message":
+            continue
+        message = event.get("message")
+        if not isinstance(message, str):
+            continue
+        parsed = _extract_json(message)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_json(text: str) -> Any | None:
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
 WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -116,7 +173,7 @@ def create_agent_runs_routes(service, actor):
         row = service.store.agent_runs.get(run_key)
         if row is None:
             raise NotFound("agent run not found")
-        return row
+        return _normalize_agent_run_result(row)
 
     @router.get("/agent-runs/{run_key}/events")
     def get_agent_run_events(run_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:

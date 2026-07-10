@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from agent_bridge.agent_runtime.events import event_record
@@ -69,6 +69,10 @@ class _OpenCodeRun:
                 yield CodingAgentUpdate(
                     final=CodingAgentFinal(result="\n".join(final_text_parts).strip())
                 )
+            else:
+                completed_final = _completed_final_from_text(final, final_text_parts, self.request)
+                if completed_final is not final:
+                    yield CodingAgentUpdate(final=completed_final)
         finally:
             if not stderr_task.done():
                 stderr_task.cancel()
@@ -126,6 +130,46 @@ def _stderr_summary(chunks: list[str], *, limit: int = 2000) -> str:
     if len(text) <= limit:
         return text
     return text[-limit:]
+
+
+def _completed_final_from_text(
+    final: CodingAgentFinal,
+    final_text_parts: list[str],
+    request: CodingAgentRequest,
+) -> CodingAgentFinal:
+    """Prefer the assistant's final text over OpenCode's generic status final.
+
+    ``opencode run --format json`` may emit a terminal row such as
+    ``{"type":"result","result":"done"}`` after the actual assistant answer has
+    already streamed as a text event. For schema-based runs that loses the JSON
+    object the UI needs, so normalize the final value once the process ends.
+    """
+    text = "\n".join(part.strip() for part in final_text_parts if part.strip()).strip()
+    if not text or final.is_error:
+        return final
+    final_result = str(final.result or "").strip()
+    if _is_generic_final_result(final_result):
+        return replace(final, result=text)
+    if request.output_schema and _extract_json(final_result) is None and _extract_json(text) is not None:
+        return replace(final, result=text)
+    return final
+
+
+def _is_generic_final_result(text: str) -> bool:
+    return text.lower() in {"", "done", "success", "succeeded", "complete", "completed", "ok"}
+
+
+def _extract_json(text: str) -> Any | None:
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
 
 
 def _decode_json_line(line: str) -> dict[str, Any]:

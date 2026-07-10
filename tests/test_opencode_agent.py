@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from agent_bridge.agent_runtime.adapters.opencode import (
     OpenCodeCodingAgent,
     _build_command,
+    _completed_final_from_text,
     _events_from_opencode_row,
 )
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
+from agent_bridge.agent_runtime.types import CodingAgentFinal, CodingAgentRequest
 from agent_bridge.core.config import AgentBackendConfig, AgentRuntimeConfig
 
 
@@ -86,6 +90,42 @@ def test_opencode_result_event_maps_to_final() -> None:
     assert final.session_id == "s1"
     assert final.cost_usd == 0.01
     assert events[0]["kind"] == "result"
+
+
+def test_opencode_completed_final_prefers_text_over_generic_done_for_schema() -> None:
+    request = CodingAgentRequest(
+        prompt="make json",
+        cwd=Path("/tmp/project"),
+        mcp_servers={},
+        setting_sources=[],
+        output_schema={"type": "object"},
+    )
+    final = CodingAgentFinal(result="done", session_id="s1")
+
+    completed = _completed_final_from_text(
+        final,
+        ['```json\n{"summary": "ok", "script": {"code": "def main(envelope):\\n    return {}\\n"}}\n```'],
+        request,
+    )
+
+    assert completed.result != "done"
+    assert '"summary": "ok"' in str(completed.result)
+    assert completed.session_id == "s1"
+
+
+def test_opencode_completed_final_preserves_specific_result() -> None:
+    request = CodingAgentRequest(
+        prompt="say hi",
+        cwd=Path("/tmp/project"),
+        mcp_servers={},
+        setting_sources=[],
+    )
+    final = CodingAgentFinal(result="specific final", session_id="s1")
+
+    completed = _completed_final_from_text(final, ["streamed text"], request)
+
+    assert completed is final
+    assert completed.result == "specific final"
 
 
 def test_registry_can_create_opencode_backend() -> None:

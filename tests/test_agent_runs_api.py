@@ -172,6 +172,50 @@ def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path
     assert [e["kind"] for e in events] == ["result"]
 
 
+def test_agent_run_detail_recovers_schema_result_from_agent_message_events(wm_paths) -> None:
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="design_script_old_opencode",
+        agent_name="design_script",
+        ok=True,
+        status="completed",
+        prompt="make a script",
+        output_schema={
+            "type": "object",
+            "required": ["summary", "script"],
+            "properties": {
+                "summary": {"type": "string"},
+                "script": {"type": "object"},
+            },
+        },
+        result="done",
+        events=[
+            {"kind": "result", "message": "done"},
+            {
+                "kind": "agent_message",
+                "message": (
+                    "```json\n"
+                    '{"summary":"created","script":{"script_key":"fib","code":"def main(envelope):\\n    return {}\\n"}}'
+                    "\n```"
+                ),
+            },
+        ],
+    )
+
+    client = _client(wm_paths)
+    detail = client.get(
+        "/agent-runs/design_script_old_opencode",
+        headers={"X-Agent-Bridge-User": "root"},
+    ).json()
+
+    assert detail["result"]["summary"] == "created"
+    assert detail["result"]["script"]["script_key"] == "fib"
+    assert "def main" in detail["result"]["script"]["code"]
+
+
 def test_agent_run_events_includes_terminal_db_events_when_live_jsonl_is_stale(wm_paths, tmp_path) -> None:
     """If a run fails after the streaming file was closed, the terminal DB error
     must still appear even though events.jsonl exists."""
