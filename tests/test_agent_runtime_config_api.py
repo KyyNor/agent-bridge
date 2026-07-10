@@ -47,3 +47,30 @@ def test_agent_runtime_config_api_rejects_missing_default_backend(wm_paths) -> N
     )
 
     assert response.status_code == 400
+
+
+def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -> None:
+    from agent_bridge.api.app import create_app
+
+    app = create_app(wm_paths, {"root"})
+    client = TestClient(app)
+
+    payload = {
+        "default_backend": "codex",
+        "backends": [
+            {"slug": "claude", "type": "claude", "command": None, "model": None},
+            {"slug": "opencode", "type": "opencode", "command": "opencode", "model": None},
+            {"slug": "codex", "type": "codex", "command": "codex", "model": "gpt-5"},
+        ],
+    }
+    saved = client.post(
+        "/agent-runtime/config",
+        json=payload,
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json() == payload
+    service = app.state.agent_bridge_service
+    assert service.agents.coding_agents.default_backend == "codex"
+    assert service.agents.coding_agents.keys() == ["claude", "codex", "opencode"]

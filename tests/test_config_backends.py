@@ -225,3 +225,31 @@ def test_save_agent_runtime_config_requires_default_backend_to_exist(tmp_path: P
             paths,
             AgentRuntimeConfig(default_backend="opencode", backends=()),
         )
+
+
+def test_agent_runtime_config_accepts_codex_backend(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+
+    saved = save_agent_runtime_config(
+        paths,
+        AgentRuntimeConfig(
+            default_backend="codex",
+            backends=(
+                AgentBackendConfig(
+                    slug="codex",
+                    agent_type="codex",
+                    command="codex",
+                    model="gpt-5",
+                ),
+            ),
+        ),
+    )
+
+    loaded = load_agent_runtime_config(paths)
+
+    assert saved.default_backend == "codex"
+    assert loaded.default_backend == "codex"
+    assert loaded.backends[0].slug == "codex"
+    assert loaded.backends[0].agent_type == "codex"
+    assert loaded.backends[0].command == "codex"
+    assert loaded.backends[0].model == "gpt-5"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent_bridge.agent_runtime.adapters import ClaudeCodingAgent, OpenCodeCodingAgent
+from agent_bridge.agent_runtime.adapters import ClaudeCodingAgent, CodexCodingAgent, OpenCodeCodingAgent
 from agent_bridge.agent_runtime.types import CodingAgent
 from agent_bridge.core.config import AgentRuntimeConfig
 
@@ -57,6 +57,15 @@ def create_coding_agent_registry(config: AgentRuntimeConfig | None = None) -> Co
                 OpenCodeCodingAgent(
                     backend_key=backend.slug,
                     command=backend.command or "opencode",
+                    model=backend.model,
+                )
+            )
+            continue
+        if backend.agent_type == "codex":
+            registry.register(
+                CodexCodingAgent(
+                    backend_key=backend.slug,
+                    command=backend.command or "codex",
                     model=backend.model,
                 )
             )
