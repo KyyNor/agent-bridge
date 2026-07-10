@@ -19,11 +19,14 @@ from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphSe
 from agent_bridge.knowledge_management.code_knowledge.understand_scheduler import UnderstandingScheduler
 from agent_bridge.knowledge_management.docs_knowledge.doc_sync_scheduler import DocSyncScheduler
 from agent_bridge.core.config import (
+    AgentBackendConfig,
     AgentBridgePaths,
+    AgentRuntimeConfig,
     BackendConfig,
     ensure_directories,
     load_agent_runtime_config,
     migrate_toml_backends_to_db,
+    save_agent_runtime_config,
 )
 from agent_bridge.capability_hub.models import ProfileResourceType
 from agent_bridge.core.domain import (
@@ -57,6 +60,21 @@ ALLOWED_EXTENSIONS = {
     ".txt", ".md", ".markdown", ".csv", ".json",
 }
 SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
+
+
+def _agent_runtime_config_payload(config: AgentRuntimeConfig) -> dict[str, Any]:
+    return {
+        "default_backend": config.default_backend,
+        "backends": [
+            {
+                "slug": backend.slug,
+                "type": backend.agent_type,
+                "command": backend.command,
+                "model": backend.model,
+            }
+            for backend in config.backends
+        ],
+    }
 
 
 class AgentBridgeService:
@@ -727,6 +745,40 @@ class AgentBridgeService:
             "doc_sync": self.doc_sync_scheduler.get_status(),
             "workflow": self.workflow_scheduler.get_status(),
         }
+
+    def get_agent_runtime_config(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        config = load_agent_runtime_config(self.paths)
+        return _agent_runtime_config_payload(config)
+
+    def save_agent_runtime_config(self, actor: str, payload: dict[str, Any]) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        backends = [
+            AgentBackendConfig(
+                slug=str(item.get("slug") or ""),
+                agent_type=str(item.get("type") or item.get("agent_type") or ""),
+                command=item.get("command") or None,
+                model=item.get("model") or None,
+            )
+            for item in payload.get("backends", [])
+            if isinstance(item, dict)
+        ]
+        config = AgentRuntimeConfig(
+            default_backend=str(payload.get("default_backend") or "claude"),
+            backends=tuple(backends),
+        )
+        try:
+            saved = save_agent_runtime_config(self.paths, config)
+            registry = create_coding_agent_registry(saved)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        self.agents.coding_agents = registry
+        logger.info(
+            "Agent runtime 配置已保存 default=%s backends=%s",
+            saved.default_backend,
+            [item.slug for item in saved.backends],
+        )
+        return _agent_runtime_config_payload(saved)
 
     def get_claude_mem_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

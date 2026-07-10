@@ -11,6 +11,8 @@ from agent_bridge.core.config import (
     load_backend_configs,
     load_mcp_config,
     load_server_config,
+    save_agent_runtime_config,
+    AgentBackendConfig,
 )
 
 
@@ -148,6 +150,7 @@ def test_load_agent_runtime_config_reads_agents_section(tmp_path: Path):
             '[agents.claude-sonnet]\n'
             'type = "claude"\n'
             'model = "claude-sonnet-test"\n'
+            'command = "ignored-for-claude"\n'
         ),
     )
 
@@ -158,6 +161,7 @@ def test_load_agent_runtime_config_reads_agents_section(tmp_path: Path):
     assert config.backends[0].slug == "claude-sonnet"
     assert config.backends[0].agent_type == "claude"
     assert config.backends[0].model == "claude-sonnet-test"
+    assert config.backends[0].command == "ignored-for-claude"
 
 
 def test_load_agent_runtime_config_requires_backend_type(tmp_path: Path):
@@ -175,3 +179,49 @@ def test_load_agent_runtime_config_requires_backend_type(tmp_path: Path):
 
     with pytest.raises(ValueError, match="type"):
         load_agent_runtime_config(paths)
+
+
+def test_save_agent_runtime_config_replaces_only_agents_section(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+    _write_config(
+        paths.config_dir,
+        (
+            'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
+            '[agents]\ndefault = "old"\n\n'
+            '[agents.old]\ntype = "claude"\n\n'
+            '[logging]\nlevel = "DEBUG"\n'
+        ),
+    )
+
+    saved = save_agent_runtime_config(
+        paths,
+        AgentRuntimeConfig(
+            default_backend="opencode",
+            backends=(
+                AgentBackendConfig(
+                    slug="opencode",
+                    agent_type="opencode",
+                    command="opencode",
+                    model="anthropic/claude-sonnet-4",
+                ),
+            ),
+        ),
+    )
+
+    text = paths.server_config_path.read_text(encoding="utf-8")
+    assert saved.default_backend == "opencode"
+    assert '[logging]\nlevel = "DEBUG"' in text
+    assert '[agents.old]' not in text
+    assert '[agents.opencode]' in text
+    assert 'command = "opencode"' in text
+    assert load_agent_runtime_config(paths).default_backend == "opencode"
+
+
+def test_save_agent_runtime_config_requires_default_backend_to_exist(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+
+    with pytest.raises(ValueError, match="not configured"):
+        save_agent_runtime_config(
+            paths,
+            AgentRuntimeConfig(default_backend="opencode", backends=()),
+        )

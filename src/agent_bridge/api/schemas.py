@@ -218,6 +218,18 @@ class ClaudeMemConfigRequest(BaseModel):
     clear_api_key: bool = False
 
 
+class AgentBackendConfigRequest(BaseModel):
+    slug: str
+    type: str
+    command: str | None = None
+    model: str | None = None
+
+
+class AgentRuntimeConfigRequest(BaseModel):
+    default_backend: str = "claude"
+    backends: list[AgentBackendConfigRequest] = Field(default_factory=list)
+
+
 class WorkflowDefinitionRequest(BaseModel):
     workflow_key: str
     name: str

@@ -44,6 +44,7 @@ import type {
   ToolCallLog,
   ToolCallStats,
   AgentRun,
+  AgentRuntimeConfig,
   DesignAgentResponse,
   WorkflowDesignResult,
   ScriptDesignResult,
@@ -423,6 +424,8 @@ export const api = {
   getSyncConfig: () => get<KnowledgeSyncConfig>('/sync-config'),
   saveSyncConfig: (config: KnowledgeSyncConfig) => post<KnowledgeSyncConfig>('/sync-config', config),
   getSchedulerStatus: () => get<SchedulerStatus>('/sync-config/scheduler-status'),
+  getAgentRuntimeConfig: () => get<AgentRuntimeConfig>('/agent-runtime/config'),
+  saveAgentRuntimeConfig: (config: AgentRuntimeConfig) => post<AgentRuntimeConfig>('/agent-runtime/config', config),
 
   // Skills
   listSkills: () => get<SkillPrompt[]>('/skills'),

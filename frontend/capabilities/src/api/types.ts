@@ -770,6 +770,18 @@ export interface KnowledgeSyncConfig {
   understand_timeout_minutes: number
 }
 
+export interface AgentBackendConfig {
+  slug: string
+  type: string
+  command: string | null
+  model: string | null
+}
+
+export interface AgentRuntimeConfig {
+  default_backend: string
+  backends: AgentBackendConfig[]
+}
+
 export interface ClaudeMemConfig {
   env_file_path: string
   config_file_path: string

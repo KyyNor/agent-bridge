@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from agent_bridge.api.runtime_context import profile_from_headers, workflow_context_from_headers
 from agent_bridge.api.schemas import (
+    AgentRuntimeConfigRequest,
     CodeRepoCategoryRequest,
     CodeRepositoryRequest,
     ClaudeMemConfigRequest,
@@ -149,6 +150,16 @@ def create_builtin_routes(service, actor):
     @router.get("/sync-config/scheduler-status")
     def get_scheduler_status(current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.get_scheduler_status(current_actor)
+
+    # -- Agent Runtime Config --
+
+    @router.get("/agent-runtime/config")
+    def get_agent_runtime_config(current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.get_agent_runtime_config(current_actor)
+
+    @router.post("/agent-runtime/config")
+    def save_agent_runtime_config(payload: AgentRuntimeConfigRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.save_agent_runtime_config(current_actor, payload.model_dump())
 
     # -- Claude Mem Config --
 
