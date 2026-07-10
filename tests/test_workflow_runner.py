@@ -4,10 +4,10 @@ from __future__ import annotations
 def _patched_runner(wm_paths, monkeypatch, fake_query, *, env=None):
     """Build a ClaudeWorkflowRunner backed by an AgentService whose SDK calls are faked.
 
-    The workflow runner now delegates all Claude Agent SDK access to
-    AgentService, so tests patch the agent_service module (not the runner).
+    The workflow runner delegates SDK execution through AgentService into the
+    Claude adapter, so tests patch the adapter module (not the runner).
     """
-    from agent_bridge.agent_runtime import service as agent_service_module
+    from agent_bridge.agent_runtime.adapters import claude as claude_agent
     from agent_bridge.app.service import AgentBridgeService
     from agent_bridge.automation.workflows.runner import ClaudeWorkflowRunner
 
@@ -15,10 +15,10 @@ def _patched_runner(wm_paths, monkeypatch, fake_query, *, env=None):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-    monkeypatch.setattr(agent_service_module, "ClaudeAgentOptions", _FakeOptions)
-    monkeypatch.setattr(agent_service_module, "claude_query", fake_query)
+    monkeypatch.setattr(claude_agent, "ClaudeAgentOptions", _FakeOptions)
+    monkeypatch.setattr(claude_agent, "claude_query", fake_query)
     monkeypatch.setattr(
-        agent_service_module, "claude_settings_env", lambda: env or {}
+        claude_agent, "claude_settings_env", lambda: env or {}
     )
     agents = AgentBridgeService.create(wm_paths, {"root"}).agents
     return ClaudeWorkflowRunner(agent_service=agents), _FakeOptions
@@ -282,6 +282,7 @@ def test_runner_forwards_timeout_seconds_to_agent_service(tmp_path):
 
     # The configured per-run wall-clock cap must reach AgentService.run as `timeout`.
     assert captured["timeout"] == 1800
+    assert captured["backend_key"] == "claude"
     # Workflow identity is forwarded so the produced agent_runs row can be
     # looked up via ``?workflow_run_id=`` / ``?workflow_key=``.
     assert captured["workflow_key"] == "github-summary"

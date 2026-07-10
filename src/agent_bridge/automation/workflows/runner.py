@@ -106,6 +106,7 @@ class ClaudeWorkflowRunner:
                     stderr=write_stderr,
                     include_partial_messages=True,
                     setting_sources=[],
+                    backend_key="claude",
                     timeout=spec.timeout_seconds,
                 )
             )

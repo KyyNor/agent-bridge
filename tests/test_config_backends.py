@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.core.config import BackendConfig, AgentBridgePaths, load_backend_configs, load_server_config, load_mcp_config
+from agent_bridge.core.config import (
+    AgentBridgePaths,
+    AgentRuntimeConfig,
+    load_agent_runtime_config,
+    load_backend_configs,
+    load_mcp_config,
+    load_server_config,
+)
 
 
 def _write_config(config_dir: Path, content: str) -> None:
@@ -121,3 +128,50 @@ def test_load_mcp_config_reads_values(tmp_path):
     config = load_mcp_config(paths)
     assert config.enabled is True
     assert config.transport == "sse"
+
+
+def test_load_agent_runtime_config_defaults_to_claude(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+    paths.config_dir.mkdir(parents=True, exist_ok=True)
+
+    assert load_agent_runtime_config(paths) == AgentRuntimeConfig()
+
+
+def test_load_agent_runtime_config_reads_agents_section(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+    _write_config(
+        paths.config_dir,
+        (
+            'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
+            '[agents]\n'
+            'default = "claude-sonnet"\n\n'
+            '[agents.claude-sonnet]\n'
+            'type = "claude"\n'
+            'model = "claude-sonnet-test"\n'
+        ),
+    )
+
+    config = load_agent_runtime_config(paths)
+
+    assert config.default_backend == "claude-sonnet"
+    assert len(config.backends) == 1
+    assert config.backends[0].slug == "claude-sonnet"
+    assert config.backends[0].agent_type == "claude"
+    assert config.backends[0].model == "claude-sonnet-test"
+
+
+def test_load_agent_runtime_config_requires_backend_type(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+    _write_config(
+        paths.config_dir,
+        (
+            'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
+            '[agents]\n'
+            'default = "custom"\n\n'
+            '[agents.custom]\n'
+            'model = "x"\n'
+        ),
+    )
+
+    with pytest.raises(ValueError, match="type"):
+        load_agent_runtime_config(paths)

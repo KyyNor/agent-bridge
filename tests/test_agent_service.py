@@ -6,7 +6,6 @@ from pathlib import Path
 
 from claude_agent_sdk import ResultMessage
 
-from agent_bridge.agent_runtime import service as agent_service
 from agent_bridge.agent_runtime.service import _extract_json, _extract_result
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
 from agent_bridge.capability_hub.profiles.docs import POINTER_START, install_profile_to_cwd, pointer_block
@@ -34,9 +33,11 @@ def _result(**overrides) -> ResultMessage:
 
 
 def _patch_sdk(monkeypatch, fake_query, env=None) -> None:
-    monkeypatch.setattr(agent_service, "ClaudeAgentOptions", _FakeOptions)
-    monkeypatch.setattr(agent_service, "claude_query", fake_query)
-    monkeypatch.setattr(agent_service, "claude_settings_env", lambda: env or {})
+    from agent_bridge.agent_runtime.adapters import claude as claude_agent
+
+    monkeypatch.setattr(claude_agent, "ClaudeAgentOptions", _FakeOptions)
+    monkeypatch.setattr(claude_agent, "claude_query", fake_query)
+    monkeypatch.setattr(claude_agent, "claude_settings_env", lambda: env or {})
 
 
 # --- agent_support: MCP config ---
@@ -135,6 +136,111 @@ def test_run_success_text_result(wm_paths, monkeypatch) -> None:
     assert res.error is None
     assert res.session_id == "session_1"
     assert Path(res.run_dir).is_dir()
+
+
+def test_run_delegates_to_injected_coding_agent(wm_paths) -> None:
+    from agent_bridge.agent_runtime.registry import CodingAgentRegistry
+    from agent_bridge.agent_runtime.types import CodingAgentFinal, CodingAgentUpdate
+    from agent_bridge.app.service import AgentBridgeService
+
+    captured = {}
+
+    class _FakeRun:
+        async def updates(self):
+            yield CodingAgentUpdate(
+                raw={"type": "FakeMessage", "result": "adapter done"},
+                events=[{"kind": "agent_message", "message": "adapter says hi"}],
+            )
+            yield CodingAgentUpdate(
+                final=CodingAgentFinal(
+                    result="adapter done",
+                    session_id="fake_session",
+                    cost_usd=0.0,
+                    num_turns=1,
+                )
+            )
+
+        async def abort(self):
+            captured["aborted"] = True
+
+    class _FakeCodingAgent:
+        backend_key = "fake"
+        display_name = "Fake"
+        source = "fake_agent"
+        capabilities = None
+
+        def start(self, request):
+            captured["request"] = request
+            return _FakeRun()
+
+    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+    service.coding_agents = CodingAgentRegistry(
+        default_backend="fake",
+        agents=[_FakeCodingAgent()],
+    )
+
+    res = asyncio.run(service.run(prompt="x", agent_name="fake-agent"))
+
+    assert res.ok is True
+    assert res.result == "adapter done"
+    assert res.session_id == "fake_session"
+    assert captured["request"].prompt == "x"
+    assert "FakeMessage" in (Path(res.run_dir) / "messages.jsonl").read_text(encoding="utf-8")
+    detail = service.store.agent_runs.get(res.run_key)
+    assert detail["events"][0]["message"] == "adapter says hi"
+
+
+def test_run_can_select_registered_backend_by_key(wm_paths) -> None:
+    from agent_bridge.agent_runtime.registry import CodingAgentRegistry
+    from agent_bridge.agent_runtime.types import CodingAgentFinal, CodingAgentUpdate
+    from agent_bridge.app.service import AgentBridgeService
+
+    captured = {}
+
+    class _FakeRun:
+        def __init__(self, name):
+            self.name = name
+
+        async def updates(self):
+            yield CodingAgentUpdate(final=CodingAgentFinal(result=self.name))
+
+        async def abort(self):
+            pass
+
+    class _FakeCodingAgent:
+        source = "fake"
+        capabilities = None
+
+        def __init__(self, backend_key):
+            self.backend_key = backend_key
+            self.display_name = backend_key
+
+        def start(self, request):
+            captured["backend"] = self.backend_key
+            return _FakeRun(self.backend_key)
+
+    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+    service.coding_agents = CodingAgentRegistry(
+        default_backend="default",
+        agents=[_FakeCodingAgent("default"), _FakeCodingAgent("other")],
+    )
+
+    res = asyncio.run(service.run(prompt="x", agent_name="select", backend_key="other"))
+
+    assert res.ok is True
+    assert res.result == "other"
+    assert captured["backend"] == "other"
+
+
+def test_run_unknown_backend_returns_failed_envelope(wm_paths) -> None:
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+
+    res = asyncio.run(service.run(prompt="x", agent_name="missing", backend_key="nope"))
+
+    assert res.ok is False
+    assert "not registered" in (res.error or "")
 
 
 def test_run_success_structured_result(wm_paths, monkeypatch) -> None:

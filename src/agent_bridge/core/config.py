@@ -111,6 +111,20 @@ class BackendConfig:
     summary_model_id: str | None = None
 
 
+@dataclass(frozen=True)
+class AgentBackendConfig:
+    slug: str
+    agent_type: str
+    model: str | None = None
+    command: str | None = None
+
+
+@dataclass(frozen=True)
+class AgentRuntimeConfig:
+    default_backend: str = "claude"
+    backends: tuple[AgentBackendConfig, ...] = ()
+
+
 def ensure_directories(paths: AgentBridgePaths) -> None:
     for directory in (
         paths.config_dir,
@@ -244,6 +258,41 @@ def load_backend_configs(paths: AgentBridgePaths) -> list[BackendConfig]:
             summary_model_id=section.get("summary_model_id"),
         ))
     return result
+
+
+def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
+    """Read the general coding-agent runtime configuration.
+
+    ``[agents]`` controls general AgentService runs only. Claude-only runtimes
+    such as the current workflow runner may still pin ``backend_key="claude"``
+    while the broader agent abstraction evolves.
+    """
+    if not paths.server_config_path.exists():
+        return AgentRuntimeConfig()
+    raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
+    agents_raw = raw.get("agents", {})
+    if not agents_raw:
+        return AgentRuntimeConfig()
+    if not isinstance(agents_raw, dict):
+        raise ValueError("[agents] must be a TOML table")
+    default_backend = str(agents_raw.get("default", "claude"))
+    configs: list[AgentBackendConfig] = []
+    for slug, section in agents_raw.items():
+        if slug == "default":
+            continue
+        if not isinstance(section, dict):
+            raise ValueError(f"agent backend '{slug}' must be a TOML table")
+        if "type" not in section:
+            raise ValueError(f"agent backend '{slug}' missing required field: type")
+        configs.append(
+            AgentBackendConfig(
+                slug=str(slug),
+                agent_type=str(section["type"]),
+                model=section.get("model"),
+                command=section.get("command"),
+            )
+        )
+    return AgentRuntimeConfig(default_backend=default_backend, backends=tuple(configs))
 
 
 def migrate_toml_backends_to_db(paths: AgentBridgePaths, store: Any) -> None:

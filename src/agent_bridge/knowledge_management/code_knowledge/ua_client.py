@@ -376,6 +376,7 @@ class UnderstandAnythingClient:
                 setting_sources=["user", "project"],
                 on_message=on_message,
                 include_partial_messages=True,
+                backend_key="claude",
                 timeout=float(timeout),
             )
         )

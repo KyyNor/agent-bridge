@@ -50,11 +50,17 @@ def message_log_record(message: Any) -> dict[str, Any]:
     return record
 
 
-def event_record(kind: str, **values: Any) -> dict[str, Any]:
+def event_record(
+    kind: str,
+    *,
+    agent_name: str = "claude",
+    source: str = "claude_agent_sdk",
+    **values: Any,
+) -> dict[str, Any]:
     return {
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "agent_name": "claude",
-        "source": "claude_agent_sdk",
+        "agent_name": agent_name,
+        "source": source,
         "kind": kind,
         **{key: json_safe(value) for key, value in values.items() if value is not None},
     }

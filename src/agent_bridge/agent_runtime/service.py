@@ -1,10 +1,10 @@
-"""AgentService: a general-purpose Claude Agent SDK runner.
+"""AgentService: a general-purpose coding-agent runner.
 
-Wraps ``claude_agent_sdk.query`` with Agent Bridge conventions: an isolated
-per-run working directory, optional profile-driven MCP access and CLAUDE.md
-guidance, optional workflow context, and optional JSON-Schema structured
-output. Results are returned as a uniform :class:`AgentRunResult` envelope —
-failures are reported via ``ok=False`` and never raised.
+Wraps a pluggable coding-agent adapter with Agent Bridge conventions: an
+isolated per-run working directory, optional profile-driven MCP access and
+guidance, optional workflow context, and optional JSON-Schema structured output.
+Results are returned as a uniform :class:`AgentRunResult` envelope — failures
+are reported via ``ok=False`` and never raised.
 """
 
 from __future__ import annotations
@@ -19,20 +19,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
-from claude_agent_sdk.types import ResultMessage
-
-from agent_bridge.agent_runtime.events import (
-    Attribution,
-    event_record,
-    is_noisy_partial_message,
-    message_events,
-    message_log_record,
-    write_event,
-)
+from agent_bridge.agent_runtime.events import event_record, write_event
+from agent_bridge.agent_runtime.registry import CodingAgentRegistry, create_coding_agent_registry
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
-from agent_bridge.agent_runtime.claude import claude_settings_env
+from agent_bridge.agent_runtime.types import CodingAgent, CodingAgentFinal, CodingAgentRequest
 from agent_bridge.core.ids import new_run_id
 
 logger = logging.getLogger(__name__)
@@ -62,7 +53,7 @@ class AgentRunResult:
 
 
 class AgentService:
-    """Runs Claude Agent SDK queries with Agent Bridge profile/workflow wiring."""
+    """Runs coding-agent queries with Agent Bridge profile/workflow wiring."""
 
     def __init__(
         self,
@@ -71,12 +62,25 @@ class AgentService:
         store: Any,
         admins: set[str],
         governance: Any,
+        coding_agent: CodingAgent | None = None,
+        coding_agents: CodingAgentRegistry | None = None,
         mcp_url: str | None = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.governance = governance
+        if coding_agents is not None and coding_agent is not None:
+            raise ValueError("pass either coding_agent or coding_agents, not both")
+        if coding_agents is not None:
+            self.coding_agents = coding_agents
+        elif coding_agent is not None:
+            self.coding_agents = CodingAgentRegistry(
+                default_backend=coding_agent.backend_key,
+                agents=[coding_agent],
+            )
+        else:
+            self.coding_agents = create_coding_agent_registry()
         self.mcp_url = mcp_url or DEFAULT_MCP_URL
         self.base_run_dir: Path = paths.run_dir / "agent-runs"
 
@@ -102,9 +106,10 @@ class AgentService:
         model: str | None = None,
         max_turns: int | None = None,
         max_budget_usd: float | None = None,
+        backend_key: str | None = None,
         timeout: float | None = None,
     ) -> AgentRunResult:
-        """Run a one-shot Claude agent query and return a uniform result.
+        """Run a one-shot coding-agent query and return a uniform result.
 
         Two modes:
 
@@ -114,13 +119,13 @@ class AgentService:
           CLAUDE.md guidance and governed ``.mcp.json`` are installed.
 
         * **In-place** (``cwd`` given): the caller owns the directory (including
-          any CLAUDE.md / staged files); this method just runs the SDK loop
-          against it. Used by the workflow runner and other callers that
+          any agent guidance / staged files); this method just runs the adapter
+          loop against it. Used by the workflow runner and other callers that
           prepare their own run directory. MCP is opt-in via ``mcp_servers``
           (defaults to none) so analyzing a repo with its own ``.mcp.json``
           does not accidentally wire up those servers.
 
-        ``on_message`` (if given) is invoked with every streamed SDK message
+        ``on_message`` (if given) is invoked with every streamed native message
         before the final result is captured, enabling progress/event logging.
         Failures (query errors, timeouts, profile-not-found, ...) return
         ``ok=False`` rather than raising.
@@ -130,14 +135,13 @@ class AgentService:
         started_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         work_dir: Path | None = None
         events: list[dict[str, Any]] = []
-        tool_names: dict[str, str] = {}
-        attribution = Attribution()
-        result_msg: ResultMessage | None = None
+        result_msg: CodingAgentFinal | None = None
         error: str | None = None
         mode = "in-place" if cwd is not None else "managed"
         logger.info(
-            "Agent run 开始 agent=%s mode=%s profile=%s skills=%s",
+            "Agent run 开始 agent=%s backend=%s mode=%s profile=%s skills=%s",
             agent_name or "agent",
+            backend_key or self.coding_agents.default_backend,
             mode,
             profile,
             ",".join(skills) if skills else "",
@@ -187,34 +191,25 @@ class AgentService:
                     mcp_servers if mcp_servers is not None else work_dir / ".mcp.json"
                 )
             self._record_cwd(run_key, work_dir)
+            coding_agent = self.coding_agents.get(backend_key)
 
-            options = ClaudeAgentOptions(
-                tools={"type": "preset", "preset": "claude_code"},
+            request = CodingAgentRequest(
+                prompt=prompt,
                 cwd=work_dir,
                 mcp_servers=effective_mcp_servers,
-                strict_mcp_config=True,
-                permission_mode="auto",
-                env=claude_settings_env(),
                 setting_sources=effective_setting_sources,
-                system_prompt={
-                    "type": "preset",
-                    "preset": "claude_code",
-                    "append": self._system_prompt_append(output_schema, system_prompt_append),
-                },
-                output_format=(
-                    {"type": "json_schema", "schema": output_schema}
-                    if output_schema
-                    else None
-                ),
+                output_schema=output_schema,
+                system_prompt_append=self._system_prompt_append(output_schema, system_prompt_append),
                 include_partial_messages=include_partial_messages,
                 skills=skills,
                 stderr=stderr,
                 model=model,
                 max_turns=max_turns,
                 max_budget_usd=max_budget_usd,
+                on_native_message=on_message,
             )
             result_msg = await asyncio.wait_for(
-                self._drain_query(prompt, options, work_dir, on_message, events, tool_names, attribution),
+                self._drain_agent(coding_agent, request, work_dir, events),
                 timeout=timeout_seconds,
             )
         except TimeoutError:
@@ -246,18 +241,15 @@ class AgentService:
         )
         return result
 
-    async def _drain_query(
+    async def _drain_agent(
         self,
-        prompt: str,
-        options: Any,
+        coding_agent: CodingAgent,
+        request: CodingAgentRequest,
         work_dir: Path | None,
-        on_message: Callable[[Any], None] | None,
         events: list[dict[str, Any]],
-        tool_names: dict[str, str],
-        attribution: Attribution,
-    ) -> ResultMessage | None:
-        last: ResultMessage | None = None
-        # Persist every raw SDK message to messages.jsonl in the work dir so the
+    ) -> CodingAgentFinal | None:
+        last: CodingAgentFinal | None = None
+        # Persist every raw native message to messages.jsonl in the work dir so the
         # run is self-contained: subagent transcript discovery, debugging, and
         # the unified event replay all read from here. This replaces the per-
         # caller on_message file writing the workflow runner used to do.
@@ -273,21 +265,23 @@ class AgentService:
             except OSError:
                 raw_log = None
                 event_log = None
+        run = None
         try:
-            async for message in claude_query(prompt=prompt, options=options):
-                if on_message is not None:
-                    on_message(message)
-                if not is_noisy_partial_message(message):
-                    if raw_log is not None:
-                        raw_log.write(json.dumps(message_log_record(message), ensure_ascii=False) + "\n")
-                        raw_log.flush()
-                    new_events = message_events(message, tool_names, attribution=attribution)
-                    if event_log is not None:
-                        for record in new_events:
-                            write_event(event_log, record)
-                    events.extend(new_events)
-                if isinstance(message, ResultMessage):
-                    last = message
+            run = coding_agent.start(request)
+            async for update in run.updates():
+                if raw_log is not None and update.raw is not None:
+                    raw_log.write(json.dumps(update.raw, ensure_ascii=False) + "\n")
+                    raw_log.flush()
+                if event_log is not None:
+                    for record in update.events:
+                        write_event(event_log, record)
+                events.extend(update.events)
+                if update.final is not None:
+                    last = update.final
+        except asyncio.CancelledError:
+            if run is not None:
+                await run.abort()
+            raise
         finally:
             if raw_log is not None:
                 raw_log.close()
@@ -299,7 +293,7 @@ class AgentService:
         self,
         work_dir: Path | None,
         started: float,
-        result_msg: ResultMessage | None,
+        result_msg: CodingAgentFinal | None,
         output_schema: dict[str, Any] | None,
         error: str | None,
     ) -> AgentRunResult:
@@ -320,7 +314,7 @@ class AgentService:
             "run_dir": run_dir,
             "duration_ms": duration_ms,
             "session_id": result_msg.session_id,
-            "cost_usd": result_msg.total_cost_usd,
+            "cost_usd": result_msg.cost_usd,
             "num_turns": result_msg.num_turns,
         }
         if result_msg.is_error:
@@ -419,8 +413,8 @@ class AgentService:
         return "root"
 
 
-def _extract_result(result_msg: ResultMessage, output_schema: dict[str, Any] | None) -> Any:
-    """Extract the final value from a ResultMessage.
+def _extract_result(result_msg: Any, output_schema: dict[str, Any] | None) -> Any:
+    """Extract the final value from an adapter final message.
 
     Prefers native ``structured_output``; falls back to parsing JSON out of the
     result text when a schema was requested; otherwise returns the result text.

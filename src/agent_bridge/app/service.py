@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 from typing import Any, Callable
 
 from agent_bridge.agent_runtime.service import AgentService
+from agent_bridge.agent_runtime.registry import create_coding_agent_registry
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
 from agent_bridge.capability_hub.service import CapabilityService
@@ -17,7 +18,13 @@ from agent_bridge.knowledge_management.code_knowledge.scheduler import CodeGraph
 from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphService
 from agent_bridge.knowledge_management.code_knowledge.understand_scheduler import UnderstandingScheduler
 from agent_bridge.knowledge_management.docs_knowledge.doc_sync_scheduler import DocSyncScheduler
-from agent_bridge.core.config import AgentBridgePaths, BackendConfig, ensure_directories, migrate_toml_backends_to_db
+from agent_bridge.core.config import (
+    AgentBridgePaths,
+    BackendConfig,
+    ensure_directories,
+    load_agent_runtime_config,
+    migrate_toml_backends_to_db,
+)
 from agent_bridge.capability_hub.models import ProfileResourceType
 from agent_bridge.core.domain import (
     AccessDenied,
@@ -69,7 +76,14 @@ class AgentBridgeService:
         self.registry: BackendRegistry | None = None
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
-        self.agents = AgentService(paths=paths, store=store, admins=admins, governance=self.governance)
+        agent_runtime_config = load_agent_runtime_config(paths)
+        self.agents = AgentService(
+            paths=paths,
+            store=store,
+            admins=admins,
+            governance=self.governance,
+            coding_agents=create_coding_agent_registry(agent_runtime_config),
+        )
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins, agent_service=self.agents)
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
