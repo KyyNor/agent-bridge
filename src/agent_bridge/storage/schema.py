@@ -289,6 +289,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_key TEXT NOT NULL UNIQUE,
   agent_name TEXT NOT NULL,
+  backend_key TEXT,
   profile_key TEXT,
   workflow_key TEXT,
   workflow_run_id TEXT,

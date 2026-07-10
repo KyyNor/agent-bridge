@@ -473,6 +473,7 @@ export interface AgentRun {
   id: number
   run_key: string
   agent_name: string
+  backend_key: string | null
   profile_key: string | null
   workflow_key: string | null
   workflow_run_id: string | null

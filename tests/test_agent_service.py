@@ -414,11 +414,13 @@ def test_run_logs_success_to_agent_runs(wm_paths, monkeypatch) -> None:
     assert len(rows) == 1
     assert rows[0]["ok"] is True
     assert rows[0]["agent_name"] == "greeter"
+    assert rows[0]["backend_key"] == "claude"
     # list view drops heavy columns
     assert "prompt" not in rows[0]
     assert "events" not in rows[0]
 
     full = bundle.store.agent_runs.get(rows[0]["run_key"])
+    assert full["backend_key"] == "claude"
     assert full["prompt"] == "hi there"
     assert full["result"] == "hello"
     assert full["ok"] is True

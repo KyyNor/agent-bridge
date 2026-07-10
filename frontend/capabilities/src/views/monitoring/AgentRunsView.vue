@@ -251,6 +251,7 @@ const displayRuns = computed(() => {
   return runs.value.filter(
     r =>
       r.agent_name?.toLowerCase().includes(q) ||
+      r.backend_key?.toLowerCase().includes(q) ||
       r.profile_key?.toLowerCase().includes(q) ||
       r.workflow_key?.toLowerCase().includes(q) ||
       r.error?.toLowerCase().includes(q),
@@ -290,6 +291,10 @@ function formatCost(v: number | null | undefined): string {
         <div>
           <span class="text-muted-foreground">Agent</span>
           <div class="font-mono font-medium">{{ detailRun.agent_name }}</div>
+        </div>
+        <div>
+          <span class="text-muted-foreground">后端</span>
+          <div class="font-mono font-medium">{{ detailRun.backend_key || '—' }}</div>
         </div>
         <div>
           <span class="text-muted-foreground">状态</span>
@@ -390,7 +395,7 @@ function formatCost(v: number | null | undefined): string {
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[280px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-        <Input v-model="search" placeholder="搜索 Agent、Profile 或工作流..." class="pl-8" />
+        <Input v-model="search" placeholder="搜索 Agent、后端、Profile 或工作流..." class="pl-8" />
       </div>
       <div class="flex items-center gap-2 text-sm">
         <Input v-model="dateFrom" type="date" class="w-[140px]" @change="() => { page = 1; loadRunData() }" />
@@ -429,6 +434,7 @@ function formatCost(v: number | null | undefined): string {
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">时间</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Agent</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">后端</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Profile</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工作流</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">耗时</th>
@@ -449,6 +455,7 @@ function formatCost(v: number | null | undefined): string {
                 {{ formatLocalDatetime(r.created_at) }}
               </td>
               <td class="px-4 py-3 font-mono text-sm">{{ r.agent_name }}</td>
+              <td class="px-4 py-3 font-mono text-sm">{{ r.backend_key || '—' }}</td>
               <td class="px-4 py-3 text-sm">{{ r.profile_key || '—' }}</td>
               <td class="px-4 py-3 text-sm">
                 <span v-if="r.workflow_key" class="font-mono text-xs">{{ r.workflow_key }}</span>

@@ -19,6 +19,7 @@ class AgentRunsRepository:
         *,
         run_key: str,
         agent_name: str,
+        backend_key: str | None = None,
         profile_key: str | None = None,
         workflow_key: str | None = None,
         workflow_run_id: str | None = None,
@@ -42,16 +43,17 @@ class AgentRunsRepository:
             conn.execute(
                 """
                 INSERT INTO agent_runs (
-                  run_key, agent_name, profile_key, workflow_key, workflow_run_id,
+                  run_key, agent_name, backend_key, profile_key, workflow_key, workflow_run_id,
                   session_id, cwd, model, ok, status, error, duration_ms, cost_usd,
                   num_turns, prompt, output_schema_json, result_json, events_json,
                   started_at, finished_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_key,
                     agent_name,
+                    backend_key,
                     profile_key,
                     workflow_key,
                     workflow_run_id,

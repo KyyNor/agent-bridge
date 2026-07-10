@@ -63,11 +63,16 @@ class SQLiteStore:
                 conn,
                 "agent_runs",
                 {
+                    "backend_key": "TEXT",
                     "status": "TEXT NOT NULL DEFAULT ''",
                     "started_at": "TEXT",
                     "finished_at": "TEXT",
                 },
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_runs_backend_key ON agent_runs(backend_key)"
+            )
+            self._backfill_agent_run_backend_keys(conn)
             self._drop_column(conn, "workflow_definitions", "manifest_json")
             self._ensure_columns(
                 conn,
@@ -310,6 +315,23 @@ class SQLiteStore:
             return
         if sqlite3.sqlite_version_info >= (3, 35, 0):
             conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+
+    def _backfill_agent_run_backend_keys(self, conn: sqlite3.Connection) -> None:
+        """Infer backend_key for historical agent runs that predate the column."""
+        for backend_key, marker in [
+            ("opencode", "opencode_cli"),
+            ("codex", "codex_cli"),
+            ("claude", "claude_agent_sdk"),
+        ]:
+            conn.execute(
+                """
+                UPDATE agent_runs
+                SET backend_key = ?
+                WHERE (backend_key IS NULL OR backend_key = '')
+                  AND events_json LIKE ?
+                """,
+                (backend_key, f"%{marker}%"),
+            )
 
     def _has_unique_index(self, conn: sqlite3.Connection, table: str, columns: list[str]) -> bool:
         for index in conn.execute(f"PRAGMA index_list({table})").fetchall():

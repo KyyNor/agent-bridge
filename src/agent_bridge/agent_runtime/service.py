@@ -138,10 +138,11 @@ class AgentService:
         result_msg: CodingAgentFinal | None = None
         error: str | None = None
         mode = "in-place" if cwd is not None else "managed"
+        effective_backend_key = backend_key or self.coding_agents.default_backend
         logger.info(
             "Agent run 开始 agent=%s backend=%s mode=%s profile=%s skills=%s",
             agent_name or "agent",
-            backend_key or self.coding_agents.default_backend,
+            effective_backend_key,
             mode,
             profile,
             ",".join(skills) if skills else "",
@@ -154,6 +155,7 @@ class AgentService:
             self.store.agent_runs.create(
                 run_key=run_key,
                 agent_name=agent_name or "agent",
+                backend_key=effective_backend_key,
                 profile_key=profile,
                 workflow_key=workflow_key or None,
                 workflow_run_id=run_id if workflow_key else None,
@@ -191,7 +193,7 @@ class AgentService:
                     mcp_servers if mcp_servers is not None else work_dir / ".mcp.json"
                 )
             self._record_cwd(run_key, work_dir)
-            coding_agent = self.coding_agents.get(backend_key)
+            coding_agent = self.coding_agents.get(effective_backend_key)
 
             request = CodingAgentRequest(
                 prompt=prompt,
