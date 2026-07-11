@@ -1028,19 +1028,25 @@ def test_execute_capability_api_uses_service_tool_name_params(wm_paths) -> None:
 
 def test_frontend_workflow_view_exposes_workflow_management() -> None:
     source = Path("frontend/capabilities/src/views/workflow/WorkflowView.vue").read_text(encoding="utf-8")
+    canvas = Path("frontend/capabilities/src/views/workflow/WorkflowEditorCanvas.vue").read_text(encoding="utf-8")
+    run_graph = Path("frontend/capabilities/src/views/workflow/WorkflowRunGraph.vue").read_text(encoding="utf-8")
 
     assert "workflow_key" in source
     assert "profile_key" in source
     assert "workflow_type" in source
-    assert "工作流类型" in source
     assert "操作" in source
     assert "总结" in source
-    assert "workflow_js" in source
-    assert "Claude Code 工作流" in source
-    assert "manifestText" not in source
-    assert "工作流结构定义" not in source
-    assert "输出验收要求" in source
-    assert "no_executable_task" in source
+    assert "WorkflowEditorCanvas" in source
+    assert "WorkflowNodeConfigPanel" in source
+    assert "workflow_js" not in source
+    assert "parseWorkflowDag" not in source
+    assert "WorkflowDagGraph" not in source
+    assert "@vue-flow/core" in canvas
+    assert "agent_run_key" in run_graph
+    assert "script_run_id" in run_graph
+    assert "warning" in run_graph
+    assert "skipped" in run_graph
+    assert "cancelled" in run_graph
     assert "启用" in source
     assert "停用" in source
 

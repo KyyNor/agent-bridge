@@ -65,6 +65,7 @@ import type {
   WorkflowSubagentDetail,
   WorkflowTasksResult,
   WorkflowTaskListParams,
+  WorkflowGraph,
   ManagedScript,
   ScriptRun,
   ScriptRunListResult,
@@ -235,13 +236,14 @@ export const api = {
     return get<WorkflowTasksResult>(`/workflows/${key}/tasks${tail}`)
   },
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
-  // Agent run events are unified under /agent-runs — fetch via the workflow_run_id
-  // link that ClaudeWorkflowRunner forwards. getWorkflowRunEvents was removed.
   upsertWorkflow: (w: Partial<WorkflowDefinition> & {
     workflow_key: string
     name: string
     profile_key: string
+    definition: WorkflowGraph
   }) => post<WorkflowDefinition>('/workflows', { status: 'active', ...w }),
+  runWorkflow: (key: string, input: Record<string, unknown> = {}) =>
+    post<{ status: string; run_id?: string }>(`/workflows/${key}/run`, { input }),
   searchWorkflowArtifacts: (params: {
     profile_key?: string
     workflow_key?: string
@@ -436,7 +438,7 @@ export const api = {
   // Scripts
   listScripts: () => get<ManagedScript[]>('/scripts'),
   getScript: (scriptKey: string) => get<ManagedScript>(`/scripts/${scriptKey}`),
-  upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string }) =>
+  upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string; input_schema: Record<string, unknown> }) =>
     post<ManagedScript>('/scripts', { language: 'python', status: 'active', owner_type: 'system', owner_key: '', description: '', ...s }),
   deleteScript: (scriptKey: string) => post<{ script_key: string; deleted: boolean }>(`/scripts/${scriptKey}/delete`),
   testScript: (

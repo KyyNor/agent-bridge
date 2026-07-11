@@ -129,3 +129,7 @@ AgentService (通用编排, 保留)
 - **写 adapter**（CloudCLI / Paseo）：每个 agent 一个实现，灵活但工作量大；Paseo 的 ACP 基类是最佳折中。
 - **走标准协议**（AionUi）：agent 都支持 ACP 时最省事，否则有盲区。
 - **先调研 ACP 对目标 agent 的覆盖度**，再决定路线。
+
+## 工作流编辑器结论（2026-07-11）
+
+未采用 Archon 或 Node-RED。Agent Bridge 采用 Vue Flow、结构化 JSON 图定义和自研轻量 DAG 执行器；第一版节点固定为获取任务、Agent、托管脚本和输出结果四类。刻意不做通用节点市场、循环、审批、自动重试、版本管理或 cron 编排。设计细节见 [轻量工作流编辑器设计](superpowers/specs/2026-07-11-lightweight-workflow-editor-design.md)。

@@ -36,6 +36,7 @@ const scriptPageSize = ref(10)
 
 // 编辑模式表单状态
 const form = ref(emptyForm())
+const inputSchemaDraft = ref(JSON.stringify(defaultInputSchema(), null, 2))
 const formError = ref('')
 const formLoading = ref(false)
 const saving = ref(false)
@@ -93,6 +94,7 @@ watch(
     scriptNotFound.value = false
     if (key === 'new') {
       form.value = emptyForm()
+      inputSchemaDraft.value = JSON.stringify(form.value.input_schema, null, 2)
       runs.value = []
       runDetail.value = null
       return
@@ -109,7 +111,9 @@ watch(
         status: detail.status,
         owner_type: detail.owner_type,
         owner_key: detail.owner_key,
+        input_schema: detail.input_schema || defaultInputSchema(),
       }
+      inputSchemaDraft.value = JSON.stringify(form.value.input_schema, null, 2)
       await loadRuns()
       runDetail.value = runs.value[0] || null
     } catch (e: unknown) {
@@ -156,6 +160,22 @@ function emptyForm() {
     status: 'active',
     owner_type: 'system',
     owner_key: '',
+    input_schema: defaultInputSchema(),
+  }
+}
+
+function defaultInputSchema() {
+  return { type: 'object', properties: {}, required: [], additionalProperties: false } as Record<string, unknown>
+}
+
+function updateInputSchema(value: string) {
+  try {
+    const parsed = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
+    form.value.input_schema = parsed as Record<string, unknown>
+    formError.value = ''
+  } catch {
+    formError.value = 'input_schema 必须是合法 JSON 对象'
   }
 }
 
@@ -185,6 +205,8 @@ async function deleteScript(item: ManagedScript) {
 
 async function saveScript(): Promise<ManagedScript | null> {
   formError.value = ''
+  updateInputSchema(inputSchemaDraft.value)
+  if (formError.value) return null
   if (!form.value.script_key || !form.value.name || !form.value.code.trim()) {
     formError.value = '请填写脚本标识、名称和代码'
     return null
@@ -200,6 +222,7 @@ async function saveScript(): Promise<ManagedScript | null> {
       status: form.value.status,
       owner_type: form.value.owner_type,
       owner_key: form.value.owner_type === 'system' ? '' : form.value.owner_key,
+      input_schema: form.value.input_schema,
     })
     await reloadScripts()
     // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
@@ -232,6 +255,7 @@ function scriptDesignerCurrent() {
       status: form.value.status,
       owner_type: form.value.owner_type,
       owner_key: form.value.owner_key,
+      input_schema: form.value.input_schema,
     }
   }
   return {
@@ -278,7 +302,9 @@ async function acceptScriptDesign() {
     status: draft.status,
     owner_type: draft.owner_type,
     owner_key: draft.owner_key,
+    input_schema: draft.input_schema || defaultInputSchema(),
   }
+  inputSchemaDraft.value = JSON.stringify(form.value.input_schema, null, 2)
   const saved = await saveScript()
   if (saved) showDesigner.value = false
 }
@@ -677,6 +703,16 @@ def main(envelope):
               <p class="mt-2 text-xs leading-5 text-muted-foreground">
                 可直接使用 <span class="font-mono text-foreground">from agent_bridge_runtime import execute, workflow_get_task, workflow_set_task, workflow_run_log</span>。
               </p>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-muted-foreground">输入 Schema（JSON Schema）</label>
+              <Textarea
+                v-model="inputSchemaDraft"
+                class="min-h-44 font-mono text-xs"
+                spellcheck="false"
+                @blur="updateInputSchema(inputSchemaDraft)"
+              />
+              <p class="mt-2 text-xs text-muted-foreground">根类型必须为 object；properties 定义参数，required 标记必填字段。</p>
             </div>
           </template>
         </CardContent>

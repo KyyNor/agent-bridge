@@ -566,35 +566,3 @@ def test_workflow_api_run_returns_409_when_already_running(wm_paths):
 
     response = client.post("/workflows/page-report/run", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 409
-
-
-def test_workflow_api_run_triggers_and_completes(wm_paths, tmp_path):
-    import time
-    from agent_bridge.api.app import create_app
-    from agent_bridge.app.service import AgentBridgeService
-    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
-
-    svc = AgentBridgeService.create(wm_paths, {"root"})
-    svc.store.init_schema()
-    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
-    _seed_workflow(svc)
-
-    app = create_app(wm_paths, {"root"})
-    # Swap the app's runner for an instant fake so the test does not shell out to claude.
-    app.state.agent_bridge_service.workflow_scheduler._runner = FakeWorkflowRunner(status="no_executable_task")
-    client = TestClient(app)
-
-    started = client.post("/workflows/page-report/run", headers={"X-Agent-Bridge-User": "root"})
-    assert started.status_code == 200, started.text
-    run_id = started.json()["run_id"]
-
-    status = "running"
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        r = client.get(f"/workflow-runs/{run_id}", headers={"X-Agent-Bridge-User": "root"})
-        assert r.status_code == 200
-        status = r.json()["status"]
-        if status != "running":
-            break
-        time.sleep(0.05)
-    assert status == "no_task"
