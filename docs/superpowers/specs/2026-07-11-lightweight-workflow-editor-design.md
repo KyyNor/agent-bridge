@@ -3,6 +3,8 @@
 日期：2026-07-11
 分支：`codex/lightweight-workflow-editor-design`
 
+术语约定：正文使用中文描述；`workflow_key`、`definition_json`、状态枚举值、类名和接口字段等代码标识保留英文，以便与实现直接对应。`operation` 表示操作型工作流，`summary` 表示总结型工作流。
+
 ## 1. 目标
 
 用 Agent Bridge 自身的轻量可视化编辑器和 Python DAG 执行器替换当前强依赖 Claude Code 动态工作流的 `workflow.js` 方案。
@@ -22,11 +24,11 @@
 ## 2. 设计原则
 
 1. **结构化定义是唯一事实来源**：画布直接保存 JSON 图，不生成隐藏的 JS 或 Python。
-2. **复用现有能力**：调度、任务租约、Agent Runtime、托管脚本、产物、日志和 SQLite 继续使用现有实现。
+2. **复用现有能力**：调度、任务租约、Agent 运行时、托管脚本、产物、日志和 SQLite 继续使用现有实现。
 3. **领域节点而非通用节点市场**：第一版只有获取任务、Agent、托管脚本、输出结果四类节点。
 4. **显式数据流**：节点通过 JSON 输出和路径引用传值，不通过共享临时文件或隐式全局变量传值。
 5. **后端一致性优先**：技能统一拼接到用户提示词前，不依赖不同 Coding Agent 的原生 Skills 语义。
-6. **失败语义简单**：普通节点 fail-fast；不做自动重试、失败继续或补偿。
+6. **失败语义简单**：普通节点采用快速失败；不做自动重试、失败继续或补偿。
 7. **必要约束直接固化**：总结工作流的 Markdown 和 HTML 输出结构在编辑器中锁定，而不是保存时才让用户修复。
 
 ## 3. 方案选择
@@ -57,8 +59,8 @@
 - `name`
 - `description`
 - `profile_key`
-- `workflow_type`: `operation | summary`
-- `status`: `active | disabled`
+- `workflow_type`: `operation | summary`，分别表示操作型和总结型
+- `status`: `active | disabled`，分别表示启用和停用
 
 原 `workflow_js` 被 `definition_json` 取代。定义结构如下：
 
@@ -168,7 +170,7 @@
 
 类型：`output`
 
-输出节点是具有产物持久化语义的 Coding Agent 节点，不是固定格式转换器。
+输出节点是具有产物持久化语义的编码智能体节点，不是固定格式转换器。
 
 配置包含 Agent 节点的提示词、后端、MCP 开关和技能列表，并增加：
 
@@ -194,6 +196,8 @@
   "content": "完整 Markdown 或 HTML"
 }
 ```
+
+输出节点除了渲染用户可修改的提示词，还由执行器自动附加直接及间接上游节点的结构化输出。HTML 输出节点只自动附加 Markdown 主产物正文和元数据，不重复注入全部原始分析上下文。
 
 执行器校验结构和格式后，通过现有 Workflow Artifact 服务保存产物。
 
@@ -237,7 +241,7 @@
 - `not_exists`
 - `contains`
 
-不支持 AND、OR、条件组或自由表达式。复杂判断应由 Agent 结构化输出或托管脚本完成。
+不支持逻辑与、逻辑或、条件组或自由表达式。复杂判断应由 Agent 结构化输出或托管脚本完成。
 
 字段缺失时：
 
@@ -255,6 +259,8 @@
 Markdown 输出 -> HTML 输出
 ```
 
+两个输出节点默认使用系统配置中的默认 Coding Agent 后端；创建完成后可以分别修改为其他已启用后端。Markdown 默认提示词要求根据全部上游节点输出生成结构清晰的 Markdown 主报告；HTML 默认提示词要求只根据 Markdown 主产物生成完整、内联 CSS、无外链脚本的 HTML 文档。
+
 编辑器和后端共同强制：
 
 - 恰好一个 Markdown 输出节点和一个 HTML 输出节点。
@@ -269,7 +275,7 @@ Markdown 输出 -> HTML 输出
 失败语义：
 
 - Markdown 输出失败：工作流和任务失败。
-- HTML 输出失败：节点状态为 `warning`，保留 Markdown，工作流和任务仍成功。
+- HTML 输出失败：节点状态为 `warning`（警告），保留 Markdown，工作流和任务仍成功。
 
 HTML 是派生展示，不因排版失败重新执行整条后台任务。
 
@@ -281,10 +287,10 @@ WorkflowScheduler
       v
 WorkflowDagExecutor
       |
-      +-- GetTaskHandler
-      +-- AgentHandler
-      +-- ScriptHandler
-      +-- OutputHandler
+      +-- GetTaskHandler（获取任务处理器）
+      +-- AgentHandler（Agent 执行处理器）
+      +-- ScriptHandler（托管脚本处理器）
+      +-- OutputHandler（输出结果处理器）
 ```
 
 `WorkflowDagExecutor` 只负责：
@@ -295,10 +301,10 @@ WorkflowDagExecutor
 - 求值条件边。
 - 并行调度就绪节点。
 - 持久化状态和输出。
-- fail-fast 和取消。
+- 快速失败和取消。
 - 工作流及任务收尾。
 
-Handler 只负责执行一种节点并返回 JSON 对象。
+每个节点处理器只负责执行一种节点并返回 JSON 对象。
 
 ### 7.1 运行上下文
 
@@ -330,7 +336,7 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 5. 所有入边条件均不成立或来源节点被跳过时，节点标记 `skipped`。
 6. 同一轮就绪节点通过 `asyncio` 并行运行。
 7. 任一普通节点失败后，不再启动新节点，并尽力取消正在运行的 Agent。
-8. HTML 输出失败是唯一 warning 例外。
+8. HTML 输出失败是唯一的警告例外。
 
 第一版不增加工作流级并发配置，沿用现有 Agent 并发控制和全局调度器运行限制。
 
@@ -341,13 +347,13 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 - 所有必需节点成功：任务标记 `completed`。
 - 普通节点失败：任务标记 `failed`，不自动重新入队。
 - 管理员可以在现有任务页手动重置失败任务。
-- Markdown 成功而 HTML 失败：任务仍标记 `completed`。
+- Markdown 成功而 HTML 失败：任务仍标记 `completed`（已完成）。
 
 ## 8. 持久化
 
 ### 8.1 工作流定义
 
-`workflow_definitions` 使用 `definition_json` 取代 `workflow_js` 作为新执行器的定义来源。
+`workflow_definitions` 使用可空的 `definition_json` 作为新执行器的定义来源。新建或经新编辑器保存的工作流必须写入该字段；升级前仅有 `workflow_js` 的历史工作流保持 `NULL`，不得被当成空图执行。
 
 第一版不实现草稿、发布或版本列表。保存会覆盖当前定义。
 
@@ -368,7 +374,8 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 - `run_id`
 - `node_id`
 - `node_type`
-- `status`: `pending | running | completed | skipped | failed | warning`
+- `status`: `pending | running | completed | skipped | failed | cancelled | warning`，分别表示等待、运行中、已完成、已跳过、失败、已取消和警告
+- `condition_results_json`：该节点每条入边的条件字段、实际值和判断结果
 - `output_json`
 - `error`
 - `agent_run_key`
@@ -393,7 +400,7 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 - 选中节点后编辑配置。
 - 选中连线后编辑结构化条件。
 - 删除节点时删除关联边。
-- summary 强制节点和连线不可删除。
+- 总结型工作流的强制节点和连线不可删除。
 - 不显示内联代码编辑器。
 - 画布显示保存校验错误和运行状态。
 
@@ -441,7 +448,7 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 
 - 普通工作流的 `output_json` 包含实际完成的末端节点输出。
 - 总结工作流额外包含 Markdown 和 HTML 产物 ID。
-- HTML 失败时 HTML 产物 ID 为空，并包含 warning。
+- HTML 失败时 HTML 产物 ID 为空，并包含警告信息。
 
 可以在保存时发现的引用、图结构和资源引用错误必须拒绝保存；不把明显配置错误延迟到运行阶段。
 
@@ -449,10 +456,11 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 
 - 不开发 `workflow.js -> definition_json` 自动转换器。
 - 旧 `workflow_js` 字段保留一段兼容期，用于读取历史定义和历史运行展示。
+- `definition_json IS NULL` 的历史工作流在列表中显示“需要迁移”，全局调度器跳过它，手动运行时返回明确校验错误。
 - 新编辑器保存后，该工作流使用 `definition_json` 和新执行器。
 - 现有工作流通过新编辑器手动重建。
 - 新执行器完成并验证后，移除 Claude-only `ClaudeWorkflowRunner` 主路径。
-- 当前 HTML reporter 行为迁移进 HTML 输出 Handler 后，移除调度器中的额外 reporter 后处理。
+- 当前 HTML 报告生成器行为迁移进 HTML 输出处理器后，移除调度器中的额外报告后处理。
 
 不自动转换的理由是旧 JS 可包含任意动态控制流，转换结果无法可靠保证语义一致；维护一次性转换器不符合第一版范围。
 
@@ -464,9 +472,9 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 2. 引用渲染：类型保持、字符串插值、祖先限制和缺失字段。
 3. 条件求值：五个操作符和字段缺失语义。
 4. DAG 调度：串行、并行、条件分支、汇合和跳过传播。
-5. Fail-fast：停止新调度并取消运行中的 Agent。
-6. 四种 Handler：使用 Fake Agent 和 Fake Script 隔离测试。
-7. 任务生命周期：无任务、成功、失败和 HTML warning。
+5. 快速失败：停止新调度并取消运行中的 Agent。
+6. 四种节点处理器：使用模拟 Agent 和模拟脚本进行隔离测试。
+7. 任务生命周期：无任务、成功、失败和 HTML 警告。
 8. API：保存、手动输入运行、定义快照和节点进度。
 9. 调度器回归：全局窗口、并发上限和手动测试保持现状。
 
@@ -474,7 +482,7 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 
 - 图定义和 Vue Flow 数据双向转换。
 - 节点及连线编辑、删除和条件配置。
-- summary 强制节点保护。
+- 总结型工作流强制节点保护。
 - 保存错误定位。
 - 节点运行状态映射。
 - Vue 类型检查和生产构建。
@@ -498,13 +506,13 @@ Handler 只负责执行一种节点并返回 JSON 对象。
 
 ## 15. 验收标准
 
-1. 管理员可以创建 operation 或 summary 工作流，并通过 Vue Flow 保存合法 DAG。
-2. operation 工作流可以包含可选获取任务节点、Agent 节点、托管脚本节点和输出节点。
-3. summary 工作流始终包含受保护的 Markdown 和 HTML 输出节点及固定直接连线。
+1. 管理员可以创建操作型或总结型工作流，并通过 Vue Flow 保存合法 DAG。
+2. 操作型工作流可以包含可选获取任务节点、Agent 节点、托管脚本节点和输出节点。
+3. 总结型工作流始终包含受保护的 Markdown 和 HTML 输出节点及固定直接连线。
 4. Agent 节点可选择 Claude、OpenCode 或 Codex，并配置提示词、Profile MCP 开关、技能顺序和可选 JSON Schema。
 5. 脚本节点只能选择启用的托管 Python 脚本，并能用显式参数映射接收上游数据。
 6. 条件边能根据结构化字段选择分支；并行节点可同时执行并正确汇合。
 7. 任一普通节点失败会终止运行并标记任务失败；不会自动重新入队。
-8. Markdown 成功而 HTML 失败时保留 Markdown，运行和任务成功，HTML 节点显示 warning。
+8. Markdown 成功而 HTML 失败时保留 Markdown，运行和任务成功，HTML 节点显示警告。
 9. 全局后台调度和手动测试都使用同一新执行器。
 10. 运行详情能在工作流图上显示节点状态、输出摘要以及 Agent/脚本详情入口。
