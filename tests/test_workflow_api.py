@@ -3,6 +3,19 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
+def test_workflow_api_saves_structured_definition(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.init_schema()
+    service.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    response = TestClient(create_app(wm_paths, {"root"})).post("/workflows", headers={"X-Agent-Bridge-User": "root"}, json={"workflow_key": "structured", "name": "Structured", "profile_key": "report-plane", "definition": {"nodes": [], "edges": []}, "status": "active"})
+    assert response.status_code == 200
+    assert response.json()["definition"] == {"nodes": [], "edges": []}
+    assert "workflow_js" not in response.json()
+
+
 def test_workflow_api_creates_and_lists_workflows(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService

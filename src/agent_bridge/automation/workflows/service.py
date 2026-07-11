@@ -12,6 +12,12 @@ from agent_bridge.automation.workflows.models import (
     WorkflowType,
 )
 from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
+from agent_bridge.automation.workflows.definition import WorkflowGraph
+from agent_bridge.automation.workflows.validation import (
+    WorkflowDefinitionValidationError,
+    WorkflowValidationIssue,
+    collect_graph_issues,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,7 @@ class WorkflowService:
         admins: set[str],
         agent_service: Any = None,
         skills: Any = None,
+        scripts: Any = None,
     ) -> None:
         self.store = store
         self.admins = admins
@@ -43,6 +50,7 @@ class WorkflowService:
         # this service stays usable in isolated tests.
         self.agent_service = agent_service
         self.skills = skills
+        self.scripts = scripts
 
     def upsert_definition(
         self,
@@ -52,13 +60,11 @@ class WorkflowService:
         name: str,
         description: str,
         profile_key: str,
-        workflow_js: str,
         status: str,
         workflow_type: str = "operation",
+        definition: dict[str, Any] | WorkflowGraph | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise ValidationError("profile not found")
         try:
             next_status = WorkflowStatus(status).value
         except ValueError as exc:
@@ -67,12 +73,20 @@ class WorkflowService:
             next_type = WorkflowType(workflow_type).value
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
+        graph = definition if isinstance(definition, WorkflowGraph) else WorkflowGraph.model_validate(definition or {"nodes": [], "edges": []})
+        issues = collect_graph_issues(graph, next_type)
+        if self.store.get_project_profile(profile_key) is None:
+            issues.append(WorkflowValidationIssue("workflow", None, "profile_key", "Profile 不存在"))
+        issues.extend(self._resource_issues(actor, graph))
+        if issues:
+            raise WorkflowDefinitionValidationError(issues)
         result = self.store.upsert_workflow_definition(
             workflow_key=workflow_key,
             name=name,
             description=description,
             profile_key=profile_key,
-            workflow_js=workflow_js,
+            definition=graph.model_dump(mode="json"),
+            workflow_js="",
             status=next_status,
             workflow_type=next_type,
             created_by=actor,
@@ -85,18 +99,18 @@ class WorkflowService:
             next_type,
             actor,
         )
-        return result
+        return self._definition_payload(result)
 
     def list_definitions(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        return self.store.list_workflow_definitions()
+        return [self._definition_payload(item) for item in self.store.list_workflow_definitions()]
 
     def get_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         workflow = self.store.get_workflow_definition(workflow_key)
         if workflow is None:
             raise NotFound("workflow not found")
-        return workflow
+        return self._definition_payload(workflow)
 
     def delete_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -240,7 +254,59 @@ class WorkflowService:
         run = self.store.get_workflow_run(run_id)
         if run is None:
             raise NotFound("workflow run not found")
+        run["node_runs"] = self.store.list_workflow_node_runs(run_id)
         return run
+
+    def _resource_issues(self, actor: str, graph: WorkflowGraph) -> list[WorkflowValidationIssue]:
+        issues: list[WorkflowValidationIssue] = []
+        input_types: dict[str, tuple[str, str]] = {}
+        for node in graph.nodes:
+            config = node.config
+            if node.type in {"agent", "output"}:
+                try:
+                    backend_missing = self.agent_service is None or self.agent_service.coding_agents.get(config.backend_key) is None
+                except Exception:
+                    backend_missing = True
+                if backend_missing:
+                    issues.append(WorkflowValidationIssue("node", node.id, "config.backend_key", f"未知后端: {config.backend_key}"))
+                for skill_name in config.skill_names:
+                    try:
+                        if self.skills is None:
+                            raise NotFound("skill service unavailable")
+                        self.skills.get_skill(actor, skill_name)
+                    except Exception:
+                        issues.append(WorkflowValidationIssue("node", node.id, "config.skill_names", f"技能不存在: {skill_name}"))
+            if node.type == "script":
+                script = self.store.scripts.get_script(config.script_key)
+                if script is None or script.get("status") != "active":
+                    issues.append(WorkflowValidationIssue("node", node.id, "config.script_key", f"脚本不存在或未启用: {config.script_key}"))
+                    continue
+                schema = script.get("input_schema") or {}
+                required = schema.get("required") or []
+                properties = schema.get("properties") or {}
+                for field in required:
+                    if field not in config.params:
+                        issues.append(WorkflowValidationIssue("node", node.id, f"config.params.{field}", "缺少脚本必填参数"))
+                for field, value in config.params.items():
+                    if not isinstance(value, str) or not value.strip().startswith("{{ input.") or not value.strip().endswith(" }}"):
+                        continue
+                    path = value.strip()[8:-3].strip()
+                    field_type = str((properties.get(field) or {}).get("type") or "")
+                    previous = input_types.get(path)
+                    if previous and previous[0] and field_type and previous[0] != field_type:
+                        issues.append(WorkflowValidationIssue("node", node.id, f"config.params.{field}", f"手动输入类型冲突: input.{path}"))
+                    elif field_type:
+                        input_types[path] = (field_type, node.id)
+            if node.type == "output" and (config.path.startswith("/") or ".." in config.path.split("/")):
+                issues.append(WorkflowValidationIssue("node", node.id, "config.path", "输出路径不能为绝对路径或包含 .."))
+        return issues
+
+    @staticmethod
+    def _definition_payload(workflow: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(workflow)
+        payload.pop("definition_json", None)
+        payload.pop("workflow_js", None)
+        return payload
 
     def append_run_log(
         self,

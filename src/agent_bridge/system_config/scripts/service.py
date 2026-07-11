@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 from agent_bridge.core.config import AgentBridgePaths, load_server_config
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -60,6 +63,7 @@ class ScriptService:
         status: str,
         owner_type: str,
         owner_key: str,
+        input_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
@@ -72,12 +76,16 @@ class ScriptService:
         if not normalized_code.strip():
             raise ValidationError("code is required")
         normalized_name = name.strip() or normalized_key
+        if input_schema is None:
+            raise ValidationError("input_schema is required")
+        normalized_input_schema = self._validate_input_schema(input_schema)
         script = self.store.scripts.upsert_script(
             script_key=normalized_key,
             name=normalized_name,
             description=description.strip(),
             language=normalized_language,
             code=normalized_code,
+            input_schema=normalized_input_schema,
             status=normalized_status,
             owner_type=normalized_owner_type,
             owner_key=normalized_owner_key,
@@ -134,6 +142,7 @@ class ScriptService:
             raise ValidationError("only python scripts are supported")
         if not isinstance(script_params, dict):
             raise ValidationError("script_params must be an object")
+        self._validate_script_params(script["script_key"], script["input_schema"], script_params)
         timeout = self._timeout(timeout_seconds)
         run_id = f"script_run_{uuid4().hex}"
         envelope = {
@@ -326,6 +335,31 @@ class ScriptService:
 
     def _content_hash(self, code: str) -> str:
         return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+    def _validate_input_schema(self, input_schema: dict[str, Any]) -> dict[str, Any]:
+        if input_schema.get("type") != "object":
+            raise ValidationError("input_schema 根类型必须为 object")
+        try:
+            Draft202012Validator.check_schema(input_schema)
+        except SchemaError as exc:
+            raise ValidationError(f"input_schema 非法: {exc.message}") from exc
+        return input_schema
+
+    def _validate_script_params(
+        self, script_key: str, input_schema: dict[str, Any], script_params: dict[str, Any]
+    ) -> None:
+        errors = sorted(
+            Draft202012Validator(input_schema).iter_errors(script_params),
+            key=lambda item: list(item.absolute_path),
+        )
+        if not errors:
+            return
+        first = errors[0]
+        path = ".".join(str(part) for part in first.absolute_path) or "<root>"
+        expected = json.dumps(input_schema, ensure_ascii=False, separators=(",", ":"))
+        raise ValidationError(
+            f"script params invalid script={script_key} field={path}: {first.message}; expected_schema={expected}"
+        )
 
     def _bounded(self, value: str | bytes) -> str:
         if isinstance(value, bytes):

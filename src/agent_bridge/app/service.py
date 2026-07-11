@@ -53,6 +53,9 @@ from agent_bridge.system_config.skills.service import SkillService
 from agent_bridge.system_config.plugin_update_scheduler import PluginUpdateScheduler
 from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 from agent_bridge.automation.workflows.service import WorkflowService
+from agent_bridge.automation.workflows.handlers import WorkflowNodeHandlers
+from agent_bridge.automation.workflows.output_handler import OutputHandler
+from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
 
 
 ALLOWED_EXTENSIONS = {
@@ -106,21 +109,26 @@ class AgentBridgeService:
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
-        self.workflows = WorkflowService(store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
-        # The workflow service generates HTML reports for summary runs, which
-        # requires driving an agent run and reading the design skill. Wire
-        # those collaborators now that both services exist.
-        self.workflows.agent_service = self.agents
-        self.workflows.skills = self.skills
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
+        self.workflows = WorkflowService(
+            store=store, admins=admins, agent_service=self.agents, skills=self.skills, scripts=self.scripts
+        )
+        self.workflow_output_handler = OutputHandler(
+            agent_service=self.agents, skill_service=self.skills, workflow_service=self.workflows
+        )
+        self.workflow_handlers = WorkflowNodeHandlers(
+            agent_service=self.agents, scripts=self.scripts, skill_service=self.skills,
+            workflow_service=self.workflows, output_handler=self.workflow_output_handler,
+        )
+        self.workflow_executor = WorkflowDagExecutor(store=store, handlers=self.workflow_handlers)
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,
             admins=admins,
-            agent_service=self.agents,
+            executor=self.workflow_executor,
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capability_hub.sources.builtin.codegraph import CodeGraphBuiltinProvider

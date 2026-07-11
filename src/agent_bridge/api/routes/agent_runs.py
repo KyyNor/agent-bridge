@@ -123,13 +123,14 @@ SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
         "script": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["script_key", "name", "description", "language", "code", "status", "owner_type", "owner_key"],
+            "required": ["script_key", "name", "description", "language", "code", "input_schema", "status", "owner_type", "owner_key"],
             "properties": {
                 "script_key": {"type": "string"},
                 "name": {"type": "string"},
                 "description": {"type": "string"},
                 "language": {"type": "string", "enum": ["python"]},
                 "code": {"type": "string"},
+                "input_schema": {"type": "object", "properties": {"type": {"const": "object"}}},
                 "status": {"type": "string", "enum": ["active", "disabled"]},
                 "owner_type": {"type": "string"},
                 "owner_key": {"type": "string"},

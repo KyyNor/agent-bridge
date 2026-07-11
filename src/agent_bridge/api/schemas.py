@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+from agent_bridge.automation.workflows.definition import WorkflowGraph
 
 
 class CreateMemoryBlockRequest(BaseModel):
@@ -235,9 +236,13 @@ class WorkflowDefinitionRequest(BaseModel):
     name: str
     description: str = ""
     profile_key: str
-    workflow_js: str = ""
+    definition: WorkflowGraph
     status: str = "active"
     workflow_type: str = "operation"
+
+
+class WorkflowRunRequest(BaseModel):
+    input: dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillPromptRequest(BaseModel):
@@ -250,6 +255,7 @@ class ScriptRequest(BaseModel):
     description: str = ""
     language: str = "python"
     code: str
+    input_schema: dict[str, Any]
     status: str = "active"
     owner_type: str = "system"
     owner_key: str = ""

@@ -22,6 +22,21 @@ def main(envelope):
 }
 """
 
+SCRIPT_INPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {"repo": {"type": "string"}},
+    "required": ["repo"],
+}
+
+
+def test_script_input_schema_round_trip_and_validation(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    saved = service.scripts.upsert_script(actor="root", script_key="schema-test", name="Schema", description="", language="python", code=MAIN_SCRIPT, input_schema=SCRIPT_INPUT_SCHEMA, status="active", owner_type="system", owner_key="")
+    assert saved["input_schema"] == SCRIPT_INPUT_SCHEMA
+    with pytest.raises(ValidationError, match="expected_schema="):
+        service.scripts.test_script(actor="root", script_key="schema-test", script_params={"repo": 1}, timeout_seconds=10)
+
 
 WORKFLOW_SCRIPT = """
 from agent_bridge_runtime import workflow_get_task, workflow_set_task, workflow_run_log

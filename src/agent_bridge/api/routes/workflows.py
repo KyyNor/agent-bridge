@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from agent_bridge.api.schemas import WorkflowDefinitionRequest
+from agent_bridge.api.schemas import WorkflowDefinitionRequest, WorkflowRunRequest
 
 
 def create_workflow_routes(service, actor):
@@ -126,8 +126,14 @@ def create_workflow_routes(service, actor):
         )
 
     @router.post("/workflows/{workflow_key}/run")
-    def run_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.workflow_scheduler.run_workflow_now(workflow_key)
+    def run_workflow(
+        workflow_key: str,
+        payload: WorkflowRunRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflow_scheduler.run_workflow_now(
+            workflow_key, input_data=payload.input, actor=current_actor
+        )
 
     @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/execute")
     def execute_task(
@@ -144,7 +150,7 @@ def create_workflow_routes(service, actor):
             task_key=task_key,
             task_version=task_version,
         )
-        started = service.workflow_scheduler.run_workflow_now(workflow_key)
+        started = service.workflow_scheduler.run_workflow_now(workflow_key, actor=current_actor)
         return {**flagged, "run_id": started.get("run_id"), "run_status": started.get("status")}
 
     @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/reset")

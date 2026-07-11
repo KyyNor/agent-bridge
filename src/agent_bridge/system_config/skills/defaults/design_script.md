@@ -3,6 +3,7 @@
 你正在为 Agent Bridge 编写“受控脚本”（managed script）。先理解用户目标，再维护脚本主体：
 
 1. `script.py`：运行在 Agent Bridge 脚本沙箱中的 Python 脚本。
+2. `input_schema`：根 `type` 必须为 `object` 的 JSON Schema，声明每个输入字段的类型、描述和 `required` 字段。
 
 ## 脚本运行协议（务必先理解）
 
@@ -145,3 +146,4 @@ def main(envelope):
 - 是否使用 `execute(...)` 调用 MCP，而没有传 `profile_key`？
 - 如果用了 workflow helper，是否依赖完整 workflow context？
 - 返回值是否稳定、易于消费、能被 JSON 序列化？
+- 是否提供了合法的 object `input_schema`，并覆盖脚本读取的全部参数？

@@ -21,6 +21,7 @@ class ScriptsRepository:
         description: str,
         language: str,
         code: str,
+        input_schema: dict[str, Any],
         status: str,
         owner_type: str,
         owner_key: str,
@@ -34,9 +35,9 @@ class ScriptsRepository:
                     """
                     INSERT INTO scripts (
                       script_key, name, description, language, code, status,
-                      owner_type, owner_key, content_hash, created_by, updated_by
+                      owner_type, owner_key, content_hash, input_schema_json, created_by, updated_by
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         script_key,
@@ -48,6 +49,7 @@ class ScriptsRepository:
                         owner_type,
                         owner_key,
                         content_hash,
+                        json.dumps(input_schema, ensure_ascii=False, sort_keys=True),
                         actor,
                         actor,
                     ),
@@ -64,6 +66,7 @@ class ScriptsRepository:
                         owner_type = ?,
                         owner_key = ?,
                         content_hash = ?,
+                        input_schema_json = ?,
                         updated_by = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE script_key = ?
@@ -77,6 +80,7 @@ class ScriptsRepository:
                         owner_type,
                         owner_key,
                         content_hash,
+                        json.dumps(input_schema, ensure_ascii=False, sort_keys=True),
                         actor,
                         script_key,
                     ),
@@ -84,16 +88,25 @@ class ScriptsRepository:
             script = row_to_dict(conn.execute("SELECT * FROM scripts WHERE script_key = ?", (script_key,)).fetchone())
             if script is None:
                 raise KeyError(f"script not found: {script_key}")
-            return script
+            return self._payload(script)
 
     def list_scripts(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM scripts ORDER BY script_key").fetchall()
-            return [dict(row) for row in rows]
+            return [self._payload(dict(row)) for row in rows]
 
     def get_script(self, script_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            return row_to_dict(conn.execute("SELECT * FROM scripts WHERE script_key = ?", (script_key,)).fetchone())
+            script = row_to_dict(conn.execute("SELECT * FROM scripts WHERE script_key = ?", (script_key,)).fetchone())
+            return self._payload(script) if script else None
+
+    @staticmethod
+    def _payload(script: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(script)
+        payload["input_schema"] = json.loads(
+            payload.get("input_schema_json") or '{"type":"object","properties":{},"additionalProperties":true}'
+        )
+        return payload
 
     def delete_script(self, script_key: str) -> bool:
         with self._connect() as conn:

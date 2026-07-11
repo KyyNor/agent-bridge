@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import threading
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -13,8 +14,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from agent_bridge.core.domain import ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
 from agent_bridge.storage.sqlite import SQLiteStore
-from agent_bridge.automation.workflows.result_parser import parse_workflow_result
-from agent_bridge.automation.workflows.runner import ClaudeWorkflowRunner, WorkflowRunner, WorkflowRunSpec
+from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,9 @@ class WorkflowScheduler:
         service: Any,
         store: SQLiteStore,
         admins: set[str],
+        executor: WorkflowDagExecutor | None = None,
         agent_service: Any = None,
-        runner: WorkflowRunner | None = None,
+        runner: Any = None,
         base_run_dir: Path | None = None,
         mcp_url: str = "http://127.0.0.1:8765/mcp",
         max_concurrent_workflows: int = 2,
@@ -43,8 +44,9 @@ class WorkflowScheduler:
         self._service = service
         self._store = store
         self._admins = admins
-        self._agent_service = agent_service
-        self._runner = runner or ClaudeWorkflowRunner(agent_service)
+        if not admins:
+            raise ValueError("workflow scheduler requires at least one admin")
+        self._executor = executor
         self._base_run_dir = base_run_dir
         self._mcp_url = mcp_url
         self._max_concurrent = max_concurrent_workflows
@@ -236,7 +238,7 @@ class WorkflowScheduler:
             workflows = [
                 item
                 for item in self._store.list_workflow_definitions()
-                if item.get("status") == "active"
+                if item.get("status") == "active" and item.get("definition") is not None
             ]
             candidates = {item["workflow_key"] for item in workflows} - self.finished_today
             if self._max_runs > 0:
@@ -264,16 +266,16 @@ class WorkflowScheduler:
                 thread = threading.Thread(target=self._run_and_release, args=(workflow_key,), daemon=True)
                 thread.start()
 
-    def _run_and_release(self, workflow_key: str, run_id: str | None = None) -> None:
+    def _run_and_release(self, workflow_key: str, run_id: str | None = None, input_data: dict[str, Any] | None = None, actor: str | None = None) -> None:
         try:
-            self.run_one_workflow(workflow_key, run_id=run_id)
+            self.run_one_workflow(workflow_key, run_id=run_id, input_data=input_data, actor=actor)
         except Exception:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
         finally:
             with self._lock:
                 self._running.discard(workflow_key)
 
-    def run_workflow_now(self, workflow_key: str) -> dict[str, Any]:
+    def run_workflow_now(self, workflow_key: str, input_data: dict[str, Any] | None = None, actor: str | None = None) -> dict[str, Any]:
         """Launch a single on-demand run immediately — a "test run".
 
         Bypasses the daily window and the active/disabled status check (those
@@ -287,6 +289,9 @@ class WorkflowScheduler:
             workflow = self._store.get_workflow_definition(workflow_key)
             if workflow is None:
                 raise NotFound("workflow not found")
+            if workflow.get("definition") is None:
+                from agent_bridge.core.domain import ValidationError
+                raise ValidationError("工作流需要通过新编辑器迁移")
             run_id = new_run_id(workflow_key)
             base_dir = self._base_run_dir or Path("workflow-runs")
             self._store.create_workflow_run(
@@ -296,6 +301,8 @@ class WorkflowScheduler:
                 task_key=None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
+                definition_snapshot=workflow["definition"],
+                input_data=input_data or {},
             )
             self._running.add(workflow_key)
         logger.info(
@@ -305,12 +312,12 @@ class WorkflowScheduler:
             workflow["profile_key"],
         )
         thread = threading.Thread(
-            target=self._run_and_release, args=(workflow_key, run_id), daemon=True
+            target=self._run_and_release, args=(workflow_key, run_id, input_data, actor), daemon=True
         )
         thread.start()
         return {"status": "started", "run_id": run_id}
 
-    def run_one_workflow(self, workflow_key: str, run_id: str | None = None) -> dict[str, Any]:
+    def run_one_workflow(self, workflow_key: str, run_id: str | None = None, input_data: dict[str, Any] | None = None, actor: str | None = None) -> dict[str, Any]:
         """执行单个 workflow run 的完整生命周期：建 run 行 -> 跑 agent -> 解析 result -> 入库。
 
         失败（agent 非零退出、result 解析不通过、异常）统一落 failed 状态并
@@ -332,6 +339,8 @@ class WorkflowScheduler:
                 task_key=None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
+                definition_snapshot=workflow.get("definition") or {"nodes": [], "edges": []},
+                input_data=input_data or {},
             )
         logger.info(
             "Workflow run 开始执行 workflow=%s run=%s profile=%s",
@@ -339,74 +348,43 @@ class WorkflowScheduler:
             run_id,
             workflow["profile_key"],
         )
-        process_result = None
+        if workflow.get("definition") is None:
+            return {"status": "missing_definition"}
+        if self._executor is None:
+            raise RuntimeError("workflow DAG executor is not configured")
         try:
-            process_result = self._runner.run(
-                base_dir,
-                WorkflowRunSpec(
-                    run_id=run_id,
-                    workflow_key=workflow_key,
-                    profile_key=workflow["profile_key"],
-                    workflow_js=workflow["workflow_js"],
-                    mcp_url=self._mcp_url,
-                    timeout_seconds=self._max_runtime_minutes * 60 or None,
-                ),
-            )
-            if process_result.exit_code != 0:
-                logger.error(
-                    "Workflow runner 退出非零 workflow=%s run=%s exit_code=%d",
-                    workflow_key,
-                    run_id,
-                    process_result.exit_code,
-                )
-                return self._finish_failed(workflow_key, run_id, process_result, "claude workflow runner failed")
-            parsed = parse_workflow_result(process_result.run_dir)
-            ingested = self._service.ingest_parsed_result(
-                workflow_key=workflow_key,
-                profile_key=workflow["profile_key"],
-                run_id=run_id,
-                parsed=parsed,
-            )
-            final_status = ingested["status"]
-            if final_status == "no_task":
+            execution = asyncio.run(self._executor.run(
+                workflow=workflow, run_id=run_id, input_data=input_data or {}, actor=actor or sorted(self._admins)[0]
+            ))
+            if execution.status == "no_task":
                 self.finished_today.add(workflow_key)
-            # For summary workflows, append a derived HTML report for human
-            # consumption. This is best-effort: a failure here must NOT change
-            # the main run status (kept completed) — it only records a warning.
-            if final_status == "completed":
-                self._maybe_generate_html_report(workflow_key, workflow, run_id)
             self._store.finish_workflow_run(
                 run_id,
-                status=final_status,
-                exit_code=process_result.exit_code,
-                stdout_path=str(process_result.stdout_path),
-                stderr_path=str(process_result.stderr_path),
-                error=None,
-                duration_ms=process_result.duration_ms,
+                status=execution.status, exit_code=0 if execution.status != "failed" else 1,
+                stdout_path=None, stderr_path=None, error=execution.error, duration_ms=None, output=execution.output,
             )
+            if execution.status == "failed":
+                self._store.fail_workflow_task_for_run(workflow_key, run_id, execution.error or "workflow failed")
             logger.info(
                 "Workflow run 完成 workflow=%s run=%s 状态=%s 耗时=%dms",
                 workflow_key,
                 run_id,
-                final_status,
-                process_result.duration_ms,
+                execution.status,
+                0,
             )
-            return ingested
+            return {"status": execution.status, "output": execution.output, "warnings": execution.warnings}
         except Exception as exc:
             logger.exception("Workflow 执行失败 workflow=%s run=%s", workflow_key, run_id)
-            stdout_path = str(process_result.stdout_path) if process_result else None
-            stderr_path = str(process_result.stderr_path) if process_result else None
-            duration_ms = process_result.duration_ms if process_result else None
             self._store.finish_workflow_run(
                 run_id,
                 status="failed",
-                exit_code=process_result.exit_code if process_result else None,
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
+                exit_code=1,
+                stdout_path=None,
+                stderr_path=None,
                 error=str(exc),
-                duration_ms=duration_ms,
+                duration_ms=None,
             )
-            self._release_leased_tasks(workflow_key, run_id, str(exc))
+            self._store.fail_workflow_task_for_run(workflow_key, run_id, str(exc))
             return {"status": "failed", "error": str(exc)}
 
     def _release_leased_tasks(self, workflow_key: str, run_id: str, error: str) -> None:
