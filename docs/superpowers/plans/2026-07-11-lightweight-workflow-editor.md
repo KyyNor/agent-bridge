@@ -30,7 +30,8 @@
 - `src/agent_bridge/automation/workflows/definition.py`：Pydantic 图定义、节点配置、条件和默认总结图。
 - `src/agent_bridge/automation/workflows/validation.py`：纯图校验、祖先引用校验、资源存在性校验和可定位错误。
 - `src/agent_bridge/automation/workflows/references.py`：路径读取、模板渲染和条件求值。
-- `src/agent_bridge/automation/workflows/handlers.py`：四类节点处理器及统一执行上下文/结果。
+- `src/agent_bridge/automation/workflows/handlers.py`：获取任务、Agent、托管脚本处理器及统一执行上下文/结果。
+- `src/agent_bridge/automation/workflows/output_handler.py`：Markdown/HTML 输出、产物保存和 HTML 警告语义。
 - `src/agent_bridge/automation/workflows/executor.py`：轻量 DAG 调度、节点状态持久化、快速失败和运行输出汇总。
 
 **后端修改文件**
@@ -527,6 +528,12 @@ def test_missing_not_equals_is_false():
     )
     assert result.matched is False
     assert result.actual is None
+
+
+def test_null_condition_is_always_active():
+    result = evaluate_condition(None, CONTEXT)
+    assert result.matched is True
+    assert result.actual is None
 ```
 
 - [ ] **步骤 2：运行测试并确认模块缺失**
@@ -578,7 +585,190 @@ git commit -m "feat(workflows): resolve node references and conditions"
 
 ---
 
-### 任务 4：实现四类节点处理器
+### 任务 4：为托管脚本增加输入 Schema
+
+**文件：**
+
+- 修改：`pyproject.toml`
+- 修改：`uv.lock`
+- 修改：`src/agent_bridge/storage/schema.py`
+- 修改：`src/agent_bridge/storage/sqlite.py`
+- 修改：`src/agent_bridge/storage/repositories/scripts.py`
+- 修改：`src/agent_bridge/system_config/scripts/service.py`
+- 修改：`src/agent_bridge/api/schemas.py`
+- 修改：`src/agent_bridge/api/routes/agent_runs.py`
+- 修改：`src/agent_bridge/system_config/skills/defaults/design_script.md`
+- 修改：`frontend/capabilities/src/api/types.ts`
+- 修改：`frontend/capabilities/src/api/client.ts`
+- 修改：`frontend/capabilities/src/views/system/ScriptsView.vue`
+- 修改测试：`tests/test_scripts.py`
+- 修改测试：`tests/test_design_agent_api.py`
+- 修改测试：`tests/test_capability_api.py`
+
+**接口：**
+
+- 托管脚本新增 `input_schema: dict[str, Any]`。
+- `ScriptService.upsert_script()` 必须接收并校验 `input_schema`。
+- `ScriptService.run_script()` 在创建运行目录前校验 `script_params`。
+- 运行时校验失败继续使用 `ValidationError`，消息包含字段路径，并在消息末尾附加紧凑 schema JSON。
+
+- [ ] **步骤 1：先写脚本 Schema 保存和运行校验失败测试**
+
+```python
+import pytest
+
+from agent_bridge.core.domain import ValidationError
+
+
+SCRIPT_INPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "repo": {"type": "string", "description": "仓库标识"},
+        "limit": {"type": "integer", "minimum": 1},
+    },
+    "required": ["repo"],
+}
+
+
+def test_script_input_schema_round_trip_and_validation(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    scripts = AgentBridgeService.create(wm_paths, {"root"}).scripts
+    saved = scripts.upsert_script(
+        actor="root", script_key="collect", name="Collect", description="",
+        language="python", code="def main(envelope):\n    return {}\n",
+        input_schema=SCRIPT_INPUT_SCHEMA,
+        status="active", owner_type="system", owner_key="",
+    )
+    assert saved["input_schema"] == SCRIPT_INPUT_SCHEMA
+
+    with pytest.raises(ValidationError) as exc:
+        scripts.test_script(
+            actor="root", script_key="collect",
+            script_params={"repo": 123}, timeout_seconds=10,
+        )
+    assert "repo" in str(exc.value)
+    assert "expected_schema=" in str(exc.value)
+
+
+def test_script_rejects_invalid_input_schema(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    scripts = AgentBridgeService.create(wm_paths, {"root"}).scripts
+    with pytest.raises(ValidationError, match="input_schema"):
+        scripts.upsert_script(
+            actor="root", script_key="bad", name="Bad", description="",
+            language="python", code="def main(envelope):\n    return {}\n",
+            input_schema={"type": "string"},
+            status="active", owner_type="system", owner_key="",
+        )
+```
+
+- [ ] **步骤 2：运行脚本测试并确认新参数缺失**
+
+```bash
+PYTHONPATH=. uv run pytest tests/test_scripts.py -q
+```
+
+预期：失败信息指向 `input_schema` 参数不存在或返回值没有该字段。
+
+- [ ] **步骤 3：增加直接依赖和数据库字段**
+
+在 `pyproject.toml` 增加 `jsonschema>=4.23.0,<5` 并执行：
+
+```bash
+uv lock
+```
+
+`scripts` 表增加：
+
+```sql
+input_schema_json TEXT NOT NULL DEFAULT '{"type":"object","properties":{},"additionalProperties":true}'
+```
+
+该默认值只用于升级前历史脚本的兼容模式；新建或重新保存的脚本必须从 API 提交 schema。`SQLiteStore.init_schema()` 通过 `_ensure_columns()` 补列。
+
+`ScriptsRepository` 的 upsert 新增 `input_schema` 参数并读写 `input_schema_json`；list/get 返回解析后的 `input_schema`，不得把原始 JSON 字符串暴露给 API。
+
+- [ ] **步骤 4：实现 schema 自身校验和运行参数校验**
+
+`ScriptService` 使用标准库接口：
+
+```python
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
+
+def _validate_input_schema(self, input_schema: dict[str, Any]) -> dict[str, Any]:
+    if input_schema.get("type") != "object":
+        raise ValidationError("input_schema 根类型必须为 object")
+    try:
+        Draft202012Validator.check_schema(input_schema)
+    except SchemaError as exc:
+        raise ValidationError(f"input_schema 非法: {exc.message}") from exc
+    return input_schema
+
+
+def _validate_script_params(
+    self, script_key: str, input_schema: dict[str, Any], script_params: dict[str, Any]
+) -> None:
+    errors = sorted(
+        Draft202012Validator(input_schema).iter_errors(script_params),
+        key=lambda item: list(item.absolute_path),
+    )
+    if not errors:
+        return
+    first = errors[0]
+    path = ".".join(str(part) for part in first.absolute_path) or "<root>"
+    expected = json.dumps(input_schema, ensure_ascii=False, separators=(",", ":"))
+    raise ValidationError(
+        f"script params invalid script={script_key} field={path}: "
+        f"{first.message}; expected_schema={expected}"
+    )
+```
+
+在 `run_script()` 中先加载并校验 params，再创建 `run_id` 和运行目录；非法输入不得生成 script run 记录。
+
+- [ ] **步骤 5：更新脚本 API、设计 Agent 和脚本管理页**
+
+- `ScriptRequest` 增加必填 `input_schema: dict[str, Any]`。
+- `ManagedScript` 和 `ScriptDesignResult.script` 增加 `input_schema`。
+- `SCRIPT_DESIGN_SCHEMA` 将 `input_schema` 加入 required，并限制根类型为对象 schema。
+- `design_script.md` 要求设计 Agent 同时输出字段名、类型、描述和 required。
+- `ScriptsView.vue` 增加输入字段表格：字段名输入框、类型下拉框、必填复选框、描述输入框、删除图标和“添加字段”按钮。
+- UI 保存时生成 `{"type":"object","properties":...,"required":...,"additionalProperties":false}`。
+- 历史兼容 schema（`additionalProperties=true` 且无 properties）显示“兼容模式：未声明字段”，用户保存时可继续保留或改成明确字段。
+
+- [ ] **步骤 6：运行脚本、设计 Agent 和前端回归**
+
+```bash
+PYTHONPATH=. uv run pytest tests/test_scripts.py tests/test_design_agent_api.py \
+  tests/test_capability_api.py -q
+cd frontend/capabilities
+npm run typecheck
+npm run build
+```
+
+预期：全部通过。
+
+- [ ] **步骤 7：提交任务 4**
+
+```bash
+git add pyproject.toml uv.lock src/agent_bridge/storage/schema.py \
+  src/agent_bridge/storage/sqlite.py src/agent_bridge/storage/repositories/scripts.py \
+  src/agent_bridge/system_config/scripts/service.py src/agent_bridge/api/schemas.py \
+  src/agent_bridge/api/routes/agent_runs.py \
+  src/agent_bridge/system_config/skills/defaults/design_script.md \
+  frontend/capabilities/src/api/types.ts frontend/capabilities/src/api/client.ts \
+  frontend/capabilities/src/views/system/ScriptsView.vue \
+  tests/test_scripts.py tests/test_design_agent_api.py tests/test_capability_api.py
+git commit -m "feat(scripts): declare and validate input schema"
+```
+
+---
+
+### 任务 5：实现获取任务、Agent 和托管脚本处理器
 
 **文件：**
 
@@ -589,10 +779,10 @@ git commit -m "feat(workflows): resolve node references and conditions"
 **接口：**
 
 - `NodeExecutionContext`：运行 ID、工作流、输入、任务、节点输出和 actor。
-- `NodeExecutionResult`：统一输出、关联运行 ID、产物 ID 和警告。
+- `NodeExecutionResult`：统一输出和关联运行 ID。
 - `WorkflowNodeHandlers.execute(node, context) -> NodeExecutionResult`。
 
-- [ ] **步骤 1：写 Agent 技能拼接、脚本参数和输出产物测试**
+- [ ] **步骤 1：写任务获取、Agent 技能拼接和脚本参数测试**
 
 ```python
 from types import SimpleNamespace
@@ -628,23 +818,18 @@ class FakeSkillService:
         return {"skill_name": skill_name, "prompt": f"{skill_name} prompt"}
 
 
-class FakeWorkflowService:
-    def save_artifact(self, **kwargs):
-        return {"artifact_id": f"artifact_{kwargs['format']}"}
-
-
 @pytest.fixture
 def fake_services():
     return SimpleNamespace(
         agent=FakeAgentService(), scripts=FakeScriptService(),
-        skills=FakeSkillService(), workflows=FakeWorkflowService(),
+        skills=FakeSkillService(),
     )
 
 
 def make_handlers(services):
     return WorkflowNodeHandlers(
-        agent_service=services.agent, script_service=services.scripts,
-        skill_service=services.skills, workflow_service=services.workflows,
+        agent_service=services.agent, scripts=services.scripts,
+        skill_service=services.skills,
     )
 
 
@@ -676,12 +861,6 @@ def script_node():
                             "timeout_seconds": 60})
 
 
-def html_output_node():
-    return node("output", {"format": "html", "title": "HTML",
-                            "path": "reports/t/index.html", "tags": ["summary"],
-                            "prompt": "render", "backend_key": "claude"})
-
-
 @pytest.mark.asyncio
 async def test_agent_handler_prepends_skills_and_wraps_text(fake_services):
     handlers = make_handlers(fake_services)
@@ -701,14 +880,6 @@ async def test_script_handler_passes_only_rendered_params(fake_services):
         "count": 20,
     }
     assert result.output == {"ok": True}
-
-
-@pytest.mark.asyncio
-async def test_html_output_failure_returns_warning(fake_services):
-    fake_services.agent.result = AgentRunResult(ok=False, error="bad html")
-    result = await make_handlers(fake_services).execute(html_output_node(), context())
-    assert result.status == "warning"
-    assert result.error == "bad html"
 ```
 
 - [ ] **步骤 2：运行测试并确认处理器尚不存在**
@@ -737,15 +908,14 @@ class NodeExecutionContext:
 
 @dataclass(frozen=True)
 class NodeExecutionResult:
-    status: Literal["completed", "warning"]
+    status: Literal["completed"]
     output: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     agent_run_key: str | None = None
     script_run_id: str | None = None
-    artifact_ids: list[str] = field(default_factory=list)
 ```
 
-- [ ] **步骤 4：实现四类处理器**
+- [ ] **步骤 4：实现三类处理器**
 
 关键调用约束：
 
@@ -766,7 +936,7 @@ agent_result = await self.agent_service.run(
 
 ```python
 script_run = await asyncio.to_thread(
-    self.script_service.run_script,
+    self.scripts.run_script,
     actor=context.actor,
     script_key=config.script_key,
     script_params=render_value(config.params, context.template_context()),
@@ -781,7 +951,7 @@ script_run = await asyncio.to_thread(
 )
 ```
 
-输出节点使用固定 schema `{title, summary, content}`。Markdown 输出提示词末尾自动附加 `[上游节点输出]` 和按节点 ID 排序序列化的全部祖先节点输出；HTML 输出提示词末尾只附加 `[Markdown 主产物]`、Markdown 正文、标题、摘要和产物 ID。Markdown 的 `content` 必须为非空字符串；HTML 的 `content` 必须包含 `<html` 或 `<body`，并继续沿用 5 MiB 上限。校验通过后调用 `WorkflowService.save_artifact()`；HTML 调用、schema、格式或保存失败都转换为 `warning`，其他节点失败抛 `NodeExecutionError`。
+`GetTaskHandler` 直接调用 `WorkflowService.get_task_for_agent()`；`AgentHandler` 调用 `AgentService.run()`；`ScriptHandler` 调用 `self.scripts.run_script()`。三者失败都抛 `NodeExecutionError`。
 
 - [ ] **步骤 5：运行处理器测试和现有 Agent/脚本测试**
 
@@ -792,18 +962,225 @@ PYTHONPATH=. uv run pytest tests/test_workflow_handlers.py \
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交任务 4**
+- [ ] **步骤 6：提交任务 5**
 
 ```bash
 git add src/agent_bridge/automation/workflows/handlers.py \
   src/agent_bridge/automation/workflows/service.py \
   tests/test_workflow_handlers.py
-git commit -m "feat(workflows): execute domain workflow nodes"
+git commit -m "feat(workflows): execute task agent and script nodes"
 ```
 
 ---
 
-### 任务 5：实现 DAG 执行器和快速失败
+### 任务 6：实现独立输出结果处理器
+
+**文件：**
+
+- 新建：`src/agent_bridge/automation/workflows/output_handler.py`
+- 修改：`src/agent_bridge/automation/workflows/handlers.py`
+- 修改：`src/agent_bridge/automation/workflows/service.py`
+- 新建测试：`tests/test_workflow_output_handler.py`
+
+**接口：**
+
+- `OutputHandler.execute(node: OutputNode, context: NodeExecutionContext) -> NodeExecutionResult`。
+- 扩展 `NodeExecutionResult.status` 为 `Literal["completed", "warning"]`，增加 `artifact_ids: list[str]`。
+- `WorkflowNodeHandlers` 在 `node.type == "output"` 时委托 `OutputHandler`。
+
+- [ ] **步骤 1：先写 Markdown 保存、HTML 输入和警告语义测试**
+
+```python
+from types import SimpleNamespace
+
+import pytest
+
+from agent_bridge.agent_runtime.service import AgentRunResult
+from agent_bridge.automation.workflows.definition import WorkflowGraph
+from agent_bridge.automation.workflows.handlers import NodeExecutionContext
+from agent_bridge.automation.workflows.output_handler import OutputHandler
+
+
+class FakeOutputAgent:
+    def __init__(self):
+        self.calls = []
+        self.result = AgentRunResult(
+            ok=True,
+            result={"title": "T", "summary": "S", "content": "# Report"},
+            run_key="agent_output_1",
+        )
+
+    async def run(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+
+class FakeOutputSkills:
+    def get_skill(self, actor, skill_name):
+        return {"skill_name": skill_name, "prompt": f"{skill_name} prompt"}
+
+
+class FakeOutputWorkflows:
+    def save_artifact(self, **kwargs):
+        return {"artifact_id": f"artifact_{kwargs['format']}"}
+
+
+def output_node(node_id, output_format):
+    return WorkflowGraph.model_validate({
+        "nodes": [{
+            "id": node_id, "type": "output", "name": node_id,
+            "position": {"x": 0, "y": 0},
+            "config": {
+                "format": output_format,
+                "title": node_id,
+                "path": f"reports/t/index.{ 'md' if output_format == 'markdown' else 'html' }",
+                "tags": ["summary"], "prompt": "render", "backend_key": "claude",
+            },
+        }],
+        "edges": [],
+    }).nodes[0]
+
+
+@pytest.fixture
+def output_fixture():
+    agent = FakeOutputAgent()
+    handler = OutputHandler(
+        agent_service=agent,
+        skill_service=FakeOutputSkills(),
+        workflow_service=FakeOutputWorkflows(),
+    )
+
+    def context(*, nodes):
+        return NodeExecutionContext(
+            actor="root", workflow={"workflow_key": "w", "profile_key": "p"},
+            run_id="run_1", input={}, task={"task_key": "t", "payload": {}},
+            nodes=nodes,
+        )
+
+    return SimpleNamespace(
+        agent=agent,
+        handler=handler,
+        context=context,
+        markdown_node=output_node("markdown-output", "markdown"),
+        html_node=output_node("html-output", "html"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_markdown_output_injects_ancestors_and_saves_artifact(output_fixture):
+    result = await output_fixture.handler.execute(
+        output_fixture.markdown_node,
+        output_fixture.context(nodes={
+            "analyze": {"status": "completed", "output": {"summary": "S"}},
+        }),
+    )
+    prompt = output_fixture.agent.calls[0]["prompt"]
+    assert "[上游节点输出]" in prompt
+    assert '"analyze"' in prompt
+    assert result.status == "completed"
+    assert result.artifact_ids == ["artifact_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_html_output_only_injects_markdown_artifact(output_fixture):
+    output_fixture.agent.result = AgentRunResult(
+        ok=True,
+        result={"title": "T", "summary": "S", "content": "<html><body>Report</body></html>"},
+        run_key="agent_output_2",
+    )
+    context = output_fixture.context(nodes={
+        "markdown-output": {
+            "status": "completed",
+            "output": {
+                "title": "T", "summary": "S", "content": "# Report",
+                "artifact_ids": ["artifact_markdown"],
+            },
+        },
+        "raw-analysis": {"status": "completed", "output": {"secret": "raw"}},
+    })
+    await output_fixture.handler.execute(output_fixture.html_node, context)
+    prompt = output_fixture.agent.calls[0]["prompt"]
+    assert "[Markdown 主产物]" in prompt
+    assert "# Report" in prompt
+    assert "secret" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_html_agent_or_format_failure_returns_warning(output_fixture):
+    output_fixture.agent.result = AgentRunResult(ok=False, error="bad html")
+    result = await output_fixture.handler.execute(
+        output_fixture.html_node,
+        output_fixture.context(nodes={"markdown-output": {
+            "status": "completed",
+            "output": {"title": "T", "summary": "S", "content": "# Report",
+                       "artifact_ids": ["artifact_markdown"]},
+        }}),
+    )
+    assert result.status == "warning"
+    assert result.error == "bad html"
+    assert result.artifact_ids == []
+```
+
+- [ ] **步骤 2：运行测试并确认输出处理器不存在**
+
+```bash
+PYTHONPATH=. uv run pytest tests/test_workflow_output_handler.py -q
+```
+
+预期：收集失败，提示 `output_handler` 模块不存在。
+
+- [ ] **步骤 3：实现固定输出 schema 和提示词输入**
+
+```python
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["title", "summary", "content"],
+    "properties": {
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "content": {"type": "string"},
+    },
+}
+HTML_MAX_BYTES = 5 * 1024 * 1024
+```
+
+- Markdown：按节点 ID 排序序列化所有祖先节点输出，追加到 `[上游节点输出]`。
+- HTML：只读取直接上游 Markdown 输出的标题、摘要、正文和产物 ID，追加到 `[Markdown 主产物]`。
+- 两类输出都通过 `AgentService.run(..., output_schema=OUTPUT_SCHEMA, backend_key=config.backend_key)` 调用 Coding Agent。
+- 技能注入和 MCP 开关复用任务 5 的公共提示词组装函数，不复制实现。
+
+- [ ] **步骤 4：实现格式校验、产物保存和 HTML 警告**
+
+- Markdown `content.strip()` 为空时抛 `NodeExecutionError`。
+- HTML 必须包含 `<html` 或 `<body`，UTF-8 字节数不得超过 5 MiB。
+- 调用 `WorkflowService.save_artifact()` 保存 title、path、tags、format、summary、content 和 `metadata={"node_id": node.id}`。
+- Markdown 的 Agent、schema、格式或保存错误抛 `NodeExecutionError`。
+- HTML 的上述错误返回 `NodeExecutionResult(status="warning", error=...)`，不得保存空产物。
+- 成功输出中保留 `title`、`summary`、`content`、`artifact_ids`，供 HTML 和运行结果汇总使用。
+
+- [ ] **步骤 5：运行输出处理器和现有 HTML 报告测试**
+
+```bash
+PYTHONPATH=. uv run pytest tests/test_workflow_output_handler.py \
+  tests/test_workflow_html_report.py -q
+```
+
+预期：全部通过；现有 HTML 测试应改为调用 `OutputHandler`，不再直接测试调度器后处理。
+
+- [ ] **步骤 6：提交任务 6**
+
+```bash
+git add src/agent_bridge/automation/workflows/output_handler.py \
+  src/agent_bridge/automation/workflows/handlers.py \
+  src/agent_bridge/automation/workflows/service.py \
+  tests/test_workflow_output_handler.py tests/test_workflow_html_report.py
+git commit -m "feat(workflows): generate and persist workflow outputs"
+```
+
+---
+
+### 任务 7：实现 DAG 执行器和快速失败
 
 **文件：**
 
@@ -814,7 +1191,7 @@ git commit -m "feat(workflows): execute domain workflow nodes"
 
 - `WorkflowExecutionResult(status, output, task, error, warnings)`。
 - `WorkflowDagExecutor.run(workflow, run_id, input_data, actor) -> WorkflowExecutionResult`。
-- 消费任务 1 的图模型、任务 2 的存储接口、任务 3 的条件求值和任务 4 的处理器。
+- 消费任务 1 的图模型、任务 2 的存储接口、任务 3 的条件求值，以及任务 5/6 的节点处理器。
 
 - [ ] **步骤 1：写串行、并行、分支、汇合、跳过和快速失败测试**
 
@@ -920,6 +1297,22 @@ def parallel_failure_workflow():
     )
 
 
+def conditional_join_skip_workflow():
+    return workflow(
+        [agent("classify"), agent("a"), agent("b"), agent("join")],
+        [
+            {"id": "to-a", "source": "classify", "target": "a"},
+            {"id": "to-b", "source": "classify", "target": "b",
+             "condition": {"field": "nodes.classify.output.category",
+                           "operator": "equals", "value": "feature"}},
+            {"id": "a-join", "source": "a", "target": "join",
+             "condition": {"field": "nodes.classify.output.category",
+                           "operator": "equals", "value": "feature"}},
+            {"id": "b-join", "source": "b", "target": "join"},
+        ],
+    )
+
+
 @pytest.mark.asyncio
 async def test_executor_runs_parallel_nodes_then_join():
     handlers = RecordingHandlers()
@@ -942,6 +1335,18 @@ async def test_executor_skips_false_branch_and_runs_true_branch():
     )
     assert result.node_statuses["fix"] == "completed"
     assert result.node_statuses["document"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_join_skips_when_completed_edge_is_false_and_other_source_is_skipped():
+    handlers = RecordingHandlers(outputs={"classify": {"category": "bug"}})
+    result = await executor(handlers).run(
+        workflow=conditional_join_skip_workflow(),
+        run_id="run_1", input_data={}, actor="root",
+    )
+    assert result.node_statuses["a"] == "completed"
+    assert result.node_statuses["b"] == "skipped"
+    assert result.node_statuses["join"] == "skipped"
 
 
 @pytest.mark.asyncio
@@ -1002,7 +1407,7 @@ PYTHONPATH=. uv run pytest tests/test_workflow_executor.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 5：提交任务 5**
+- [ ] **步骤 5：提交任务 7**
 
 ```bash
 git add src/agent_bridge/automation/workflows/executor.py tests/test_workflow_executor.py
@@ -1011,7 +1416,7 @@ git commit -m "feat(workflows): add lightweight DAG executor"
 
 ---
 
-### 任务 6：接入服务、调度器和任务生命周期
+### 任务 8：接入服务、调度器和任务生命周期
 
 **文件：**
 
@@ -1085,8 +1490,10 @@ PYTHONPATH=. uv run pytest tests/test_workflow_scheduler.py \
 3. 对每个 Agent/输出节点调用 `agent_service.coding_agents.get(backend_key)`，未知后端产生 node 级 `config.backend_key` 错误。
 4. 对每个技能调用 `skills.get_skill(actor, skill_name)`，不存在产生 node 级 `config.skill_names` 错误。
 5. 对脚本节点查询 `store.scripts.get_script(script_key)`，不存在或非 `active` 产生 node 级 `config.script_key` 错误。
-6. 输出路径不得以 `/` 开头，路径段不得包含 `..`；错误定位到 `config.path`。
-7. 汇总全部问题后一次性抛 `WorkflowDefinitionValidationError`，不要遇到首个问题立即返回。
+6. 脚本 schema 中每个 required 字段都必须出现在节点 `config.params`；缺失时错误定位到 `config.params.<field>`。
+7. 当多个脚本参数把同一个 `input.<path>` 映射为不同 schema 类型时，拒绝保存并报告冲突节点。
+8. 输出路径不得以 `/` 开头，路径段不得包含 `..`；错误定位到 `config.path`。
+9. 汇总全部问题后一次性抛 `WorkflowDefinitionValidationError`，不要遇到首个问题立即返回。
 
 - [ ] **步骤 4：改造调度器**
 
@@ -1123,7 +1530,7 @@ PYTHONPATH=. uv run pytest tests/test_workflow_scheduler.py \
 
 预期：全部通过；测试命名可以保留，但断言必须针对 DAG 执行器，不再执行 `workflow.js`。
 
-- [ ] **步骤 6：提交任务 6**
+- [ ] **步骤 6：提交任务 8**
 
 ```bash
 git add src/agent_bridge/automation/workflows/service.py \
@@ -1136,7 +1543,7 @@ git commit -m "refactor(workflows): run structured DAG workflows"
 
 ---
 
-### 任务 7：更新工作流 API 和结构化错误
+### 任务 9：更新工作流 API 和结构化错误
 
 **文件：**
 
@@ -1291,7 +1698,7 @@ PYTHONPATH=. uv run pytest tests/test_workflow_api.py tests/test_design_agent_ap
 
 预期：工作流 API 全部通过；设计 Agent API 可继续保留旧接口作为未展示的兼容入口，但新工作流页面不得调用它。
 
-- [ ] **步骤 5：提交任务 7**
+- [ ] **步骤 5：提交任务 9**
 
 ```bash
 git add src/agent_bridge/api/schemas.py src/agent_bridge/api/routes/workflows.py \
@@ -1301,7 +1708,7 @@ git commit -m "feat(workflows): expose structured workflow API"
 
 ---
 
-### 任务 8：建立前端工作流图类型和纯逻辑
+### 任务 10：建立前端工作流图类型和纯逻辑
 
 **文件：**
 
@@ -1316,6 +1723,7 @@ git commit -m "feat(workflows): expose structured workflow API"
 - `createDefaultGraph(type, defaultBackend)` 生成空操作图或使用系统默认后端的固定总结输出对。
 - `toVueFlowElements(graph)` 和 `fromVueFlowElements(nodes, edges)`。
 - `isProtectedSummaryNode()`、`isProtectedSummaryEdge()`。
+- `deriveManualInputFields(graph, scripts) -> ManualInputField[]`，只从脚本参数中的完整 `{{ input.path }}` 引用推导字段。
 
 - [ ] **步骤 1：写默认总结图和保护规则测试**
 
@@ -1325,6 +1733,7 @@ import test from 'node:test'
 
 import {
   createDefaultGraph,
+  deriveManualInputFields,
   isProtectedSummaryEdge,
   isProtectedSummaryNode,
 } from '../src/views/workflow/workflowDefinition.ts'
@@ -1336,7 +1745,29 @@ test('summary graph creates protected markdown and html pair', () => {
   assert.equal(isProtectedSummaryEdge(graph.edges[0], 'summary'), true)
   assert.deepEqual(graph.nodes.map(node => node.config.backend_key), ['codex', 'codex'])
 })
+
+test('manual input fields are derived from selected script schemas', () => {
+  const graph = graphWithScriptParams({
+    repo: '{{ input.repo }}',
+    limit: '{{ input.limit }}',
+  })
+  const scripts = [managedScript('collect', {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      repo: { type: 'string' },
+      limit: { type: 'integer' },
+    },
+    required: ['repo'],
+  })]
+  assert.deepEqual(deriveManualInputFields(graph, scripts), [
+    { path: 'input.limit', type: 'integer', required: false, description: '' },
+    { path: 'input.repo', type: 'string', required: true, description: '' },
+  ])
+})
 ```
+
+`graphWithScriptParams()` 和 `managedScript()` 在测试文件中返回完整的 `WorkflowGraph` 和 `ManagedScript` 测试对象；推导结果按 `input.path` 排序，保证表单顺序稳定。
 
 - [ ] **步骤 2：运行测试并确认模块缺失**
 
@@ -1412,7 +1843,7 @@ npm run typecheck
 
 预期：测试和类型检查通过。
 
-- [ ] **步骤 5：提交任务 8**
+- [ ] **步骤 5：提交任务 10**
 
 ```bash
 git add frontend/capabilities/src/api/types.ts \
@@ -1424,7 +1855,7 @@ git commit -m "feat(workflows): add frontend graph model"
 
 ---
 
-### 任务 9：实现 Vue Flow 编辑器和配置面板
+### 任务 11：实现 Vue Flow 编辑器和配置面板
 
 **文件：**
 
@@ -1450,7 +1881,8 @@ def test_workflow_editor_uses_structured_canvas_and_no_inline_code():
     assert "WorkflowEditorCanvas" in view
     assert "WorkflowNodeConfigPanel" in view
     assert "workflow_js" not in view
-    assert "CodeMirror" not in view
+    assert "parseWorkflowDag" not in view
+    assert "WorkflowDagGraph" not in view
     assert "@vue-flow/core" in canvas
 ```
 
@@ -1485,9 +1917,9 @@ const emit = defineEmits<{
 
 - [ ] **步骤 4：实现节点和边配置面板**
 
-Agent 配置必须包含：提示词、后端三选一、Profile MCP 开关、技能有序列表、文本/JSON 输出模式和 JSON Schema 编辑区。
+Agent 配置必须包含：提示词、后端三选一、Profile MCP 开关、技能有序列表、文本/JSON 输出模式和 JSON Schema 编辑区。技能选项只来自 `api.listSkills()`；选择后可用上移、下移和删除图标调整注入顺序，不允许手输技能名。
 
-脚本配置必须从 `api.listScripts()` 返回的启用脚本中选择，并编辑 JSON 参数映射与超时。
+脚本配置必须从 `api.listScripts()` 返回的启用脚本中选择，不允许手输脚本标识。选中后根据脚本 `input_schema.properties` 生成参数映射行，根据 `required` 标记必填字段，并允许编辑超时。
 
 输出配置必须包含格式只读、标题、路径、标签、提示词、后端、MCP 和技能；总结型格式不可改。
 
@@ -1500,7 +1932,8 @@ Agent 配置必须包含：提示词、后端三选一、Profile MCP 开关、�
 - 历史工作流 `definition=null` 时在详情和编辑页显示“需要迁移”；进入编辑页后按工作流类型创建默认图，只有用户显式保存后才写入新定义。
 - dirty 状态沿用现有逻辑。
 - 有未保存修改时点击测试运行，先提示保存。
-- 无 `get_task` 节点时弹出 JSON 输入对话框；解析失败时不发请求。
+- 有 `get_task` 节点时直接使用任务队列，不显示手动输入表单。
+- 无 `get_task` 节点时调用 `deriveManualInputFields()` 展示可推导字段，并提供“高级 JSON”区域补充无法推导的输入；同一路径以字段表单值覆盖高级 JSON 值。JSON 解析失败或必填字段为空时不发请求。
 - 后端 `{errors}` 映射到画布节点或边。
 
 - [ ] **步骤 6：运行前端类型检查、构建和页面结构测试**
@@ -1515,7 +1948,7 @@ PYTHONPATH=. uv run pytest tests/test_capability_api.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 7：提交任务 9**
+- [ ] **步骤 7：提交任务 11**
 
 ```bash
 git add frontend/capabilities/src/views/workflow/WorkflowEditorCanvas.vue \
@@ -1529,7 +1962,7 @@ git commit -m "feat(workflows): add lightweight visual editor"
 
 ---
 
-### 任务 10：在运行详情中显示 DAG 节点状态
+### 任务 12：在运行详情中显示 DAG 节点状态
 
 **文件：**
 
@@ -1598,7 +2031,7 @@ PYTHONPATH=. uv run pytest tests/test_capability_api.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交任务 10**
+- [ ] **步骤 6：提交任务 12**
 
 ```bash
 git add frontend/capabilities/src/views/workflow/WorkflowRunGraph.vue \
@@ -1609,7 +2042,7 @@ git commit -m "feat(workflows): show DAG node run status"
 
 ---
 
-### 任务 11：移除新主路径中的 Claude 工作流兼容代码并完成端到端回归
+### 任务 13：移除新主路径中的 Claude 工作流兼容代码并完成端到端回归
 
 **文件：**
 
@@ -1622,6 +2055,7 @@ git commit -m "feat(workflows): show DAG node run status"
 - 删除：`tests/test_workflow_result_parser.py`，其产物结构断言已迁入 `tests/test_workflow_handlers.py`
 - 修改：`tests/test_workflow_html_report.py`，只保留 Markdown 必需、HTML 警告和产物历史的集成断言
 - 修改：`docs/multi-agent-adapter-research.md`
+- 修改：`docs/TODO.md`
 
 **接口：**
 
@@ -1649,9 +2083,11 @@ rg -n "ClaudeWorkflowRunner|parse_workflow_result|build_report_prompt|parseWorkf
 
 只删除已经没有生产引用的文件。测试需要保留的行为必须迁移到定义、处理器、执行器或调度器测试，不能简单丢弃断言。
 
-- [ ] **步骤 3：更新研究文档中的最终决策**
+- [ ] **步骤 3：记录日志聚合待办并更新研究结论**
 
 在 `docs/multi-agent-adapter-research.md` 增加结论：未采用 Archon/Node-RED；采用 Vue Flow + 结构化 JSON + 自研轻量执行器；列出四类节点和明确不做范围。不要复制完整 spec，只链接到设计文档。
+
+在 `docs/TODO.md` 增加未排期项：“工作流执行日志聚合：一个 workflow run 作为顶层记录，内部关联多个 Agent Run；普通 Agent Run 继续独立展示。第一版先由 workflow_node_runs 保存关联关系。”本计划不得实现新的聚合表或日志页面。
 
 - [ ] **步骤 4：运行后端完整本地测试基线**
 
@@ -1685,12 +2121,12 @@ npm run build
 7. 模拟 HTML 输出失败，确认 Markdown 和任务仍成功且 HTML 节点为警告。
 8. 检查节点、工具栏和右侧面板没有文字溢出或重叠。
 
-- [ ] **步骤 7：提交任务 11**
+- [ ] **步骤 7：提交任务 13**
 
 ```bash
 git add -A src/agent_bridge/automation/workflows \
   frontend/capabilities/src/views/workflow tests \
-  docs/multi-agent-adapter-research.md
+  docs/multi-agent-adapter-research.md docs/TODO.md
 git commit -m "refactor(workflows): retire Claude-only workflow runtime"
 ```
 
@@ -1704,5 +2140,7 @@ git commit -m "refactor(workflows): retire Claude-only workflow runtime"
 - [ ] 新工作流 API 不再返回 `workflow_js`。
 - [ ] 全局调度器和手动测试都进入同一个 `WorkflowDagExecutor`。
 - [ ] 运行详情可以定位到每个 Agent Run 和 Script Run。
+- [ ] 托管脚本保存 input schema，脚本管理页和工作流节点均从 schema 生成参数字段，运行前校验参数。
 - [ ] 总结型 Markdown 必需、HTML 最佳努力语义通过自动测试和浏览器验证。
+- [ ] 工作流日志聚合只记录到 `docs/TODO.md`，本阶段没有新增聚合实现。
 - [ ] 没有新增循环、审批、自动重试、版本、cron、内联代码或动态节点机制。

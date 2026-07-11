@@ -116,9 +116,12 @@
 }
 ```
 
+示例中的技能名仅用于说明数据结构。实际编辑器从系统 `GET /skills` 列表提供选择，不允许手工输入不存在的技能名。
+
 约束：
 
 - `backend_key` 必须是已注册且启用的 Coding Agent 后端。
+- 现有 `AgentService.run()` 已支持每次调用传入 `backend_key`，因此同一工作流中的不同 Agent 节点可以选择不同后端。
 - 第一版不提供节点级模型选择；当前每个后端只有唯一模型配置。
 - `mcp_enabled=true` 时使用工作流绑定的 Profile 配置 Agent Bridge MCP。
 - 不允许节点编辑完整 MCP JSON，也不允许节点选择其他 Profile。
@@ -157,11 +160,17 @@
 }
 ```
 
+示例中的 `script_key` 仅用于说明引用格式。实际编辑器从系统 `GET /scripts` 返回的启用脚本中选择。
+
 约束：
 
 - 节点中不能编辑代码。
 - `script_key` 必须引用脚本管理中启用的托管 Python 脚本。
+- 每个托管脚本声明一个 JSON `input_schema`，根类型必须为 object；`properties` 描述字段名和类型，`required` 描述必填字段。
+- 新建或更新脚本时必须提交合法 schema；升级前的历史脚本使用允许任意对象的兼容 schema，直到用户重新保存。
+- `ScriptService` 在启动 Python 进程前根据 schema 校验 `script_params`；失败信息同时返回具体字段错误和期望 schema。
 - 参数采用显式映射，不自动注入所有上游结果。
+- 脚本节点选中脚本后，根据其 schema 展示参数映射行和必填状态，而不是让用户猜字段。
 - 调用现有 `ScriptService.run_script()`。
 - 脚本返回的 JSON 对象直接成为节点输出。
 - 脚本运行仍使用现有隔离目录、超时、stdout、stderr 和运行记录。
@@ -242,6 +251,8 @@
 - `contains`
 
 不支持逻辑与、逻辑或、条件组或自由表达式。复杂判断应由 Agent 结构化输出或托管脚本完成。
+
+`condition: null` 表示无条件边：只要来源节点成功或处于警告状态，该边就始终激活。
 
 字段缺失时：
 
@@ -403,6 +414,8 @@ WorkflowDagExecutor
 - 总结型工作流的强制节点和连线不可删除。
 - 不显示内联代码编辑器。
 - 画布显示保存校验错误和运行状态。
+- 脚本节点的脚本选择项来自 `GET /scripts` 返回的启用脚本；技能选择项来自 `GET /skills`，技能顺序可调整。
+- 手动输入型工作流运行时，根据脚本节点中 `input.*` 参数映射及对应脚本 schema 汇总字段表单；无法从脚本 schema 推导的其他输入仍可在高级 JSON 区域填写。
 
 第一版只显式保存，不自动保存。存在未保存修改时，测试运行先要求保存；不提供执行临时草稿的第二套入口。
 
@@ -503,6 +516,7 @@ WorkflowDagExecutor
 - 单步调试和断点。
 - Agent 会话在节点之间延续。
 - 节点级模型或 Profile 选择。
+- 工作流运行日志聚合为单条顶层 Agent 记录。第一版继续使用 `workflow_node_runs` 关联各 Agent/脚本运行，聚合展示另记待办。
 
 ## 15. 验收标准
 
