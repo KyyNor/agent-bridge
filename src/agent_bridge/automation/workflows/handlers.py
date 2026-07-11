@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from agent_bridge.automation.workflows.definition import AgentNode, GetTaskNode, ScriptNode, WorkflowNode
+from agent_bridge.automation.workflows.definition import AgentNode, GetTaskNode, ScriptNode, WorkflowGraph, WorkflowNode
 from agent_bridge.automation.workflows.references import render_text, render_value
 
 
@@ -22,6 +22,7 @@ class NodeExecutionContext:
     input: dict[str, Any]
     task: dict[str, Any] | None
     nodes: dict[str, dict[str, Any]]
+    graph: WorkflowGraph
 
     def template_context(self) -> dict[str, Any]:
         return {"input": self.input, "task": self.task, "nodes": self.nodes}

@@ -24,6 +24,13 @@ class MissingReferenceError(ValueError):
 _MISSING = object()
 
 
+def parse_reference(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = REFERENCE_RE.fullmatch(value)
+    return match.group(1) if match else None
+
+
 def resolve_path(context: dict[str, Any], path: str) -> Any:
     value: Any = context
     for part in path.split("."):
@@ -47,8 +54,8 @@ def render_value(value: Any, context: dict[str, Any]) -> Any:
         return [render_value(item, context) for item in value]
     if not isinstance(value, str):
         return value
-    match = REFERENCE_RE.fullmatch(value)
-    return resolve_path(context, match.group(1)) if match else render_text(value, context)
+    path = parse_reference(value)
+    return resolve_path(context, path) if path else render_text(value, context)
 
 
 def evaluate_condition(condition: EdgeCondition | None, context: dict[str, Any]) -> ConditionResult:

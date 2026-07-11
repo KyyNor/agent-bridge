@@ -353,11 +353,30 @@ class WorkflowScheduler:
         if self._executor is None:
             raise RuntimeError("workflow DAG executor is not configured")
         try:
+            run = self._store.get_workflow_run(run_id)
+            if run is None:
+                raise RuntimeError("workflow run not found after creation")
+            execution_workflow = {
+                **workflow,
+                "definition": run["definition_snapshot"],
+            }
             execution = asyncio.run(self._executor.run(
-                workflow=workflow, run_id=run_id, input_data=input_data or {}, actor=actor or sorted(self._admins)[0]
+                workflow=execution_workflow,
+                run_id=run_id,
+                input_data=run["input"],
+                actor=actor or sorted(self._admins)[0],
             ))
             if execution.status == "no_task":
                 self.finished_today.add(workflow_key)
+            if execution.status == "completed" and execution.task is not None:
+                completed = self._store.complete_workflow_task(
+                    workflow_key,
+                    execution.task["task_key"],
+                    task_version=str(execution.task.get("task_version") or ""),
+                    run_id=run_id,
+                )
+                if not completed:
+                    raise RuntimeError("workflow task completion failed")
             self._store.finish_workflow_run(
                 run_id,
                 status=execution.status, exit_code=0 if execution.status != "failed" else 1,

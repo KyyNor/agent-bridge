@@ -64,6 +64,25 @@ def collect_graph_issues(graph: WorkflowGraph, workflow_type: WorkflowType) -> l
         issues.append(_issue("workflow", None, None, "工作流最多只能包含一个获取任务节点"))
     if task_nodes and incoming[task_nodes[0].id]:
         issues.append(_issue("node", task_nodes[0].id, None, "获取任务节点必须是无入边起点"))
+    roots = [node.id for node in graph.nodes if not incoming[node.id]]
+    if task_nodes and roots != [task_nodes[0].id]:
+        issues.append(_issue("node", task_nodes[0].id, None, "获取任务节点必须是工作流唯一根节点"))
+
+    for edge in graph.edges:
+        condition = edge.condition
+        if condition is None or not condition.field.startswith("nodes."):
+            continue
+        referenced_id = condition.field.split(".", 2)[1]
+        guaranteed = _ancestors(edge.source, incoming) | {edge.source}
+        if referenced_id not in guaranteed:
+            issues.append(
+                _issue(
+                    "edge",
+                    edge.id,
+                    "condition.field",
+                    f"条件字段必须引用来源节点或其祖先节点: {referenced_id}",
+                )
+            )
 
     for node in graph.nodes:
         ancestors = _ancestors(node.id, incoming)

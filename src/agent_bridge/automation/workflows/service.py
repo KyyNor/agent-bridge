@@ -18,6 +18,7 @@ from agent_bridge.automation.workflows.validation import (
     WorkflowValidationIssue,
     collect_graph_issues,
 )
+from agent_bridge.automation.workflows.references import parse_reference
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +71,12 @@ class WorkflowService:
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         try:
-            next_type = WorkflowType(workflow_type).value
+            workflow_type_enum = WorkflowType(workflow_type)
+            next_type = workflow_type_enum.value
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         graph = definition if isinstance(definition, WorkflowGraph) else WorkflowGraph.model_validate(definition or {"nodes": [], "edges": []})
-        issues = collect_graph_issues(graph, next_type)
+        issues = collect_graph_issues(graph, workflow_type_enum)
         if self.store.get_project_profile(profile_key) is None:
             issues.append(WorkflowValidationIssue("workflow", None, "profile_key", "Profile 不存在"))
         issues.extend(self._resource_issues(actor, graph))
@@ -288,9 +290,10 @@ class WorkflowService:
                     if field not in config.params:
                         issues.append(WorkflowValidationIssue("node", node.id, f"config.params.{field}", "缺少脚本必填参数"))
                 for field, value in config.params.items():
-                    if not isinstance(value, str) or not value.strip().startswith("{{ input.") or not value.strip().endswith(" }}"):
+                    reference = parse_reference(value)
+                    if reference is None or not reference.startswith("input."):
                         continue
-                    path = value.strip()[8:-3].strip()
+                    path = reference.removeprefix("input.")
                     field_type = str((properties.get(field) or {}).get("type") or "")
                     previous = input_types.get(path)
                     if previous and previous[0] and field_type and previous[0] != field_type:

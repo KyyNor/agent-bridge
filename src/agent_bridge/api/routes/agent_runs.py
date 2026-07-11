@@ -130,7 +130,22 @@ SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
                 "description": {"type": "string"},
                 "language": {"type": "string", "enum": ["python"]},
                 "code": {"type": "string"},
-                "input_schema": {"type": "object", "properties": {"type": {"const": "object"}}},
+                "input_schema": {
+                    "type": "object",
+                    "required": ["type", "properties"],
+                    "properties": {
+                        "type": {"const": "object"},
+                        "properties": {
+                            "type": "object",
+                            "additionalProperties": {"type": "object"},
+                        },
+                        "required": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "uniqueItems": True,
+                        },
+                    },
+                },
                 "status": {"type": "string", "enum": ["active", "disabled"]},
                 "owner_type": {"type": "string"},
                 "owner_key": {"type": "string"},

@@ -19,7 +19,7 @@ def test_workflow_service_creates_definition_with_existing_profile(wm_paths):
         name="Page Report",
         description="Nightly page report",
         profile_key="report-plane",
-        workflow_js="export default async function workflow() {}",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
 
@@ -39,13 +39,64 @@ def test_workflow_service_rejects_missing_profile(wm_paths):
             name="Page Report",
             description="",
             profile_key="missing",
-            workflow_js="",
+            definition={"nodes": [], "edges": []},
             status="active",
         )
     except ValidationError as exc:
-        assert "profile not found" in exc.message
+        assert any(issue.field == "profile_key" for issue in exc.issues)
     else:
         raise AssertionError("missing profile should be rejected")
+
+
+def test_workflow_service_applies_summary_validation_for_string_type(wm_paths):
+    from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
+
+    svc = _service(wm_paths)
+    try:
+        svc.workflows.upsert_definition(
+            actor="root",
+            workflow_key="summary-report",
+            name="Summary",
+            description="",
+            profile_key="report-plane",
+            definition={"nodes": [], "edges": []},
+            status="active",
+            workflow_type="summary",
+        )
+    except WorkflowDefinitionValidationError as exc:
+        assert any("Markdown 和 HTML" in issue.message for issue in exc.issues)
+    else:
+        raise AssertionError("expected summary graph validation error")
+
+
+def test_manual_input_type_conflict_uses_structured_reference_parser(wm_paths):
+    from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
+
+    svc = _service(wm_paths)
+    code = "def main(envelope):\n    return {}\n"
+    for key, field_type in (("string-script", "string"), ("integer-script", "integer")):
+        svc.scripts.upsert_script(
+            actor="root",
+            script_key=key,
+            name=key,
+            description="",
+            language="python",
+            code=code,
+            input_schema={"type": "object", "properties": {"value": {"type": field_type}}, "required": ["value"]},
+            status="active",
+            owner_type="system",
+            owner_key="",
+        )
+    definition = {"nodes": [
+        {"id": "compact", "type": "script", "name": "Compact", "position": {"x": 0, "y": 0}, "config": {"script_key": "string-script", "params": {"value": "{{input.topic}}"}}},
+        {"id": "spaced", "type": "script", "name": "Spaced", "position": {"x": 1, "y": 0}, "config": {"script_key": "integer-script", "params": {"value": "{{ input.topic }}"}}},
+    ]}
+    try:
+        svc.workflows.upsert_definition(actor="root", workflow_key="manual", name="Manual", description="", profile_key="report-plane", definition=definition, status="active")
+    except WorkflowDefinitionValidationError as exc:
+        assert any("手动输入类型冲突" in issue.message for issue in exc.issues)
+    else:
+        raise AssertionError("expected manual input type conflict")
 
 
 def test_workflow_service_appends_run_log(wm_paths):
@@ -56,7 +107,7 @@ def test_workflow_service_appends_run_log(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
     svc.store.create_workflow_run(
@@ -91,7 +142,7 @@ def test_workflow_service_saves_and_searches_artifacts(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
 
@@ -131,7 +182,7 @@ def test_workflow_service_search_returns_full_content_only_for_exact_path(wm_pat
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -172,7 +223,7 @@ def test_workflow_service_allows_non_admin_profile_artifact_search(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -247,7 +298,7 @@ def test_workflow_service_artifact_search_applies_tags_before_limit(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
     for index in range(3):
@@ -299,7 +350,7 @@ def test_workflow_service_artifact_search_matches_literal_tag_wildcards(wm_paths
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
     svc.workflows.save_artifact(
@@ -381,7 +432,7 @@ def test_workflow_service_rejects_artifact_profile_mismatch(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
 
@@ -413,7 +464,7 @@ def test_workflow_service_artifact_upsert_tracks_current_version_and_metadata(wm
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
+        definition={"nodes": [], "edges": []},
         status="active",
     )
 

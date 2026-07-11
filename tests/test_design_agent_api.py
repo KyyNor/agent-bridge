@@ -3,6 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
+
+from agent_bridge.api.routes.agent_runs import SCRIPT_DESIGN_SCHEMA
 
 
 def _client(wm_paths) -> TestClient:
@@ -76,6 +79,7 @@ def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:
                     "description": "",
                     "language": "python",
                     "code": "def main(envelope):\n    return {}\n",
+                    "input_schema": {"type": "object", "properties": {}, "required": []},
                     "status": "active",
                     "owner_type": "system",
                     "owner_key": "",
@@ -100,3 +104,23 @@ def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:
     assert captured["agent_name"] == "design_script"
     assert "design_script 内容" in str(captured["prompt"])
     assert '"language": "python"' in str(captured["prompt"])
+
+
+def test_script_design_schema_requires_object_input_schema_shape() -> None:
+    validator = Draft202012Validator(SCRIPT_DESIGN_SCHEMA)
+    base_script = {
+        "script_key": "system.echo",
+        "name": "Echo",
+        "description": "",
+        "language": "python",
+        "code": "def main(envelope):\n    return {}\n",
+        "status": "active",
+        "owner_type": "system",
+        "owner_key": "",
+    }
+    missing_type = {"summary": "x", "script": {**base_script, "input_schema": {"properties": {}}}}
+    wrong_type = {"summary": "x", "script": {**base_script, "input_schema": {"type": "string", "properties": {}}}}
+    invalid_required = {"summary": "x", "script": {**base_script, "input_schema": {"type": "object", "properties": {}, "required": "value"}}}
+    assert list(validator.iter_errors(missing_type))
+    assert list(validator.iter_errors(wrong_type))
+    assert list(validator.iter_errors(invalid_required))

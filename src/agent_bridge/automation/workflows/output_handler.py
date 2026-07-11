@@ -39,10 +39,13 @@ class OutputHandler:
             )
             output["artifact_ids"] = [artifact["artifact_id"]]
             return NodeExecutionResult(output=output, agent_run_key=output.pop("_agent_run_key"), artifact_ids=output["artifact_ids"])
-        except NodeExecutionError as exc:
+        except Exception as exc:
+            error = exc if isinstance(exc, NodeExecutionError) else NodeExecutionError(node.id, str(exc))
             if node.config.format == "html":
-                return NodeExecutionResult(status="warning", error=str(exc))
-            raise
+                return NodeExecutionResult(status="warning", error=str(error))
+            if isinstance(exc, NodeExecutionError):
+                raise
+            raise error from exc
 
     async def _generate(self, node: OutputNode, context: NodeExecutionContext) -> dict[str, Any]:
         config = node.config
@@ -51,12 +54,27 @@ class OutputHandler:
             prompt=config.prompt, context=context.template_context(),
         )
         if config.format == "markdown":
-            ancestors = {key: value.get("output", {}) for key, value in sorted(context.nodes.items())}
+            ancestor_ids = self._ancestors(node.id, context)
+            ancestors = {
+                key: context.nodes[key].get("output", {})
+                for key in sorted(ancestor_ids)
+                if key in context.nodes
+            }
             prompt += "\n\n[上游节点输出]\n" + json.dumps(ancestors, ensure_ascii=False, sort_keys=True)
         else:
-            markdown = next((value.get("output", {}) for value in context.nodes.values() if value.get("type") == "output" and value.get("format") == "markdown"), None)
-            if markdown is None:
-                markdown = next((value.get("output", {}) for key, value in context.nodes.items() if key == "markdown-output"), None)
+            direct_sources = {
+                edge.source for edge in context.graph.edges if edge.target == node.id
+            }
+            markdown = next(
+                (
+                    context.nodes[source].get("output", {})
+                    for source in sorted(direct_sources)
+                    if source in context.nodes
+                    and context.nodes[source].get("type") == "output"
+                    and context.nodes[source].get("format") == "markdown"
+                ),
+                None,
+            )
             if not markdown:
                 raise NodeExecutionError(node.id, "HTML 输出缺少 Markdown 主产物")
             prompt += "\n\n[Markdown 主产物]\n" + json.dumps(markdown, ensure_ascii=False)
@@ -80,3 +98,17 @@ class OutputHandler:
         output["content"] = content
         output["_agent_run_key"] = result.run_key
         return output
+
+    @staticmethod
+    def _ancestors(node_id: str, context: NodeExecutionContext) -> set[str]:
+        incoming: dict[str, list[str]] = {node.id: [] for node in context.graph.nodes}
+        for edge in context.graph.edges:
+            incoming[edge.target].append(edge.source)
+        ancestors: set[str] = set()
+        pending = list(incoming[node_id])
+        while pending:
+            parent = pending.pop()
+            if parent not in ancestors:
+                ancestors.add(parent)
+                pending.extend(incoming[parent])
+        return ancestors
