@@ -1047,6 +1047,11 @@ def test_frontend_workflow_view_exposes_workflow_management() -> None:
     assert "warning" in run_graph
     assert "skipped" in run_graph
     assert "cancelled" in run_graph
+    assert "routeMode === 'tasks'" in source
+    assert "searchArtifacts" in source
+    assert "openArtifactHistory" in source
+    assert "requestClearWorkflow" in source
+    assert "RunEventTimeline" in source
     assert "启用" in source
     assert "停用" in source
 
