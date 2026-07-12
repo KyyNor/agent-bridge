@@ -36,7 +36,9 @@ const scriptPageSize = ref(10)
 
 // 编辑模式表单状态
 const form = ref(emptyForm())
-const inputSchemaDraft = ref(JSON.stringify(defaultInputSchema(), null, 2))
+type SchemaField = { name: string; type: string; required: boolean; description: string }
+const schemaFields = ref<SchemaField[]>([])
+const schemaCompatibilityMode = ref(false)
 const formError = ref('')
 const formLoading = ref(false)
 const saving = ref(false)
@@ -63,9 +65,11 @@ const designing = ref(false)
 const designError = ref('')
 const designResponse = ref<DesignAgentResponse<ScriptDesignResult> | null>(null)
 
+const routeParts = computed(() => props.routeKey.split('/').filter(Boolean))
 const mode = computed<'list' | 'edit'>(() => (props.routeKey ? 'edit' : 'list'))
-const isNew = computed(() => props.routeKey === 'new')
-const editingKey = computed(() => (isNew.value ? '' : props.routeKey))
+const isNew = computed(() => routeParts.value[0] === 'new')
+const editingKey = computed(() => (isNew.value ? '' : routeParts.value[0] || ''))
+const requestedRunId = computed(() => routeParts.value[1] === 'run' ? routeParts.value[2] || '' : '')
 
 const ownerKeyOptions = computed(() => {
   if (form.value.owner_type === 'profile') return profiles.value.map(p => ({ value: p.profile_key, label: p.name }))
@@ -92,16 +96,16 @@ watch(
     if (!key) return
     formError.value = ''
     scriptNotFound.value = false
-    if (key === 'new') {
+    if (isNew.value) {
       form.value = emptyForm()
-      inputSchemaDraft.value = JSON.stringify(form.value.input_schema, null, 2)
+      loadSchemaFields(form.value.input_schema)
       runs.value = []
       runDetail.value = null
       return
     }
     formLoading.value = true
     try {
-      const detail = await api.getScript(key)
+      const detail = await api.getScript(editingKey.value)
       form.value = {
         script_key: detail.script_key,
         name: detail.name,
@@ -113,9 +117,10 @@ watch(
         owner_key: detail.owner_key,
         input_schema: detail.input_schema || defaultInputSchema(),
       }
-      inputSchemaDraft.value = JSON.stringify(form.value.input_schema, null, 2)
+      loadSchemaFields(form.value.input_schema)
       await loadRuns()
-      runDetail.value = runs.value[0] || null
+      if (requestedRunId.value) await openRunDetail(requestedRunId.value)
+      else runDetail.value = runs.value[0] || null
     } catch (e: unknown) {
       scriptNotFound.value = true
       form.value = emptyForm()
@@ -168,15 +173,50 @@ function defaultInputSchema() {
   return { type: 'object', properties: {}, required: [], additionalProperties: false } as Record<string, unknown>
 }
 
-function updateInputSchema(value: string) {
-  try {
-    const parsed = JSON.parse(value)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
-    form.value.input_schema = parsed as Record<string, unknown>
-    formError.value = ''
-  } catch {
-    formError.value = 'input_schema 必须是合法 JSON 对象'
+function loadSchemaFields(schema: Record<string, unknown>) {
+  const properties = (schema.properties || {}) as Record<string, Record<string, unknown>>
+  const required = new Set(Array.isArray(schema.required) ? schema.required.filter((item): item is string => typeof item === 'string') : [])
+  schemaFields.value = Object.entries(properties).map(([name, value]) => ({
+    name,
+    type: typeof value.type === 'string' ? value.type : 'string',
+    required: required.has(name),
+    description: typeof value.description === 'string' ? value.description : '',
+  }))
+  schemaCompatibilityMode.value = schema.additionalProperties === true && schemaFields.value.length === 0
+}
+
+function addSchemaField() {
+  schemaCompatibilityMode.value = false
+  schemaFields.value.push({ name: '', type: 'string', required: false, description: '' })
+}
+
+function removeSchemaField(index: number) {
+  schemaFields.value.splice(index, 1)
+}
+
+function syncInputSchema(): boolean {
+  const names = schemaFields.value.map(field => field.name.trim())
+  if (names.some(name => !name)) {
+    formError.value = '输入字段名不能为空'
+    return false
   }
+  if (new Set(names).size !== names.length) {
+    formError.value = '输入字段名不能重复'
+    return false
+  }
+  const properties = Object.fromEntries(schemaFields.value.map((field, index) => [names[index], {
+    type: field.type,
+    ...(field.description.trim() ? { description: field.description.trim() } : {}),
+  }]))
+  form.value.input_schema = schemaCompatibilityMode.value
+    ? { type: 'object', properties: {}, additionalProperties: true }
+    : {
+        type: 'object',
+        properties,
+        required: schemaFields.value.filter(field => field.required).map(field => field.name.trim()),
+        additionalProperties: false,
+      }
+  return true
 }
 
 function goList() {
@@ -205,8 +245,7 @@ async function deleteScript(item: ManagedScript) {
 
 async function saveScript(): Promise<ManagedScript | null> {
   formError.value = ''
-  updateInputSchema(inputSchemaDraft.value)
-  if (formError.value) return null
+  if (!syncInputSchema()) return null
   if (!form.value.script_key || !form.value.name || !form.value.code.trim()) {
     formError.value = '请填写脚本标识、名称和代码'
     return null
@@ -245,6 +284,7 @@ function openScriptDesigner(mode: 'create' | 'modify' = 'modify') {
 }
 
 function scriptDesignerCurrent() {
+  syncInputSchema()
   if (designMode.value === 'modify') {
     return {
       script_key: form.value.script_key,
@@ -304,7 +344,7 @@ async function acceptScriptDesign() {
     owner_key: draft.owner_key,
     input_schema: draft.input_schema || defaultInputSchema(),
   }
-  inputSchemaDraft.value = JSON.stringify(form.value.input_schema, null, 2)
+  loadSchemaFields(form.value.input_schema)
   const saved = await saveScript()
   if (saved) showDesigner.value = false
 }
@@ -705,14 +745,41 @@ def main(envelope):
               </p>
             </div>
             <div>
-              <label class="mb-1 block text-xs text-muted-foreground">输入 Schema（JSON Schema）</label>
-              <Textarea
-                v-model="inputSchemaDraft"
-                class="min-h-44 font-mono text-xs"
-                spellcheck="false"
-                @blur="updateInputSchema(inputSchemaDraft)"
-              />
-              <p class="mt-2 text-xs text-muted-foreground">根类型必须为 object；properties 定义参数，required 标记必填字段。</p>
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <div>
+                  <div class="text-xs font-medium text-foreground">输入字段</div>
+                  <p class="mt-1 text-xs text-muted-foreground">工作流会根据这些字段生成参数映射和运行前校验。</p>
+                </div>
+                <Button variant="outline" size="sm" type="button" @click="addSchemaField">
+                  <Plus class="mr-1 h-4 w-4" />添加字段
+                </Button>
+              </div>
+              <label v-if="schemaCompatibilityMode" class="mb-2 flex items-center gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <input v-model="schemaCompatibilityMode" type="checkbox" />
+                兼容模式：允许历史脚本接收未声明字段
+              </label>
+              <div v-if="schemaFields.length" class="divide-y border">
+                <div v-for="(field, index) in schemaFields" :key="index" class="grid gap-2 p-3 md:grid-cols-[minmax(120px,1fr)_120px_72px_minmax(160px,1.5fr)_32px] md:items-center">
+                  <Input v-model="field.name" placeholder="字段名" />
+                  <Select v-model="field.type">
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="string">string</SelectItem>
+                      <SelectItem value="integer">integer</SelectItem>
+                      <SelectItem value="number">number</SelectItem>
+                      <SelectItem value="boolean">boolean</SelectItem>
+                      <SelectItem value="object">object</SelectItem>
+                      <SelectItem value="array">array</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <label class="flex items-center gap-2 text-xs"><input v-model="field.required" type="checkbox" />必填</label>
+                  <Input v-model="field.description" placeholder="字段说明" />
+                  <Button variant="ghost" size="sm" class="h-8 w-8 p-0" type="button" title="删除字段" @click="removeSchemaField(index)">
+                    <Trash2 class="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div v-else-if="!schemaCompatibilityMode" class="border px-3 py-5 text-center text-xs text-muted-foreground">此脚本不接收输入参数</div>
             </div>
           </template>
         </CardContent>

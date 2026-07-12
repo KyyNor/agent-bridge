@@ -128,11 +128,11 @@ def create_workflow_routes(service, actor):
     @router.post("/workflows/{workflow_key}/run")
     def run_workflow(
         workflow_key: str,
-        payload: WorkflowRunRequest,
+        payload: WorkflowRunRequest | None = None,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         return service.workflow_scheduler.run_workflow_now(
-            workflow_key, input_data=payload.input, actor=current_actor
+            workflow_key, input_data=payload.input if payload else {}, actor=current_actor
         )
 
     @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/execute")

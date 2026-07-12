@@ -292,7 +292,6 @@ export const api = {
     const tail = qs.toString() ? `?${qs}` : ''
     return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`)
   },
-  runWorkflow: (key: string) => post<{ status: string; run_id?: string }>(`/workflows/${key}/run`),
   executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string) => {
     const qs = new URLSearchParams()
     if (taskVersion) qs.set('task_version', taskVersion)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { Handle, Position, VueFlow, type Connection, type Edge, type Node } from '@vue-flow/core'
@@ -15,8 +15,8 @@ const graph = defineModel<WorkflowGraph>('graph', { required: true })
 const props = defineProps<{ workflowType: WorkflowType; errors: WorkflowValidationError[] }>()
 const emit = defineEmits<{ selectNode: [nodeId: string]; selectEdge: [edgeId: string]; addNode: [type: WorkflowNodeType, position?: { x: number; y: number }] }>()
 
-const flowNodes = ref<Node[]>([])
-const flowEdges = ref<Edge[]>([])
+const flowNodes = shallowRef<Node[]>([])
+const flowEdges = shallowRef<Edge[]>([])
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
 watch(graph, value => { const elements = toVueFlowElements(value); flowNodes.value = elements.nodes; flowEdges.value = elements.edges }, { immediate: true, deep: true })

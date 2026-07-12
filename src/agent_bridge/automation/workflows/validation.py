@@ -109,8 +109,15 @@ def _validate_summary_graph(graph, incoming, outgoing, issues) -> None:
         return
     if [node.id for node in graph.nodes[-2:]] != [markdown.id, html.id]:
         issues.append(_issue("workflow", None, None, "总结输出节点必须按 Markdown、HTML 顺序位于图末端"))
-    if html.id not in outgoing.get(markdown.id, []):
+    connecting_edges = [
+        edge for edge in graph.edges if edge.source == markdown.id and edge.target == html.id
+    ]
+    if not connecting_edges:
         issues.append(_issue("workflow", None, None, "Markdown 输出必须连接到 HTML 输出"))
+    elif len(connecting_edges) != 1 or connecting_edges[0].condition is not None:
+        issues.append(_issue("edge", connecting_edges[0].id, "condition", "Markdown 到 HTML 必须使用唯一无条件边"))
+    if incoming.get(html.id) != [markdown.id]:
+        issues.append(_issue("node", html.id, None, "HTML 输出只能直接依赖 Markdown 主报告"))
     if outgoing.get(html.id):
         issues.append(_issue("node", html.id, None, "HTML 输出必须是末端节点"))
 

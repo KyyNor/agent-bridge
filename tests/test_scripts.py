@@ -29,6 +29,12 @@ SCRIPT_INPUT_SCHEMA = {
     "required": ["repo"],
 }
 
+PERMISSIVE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": True,
+}
+
 
 def test_script_input_schema_round_trip_and_validation(wm_paths):
     service = AgentBridgeService.create(wm_paths, {"root"})
@@ -89,6 +95,7 @@ def test_script_service_upserts_and_test_runs_python_script(wm_paths):
         description="Create workflow tasks from upstream data",
         language="python",
         code=MAIN_SCRIPT,
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
         status="active",
         owner_type="system",
         owner_key="",
@@ -121,6 +128,7 @@ def test_builtin_run_script_executes_managed_script(wm_paths):
         description="",
         language="python",
         code=MAIN_SCRIPT,
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
         status="active",
         owner_type="system",
         owner_key="",
@@ -192,6 +200,7 @@ def test_script_run_requires_main_function(wm_paths):
         description="",
         language="python",
         code="print('still only logs')",
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
         status="active",
         owner_type="system",
         owner_key="",
@@ -219,6 +228,7 @@ def test_script_run_requires_main_to_return_object(wm_paths):
         description="",
         language="python",
         code="def main(envelope):\n    return ['not', 'a', 'dict']\n",
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
         status="active",
         owner_type="system",
         owner_key="",
@@ -248,6 +258,7 @@ def test_runtime_helper_execute_signature_rejects_profile_override(wm_paths):
             "    execute('built-in', 'load_skill', {'skill_name': 'design_workflow'}, profile_key='other')\n"
             "    return {}\n"
         ),
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
         status="active",
         owner_type="system",
         owner_key="",
@@ -273,6 +284,7 @@ def test_workflow_helpers_require_runtime_context(wm_paths):
         description="",
         language="python",
         code="from agent_bridge_runtime import workflow_get_task\n\ndef main(envelope):\n    workflow_get_task()\n    return {}\n",
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
         status="active",
         owner_type="system",
         owner_key="",
@@ -315,6 +327,7 @@ def test_script_workflow_helpers_round_trip_tasks_and_logs(wm_paths):
         description="",
         language="python",
         code=WORKFLOW_SCRIPT,
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
         status="active",
         owner_type="system",
         owner_key="",

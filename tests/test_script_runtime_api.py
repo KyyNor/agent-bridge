@@ -29,6 +29,7 @@ def _register_script(client: TestClient) -> None:
             "description": "",
             "language": "python",
             "code": SCRIPT_CODE,
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": True},
             "status": "active",
             "owner_type": "system",
             "owner_key": "",

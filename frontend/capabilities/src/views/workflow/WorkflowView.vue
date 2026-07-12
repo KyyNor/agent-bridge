@@ -19,7 +19,7 @@ import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
-import { createDefaultGraph, deriveManualInputFields } from './workflowDefinition'
+import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge } from './workflowDefinition'
 import {
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
@@ -1396,6 +1396,19 @@ async function refreshProgress() {
   if (progressRunId.value) progressRunDetail.value = await api.getWorkflowRun(progressRunId.value)
 }
 
+async function openScriptRun(runId: string) {
+  try {
+    const scriptRun = await api.getScriptRun(runId)
+    window.location.hash = `scripts/${scriptRun.script_key}/run/${runId}`
+  } catch (e: unknown) {
+    testError.value = errorMessage(e)
+  }
+}
+
+function openAgentRun(runKey: string) {
+  window.location.hash = `agent-runs/${runKey}`
+}
+
 async function pollTestRun() {
   const runId = testingRunId.value
   if (!runId) return
@@ -2128,8 +2141,8 @@ async function confirmClearWorkflow() {
             v-if="progressRunDetail"
             :definition-snapshot="progressRunDetail.definition_snapshot"
             :node-runs="progressRunDetail.node_runs || []"
-            @open-agent-run="runKey => window.location.hash = 'agent-runs/' + runKey"
-            @open-script-run="runId => window.location.hash = 'scripts/' + runId"
+            @open-agent-run="openAgentRun"
+            @open-script-run="openScriptRun"
           />
           <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div class="min-w-0 space-y-1">
@@ -2271,7 +2284,7 @@ async function confirmClearWorkflow() {
             <WorkflowNodePalette @add-node="addNode" />
             <WorkflowEditorCanvas v-model:graph="form.definition" :workflow-type="form.workflow_type" :errors="graphErrors" @select-node="id => { selectedNodeId = id; selectedEdgeId = null }" @select-edge="id => { selectedEdgeId = id; selectedNodeId = null }" @add-node="addNode" />
             <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" @replace="replaceNode" />
-            <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" @replace="replaceEdge" />
+            <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" @replace="replaceEdge" />
             <aside v-else class="hidden border-l p-4 text-sm text-muted-foreground xl:block">选择一个节点或连线进行配置。</aside>
           </div>
           <div v-if="!hasTaskNode" class="grid gap-3 border p-4 lg:grid-cols-2">

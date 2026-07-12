@@ -10,6 +10,22 @@ def test_summary_default_graph_contains_locked_output_pair():
     assert [(edge.source, edge.target) for edge in graph.edges] == [("markdown-output", "html-output")]
 
 
+def test_summary_output_pair_requires_one_unconditional_direct_edge():
+    payload = default_workflow_graph(WorkflowType.summary, "codex").model_dump(mode="json")
+    payload["edges"][0]["condition"] = {
+        "field": "nodes.markdown-output.output.content",
+        "operator": "exists",
+    }
+    graph = WorkflowGraph.model_validate(payload)
+
+    try:
+        validate_graph(graph, WorkflowType.summary)
+    except WorkflowDefinitionValidationError as exc:
+        assert any(issue.field == "condition" for issue in exc.issues)
+    else:
+        raise AssertionError("expected protected summary edge validation error")
+
+
 def test_validate_graph_rejects_cycle():
     graph = WorkflowGraph.model_validate({
         "nodes": [

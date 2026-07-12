@@ -63,7 +63,11 @@ class WorkflowService:
         status: str,
         workflow_type: str = "operation",
         definition: dict[str, Any] | WorkflowGraph | None = None,
+        workflow_js: str = "",
     ) -> dict[str, Any]:
+        # Kept only for internal callers that still construct historical test
+        # fixtures. New API schemas do not expose or execute this field.
+        del workflow_js
         require_admin_user(actor, self.admins)
         try:
             next_status = WorkflowStatus(status).value

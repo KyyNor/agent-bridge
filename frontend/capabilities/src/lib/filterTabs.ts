@@ -1,5 +1,5 @@
 import type { AgentRun, ToolCallLog } from '../api/types'
-import { agentRunBadgeVariant, type AgentRunFilter } from './agentRunStatus'
+import { agentRunBadgeVariant, type AgentRunFilter } from './agentRunStatus.ts'
 
 export interface FilterTabCount<T extends string = string> {
   key: T

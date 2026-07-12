@@ -34,8 +34,7 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
             "name": "Page Report",
             "description": "Nightly page report",
             "profile_key": "report-plane",
-            "workflow_js": "export default async function workflow() {}",
-            "schedule": {"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
+            "definition": {"nodes": [], "edges": []},
             "status": "active",
         },
     )

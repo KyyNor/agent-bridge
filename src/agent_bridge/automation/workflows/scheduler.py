@@ -364,6 +364,14 @@ class WorkflowScheduler:
             ))
             if execution.status == "no_task":
                 self.finished_today.add(workflow_key)
+            if execution.status == "completed" and not any(
+                node.get("type") == "get_task"
+                for node in run["definition_snapshot"].get("nodes", [])
+            ):
+                # Manual-input workflows have no queue to drain. Run them at
+                # most once per scheduler window; explicit test runs remain
+                # available through run_workflow_now().
+                self.finished_today.add(workflow_key)
             if execution.status == "completed" and execution.task is not None:
                 completed = self._store.complete_workflow_task(
                     workflow_key,

@@ -11,15 +11,15 @@ function source(path: string): string {
 
 test('knowledge document deletion requires explicit confirmation', () => {
   const file = source('src/views/knowledge/KnowledgeView.vue')
-  assert.match(file, /async function deleteDoc[\s\S]*confirm\(`确定删除文档「\$\{docTitle\}」？/)
+  assert.match(file, /async function deleteDoc[\s\S]*confirm\(\{[\s\S]*description: `确定删除文档「\$\{docTitle\}」？/)
 })
 
 test('knowledge backend deletion requires explicit confirmation', () => {
   const file = source('src/views/knowledge/KnowledgeProcessingConfigView.vue')
-  assert.match(file, /async function deleteBackend[\s\S]*confirm\(`确定删除知识后端「\$\{slug\}」？/)
+  assert.match(file, /async function deleteBackend[\s\S]*confirm\(\{[\s\S]*description: `确定删除知识后端「\$\{slug\}」？/)
 })
 
 test('code repository category deletion requires explicit confirmation', () => {
   const file = source('src/views/knowledge/KnowledgeProcessingConfigView.vue')
-  assert.match(file, /async function deleteCategory[\s\S]*confirm\(`确定删除代码仓库分类「\$\{key\}」？/)
+  assert.match(file, /async function deleteCategory[\s\S]*confirm\(\{[\s\S]*description: `确定删除代码仓库分类「\$\{key\}」？/)
 })
