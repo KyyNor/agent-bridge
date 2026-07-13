@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import CodeMirror from '../../components/CodeMirror.vue'
+import SchemaFieldEditor from '../../components/SchemaFieldEditor.vue'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { Textarea } from '../../components/ui/textarea'
@@ -18,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select'
+import { schemaToFields, type SchemaField } from '../../lib/schemaFields'
 import { formatLocalDatetime } from '../../lib/time'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
@@ -36,9 +38,10 @@ const scriptPageSize = ref(10)
 
 // 编辑模式表单状态
 const form = ref(emptyForm())
-type SchemaField = { name: string; type: string; required: boolean; description: string }
-const schemaFields = ref<SchemaField[]>([])
-const schemaCompatibilityMode = ref(false)
+type SchemaFieldEditorHandle = { validate: () => boolean; getValidationMessage: () => string }
+const inputSchemaEditor = ref<SchemaFieldEditorHandle | null>(null)
+const outputSchemaEditor = ref<SchemaFieldEditorHandle | null>(null)
+const outputSchemaEnabled = ref(false)
 const formError = ref('')
 const formLoading = ref(false)
 const saving = ref(false)
@@ -85,6 +88,8 @@ const editingScript = computed(() =>
   editingKey.value ? scripts.value.find(s => s.script_key === editingKey.value) || null : null,
 )
 const scriptDesignDraft = computed(() => designResponse.value?.result?.script || null)
+const inputSchemaFields = computed(() => schemaToFields(form.value.input_schema))
+const isBuiltInScript = computed(() => editingScript.value ? isBuiltInScriptItem(editingScript.value) : false)
 const pagedScripts = computed(() => paginate(scripts.value, scriptPage.value, scriptPageSize.value))
 const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 
@@ -101,7 +106,7 @@ watch(
     scriptNotFound.value = false
     if (isNew.value) {
       form.value = emptyForm()
-      loadSchemaFields(form.value.input_schema)
+      outputSchemaEnabled.value = false
       runs.value = []
       runDetail.value = null
       return
@@ -119,8 +124,9 @@ watch(
         owner_type: detail.owner_type,
         owner_key: detail.owner_key,
         input_schema: detail.input_schema || defaultInputSchema(),
+        output_schema: detail.output_schema || null,
       }
-      loadSchemaFields(form.value.input_schema)
+      outputSchemaEnabled.value = !!detail.output_schema
       await loadRuns()
       if (requestedRunId.value) await openRunDetail(requestedRunId.value)
       else runDetail.value = runs.value[0] || null
@@ -169,6 +175,7 @@ function emptyForm() {
     owner_type: 'system',
     owner_key: '',
     input_schema: defaultInputSchema(),
+    output_schema: null as Record<string, unknown> | null,
   }
 }
 
@@ -176,29 +183,8 @@ function defaultInputSchema() {
   return { type: 'object', properties: {}, required: [], additionalProperties: false } as Record<string, unknown>
 }
 
-function loadSchemaFields(schema: Record<string, unknown>) {
-  const properties = (schema.properties || {}) as Record<string, Record<string, unknown>>
-  const required = new Set(Array.isArray(schema.required) ? schema.required.filter((item): item is string => typeof item === 'string') : [])
-  schemaFields.value = Object.entries(properties).map(([name, value]) => ({
-    name,
-    type: typeof value.type === 'string' ? value.type : 'string',
-    required: required.has(name),
-    description: typeof value.description === 'string' ? value.description : '',
-  }))
-  schemaCompatibilityMode.value = schema.additionalProperties === true && schemaFields.value.length === 0
-}
-
-function addSchemaField() {
-  schemaCompatibilityMode.value = false
-  schemaFields.value.push({ name: '', type: 'string', required: false, description: '' })
-}
-
-function removeSchemaField(index: number) {
-  schemaFields.value.splice(index, 1)
-}
-
 // 输入字段变化时同步测试运行的字段表单值：保留已填值，补齐新字段，移除已删字段。
-watch(schemaFields, (fields) => {
+watch(inputSchemaFields, (fields) => {
   const next: Record<string, string> = {}
   for (const field of fields) {
     const name = field.name.trim()
@@ -206,7 +192,7 @@ watch(schemaFields, (fields) => {
     next[name] = name in testParamsByField.value ? testParamsByField.value[name] : ''
   }
   testParamsByField.value = next
-}, { deep: true })
+}, { deep: true, immediate: true })
 
 // 把字段表单的字符串值按 schema type 转成实际参数值；空字符串跳过（除非必填且未填，由调用方校验）。
 function coerceParamValue(rawValue: string, type: string): unknown {
@@ -237,7 +223,7 @@ function coerceParamValue(rawValue: string, type: string): unknown {
 // 字段表单值 → 参数对象（跳过空值）。
 function buildParamsFromFields(): Record<string, unknown> {
   const params: Record<string, unknown> = {}
-  for (const field of schemaFields.value) {
+  for (const field of inputSchemaFields.value) {
     const name = field.name.trim()
     if (!name) continue
     const value = coerceParamValue(testParamsByField.value[name] ?? '', field.type)
@@ -260,7 +246,7 @@ function syncRawToFields() {
     if (v && typeof v === 'object' && !Array.isArray(v)) parsed = v as Record<string, unknown>
   } catch { /* 解析失败就保留现有字段值 */ }
   const next: Record<string, string> = {}
-  for (const field of schemaFields.value) {
+  for (const field of inputSchemaFields.value) {
     const name = field.name.trim()
     if (!name) continue
     const value = parsed[name]
@@ -283,29 +269,25 @@ function fieldPlaceholder(field: SchemaField): string {
   return field.description || ''
 }
 
-function syncInputSchema(): boolean {
-  const names = schemaFields.value.map(field => field.name.trim())
-  if (names.some(name => !name)) {
-    formError.value = '输入字段名不能为空'
+function validateSchemaEditors(): boolean {
+  if (!inputSchemaEditor.value?.validate()) {
+    formError.value = inputSchemaEditor.value?.getValidationMessage() || '输入 Schema 不合法'
     return false
   }
-  if (new Set(names).size !== names.length) {
-    formError.value = '输入字段名不能重复'
-    return false
+  if (outputSchemaEnabled.value) {
+    if (!outputSchemaEditor.value?.validate()) {
+      formError.value = outputSchemaEditor.value?.getValidationMessage() || '输出 Schema 不合法'
+      return false
+    }
+  } else {
+    form.value.output_schema = null
   }
-  const properties = Object.fromEntries(schemaFields.value.map((field, index) => [names[index], {
-    type: field.type,
-    ...(field.description.trim() ? { description: field.description.trim() } : {}),
-  }]))
-  form.value.input_schema = schemaCompatibilityMode.value
-    ? { type: 'object', properties: {}, additionalProperties: true }
-    : {
-        type: 'object',
-        properties,
-        required: schemaFields.value.filter(field => field.required).map(field => field.name.trim()),
-        additionalProperties: false,
-      }
   return true
+}
+
+function toggleOutputSchema(enabled: boolean) {
+  outputSchemaEnabled.value = enabled
+  form.value.output_schema = enabled ? (form.value.output_schema || defaultInputSchema()) : null
 }
 
 function goList() {
@@ -321,6 +303,7 @@ function openEdit(item: ManagedScript) {
 }
 
 async function deleteScript(item: ManagedScript) {
+  if (isBuiltInScriptItem(item)) return
   if (!await confirm({ title: '删除脚本', description: `确定删除脚本「${item.name}」？其运行记录将一并清除。`, destructive: true, confirmText: '删除' })) return
   error.value = ''
   try {
@@ -334,7 +317,7 @@ async function deleteScript(item: ManagedScript) {
 
 async function saveScript(): Promise<ManagedScript | null> {
   formError.value = ''
-  if (!syncInputSchema()) return null
+  if (!validateSchemaEditors()) return null
   if (!form.value.script_key || !form.value.name || !form.value.code.trim()) {
     formError.value = '请填写脚本标识、名称和代码'
     return null
@@ -351,6 +334,7 @@ async function saveScript(): Promise<ManagedScript | null> {
       owner_type: form.value.owner_type,
       owner_key: form.value.owner_type === 'system' ? '' : form.value.owner_key,
       input_schema: form.value.input_schema,
+      output_schema: outputSchemaEnabled.value ? form.value.output_schema : null,
     })
     await reloadScripts()
     // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
@@ -373,7 +357,7 @@ function openScriptDesigner(mode: 'create' | 'modify' = 'modify') {
 }
 
 function scriptDesignerCurrent() {
-  syncInputSchema()
+  validateSchemaEditors()
   if (designMode.value === 'modify') {
     return {
       script_key: form.value.script_key,
@@ -385,6 +369,7 @@ function scriptDesignerCurrent() {
       owner_type: form.value.owner_type,
       owner_key: form.value.owner_key,
       input_schema: form.value.input_schema,
+      output_schema: outputSchemaEnabled.value ? form.value.output_schema : null,
     }
   }
   return {
@@ -392,6 +377,7 @@ function scriptDesignerCurrent() {
     status: 'active',
     owner_type: form.value.owner_type,
     owner_key: form.value.owner_key,
+    output_schema: outputSchemaEnabled.value ? form.value.output_schema : null,
   }
 }
 
@@ -432,10 +418,36 @@ async function acceptScriptDesign() {
     owner_type: draft.owner_type,
     owner_key: draft.owner_key,
     input_schema: draft.input_schema || defaultInputSchema(),
+    output_schema: draft.output_schema || null,
   }
-  loadSchemaFields(form.value.input_schema)
+  outputSchemaEnabled.value = !!draft.output_schema
   const saved = await saveScript()
   if (saved) showDesigner.value = false
+}
+
+async function resetBuiltInScript() {
+  const item = editingScript.value
+  if (!item || !isBuiltInScriptItem(item)) return
+  formError.value = ''
+  try {
+    const detail = await api.resetScript(item.script_key)
+    form.value = {
+      script_key: detail.script_key,
+      name: detail.name,
+      description: detail.description,
+      language: detail.language,
+      code: detail.code || '',
+      status: detail.status,
+      owner_type: detail.owner_type,
+      owner_key: detail.owner_key,
+      input_schema: detail.input_schema || defaultInputSchema(),
+      output_schema: detail.output_schema || null,
+    }
+    outputSchemaEnabled.value = !!detail.output_schema
+    await reloadScripts()
+  } catch (e: unknown) {
+    formError.value = errorMessage(e)
+  }
 }
 
 async function runScript() {
@@ -526,6 +538,22 @@ function statusLabel(status: string) {
   if (status === 'active') return '启用'
   if (status === 'disabled') return '停用'
   return status
+}
+
+function isBuiltInScriptItem(item: Pick<ManagedScript, 'script_key' | 'source'>) {
+  return item.source === 'default' || item.script_key.startsWith('system.')
+}
+
+function sourceLabel(source: string | undefined) {
+  if (source === 'default') return '默认内置'
+  if (source === 'database') return '数据库覆盖'
+  return source || '未知来源'
+}
+
+function sourceBadgeClass(source: string | undefined) {
+  if (source === 'default') return 'bg-amber-50 text-amber-700'
+  if (source === 'database') return 'bg-sky-50 text-sky-700'
+  return ''
 }
 
 function ownerLabel(item: ManagedScript) {
@@ -704,6 +732,7 @@ def main(envelope):
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
                 <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
                 <Badge variant="outline">{{ item.language }}</Badge>
+                <Badge v-if="isBuiltInScriptItem(item)" variant="secondary" :class="sourceBadgeClass(item.source)">{{ sourceLabel(item.source) }}</Badge>
               </div>
               <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.script_key }}</div>
               <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || item.code_preview || '无描述' }}</p>
@@ -717,7 +746,7 @@ def main(envelope):
                 <Play class="mr-1 h-3.5 w-3.5" />
                 编辑/运行
               </Button>
-              <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" @click="deleteScript(item)">
+              <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" :disabled="isBuiltInScriptItem(item)" @click="deleteScript(item)">
                 <Trash2 class="mr-1 h-3.5 w-3.5" />
                 删除
               </Button>
@@ -748,12 +777,19 @@ def main(envelope):
           <h2 class="text-lg font-semibold text-foreground">
             {{ isNew ? '新建脚本' : (editingScript?.name || form.name || '编辑脚本') }}
           </h2>
-          <p class="font-mono text-xs text-muted-foreground">
-            {{ isNew ? '新建后将自动生成 script_key' : editingKey }}
-          </p>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <p class="font-mono text-xs text-muted-foreground">
+              {{ isNew ? '新建后将自动生成 script_key' : editingKey }}
+            </p>
+            <Badge v-if="editingScript && isBuiltInScript" variant="secondary" :class="sourceBadgeClass(editingScript.source)">{{ sourceLabel(editingScript.source) }}</Badge>
+          </div>
         </div>
       </div>
       <div class="flex flex-wrap gap-2">
+        <Button v-if="isBuiltInScript" variant="outline" size="sm" :disabled="saving || testing" @click="resetBuiltInScript">
+          <RotateCcw class="mr-1.5 h-4 w-4" />
+          恢复默认
+        </Button>
         <Button variant="outline" size="sm" :disabled="designing" @click="openScriptDesigner('modify')">
           <WandSparkles class="mr-1.5 h-4 w-4" />
           AI 设计
@@ -799,13 +835,14 @@ def main(envelope):
             <div class="grid gap-3 md:grid-cols-3">
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">状态</label>
-                <Select v-model="form.status">
+                <Select v-model="form.status" :disabled="isBuiltInScript">
                   <SelectTrigger class="w-full"><SelectValue placeholder="状态" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">启用</SelectItem>
                     <SelectItem value="disabled">停用</SelectItem>
                   </SelectContent>
                 </Select>
+                <p v-if="isBuiltInScript" class="mt-1 text-xs text-muted-foreground">内置脚本不能停用，可修改代码后按需恢复默认。</p>
               </div>
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">归属类型</label>
@@ -838,41 +875,27 @@ def main(envelope):
               </p>
             </div>
             <div>
-              <div class="mb-2 flex items-center justify-between gap-3">
-                <div>
-                  <div class="text-xs font-medium text-foreground">输入字段</div>
-                  <p class="mt-1 text-xs text-muted-foreground">工作流会根据这些字段生成参数映射和运行前校验。</p>
-                </div>
-                <Button variant="outline" size="sm" type="button" @click="addSchemaField">
-                  <Plus class="mr-1 h-4 w-4" />添加字段
-                </Button>
-              </div>
-              <label v-if="schemaCompatibilityMode" class="mb-2 flex items-center gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                <input v-model="schemaCompatibilityMode" type="checkbox" />
-                兼容模式：允许历史脚本接收未声明字段
+              <SchemaFieldEditor
+                ref="inputSchemaEditor"
+                v-model="form.input_schema"
+                label="输入 Schema"
+              />
+              <p class="mt-2 text-xs text-muted-foreground">工作流会根据这些字段生成参数映射和运行前校验。</p>
+            </div>
+            <div class="space-y-3">
+              <label class="flex items-center gap-2 text-xs text-muted-foreground">
+                <input :checked="outputSchemaEnabled" type="checkbox" @change="toggleOutputSchema(($event.target as HTMLInputElement).checked)" />
+                声明输出 Schema
               </label>
-              <div v-if="schemaFields.length" class="divide-y border">
-                <div v-for="(field, index) in schemaFields" :key="index" class="grid gap-2 p-3 md:grid-cols-[minmax(120px,1fr)_120px_72px_minmax(160px,1.5fr)_32px] md:items-center">
-                  <Input v-model="field.name" placeholder="字段名" />
-                  <Select v-model="field.type">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="string">string</SelectItem>
-                      <SelectItem value="integer">integer</SelectItem>
-                      <SelectItem value="number">number</SelectItem>
-                      <SelectItem value="boolean">boolean</SelectItem>
-                      <SelectItem value="object">object</SelectItem>
-                      <SelectItem value="array">array</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <label class="flex items-center gap-2 text-xs"><input v-model="field.required" type="checkbox" />必填</label>
-                  <Input v-model="field.description" placeholder="字段说明" />
-                  <Button variant="ghost" size="sm" class="h-8 w-8 p-0" type="button" title="删除字段" @click="removeSchemaField(index)">
-                    <Trash2 class="h-4 w-4" />
-                  </Button>
-                </div>
+              <SchemaFieldEditor
+                v-if="outputSchemaEnabled"
+                ref="outputSchemaEditor"
+                v-model="form.output_schema"
+                label="输出 Schema"
+              />
+              <div v-else class="rounded-md border px-3 py-4 text-xs text-muted-foreground">
+                未声明输出 Schema 时，脚本仍可运行，但下游只能把结果当作未建模对象处理。
               </div>
-              <div v-else-if="!schemaCompatibilityMode" class="border px-3 py-5 text-center text-xs text-muted-foreground">此脚本不接收输入参数</div>
             </div>
           </template>
         </CardContent>
@@ -895,8 +918,8 @@ def main(envelope):
               </div>
               <!-- 字段表单：按「输入字段」逐个填写 -->
               <div v-if="!showRawParams">
-                <div v-if="schemaFields.filter(f => f.name.trim()).length" class="space-y-2">
-                  <div v-for="field in schemaFields.filter(f => f.name.trim())" :key="field.name" class="grid gap-1">
+                <div v-if="inputSchemaFields.filter(f => f.name.trim()).length" class="space-y-2">
+                  <div v-for="field in inputSchemaFields.filter(f => f.name.trim())" :key="field.name" class="grid gap-1">
                     <label class="flex items-center gap-1 text-xs text-muted-foreground">
                       <span class="font-mono">{{ field.name }}</span>
                       <span class="text-[10px] uppercase text-muted-foreground/70">{{ field.type }}</span>

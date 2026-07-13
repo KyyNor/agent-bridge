@@ -439,6 +439,7 @@ export const api = {
   getScript: (scriptKey: string) => get<ManagedScript>(`/scripts/${scriptKey}`),
   upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string; input_schema: Record<string, unknown> }) =>
     post<ManagedScript>('/scripts', { language: 'python', status: 'active', owner_type: 'system', owner_key: '', description: '', ...s }),
+  resetScript: (scriptKey: string) => post<ManagedScript>(`/scripts/${scriptKey}/reset`),
   deleteScript: (scriptKey: string) => post<{ script_key: string; deleted: boolean }>(`/scripts/${scriptKey}/delete`),
   testScript: (
     scriptKey: string,

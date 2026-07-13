@@ -554,6 +554,7 @@ export interface ScriptDesignResult {
     language: string
     code: string
     input_schema: Record<string, unknown>
+    output_schema: Record<string, unknown> | null
     status: string
     owner_type: string
     owner_key: string
@@ -953,6 +954,8 @@ export interface ManagedScript {
   created_at: string
   updated_at: string
   input_schema: Record<string, unknown>
+  output_schema: Record<string, unknown> | null
+  source?: 'default' | 'database'
   code?: string
   code_preview?: string
 }
