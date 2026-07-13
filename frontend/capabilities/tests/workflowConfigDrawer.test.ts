@@ -47,3 +47,11 @@ test('workflow form keeps configuration in the editor drawer region', async () =
   assert.match(view, /@select-node="selectWorkflowNode"/)
   assert.match(view, /@update:open="setConfigDrawerOpen"/)
 })
+
+test('node skill_names validation issue is surfaced in the skill picker', async () => {
+  const panel = await readFile(new URL('../src/views/workflow/WorkflowNodeConfigPanel.vue', import.meta.url), 'utf8')
+
+  assert.match(panel, /issueFor\('skill_names'\)/)
+  assert.match(panel, /:aria-invalid="Boolean\(issueFor\('skill_names'\)\)"/)
+  assert.match(panel, /技能配置有误/)
+})
