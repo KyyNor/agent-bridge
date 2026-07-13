@@ -16,6 +16,7 @@ export interface ScriptEditableFields {
 export interface ScriptSourceInfo {
   script_key: string
   source?: string
+  is_builtin: boolean
 }
 
 export interface ScriptFormState {
@@ -64,7 +65,7 @@ export function toScriptUpsertPayload(
 }
 
 export function isBuiltInScriptFamily(item: ScriptSourceInfo): boolean {
-  return item.script_key.startsWith('system.')
+  return item.is_builtin
 }
 
 export function isDefaultBuiltInScript(item: ScriptSourceInfo): boolean {
@@ -85,4 +86,15 @@ export function canResetScript(item: ScriptSourceInfo): boolean {
 
 export function scriptResetPath(scriptKey: string): string {
   return `/scripts/${scriptKey}/reset`
+}
+
+export function mergeScriptDesignDraft(
+  current: ScriptEditableFields,
+  draft: Partial<ScriptEditableFields> & Pick<ScriptEditableFields, 'script_key'>,
+): ScriptEditableFields {
+  return {
+    ...current,
+    ...draft,
+    output_schema: draft.output_schema == null ? current.output_schema : draft.output_schema,
+  }
 }

@@ -16,8 +16,10 @@ import {
   SCHEMA_FIELD_TYPES,
   fieldsToSchema,
   isSimpleObjectSchema,
+  parseSchemaObjectText as parseSchemaText,
   schemaToFields,
   type SchemaField,
+  validateSchemaFieldNames,
 } from '../lib/schemaFields'
 
 const props = defineProps<{
@@ -27,6 +29,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: Record<string, unknown>]
+  'validity-change': [valid: boolean, message: string]
 }>()
 
 const mode = ref<'fields' | 'advanced'>('fields')
@@ -59,6 +62,7 @@ watch(
     } else {
       mode.value = 'advanced'
     }
+    setValidationMessage('')
   },
   { immediate: true },
 )
@@ -79,32 +83,18 @@ function serializeSchema(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function parseSchemaText(value: string):
-  | { ok: true; value: Record<string, unknown> }
-  | { ok: false; message: string } {
-  const text = value.trim()
-  if (!text) return { ok: true, value: defaultSchema() }
-  try {
-    const parsed = JSON.parse(text)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { ok: false, message: 'Schema 必须是 JSON 对象' }
-    }
-    return { ok: true, value: parsed as Record<string, unknown> }
-  } catch {
-    return { ok: false, message: '高级 JSON 不是合法对象' }
-  }
+function validateFieldRows(): string {
+  return validateSchemaFieldNames(fields.value, props.label)
 }
 
-function validateFieldRows(): string {
-  const names = fields.value.map(field => field.name.trim())
-  if (names.some(name => !name)) return `${props.label}字段名不能为空`
-  if (new Set(names).size !== names.length) return `${props.label}字段名不能重复`
-  return ''
+function setValidationMessage(message: string) {
+  validationMessage.value = message
+  emit('validity-change', !message, message)
 }
 
 function syncFieldSchema() {
   const message = validateFieldRows()
-  validationMessage.value = message
+  setValidationMessage(message)
   if (message) return false
 
   const normalizedFields = fields.value.map(field => ({
@@ -112,13 +102,14 @@ function syncFieldSchema() {
     name: field.name.trim(),
     description: field.description.trim(),
   }))
-  emit('update:modelValue', fieldsToSchema(normalizedFields))
+  emit('update:modelValue', fieldsToSchema(normalizedFields, props.modelValue))
   return true
 }
 
 function addField() {
   mode.value = 'fields'
   fields.value.push({ name: '', type: 'string', required: false, description: '' })
+  syncFieldSchema()
 }
 
 function removeField(index: number) {
@@ -130,24 +121,24 @@ function updateJson(value: string | number) {
   schemaText.value = String(value)
   const parsed = parseSchemaText(schemaText.value)
   if (!parsed.ok) {
-    validationMessage.value = parsed.message
+    setValidationMessage(parsed.message)
     return
   }
-  validationMessage.value = ''
+  setValidationMessage('')
   emit('update:modelValue', parsed.value)
 }
 
 function switchToFields() {
   const parsed = parseSchemaText(schemaText.value)
   if (!parsed.ok) {
-    validationMessage.value = parsed.message
+    setValidationMessage(parsed.message)
     return
   }
   if (!isSimpleObjectSchema(parsed.value)) {
-    validationMessage.value = `${props.label}包含高级 Schema 结构，请继续使用高级 JSON`
+    setValidationMessage(`${props.label}包含高级 Schema 结构，请继续使用高级 JSON`)
     return
   }
-  validationMessage.value = ''
+  setValidationMessage('')
   fields.value = schemaToFields(parsed.value)
   mode.value = 'fields'
   emit('update:modelValue', parsed.value)
@@ -155,7 +146,7 @@ function switchToFields() {
 
 function switchToAdvanced() {
   mode.value = 'advanced'
-  validationMessage.value = ''
+  setValidationMessage('')
   schemaText.value = prettyJson(normalizeSchema(props.modelValue))
 }
 
@@ -164,16 +155,17 @@ function validate(): boolean {
 
   const parsed = parseSchemaText(schemaText.value)
   if (!parsed.ok) {
-    validationMessage.value = parsed.message
+    setValidationMessage(parsed.message)
     return false
   }
-  validationMessage.value = ''
+  setValidationMessage('')
   emit('update:modelValue', parsed.value)
   return true
 }
 
 defineExpose({
   validate,
+  isValid: () => !validationMessage.value,
   getValidationMessage: () => validationMessage.value,
 })
 </script>

@@ -5,6 +5,7 @@ import {
   canDeleteScript,
   canDisableScript,
   canResetScript,
+  mergeScriptDesignDraft,
   scriptResetPath,
   toScriptFormState,
   toScriptUpsertPayload,
@@ -45,6 +46,7 @@ function script(overrides: Partial<ManagedScript> = {}): ManagedScript {
     updated_at: '2026-01-01T00:00:00Z',
     input_schema: INPUT_SCHEMA,
     output_schema: null,
+    is_builtin: false,
     source: 'database',
     code: 'def main(envelope):\n    return {}\n',
     code_preview: 'def main',
@@ -72,10 +74,17 @@ test('default built-ins are protected and database overrides remain resettable',
   const defaultBuiltin = script({
     script_key: 'system.validate_workflow',
     source: 'default',
+    is_builtin: true,
   })
   const overrideBuiltin = script({
     script_key: 'system.validate_workflow',
     source: 'database',
+    is_builtin: true,
+  })
+  const prefixedUserScript = script({
+    script_key: 'system.user_owned',
+    source: 'database',
+    is_builtin: false,
   })
 
   assert.equal(canDeleteScript(defaultBuiltin), false)
@@ -83,6 +92,25 @@ test('default built-ins are protected and database overrides remain resettable',
   assert.equal(canResetScript(defaultBuiltin), true)
 
   assert.equal(canResetScript(overrideBuiltin), true)
+  assert.equal(canDeleteScript(prefixedUserScript), true)
+  assert.equal(canDisableScript(prefixedUserScript), true)
+  assert.equal(canResetScript(prefixedUserScript), false)
+})
+
+test('design adoption preserves existing output schema when the agent omits or nulls it', () => {
+  const current = toScriptFormState(script({ output_schema: OUTPUT_SCHEMA }), INPUT_SCHEMA).form
+  const draft = {
+    ...current,
+    name: 'Updated by agent',
+    output_schema: undefined,
+  }
+
+  const merged = mergeScriptDesignDraft(current, draft)
+
+  assert.equal(merged.name, 'Updated by agent')
+  assert.deepEqual(merged.output_schema, OUTPUT_SCHEMA)
+  assert.deepEqual(mergeScriptDesignDraft(current, { ...draft, output_schema: null }).output_schema, OUTPUT_SCHEMA)
+  assert.deepEqual(toScriptUpsertPayload(merged, true).output_schema, OUTPUT_SCHEMA)
 })
 
 test('reset path uses scripts reset endpoint', () => {

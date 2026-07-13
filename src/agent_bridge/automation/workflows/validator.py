@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel, ConfigDict, ValidationError as PydanticValidationError
 
-from agent_bridge.automation.workflows.definition import WorkflowGraph
+from agent_bridge.automation.workflows.definition import WorkflowGraph, WorkflowNode
 from agent_bridge.automation.workflows.models import WorkflowStatus, WorkflowType
-from agent_bridge.automation.workflows.references import parse_reference
+from agent_bridge.automation.workflows.references import REFERENCE_RE, parse_reference
 from agent_bridge.automation.workflows.validation import (
     WorkflowDefinitionValidationError,
     WorkflowValidationIssue,
@@ -19,15 +21,17 @@ from agent_bridge.storage.sqlite import SQLiteStore
 
 
 class _WorkflowValidationRequest(BaseModel):
+    # Persisted workflow rows contain storage metadata. Validation requires the
+    # complete public workflow contract while ignoring those database fields.
     model_config = ConfigDict(extra="ignore")
 
     workflow_key: str
     name: str
-    description: str = ""
+    description: str
     profile_key: str
     definition: WorkflowGraph
-    status: WorkflowStatus = WorkflowStatus.active
-    workflow_type: WorkflowType = WorkflowType.operation
+    status: WorkflowStatus
+    workflow_type: WorkflowType
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,8 @@ class WorkflowValidator:
                 )
             )
         issues.extend(self._resource_issues(actor=actor, graph=parsed.definition))
+        issues.extend(self._reference_issues(actor=actor, graph=parsed.definition))
+        issues = self._dedupe_issues(issues)
         result = WorkflowValidationResult(valid=not issues, errors=issues, warnings=[])
         normalized = _NormalizedWorkflow(
             profile_key=parsed.profile_key,
@@ -159,6 +165,19 @@ class WorkflowValidator:
         for node in graph.nodes:
             config = node.config
             if node.type in {"agent", "output"}:
+                if node.type == "agent" and config.result_mode == "json" and config.output_schema:
+                    try:
+                        Draft202012Validator.check_schema(config.output_schema)
+                    except SchemaError:
+                        issues.append(
+                            WorkflowValidationIssue(
+                                scope="node",
+                                id=node.id,
+                                field="config.output_schema",
+                                code="invalid_output_schema",
+                                message="JSON 输出 Schema 不合法",
+                            )
+                        )
                 try:
                     backend_missing = self.agent_service is None or self.agent_service.coding_agents.get(config.backend_key) is None
                 except Exception:
@@ -189,7 +208,7 @@ class WorkflowValidator:
                             )
                         )
             if node.type == "script":
-                script = self.store.scripts.get_script(config.script_key)
+                script = self._resolve_script(actor=actor, script_key=config.script_key)
                 if script is None or script.get("status") != "active":
                     issues.append(
                         WorkflowValidationIssue(
@@ -215,6 +234,13 @@ class WorkflowValidator:
                                 message="缺少脚本必填参数",
                             )
                         )
+                issues.extend(
+                    self._script_param_schema_issues(
+                        node_id=node.id,
+                        schema=schema,
+                        params=config.params,
+                    )
+                )
                 for field, value in config.params.items():
                     reference = parse_reference(value)
                     if reference is None or not reference.startswith("input."):
@@ -245,3 +271,302 @@ class WorkflowValidator:
                     )
                 )
         return issues
+
+    def _resolve_script(self, *, actor: str, script_key: str) -> dict[str, Any] | None:
+        try:
+            if self.scripts is None:
+                return None
+            return self.scripts.get_script(actor, script_key)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _script_param_schema_issues(
+        *,
+        node_id: str,
+        schema: dict[str, Any],
+        params: dict[str, Any],
+    ) -> list[WorkflowValidationIssue]:
+        issues: list[WorkflowValidationIssue] = []
+        errors = sorted(
+            Draft202012Validator(schema).iter_errors(params),
+            key=lambda item: (list(item.absolute_path), str(item.validator)),
+        )
+        for error in errors:
+            path = [str(part) for part in error.absolute_path]
+            if error.validator == "required" and isinstance(error.instance, dict):
+                missing = next(
+                    (
+                        str(field)
+                        for field in error.validator_value
+                        if isinstance(field, str) and field not in error.instance
+                    ),
+                    None,
+                )
+                if missing:
+                    field = ".".join(["config", "params", *path, missing])
+                    issues.append(
+                        WorkflowValidationIssue(
+                            scope="node",
+                            id=node_id,
+                            field=field,
+                            code="missing_script_param",
+                            message="缺少脚本必填参数",
+                        )
+                    )
+                continue
+            if error.validator == "type":
+                if parse_reference(error.instance) is not None:
+                    continue
+                expected = error.validator_value
+                expected_text = "/".join(expected) if isinstance(expected, list) else str(expected)
+                issues.append(
+                    WorkflowValidationIssue(
+                        scope="node",
+                        id=node_id,
+                        field=".".join(["config", "params", *path]),
+                        code="invalid_script_param_type",
+                        message=f"脚本参数类型不匹配，期望 {expected_text}",
+                    )
+                )
+                continue
+            if parse_reference(error.instance) is not None:
+                continue
+            issues.append(
+                WorkflowValidationIssue(
+                    scope="node",
+                    id=node_id,
+                    field=".".join(["config", "params", *path]),
+                    code="invalid_script_param",
+                    message="脚本参数不符合输入 Schema",
+                )
+            )
+        return issues
+
+    def _reference_issues(self, *, actor: str, graph: WorkflowGraph) -> list[WorkflowValidationIssue]:
+        issues: list[WorkflowValidationIssue] = []
+        incoming = {node.id: [] for node in graph.nodes}
+        nodes = {node.id: node for node in graph.nodes}
+        for edge in graph.edges:
+            if edge.source in nodes and edge.target in incoming and edge.source != edge.target:
+                incoming[edge.target].append(edge.source)
+
+        for node in graph.nodes:
+            ancestors = self._ancestors(node.id, incoming)
+            for field, value in self._template_values(node):
+                for match in REFERENCE_RE.finditer(value):
+                    path = match.group(1)
+                    namespace = path.split(".", 1)[0]
+                    if namespace not in {"input", "task", "nodes"}:
+                        issues.append(
+                            WorkflowValidationIssue(
+                                scope="node",
+                                id=node.id,
+                                field=field,
+                                code="invalid_reference_namespace",
+                                message="引用命名空间只允许 input、task、nodes",
+                            )
+                        )
+                        continue
+                    if namespace == "input":
+                        if "." not in path:
+                            issues.append(self._missing_reference_path("node", node.id, field, path))
+                        continue
+                    if namespace == "task":
+                        if not self._valid_task_path(path):
+                            issues.append(self._missing_reference_path("node", node.id, field, path))
+                        continue
+                    referenced_id = self._referenced_node_id(path)
+                    if referenced_id is None:
+                        issues.append(self._missing_reference_path("node", node.id, field, path))
+                        continue
+                    if referenced_id not in ancestors:
+                        issues.append(
+                            WorkflowValidationIssue(
+                                scope="node",
+                                id=node.id,
+                                field=field,
+                                code="invalid_reference",
+                                message=f"节点引用必须来自祖先节点: {referenced_id}",
+                            )
+                        )
+                        continue
+                    if not self._node_output_path_exists(
+                        actor=actor,
+                        node=nodes[referenced_id],
+                        path=path,
+                    ):
+                        issues.append(self._missing_reference_path("node", node.id, field, path))
+
+        for edge in graph.edges:
+            if edge.condition is None:
+                continue
+            path = edge.condition.field
+            parts = path.split(".")
+            if len(parts) < 3 or parts[0] != "nodes":
+                issues.append(
+                    WorkflowValidationIssue(
+                        scope="edge",
+                        id=edge.id,
+                        field="condition.field",
+                        code="invalid_reference_namespace",
+                        message="条件字段只能引用来源节点或其祖先节点输出",
+                    )
+                )
+                continue
+            referenced_id = parts[1]
+            guaranteed = self._ancestors(edge.source, incoming) | {edge.source}
+            if referenced_id not in guaranteed:
+                issues.append(
+                    WorkflowValidationIssue(
+                        scope="edge",
+                        id=edge.id,
+                        field="condition.field",
+                        code="invalid_reference",
+                        message=f"条件字段必须引用来源节点或其祖先节点: {referenced_id}",
+                    )
+                )
+                continue
+            if referenced_id not in nodes or not self._node_output_path_exists(
+                actor=actor,
+                node=nodes[referenced_id],
+                path=path,
+            ):
+                issues.append(self._missing_reference_path("edge", edge.id, "condition.field", path))
+        return issues
+
+    @staticmethod
+    def _template_values(node: WorkflowNode) -> Iterable[tuple[str, str]]:
+        if node.type == "agent":
+            yield "config.prompt", node.config.prompt
+            return
+        if node.type == "output":
+            yield "config.prompt", node.config.prompt
+            yield "config.path", node.config.path
+            yield "config.title", node.config.title
+            return
+        if node.type != "script":
+            return
+
+        def visit(value: Any, path: list[str]) -> Iterable[tuple[str, str]]:
+            if isinstance(value, str):
+                yield ".".join(["config", "params", *path]), value
+            elif isinstance(value, dict):
+                for key, item in value.items():
+                    yield from visit(item, [*path, str(key)])
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    yield from visit(item, [*path, str(index)])
+
+        yield from visit(node.config.params, [])
+
+    @staticmethod
+    def _ancestors(node_id: str, incoming: dict[str, list[str]]) -> set[str]:
+        seen: set[str] = set()
+        pending = list(incoming.get(node_id, []))
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            pending.extend(incoming.get(current, []))
+        return seen
+
+    @staticmethod
+    def _valid_task_path(path: str) -> bool:
+        parts = path.split(".")
+        if len(parts) < 2:
+            return False
+        if parts[1] == "payload":
+            return True
+        return len(parts) == 2 and parts[1] in {"task_key", "task_version", "type"}
+
+    @staticmethod
+    def _referenced_node_id(path: str) -> str | None:
+        parts = path.split(".")
+        if len(parts) < 3 or parts[0] != "nodes" or not parts[1]:
+            return None
+        return parts[1]
+
+    def _node_output_path_exists(self, *, actor: str, node: WorkflowNode, path: str) -> bool:
+        parts = path.split(".")
+        if len(parts) < 3 or parts[:1] != ["nodes"] or parts[1] != node.id or parts[2] != "output":
+            return False
+        if len(parts) == 3:
+            return True
+        schema = self._node_output_schema(actor=actor, node=node)
+        if schema is None:
+            return True
+        return self._schema_path_exists(schema, parts[3:])
+
+    def _node_output_schema(self, *, actor: str, node: WorkflowNode) -> dict[str, Any] | None:
+        if node.type == "agent":
+            if node.config.result_mode == "json":
+                return node.config.output_schema
+            return {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "additionalProperties": False,
+            }
+        if node.type == "script":
+            script = self._resolve_script(actor=actor, script_key=node.config.script_key)
+            schema = script.get("output_schema") if script else None
+            return schema if isinstance(schema, dict) else None
+        if node.type == "output":
+            return {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "content": {"type": "string"},
+                    "artifact_ids": {"type": "array"},
+                },
+                "additionalProperties": False,
+            }
+        return None
+
+    @staticmethod
+    def _schema_path_exists(schema: dict[str, Any], path: list[str]) -> bool:
+        current: Any = schema
+        for part in path:
+            if not isinstance(current, dict):
+                return False
+            properties = current.get("properties")
+            if isinstance(properties, dict) and part in properties:
+                current = properties[part]
+                continue
+            additional = current.get("additionalProperties")
+            if additional is True:
+                return True
+            if isinstance(additional, dict):
+                current = additional
+                continue
+            return False
+        return True
+
+    @staticmethod
+    def _missing_reference_path(
+        scope: str,
+        identifier: str | None,
+        field: str,
+        path: str,
+    ) -> WorkflowValidationIssue:
+        return WorkflowValidationIssue(
+            scope=scope,
+            id=identifier,
+            field=field,
+            code="invalid_reference_path",
+            message=f"引用字段不存在: {path}",
+        )
+
+    @staticmethod
+    def _dedupe_issues(issues: list[WorkflowValidationIssue]) -> list[WorkflowValidationIssue]:
+        seen: set[tuple[Any, ...]] = set()
+        result: list[WorkflowValidationIssue] = []
+        for issue in issues:
+            key = (issue.scope, issue.id, issue.field, issue.code, issue.message)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(issue)
+        return result

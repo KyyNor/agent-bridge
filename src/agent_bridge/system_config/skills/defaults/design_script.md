@@ -4,6 +4,9 @@
 
 1. `script.py`：运行在 Agent Bridge 脚本沙箱中的 Python 脚本。
 2. `input_schema`：根 `type` 必须为 `object` 的 JSON Schema，声明每个输入字段的类型、描述和 `required` 字段。
+3. `output_schema`：可为合法 JSON Schema 对象或 `null`；声明后用于校验脚本返回对象并为工作流下游提供字段提示。
+
+修改已有脚本时必须保留用户未要求变更的契约，尤其不得清空已有 output_schema；`null` 仅用于没有输出契约的新脚本。已有输出 Schema 如需移除，应由用户在脚本编辑器中显式关闭。
 
 ## 脚本运行协议（务必先理解）
 
@@ -147,3 +150,4 @@ def main(envelope):
 - 如果用了 workflow helper，是否依赖完整 workflow context？
 - 返回值是否稳定、易于消费、能被 JSON 序列化？
 - 是否提供了合法的 object `input_schema`，并覆盖脚本读取的全部参数？
+- 是否返回了 `output_schema` 字段，并保留了已有输出契约？

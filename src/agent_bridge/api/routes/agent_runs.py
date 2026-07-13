@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from agent_bridge.api.schemas import DesignAgentRequest
+from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.core.domain import NotFound, require_admin_user
 
 
@@ -90,10 +91,16 @@ def _extract_json(text: str) -> Any | None:
         return None
 
 
+_WORKFLOW_GRAPH_SCHEMA = WorkflowGraph.model_json_schema(ref_template="#/$defs/{model}")
+_WORKFLOW_GRAPH_DEFS = _WORKFLOW_GRAPH_SCHEMA.pop("$defs", {})
+_WORKFLOW_GRAPH_SCHEMA["required"] = ["nodes", "edges"]
+
 WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$defs": _WORKFLOW_GRAPH_DEFS,
     "type": "object",
     "additionalProperties": False,
-    "required": ["summary", "workflow"],
+    "required": ["summary", "notes", "workflow"],
     "properties": {
         "summary": {"type": "string"},
         "notes": {"type": "array", "items": {"type": "string"}},
@@ -116,15 +123,7 @@ WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
                 "profile_key": {"type": "string"},
                 "workflow_type": {"type": "string", "enum": ["operation", "summary"]},
                 "status": {"type": "string", "enum": ["active", "disabled"]},
-                "definition": {
-                    "type": "object",
-                    "required": ["nodes", "edges"],
-                    "properties": {
-                        "nodes": {"type": "array", "items": {"type": "object"}},
-                        "edges": {"type": "array", "items": {"type": "object"}},
-                    },
-                    "additionalProperties": True,
-                },
+                "definition": _WORKFLOW_GRAPH_SCHEMA,
             },
         },
     },
@@ -140,7 +139,7 @@ SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
         "script": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["script_key", "name", "description", "language", "code", "input_schema", "status", "owner_type", "owner_key"],
+            "required": ["script_key", "name", "description", "language", "code", "input_schema", "output_schema", "status", "owner_type", "owner_key"],
             "properties": {
                 "script_key": {"type": "string"},
                 "name": {"type": "string"},
@@ -162,6 +161,12 @@ SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
                             "uniqueItems": True,
                         },
                     },
+                },
+                "output_schema": {
+                    "anyOf": [
+                        {"type": "object"},
+                        {"type": "null"},
+                    ],
                 },
                 "status": {"type": "string", "enum": ["active", "disabled"]},
                 "owner_type": {"type": "string"},

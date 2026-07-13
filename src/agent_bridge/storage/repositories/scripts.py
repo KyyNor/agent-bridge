@@ -132,6 +132,14 @@ class ScriptsRepository:
             cursor = conn.execute("DELETE FROM scripts WHERE script_key = ?", (script_key,))
             return cursor.rowcount > 0
 
+    def has_script_runs(self, script_key: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM script_runs WHERE script_key = ? LIMIT 1",
+                (script_key,),
+            ).fetchone()
+            return row is not None
+
     def create_script_run(
         self,
         *,

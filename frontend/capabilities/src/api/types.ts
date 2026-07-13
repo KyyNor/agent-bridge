@@ -172,13 +172,13 @@ export interface WorkflowValidationIssue { scope: 'workflow' | 'node' | 'edge'; 
 export type WorkflowValidationError = WorkflowValidationIssue
 export interface WorkflowValidationResult { valid: boolean; errors: WorkflowValidationIssue[]; warnings: WorkflowValidationIssue[] }
 export interface WorkflowDraft {
-  workflow_key?: string
-  name?: string
-  description?: string
-  profile_key?: string
+  workflow_key: string
+  name: string
+  description: string
+  profile_key: string
   definition: WorkflowGraph
-  status?: string
-  workflow_type?: WorkflowType
+  status: string
+  workflow_type: WorkflowType
 }
 
 export interface WorkflowDefinition {
@@ -565,7 +565,7 @@ export interface ScriptDesignResult {
     language: string
     code: string
     input_schema: Record<string, unknown>
-    output_schema: Record<string, unknown> | null
+    output_schema?: Record<string, unknown> | null
     status: string
     owner_type: string
     owner_key: string
@@ -966,6 +966,7 @@ export interface ManagedScript {
   updated_at: string
   input_schema: Record<string, unknown>
   output_schema: Record<string, unknown> | null
+  is_builtin: boolean
   source?: 'default' | 'database'
   code?: string
   code_preview?: string

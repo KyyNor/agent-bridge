@@ -25,6 +25,7 @@ import {
   canDisableScript,
   canResetScript,
   isBuiltInScriptFamily,
+  mergeScriptDesignDraft,
   toScriptFormState,
   toScriptUpsertPayload,
   type ScriptEditableFields,
@@ -303,7 +304,7 @@ function openEdit(item: ManagedScript) {
 
 async function deleteScript(item: ManagedScript) {
   if (!canDeleteScript(item)) return
-  if (!await confirm({ title: '删除脚本', description: `确定删除脚本「${item.name}」？其运行记录将一并清除。`, destructive: true, confirmText: '删除' })) return
+  if (!await confirm({ title: '删除脚本', description: `确定删除脚本「${item.name}」？已有运行历史的脚本应改为停用。`, destructive: true, confirmText: '删除' })) return
   error.value = ''
   try {
     await api.deleteScript(item.script_key)
@@ -396,7 +397,7 @@ async function runScriptDesigner() {
 async function acceptScriptDesign() {
   const draft = scriptDesignDraft.value
   if (!draft) return
-  const state = toScriptFormState(draft, defaultInputSchema())
+  const state = toScriptFormState(mergeScriptDesignDraft(form.value, draft), defaultInputSchema())
   form.value = state.form
   outputSchemaEnabled.value = state.outputSchemaEnabled
   const saved = await saveScript()
@@ -799,7 +800,7 @@ def main(envelope):
             <div class="grid gap-3 md:grid-cols-3">
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">状态</label>
-                <Select v-model="form.status" :disabled="!canDisableScript({ script_key: form.script_key, source: editingScript?.source })">
+                <Select v-model="form.status" :disabled="!canDisableScript({ script_key: form.script_key, source: editingScript?.source, is_builtin: isBuiltInScript })">
                   <SelectTrigger class="w-full"><SelectValue placeholder="状态" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">启用</SelectItem>

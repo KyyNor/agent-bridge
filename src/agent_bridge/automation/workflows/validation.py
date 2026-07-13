@@ -9,6 +9,31 @@ from agent_bridge.automation.workflows.models import WorkflowType
 from agent_bridge.core.domain import ValidationError
 
 
+WORKFLOW_VALIDATION_INPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": True,
+    "description": "要校验的完整工作流对象。",
+    "properties": {
+        "workflow_key": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "profile_key": {"type": "string"},
+        "definition": {"type": "object"},
+        "status": {"type": "string"},
+        "workflow_type": {"type": "string"},
+    },
+    "required": [
+        "workflow_key",
+        "name",
+        "description",
+        "profile_key",
+        "definition",
+        "status",
+        "workflow_type",
+    ],
+}
+
+
 @dataclass(frozen=True)
 class WorkflowValidationIssue:
     scope: Literal["workflow", "node", "edge"]

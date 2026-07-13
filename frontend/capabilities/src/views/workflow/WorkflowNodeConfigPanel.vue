@@ -17,7 +17,10 @@ import SelectValue from '../../components/ui/select/SelectValue.vue'
 interface InsertableField { focus(): void; insertText(value: string): void }
 
 const props = defineProps<{ node: WorkflowNode; scripts: ManagedScript[]; skills: SkillPrompt[]; backends: string[]; referenceItems?: WorkflowReferenceItem[]; issues?: WorkflowValidationError[] }>()
-const emit = defineEmits<{ replace: [node: WorkflowNode] }>()
+const emit = defineEmits<{
+  replace: [node: WorkflowNode]
+  'schema-validity': [nodeId: string, valid: boolean, message: string]
+}>()
 const activeField = ref<InsertableField | null>(null)
 const promptInput = ref<InsertableField | null>(null)
 const titleInput = ref<InsertableField | null>(null)
@@ -55,6 +58,13 @@ function issueFor(...fields: string[]) {
 function issueId(field: string) {
   return `workflow-node-${props.node.id}-${field.replace(/[^a-zA-Z0-9_-]/g, '-')}-error`
 }
+function updateSchemaValidity(valid: boolean, message: string) {
+  emit('schema-validity', props.node.id, valid, message)
+}
+function setResultMode(value: string) {
+  config({ result_mode: value })
+  if (value !== 'json') updateSchemaValidity(true, '')
+}
 </script>
 
 <template>
@@ -77,7 +87,7 @@ function issueId(field: string) {
       <div><label class="mb-1 block text-xs text-muted-foreground">提示词</label><Textarea ref="promptInput" :model-value="node.config.prompt" class="min-h-28" :aria-invalid="Boolean(issueFor('prompt'))" @focusin="activeField = promptInput" @update:model-value="config({ prompt: String($event) })" /><p v-if="issueFor('prompt')" class="mt-1 text-xs text-destructive">{{ issueFor('prompt')?.message }}</p></div>
       <div><label class="mb-1 block text-xs text-muted-foreground">后端</label><Select :model-value="node.config.backend_key" @update:model-value="config({ backend_key: String($event) })"><SelectTrigger :aria-invalid="Boolean(issueFor('backend_key'))"><SelectValue /></SelectTrigger><SelectContent><SelectItem v-for="backend in backends" :key="backend" :value="backend">{{ backend }}</SelectItem></SelectContent></Select><p v-if="issueFor('backend_key')" class="mt-1 text-xs text-destructive">{{ issueFor('backend_key')?.message }}</p></div>
       <label class="flex items-center gap-2 text-sm"><input :checked="node.config.mcp_enabled" type="checkbox" @change="config({ mcp_enabled: ($event.target as HTMLInputElement).checked })" /> Profile MCP</label>
-      <template v-if="node.type === 'agent'"><div><label class="mb-1 block text-xs text-muted-foreground">输出模式</label><Select :model-value="node.config.result_mode" @update:model-value="config({ result_mode: String($event) })"><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">文本</SelectItem><SelectItem value="json">JSON</SelectItem></SelectContent></Select></div><div v-if="node.config.result_mode === 'json'"><SchemaFieldEditor :model-value="node.config.output_schema" label="JSON Schema" @update:model-value="config({ output_schema: $event })" /><p v-if="issueFor('output_schema')" class="mt-1 text-xs text-destructive">{{ issueFor('output_schema')?.message }}</p></div></template>
+      <template v-if="node.type === 'agent'"><div><label class="mb-1 block text-xs text-muted-foreground">输出模式</label><Select :model-value="node.config.result_mode" @update:model-value="setResultMode(String($event))"><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">文本</SelectItem><SelectItem value="json">JSON</SelectItem></SelectContent></Select></div><div v-if="node.config.result_mode === 'json'"><SchemaFieldEditor :model-value="node.config.output_schema" label="JSON Schema" @update:model-value="config({ output_schema: $event })" @validity-change="updateSchemaValidity" /><p v-if="issueFor('output_schema')" class="mt-1 text-xs text-destructive">{{ issueFor('output_schema')?.message }}</p></div></template>
       <template v-else><div><label class="mb-1 block text-xs text-muted-foreground">格式</label><Input :model-value="node.config.format" disabled /></div><div><label class="mb-1 block text-xs text-muted-foreground">标题</label><Input ref="titleInput" :model-value="node.config.title" :aria-invalid="Boolean(issueFor('title'))" @focusin="activeField = titleInput" @update:model-value="config({ title: String($event) })" /><p v-if="issueFor('title')" class="mt-1 text-xs text-destructive">{{ issueFor('title')?.message }}</p></div><div><label class="mb-1 block text-xs text-muted-foreground">路径</label><Input ref="pathInput" :model-value="node.config.path" :aria-invalid="Boolean(issueFor('path'))" @focusin="activeField = pathInput" @update:model-value="config({ path: String($event) })" /><p v-if="issueFor('path')" class="mt-1 text-xs text-destructive">{{ issueFor('path')?.message }}</p></div><div><label class="mb-1 block text-xs text-muted-foreground">标签（逗号分隔）</label><Input :model-value="node.config.tags.join(', ')" @update:model-value="config({ tags: String($event).split(',').map(item => item.trim()).filter(Boolean) })" /></div></template>
       <div><label class="mb-1 block text-xs text-muted-foreground">技能</label><Select @update:model-value="addSkill(String($event))"><SelectTrigger :aria-invalid="Boolean(issueFor('skill_names'))" :aria-describedby="issueFor('skill_names') ? issueId('skill_names') : undefined"><SelectValue placeholder="选择技能" /></SelectTrigger><SelectContent><SelectItem v-for="skill in skills" :key="skill.skill_name" :value="skill.skill_name">{{ skill.name || skill.skill_name }}</SelectItem></SelectContent></Select><p v-if="issueFor('skill_names')" :id="issueId('skill_names')" class="mt-1 text-xs text-destructive">{{ issueFor('skill_names')?.message || '技能配置有误' }}</p><div class="mt-2 grid gap-1"><div v-for="(skill, index) in node.config.skill_names" :key="skill" class="flex h-8 items-center gap-1 border px-2 text-xs"><span class="min-w-0 flex-1 truncate">{{ skill }}</span><Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="上移" @click="moveSkill(index, -1)"><ArrowUp class="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="下移" @click="moveSkill(index, 1)"><ArrowDown class="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" class="h-7 w-7 p-0" title="删除" @click="removeSkill(index)"><Trash2 class="h-3.5 w-3.5" /></Button></div></div></div>
     </template>

@@ -6,8 +6,21 @@
 
 ## 交付格式
 
-- 只输出一个**完整 JSON 对象**，不要输出解释、注释、补丁、伪代码或 Markdown fence。
-- 顶层对象至少包含：
+- 只输出一个设计 Agent envelope，不要输出 envelope 之外的解释、注释、补丁、伪代码或 Markdown fence。
+- envelope 结构固定为：
+
+```json
+{
+  "summary": "本次设计摘要",
+  "notes": ["需要用户注意的事项"],
+  "workflow": {
+    "workflow_key": "完整工作流对象从这里开始"
+  }
+}
+```
+
+- `summary` 必须是字符串，`notes` 必须是字符串数组，`workflow` 才是可保存、可校验的完整工作流对象。
+- `workflow` 至少包含：
   - `workflow_key`
   - `name`
   - `description`
@@ -248,7 +261,7 @@
 
 ### Step 3. 组装完整工作流对象
 
-交付时必须包含完整对象，而不是只给 `definition` 片段。所有节点和边 ID 都要稳定、唯一、可读。
+交付时 `workflow` 必须包含完整对象，而不是只给 `definition` 片段。所有节点和边 ID 都要稳定、唯一、可读。
 
 ### Step 4. 调用校验脚本
 
@@ -256,7 +269,7 @@
 
 ```text
 execute service='built-in' tool_name='run_script'
-params={"script_key":"system.validate_workflow","script_params":{"workflow":<完整对象>}}
+params={"script_key":"system.validate_workflow","script_params":{"workflow":<workflow 子对象>}}
 ```
 
 校验结果是结构化 JSON，至少包含：
@@ -290,13 +303,16 @@ params={"script_key":"system.validate_workflow","script_params":{"workflow":<完
 
 ```json
 {
-  "workflow_key": "repo-summary",
-  "name": "Repo Summary",
-  "description": "生成仓库总结报告",
-  "profile_key": "report-plane",
-  "workflow_type": "summary",
-  "status": "active",
-  "definition": {
+  "summary": "生成仓库总结报告",
+  "notes": [],
+  "workflow": {
+    "workflow_key": "repo-summary",
+    "name": "Repo Summary",
+    "description": "生成仓库总结报告",
+    "profile_key": "report-plane",
+    "workflow_type": "summary",
+    "status": "active",
+    "definition": {
     "nodes": [
       {
         "id": "get-task",
@@ -362,7 +378,8 @@ params={"script_key":"system.validate_workflow","script_params":{"workflow":<完
       { "id": "task-analyze", "source": "get-task", "target": "analyze" },
       { "id": "analyze-markdown", "source": "analyze", "target": "markdown-output" },
       { "id": "markdown-html", "source": "markdown-output", "target": "html-output" }
-    ]
+      ]
+    }
   }
 }
 ```

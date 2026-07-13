@@ -24,6 +24,7 @@ const scripts: ManagedScript[] = [
         pages: { type: 'array', description: 'Collected pages' },
       },
     },
+    is_builtin: false,
   },
 ]
 
@@ -170,6 +171,7 @@ test('edge target exposes source lineage and returns raw condition paths', () =>
     ],
   }
   const result = deriveAvailableData(graph, { kind: 'edge', id: 'classify-handle' }, scripts)
+  assert.deepEqual(result.map(item => item.path), ['nodes.classify.output.category'])
   assert.equal(result.some(item => item.path === 'nodes.classify.output.category'), true)
   assert.equal(result.some(item => item.path === 'nodes.sibling.output.value'), false)
   assert.equal(formatWorkflowReference(result.find(item => item.path === 'nodes.classify.output.category')!, 'condition'), 'nodes.classify.output.category')

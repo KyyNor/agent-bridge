@@ -56,6 +56,27 @@ function isObject(value: unknown): value is JsonObject {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
+export function parseSchemaObjectText(value: string):
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; message: string } {
+  const text = value.trim()
+  if (!text) return { ok: true, value: fieldsToSchema([]) }
+  try {
+    const parsed = JSON.parse(text)
+    if (!isObject(parsed)) return { ok: false, message: 'Schema 必须是 JSON 对象' }
+    return { ok: true, value: parsed }
+  } catch {
+    return { ok: false, message: '高级 JSON 不是合法对象' }
+  }
+}
+
+export function validateSchemaFieldNames(fields: SchemaField[], label: string): string {
+  const names = fields.map(field => field.name.trim())
+  if (names.some(name => !name)) return `${label}字段名不能为空`
+  if (new Set(names).size !== names.length) return `${label}字段名不能重复`
+  return ''
+}
+
 function isSupportedFieldType(value: unknown): value is SchemaFieldType {
   return typeof value === 'string' && (SCHEMA_FIELD_TYPES as readonly string[]).includes(value)
 }
@@ -116,7 +137,10 @@ export function schemaToFields(schema: Record<string, unknown> | null | undefine
   }))
 }
 
-export function fieldsToSchema(fields: SchemaField[]): Record<string, unknown> {
+export function fieldsToSchema(
+  fields: SchemaField[],
+  source?: Record<string, unknown> | null,
+): Record<string, unknown> {
   const properties = Object.fromEntries(
     fields.map(field => [
       field.name,
@@ -129,6 +153,7 @@ export function fieldsToSchema(fields: SchemaField[]): Record<string, unknown> {
 
   return {
     type: 'object',
+    ...(source && typeof source.description === 'string' ? { description: source.description } : {}),
     properties,
     required: fields.filter(field => field.required).map(field => field.name),
     additionalProperties: false,

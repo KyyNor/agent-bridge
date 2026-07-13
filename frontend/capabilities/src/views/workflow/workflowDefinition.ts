@@ -17,6 +17,50 @@ export function createDefaultGraph(type: WorkflowType, defaultBackend: string): 
   }
 }
 
+export function migrateWorkflowGraph(
+  graph: WorkflowGraph,
+  from: WorkflowType,
+  to: WorkflowType,
+  defaultBackend: string,
+): WorkflowGraph {
+  if (from === to) return structuredClone(graph)
+
+  const protectedIds = new Set(['markdown-output', 'html-output'])
+  if (to === 'operation') {
+    const nodes = graph.nodes.filter(node => !protectedIds.has(node.id))
+    const nodeIds = new Set(nodes.map(node => node.id))
+    return {
+      nodes,
+      edges: graph.edges.filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target)),
+    }
+  }
+
+  const nodes = graph.nodes.filter(node => node.type !== 'output' && !protectedIds.has(node.id))
+  const nodeIds = new Set(nodes.map(node => node.id))
+  const edges = graph.edges.filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+  const outgoing = new Set(edges.map(edge => edge.source))
+  const usedEdgeIds = new Set(edges.map(edge => edge.id))
+  const maxX = nodes.reduce((value, node) => Math.max(value, node.position.x), 0)
+  const summary = createDefaultGraph('summary', defaultBackend)
+  summary.nodes[0].position = { x: maxX + 240, y: 120 }
+  summary.nodes[1].position = { x: maxX + 560, y: 120 }
+
+  for (const node of nodes) {
+    if (outgoing.has(node.id)) continue
+    const base = `${node.id}-markdown-output`
+    let edgeId = base
+    let suffix = 2
+    while (usedEdgeIds.has(edgeId)) edgeId = `${base}-${suffix++}`
+    usedEdgeIds.add(edgeId)
+    edges.push({ id: edgeId, source: node.id, target: 'markdown-output', condition: null })
+  }
+
+  return {
+    nodes: [...nodes, ...summary.nodes],
+    edges: [...edges, ...summary.edges],
+  }
+}
+
 export function isProtectedSummaryNode(node: WorkflowNode, workflowType: WorkflowType) {
   return workflowType === 'summary' && (node.id === 'markdown-output' || node.id === 'html-output')
 }

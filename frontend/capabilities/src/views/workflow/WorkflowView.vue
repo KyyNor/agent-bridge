@@ -20,7 +20,7 @@ import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
-import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge } from './workflowDefinition'
+import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
   ALL_STATUS_SENTINEL,
@@ -132,6 +132,7 @@ const routeError = ref('')
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
 const graphErrors = ref<WorkflowValidationError[]>([])
+const schemaEditorErrors = ref<Record<string, string>>({})
 const runValidationGuard = ref({ validating: false, token: 0 })
 const editedWorkflowRunBusy = computed(() => runValidationGuard.value.validating || testing.value)
 type WorkflowConfigDrawerMode = 'overlay' | 'fullscreen'
@@ -197,10 +198,23 @@ watch(
   },
   { deep: true },
 )
+watch(
+  () => form.value.definition.nodes.map(node => node.id),
+  (nodeIds) => {
+    const activeIds = new Set(nodeIds)
+    const next = Object.fromEntries(
+      Object.entries(schemaEditorErrors.value).filter(([nodeId]) => activeIds.has(nodeId)),
+    )
+    if (Object.keys(next).length !== Object.keys(schemaEditorErrors.value).length) {
+      schemaEditorErrors.value = next
+    }
+  },
+)
 function resetForm(next: typeof form.value) {
   invalidateWorkflowValidationRun(runValidationGuard.value)
   suppressDirty = true
   form.value = { ...next }
+  schemaEditorErrors.value = {}
   formDirty.value = false
   // let the deep watcher's synchronous flush pass before re-enabling
   void nextTick(() => {
@@ -534,6 +548,11 @@ function workflowDraft(): WorkflowDraft {
 
 async function validateWorkflowDraft(options: { isCurrent?: () => boolean } = {}): Promise<boolean | null> {
   graphErrors.value = []
+  const schemaError = Object.values(schemaEditorErrors.value).find(Boolean)
+  if (schemaError) {
+    formError.value = `保存前请修正 Schema：${schemaError}`
+    return false
+  }
   const validation = await api.validateWorkflow(workflowDraft())
   if (options.isCurrent && !options.isCurrent()) return null
   if (!hasBlockingWorkflowValidationErrors(validation)) return true
@@ -576,8 +595,9 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
 }
 
 function changeWorkflowType(value: WorkflowType) {
+  const previous = form.value.workflow_type
   form.value.workflow_type = value
-  form.value.definition = createDefaultGraph(value, defaultBackend.value)
+  form.value.definition = migrateWorkflowGraph(form.value.definition, previous, value, defaultBackend.value)
   selectedNodeId.value = null
   selectedEdgeId.value = null
   configDrawerOpen.value = false
@@ -621,6 +641,13 @@ function setConfigDrawerMode(mode: WorkflowConfigDrawerMode) {
 
 function replaceNode(node: WorkflowNode) {
   form.value.definition = { ...form.value.definition, nodes: form.value.definition.nodes.map(item => item.id === node.id ? node : item) }
+}
+
+function setNodeSchemaValidity(nodeId: string, valid: boolean, message: string) {
+  const next = { ...schemaEditorErrors.value }
+  if (valid) delete next[nodeId]
+  else next[nodeId] = message || 'Schema 不合法'
+  schemaEditorErrors.value = next
 }
 
 function replaceEdge(edge: WorkflowEdge) {
@@ -2417,7 +2444,7 @@ async function confirmClearWorkflow() {
               @update:open="setConfigDrawerOpen"
               @update:mode="setConfigDrawerMode"
             >
-              <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" :reference-items="selectedNodeReferenceItems" :issues="selectedNodeIssues" @replace="replaceNode" />
+              <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" :reference-items="selectedNodeReferenceItems" :issues="selectedNodeIssues" @replace="replaceNode" @schema-validity="setNodeSchemaValidity" />
               <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" :reference-items="selectedEdgeReferenceItems" :issues="selectedEdgeIssues" @replace="replaceEdge" />
             </WorkflowConfigDrawer>
           </div>

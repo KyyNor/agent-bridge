@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
+from agent_bridge.automation.workflows.validation import WORKFLOW_VALIDATION_INPUT_SCHEMA
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool
 from agent_bridge.capability_hub.models import ToolType
 from agent_bridge.core.domain import NotFound, ValidationError
@@ -64,9 +65,7 @@ class PlatformBuiltinProvider:
                     "type": "object",
                     "properties": {
                         "workflow": {
-                            "type": "object",
-                            "additionalProperties": True,
-                            "description": "要校验的工作流定义或草稿。",
+                            **WORKFLOW_VALIDATION_INPUT_SCHEMA,
                         },
                     },
                     "required": ["workflow"],

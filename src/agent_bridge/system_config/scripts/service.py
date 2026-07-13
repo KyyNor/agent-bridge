@@ -14,6 +14,7 @@ from uuid import uuid4
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from agent_bridge.automation.workflows.validation import WORKFLOW_VALIDATION_INPUT_SCHEMA
 from agent_bridge.core.config import AgentBridgePaths, load_server_config
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -65,9 +66,7 @@ class ScriptService:
                     "additionalProperties": False,
                     "properties": {
                         "workflow": {
-                            "type": "object",
-                            "additionalProperties": True,
-                            "description": "Workflow definition draft to validate.",
+                            **WORKFLOW_VALIDATION_INPUT_SCHEMA,
                         },
                     },
                     "required": ["workflow"],
@@ -160,6 +159,8 @@ class ScriptService:
         normalized_key = self._validate_script_key(script_key)
         if normalized_key in self._builtins:
             raise ValidationError("cannot delete built-in script")
+        if self.store.scripts.has_script_runs(normalized_key):
+            raise ValidationError("脚本已有运行历史，请改为 disabled，不能删除")
         deleted = self.store.scripts.delete_script(normalized_key)
         if not deleted:
             raise NotFound("script not found")
@@ -358,10 +359,15 @@ class ScriptService:
     def _with_script_source(self, script: dict[str, Any]) -> dict[str, Any]:
         payload = dict(script)
         definition = self._builtins.get(str(payload.get("script_key") or ""))
-        if definition is not None and self._is_materialized_default(payload, definition):
-            payload["source"] = "default"
-        else:
+        if definition is None:
             payload["source"] = "database"
+            return payload
+        if payload.get("updated_by") == DEFAULT_SCRIPT_ACTOR:
+            if not self._is_materialized_default(payload, definition):
+                return self._materialize_default_script(definition)
+            payload["source"] = "default"
+            return payload
+        payload["source"] = "database"
         return payload
 
     def _materialize_default_script(self, definition: BuiltInScriptDefinition) -> dict[str, Any]:
@@ -462,6 +468,7 @@ class ScriptService:
     def _script_payload(self, script: dict[str, Any], *, include_code: bool) -> dict[str, Any]:
         payload = dict(script)
         payload.setdefault("source", "database")
+        payload["is_builtin"] = str(payload.get("script_key") or "") in self._builtins
         if not include_code:
             payload.pop("code", None)
             payload["code_preview"] = str(script.get("code") or "")[:160]

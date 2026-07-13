@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
-def test_validate_workflow_endpoint_returns_structured_result(wm_paths):
+def test_validate_workflow_endpoint_requires_complete_workflow(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService
 
@@ -15,7 +15,46 @@ def test_validate_workflow_endpoint_returns_structured_result(wm_paths):
     )
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"valid": True, "errors": [], "warnings": []}
+    payload = response.json()
+    assert payload["valid"] is False
+    assert {issue["field"] for issue in payload["errors"]} >= {
+        "workflow_key",
+        "name",
+        "description",
+        "profile_key",
+        "status",
+    }
+
+
+def test_validate_workflow_endpoint_reports_missing_profile(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
+    response = TestClient(create_app(wm_paths, {"root"})).post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={
+            "workflow": {
+                "workflow_key": "missing-profile",
+                "name": "Missing Profile",
+                "description": "",
+                "profile_key": "does-not-exist",
+                "workflow_type": "operation",
+                "definition": {"nodes": [], "edges": []},
+                "status": "active",
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] is False
+    assert any(
+        issue["field"] == "profile_key"
+        and issue["code"] == "missing_profile"
+        and issue["message"] == "Profile 不存在"
+        for issue in response.json()["errors"]
+    )
 
 
 def test_validate_workflow_endpoint_does_not_persist_draft(wm_paths):

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationIssuesFor } from '../src/api/client.ts'
-import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge, isProtectedSummaryNode } from '../src/views/workflow/workflowDefinition.ts'
+import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge, isProtectedSummaryNode, migrateWorkflowGraph } from '../src/views/workflow/workflowDefinition.ts'
 import type { ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
 
 test('summary graph creates protected markdown and html pair', () => {
@@ -14,7 +14,7 @@ test('summary graph creates protected markdown and html pair', () => {
 
 test('manual input fields are derived from selected script schemas', () => {
   const graph: WorkflowGraph = { nodes: [{ id: 'collect', type: 'script', name: 'Collect', position: { x: 0, y: 0 }, config: { script_key: 'collect', params: { repo: '{{ input.repo }}', limit: '{{ input.limit }}' }, timeout_seconds: 60 } }], edges: [] }
-  const scripts: ManagedScript[] = [{ script_key: 'collect', name: 'Collect', description: '', language: 'python', status: 'active', owner_type: 'system', owner_key: '', content_hash: '', created_by: '', updated_by: '', created_at: '', updated_at: '', input_schema: { type: 'object', properties: { repo: { type: 'string' }, limit: { type: 'integer' } }, required: ['repo'] } }]
+    const scripts: ManagedScript[] = [{ script_key: 'collect', name: 'Collect', description: '', language: 'python', status: 'active', owner_type: 'system', owner_key: '', content_hash: '', created_by: '', updated_by: '', created_at: '', updated_at: '', input_schema: { type: 'object', properties: { repo: { type: 'string' }, limit: { type: 'integer' } }, required: ['repo'] }, output_schema: null, is_builtin: false }]
   assert.deepEqual(deriveManualInputFields(graph, scripts), [
     { path: 'input.limit', type: 'integer', required: false, description: '' },
     { path: 'input.repo', type: 'string', required: true, description: '' },
@@ -52,7 +52,9 @@ test('validateWorkflow posts draft workflow without saving it', async () => {
     const result = await api.validateWorkflow({
       workflow_key: 'draft-only',
       name: 'Draft Only',
+      description: '',
       profile_key: 'report-plane',
+      status: 'active',
       workflow_type: 'operation',
       definition: { nodes: [], edges: [] },
     })
@@ -65,7 +67,9 @@ test('validateWorkflow posts draft workflow without saving it', async () => {
       workflow: {
         workflow_key: 'draft-only',
         name: 'Draft Only',
+        description: '',
         profile_key: 'report-plane',
+        status: 'active',
         workflow_type: 'operation',
         definition: { nodes: [], edges: [] },
       },
@@ -73,6 +77,33 @@ test('validateWorkflow posts draft workflow without saving it', async () => {
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('workflow type migration preserves ordinary DAG nodes and valid edges', () => {
+  const operation: WorkflowGraph = {
+    nodes: [
+      { id: 'collect', type: 'agent', name: 'Collect', position: { x: 0, y: 0 }, config: { prompt: '', backend_key: 'codex', mcp_enabled: false, skill_names: [], result_mode: 'text', output_schema: null } },
+      { id: 'clean', type: 'script', name: 'Clean', position: { x: 160, y: 0 }, config: { script_key: 'clean', params: {}, timeout_seconds: 60 } },
+      { id: 'old-output', type: 'output', name: 'Old Output', position: { x: 320, y: 0 }, config: { format: 'markdown', title: 'Old', path: 'old.md', tags: [], prompt: '', backend_key: 'codex', mcp_enabled: false, skill_names: [] } },
+    ],
+    edges: [
+      { id: 'collect-clean', source: 'collect', target: 'clean', condition: null },
+      { id: 'clean-old', source: 'clean', target: 'old-output', condition: null },
+      { id: 'dangling', source: 'missing', target: 'clean', condition: null },
+    ],
+  }
+
+  const summary = migrateWorkflowGraph(operation, 'operation', 'summary', 'codex')
+
+  assert.deepEqual(summary.nodes.map(node => node.id), ['collect', 'clean', 'markdown-output', 'html-output'])
+  assert.equal(summary.edges.some(edge => edge.id === 'collect-clean'), true)
+  assert.equal(summary.edges.some(edge => edge.source === 'clean' && edge.target === 'markdown-output'), true)
+  assert.equal(summary.edges.some(edge => edge.id === 'markdown-to-html'), true)
+  assert.equal(summary.edges.some(edge => edge.id === 'dangling' || edge.id === 'clean-old'), false)
+
+  const roundTrip = migrateWorkflowGraph(summary, 'summary', 'operation', 'codex')
+  assert.deepEqual(roundTrip.nodes.map(node => node.id), ['collect', 'clean'])
+  assert.deepEqual(roundTrip.edges.map(edge => edge.id), ['collect-clean'])
 })
 
 test('workflow validation run guard blocks duplicates and ignores stale responses', () => {

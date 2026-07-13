@@ -126,6 +126,7 @@ class AgentBridgeService:
         self.workflow_executor = WorkflowDagExecutor(
             store=store,
             handlers=self.workflow_handlers,
+            validate_structure_on_run=False,
         )
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
@@ -176,29 +177,9 @@ class AgentBridgeService:
         self.store.init_schema()
 
     def validate_workflow_draft(self, *, actor: str, workflow: dict[str, Any]) -> dict[str, Any]:
-        draft = dict(workflow)
-        synthetic_profile = not draft.get("profile_key")
-        draft.setdefault("workflow_key", "__validation__")
-        draft.setdefault("name", "Validation Draft")
-        draft.setdefault("description", "")
-        draft.setdefault("status", "active")
-        draft.setdefault("workflow_type", "operation")
-        if synthetic_profile:
-            draft["profile_key"] = "__validation__"
-
-        result = self.workflows.validator.validate(actor=actor, workflow=draft)
+        result = self.workflows.validator.validate(actor=actor, workflow=workflow)
         errors = [asdict(issue) for issue in result.errors]
         warnings = [asdict(issue) for issue in result.warnings]
-        if synthetic_profile:
-            errors = [
-                issue
-                for issue in errors
-                if not (
-                    issue["scope"] == "workflow"
-                    and issue["field"] == "profile_key"
-                    and issue["code"] == "missing_profile"
-                )
-            ]
         return {"valid": not errors, "errors": errors, "warnings": warnings}
 
     def ensure_weknora_agents(self) -> None:

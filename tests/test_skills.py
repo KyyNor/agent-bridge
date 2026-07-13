@@ -39,6 +39,21 @@ def test_design_workflow_skill_mentions_structured_validation_and_omits_history_
     assert "definition" in prompt
     assert "workflow_js" not in prompt
     assert "第一版明确不做" not in prompt
+    assert '"summary"' in prompt
+    assert '"notes"' in prompt
+    assert '"workflow"' in prompt
+    assert '"script_params":{"workflow":<workflow 子对象>}' in prompt
+
+
+def test_design_script_skill_preserves_and_documents_output_schema(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    prompt = service.skills.get_skill("root", "design_script")["prompt"]
+
+    assert "output_schema" in prompt
+    assert "不得清空已有 output_schema" in prompt
 
 
 def test_list_skills_includes_design_script(wm_paths):

@@ -31,11 +31,11 @@ export function deriveAvailableData(
     ? deriveEdgeSourceLineage(graph, target.id)
     : deriveNodeAncestors(graph, target.id)
   const lineage = lineageIds.map(id => nodesById.get(id)).filter((node): node is WorkflowNode => Boolean(node))
-  const items: WorkflowReferenceItem[] = [
-    ...deriveInputReferences(graph, scriptByKey),
-  ]
+  const items: WorkflowReferenceItem[] = target.kind === 'node'
+    ? deriveInputReferences(graph, scriptByKey)
+    : []
 
-  if (lineage.some(node => node.type === 'get_task')) {
+  if (target.kind === 'node' && lineage.some(node => node.type === 'get_task')) {
     items.push(
       { path: 'task.task_key', label: '任务 Key', type: 'string', description: '当前任务标识' },
       { path: 'task.payload', label: '任务负载', type: 'object', description: '当前任务的完整 payload' },

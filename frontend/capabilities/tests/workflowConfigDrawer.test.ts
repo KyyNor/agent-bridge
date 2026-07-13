@@ -55,3 +55,27 @@ test('node skill_names validation issue is surfaced in the skill picker', async 
   assert.match(panel, /:aria-invalid="Boolean\(issueFor\('skill_names'\)\)"/)
   assert.match(panel, /技能配置有误/)
 })
+
+test('agent output schema validity is wired to workflow save guards', async () => {
+  const panel = await readFile(new URL('../src/views/workflow/WorkflowNodeConfigPanel.vue', import.meta.url), 'utf8')
+  const editor = await readFile(new URL('../src/components/SchemaFieldEditor.vue', import.meta.url), 'utf8')
+  const view = await readFile(new URL('../src/views/workflow/WorkflowView.vue', import.meta.url), 'utf8')
+
+  assert.match(editor, /validity-change/)
+  assert.match(panel, /schema-validity/)
+  assert.match(panel, /@validity-change=/)
+  assert.match(panel, /value !== 'json'\) updateSchemaValidity\(true, ''\)/)
+  assert.match(view, /@schema-validity=/)
+  assert.match(view, /schemaEditorErrors/)
+  assert.match(view, /activeIds\.has\(nodeId\)/)
+  assert.match(view, /保存前请修正 Schema/)
+})
+
+test('script save validates both mounted schema editors before the API call', async () => {
+  const view = await readFile(new URL('../src/views/system/ScriptsView.vue', import.meta.url), 'utf8')
+
+  assert.match(view, /inputSchemaEditor\.value\?\.validate\(\)/)
+  assert.match(view, /outputSchemaEditor\.value\?\.validate\(\)/)
+  assert.match(view, /if \(!validateSchemaEditors\(\)\) return null/)
+  assert.ok(view.indexOf('if (!validateSchemaEditors()) return null') < view.indexOf('api.upsertScript'))
+})
