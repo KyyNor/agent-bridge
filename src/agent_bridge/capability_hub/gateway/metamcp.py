@@ -207,7 +207,7 @@ def create_mcp_server(
         limit: int = Field(default=20, description="本次最多返回的产物数量。"),
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
-        return service.workflows.search_artifacts(
+        result = service.workflows.search_artifacts(
             actor=default_user(),
             profile_key=active_profile,
             query=query,
@@ -220,6 +220,14 @@ def create_mcp_server(
             limit=limit,
             trusted_profile_context=True,
         )
+        # 引导 agent：命中结果默认只含摘要片段，用完整 path 再查一次可取全文。
+        # 仅在有数据时提示，避免空结果噪声。
+        if result.get("items"):
+            result["hint"] = (
+                "结果默认只含摘要片段。将任一结果的完整 path 作为 path 参数重新调用本工具，"
+                "即可获取该产物的完整正文。"
+            )
+        return result
 
     active_workflow_context = workflow_context or _request_workflow_context.get()
     if _has_complete_workflow_context(active_workflow_context):
