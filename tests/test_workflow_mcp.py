@@ -180,8 +180,9 @@ def test_execute_builtin_load_skill_returns_design_workflow_prompt(wm_paths):
 
     assert result["success"] is True
     assert result["result"]["skill_name"] == "design_workflow"
-    assert "workflow_get_task" in result["result"]["prompt"]
-    assert "workflow_set_task" in result["result"]["prompt"]
+    assert "system.validate_workflow" in result["result"]["prompt"]
+    assert "run_script" in result["result"]["prompt"]
+    assert "code" in result["result"]["prompt"]
 
 
 def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):

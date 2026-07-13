@@ -587,7 +587,7 @@ function errorMessage(e: unknown) {
             <h3 class="text-sm font-semibold text-foreground">入参与出参</h3>
             <p class="mt-2">
               脚本入口必须实现 <span class="font-mono text-foreground">main(envelope)</span>。页面里的测试运行会把自定义
-              <span class="font-mono text-foreground"> params </span> 作为对象传到
+              <span class="font-mono text-foreground"> params (JSON 对象) </span> 作为对象传到
               <span class="font-mono text-foreground">envelope["script_params"]</span>，并把 profile / workflow 信息放进
               <span class="font-mono text-foreground">envelope["profile_key"]</span> 与
               <span class="font-mono text-foreground">envelope["workflow"]</span>。
