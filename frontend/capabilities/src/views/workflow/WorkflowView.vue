@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, HelpCircle, Maximize2, Minimize2, Play, Save } from 'lucide-vue-next'
-import { api, hasBlockingWorkflowValidationErrors, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
+import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, AgentRun, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
@@ -132,6 +132,8 @@ const routeError = ref('')
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
 const graphErrors = ref<WorkflowValidationError[]>([])
+const runValidationGuard = ref({ validating: false, token: 0 })
+const editedWorkflowRunBusy = computed(() => runValidationGuard.value.validating || testing.value)
 type WorkflowConfigDrawerMode = 'overlay' | 'fullscreen'
 const configDrawerOpen = ref(false)
 const configDrawerMode = ref<WorkflowConfigDrawerMode>('overlay')
@@ -191,10 +193,12 @@ watch(
   () => {
     if (suppressDirty) return
     formDirty.value = true
+    invalidateWorkflowValidationRun(runValidationGuard.value)
   },
   { deep: true },
 )
 function resetForm(next: typeof form.value) {
+  invalidateWorkflowValidationRun(runValidationGuard.value)
   suppressDirty = true
   form.value = { ...next }
   formDirty.value = false
@@ -528,9 +532,10 @@ function workflowDraft(): WorkflowDraft {
   }
 }
 
-async function validateWorkflowDraft(): Promise<boolean> {
+async function validateWorkflowDraft(options: { isCurrent?: () => boolean } = {}): Promise<boolean | null> {
   graphErrors.value = []
   const validation = await api.validateWorkflow(workflowDraft())
+  if (options.isCurrent && !options.isCurrent()) return null
   if (!hasBlockingWorkflowValidationErrors(validation)) return true
   graphErrors.value = validation.errors
   formError.value = workflowValidationErrorMessage(validation)
@@ -651,23 +656,30 @@ function manualInput(): Record<string, unknown> | null {
 }
 
 async function runEditedWorkflow() {
+  if (editedWorkflowRunBusy.value) return
+  const validationToken = beginWorkflowValidationRun(runValidationGuard.value)
+  if (validationToken === null) return
+  const isCurrentValidation = () => isCurrentWorkflowValidationRun(runValidationGuard.value, validationToken)
   formError.value = ''
   try {
-    if (!await validateWorkflowDraft()) return
+    const valid = await validateWorkflowDraft({ isCurrent: isCurrentValidation })
+    if (!isCurrentValidation() || valid !== true) return
+    if (formDirty.value) {
+      formError.value = '有未保存的修改，请先保存后再测试运行'
+      return
+    }
+    const workflow = selectedWorkflow.value
+    if (!workflow) return
+    const input = hasTaskNode.value ? {} : manualInput()
+    if (input === null) return
+    await runWorkflow(workflow, input)
   } catch (e: unknown) {
+    if (!isCurrentValidation()) return
     formError.value = errorMessage(e)
     graphErrors.value = parseWorkflowIssues(formError.value)
-    return
+  } finally {
+    finishWorkflowValidationRun(runValidationGuard.value, validationToken)
   }
-  if (formDirty.value) {
-    formError.value = '有未保存的修改，请先保存后再测试运行'
-    return
-  }
-  const workflow = selectedWorkflow.value
-  if (!workflow) return
-  const input = hasTaskNode.value ? {} : manualInput()
-  if (input === null) return
-  await runWorkflow(workflow, input)
 }
 
 
@@ -2333,7 +2345,7 @@ async function confirmClearWorkflow() {
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" :disabled="testing" @click="runEditedWorkflow">
+          <Button variant="outline" size="sm" :disabled="editedWorkflowRunBusy" @click="runEditedWorkflow">
             <Play class="mr-1.5 h-4 w-4" />
             测试运行
           </Button>

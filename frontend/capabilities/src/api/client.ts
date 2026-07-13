@@ -97,6 +97,30 @@ export function workflowValidationErrorMessage(result: WorkflowValidationResult)
   return result.errors.map(issue => issue.message).filter(Boolean).join('\n') || '工作流校验未通过'
 }
 
+export interface WorkflowValidationRunGuard { validating: boolean; token: number }
+
+export function beginWorkflowValidationRun(guard: WorkflowValidationRunGuard): number | null {
+  if (guard.validating) return null
+  guard.validating = true
+  guard.token += 1
+  return guard.token
+}
+
+export function invalidateWorkflowValidationRun(guard: WorkflowValidationRunGuard): void {
+  guard.token += 1
+  guard.validating = false
+}
+
+export function isCurrentWorkflowValidationRun(guard: WorkflowValidationRunGuard, token: number | null): boolean {
+  return token !== null && guard.validating && guard.token === token
+}
+
+export function finishWorkflowValidationRun(guard: WorkflowValidationRunGuard, token: number | null): boolean {
+  if (!isCurrentWorkflowValidationRun(guard, token)) return false
+  guard.validating = false
+  return true
+}
+
 function headers(): Record<string, string> {
   return { 'X-Agent-Bridge-User': DEFAULT_USER }
 }

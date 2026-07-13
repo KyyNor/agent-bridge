@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { api, hasBlockingWorkflowValidationErrors, workflowValidationIssuesFor } from '../src/api/client.ts'
+import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationIssuesFor } from '../src/api/client.ts'
 import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge, isProtectedSummaryNode } from '../src/views/workflow/workflowDefinition.ts'
 import type { ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
 
@@ -73,4 +73,23 @@ test('validateWorkflow posts draft workflow without saving it', async () => {
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('workflow validation run guard blocks duplicates and ignores stale responses', () => {
+  const guard = { validating: false, token: 0 }
+
+  const first = beginWorkflowValidationRun(guard)
+  assert.equal(first, 1)
+  assert.equal(guard.validating, true)
+  assert.equal(beginWorkflowValidationRun(guard), null)
+
+  invalidateWorkflowValidationRun(guard)
+  assert.equal(isCurrentWorkflowValidationRun(guard, first), false)
+
+  const second = beginWorkflowValidationRun(guard)
+  assert.equal(second, 3)
+  assert.equal(finishWorkflowValidationRun(guard, first), false)
+  assert.equal(guard.validating, true)
+  assert.equal(finishWorkflowValidationRun(guard, second), true)
+  assert.equal(guard.validating, false)
 })
