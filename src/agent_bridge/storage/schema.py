@@ -332,6 +332,7 @@ CREATE TABLE IF NOT EXISTS scripts (
   owner_key TEXT NOT NULL DEFAULT '',
   content_hash TEXT NOT NULL DEFAULT '',
   input_schema_json TEXT NOT NULL DEFAULT '{"type":"object","properties":{},"additionalProperties":true}',
+  output_schema_json TEXT,
   created_by TEXT NOT NULL,
   updated_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

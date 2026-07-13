@@ -256,6 +256,7 @@ class ScriptRequest(BaseModel):
     language: str = "python"
     code: str
     input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None = None
     status: str = "active"
     owner_type: str = "system"
     owner_key: str = ""

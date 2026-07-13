@@ -44,6 +44,54 @@ def test_script_input_schema_round_trip_and_validation(wm_paths):
         service.scripts.test_script(actor="root", script_key="schema-test", script_params={"repo": 1}, timeout_seconds=10)
 
 
+def test_script_output_schema_round_trip_and_validation(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    output_schema = {
+        "type": "object",
+        "required": ["items"],
+        "properties": {"items": {"type": "array"}},
+    }
+    service.scripts.upsert_script(
+        actor="root",
+        script_key="schema.output",
+        name="Output",
+        description="",
+        language="python",
+        code="def main(envelope):\n    return {'items': []}\n",
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
+        output_schema=output_schema,
+        status="active",
+        owner_type="system",
+        owner_key="",
+    )
+    script = service.scripts.get_script("root", "schema.output")
+    assert script["output_schema"] == output_schema
+
+    service.scripts.upsert_script(
+        actor="root",
+        script_key="schema.bad-output",
+        name="Bad",
+        description="",
+        language="python",
+        code="def main(envelope):\n    return {'items': 'bad'}\n",
+        input_schema=PERMISSIVE_INPUT_SCHEMA,
+        output_schema=output_schema,
+        status="active",
+        owner_type="system",
+        owner_key="",
+    )
+    with pytest.raises(ValidationError, match="output_schema"):
+        service.scripts.test_script(
+            actor="root",
+            script_key="schema.bad-output",
+            script_params={},
+            timeout_seconds=10,
+        )
+    run = service.scripts.list_runs("root", "schema.bad-output")["runs"][0]
+    assert run["status"] == "failed"
+    assert "output_schema invalid" in run["error_message"]
+
+
 WORKFLOW_SCRIPT = """
 from agent_bridge_runtime import workflow_get_task, workflow_set_task, workflow_run_log
 

@@ -64,6 +64,7 @@ class ScriptService:
         owner_type: str,
         owner_key: str,
         input_schema: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
@@ -78,7 +79,10 @@ class ScriptService:
         normalized_name = name.strip() or normalized_key
         if input_schema is None:
             raise ValidationError("input_schema is required")
-        normalized_input_schema = self._validate_input_schema(input_schema)
+        normalized_input_schema = self._validate_schema("input_schema", input_schema, require_object_root=True)
+        normalized_output_schema = None
+        if output_schema is not None:
+            normalized_output_schema = self._validate_schema("output_schema", output_schema)
         script = self.store.scripts.upsert_script(
             script_key=normalized_key,
             name=normalized_name,
@@ -86,6 +90,7 @@ class ScriptService:
             language=normalized_language,
             code=normalized_code,
             input_schema=normalized_input_schema,
+            output_schema=normalized_output_schema,
             status=normalized_status,
             owner_type=normalized_owner_type,
             owner_key=normalized_owner_key,
@@ -186,6 +191,14 @@ class ScriptService:
                         error_message = "script main(envelope) must return a JSON object"
                     else:
                         result = parsed
+                        validation_error = self._validate_script_output(
+                            script["script_key"],
+                            script.get("output_schema"),
+                            result,
+                        )
+                        if validation_error is not None:
+                            status = "failed"
+                            error_message = validation_error
         run = self.store.scripts.create_script_run(
             run_id=run_id,
             script_key=script["script_key"],
@@ -336,14 +349,16 @@ class ScriptService:
     def _content_hash(self, code: str) -> str:
         return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
-    def _validate_input_schema(self, input_schema: dict[str, Any]) -> dict[str, Any]:
-        if input_schema.get("type") != "object":
-            raise ValidationError("input_schema 根类型必须为 object")
+    def _validate_schema(
+        self, schema_name: str, schema: dict[str, Any], *, require_object_root: bool = False
+    ) -> dict[str, Any]:
+        if require_object_root and schema.get("type") != "object":
+            raise ValidationError(f"{schema_name} 根类型必须为 object")
         try:
-            Draft202012Validator.check_schema(input_schema)
+            Draft202012Validator.check_schema(schema)
         except SchemaError as exc:
-            raise ValidationError(f"input_schema 非法: {exc.message}") from exc
-        return input_schema
+            raise ValidationError(f"{schema_name} 非法: {exc.message}") from exc
+        return schema
 
     def _validate_script_params(
         self, script_key: str, input_schema: dict[str, Any], script_params: dict[str, Any]
@@ -359,6 +374,28 @@ class ScriptService:
         expected = json.dumps(input_schema, ensure_ascii=False, separators=(",", ":"))
         raise ValidationError(
             f"script params invalid script={script_key} field={path}: {first.message}; expected_schema={expected}"
+        )
+
+    def _validate_script_output(
+        self,
+        script_key: str,
+        output_schema: dict[str, Any] | None,
+        result: dict[str, Any],
+    ) -> str | None:
+        if output_schema is None:
+            return None
+        errors = sorted(
+            Draft202012Validator(output_schema).iter_errors(result),
+            key=lambda item: list(item.absolute_path),
+        )
+        if not errors:
+            return None
+        first = errors[0]
+        path = ".".join(str(part) for part in first.absolute_path) or "<root>"
+        expected = json.dumps(output_schema, ensure_ascii=False, separators=(",", ":"))
+        return (
+            f"output_schema invalid script={script_key} field={path}: "
+            f"{first.message}; expected_schema={expected}"
         )
 
     def _bounded(self, value: str | bytes) -> str:
