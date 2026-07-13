@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nextTick, ref } from "vue"
 import type { HTMLAttributes } from "vue"
 import { useVModel } from "@vueuse/core"
 import { cn } from "@/lib/utils"
@@ -17,10 +18,32 @@ const modelValue = useVModel(props, "modelValue", emits, {
   passive: true,
   defaultValue: props.defaultValue,
 })
+
+const inputRef = ref<HTMLInputElement>()
+
+function focus() {
+  inputRef.value?.focus()
+}
+
+function insertText(value: string) {
+  const input = inputRef.value
+  if (!input) return
+  const current = String(modelValue.value ?? "")
+  const start = input.selectionStart ?? current.length
+  const end = input.selectionEnd ?? start
+  modelValue.value = `${current.slice(0, start)}${value}${current.slice(end)}`
+  void nextTick(() => {
+    input.focus()
+    input.setSelectionRange(start + value.length, start + value.length)
+  })
+}
+
+defineExpose({ focus, insertText })
 </script>
 
 <template>
   <input
+    ref="inputRef"
     v-model="modelValue"
     data-slot="input"
     :class="cn(

@@ -20,6 +20,7 @@ import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge } from './workflowDefinition'
+import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
@@ -214,6 +215,8 @@ const pageWorkflow = computed(() =>
 
 const selectedNode = computed(() => form.value.definition.nodes.find(node => node.id === selectedNodeId.value) || null)
 const selectedEdge = computed(() => form.value.definition.edges.find(edge => edge.id === selectedEdgeId.value) || null)
+const selectedNodeReferenceItems = computed(() => selectedNode.value ? deriveAvailableData(form.value.definition, { kind: 'node', id: selectedNode.value.id }, scripts.value) : [])
+const selectedEdgeReferenceItems = computed(() => selectedEdge.value ? deriveAvailableData(form.value.definition, { kind: 'edge', id: selectedEdge.value.id }, scripts.value) : [])
 const hasTaskNode = computed(() => form.value.definition.nodes.some(node => node.type === 'get_task'))
 const manualInputFields = computed(() => deriveManualInputFields(form.value.definition, scripts.value))
 const backendKeys = computed(() => [defaultBackend.value, 'claude', 'opencode', 'codex'].filter((item, index, all) => item && all.indexOf(item) === index))
@@ -2283,8 +2286,8 @@ async function confirmClearWorkflow() {
           <div class="grid min-h-[520px] grid-cols-[132px_minmax(0,1fr)] xl:grid-cols-[132px_minmax(0,1fr)_340px]">
             <WorkflowNodePalette @add-node="addNode" />
             <WorkflowEditorCanvas v-model:graph="form.definition" :workflow-type="form.workflow_type" :errors="graphErrors" @select-node="id => { selectedNodeId = id; selectedEdgeId = null }" @select-edge="id => { selectedEdgeId = id; selectedNodeId = null }" @add-node="addNode" />
-            <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" @replace="replaceNode" />
-            <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" @replace="replaceEdge" />
+            <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" :reference-items="selectedNodeReferenceItems" @replace="replaceNode" />
+            <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" :reference-items="selectedEdgeReferenceItems" @replace="replaceEdge" />
             <aside v-else class="hidden border-l p-4 text-sm text-muted-foreground xl:block">选择一个节点或连线进行配置。</aside>
           </div>
           <div v-if="!hasTaskNode" class="grid gap-3 border p-4 lg:grid-cols-2">
