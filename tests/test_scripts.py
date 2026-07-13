@@ -124,7 +124,10 @@ def test_builtin_workflow_validator_script_can_be_overridden_and_reset(wm_paths)
         name="ignored",
         description="ignored",
         language="python",
-        code=default["code"],
+        code=(
+            "def main(envelope):\n"
+            "    return {'valid': True, 'errors': [], 'warnings': [{'source': 'override'}]}\n"
+        ),
         input_schema=default["input_schema"],
         output_schema=default["output_schema"],
         status="active",
@@ -135,6 +138,66 @@ def test_builtin_workflow_validator_script_can_be_overridden_and_reset(wm_paths)
 
     restored = service.scripts.reset_script("root", "system.validate_workflow")
     assert restored["source"] == "default"
+
+
+def test_default_builtin_script_run_is_persisted_and_queryable(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    with _started_server(wm_paths):
+        result = service.scripts.test_script(
+            actor="root",
+            script_key="system.validate_workflow",
+            script_params={"workflow": {"workflow_type": "operation", "definition": {"nodes": [], "edges": []}}},
+            timeout_seconds=10,
+        )
+
+    persisted = service.scripts.get_run("root", result["run_id"])
+    listed = service.scripts.list_runs("root", "system.validate_workflow")["runs"]
+
+    assert persisted["run_id"] == result["run_id"]
+    assert persisted["status"] == "success"
+    assert persisted["result"] == {"valid": True, "errors": [], "warnings": []}
+    assert listed[0]["run_id"] == result["run_id"]
+    assert service.scripts.get_script("root", "system.validate_workflow")["source"] == "default"
+
+
+def test_reset_builtin_script_preserves_default_run_history(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    with _started_server(wm_paths):
+        result = service.scripts.test_script(
+            actor="root",
+            script_key="system.validate_workflow",
+            script_params={"workflow": {"workflow_type": "operation", "definition": {"nodes": [], "edges": []}}},
+            timeout_seconds=10,
+        )
+
+    default = service.scripts.get_script("root", "system.validate_workflow")
+    service.scripts.upsert_script(
+        actor="root",
+        script_key="system.validate_workflow",
+        name="ignored",
+        description="ignored",
+        language="python",
+        code=(
+            "def main(envelope):\n"
+            "    return {'valid': True, 'errors': [], 'warnings': [{'source': 'override'}]}\n"
+        ),
+        input_schema=default["input_schema"],
+        output_schema=default["output_schema"],
+        status="active",
+        owner_type="system",
+        owner_key="",
+    )
+
+    restored = service.scripts.reset_script("root", "system.validate_workflow")
+    persisted = service.scripts.get_run("root", result["run_id"])
+    listed = service.scripts.list_runs("root", "system.validate_workflow")["runs"]
+
+    assert restored["source"] == "default"
+    assert persisted["run_id"] == result["run_id"]
+    assert listed[0]["run_id"] == result["run_id"]
+    assert service.scripts.get_script("root", "system.validate_workflow")["source"] == "default"
 
 
 def test_builtin_validate_workflow_tool_returns_structured_result(wm_paths):

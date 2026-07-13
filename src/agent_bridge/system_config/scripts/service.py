@@ -25,6 +25,7 @@ OWNER_TYPES = {"workflow", "skill", "profile", "system"}
 SCRIPT_STATUSES = {"active", "disabled"}
 RUN_TYPES = {"test", "mcp"}
 MAX_CAPTURE_CHARS = 256_000
+DEFAULT_SCRIPT_ACTOR = "__agent_bridge_default__"
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,7 @@ class ScriptService:
 
     def list_scripts(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        scripts = {script["script_key"]: script for script in self.store.scripts.list_scripts()}
+        scripts = {script["script_key"]: self._with_script_source(script) for script in self.store.scripts.list_scripts()}
         for script_key, definition in self._builtins.items():
             scripts.setdefault(script_key, self._default_script(definition))
         return [self._script_payload(scripts[key], include_code=False) for key in sorted(scripts)]
@@ -170,8 +171,7 @@ class ScriptService:
         definition = self._builtins.get(normalized_key)
         if definition is None:
             raise NotFound("built-in script not found")
-        self.store.scripts.delete_script(normalized_key)
-        return self._script_payload(self._default_script(definition), include_code=True)
+        return self._script_payload(self._materialize_default_script(definition), include_code=True)
 
     def test_script(
         self,
@@ -215,6 +215,8 @@ class ScriptService:
         if not isinstance(script_params, dict):
             raise ValidationError("script_params must be an object")
         self._validate_script_params(script["script_key"], script["input_schema"], script_params)
+        if script.get("source") == "default":
+            script = self._materialize_default_script(self._builtins[script["script_key"]])
         timeout = self._timeout(timeout_seconds)
         run_id = f"script_run_{uuid4().hex}"
         envelope = {
@@ -267,41 +269,21 @@ class ScriptService:
                             status = "failed"
                             error_message = validation_error
         run_params = {"script_params": script_params, "timeout_seconds": timeout, "profile_key": profile_key}
-        if script.get("source") == "default":
-            payload = self._run_payload(
-                {
-                    "run_id": run_id,
-                    "script_key": script["script_key"],
-                    "run_type": run_type,
-                    "params_json": json.dumps(run_params, ensure_ascii=False, sort_keys=True),
-                    "result_json": json.dumps(result, ensure_ascii=False, sort_keys=True),
-                    "stdout": process.stdout,
-                    "stderr": process.stderr,
-                    "status": status,
-                    "exit_code": process.exit_code,
-                    "error_message": error_message,
-                    "duration_ms": process.duration_ms,
-                    "created_by": actor,
-                    "created_at": None,
-                },
-                include_logs=True,
-            )
-        else:
-            run = self.store.scripts.create_script_run(
-                run_id=run_id,
-                script_key=script["script_key"],
-                run_type=run_type,
-                params=run_params,
-                result=result,
-                stdout=process.stdout,
-                stderr=process.stderr,
-                status=status,
-                exit_code=process.exit_code,
-                error_message=error_message,
-                duration_ms=process.duration_ms,
-                actor=actor,
-            )
-            payload = self._run_payload(run, include_logs=True)
+        run = self.store.scripts.create_script_run(
+            run_id=run_id,
+            script_key=script["script_key"],
+            run_type=run_type,
+            params=run_params,
+            result=result,
+            stdout=process.stdout,
+            stderr=process.stderr,
+            status=status,
+            exit_code=process.exit_code,
+            error_message=error_message,
+            duration_ms=process.duration_ms,
+            actor=actor,
+        )
+        payload = self._run_payload(run, include_logs=True)
         if status != "success":
             raise ValidationError(f"script run failed: {error_message}")
         return payload
@@ -367,12 +349,52 @@ class ScriptService:
         normalized_key = self._validate_script_key(script_key)
         script = self.store.scripts.get_script(normalized_key)
         if script is not None:
-            script["source"] = "database"
-            return script
+            return self._with_script_source(script)
         definition = self._builtins.get(normalized_key)
         if definition is None:
             raise NotFound("script not found")
         return self._default_script(definition)
+
+    def _with_script_source(self, script: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(script)
+        definition = self._builtins.get(str(payload.get("script_key") or ""))
+        if definition is not None and self._is_materialized_default(payload, definition):
+            payload["source"] = "default"
+        else:
+            payload["source"] = "database"
+        return payload
+
+    def _materialize_default_script(self, definition: BuiltInScriptDefinition) -> dict[str, Any]:
+        default = self._default_script(definition)
+        stored = self.store.scripts.upsert_script(
+            script_key=default["script_key"],
+            name=default["name"],
+            description=default["description"],
+            language=default["language"],
+            code=default["code"],
+            input_schema=default["input_schema"],
+            output_schema=default["output_schema"],
+            status=default["status"],
+            owner_type=default["owner_type"],
+            owner_key=default["owner_key"],
+            content_hash=default["content_hash"],
+            actor=DEFAULT_SCRIPT_ACTOR,
+        )
+        return self._with_script_source(stored)
+
+    def _is_materialized_default(self, script: dict[str, Any], definition: BuiltInScriptDefinition) -> bool:
+        default = self._default_script(definition)
+        return (
+            script.get("updated_by") == DEFAULT_SCRIPT_ACTOR
+            and script.get("language") == default["language"]
+            and script.get("code") == default["code"]
+            and script.get("status") == default["status"]
+            and script.get("owner_type") == default["owner_type"]
+            and script.get("owner_key") == default["owner_key"]
+            and script.get("content_hash") == default["content_hash"]
+            and script.get("input_schema") == default["input_schema"]
+            and script.get("output_schema") == default["output_schema"]
+        )
 
     def _default_script(self, definition: BuiltInScriptDefinition) -> dict[str, Any]:
         try:
