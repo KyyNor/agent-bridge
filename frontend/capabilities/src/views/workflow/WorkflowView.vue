@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, HelpCircle, Maximize2, Minimize2, Play, Save } from 'lucide-vue-next'
-import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, AgentRun, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
+import { api, hasBlockingWorkflowValidationErrors, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
+import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, AgentRun, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -479,7 +479,7 @@ function normalizeWorkflowIssue(value: unknown): WorkflowValidationError | null 
   const field = typeof raw.field === 'string' ? raw.field : null
   const message = typeof raw.message === 'string' ? raw.message : ''
   if (!message) return null
-  const code = typeof raw.code === 'string' ? raw.code : null
+  const code = typeof raw.code === 'string' ? raw.code : 'invalid_definition'
   return { scope, id, field, message, code }
 }
 
@@ -513,8 +513,28 @@ function parseWorkflowIssues(message: string): WorkflowValidationError[] {
 }
 
 function scopedGraphIssues(scope: WorkflowValidationError['scope'], id: string | null) {
-  if (!id) return []
-  return graphErrors.value.filter(issue => issue.scope === scope && issue.id === id)
+  return workflowValidationIssuesFor(graphErrors.value, scope, id)
+}
+
+function workflowDraft(): WorkflowDraft {
+  return {
+    workflow_key: form.value.workflow_key,
+    name: form.value.name,
+    description: form.value.description,
+    profile_key: form.value.profile_key,
+    status: form.value.status,
+    workflow_type: form.value.workflow_type,
+    definition: form.value.definition,
+  }
+}
+
+async function validateWorkflowDraft(): Promise<boolean> {
+  graphErrors.value = []
+  const validation = await api.validateWorkflow(workflowDraft())
+  if (!hasBlockingWorkflowValidationErrors(validation)) return true
+  graphErrors.value = validation.errors
+  formError.value = workflowValidationErrorMessage(validation)
+  return false
 }
 
 async function saveWorkflow(): Promise<WorkflowDefinition | null> {
@@ -525,6 +545,7 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
   }
   saving.value = true
   try {
+    if (!await validateWorkflowDraft()) return null
     const saved = await api.upsertWorkflow({
       workflow_key: form.value.workflow_key,
       name: form.value.name,
@@ -630,6 +651,14 @@ function manualInput(): Record<string, unknown> | null {
 }
 
 async function runEditedWorkflow() {
+  formError.value = ''
+  try {
+    if (!await validateWorkflowDraft()) return
+  } catch (e: unknown) {
+    formError.value = errorMessage(e)
+    graphErrors.value = parseWorkflowIssues(formError.value)
+    return
+  }
   if (formDirty.value) {
     formError.value = '有未保存的修改，请先保存后再测试运行'
     return

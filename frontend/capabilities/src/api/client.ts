@@ -59,6 +59,7 @@ import type {
   WorkflowArtifactDetail,
   WorkflowClearResult,
   WorkflowDefinition,
+  WorkflowDraft,
   WorkflowRun,
   WorkflowRunEvent,
   WorkflowRunLog,
@@ -66,13 +67,35 @@ import type {
   WorkflowTasksResult,
   WorkflowTaskListParams,
   WorkflowGraph,
+  WorkflowValidationIssue,
+  WorkflowValidationResult,
   ManagedScript,
   ScriptRun,
   ScriptRunListResult,
 } from './types'
-import { scriptResetPath } from '../lib/scriptManagement'
+import { scriptResetPath } from '../lib/scriptManagement.ts'
 
-const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
+const DEFAULT_USER = typeof window === 'undefined'
+  ? 'root'
+  : (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
+
+export function workflowValidationIssuesFor(
+  issues: WorkflowValidationIssue[],
+  scope: WorkflowValidationIssue['scope'],
+  id: string | null,
+): WorkflowValidationIssue[] {
+  if (!id) return []
+  return issues.filter(issue => issue.scope === scope && issue.id === id)
+}
+
+export function hasBlockingWorkflowValidationErrors(result: WorkflowValidationResult): boolean {
+  return !result.valid || result.errors.length > 0
+}
+
+export function workflowValidationErrorMessage(result: WorkflowValidationResult): string {
+  if (!hasBlockingWorkflowValidationErrors(result)) return ''
+  return result.errors.map(issue => issue.message).filter(Boolean).join('\n') || '工作流校验未通过'
+}
 
 function headers(): Record<string, string> {
   return { 'X-Agent-Bridge-User': DEFAULT_USER }
@@ -237,6 +260,8 @@ export const api = {
     return get<WorkflowTasksResult>(`/workflows/${key}/tasks${tail}`)
   },
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
+  validateWorkflow: (workflow: WorkflowDraft) =>
+    post<WorkflowValidationResult>('/workflows/validate', { workflow }),
   upsertWorkflow: (w: Partial<WorkflowDefinition> & {
     workflow_key: string
     name: string

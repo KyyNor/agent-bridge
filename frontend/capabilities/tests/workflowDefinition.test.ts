@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { api, hasBlockingWorkflowValidationErrors, workflowValidationIssuesFor } from '../src/api/client.ts'
 import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge, isProtectedSummaryNode } from '../src/views/workflow/workflowDefinition.ts'
-import type { ManagedScript, WorkflowGraph } from '../src/api/types.ts'
+import type { ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
 
 test('summary graph creates protected markdown and html pair', () => {
   const graph = createDefaultGraph('summary', 'codex')
@@ -18,4 +19,58 @@ test('manual input fields are derived from selected script schemas', () => {
     { path: 'input.limit', type: 'integer', required: false, description: '' },
     { path: 'input.repo', type: 'string', required: true, description: '' },
   ])
+})
+
+test('workflow validation issues locate node and edge fields', () => {
+  const result: WorkflowValidationResult = {
+    valid: false,
+    errors: [
+      { scope: 'node', id: 'agent-1', field: 'config.prompt', code: 'invalid_reference', message: '引用不存在' },
+      { scope: 'edge', id: 'agent-1-output-1', field: 'condition.field', code: 'invalid_condition', message: '条件字段不合法' },
+      { scope: 'workflow', id: null, field: 'profile_key', code: 'missing_profile', message: 'Profile 不存在' },
+    ],
+    warnings: [],
+  }
+
+  assert.equal(hasBlockingWorkflowValidationErrors(result), true)
+  assert.deepEqual(workflowValidationIssuesFor(result.errors, 'node', 'agent-1'), [result.errors[0]])
+  assert.deepEqual(workflowValidationIssuesFor(result.errors, 'edge', 'agent-1-output-1'), [result.errors[1]])
+})
+
+test('validateWorkflow posts draft workflow without saving it', async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init || {} })
+    return new Response(JSON.stringify({ valid: true, errors: [], warnings: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  try {
+    const result = await api.validateWorkflow({
+      workflow_key: 'draft-only',
+      name: 'Draft Only',
+      profile_key: 'report-plane',
+      workflow_type: 'operation',
+      definition: { nodes: [], edges: [] },
+    })
+
+    assert.equal(result.valid, true)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].url, '/workflows/validate')
+    assert.equal(calls[0].init.method, 'POST')
+    assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+      workflow: {
+        workflow_key: 'draft-only',
+        name: 'Draft Only',
+        profile_key: 'report-plane',
+        workflow_type: 'operation',
+        definition: { nodes: [], edges: [] },
+      },
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

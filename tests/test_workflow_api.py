@@ -18,6 +18,36 @@ def test_validate_workflow_endpoint_returns_structured_result(wm_paths):
     assert response.json() == {"valid": True, "errors": [], "warnings": []}
 
 
+def test_validate_workflow_endpoint_does_not_persist_draft(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.init_schema()
+    service.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    client = TestClient(create_app(wm_paths, {"root"}))
+
+    response = client.post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={
+            "workflow": {
+                "workflow_key": "draft-only",
+                "name": "Draft Only",
+                "description": "Should never be saved",
+                "profile_key": "report-plane",
+                "workflow_type": "operation",
+                "definition": {"nodes": [], "edges": []},
+                "status": "active",
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] is True
+    assert client.get("/workflows", headers={"X-Agent-Bridge-User": "root"}).json() == []
+
+
 def test_workflow_api_saves_structured_definition(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService
