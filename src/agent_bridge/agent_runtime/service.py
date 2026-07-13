@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from jsonschema import Draft202012Validator
+
 from agent_bridge.agent_runtime.events import event_record, write_event
 from agent_bridge.agent_runtime.registry import CodingAgentRegistry, create_coding_agent_registry
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
@@ -323,9 +325,11 @@ class AgentService:
             return AgentRunResult(
                 ok=False, error=result_msg.result or result_msg.subtype, **meta
             )
-        return AgentRunResult(
-            ok=True, result=_extract_result(result_msg, output_schema), **meta
-        )
+        result = _extract_result(result_msg, output_schema)
+        schema_error = _output_schema_error(output_schema, result)
+        if schema_error is not None:
+            return AgentRunResult(ok=False, error=schema_error, **meta)
+        return AgentRunResult(ok=True, result=result, **meta)
 
     def _record_cwd(self, run_key: str, work_dir: Path | None) -> None:
         """Backfill the work-dir path on the placeholder row once it is known."""
@@ -427,6 +431,20 @@ def _extract_result(result_msg: Any, output_schema: dict[str, Any] | None) -> An
         return result_msg.structured_output
     parsed = _extract_json(result_msg.result or "")
     return parsed if parsed is not None else (result_msg.result or "")
+
+
+def _output_schema_error(output_schema: dict[str, Any] | None, result: Any) -> str | None:
+    if output_schema is None:
+        return None
+    errors = sorted(
+        Draft202012Validator(output_schema).iter_errors(result),
+        key=lambda item: (list(item.absolute_path), str(item.validator)),
+    )
+    if not errors:
+        return None
+    first = errors[0]
+    path = ".".join(str(part) for part in first.absolute_path) or "<root>"
+    return f"agent output_schema invalid field={path}: {first.message}"
 
 
 def _extract_json(text: str) -> Any:

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationIssuesFor } from '../src/api/client.ts'
-import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge, isProtectedSummaryNode, migrateWorkflowGraph } from '../src/views/workflow/workflowDefinition.ts'
-import type { ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
+import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, isProtectedSummaryNode, migrateWorkflowGraph } from '../src/views/workflow/workflowDefinition.ts'
+import type { AgentRuntimeConfig, ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
 
 test('summary graph creates protected markdown and html pair', () => {
   const graph = createDefaultGraph('summary', 'codex')
@@ -95,15 +95,69 @@ test('workflow type migration preserves ordinary DAG nodes and valid edges', () 
 
   const summary = migrateWorkflowGraph(operation, 'operation', 'summary', 'codex')
 
-  assert.deepEqual(summary.nodes.map(node => node.id), ['collect', 'clean', 'markdown-output', 'html-output'])
+  assert.deepEqual(summary.nodes.map(node => node.id), ['collect', 'clean', 'old-output', 'markdown-output', 'html-output'])
   assert.equal(summary.edges.some(edge => edge.id === 'collect-clean'), true)
-  assert.equal(summary.edges.some(edge => edge.source === 'clean' && edge.target === 'markdown-output'), true)
+  assert.equal(summary.edges.some(edge => edge.id === 'clean-old'), true)
+  assert.equal(summary.edges.some(edge => edge.source === 'old-output' && edge.target === 'markdown-output'), true)
   assert.equal(summary.edges.some(edge => edge.id === 'markdown-to-html'), true)
-  assert.equal(summary.edges.some(edge => edge.id === 'dangling' || edge.id === 'clean-old'), false)
+  assert.equal(summary.edges.some(edge => edge.id === 'dangling'), true)
 
   const roundTrip = migrateWorkflowGraph(summary, 'summary', 'operation', 'codex')
-  assert.deepEqual(roundTrip.nodes.map(node => node.id), ['collect', 'clean'])
-  assert.deepEqual(roundTrip.edges.map(edge => edge.id), ['collect-clean'])
+  assert.deepEqual(roundTrip, operation)
+})
+
+test('summary migration marks system nodes and avoids user node and edge id collisions', () => {
+  const operation: WorkflowGraph = {
+    nodes: [
+      { id: 'markdown-output', type: 'agent', name: 'User node', position: { x: 0, y: 0 }, config: { prompt: '', backend_key: 'team-codex', mcp_enabled: false, skill_names: [], result_mode: 'text', output_schema: null } },
+    ],
+    edges: [
+      { id: 'markdown-to-html', source: 'markdown-output', target: 'missing', condition: null },
+    ],
+  }
+
+  const summary = migrateWorkflowGraph(operation, 'operation', 'summary', 'team-codex')
+  const systemNodes = summary.nodes.filter(node => node.type === 'output' && node.config.system_role)
+  const systemEdge = summary.edges.find(edge => edge.system_role === 'summary_markdown_to_html')
+
+  assert.equal(summary.nodes.some(node => node.id === 'markdown-output' && node.type === 'agent'), true)
+  assert.deepEqual(systemNodes.map(node => node.id), ['markdown-output-2', 'html-output'])
+  assert.equal(systemEdge?.id, 'markdown-to-html-2')
+  assert.equal(new Set(summary.nodes.map(node => node.id)).size, summary.nodes.length)
+  assert.equal(new Set(summary.edges.map(edge => edge.id)).size, summary.edges.length)
+  assert.deepEqual(migrateWorkflowGraph(summary, 'summary', 'operation', 'team-codex'), operation)
+})
+
+test('legacy summary output pair is recognized by node types instead of fixed ids', () => {
+  const legacy = createDefaultGraph('summary', 'codex')
+  legacy.nodes[0].id = 'legacy-markdown'
+  legacy.nodes[1].id = 'legacy-html'
+  legacy.edges[0] = {
+    id: 'legacy-bridge',
+    source: 'legacy-markdown',
+    target: 'legacy-html',
+    condition: null,
+  }
+  delete legacy.nodes[0].config.system_role
+  delete legacy.nodes[1].config.system_role
+
+  assert.deepEqual(migrateWorkflowGraph(legacy, 'summary', 'operation', 'codex'), {
+    nodes: [],
+    edges: [],
+  })
+})
+
+test('workflow backend options come from the runtime registry payload and keep custom slugs', () => {
+  const runtime: AgentRuntimeConfig = {
+    default_backend: 'team-codex',
+    backends: [{ slug: 'team-codex', type: 'codex', command: 'codex', model: null }],
+    available_backends: [
+      { slug: 'claude', display_name: 'Claude', source: 'claude_agent_sdk', capabilities: { supports_mcp: true } },
+      { slug: 'team-codex', display_name: 'Codex', source: 'codex_cli', capabilities: { supports_mcp: false } },
+    ],
+  }
+
+  assert.deepEqual(deriveWorkflowBackendKeys(runtime), ['claude', 'team-codex'])
 })
 
 test('workflow validation run guard blocks duplicates and ignores stale responses', () => {

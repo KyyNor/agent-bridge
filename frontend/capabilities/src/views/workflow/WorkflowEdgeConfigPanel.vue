@@ -4,6 +4,8 @@ import type { WorkflowEdge, WorkflowValidationError } from '../../api/types'
 import type { WorkflowReferenceItem } from '../../lib/workflowReferences'
 import Input from '../../components/ui/input/Input.vue'
 import WorkflowReferencePicker from '../../components/workflow/WorkflowReferencePicker.vue'
+import WorkflowTypedValueInput from '../../components/workflow/WorkflowTypedValueInput.vue'
+import { workflowValueTypeForReference } from '../../lib/workflowValues'
 import Select from '../../components/ui/select/Select.vue'
 import SelectContent from '../../components/ui/select/SelectContent.vue'
 import SelectItem from '../../components/ui/select/SelectItem.vue'
@@ -16,14 +18,20 @@ const props = defineProps<{ edge: WorkflowEdge; locked?: boolean; referenceItems
 const emit = defineEmits<{ replace: [edge: WorkflowEdge] }>()
 const condition = computed(() => props.edge.condition || { field: '', operator: 'equals' as const, value: '' })
 const fieldInput = ref<InsertableField | null>(null)
+const conditionValueInput = ref<InsertableField | null>(null)
 const activeField = ref<InsertableField | null>(null)
 const referenceItems = computed(() => props.referenceItems || [])
 const issues = computed(() => props.issues || [])
+const conditionValueType = computed(() => workflowValueTypeForReference(
+  referenceItems.value,
+  condition.value.field,
+  condition.value.value,
+))
 watch(() => props.edge.id, () => { activeField.value = null })
 function change(patch: Partial<NonNullable<WorkflowEdge['condition']>>) { emit('replace', { ...props.edge, condition: { ...condition.value, ...patch } }) }
 function changeOperator(value: string) { change({ operator: value as NonNullable<WorkflowEdge['condition']>['operator'] }) }
 function toggleConditional(enabled: boolean) { emit('replace', { ...props.edge, condition: enabled ? condition.value : null }) }
-function insertReference(value: string) { if (activeField.value) activeField.value.insertText(value); else void navigator.clipboard?.writeText(value) }
+function insertReference(value: string, rawPath: string) { if (activeField.value) activeField.value.insertText(value); else void navigator.clipboard?.writeText(rawPath) }
 function issueFor(...fields: string[]) {
   const fieldSet = new Set(fields.flatMap(field => [field, `condition.${field}`]))
   return issues.value.find(issue => issue.field && fieldSet.has(issue.field)) || null
@@ -47,7 +55,7 @@ function issueFor(...fields: string[]) {
           <p v-if="issueFor('operator')" class="mt-1 text-xs text-destructive">{{ issueFor('operator')?.message }}</p>
         </div>
         <div v-if="condition.operator !== 'exists' && condition.operator !== 'not_exists'">
-          <Input :model-value="String(condition.value ?? '')" placeholder="期望值" :aria-invalid="Boolean(issueFor('value'))" @update:model-value="change({ value: $event })" />
+          <WorkflowTypedValueInput ref="conditionValueInput" :model-value="condition.value" :value-type="conditionValueType" placeholder="期望值" :invalid="Boolean(issueFor('value'))" @focusin="activeField = conditionValueInput" @update:model-value="change({ value: $event })" />
           <p v-if="issueFor('value')" class="mt-1 text-xs text-destructive">{{ issueFor('value')?.message }}</p>
         </div>
       </template>

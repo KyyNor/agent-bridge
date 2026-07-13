@@ -25,6 +25,7 @@ import {
 const props = defineProps<{
   modelValue: Record<string, unknown> | null
   label: string
+  disabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +37,7 @@ const mode = ref<'fields' | 'advanced'>('fields')
 const fields = ref<SchemaField[]>([])
 const schemaText = ref('')
 const validationMessage = ref('')
+const baseSchema = ref<Record<string, unknown> | null>(null)
 
 const fieldModeAvailable = computed(() => {
   const parsed = parseSchemaText(schemaText.value)
@@ -46,6 +48,7 @@ watch(
   () => props.modelValue,
   (value) => {
     const nextSchema = normalizeSchema(value)
+    baseSchema.value = structuredClone(nextSchema)
     const nextText = prettyJson(nextSchema)
     const currentParsed = parseSchemaText(schemaText.value)
 
@@ -102,22 +105,27 @@ function syncFieldSchema() {
     name: field.name.trim(),
     description: field.description.trim(),
   }))
-  emit('update:modelValue', fieldsToSchema(normalizedFields, props.modelValue))
+  const nextSchema = fieldsToSchema(normalizedFields, baseSchema.value)
+  baseSchema.value = structuredClone(nextSchema)
+  emit('update:modelValue', nextSchema)
   return true
 }
 
 function addField() {
+  if (props.disabled) return
   mode.value = 'fields'
   fields.value.push({ name: '', type: 'string', required: false, description: '' })
   syncFieldSchema()
 }
 
 function removeField(index: number) {
+  if (props.disabled) return
   fields.value.splice(index, 1)
   syncFieldSchema()
 }
 
 function updateJson(value: string | number) {
+  if (props.disabled) return
   schemaText.value = String(value)
   const parsed = parseSchemaText(schemaText.value)
   if (!parsed.ok) {
@@ -125,10 +133,12 @@ function updateJson(value: string | number) {
     return
   }
   setValidationMessage('')
+  baseSchema.value = structuredClone(parsed.value)
   emit('update:modelValue', parsed.value)
 }
 
 function switchToFields() {
+  if (props.disabled) return
   const parsed = parseSchemaText(schemaText.value)
   if (!parsed.ok) {
     setValidationMessage(parsed.message)
@@ -140,11 +150,13 @@ function switchToFields() {
   }
   setValidationMessage('')
   fields.value = schemaToFields(parsed.value)
+  baseSchema.value = structuredClone(parsed.value)
   mode.value = 'fields'
   emit('update:modelValue', parsed.value)
 }
 
 function switchToAdvanced() {
+  if (props.disabled) return
   mode.value = 'advanced'
   setValidationMessage('')
   schemaText.value = prettyJson(normalizeSchema(props.modelValue))
@@ -185,7 +197,7 @@ defineExpose({
           size="sm"
           type="button"
           class="h-8"
-          :disabled="mode === 'fields'"
+          :disabled="disabled || mode === 'fields'"
           @click="switchToFields"
         >
           <ListTree class="mr-1.5 h-4 w-4" />
@@ -196,7 +208,7 @@ defineExpose({
           size="sm"
           type="button"
           class="h-8"
-          :disabled="mode === 'advanced'"
+          :disabled="disabled || mode === 'advanced'"
           @click="switchToAdvanced"
         >
           <Braces class="mr-1.5 h-4 w-4" />
@@ -214,7 +226,7 @@ defineExpose({
 
     <div v-if="mode === 'fields'" class="space-y-3">
       <div class="flex items-center justify-end">
-        <Button variant="outline" size="sm" type="button" class="h-8" @click="addField">
+        <Button variant="outline" size="sm" type="button" class="h-8" :disabled="disabled" @click="addField">
           <Plus class="mr-1.5 h-4 w-4" />
           添加字段
         </Button>
@@ -225,24 +237,25 @@ defineExpose({
           :key="index"
           class="grid gap-2 p-3 md:grid-cols-[minmax(120px,1fr)_120px_72px_minmax(160px,1.5fr)_32px] md:items-center"
         >
-          <Input v-model="field.name" placeholder="字段名" @update:model-value="syncFieldSchema" />
-          <Select v-model="field.type" @update:model-value="syncFieldSchema">
+          <Input v-model="field.name" placeholder="字段名" :disabled="disabled" @update:model-value="syncFieldSchema" />
+          <Select v-model="field.type" :disabled="disabled" @update:model-value="syncFieldSchema">
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem v-for="type in SCHEMA_FIELD_TYPES" :key="type" :value="type">{{ type }}</SelectItem>
             </SelectContent>
           </Select>
           <label class="flex items-center gap-2 text-xs">
-            <input v-model="field.required" type="checkbox" @change="syncFieldSchema" />
+            <input v-model="field.required" type="checkbox" :disabled="disabled" @change="syncFieldSchema" />
             必填
           </label>
-          <Input v-model="field.description" placeholder="字段说明" @update:model-value="syncFieldSchema" />
+          <Input v-model="field.description" placeholder="字段说明" :disabled="disabled" @update:model-value="syncFieldSchema" />
           <Button
             variant="ghost"
             size="sm"
             class="h-8 w-8 p-0"
             type="button"
             title="删除字段"
+            :disabled="disabled"
             @click="removeField(index)"
           >
             <Trash2 class="h-4 w-4" />
@@ -259,6 +272,7 @@ defineExpose({
         :model-value="schemaText"
         class="min-h-[220px] font-mono text-xs"
         spellcheck="false"
+        :disabled="disabled"
         @update:model-value="updateJson"
       />
       <div v-if="fieldModeAvailable" class="text-xs text-muted-foreground">

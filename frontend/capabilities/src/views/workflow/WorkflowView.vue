@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, HelpCircle, Maximize2, Minimize2, Play, Save } from 'lucide-vue-next'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, AgentRun, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -20,7 +20,7 @@ import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
-import { createDefaultGraph, deriveManualInputFields, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
+import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
   ALL_STATUS_SENTINEL,
@@ -48,6 +48,7 @@ const profiles = ref<ProjectProfile[]>([])
 const scripts = ref<ManagedScript[]>([])
 const skills = ref<SkillPrompt[]>([])
 const defaultBackend = ref('codex')
+const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'claude', backends: [] })
 const artifacts = ref<WorkflowArtifact[]>([])
 const selectedKey = ref('')
 const loading = ref(true)
@@ -248,7 +249,7 @@ const selectedNodeReferenceItems = computed(() => selectedNode.value ? deriveAva
 const selectedEdgeReferenceItems = computed(() => selectedEdge.value ? deriveAvailableData(form.value.definition, { kind: 'edge', id: selectedEdge.value.id }, scripts.value) : [])
 const hasTaskNode = computed(() => form.value.definition.nodes.some(node => node.type === 'get_task'))
 const manualInputFields = computed(() => deriveManualInputFields(form.value.definition, scripts.value))
-const backendKeys = computed(() => [defaultBackend.value, 'claude', 'opencode', 'codex'].filter((item, index, all) => item && all.indexOf(item) === index))
+const backendKeys = computed(() => deriveWorkflowBackendKeys(agentRuntimeConfig.value))
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
 const hasAnyRunningRun = computed(() =>
@@ -390,6 +391,7 @@ async function loadAll() {
     profiles.value = profileList
     scripts.value = scriptList
     skills.value = skillList
+    agentRuntimeConfig.value = runtimeConfig
     defaultBackend.value = runtimeConfig.default_backend || defaultBackend.value
     selectedKey.value = selectedKey.value || workflowList[0]?.workflow_key || ''
     await loadRunsForWorkflows(workflowList)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { deriveAvailableData, formatWorkflowReference } from '../src/lib/workflowReferences.ts'
+import { deriveAvailableData, formatWorkflowReference, referenceValueForTarget } from '../src/lib/workflowReferences.ts'
 import type { ManagedScript, WorkflowGraph } from '../src/api/types.ts'
 
 const scripts: ManagedScript[] = [
@@ -107,6 +107,8 @@ test('node target exposes input, task, and ancestor output fields only', () => {
   assert.deepEqual(result.map(item => item.path), [
     'input.repo',
     'task.task_key',
+    'task.task_version',
+    'task.type',
     'task.payload',
     'nodes.collect.output.pages',
     'nodes.enrich.output.summary',
@@ -178,7 +180,9 @@ test('edge target exposes source lineage and returns raw condition paths', () =>
 })
 
 test('reference formatter inserts templates for prompt-like fields', () => {
-  assert.equal(formatWorkflowReference({ path: 'nodes.collect.output.pages', label: '', type: 'array', description: '' }, 'template'), '{{ nodes.collect.output.pages }}')
+  const item = { path: 'nodes.collect.output.pages', label: '', type: 'array', description: '' }
+  assert.equal(formatWorkflowReference(item, 'template'), '{{ nodes.collect.output.pages }}')
+  assert.equal(referenceValueForTarget(item, 'template', false), 'nodes.collect.output.pages')
 })
 
 test('downstream node can reference text agent and output artifact fields', () => {

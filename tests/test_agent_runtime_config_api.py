@@ -13,6 +13,8 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
     initial = client.get("/agent-runtime/config", headers=headers)
     assert initial.status_code == 200
     assert initial.json()["default_backend"] == "claude"
+    assert [item["slug"] for item in initial.json()["available_backends"]] == ["claude"]
+    assert initial.json()["available_backends"][0]["capabilities"]["supports_mcp"] is True
 
     payload = {
         "default_backend": "opencode",
@@ -28,7 +30,9 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
     saved = client.post("/agent-runtime/config", json=payload, headers=headers)
 
     assert saved.status_code == 200
-    assert saved.json() == payload
+    assert {key: saved.json()[key] for key in ("default_backend", "backends")} == payload
+    assert [item["slug"] for item in saved.json()["available_backends"]] == ["claude", "opencode"]
+    assert saved.json()["available_backends"][1]["capabilities"]["supports_mcp"] is False
     service = app.state.agent_bridge_service
     assert service.agents.coding_agents.default_backend == "opencode"
     assert "opencode" in service.agents.coding_agents.keys()
@@ -70,7 +74,8 @@ def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -
     )
 
     assert saved.status_code == 200
-    assert saved.json() == payload
+    assert {key: saved.json()[key] for key in ("default_backend", "backends")} == payload
+    assert [item["slug"] for item in saved.json()["available_backends"]] == ["claude", "codex", "opencode"]
     service = app.state.agent_bridge_service
     assert service.agents.coding_agents.default_backend == "codex"
     assert service.agents.coding_agents.keys() == ["claude", "codex", "opencode"]

@@ -259,6 +259,60 @@ def test_run_success_structured_result(wm_paths, monkeypatch) -> None:
     assert res.result == {"answer": 42}
 
 
+def test_run_rejects_adapter_independent_output_schema_violation(wm_paths) -> None:
+    from agent_bridge.agent_runtime.registry import CodingAgentRegistry
+    from agent_bridge.agent_runtime.types import (
+        CodingAgentCapabilities,
+        CodingAgentFinal,
+        CodingAgentUpdate,
+    )
+
+    class _InvalidSchemaRun:
+        async def updates(self):
+            yield CodingAgentUpdate(
+                final=CodingAgentFinal(structured_output={"answer": "forty-two"})
+            )
+
+        async def abort(self):
+            return None
+
+    class _InvalidSchemaAgent:
+        backend_key = "schema-test"
+        display_name = "Schema test"
+        source = "test"
+        capabilities = CodingAgentCapabilities(supports_native_json_schema=True)
+
+        def start(self, request):
+            return _InvalidSchemaRun()
+
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    bundle.agents.coding_agents = CodingAgentRegistry(
+        default_backend="schema-test",
+        agents=[_InvalidSchemaAgent()],
+    )
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "integer"}},
+        "required": ["answer"],
+    }
+
+    result = asyncio.run(
+        bundle.agents.run(
+            prompt="compute",
+            agent_name="schema-check",
+            output_schema=schema,
+        )
+    )
+
+    assert result.ok is False
+    assert result.result is None
+    assert result.error is not None
+    assert result.error.startswith("agent output_schema invalid field=answer:")
+    stored = bundle.store.agent_runs.get(result.run_key)
+    assert stored["status"] == "failed"
+    assert stored["result"] is None
+
+
 def test_run_error_returns_envelope_without_raising(wm_paths, monkeypatch) -> None:
     async def fake_query(*, prompt, options):
         raise RuntimeError("boom")

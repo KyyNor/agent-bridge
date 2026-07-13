@@ -80,6 +80,10 @@ export function canDisableScript(item: ScriptSourceInfo): boolean {
   return !isBuiltInScriptFamily(item)
 }
 
+export function canEditScriptContract(item: ScriptSourceInfo): boolean {
+  return !isBuiltInScriptFamily(item)
+}
+
 export function canResetScript(item: ScriptSourceInfo): boolean {
   return isBuiltInScriptFamily(item)
 }

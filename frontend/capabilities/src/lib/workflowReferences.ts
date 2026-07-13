@@ -20,6 +20,14 @@ export function formatWorkflowReference(item: WorkflowReferenceItem, mode: 'temp
   return mode === 'template' ? `{{ ${item.path} }}` : item.path
 }
 
+export function referenceValueForTarget(
+  item: WorkflowReferenceItem,
+  mode: 'template' | 'condition',
+  hasActiveTarget: boolean,
+): string {
+  return hasActiveTarget ? formatWorkflowReference(item, mode) : item.path
+}
+
 export function deriveAvailableData(
   graph: WorkflowGraph,
   target: WorkflowReferenceTarget,
@@ -38,6 +46,8 @@ export function deriveAvailableData(
   if (target.kind === 'node' && lineage.some(node => node.type === 'get_task')) {
     items.push(
       { path: 'task.task_key', label: '任务 Key', type: 'string', description: '当前任务标识' },
+      { path: 'task.task_version', label: '任务版本', type: 'string', description: '当前任务版本' },
+      { path: 'task.type', label: '任务类型', type: 'string', description: '当前任务类型' },
       { path: 'task.payload', label: '任务负载', type: 'object', description: '当前任务的完整 payload' },
     )
   }

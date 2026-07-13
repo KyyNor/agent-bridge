@@ -8,6 +8,8 @@ import Input from '../../components/ui/input/Input.vue'
 import Textarea from '../../components/ui/textarea/Textarea.vue'
 import SchemaFieldEditor from '../../components/SchemaFieldEditor.vue'
 import WorkflowReferencePicker from '../../components/workflow/WorkflowReferencePicker.vue'
+import WorkflowTypedValueInput from '../../components/workflow/WorkflowTypedValueInput.vue'
+import { defaultWorkflowValue, workflowValueType } from '../../lib/workflowValues'
 import Select from '../../components/ui/select/Select.vue'
 import SelectContent from '../../components/ui/select/SelectContent.vue'
 import SelectItem from '../../components/ui/select/SelectItem.vue'
@@ -41,8 +43,14 @@ const requiredParams = computed(() => new Set(Array.isArray(selectedScript.value
 
 function replace(patch: Record<string, unknown>) { emit('replace', { ...props.node, ...patch } as WorkflowNode) }
 function config(patch: Record<string, unknown>) { replace({ config: { ...props.node.config, ...patch } }) }
-function selectScript(scriptKey: string) { const params = Object.fromEntries(Object.keys((props.scripts.find(script => script.script_key === scriptKey)?.input_schema?.properties || {}) as Record<string, unknown>).map(key => [key, ''])); config({ script_key: scriptKey, params }) }
-function setParam(key: string, value: string) { if (props.node.type === 'script') config({ params: { ...props.node.config.params, [key]: value } }) }
+function selectScript(scriptKey: string) {
+  const properties = (props.scripts.find(script => script.script_key === scriptKey)?.input_schema?.properties || {}) as Record<string, unknown>
+  const params = Object.fromEntries(
+    Object.entries(properties).map(([key, schema]) => [key, defaultWorkflowValue(workflowValueType(schema))]),
+  )
+  config({ script_key: scriptKey, params })
+}
+function setParam(key: string, value: unknown) { if (props.node.type === 'script') config({ params: { ...props.node.config.params, [key]: value } }) }
 function currentSkills() { return props.node.type === 'agent' || props.node.type === 'output' ? props.node.config.skill_names : [] }
 function moveSkill(index: number, direction: number) { const names = [...currentSkills()]; const other = index + direction; if (other < 0 || other >= names.length) return; [names[index], names[other]] = [names[other], names[index]]; config({ skill_names: names }) }
 function addSkill(skillName: string) { if (!skillName || currentSkills().includes(skillName)) return; config({ skill_names: [...currentSkills(), skillName] }) }
@@ -50,7 +58,7 @@ function removeSkill(index: number) { config({ skill_names: currentSkills().filt
 function isInsertableField(value: unknown): value is InsertableField { return Boolean(value) && typeof (value as InsertableField).insertText === 'function' }
 function setParamInputRef(key: string, value: unknown) { if (isInsertableField(value)) paramInputs.set(key, value); else paramInputs.delete(key) }
 function activateParamInput(key: string) { activeField.value = paramInputs.get(key) || null }
-function insertReference(value: string) { if (activeField.value) activeField.value.insertText(value); else void navigator.clipboard?.writeText(value) }
+function insertReference(value: string, rawPath: string) { if (activeField.value) activeField.value.insertText(value); else void navigator.clipboard?.writeText(rawPath) }
 function issueFor(...fields: string[]) {
   const fieldSet = new Set(fields.flatMap(field => [field, `config.${field}`]))
   return issues.value.find(issue => issue.field && fieldSet.has(issue.field)) || null
@@ -80,7 +88,7 @@ function setResultMode(value: string) {
     <template v-if="node.type === 'get_task'"><p class="text-sm text-muted-foreground">从当前工作流队列领取一个任务。</p></template>
     <template v-else-if="node.type === 'script'">
       <div><label class="mb-1 block text-xs text-muted-foreground">托管脚本</label><Select :model-value="node.config.script_key" @update:model-value="selectScript(String($event))"><SelectTrigger :aria-invalid="Boolean(issueFor('script_key'))"><SelectValue placeholder="选择启用脚本" /></SelectTrigger><SelectContent><SelectItem v-for="script in activeScripts" :key="script.script_key" :value="script.script_key">{{ script.name }}</SelectItem></SelectContent></Select><p v-if="issueFor('script_key')" class="mt-1 text-xs text-destructive">{{ issueFor('script_key')?.message }}</p></div>
-      <div v-for="(schema, key) in scriptProperties" :key="key"><label class="mb-1 block text-xs text-muted-foreground">{{ key }}<span v-if="requiredParams.has(key)" class="text-destructive"> *</span></label><Input :ref="(el) => setParamInputRef(String(key), el)" :model-value="String(node.config.params[key] ?? '')" :placeholder="typeof schema.description === 'string' ? schema.description : '{{ input.value }}'" :aria-invalid="Boolean(issueFor(`params.${String(key)}`, `config.params.${String(key)}`))" :aria-describedby="issueFor(`params.${String(key)}`, `config.params.${String(key)}`) ? issueId(`params-${String(key)}`) : undefined" @focusin="activateParamInput(String(key))" @update:model-value="setParam(key, String($event))" /><p v-if="issueFor(`params.${String(key)}`, `config.params.${String(key)}`)" :id="issueId(`params-${String(key)}`)" class="mt-1 text-xs text-destructive">{{ issueFor(`params.${String(key)}`, `config.params.${String(key)}`)?.message }}</p></div>
+      <div v-for="(schema, key) in scriptProperties" :key="key"><label class="mb-1 block text-xs text-muted-foreground">{{ key }}<span v-if="requiredParams.has(key)" class="text-destructive"> *</span></label><WorkflowTypedValueInput :ref="(el) => setParamInputRef(String(key), el)" :model-value="node.config.params[key]" :value-type="workflowValueType(schema)" :placeholder="typeof schema.description === 'string' ? schema.description : '{{ input.value }}'" :invalid="Boolean(issueFor(`params.${String(key)}`, `config.params.${String(key)}`))" @focusin="activateParamInput(String(key))" @update:model-value="setParam(String(key), $event)" /><p v-if="issueFor(`params.${String(key)}`, `config.params.${String(key)}`)" :id="issueId(`params-${String(key)}`)" class="mt-1 text-xs text-destructive">{{ issueFor(`params.${String(key)}`, `config.params.${String(key)}`)?.message }}</p></div>
       <div><label class="mb-1 block text-xs text-muted-foreground">超时（秒）</label><Input :model-value="node.config.timeout_seconds" type="number" :aria-invalid="Boolean(issueFor('timeout_seconds'))" @update:model-value="config({ timeout_seconds: Number($event) })" /><p v-if="issueFor('timeout_seconds')" class="mt-1 text-xs text-destructive">{{ issueFor('timeout_seconds')?.message }}</p></div>
     </template>
     <template v-else>

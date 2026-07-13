@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from agent_bridge.app.service import AgentBridgeService
 
 
@@ -91,6 +93,135 @@ def test_validator_requires_complete_workflow_metadata(wm_paths):
         ("status", "missing_field", "缺少必填字段"),
         ("workflow_type", "missing_field", "缺少必填字段"),
     }
+
+
+@pytest.mark.parametrize(
+    ("node_type", "config", "expected_field"),
+    [
+        ("get_task", {"unexpected": True}, "unexpected"),
+        ("agent", {"prompt": 3, "backend_key": "claude"}, "prompt"),
+        (
+            "agent",
+            {
+                "prompt": "return json",
+                "backend_key": "claude",
+                "result_mode": "json",
+                "output_schema": [],
+            },
+            "output_schema",
+        ),
+        ("script", {"script_key": "x", "params": []}, "params"),
+        (
+            "output",
+            {
+                "format": "markdown",
+                "title": "Report",
+                "path": "report.md",
+                "prompt": 3,
+                "backend_key": "claude",
+            },
+            "prompt",
+        ),
+    ],
+)
+def test_validator_parse_errors_locate_node_config_fields_without_union_segments(
+    wm_paths,
+    node_type,
+    config,
+    expected_field,
+):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    result = service.workflows.validator.validate(
+        actor="root",
+        workflow=_workflow(
+            {
+                "nodes": [
+                    {
+                        "id": f"broken-{node_type}",
+                        "type": node_type,
+                        "name": "Broken",
+                        "position": {"x": 0, "y": 0},
+                        "config": config,
+                    }
+                ],
+                "edges": [],
+            }
+        ),
+    )
+
+    assert [(issue.scope, issue.id, issue.field) for issue in result.errors] == [
+        ("node", f"broken-{node_type}", expected_field)
+    ]
+
+
+@pytest.mark.parametrize("backend_key", ["codex", "opencode"])
+def test_validator_rejects_mcp_for_backends_without_runtime_support(wm_paths, backend_key):
+    from agent_bridge.agent_runtime.adapters import CodexCodingAgent, OpenCodeCodingAgent
+    from agent_bridge.agent_runtime.registry import CodingAgentRegistry
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.upsert_project_profile(profile_key="default", name="Default", created_by="root")
+    adapters = {
+        "codex": CodexCodingAgent(),
+        "opencode": OpenCodeCodingAgent(),
+    }
+    service.agents.coding_agents = CodingAgentRegistry(
+        default_backend=backend_key,
+        agents=[adapters[backend_key]],
+    )
+
+    result = service.workflows.validator.validate(
+        actor="root",
+        workflow=_workflow(
+            {
+                "nodes": [
+                    {
+                        **_agent("needs-mcp"),
+                        "config": {
+                            **_agent("needs-mcp")["config"],
+                            "backend_key": backend_key,
+                            "mcp_enabled": True,
+                        },
+                    }
+                ],
+                "edges": [],
+            }
+        ),
+    )
+
+    assert any(
+        issue.id == "needs-mcp"
+        and issue.field == "config.mcp_enabled"
+        and issue.code == "unsupported_mcp"
+        for issue in result.errors
+    )
+
+
+def test_validator_accepts_mcp_for_backend_with_runtime_support(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.upsert_project_profile(profile_key="default", name="Default", created_by="root")
+
+    result = service.workflows.validator.validate(
+        actor="root",
+        workflow=_workflow(
+            {
+                "nodes": [
+                    {
+                        **_agent("uses-mcp"),
+                        "config": {
+                            **_agent("uses-mcp")["config"],
+                            "backend_key": "claude",
+                            "mcp_enabled": True,
+                        },
+                    }
+                ],
+                "edges": [],
+            }
+        ),
+    )
+
+    assert not any(issue.code == "unsupported_mcp" for issue in result.errors)
 
 
 def test_validator_resolves_default_builtin_script_before_materialization(wm_paths):

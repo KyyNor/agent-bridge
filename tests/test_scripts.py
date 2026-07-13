@@ -513,6 +513,47 @@ def test_system_validate_workflow_default_script_runs_through_builtin_tool(wm_pa
     assert service.scripts.get_script("root", "system.validate_workflow")["source"] == "default"
 
 
+def test_system_validate_workflow_returns_structured_parse_issues_for_malformed_definition(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    _ensure_validation_profile(service)
+    workflow = _validation_workflow()
+    workflow["definition"] = {
+        "nodes": [
+            {
+                "id": "broken-agent",
+                "type": "agent",
+                "name": "Broken agent",
+                "position": {"x": 0, "y": 0},
+                "config": {"prompt": 42, "backend_key": "claude"},
+            }
+        ],
+        "edges": [],
+    }
+
+    with _started_server(wm_paths):
+        result = service.scripts.test_script(
+            actor="root",
+            script_key="system.validate_workflow",
+            script_params={"workflow": workflow},
+            timeout_seconds=10,
+        )
+
+    assert result["status"] == "success"
+    assert result["result"] == {
+        "valid": False,
+        "errors": [
+            {
+                "scope": "node",
+                "id": "broken-agent",
+                "field": "prompt",
+                "code": "invalid_type",
+                "message": "字段类型不合法",
+            }
+        ],
+        "warnings": [],
+    }
+
+
 def test_script_service_upserts_and_test_runs_python_script(wm_paths):
     service = AgentBridgeService.create(wm_paths, {"root"})
 

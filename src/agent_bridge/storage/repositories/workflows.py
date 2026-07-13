@@ -604,6 +604,11 @@ class WorkflowsRepository:
                 "DELETE FROM workflow_definitions WHERE workflow_key = ?",
                 (workflow_key,),
             )
+            if cursor.rowcount > 0:
+                conn.execute(
+                    "DELETE FROM workflow_run_logs WHERE workflow_key = ?",
+                    (workflow_key,),
+                )
             return cursor.rowcount > 0
 
     def clear_workflow_execution_data(self, workflow_key: str) -> dict[str, int]:

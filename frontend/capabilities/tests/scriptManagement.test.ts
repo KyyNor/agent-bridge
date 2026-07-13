@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   canDeleteScript,
   canDisableScript,
+  canEditScriptContract,
   canResetScript,
   mergeScriptDesignDraft,
   scriptResetPath,
@@ -95,6 +96,11 @@ test('default built-ins are protected and database overrides remain resettable',
   assert.equal(canDeleteScript(prefixedUserScript), true)
   assert.equal(canDisableScript(prefixedUserScript), true)
   assert.equal(canResetScript(prefixedUserScript), false)
+})
+
+test('built-in scripts only allow code edits while user scripts keep contract fields editable', () => {
+  assert.equal(canEditScriptContract(script({ is_builtin: true })), false)
+  assert.equal(canEditScriptContract(script({ is_builtin: false })), true)
 })
 
 test('design adoption preserves existing output schema when the agent omits or nulls it', () => {

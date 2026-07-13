@@ -24,6 +24,14 @@ class MissingReferenceError(ValueError):
 _MISSING = object()
 
 
+def _strict_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    return type(left) is type(right) and left == right
+
+
 def parse_reference(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -72,9 +80,9 @@ def evaluate_condition(condition: EdgeCondition | None, context: dict[str, Any])
     if actual is _MISSING:
         return ConditionResult(False, None)
     if condition.operator == "equals":
-        return ConditionResult(actual == condition.value, actual)
+        return ConditionResult(_strict_equal(actual, condition.value), actual)
     if condition.operator == "not_equals":
-        return ConditionResult(actual != condition.value, actual)
+        return ConditionResult(not _strict_equal(actual, condition.value), actual)
     if condition.operator == "contains":
         try:
             return ConditionResult(condition.value in actual, actual)

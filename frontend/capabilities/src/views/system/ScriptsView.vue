@@ -23,6 +23,7 @@ import { schemaToFields, type SchemaField } from '../../lib/schemaFields'
 import {
   canDeleteScript,
   canDisableScript,
+  canEditScriptContract,
   canResetScript,
   isBuiltInScriptFamily,
   mergeScriptDesignDraft,
@@ -100,6 +101,7 @@ const editingScript = computed(() =>
 const scriptDesignDraft = computed(() => designResponse.value?.result?.script || null)
 const inputSchemaFields = computed(() => schemaToFields(form.value.input_schema))
 const isBuiltInScript = computed(() => editingScript.value ? isBuiltInScriptFamily(editingScript.value) : false)
+const canEditContract = computed(() => editingScript.value ? canEditScriptContract(editingScript.value) : true)
 const pagedScripts = computed(() => paginate(scripts.value, scriptPage.value, scriptPageSize.value))
 const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 
@@ -755,7 +757,7 @@ def main(envelope):
           <RotateCcw class="mr-1.5 h-4 w-4" />
           恢复默认
         </Button>
-        <Button variant="outline" size="sm" :disabled="designing" @click="openScriptDesigner('modify')">
+        <Button variant="outline" size="sm" :disabled="designing || !canEditContract" @click="openScriptDesigner('modify')">
           <WandSparkles class="mr-1.5 h-4 w-4" />
           AI 设计
         </Button>
@@ -790,12 +792,12 @@ def main(envelope):
               </div>
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">名称</label>
-                <Input v-model="form.name" placeholder="我的脚本" />
+                <Input v-model="form.name" placeholder="我的脚本" :disabled="!canEditContract" />
               </div>
             </div>
             <div>
               <label class="mb-1 block text-xs text-muted-foreground">描述</label>
-              <Input v-model="form.description" placeholder="可选" />
+              <Input v-model="form.description" placeholder="可选" :disabled="!canEditContract" />
             </div>
             <div class="grid gap-3 md:grid-cols-3">
               <div>
@@ -811,7 +813,7 @@ def main(envelope):
               </div>
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">归属类型</label>
-                <Select v-model="form.owner_type">
+                <Select v-model="form.owner_type" :disabled="!canEditContract">
                   <SelectTrigger class="w-full"><SelectValue placeholder="归属" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="system">系统</SelectItem>
@@ -823,13 +825,13 @@ def main(envelope):
               </div>
               <div v-if="form.owner_type !== 'system'">
                 <label class="mb-1 block text-xs text-muted-foreground">归属 key</label>
-                <Select v-if="ownerKeyOptions.length" v-model="form.owner_key">
+                <Select v-if="ownerKeyOptions.length" v-model="form.owner_key" :disabled="!canEditContract">
                   <SelectTrigger class="w-full"><SelectValue placeholder="选择" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem v-for="opt in ownerKeyOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input v-else v-model="form.owner_key" placeholder="owner_key" />
+                <Input v-else v-model="form.owner_key" placeholder="owner_key" :disabled="!canEditContract" />
               </div>
             </div>
             <div>
@@ -844,12 +846,13 @@ def main(envelope):
                 ref="inputSchemaEditor"
                 v-model="form.input_schema"
                 label="输入 Schema"
+                :disabled="!canEditContract"
               />
               <p class="mt-2 text-xs text-muted-foreground">工作流会根据这些字段生成参数映射和运行前校验。</p>
             </div>
             <div class="space-y-3">
               <label class="flex items-center gap-2 text-xs text-muted-foreground">
-                <input :checked="outputSchemaEnabled" type="checkbox" @change="toggleOutputSchema(($event.target as HTMLInputElement).checked)" />
+                <input :checked="outputSchemaEnabled" type="checkbox" :disabled="!canEditContract" @change="toggleOutputSchema(($event.target as HTMLInputElement).checked)" />
                 声明输出 Schema
               </label>
               <SchemaFieldEditor
@@ -857,6 +860,7 @@ def main(envelope):
                 ref="outputSchemaEditor"
                 v-model="form.output_schema"
                 label="输出 Schema"
+                :disabled="!canEditContract"
               />
               <div v-else class="rounded-md border px-3 py-4 text-xs text-muted-foreground">
                 未声明输出 Schema 时，脚本仍可运行，但下游只能把结果当作未建模对象处理。

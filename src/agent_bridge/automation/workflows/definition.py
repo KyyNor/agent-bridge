@@ -29,6 +29,7 @@ class WorkflowEdge(BaseModel):
     source: str
     target: str
     condition: EdgeCondition | None = None
+    system_role: Literal["summary_markdown_to_html"] | None = None
 
 
 class GetTaskConfig(BaseModel):
@@ -65,6 +66,7 @@ class OutputConfig(BaseModel):
     backend_key: str
     mcp_enabled: bool = False
     skill_names: list[str] = Field(default_factory=list)
+    system_role: Literal["summary_markdown", "summary_html"] | None = None
 
 
 class BaseNode(BaseModel):
@@ -125,6 +127,7 @@ def default_workflow_graph(workflow_type: WorkflowType, default_backend: str) ->
                         "path": "reports/index.md",
                         "prompt": "根据全部上游节点输出生成结构清晰的 Markdown 主报告；返回 title、summary、content，content 必须是完整 Markdown。",
                         "backend_key": default_backend,
+                        "system_role": "summary_markdown",
                     },
                 },
                 {
@@ -138,11 +141,17 @@ def default_workflow_graph(workflow_type: WorkflowType, default_backend: str) ->
                         "path": "reports/index.html",
                         "prompt": "只根据 Markdown 主产物生成完整 HTML 文档；返回 title、summary、content，content 必须包含 html 或 body 标签、内联 CSS、无外链脚本。",
                         "backend_key": default_backend,
+                        "system_role": "summary_html",
                     },
                 },
             ],
             "edges": [
-                {"id": "markdown-to-html", "source": "markdown-output", "target": "html-output"}
+                {
+                    "id": "markdown-to-html",
+                    "source": "markdown-output",
+                    "target": "html-output",
+                    "system_role": "summary_markdown_to_html",
+                }
             ],
         }
     )

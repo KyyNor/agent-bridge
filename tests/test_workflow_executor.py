@@ -78,6 +78,23 @@ def test_run_workflow_revalidates_disabled_script_before_execution(wm_paths):
     assert "workflow-key" not in service.workflow_scheduler._running
 
 
+def test_run_workflow_revalidates_disabled_profile_before_creating_run(wm_paths):
+    service = make_service_with_valid_script_workflow(wm_paths)
+    service.store.upsert_project_profile(
+        profile_key="workflow-profile",
+        name="Workflow Profile",
+        status="disabled",
+        created_by="root",
+    )
+
+    with pytest.raises(WorkflowDefinitionValidationError) as exc_info:
+        service.workflow_scheduler.run_workflow_now("workflow-key", actor="root")
+
+    assert any(issue.code == "inactive_profile" for issue in exc_info.value.issues)
+    assert service.store.list_workflow_runs("workflow-key", limit=10) == []
+    assert "workflow-key" not in service.workflow_scheduler._running
+
+
 def test_run_workflow_now_validates_resources_once_before_thread_execution(wm_paths, monkeypatch):
     service = make_service_with_valid_script_workflow(wm_paths)
 

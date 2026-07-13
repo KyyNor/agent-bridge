@@ -52,6 +52,22 @@ const COMPLEX_KEYWORDS = new Set([
   'unevaluatedProperties',
 ])
 
+const SIMPLE_OBJECT_KEYS = [
+  '$comment',
+  '$id',
+  '$schema',
+  'additionalProperties',
+  'deprecated',
+  'description',
+  'examples',
+  'properties',
+  'readOnly',
+  'required',
+  'title',
+  'type',
+  'writeOnly',
+]
+
 function isObject(value: unknown): value is JsonObject {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -96,7 +112,7 @@ export function isSimpleObjectSchema(schema: Record<string, unknown> | null | un
   if (!isObject(schema)) return false
   if (schema.type !== 'object') return false
   if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) return false
-  if (!hasOnlyKeys(schema, ['type', 'properties', 'required', 'additionalProperties', 'description'])) return false
+  if (!hasOnlyKeys(schema, SIMPLE_OBJECT_KEYS)) return false
 
   const properties = schema.properties
   if (properties === undefined || !isObject(properties)) return false
@@ -151,11 +167,18 @@ export function fieldsToSchema(
     ]),
   )
 
+  const base = source
+    ? Object.fromEntries(
+        Object.entries(source).filter(([key]) => !['type', 'properties', 'required'].includes(key)),
+      )
+    : { additionalProperties: false }
+  const required = fields.filter(field => field.required).map(field => field.name)
+  const keepRequired = source === undefined || source === null || 'required' in source || required.length > 0
+
   return {
+    ...base,
     type: 'object',
-    ...(source && typeof source.description === 'string' ? { description: source.description } : {}),
     properties,
-    required: fields.filter(field => field.required).map(field => field.name),
-    additionalProperties: false,
+    ...(keepRequired ? { required } : {}),
   }
 }

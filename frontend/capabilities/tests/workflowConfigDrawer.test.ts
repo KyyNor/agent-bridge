@@ -56,6 +56,13 @@ test('node skill_names validation issue is surfaced in the skill picker', async 
   assert.match(panel, /技能配置有误/)
 })
 
+test('typed edge condition value remains a reference insertion target', async () => {
+  const panel = await readFile(new URL('../src/views/workflow/WorkflowEdgeConfigPanel.vue', import.meta.url), 'utf8')
+
+  assert.match(panel, /ref="conditionValueInput"/)
+  assert.match(panel, /@focusin="activeField = conditionValueInput"/)
+})
+
 test('agent output schema validity is wired to workflow save guards', async () => {
   const panel = await readFile(new URL('../src/views/workflow/WorkflowNodeConfigPanel.vue', import.meta.url), 'utf8')
   const editor = await readFile(new URL('../src/components/SchemaFieldEditor.vue', import.meta.url), 'utf8')

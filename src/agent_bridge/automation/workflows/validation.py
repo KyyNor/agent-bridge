@@ -135,13 +135,33 @@ def collect_graph_issues(graph: WorkflowGraph, workflow_type: WorkflowType) -> l
 
 def _validate_summary_graph(graph, incoming, outgoing, issues) -> None:
     outputs = [node for node in graph.nodes if node.type == "output"]
-    if len(outputs) != 2:
+    marked_outputs = [node for node in outputs if node.config.system_role is not None]
+    summary_outputs = marked_outputs or outputs
+    if len(summary_outputs) != 2:
         issues.append(
             _issue("workflow", None, None, "invalid_summary_outputs", "总结型工作流必须且只能包含 Markdown 和 HTML 输出节点")
         )
         return
-    markdown = next((node for node in outputs if node.config.format == "markdown"), None)
-    html = next((node for node in outputs if node.config.format == "html"), None)
+    if marked_outputs:
+        markdown = next(
+            (
+                node
+                for node in summary_outputs
+                if node.config.system_role == "summary_markdown" and node.config.format == "markdown"
+            ),
+            None,
+        )
+        html = next(
+            (
+                node
+                for node in summary_outputs
+                if node.config.system_role == "summary_html" and node.config.format == "html"
+            ),
+            None,
+        )
+    else:
+        markdown = next((node for node in summary_outputs if node.config.format == "markdown"), None)
+        html = next((node for node in summary_outputs if node.config.format == "html"), None)
     if markdown is None or html is None:
         issues.append(
             _issue("workflow", None, None, "invalid_summary_outputs", "总结型工作流必须包含一组 Markdown 和 HTML 输出节点")

@@ -66,8 +66,8 @@ ALLOWED_EXTENSIONS = {
 SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
 
 
-def _agent_runtime_config_payload(config: AgentRuntimeConfig) -> dict[str, Any]:
-    return {
+def _agent_runtime_config_payload(config: AgentRuntimeConfig, registry: Any = None) -> dict[str, Any]:
+    payload = {
         "default_backend": config.default_backend,
         "backends": [
             {
@@ -79,6 +79,17 @@ def _agent_runtime_config_payload(config: AgentRuntimeConfig) -> dict[str, Any]:
             for backend in config.backends
         ],
     }
+    if registry is not None:
+        payload["available_backends"] = [
+            {
+                "slug": backend_key,
+                "display_name": registry.get(backend_key).display_name,
+                "source": registry.get(backend_key).source,
+                "capabilities": asdict(registry.get(backend_key).capabilities),
+            }
+            for backend_key in registry.keys()
+        ]
+    return payload
 
 
 class AgentBridgeService:
@@ -770,7 +781,7 @@ class AgentBridgeService:
     def get_agent_runtime_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         config = load_agent_runtime_config(self.paths)
-        return _agent_runtime_config_payload(config)
+        return _agent_runtime_config_payload(config, self.agents.coding_agents)
 
     def save_agent_runtime_config(self, actor: str, payload: dict[str, Any]) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -799,7 +810,7 @@ class AgentBridgeService:
             saved.default_backend,
             [item.slug for item in saved.backends],
         )
-        return _agent_runtime_config_payload(saved)
+        return _agent_runtime_config_payload(saved, registry)
 
     def get_claude_mem_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

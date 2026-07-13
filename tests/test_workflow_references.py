@@ -29,3 +29,11 @@ def test_conditions(operator, expected):
     value = "bug" if operator != "contains" else "ui"
     result = evaluate_condition(EdgeCondition(field="nodes.classify.output.category" if operator != "contains" else "nodes.classify.output.tags", operator=operator, value=value), CONTEXT)
     assert result.matched is expected
+
+
+def test_condition_equality_does_not_coerce_boolean_and_number_types():
+    context = {"input": {"enabled": True, "limit": 1}}
+
+    assert evaluate_condition(EdgeCondition(field="input.enabled", operator="equals", value=1), context).matched is False
+    assert evaluate_condition(EdgeCondition(field="input.enabled", operator="equals", value=True), context).matched is True
+    assert evaluate_condition(EdgeCondition(field="input.limit", operator="not_equals", value=True), context).matched is True

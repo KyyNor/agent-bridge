@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
-from agent_bridge.automation.workflows.definition import WorkflowGraph
 
 
 class CreateMemoryBlockRequest(BaseModel):
@@ -236,7 +235,9 @@ class WorkflowDefinitionRequest(BaseModel):
     name: str
     description: str = ""
     profile_key: str
-    definition: WorkflowGraph
+    # Graph parsing belongs to WorkflowValidator so save and validation routes
+    # produce the same structured issue contract for malformed definitions.
+    definition: dict[str, Any]
     status: str = "active"
     workflow_type: str = "operation"
 

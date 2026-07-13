@@ -81,7 +81,8 @@ class WorkflowValidator:
             return None, WorkflowValidationResult(valid=False, errors=issues, warnings=[])
 
         issues = collect_graph_issues(parsed.definition, parsed.workflow_type)
-        if self.store.get_project_profile(parsed.profile_key) is None:
+        profile = self.store.get_project_profile(parsed.profile_key)
+        if profile is None:
             issues.append(
                 WorkflowValidationIssue(
                     scope="workflow",
@@ -89,6 +90,16 @@ class WorkflowValidator:
                     field="profile_key",
                     code="missing_profile",
                     message="Profile 不存在",
+                )
+            )
+        elif profile.get("status") != "active":
+            issues.append(
+                WorkflowValidationIssue(
+                    scope="workflow",
+                    id=None,
+                    field="profile_key",
+                    code="inactive_profile",
+                    message="Profile 未启用",
                 )
             )
         issues.extend(self._resource_issues(actor=actor, graph=parsed.definition))
@@ -133,7 +144,15 @@ class WorkflowValidator:
         if len(parts) >= 3 and parts[0] == "definition" and parts[1] in {"nodes", "edges"} and isinstance(parts[2], int):
             collection = str(parts[1])
             index = parts[2]
-            field_parts = [str(part) for part in parts[3:] if part != "config"]
+            field_parts = list(parts[3:])
+            if collection == "nodes" and field_parts and field_parts[0] in {
+                "get_task",
+                "agent",
+                "script",
+                "output",
+            }:
+                field_parts.pop(0)
+            field_parts = [str(part) for part in field_parts if part != "config"]
             identifier = None
             definition = workflow.get("definition")
             if isinstance(definition, dict):
@@ -178,11 +197,13 @@ class WorkflowValidator:
                                 message="JSON 输出 Schema 不合法",
                             )
                         )
+                backend = None
                 try:
-                    backend_missing = self.agent_service is None or self.agent_service.coding_agents.get(config.backend_key) is None
+                    if self.agent_service is not None:
+                        backend = self.agent_service.coding_agents.get(config.backend_key)
                 except Exception:
-                    backend_missing = True
-                if backend_missing:
+                    backend = None
+                if backend is None:
                     issues.append(
                         WorkflowValidationIssue(
                             scope="node",
@@ -190,6 +211,18 @@ class WorkflowValidator:
                             field="config.backend_key",
                             code="unknown_backend",
                             message=f"未知后端: {config.backend_key}",
+                        )
+                    )
+                elif config.mcp_enabled and not bool(
+                    getattr(getattr(backend, "capabilities", None), "supports_mcp", False)
+                ):
+                    issues.append(
+                        WorkflowValidationIssue(
+                            scope="node",
+                            id=node.id,
+                            field="config.mcp_enabled",
+                            code="unsupported_mcp",
+                            message=f"后端不支持 MCP: {config.backend_key}",
                         )
                     )
                 for skill_name in config.skill_names:

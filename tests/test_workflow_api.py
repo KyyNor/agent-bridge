@@ -3,6 +3,56 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
+def test_malformed_definition_uses_structured_validator_issues_for_save_and_validate(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.init_schema()
+    service.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    client = TestClient(create_app(wm_paths, {"root"}))
+    workflow = {
+        "workflow_key": "malformed",
+        "name": "Malformed",
+        "description": "",
+        "profile_key": "report-plane",
+        "status": "active",
+        "workflow_type": "operation",
+        "definition": {
+            "nodes": [
+                {
+                    "id": "broken-agent",
+                    "type": "agent",
+                    "name": "Broken agent",
+                    "position": {"x": 0, "y": 0},
+                    "config": {"prompt": 42, "backend_key": "claude"},
+                }
+            ],
+            "edges": [],
+        },
+    }
+
+    saved = client.post("/workflows", headers={"X-Agent-Bridge-User": "root"}, json=workflow)
+    validated = client.post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"workflow": workflow},
+    )
+
+    assert saved.status_code == 400, saved.text
+    assert validated.status_code == 200, validated.text
+    assert saved.json()["errors"] == validated.json()["errors"]
+    assert saved.json()["errors"] == [
+        {
+            "scope": "node",
+            "id": "broken-agent",
+            "field": "prompt",
+            "code": "invalid_type",
+            "message": "字段类型不合法",
+        }
+    ]
+
+
 def test_validate_workflow_endpoint_requires_complete_workflow(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService

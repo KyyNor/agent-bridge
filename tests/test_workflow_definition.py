@@ -7,7 +7,39 @@ def test_summary_default_graph_contains_locked_output_pair():
     graph = default_workflow_graph(WorkflowType.summary, "codex")
     assert [node.type for node in graph.nodes] == ["output", "output"]
     assert [node.config.format for node in graph.nodes] == ["markdown", "html"]
+    assert [node.config.system_role for node in graph.nodes] == ["summary_markdown", "summary_html"]
+    assert graph.edges[0].system_role == "summary_markdown_to_html"
     assert [(edge.source, edge.target) for edge in graph.edges] == [("markdown-output", "html-output")]
+
+
+def test_summary_validation_uses_markers_without_rejecting_ordinary_output_nodes():
+    default = default_workflow_graph(WorkflowType.summary, "claude").model_dump(mode="json")
+    default["nodes"].insert(
+        0,
+        {
+            "id": "ordinary-output",
+            "type": "output",
+            "name": "Ordinary output",
+            "position": {"x": 0, "y": 0},
+            "config": {
+                "format": "markdown",
+                "title": "Ordinary",
+                "path": "ordinary.md",
+                "prompt": "ordinary",
+                "backend_key": "claude",
+            },
+        },
+    )
+    default["edges"].insert(
+        0,
+        {
+            "id": "ordinary-to-summary",
+            "source": "ordinary-output",
+            "target": "markdown-output",
+        },
+    )
+
+    validate_graph(WorkflowGraph.model_validate(default), WorkflowType.summary)
 
 
 def test_summary_output_pair_requires_one_unconditional_direct_edge():

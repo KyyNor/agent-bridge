@@ -55,6 +55,22 @@ test('field rows preserve supported top-level schema metadata', () => {
   assert.deepEqual(roundTripped, schema)
 })
 
+test('field rows preserve unspecified additionalProperties and schema annotations', () => {
+  const schema = {
+    type: 'object',
+    title: 'Runtime payload',
+    description: 'Properties outside this list remain allowed by default.',
+    properties: {
+      count: { type: 'integer' },
+    },
+    required: [],
+  }
+
+  assert.equal(isSimpleObjectSchema(schema), true)
+  assert.deepEqual(fieldsToSchema(schemaToFields(schema), schema), schema)
+  assert.equal('additionalProperties' in fieldsToSchema(schemaToFields(schema), schema), false)
+})
+
 test('unknown top-level metadata keeps schema in advanced mode', () => {
   assert.equal(isSimpleObjectSchema({
     type: 'object',

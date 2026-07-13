@@ -10,7 +10,7 @@ const props = defineProps<{
   mode: 'template' | 'condition'
 }>()
 
-const emit = defineEmits<{ insert: [value: string] }>()
+const emit = defineEmits<{ insert: [value: string, rawPath: string] }>()
 const query = ref('')
 const filteredItems = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -23,7 +23,7 @@ const filteredItems = computed(() => {
 })
 
 function insert(item: WorkflowReferenceItem) {
-  emit('insert', formatWorkflowReference(item, props.mode))
+  emit('insert', formatWorkflowReference(item, props.mode), item.path)
 }
 </script>
 

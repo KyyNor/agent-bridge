@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@vue-flow/core'
-import type { ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../../api/types'
+import type { AgentRuntimeConfig, ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../../api/types'
 
 export interface ManualInputField { path: string; type: string; required: boolean; description: string }
 
@@ -10,10 +10,10 @@ export function createDefaultGraph(type: WorkflowType, defaultBackend: string): 
   if (type === 'operation') return { nodes: [], edges: [] }
   return {
     nodes: [
-      { id: 'markdown-output', type: 'output', name: 'Markdown 主报告', position: { x: 160, y: 120 }, config: { format: 'markdown', title: '总结报告', path: 'reports/index.md', tags: [], prompt: markdownPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: [] } },
-      { id: 'html-output', type: 'output', name: 'HTML 派生报告', position: { x: 480, y: 120 }, config: { format: 'html', title: '总结报告 HTML', path: 'reports/index.html', tags: [], prompt: htmlPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: [] } },
+      { id: 'markdown-output', type: 'output', name: 'Markdown 主报告', position: { x: 160, y: 120 }, config: { format: 'markdown', title: '总结报告', path: 'reports/index.md', tags: [], prompt: markdownPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: [], system_role: 'summary_markdown' } },
+      { id: 'html-output', type: 'output', name: 'HTML 派生报告', position: { x: 480, y: 120 }, config: { format: 'html', title: '总结报告 HTML', path: 'reports/index.html', tags: [], prompt: htmlPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: [], system_role: 'summary_html' } },
     ],
-    edges: [{ id: 'markdown-to-html', source: 'markdown-output', target: 'html-output', condition: null }],
+    edges: [{ id: 'markdown-to-html', source: 'markdown-output', target: 'html-output', condition: null, system_role: 'summary_markdown_to_html' }],
   }
 }
 
@@ -25,34 +25,56 @@ export function migrateWorkflowGraph(
 ): WorkflowGraph {
   if (from === to) return structuredClone(graph)
 
-  const protectedIds = new Set(['markdown-output', 'html-output'])
+  const protectedIds = summarySystemNodeIds(graph, from)
   if (to === 'operation') {
     const nodes = graph.nodes.filter(node => !protectedIds.has(node.id))
-    const nodeIds = new Set(nodes.map(node => node.id))
     return {
-      nodes,
-      edges: graph.edges.filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target)),
+      nodes: structuredClone(nodes),
+      edges: structuredClone(
+        graph.edges.filter(
+          edge => !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target),
+        ),
+      ),
     }
   }
 
-  const nodes = graph.nodes.filter(node => node.type !== 'output' && !protectedIds.has(node.id))
+  const nodes = structuredClone(graph.nodes.filter(node => !protectedIds.has(node.id)))
   const nodeIds = new Set(nodes.map(node => node.id))
-  const edges = graph.edges.filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target))
-  const outgoing = new Set(edges.map(edge => edge.source))
+  const edges = structuredClone(
+    graph.edges.filter(
+      edge => !edge.system_role && !protectedIds.has(edge.source) && !protectedIds.has(edge.target),
+    ),
+  )
+  const outgoing = new Set(
+    edges
+      .filter(edge => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+      .map(edge => edge.source),
+  )
+  const usedNodeIds = new Set(nodes.map(node => node.id))
   const usedEdgeIds = new Set(edges.map(edge => edge.id))
   const maxX = nodes.reduce((value, node) => Math.max(value, node.position.x), 0)
   const summary = createDefaultGraph('summary', defaultBackend)
+  const markdownId = uniqueGraphId('markdown-output', usedNodeIds)
+  const htmlId = uniqueGraphId('html-output', usedNodeIds)
+  summary.nodes[0].id = markdownId
+  summary.nodes[1].id = htmlId
   summary.nodes[0].position = { x: maxX + 240, y: 120 }
   summary.nodes[1].position = { x: maxX + 560, y: 120 }
+  summary.edges[0] = {
+    ...summary.edges[0],
+    id: uniqueGraphId('markdown-to-html', usedEdgeIds),
+    source: markdownId,
+    target: htmlId,
+  }
 
   for (const node of nodes) {
     if (outgoing.has(node.id)) continue
-    const base = `${node.id}-markdown-output`
-    let edgeId = base
-    let suffix = 2
-    while (usedEdgeIds.has(edgeId)) edgeId = `${base}-${suffix++}`
-    usedEdgeIds.add(edgeId)
-    edges.push({ id: edgeId, source: node.id, target: 'markdown-output', condition: null })
+    edges.push({
+      id: uniqueGraphId(`${node.id}-${markdownId}`, usedEdgeIds),
+      source: node.id,
+      target: markdownId,
+      condition: null,
+    })
   }
 
   return {
@@ -61,12 +83,45 @@ export function migrateWorkflowGraph(
   }
 }
 
+function summarySystemNodeIds(graph: WorkflowGraph, workflowType: WorkflowType): Set<string> {
+  const marked = graph.nodes.filter(
+    node => node.type === 'output' && Boolean(node.config.system_role),
+  )
+  if (marked.length || workflowType !== 'summary') return new Set(marked.map(node => node.id))
+
+  const outputs = graph.nodes.filter(node => node.type === 'output')
+  if (outputs.length !== 2) return new Set()
+  const markdown = outputs.find(node => node.config.format === 'markdown')
+  const html = outputs.find(node => node.config.format === 'html')
+  if (!markdown || !html) return new Set()
+  const hasLegacyBridge = graph.edges.some(
+    edge => edge.source === markdown.id && edge.target === html.id && edge.condition === null,
+  )
+  return hasLegacyBridge ? new Set([markdown.id, html.id]) : new Set()
+}
+
+function uniqueGraphId(base: string, used: Set<string>): string {
+  let value = base
+  let suffix = 2
+  while (used.has(value)) value = `${base}-${suffix++}`
+  used.add(value)
+  return value
+}
+
 export function isProtectedSummaryNode(node: WorkflowNode, workflowType: WorkflowType) {
-  return workflowType === 'summary' && (node.id === 'markdown-output' || node.id === 'html-output')
+  return workflowType === 'summary' && node.type === 'output' && Boolean(node.config.system_role)
 }
 
 export function isProtectedSummaryEdge(edge: WorkflowEdge, workflowType: WorkflowType) {
-  return workflowType === 'summary' && edge.id === 'markdown-to-html'
+  return workflowType === 'summary' && edge.system_role === 'summary_markdown_to_html'
+}
+
+export function deriveWorkflowBackendKeys(runtime: AgentRuntimeConfig): string[] {
+  const registered = runtime.available_backends?.map(item => item.slug) || []
+  const candidates = registered.length
+    ? registered
+    : [runtime.default_backend, ...runtime.backends.map(item => item.slug)]
+  return candidates.filter((item, index, all) => Boolean(item) && all.indexOf(item) === index)
 }
 
 export function toVueFlowElements(graph: WorkflowGraph): { nodes: Node[]; edges: Edge[] } {
