@@ -19,8 +19,15 @@ const flowNodes = shallowRef<Node[]>([])
 const flowEdges = shallowRef<Edge[]>([])
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
-watch(graph, value => { const elements = toVueFlowElements(value); flowNodes.value = elements.nodes; flowEdges.value = elements.edges }, { immediate: true, deep: true })
-const issueById = computed(() => new Map(props.errors.filter(issue => issue.id).map(issue => [issue.id as string, issue.message])))
+watch([graph, () => props.errors], () => {
+  const elements = toVueFlowElements(graph.value)
+  const edgeIssueIds = new Set(props.errors.filter(issue => issue.scope === 'edge' && issue.id).map(issue => issue.id as string))
+  flowNodes.value = elements.nodes
+  flowEdges.value = elements.edges.map(edge => edgeIssueIds.has(edge.id)
+    ? { ...edge, class: 'workflow-edge-error', style: { stroke: 'var(--destructive)', strokeWidth: 2 } }
+    : edge)
+}, { immediate: true, deep: true })
+const issueById = computed(() => new Map(props.errors.filter(issue => issue.scope === 'node' && issue.id).map(issue => [issue.id as string, issue.message])))
 
 function sync() { graph.value = fromVueFlowElements(flowNodes.value, flowEdges.value) }
 function connect(connection: Connection) {
@@ -76,3 +83,10 @@ function drop(event: DragEvent) {
     </VueFlow>
   </div>
 </template>
+
+<style scoped>
+:deep(.workflow-edge-error path) {
+  stroke: var(--destructive);
+  stroke-width: 2;
+}
+</style>

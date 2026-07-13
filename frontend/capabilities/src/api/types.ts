@@ -168,7 +168,7 @@ export interface ScriptWorkflowNode { id: string; type: 'script'; name: string; 
 export interface OutputWorkflowNode { id: string; type: 'output'; name: string; position: WorkflowPosition; config: { format: 'markdown' | 'html'; title: string; path: string; tags: string[]; prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[] } }
 export type WorkflowNode = GetTaskWorkflowNode | AgentWorkflowNode | ScriptWorkflowNode | OutputWorkflowNode
 export interface WorkflowGraph { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
-export interface WorkflowValidationError { scope: 'workflow' | 'node' | 'edge'; id: string | null; field: string | null; message: string }
+export interface WorkflowValidationError { scope: 'workflow' | 'node' | 'edge'; id: string | null; field: string | null; message: string; code?: string | null }
 
 export interface WorkflowDefinition {
   workflow_key: string

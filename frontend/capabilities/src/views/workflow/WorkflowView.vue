@@ -12,6 +12,7 @@ import { confirm, alert } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
+import WorkflowConfigDrawer from './WorkflowConfigDrawer.vue'
 import WorkflowNodeConfigPanel from './WorkflowNodeConfigPanel.vue'
 import WorkflowEdgeConfigPanel from './WorkflowEdgeConfigPanel.vue'
 import WorkflowRunGraph from './WorkflowRunGraph.vue'
@@ -131,6 +132,9 @@ const routeError = ref('')
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
 const graphErrors = ref<WorkflowValidationError[]>([])
+type WorkflowConfigDrawerMode = 'overlay' | 'fullscreen'
+const configDrawerOpen = ref(false)
+const configDrawerMode = ref<WorkflowConfigDrawerMode>('overlay')
 const manualInputValues = ref<Record<string, string>>({})
 const advancedInput = ref('{}')
 const progressRunDetail = ref<WorkflowRun | null>(null)
@@ -215,6 +219,13 @@ const pageWorkflow = computed(() =>
 
 const selectedNode = computed(() => form.value.definition.nodes.find(node => node.id === selectedNodeId.value) || null)
 const selectedEdge = computed(() => form.value.definition.edges.find(edge => edge.id === selectedEdgeId.value) || null)
+const selectedNodeIssues = computed(() => scopedGraphIssues('node', selectedNode.value?.id || null))
+const selectedEdgeIssues = computed(() => scopedGraphIssues('edge', selectedEdge.value?.id || null))
+const configDrawerTitle = computed(() => {
+  if (selectedNode.value) return `节点配置 / ${selectedNode.value.name || selectedNode.value.id}`
+  if (selectedEdge.value) return `连线条件 / ${selectedEdge.value.id}`
+  return '配置'
+})
 const selectedNodeReferenceItems = computed(() => selectedNode.value ? deriveAvailableData(form.value.definition, { kind: 'node', id: selectedNode.value.id }, scripts.value) : [])
 const selectedEdgeReferenceItems = computed(() => selectedEdge.value ? deriveAvailableData(form.value.definition, { kind: 'edge', id: selectedEdge.value.id }, scripts.value) : [])
 const hasTaskNode = computed(() => form.value.definition.nodes.some(node => node.type === 'get_task'))
@@ -432,6 +443,10 @@ function prepareCreateForm() {
     definition: createDefaultGraph('operation', defaultBackend.value),
   })
   formError.value = ''
+  graphErrors.value = []
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  configDrawerOpen.value = false
 }
 
 function openEdit(item: WorkflowDefinition) {
@@ -449,6 +464,57 @@ function prepareEditForm(item: WorkflowDefinition) {
     definition: item.definition || createDefaultGraph(item.workflow_type === 'summary' ? 'summary' : 'operation', defaultBackend.value),
   })
   formError.value = ''
+  graphErrors.value = []
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  configDrawerOpen.value = false
+}
+
+function normalizeWorkflowIssue(value: unknown): WorkflowValidationError | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  const scope = raw.scope
+  if (scope !== 'workflow' && scope !== 'node' && scope !== 'edge') return null
+  const id = typeof raw.id === 'string' ? raw.id : null
+  const field = typeof raw.field === 'string' ? raw.field : null
+  const message = typeof raw.message === 'string' ? raw.message : ''
+  if (!message) return null
+  const code = typeof raw.code === 'string' ? raw.code : null
+  return { scope, id, field, message, code }
+}
+
+function collectWorkflowIssues(value: unknown): WorkflowValidationError[] {
+  if (Array.isArray(value)) return value.map(normalizeWorkflowIssue).filter((issue): issue is WorkflowValidationError => Boolean(issue))
+  if (!value || typeof value !== 'object') return []
+  const raw = value as Record<string, unknown>
+  for (const key of ['issues', 'errors']) {
+    const found = collectWorkflowIssues(raw[key])
+    if (found.length) return found
+  }
+  return collectWorkflowIssues(raw.detail)
+}
+
+function parseWorkflowIssues(message: string): WorkflowValidationError[] {
+  const body = message.replace(/^\d+:\s*/, '').trim()
+  try {
+    const parsed = JSON.parse(body)
+    const issues = collectWorkflowIssues(parsed)
+    if (issues.length) return issues
+  } catch {
+    // Some server errors are plain text containing a JSON issues array.
+  }
+  const match = message.match(/"(?:errors|issues)"\s*:\s*(\[[\s\S]*?\])\s*[},]?/)
+  if (!match) return []
+  try {
+    return collectWorkflowIssues(JSON.parse(match[1]))
+  } catch {
+    return []
+  }
+}
+
+function scopedGraphIssues(scope: WorkflowValidationError['scope'], id: string | null) {
+  if (!id) return []
+  return graphErrors.value.filter(issue => issue.scope === scope && issue.id === id)
 }
 
 async function saveWorkflow(): Promise<WorkflowDefinition | null> {
@@ -469,18 +535,14 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
       definition: form.value.definition,
     })
     selectedKey.value = saved.workflow_key
+    graphErrors.value = []
     workflows.value = await api.listWorkflows()
     await loadRunsForWorkflows()
     window.location.hash = `workflow/${saved.workflow_key}/detail`
     return saved
   } catch (e: unknown) {
     formError.value = errorMessage(e)
-    try {
-      const match = formError.value.match(/"errors"\s*:\s*(\[[\s\S]*\])/)
-      graphErrors.value = match ? JSON.parse(match[1]) : []
-    } catch {
-      graphErrors.value = []
-    }
+    graphErrors.value = parseWorkflowIssues(formError.value)
     return null
   } finally {
     saving.value = false
@@ -492,6 +554,7 @@ function changeWorkflowType(value: WorkflowType) {
   form.value.definition = createDefaultGraph(value, defaultBackend.value)
   selectedNodeId.value = null
   selectedEdgeId.value = null
+  configDrawerOpen.value = false
 }
 
 function createNode(type: WorkflowNodeType, position = { x: 120 + form.value.definition.nodes.length * 36, y: 160 + form.value.definition.nodes.length * 32 }): WorkflowNode {
@@ -508,6 +571,26 @@ function addNode(type: WorkflowNodeType, position?: { x: number; y: number }) {
     return
   }
   form.value.definition = { ...form.value.definition, nodes: [...form.value.definition.nodes, createNode(type, position)] }
+}
+
+function selectWorkflowNode(id: string) {
+  selectedNodeId.value = id
+  selectedEdgeId.value = null
+  configDrawerOpen.value = true
+}
+
+function selectWorkflowEdge(id: string) {
+  selectedEdgeId.value = id
+  selectedNodeId.value = null
+  configDrawerOpen.value = true
+}
+
+function setConfigDrawerOpen(open: boolean) {
+  configDrawerOpen.value = open
+}
+
+function setConfigDrawerMode(mode: WorkflowConfigDrawerMode) {
+  configDrawerMode.value = mode
 }
 
 function replaceNode(node: WorkflowNode) {
@@ -2283,12 +2366,19 @@ async function confirmClearWorkflow() {
             </div>
           </div>
 
-          <div class="grid min-h-[520px] grid-cols-[132px_minmax(0,1fr)] xl:grid-cols-[132px_minmax(0,1fr)_340px]">
+          <div class="workflow-editor-region relative grid min-h-[520px] grid-cols-[132px_minmax(0,1fr)] overflow-hidden">
             <WorkflowNodePalette @add-node="addNode" />
-            <WorkflowEditorCanvas v-model:graph="form.definition" :workflow-type="form.workflow_type" :errors="graphErrors" @select-node="id => { selectedNodeId = id; selectedEdgeId = null }" @select-edge="id => { selectedEdgeId = id; selectedNodeId = null }" @add-node="addNode" />
-            <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" :reference-items="selectedNodeReferenceItems" @replace="replaceNode" />
-            <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" :reference-items="selectedEdgeReferenceItems" @replace="replaceEdge" />
-            <aside v-else class="hidden border-l p-4 text-sm text-muted-foreground xl:block">选择一个节点或连线进行配置。</aside>
+            <WorkflowEditorCanvas v-model:graph="form.definition" :workflow-type="form.workflow_type" :errors="graphErrors" @select-node="selectWorkflowNode" @select-edge="selectWorkflowEdge" @add-node="addNode" />
+            <WorkflowConfigDrawer
+              :open="configDrawerOpen && Boolean(selectedNode || selectedEdge)"
+              :mode="configDrawerMode"
+              :title="configDrawerTitle"
+              @update:open="setConfigDrawerOpen"
+              @update:mode="setConfigDrawerMode"
+            >
+              <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" :reference-items="selectedNodeReferenceItems" :issues="selectedNodeIssues" @replace="replaceNode" />
+              <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" :reference-items="selectedEdgeReferenceItems" :issues="selectedEdgeIssues" @replace="replaceEdge" />
+            </WorkflowConfigDrawer>
           </div>
           <div v-if="!hasTaskNode" class="grid gap-3 border p-4 lg:grid-cols-2">
             <div><div class="mb-2 text-sm font-semibold">测试输入</div><div v-for="field in manualInputFields" :key="field.path" class="mb-2"><label class="mb-1 block text-xs text-muted-foreground">{{ field.path }}<span v-if="field.required" class="text-destructive"> *</span></label><Input v-model="manualInputValues[field.path]" :placeholder="field.description || field.type" /></div><p v-if="!manualInputFields.length" class="text-xs text-muted-foreground">当前脚本参数没有可推导输入字段。</p></div>
