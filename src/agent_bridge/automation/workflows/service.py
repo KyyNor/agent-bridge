@@ -70,15 +70,6 @@ class WorkflowService:
         # fixtures. New API schemas do not expose or execute this field.
         del workflow_js
         require_admin_user(actor, self.admins)
-        try:
-            next_status = WorkflowStatus(status).value
-        except ValueError as exc:
-            raise ValidationError(str(exc)) from exc
-        try:
-            workflow_type_enum = WorkflowType(workflow_type)
-            next_type = workflow_type_enum.value
-        except ValueError as exc:
-            raise ValidationError(str(exc)) from exc
         graph = self.validator.require_valid(
             actor=actor,
             workflow={
@@ -87,10 +78,12 @@ class WorkflowService:
                 "description": description,
                 "profile_key": profile_key,
                 "definition": definition or {"nodes": [], "edges": []},
-                "status": next_status,
-                "workflow_type": workflow_type_enum,
+                "status": status,
+                "workflow_type": workflow_type,
             },
         )
+        next_status = WorkflowStatus(status).value
+        next_type = WorkflowType(workflow_type).value
         result = self.store.upsert_workflow_definition(
             workflow_key=workflow_key,
             name=name,

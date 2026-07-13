@@ -69,6 +69,59 @@ def test_workflow_service_applies_summary_validation_for_string_type(wm_paths):
         raise AssertionError("expected summary graph validation error")
 
 
+def test_workflow_service_rejects_invalid_workflow_type_with_structured_issue(wm_paths):
+    from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
+
+    svc = _service(wm_paths)
+    try:
+        svc.workflows.upsert_definition(
+            actor="root",
+            workflow_key="bad-type",
+            name="Bad Type",
+            description="",
+            profile_key="report-plane",
+            definition={"nodes": [], "edges": []},
+            status="active",
+            workflow_type="bad-type",
+        )
+    except WorkflowDefinitionValidationError as exc:
+        assert any(
+            issue.scope == "workflow"
+            and issue.id is None
+            and issue.field == "workflow_type"
+            and issue.code == "invalid_value"
+            for issue in exc.issues
+        )
+    else:
+        raise AssertionError("expected invalid workflow_type validation error")
+
+
+def test_workflow_service_rejects_invalid_status_with_structured_issue(wm_paths):
+    from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
+
+    svc = _service(wm_paths)
+    try:
+        svc.workflows.upsert_definition(
+            actor="root",
+            workflow_key="bad-status",
+            name="Bad Status",
+            description="",
+            profile_key="report-plane",
+            definition={"nodes": [], "edges": []},
+            status="paused",
+        )
+    except WorkflowDefinitionValidationError as exc:
+        assert any(
+            issue.scope == "workflow"
+            and issue.id is None
+            and issue.field == "status"
+            and issue.code == "invalid_value"
+            for issue in exc.issues
+        )
+    else:
+        raise AssertionError("expected invalid status validation error")
+
+
 def test_manual_input_type_conflict_uses_structured_reference_parser(wm_paths):
     from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
 

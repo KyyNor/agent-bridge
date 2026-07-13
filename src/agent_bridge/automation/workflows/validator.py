@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, ValidationError as PydanticValidationError
 
 from agent_bridge.automation.workflows.definition import WorkflowGraph
-from agent_bridge.automation.workflows.models import WorkflowType
+from agent_bridge.automation.workflows.models import WorkflowStatus, WorkflowType
 from agent_bridge.automation.workflows.references import parse_reference
 from agent_bridge.automation.workflows.validation import (
     WorkflowDefinitionValidationError,
@@ -26,13 +26,14 @@ class _WorkflowValidationRequest(BaseModel):
     description: str = ""
     profile_key: str
     definition: WorkflowGraph
-    status: str = "active"
+    status: WorkflowStatus = WorkflowStatus.active
     workflow_type: WorkflowType = WorkflowType.operation
 
 
 @dataclass(frozen=True)
 class _NormalizedWorkflow:
     profile_key: str
+    status: WorkflowStatus
     workflow_type: WorkflowType
     definition: WorkflowGraph
 
@@ -90,6 +91,7 @@ class WorkflowValidator:
         result = WorkflowValidationResult(valid=not issues, errors=issues, warnings=[])
         normalized = _NormalizedWorkflow(
             profile_key=parsed.profile_key,
+            status=parsed.status,
             workflow_type=parsed.workflow_type,
             definition=parsed.definition,
         )
