@@ -100,14 +100,31 @@ WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
         "workflow": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["workflow_key", "name", "description", "profile_key", "status", "workflow_js"],
+            "required": [
+                "workflow_key",
+                "name",
+                "description",
+                "profile_key",
+                "workflow_type",
+                "status",
+                "definition",
+            ],
             "properties": {
                 "workflow_key": {"type": "string"},
                 "name": {"type": "string"},
                 "description": {"type": "string"},
                 "profile_key": {"type": "string"},
+                "workflow_type": {"type": "string", "enum": ["operation", "summary"]},
                 "status": {"type": "string", "enum": ["active", "disabled"]},
-                "workflow_js": {"type": "string"},
+                "definition": {
+                    "type": "object",
+                    "required": ["nodes", "edges"],
+                    "properties": {
+                        "nodes": {"type": "array", "items": {"type": "object"}},
+                        "edges": {"type": "array", "items": {"type": "object"}},
+                    },
+                    "additionalProperties": True,
+                },
             },
         },
     },
@@ -247,7 +264,7 @@ def create_agent_runs_routes(service, actor):
                 skill_name="design_workflow",
                 skill_prompt=service.skills.get_skill(current_actor, "design_workflow")["prompt"],
                 payload=payload,
-                expected_file="workflow.js",
+                expected_artifact="structured workflow definition",
             ),
             agent_name="design_workflow",
             profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
@@ -269,7 +286,7 @@ def create_agent_runs_routes(service, actor):
                 skill_name="design_script",
                 skill_prompt=service.skills.get_skill(current_actor, "design_script")["prompt"],
                 payload=payload,
-                expected_file="script.py",
+                expected_artifact="script.py",
             ),
             agent_name="design_script",
             profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
@@ -288,12 +305,12 @@ def _design_prompt(
     skill_name: str,
     skill_prompt: str,
     payload: DesignAgentRequest,
-    expected_file: str,
+    expected_artifact: str,
 ) -> str:
     mode = "modify" if payload.mode == "modify" else "create"
     return "\n\n".join(
         [
-            f"你是 Agent Bridge 的 {kind} 设计 agent。请根据用户需求生成可直接采纳的 {expected_file}。",
+            f"你是 Agent Bridge 的 {kind} 设计 agent。请根据用户需求生成可直接采纳的 {expected_artifact}。",
             f"必须先遵循内置技能 {skill_name}。如果你需要工具，请优先执行 execute service='built-in' tool_name='load_skill' params={{\"skill_name\":\"{skill_name}\"}}；下方也内联提供了当前技能内容作为约束。",
             "采纳结果会直接写回系统，所以请返回完整字段，不要只给 patch 或解释。",
             f"模式：{mode}。modify 表示在当前对象基础上改；create 表示生成一个新对象。",

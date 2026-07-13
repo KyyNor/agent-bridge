@@ -5,7 +5,26 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
-from agent_bridge.api.routes.agent_runs import SCRIPT_DESIGN_SCHEMA
+from agent_bridge.api.routes.agent_runs import SCRIPT_DESIGN_SCHEMA, WORKFLOW_DESIGN_SCHEMA
+
+
+def _workflow_definition() -> dict[str, object]:
+    return {
+        "nodes": [
+            {
+                "id": "collect",
+                "type": "agent",
+                "label": "Collect",
+                "config": {
+                    "prompt": "collect",
+                    "backend_key": "codex",
+                    "result_mode": "json",
+                    "output_schema": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+        "edges": [],
+    }
 
 
 def _client(wm_paths) -> TestClient:
@@ -33,8 +52,9 @@ def test_workflow_design_agent_uses_design_workflow_skill(wm_paths) -> None:
                     "name": "Page Report",
                     "description": "desc",
                     "profile_key": "report-plane",
+                    "workflow_type": "operation",
                     "status": "active",
-                    "workflow_js": "export const meta = { name: 'x', description: '', phases: [] }",
+                    "definition": _workflow_definition(),
                 },
             },
         )
@@ -48,16 +68,61 @@ def test_workflow_design_agent_uses_design_workflow_skill(wm_paths) -> None:
             "mode": "modify",
             "prompt": "加一个清理输出的步骤",
             "profile_key": "report-plane",
-            "current": {"workflow_key": "page-report", "workflow_js": "old"},
+            "current": {
+                "workflow_key": "page-report",
+                "workflow_type": "operation",
+                "definition": {"nodes": [], "edges": []},
+            },
         },
     )
 
     assert response.status_code == 200, response.text
     assert response.json()["result"]["workflow"]["workflow_key"] == "page-report"
+    assert response.json()["result"]["workflow"]["definition"] == _workflow_definition()
     assert captured["agent_name"] == "design_workflow"
     assert captured["profile"] == "report-plane"
     assert "design_workflow 内容" in str(captured["prompt"])
+    assert "structured workflow definition" in str(captured["prompt"])
     assert '"workflow_key": "page-report"' in str(captured["prompt"])
+
+
+def test_workflow_design_schema_accepts_structured_definition() -> None:
+    validator = Draft202012Validator(WORKFLOW_DESIGN_SCHEMA)
+    result = {
+        "summary": "updated",
+        "notes": ["kept DAG shape"],
+        "workflow": {
+            "workflow_key": "page-report",
+            "name": "Page Report",
+            "description": "desc",
+            "profile_key": "report-plane",
+            "workflow_type": "operation",
+            "status": "active",
+            "definition": _workflow_definition(),
+        },
+    }
+
+    assert list(validator.iter_errors(result)) == []
+
+
+def test_workflow_design_schema_rejects_legacy_workflow_js() -> None:
+    validator = Draft202012Validator(WORKFLOW_DESIGN_SCHEMA)
+    result = {
+        "summary": "updated",
+        "workflow": {
+            "workflow_key": "page-report",
+            "name": "Page Report",
+            "description": "desc",
+            "profile_key": "report-plane",
+            "status": "active",
+            "workflow_js": "export const meta = {};",
+        },
+    }
+
+    errors = list(validator.iter_errors(result))
+
+    assert errors
+    assert any("workflow_js" in error.message for error in errors)
 
 
 def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:
