@@ -20,6 +20,15 @@ import {
   SelectValue,
 } from '../../components/ui/select'
 import { schemaToFields, type SchemaField } from '../../lib/schemaFields'
+import {
+  canDeleteScript,
+  canDisableScript,
+  canResetScript,
+  isBuiltInScriptFamily,
+  toScriptFormState,
+  toScriptUpsertPayload,
+  type ScriptEditableFields,
+} from '../../lib/scriptManagement'
 import { formatLocalDatetime } from '../../lib/time'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
@@ -37,7 +46,7 @@ const scriptPage = ref(1)
 const scriptPageSize = ref(10)
 
 // 编辑模式表单状态
-const form = ref(emptyForm())
+const form = ref<ScriptEditableFields>(emptyForm())
 type SchemaFieldEditorHandle = { validate: () => boolean; getValidationMessage: () => string }
 const inputSchemaEditor = ref<SchemaFieldEditorHandle | null>(null)
 const outputSchemaEditor = ref<SchemaFieldEditorHandle | null>(null)
@@ -89,7 +98,7 @@ const editingScript = computed(() =>
 )
 const scriptDesignDraft = computed(() => designResponse.value?.result?.script || null)
 const inputSchemaFields = computed(() => schemaToFields(form.value.input_schema))
-const isBuiltInScript = computed(() => editingScript.value ? isBuiltInScriptItem(editingScript.value) : false)
+const isBuiltInScript = computed(() => editingScript.value ? isBuiltInScriptFamily(editingScript.value) : false)
 const pagedScripts = computed(() => paginate(scripts.value, scriptPage.value, scriptPageSize.value))
 const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 
@@ -114,19 +123,9 @@ watch(
     formLoading.value = true
     try {
       const detail = await api.getScript(editingKey.value)
-      form.value = {
-        script_key: detail.script_key,
-        name: detail.name,
-        description: detail.description,
-        language: detail.language,
-        code: detail.code || '',
-        status: detail.status,
-        owner_type: detail.owner_type,
-        owner_key: detail.owner_key,
-        input_schema: detail.input_schema || defaultInputSchema(),
-        output_schema: detail.output_schema || null,
-      }
-      outputSchemaEnabled.value = !!detail.output_schema
+      const state = toScriptFormState(detail, defaultInputSchema())
+      form.value = state.form
+      outputSchemaEnabled.value = state.outputSchemaEnabled
       await loadRuns()
       if (requestedRunId.value) await openRunDetail(requestedRunId.value)
       else runDetail.value = runs.value[0] || null
@@ -164,7 +163,7 @@ async function reloadScripts() {
   scripts.value = await api.listScripts()
 }
 
-function emptyForm() {
+function emptyForm(): ScriptEditableFields {
   return {
     script_key: '',
     name: '',
@@ -303,7 +302,7 @@ function openEdit(item: ManagedScript) {
 }
 
 async function deleteScript(item: ManagedScript) {
-  if (isBuiltInScriptItem(item)) return
+  if (!canDeleteScript(item)) return
   if (!await confirm({ title: '删除脚本', description: `确定删除脚本「${item.name}」？其运行记录将一并清除。`, destructive: true, confirmText: '删除' })) return
   error.value = ''
   try {
@@ -324,18 +323,7 @@ async function saveScript(): Promise<ManagedScript | null> {
   }
   saving.value = true
   try {
-    const saved = await api.upsertScript({
-      script_key: form.value.script_key,
-      name: form.value.name,
-      description: form.value.description,
-      language: form.value.language,
-      code: form.value.code,
-      status: form.value.status,
-      owner_type: form.value.owner_type,
-      owner_key: form.value.owner_type === 'system' ? '' : form.value.owner_key,
-      input_schema: form.value.input_schema,
-      output_schema: outputSchemaEnabled.value ? form.value.output_schema : null,
-    })
+    const saved = await api.upsertScript(toScriptUpsertPayload(form.value, outputSchemaEnabled.value))
     await reloadScripts()
     // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
     if (isNew.value || saved.script_key !== editingKey.value) {
@@ -408,42 +396,22 @@ async function runScriptDesigner() {
 async function acceptScriptDesign() {
   const draft = scriptDesignDraft.value
   if (!draft) return
-  form.value = {
-    script_key: draft.script_key,
-    name: draft.name,
-    description: draft.description,
-    language: draft.language,
-    code: draft.code,
-    status: draft.status,
-    owner_type: draft.owner_type,
-    owner_key: draft.owner_key,
-    input_schema: draft.input_schema || defaultInputSchema(),
-    output_schema: draft.output_schema || null,
-  }
-  outputSchemaEnabled.value = !!draft.output_schema
+  const state = toScriptFormState(draft, defaultInputSchema())
+  form.value = state.form
+  outputSchemaEnabled.value = state.outputSchemaEnabled
   const saved = await saveScript()
   if (saved) showDesigner.value = false
 }
 
 async function resetBuiltInScript() {
   const item = editingScript.value
-  if (!item || !isBuiltInScriptItem(item)) return
+  if (!item || !canResetScript(item)) return
   formError.value = ''
   try {
     const detail = await api.resetScript(item.script_key)
-    form.value = {
-      script_key: detail.script_key,
-      name: detail.name,
-      description: detail.description,
-      language: detail.language,
-      code: detail.code || '',
-      status: detail.status,
-      owner_type: detail.owner_type,
-      owner_key: detail.owner_key,
-      input_schema: detail.input_schema || defaultInputSchema(),
-      output_schema: detail.output_schema || null,
-    }
-    outputSchemaEnabled.value = !!detail.output_schema
+    const state = toScriptFormState(detail, defaultInputSchema())
+    form.value = state.form
+    outputSchemaEnabled.value = state.outputSchemaEnabled
     await reloadScripts()
   } catch (e: unknown) {
     formError.value = errorMessage(e)
@@ -538,10 +506,6 @@ function statusLabel(status: string) {
   if (status === 'active') return '启用'
   if (status === 'disabled') return '停用'
   return status
-}
-
-function isBuiltInScriptItem(item: Pick<ManagedScript, 'script_key' | 'source'>) {
-  return item.source === 'default' || item.script_key.startsWith('system.')
 }
 
 function sourceLabel(source: string | undefined) {
@@ -732,7 +696,7 @@ def main(envelope):
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
                 <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
                 <Badge variant="outline">{{ item.language }}</Badge>
-                <Badge v-if="isBuiltInScriptItem(item)" variant="secondary" :class="sourceBadgeClass(item.source)">{{ sourceLabel(item.source) }}</Badge>
+                <Badge v-if="isBuiltInScriptFamily(item)" variant="secondary" :class="sourceBadgeClass(item.source)">{{ sourceLabel(item.source) }}</Badge>
               </div>
               <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.script_key }}</div>
               <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || item.code_preview || '无描述' }}</p>
@@ -746,7 +710,7 @@ def main(envelope):
                 <Play class="mr-1 h-3.5 w-3.5" />
                 编辑/运行
               </Button>
-              <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" :disabled="isBuiltInScriptItem(item)" @click="deleteScript(item)">
+              <Button variant="ghost" size="sm" class="h-8 text-xs text-destructive" :disabled="!canDeleteScript(item)" @click="deleteScript(item)">
                 <Trash2 class="mr-1 h-3.5 w-3.5" />
                 删除
               </Button>
@@ -835,7 +799,7 @@ def main(envelope):
             <div class="grid gap-3 md:grid-cols-3">
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">状态</label>
-                <Select v-model="form.status" :disabled="isBuiltInScript">
+                <Select v-model="form.status" :disabled="!canDisableScript({ script_key: form.script_key, source: editingScript?.source })">
                   <SelectTrigger class="w-full"><SelectValue placeholder="状态" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">启用</SelectItem>

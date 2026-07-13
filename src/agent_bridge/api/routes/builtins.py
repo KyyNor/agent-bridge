@@ -211,6 +211,10 @@ def create_builtin_routes(service, actor):
     def delete_script(script_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.scripts.delete_script(current_actor, script_key)
 
+    @router.post("/scripts/{script_key}/reset")
+    def reset_script(script_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.scripts.reset_script(current_actor, script_key)
+
     @router.post("/scripts/{script_key}/test")
     def test_script(
         script_key: str,

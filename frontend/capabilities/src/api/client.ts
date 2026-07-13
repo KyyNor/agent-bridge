@@ -70,6 +70,7 @@ import type {
   ScriptRun,
   ScriptRunListResult,
 } from './types'
+import { scriptResetPath } from '../lib/scriptManagement'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
 
@@ -439,7 +440,7 @@ export const api = {
   getScript: (scriptKey: string) => get<ManagedScript>(`/scripts/${scriptKey}`),
   upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string; input_schema: Record<string, unknown> }) =>
     post<ManagedScript>('/scripts', { language: 'python', status: 'active', owner_type: 'system', owner_key: '', description: '', ...s }),
-  resetScript: (scriptKey: string) => post<ManagedScript>(`/scripts/${scriptKey}/reset`),
+  resetScript: (scriptKey: string) => post<ManagedScript>(scriptResetPath(scriptKey)),
   deleteScript: (scriptKey: string) => post<{ script_key: string; deleted: boolean }>(`/scripts/${scriptKey}/delete`),
   testScript: (
     scriptKey: string,
