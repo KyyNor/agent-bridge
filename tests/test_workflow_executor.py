@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from agent_bridge.automation.workflows.definition import WorkflowGraph
-from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
+from agent_bridge.automation.workflows.executor import WorkflowDagExecutor, WorkflowExecutionResult
 from agent_bridge.automation.workflows.handlers import NodeExecutionError, NodeExecutionResult
 from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
 
@@ -76,6 +76,49 @@ def test_run_workflow_revalidates_disabled_script_before_execution(wm_paths):
     assert any(issue.code == "missing_script" for issue in exc_info.value.issues)
     assert service.store.list_workflow_runs("workflow-key", limit=10) == []
     assert "workflow-key" not in service.workflow_scheduler._running
+
+
+def test_run_workflow_now_validates_resources_once_before_thread_execution(wm_paths, monkeypatch):
+    service = make_service_with_valid_script_workflow(wm_paths)
+
+    class CountingValidator:
+        def __init__(self, delegate):
+            self.delegate = delegate
+            self.calls = 0
+
+        def require_valid(self, **kwargs):
+            self.calls += 1
+            return self.delegate.require_valid(**kwargs)
+
+    class CompletedExecutor:
+        async def run(self, **kwargs):
+            return WorkflowExecutionResult(
+                status="completed",
+                output={},
+                task=None,
+                error=None,
+                warnings=[],
+                node_statuses={},
+            )
+
+    class ImmediateThread:
+        def __init__(self, *, target, args=(), daemon=None):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            self.target(*self.args)
+
+    validator = CountingValidator(service.workflows.validator)
+    service.workflow_scheduler._validator = validator
+    service.workflow_scheduler._executor = CompletedExecutor()
+    monkeypatch.setattr("agent_bridge.automation.workflows.scheduler.threading.Thread", ImmediateThread)
+
+    result = service.workflow_scheduler.run_workflow_now("workflow-key", actor="root")
+
+    assert result["status"] == "started"
+    assert validator.calls == 1
 
 
 class Store:

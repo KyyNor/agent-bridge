@@ -259,11 +259,12 @@ class WorkflowScheduler:
             for workflow_key in batch:
                 workflow = workflows_by_key[workflow_key]
                 try:
-                    self._require_valid_workflow(workflow, actor=None)
+                    graph = self._require_valid_workflow(workflow, actor=None)
                 except WorkflowDefinitionValidationError as exc:
                     self.finished_today.add(workflow_key)
                     self._log_validation_failure(workflow_key, exc)
                     continue
+                definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
                 self._running.add(workflow_key)
                 if self._max_runs > 0:
                     self.run_counts[workflow_key] = self.run_counts.get(workflow_key, 0) + 1
@@ -272,12 +273,31 @@ class WorkflowScheduler:
                     workflow_key,
                     "(pending)",
                 )
-                thread = threading.Thread(target=self._run_and_release, args=(workflow_key,), daemon=True)
+                thread = threading.Thread(
+                    target=self._run_and_release,
+                    args=(workflow_key, None, None, None, True, definition_snapshot),
+                    daemon=True,
+                )
                 thread.start()
 
-    def _run_and_release(self, workflow_key: str, run_id: str | None = None, input_data: dict[str, Any] | None = None, actor: str | None = None) -> None:
+    def _run_and_release(
+        self,
+        workflow_key: str,
+        run_id: str | None = None,
+        input_data: dict[str, Any] | None = None,
+        actor: str | None = None,
+        resources_validated: bool = False,
+        validated_definition: dict[str, Any] | None = None,
+    ) -> None:
         try:
-            self.run_one_workflow(workflow_key, run_id=run_id, input_data=input_data, actor=actor)
+            self.run_one_workflow(
+                workflow_key,
+                run_id=run_id,
+                input_data=input_data,
+                actor=actor,
+                resources_validated=resources_validated,
+                validated_definition=validated_definition,
+            )
         except Exception:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
         finally:
@@ -322,12 +342,23 @@ class WorkflowScheduler:
             workflow["profile_key"],
         )
         thread = threading.Thread(
-            target=self._run_and_release, args=(workflow_key, run_id, input_data, actor), daemon=True
+            target=self._run_and_release,
+            args=(workflow_key, run_id, input_data, actor, True, None),
+            daemon=True,
         )
         thread.start()
         return {"status": "started", "run_id": run_id}
 
-    def run_one_workflow(self, workflow_key: str, run_id: str | None = None, input_data: dict[str, Any] | None = None, actor: str | None = None) -> dict[str, Any]:
+    def run_one_workflow(
+        self,
+        workflow_key: str,
+        run_id: str | None = None,
+        input_data: dict[str, Any] | None = None,
+        actor: str | None = None,
+        *,
+        resources_validated: bool = False,
+        validated_definition: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """执行单个 workflow run 的完整生命周期：建 run 行 -> 跑 agent -> 解析 result -> 入库。
 
         失败（agent 非零退出、result 解析不通过、异常）统一落 failed 状态并
@@ -344,33 +375,43 @@ class WorkflowScheduler:
 
         base_dir = self._base_run_dir or Path("workflow-runs")
         run = self._store.get_workflow_run(run_id) if run_id is not None else None
-        validation_workflow = {
-            **workflow,
-            "definition": run["definition_snapshot"] if run is not None else workflow["definition"],
-        }
-        try:
-            graph = self._require_valid_workflow(validation_workflow, actor=actor)
-        except WorkflowDefinitionValidationError as exc:
-            self.finished_today.add(workflow_key)
-            self._log_validation_failure(workflow_key, exc, run_id=run_id)
-            if run_id is not None:
-                self._store.finish_workflow_run(
-                    run_id,
-                    status="failed",
-                    exit_code=1,
-                    stdout_path=None,
-                    stderr_path=None,
-                    error=str(exc),
-                    duration_ms=None,
-                )
-                self._store.fail_workflow_task_for_run(workflow_key, run_id, str(exc))
-            return {
-                "status": "failed",
-                "error": str(exc),
-                "issues": [asdict(issue) for issue in exc.issues],
+        graph: WorkflowGraph | Any | None = None
+        if resources_validated:
+            if run_id is None and validated_definition is None:
+                raise RuntimeError("validated_definition is required when creating a pre-validated workflow run")
+        else:
+            validation_workflow = {
+                **workflow,
+                "definition": run["definition_snapshot"] if run is not None else workflow["definition"],
             }
+            try:
+                graph = self._require_valid_workflow(validation_workflow, actor=actor)
+            except WorkflowDefinitionValidationError as exc:
+                self.finished_today.add(workflow_key)
+                self._log_validation_failure(workflow_key, exc, run_id=run_id)
+                if run_id is not None:
+                    self._store.finish_workflow_run(
+                        run_id,
+                        status="failed",
+                        exit_code=1,
+                        stdout_path=None,
+                        stderr_path=None,
+                        error=str(exc),
+                        duration_ms=None,
+                    )
+                    self._store.fail_workflow_task_for_run(workflow_key, run_id, str(exc))
+                return {
+                    "status": "failed",
+                    "error": str(exc),
+                    "issues": [asdict(issue) for issue in exc.issues],
+                }
         if run_id is None:
             run_id = new_run_id(workflow_key)
+            definition_snapshot = (
+                validated_definition
+                if resources_validated
+                else self._definition_snapshot(graph, workflow["definition"])
+            )
             self._store.create_workflow_run(
                 run_id=run_id,
                 workflow_key=workflow_key,
@@ -378,7 +419,7 @@ class WorkflowScheduler:
                 task_key=None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
-                definition_snapshot=graph.model_dump(mode="json") if isinstance(graph, WorkflowGraph) else workflow["definition"],
+                definition_snapshot=definition_snapshot,
                 input_data=input_data or {},
             )
             run = None
@@ -459,6 +500,14 @@ class WorkflowScheduler:
         if self._validator is None:
             return workflow["definition"]
         return self._validator.require_valid(actor=self._default_actor(actor), workflow=workflow)
+
+    @staticmethod
+    def _definition_snapshot(definition: WorkflowGraph | Any, fallback: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(definition, WorkflowGraph):
+            return definition.model_dump(mode="json")
+        if isinstance(definition, dict):
+            return definition
+        return fallback
 
     def _log_validation_failure(
         self,

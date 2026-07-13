@@ -126,7 +126,6 @@ class AgentBridgeService:
         self.workflow_executor = WorkflowDagExecutor(
             store=store,
             handlers=self.workflow_handlers,
-            validator=workflow_validator,
         )
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)

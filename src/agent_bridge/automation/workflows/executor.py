@@ -32,15 +32,11 @@ class WorkflowDagExecutor:
         *,
         store: Any,
         handlers: Any,
-        validator: Any = None,
-        validate_structure_on_run: bool | None = None,
+        validate_structure_on_run: bool = True,
     ) -> None:
         self.store = store
         self.handlers = handlers
-        self.validator = validator
-        self._validate_structure_on_run = (
-            validator is None if validate_structure_on_run is None else validate_structure_on_run
-        )
+        self._validate_structure_on_run = validate_structure_on_run
 
     async def run(
         self, *, workflow: dict[str, Any], run_id: str, input_data: dict[str, Any], actor: str
