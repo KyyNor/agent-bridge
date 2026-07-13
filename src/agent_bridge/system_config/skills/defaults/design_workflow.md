@@ -1,88 +1,135 @@
 # design_workflow
 
-你正在为 Agent Bridge 设计一个工作流。Agent Bridge 的工作流是一份**结构化 JSON DAG 定义**，在 Vue Flow 画布上编排，由后端轻量 DAG 执行器运行。本技能描述这份定义的完整契约。
+你正在为 Agent Bridge 设计工作流。交付物不是脚本，而是可保存、可校验、可执行的**结构化 JSON DAG 工作流对象**。
 
-工作流定义不再是脚本（不写 JS / Python 控制流），而是 `definition_json`：一组节点和连线。画布直接保存这份 JSON，后端校验是最终边界。
+请始终按这个顺序工作：读取输入信息 -> 选择节点 -> 设计数据契约 -> 生成完整 JSON -> 调用校验脚本 -> 根据稳定 `code` 修正并重跑 -> 交付最终对象。
 
-## 工作流元信息
+## 交付格式
 
-- `workflow_key`：稳定标识。
-- `name` / `description`：展示用。
-- `profile_key`：工作流绑定的能力平面（Agent 节点开 MCP 时用它配置 Agent Bridge MCP）。
-- `workflow_type`：`operation`（普通）或 `summary`（总结类，强制 Markdown→HTML 输出对）。
-- `status`：`active` / `disabled`。
+- 只输出一个**完整 JSON 对象**，不要输出解释、注释、补丁、伪代码或 Markdown fence。
+- 顶层对象至少包含：
+  - `workflow_key`
+  - `name`
+  - `description`
+  - `profile_key`
+  - `workflow_type`
+  - `status`
+  - `definition`
+- `definition` 必须是：
+
+```json
+{
+  "nodes": [],
+  "edges": []
+}
+```
+
+- 真实字段请使用系统里的 key，不要发明别名。例如：
+  - backend 用 `backend_key`
+  - 技能列表用 `skill_names`
+  - 托管脚本用 `script_key`
+  - 工作流定义用 `definition`
+
+## 先理解输入
+
+在生成前，先从用户需求和当前对象里明确这些问题：
+
+1. 这是 `operation` 还是 `summary` 工作流。
+2. 是否需要 `get_task` 作为唯一根节点，还是手动输入型工作流。
+3. 每个节点消费什么，产出什么，后续谁会引用它。
+4. 哪些步骤适合 Agent，哪些适合托管脚本，哪些需要落产物。
+5. 是否存在条件分支；若有，判断字段必须来自来源节点或其祖先。
+
+如果当前对象已经有可复用节点，优先在原结构上做增量修改，而不是无谓重排。
+
+## 顶层工作流对象
+
+- `workflow_key`：稳定标识，适合存储与复用。
+- `name` / `description`：面向人读。
+- `profile_key`：工作流绑定的能力平面。`mcp_enabled=true` 的 Agent 节点会使用它。
+- `workflow_type`：`operation` 或 `summary`。
+- `status`：`active` 或 `disabled`。
+- `definition.nodes`：节点数组。
+- `definition.edges`：边数组。
 
 ## 四类节点
 
 ### 1. 获取任务 `get_task`
 
-无业务配置。调用服务的租约能力，租约一条待处理任务（锁到本次 run，`attempt_count+1`，租期 7200s）。
+无业务配置，负责租约一条待处理任务。
 
 约束：
 
-- 一个工作流**最多一个** `get_task` 节点。
-- 存在时必须是**唯一的无入边起点**（整个图只有它一个根节点）。
-- 不存在时，工作流是手动输入型：可以有一个或多个无入边节点，靠运行时传入的 `input` 驱动。
-- 没有可租约任务时，运行结束为 `no_task`，**不执行后续任何节点**。
-- 节点输出形如 `{ "task": { "task_key", "task_version", "type", "payload" } | null }`，供下游引用。
-
-> 注意：`get_task` **只负责租约**，不负责生产任务。如果需要在队列空时从外部数据源补任务，那是前置 `script` 节点的职责（脚本里调 `workflow_set_task` 幂等 upsert），不是 `get_task` 的行为。第一版 DAG 不支持「租约为空 → 补任务 → 再租约」的循环，补任务应作为每次 run 固定执行的前置节点。
-
-### 2. Agent `agent`
-
-配置：
+- 一个工作流最多一个 `get_task` 节点。
+- 如果存在，它必须是**唯一的无入边根节点**。
+- 没租到任务时，本次运行以 `no_task` 结束，后续节点不执行。
+- 输出形如：
 
 ```json
 {
-  "prompt": "分析任务：{{ task.payload.repo }}",
-  "backend_key": "codex",
-  "mcp_enabled": true,
-  "skill_names": ["code-review"],
-  "result_mode": "text",
-  "output_schema": null
+  "task": {
+    "task_key": "page:repo-a",
+    "task_version": "v1",
+    "type": "page",
+    "payload": {}
+  }
 }
 ```
 
-- `backend_key`：必须是已注册启用的 Coding Agent 后端（如 `claude` / `opencode` / `codex`）。第一版无节点级模型选择。
-- `mcp_enabled=true` 时用工作流绑定的 profile 配置 Agent Bridge MCP；不允许节点改 profile 或编辑 MCP JSON。
-- `skill_names`：引用系统技能管理的技能，按数组顺序拼接到用户提示词**之前**（不调后端原生 Skills 机制）。
-- `result_mode="text"`：输出规范化为 `{ "text": "..." }`。
-- `result_mode="json"`：**必须**提供 `output_schema`（JSON Schema），AgentService 负责结构化输出与校验；输出必须是 JSON 对象。
+### 2. Agent `agent`
 
-统一提示词结构（技能在前、任务指令在后）：
+配置示例：
 
-```text
-[技能：skill-a]
-<skill-a 正文>
-
-[技能：skill-b]
-<skill-b 正文>
-
-[任务指令]
-<渲染后的节点提示词>
+```json
+{
+  "prompt": "分析仓库 {{ task.payload.repo }} 并输出结构化结果",
+  "backend_key": "codex",
+  "mcp_enabled": true,
+  "skill_names": ["code-review"],
+  "result_mode": "json",
+  "output_schema": {
+    "type": "object",
+    "required": ["summary"],
+    "properties": {
+      "summary": { "type": "string" }
+    }
+  }
+}
 ```
+
+规则：
+
+- `backend_key` 必须是已注册且启用的后端，例如 `claude`、`codex`、`opencode`。
+- `mcp_enabled=true` 时复用工作流的 `profile_key`；节点内不改 profile。
+- `skill_names` 是系统技能 key 数组，按顺序拼进用户任务提示词前面。
+- `result_mode="text"` 时，节点输出规范化为 `{ "text": "..." }`。
+- `result_mode="json"` 时必须提供 `output_schema`，输出必须是 JSON 对象。
 
 ### 3. 托管脚本 `script`
 
-配置：
+配置示例：
 
 ```json
 {
   "script_key": "workflow.collect_pages",
-  "params": { "repo": "{{ task.payload.repo }}", "analysis": "{{ nodes.analyze.output }}" },
+  "params": {
+    "repo": "{{ task.payload.repo }}",
+    "analysis": "{{ nodes.analyze.output }}"
+  },
   "timeout_seconds": 60
 }
 ```
 
-- `script_key` 必须引用脚本管理中**启用**的托管 Python 脚本。
-- 参数采用**显式映射**，不自动注入所有上游结果。
-- 调用现有 `ScriptService.run_script()`（隔离目录、超时、stdout/stderr、运行记录）。
-- 脚本返回的 JSON 对象**直接成为节点输出**。
-- 节点里不能编辑脚本代码；代码在「脚本管理」页维护，节点只做参数映射。
+规则：
+
+- `script_key` 必须引用已启用的托管 Python 脚本。
+- 参数必须显式映射；不要假设系统会自动注入所有上游输出。
+- 脚本返回的 JSON 对象直接成为节点输出。
+- 节点里不内联脚本代码，代码只在脚本管理里维护。
 
 ### 4. 输出结果 `output`
 
-输出节点是带产物持久化语义的 Agent 节点。配置含 Agent 节点的全部字段，并增加：
+这是带产物持久化语义的 Agent 节点，配置包含 Agent 节点全部字段，并额外包含：
 
 ```json
 {
@@ -90,169 +137,239 @@
   "title": "项目分析报告",
   "path": "reports/{{ task.task_key }}/index.md",
   "tags": ["summary"],
-  "prompt": "...",
+  "prompt": "根据上游结果生成 Markdown 报告",
   "backend_key": "claude",
   "mcp_enabled": false,
-  "skill_names": []
+  "skill_names": ["design_html_report"]
 }
-```
-
-- `format`：`markdown` 或 `html`。
-- `path`：产物逻辑路径，不能以 `/` 开头、不能含 `..`。支持引用（如 `repos/{{ task.task_key }}.md`）。
-- 输出 Agent 必须返回固定结构：`{ "title", "summary", "content" }`，`content` 是完整 Markdown 或 HTML。
-
-执行器对两种格式取上游数据的方式不同：
-
-- **Markdown 输出**：自动拼接**全部祖先节点**的输出到提示词（`[上游节点输出]` 段），便于汇总。
-- **HTML 输出**：只取**直接上游**的 Markdown 产物（必须是 `format=markdown` 的 output 节点）作为主输入，据此派生 HTML；缺少 Markdown 主产物时节点失败。
-
-产物由执行器经 `save_artifact` 持久化；路径/格式/内容均由后端校验，无需 agent 自己写文件。
-
-## 引用（路径插值）
-
-第一版只支持纯路径引用，不支持函数、计算、过滤器或表达式：
-
-```text
-{{ input.topic }}
-{{ task.payload.repo }}
-{{ nodes.analyze.output.category }}
 ```
 
 规则：
 
-- 只能引用运行输入 `input.*`、当前任务 `task.*`、拓扑上的**祖先节点** `nodes.<id>.output.*`。引用非祖先节点会被保存校验拒绝。
-- 脚本参数值若**整体只有一个引用**，保留原始 JSON 类型（不转字符串）；引用嵌入普通字符串时转为文本。
-- 运行时引用字段缺失，节点**失败**（不替换为空字符串）。
+- `format` 只能是 `markdown` 或 `html`。
+- `path` 不能以 `/` 开头，也不能包含 `..`。
+- 输出节点必须返回固定结构：
 
-## 条件边（条件分支）
+```json
+{
+  "title": "string",
+  "summary": "string",
+  "content": "string"
+}
+```
 
-每条边**可选**配置一个条件，实现结构化分支：
+- `markdown` 输出节点会自动看到全部祖先节点输出，适合汇总主报告。
+- `html` 输出节点只会消费其直接上游的 Markdown 产物，适合把主报告转为 HTML 成品。
+
+## 引用规则
+
+只允许三类引用：
+
+- `input.*`
+- `task.*`
+- `nodes.<ancestor_id>.output.*`
+
+示例：
+
+- `{{ input.topic }}`
+- `{{ task.payload.repo }}`
+- `{{ nodes.analyze.output.summary }}`
+
+硬约束：
+
+- 只能引用祖先节点，不能引用并行节点或下游节点。
+- 脚本参数如果整体就是单个引用，应保留原始 JSON 类型。
+- 引用被嵌入普通字符串时再转成文本。
+- 运行期字段缺失会导致节点失败，所以不要凭空引用不存在的路径。
+
+## 条件边
+
+边可以带 `condition`：
 
 ```json
 {
   "id": "classify-bug",
   "source": "classify",
   "target": "handle-bug",
-  "condition": { "field": "nodes.classify.output.category", "operator": "equals", "value": "bug" }
+  "condition": {
+    "field": "nodes.classify.output.category",
+    "operator": "equals",
+    "value": "bug"
+  }
 }
 ```
 
-操作符仅五种：`equals` / `not_equals` / `exists` / `not_exists` / `contains`。不支持 AND、OR、条件组或自由表达式——复杂判断应交给 Agent 的 JSON 输出或托管脚本完成。
+规则：
 
-字段缺失时的判定：`exists=false`、`not_exists=true`、`equals`/`not_equals`/`contains` 均 `false`。
+- `operator` 只用这五种：`equals`、`not_equals`、`exists`、`not_exists`、`contains`。
+- `field` 只能引用来源节点或其祖先。
+- 无条件边等价于恒成立。
+- 如果所有入边条件都不成立，节点会被跳过。
 
-调度语义：
+## `summary` 工作流约束
 
-- 节点等待**所有直接上游**进入终态后，检查每条入边的条件。
-- **至少一条**入边的条件成立且来源节点 `completed`/`warning` 时，节点运行。
-- 所有入边条件都不成立、或来源节点被跳过时，节点标记 `skipped`（跳过会向下游传播）。
-- 无条件的边视为条件恒成立。
-- 同一轮就绪节点通过 `asyncio` **并行**运行。
+`workflow_type="summary"` 时，末端必须保留一对固定职责的输出节点：
 
-> 条件字段只能引用**来源节点或其祖先**的输出（保存时校验），不能引用与来源并行的兄弟节点——否则会读到未确定的值。
+1. Markdown 主报告
+2. HTML 派生报告
 
-**前端如何配置条件分支**：在 Vue Flow 编辑器画布上**点选一条连线**，右侧配置面板会出现「连线条件」区：勾选「启用条件」后填写字段路径（如 `nodes.classify.output.category`）、选择操作符、填写期望值。总结型工作流的 Markdown→HTML 连线固定为无条件，不可配置。
+要求：
 
-## 总结型工作流约束
+- 恰好一个 Markdown 输出节点和一个 HTML 输出节点。
+- Markdown 节点在前，HTML 节点在后。
+- HTML 节点只能直接依赖那个 Markdown 主报告。
+- Markdown -> HTML 连线不加条件。
+- HTML 节点必须是末端节点。
+- Markdown 负责内容汇总，HTML 负责最终展示。
 
-创建 `summary` 类型时，编辑器自动生成并锁定：
+## 设计步骤
 
-```text
-（其他节点）──▶ Markdown 输出 ──▶ HTML 输出
-```
+### Step 1. 选择节点
 
-编辑器与后端共同强制：
+先判断是否需要：
 
-- 恰好一个 Markdown 输出节点和一个 HTML 输出节点，位于图末端（按 Markdown、HTML 顺序）。
-- 两个节点不可删除，`format` 不可修改。
-- Markdown→HTML 的直接连线不可删除、不可加条件。
-- HTML 节点**只能**直接依赖 Markdown 主报告，且必须是末端（无后续节点）。
-- 其他处理节点可以连到 Markdown 输出；提示词、后端、MCP、技能、标题、路径、标签允许修改。
+- `get_task` 取任务
+- `agent` 做分析/分类/提炼
+- `script` 做稳定、可复用、确定性的处理
+- `output` 落 Markdown 或 HTML 产物
 
-失败语义：
+节点越少越好，但必须覆盖用户需求和数据流。
 
-- Markdown 输出失败 → 工作流和任务都失败。
-- HTML 输出失败 → 节点状态 `warning`，保留 Markdown 产物，**工作流和任务仍成功**（HTML 是派生展示，不因排版失败重跑整条任务）。
+### Step 2. 设计每个节点的数据契约
 
-## 执行语义（fail-fast）
+为每个节点想清楚：
 
-- 保存和运行前都校验 DAG 无环。
-- 任一**普通**节点失败后，不再启动新节点，并尽力取消正在运行的 Agent；已就绪/未运行节点标记失败或跳过。
-- HTML 输出失败是唯一的 warning 例外。
-- 第一版**不做**自动重试、失败继续、补偿、循环、人工审批。
+- 它读取哪些输入
+- 它输出什么 JSON 形状
+- 下游具体引用哪个字段
+- 它是否需要条件分支
 
-### 任务生命周期收尾
+如果某个 Agent 节点给后续分支提供判断依据，优先让它输出结构化 JSON，而不是模糊文本。
 
-- 无 `get_task` 节点：只结束工作流运行。
-- `get_task` 没租到任务：运行结束 `no_task`。
-- 所有必需节点成功：任务标记 `completed`。
-- 普通节点失败：任务标记 `failed`，不自动重新入队；管理员可在任务页手动重置。
-- Markdown 成功而 HTML 失败：任务仍 `completed`。
+### Step 3. 组装完整工作流对象
 
-## 服务端硬约束（执行器强制，非 manifest 约定）
+交付时必须包含完整对象，而不是只给 `definition` 片段。所有节点和边 ID 都要稳定、唯一、可读。
 
-这些由后端保证，**不需要**在节点配置里声明，了解即可：
+### Step 4. 调用校验脚本
 
-- 产物 `path` 不得为绝对路径或含 `..`；`format` 仅限 `markdown` / `html`。
-- 输出节点强制返回 `{ title, summary, content }` 固定结构；content 非空；HTML 须含 `<html>` 或 `<body>` 标签且 ≤ 5 MiB。
-- profile / workflow 运行上下文从请求头读取、经 ContextVar 传递；节点配置里不写 profile。
-
-## 智能体协作方式
-
-如果用户要求智能体协助设计工作流，应提示智能体先读取本技能：
+生成完整对象后，必须执行下面这一步：
 
 ```text
-请执行 execute service='built-in' tool_name='load_skill' params={"skill_name":"design_workflow"} 读取技能，
-然后参照技能内容与我的需求，完成工作流 DAG 定义（节点、连线、条件与配置）。
+execute service='built-in' tool_name='run_script'
+params={"script_key":"system.validate_workflow","script_params":{"workflow":<完整对象>}}
 ```
 
-智能体产出后应检查：
+校验结果是结构化 JSON，至少包含：
 
-- 图是否无环？节点 ID / 边 ID 是否唯一？边的 source/target 是否都指向存在的节点？
-- 是否需要 `get_task`？若用了，它是否是唯一根节点？
-- Agent / 输出节点的 `backend_key` 是否是已启用后端？`skill_names` 是否都存在？`result_mode=json` 时是否提供了 `output_schema`？
-- 脚本节点的 `script_key` 是否引用了启用脚本？必填参数是否都映射了？
-- 所有 `{{ ... }}` 引用是否只指向 `input` / `task` / 祖先节点？条件字段是否只引用来源或其祖先？
-- 若是 `summary` 型：是否只有一对受保护的 Markdown / HTML 输出节点，且顺序、连线、依赖关系符合约束？
-- 输出节点的 `path` 是否合法（非绝对、无 `..`）？
+- `valid`
+- `errors`
+- `warnings`
 
-## 完整定义示例（总结型）
+### Step 5. 按稳定 `code` 修正并重跑
+
+如果 `valid=false`：
+
+- 逐条读取 `errors[*].code`、`field`、`message`
+- 优先按稳定 `code` 修正，不要靠主观猜测
+- 修正后重新运行 `system.validate_workflow`
+- 直到 `valid=true` 再交付
+
+常见稳定 `code` 示例：
+
+- `duplicate_id`
+- `missing_node`
+- `cycle_detected`
+- `invalid_root`
+- `missing_output_schema`
+
+`warnings` 不一定阻塞交付，但必须确认是可接受的设计结果，而不是漏配。
+
+## 紧凑示例
+
+下面是一个总结型工作流对象的紧凑示例，字段名和结构要保持一致：
 
 ```json
 {
-  "nodes": [
-    { "id": "get-task", "type": "get_task", "name": "获取任务", "position": { "x": 80, "y": 220 }, "config": {} },
-    {
-      "id": "enrich", "type": "agent", "name": "富化信息", "position": { "x": 400, "y": 220 },
-      "config": {
-        "prompt": "为仓库 {{ task.task_key }} 收集结构化素材……",
-        "backend_key": "claude", "mcp_enabled": true, "skill_names": [],
-        "result_mode": "json", "output_schema": { "type": "object", "required": ["summary"], "properties": { "summary": { "type": "string" } } }
+  "workflow_key": "repo-summary",
+  "name": "Repo Summary",
+  "description": "生成仓库总结报告",
+  "profile_key": "report-plane",
+  "workflow_type": "summary",
+  "status": "active",
+  "definition": {
+    "nodes": [
+      {
+        "id": "get-task",
+        "type": "get_task",
+        "name": "获取任务",
+        "position": { "x": 80, "y": 200 },
+        "config": {}
+      },
+      {
+        "id": "analyze",
+        "type": "agent",
+        "name": "仓库分析",
+        "position": { "x": 360, "y": 200 },
+        "config": {
+          "prompt": "分析仓库 {{ task.payload.repo }}，输出结构化总结",
+          "backend_key": "codex",
+          "mcp_enabled": true,
+          "skill_names": ["code-review"],
+          "result_mode": "json",
+          "output_schema": {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {
+              "summary": { "type": "string" }
+            }
+          }
+        }
+      },
+      {
+        "id": "markdown-output",
+        "type": "output",
+        "name": "Markdown 主报告",
+        "position": { "x": 700, "y": 140 },
+        "config": {
+          "format": "markdown",
+          "title": "{{ task.task_key }} 总结",
+          "path": "reports/{{ task.task_key }}/index.md",
+          "tags": ["summary"],
+          "prompt": "基于全部祖先节点输出生成 Markdown 总结报告",
+          "backend_key": "claude",
+          "mcp_enabled": false,
+          "skill_names": []
+        }
+      },
+      {
+        "id": "html-output",
+        "type": "output",
+        "name": "HTML 派生报告",
+        "position": { "x": 1020, "y": 140 },
+        "config": {
+          "format": "html",
+          "title": "{{ task.task_key }} 总结",
+          "path": "reports/{{ task.task_key }}/index.html",
+          "tags": ["summary"],
+          "prompt": "只根据直接上游 Markdown 主报告生成完整 HTML 文档",
+          "backend_key": "claude",
+          "mcp_enabled": false,
+          "skill_names": ["design_html_report"]
+        }
       }
-    },
-    {
-      "id": "markdown-output", "type": "output", "name": "Markdown 主报告", "position": { "x": 740, "y": 140 },
-      "config": {
-        "format": "markdown", "title": "{{ task.task_key }} 速览", "path": "repos/{{ task.task_key }}.md", "tags": ["summary"],
-        "prompt": "根据上游输出生成速览 Markdown……", "backend_key": "claude", "mcp_enabled": false, "skill_names": []
-      }
-    },
-    {
-      "id": "html-output", "type": "output", "name": "HTML 派生报告", "position": { "x": 1080, "y": 140 },
-      "config": {
-        "format": "html", "title": "{{ task.task_key }} 速览", "path": "repos/{{ task.task_key }}.html", "tags": ["summary"],
-        "prompt": "只根据 Markdown 主产物生成完整 HTML 文档……", "backend_key": "claude", "mcp_enabled": false, "skill_names": []
-      }
-    }
-  ],
-  "edges": [
-    { "id": "task-enrich", "source": "get-task", "target": "enrich" },
-    { "id": "enrich-markdown", "source": "enrich", "target": "markdown-output" },
-    { "id": "markdown-to-html", "source": "markdown-output", "target": "html-output" }
-  ]
+    ],
+    "edges": [
+      { "id": "task-analyze", "source": "get-task", "target": "analyze" },
+      { "id": "analyze-markdown", "source": "analyze", "target": "markdown-output" },
+      { "id": "markdown-html", "source": "markdown-output", "target": "html-output" }
+    ]
+  }
 }
 ```
 
-## 第一版明确不做
+## 与用户协作时的行为
 
-循环、人工审批、自动重试、失败继续、补偿、工作流版本/草稿/发布、单工作流 cron、内联代码、自由表达式与条件组、多任务源、动态节点插件、Agent 会话跨节点延续、节点级模型或 profile 选择。
+- 如果用户要求“新增一步”“改成总结型”“补条件分支”，就在当前对象上做对应的结构化修改。
+- 如果当前对象缺关键字段，先补足能通过校验的最小完整结构。
+- 如果用户需求和已有结构冲突，优先保证 DAG、引用、条件、输出契约和校验通过。
+- 最终交付前，默认已经完成 `system.validate_workflow` 校验并按 `code` 修正过至少一轮。
