@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import threading
+from dataclasses import asdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from agent_bridge.core.domain import ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
+from agent_bridge.automation.workflows.definition import WorkflowGraph
+from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,7 @@ class WorkflowScheduler:
         store: SQLiteStore,
         admins: set[str],
         executor: WorkflowDagExecutor | None = None,
+        validator: Any = None,
         base_run_dir: Path | None = None,
         max_concurrent_workflows: int = 2,
     ) -> None:
@@ -44,6 +48,7 @@ class WorkflowScheduler:
         if not admins:
             raise ValueError("workflow scheduler requires at least one admin")
         self._executor = executor
+        self._validator = validator or getattr(service, "validator", None)
         self._base_run_dir = base_run_dir
         self._max_concurrent = max_concurrent_workflows
         self._scheduler: BackgroundScheduler | None = None
@@ -250,7 +255,15 @@ class WorkflowScheduler:
                 )
                 return
             batch = self.next_workflow_batch(candidates, self._running)[:available]
+            workflows_by_key = {item["workflow_key"]: item for item in workflows}
             for workflow_key in batch:
+                workflow = workflows_by_key[workflow_key]
+                try:
+                    self._require_valid_workflow(workflow, actor=None)
+                except WorkflowDefinitionValidationError as exc:
+                    self.finished_today.add(workflow_key)
+                    self._log_validation_failure(workflow_key, exc)
+                    continue
                 self._running.add(workflow_key)
                 if self._max_runs > 0:
                     self.run_counts[workflow_key] = self.run_counts.get(workflow_key, 0) + 1
@@ -288,6 +301,7 @@ class WorkflowScheduler:
             if workflow.get("definition") is None:
                 from agent_bridge.core.domain import ValidationError
                 raise ValidationError("工作流需要通过新编辑器迁移")
+            graph = self._require_valid_workflow(workflow, actor=actor)
             run_id = new_run_id(workflow_key)
             base_dir = self._base_run_dir or Path("workflow-runs")
             self._store.create_workflow_run(
@@ -297,7 +311,7 @@ class WorkflowScheduler:
                 task_key=None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
-                definition_snapshot=workflow["definition"],
+                definition_snapshot=graph.model_dump(mode="json") if isinstance(graph, WorkflowGraph) else workflow["definition"],
                 input_data=input_data or {},
             )
             self._running.add(workflow_key)
@@ -325,7 +339,36 @@ class WorkflowScheduler:
             self.finished_today.add(workflow_key)
             return {"status": "missing"}
 
+        if workflow.get("definition") is None:
+            return {"status": "missing_definition"}
+
         base_dir = self._base_run_dir or Path("workflow-runs")
+        run = self._store.get_workflow_run(run_id) if run_id is not None else None
+        validation_workflow = {
+            **workflow,
+            "definition": run["definition_snapshot"] if run is not None else workflow["definition"],
+        }
+        try:
+            graph = self._require_valid_workflow(validation_workflow, actor=actor)
+        except WorkflowDefinitionValidationError as exc:
+            self.finished_today.add(workflow_key)
+            self._log_validation_failure(workflow_key, exc, run_id=run_id)
+            if run_id is not None:
+                self._store.finish_workflow_run(
+                    run_id,
+                    status="failed",
+                    exit_code=1,
+                    stdout_path=None,
+                    stderr_path=None,
+                    error=str(exc),
+                    duration_ms=None,
+                )
+                self._store.fail_workflow_task_for_run(workflow_key, run_id, str(exc))
+            return {
+                "status": "failed",
+                "error": str(exc),
+                "issues": [asdict(issue) for issue in exc.issues],
+            }
         if run_id is None:
             run_id = new_run_id(workflow_key)
             self._store.create_workflow_run(
@@ -335,21 +378,20 @@ class WorkflowScheduler:
                 task_key=None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
-                definition_snapshot=workflow.get("definition") or {"nodes": [], "edges": []},
+                definition_snapshot=graph.model_dump(mode="json") if isinstance(graph, WorkflowGraph) else workflow["definition"],
                 input_data=input_data or {},
             )
+            run = None
         logger.info(
             "Workflow run 开始执行 workflow=%s run=%s profile=%s",
             workflow_key,
             run_id,
             workflow["profile_key"],
         )
-        if workflow.get("definition") is None:
-            return {"status": "missing_definition"}
         if self._executor is None:
             raise RuntimeError("workflow DAG executor is not configured")
         try:
-            run = self._store.get_workflow_run(run_id)
+            run = run or self._store.get_workflow_run(run_id)
             if run is None:
                 raise RuntimeError("workflow run not found after creation")
             execution_workflow = {
@@ -409,6 +451,43 @@ class WorkflowScheduler:
             )
             self._store.fail_workflow_task_for_run(workflow_key, run_id, str(exc))
             return {"status": "failed", "error": str(exc)}
+
+    def _default_actor(self, actor: str | None) -> str:
+        return actor or sorted(self._admins)[0]
+
+    def _require_valid_workflow(self, workflow: dict[str, Any], *, actor: str | None) -> WorkflowGraph | Any:
+        if self._validator is None:
+            return workflow["definition"]
+        return self._validator.require_valid(actor=self._default_actor(actor), workflow=workflow)
+
+    def _log_validation_failure(
+        self,
+        workflow_key: str,
+        exc: WorkflowDefinitionValidationError,
+        *,
+        run_id: str | None = None,
+    ) -> None:
+        issues = [asdict(issue) for issue in exc.issues]
+        logger.warning(
+            "Workflow 执行前校验失败 workflow=%s run=%s issues=%s",
+            workflow_key,
+            run_id,
+            issues,
+        )
+        if run_id is None or not hasattr(self._service, "append_run_log"):
+            return
+        try:
+            self._service.append_run_log(
+                workflow_key=workflow_key,
+                run_id=run_id,
+                task_key=None,
+                level="error",
+                stage="validate",
+                message="workflow validation failed before execution",
+                payload={"issues": issues},
+            )
+        except Exception:
+            logger.exception("Workflow 校验失败日志写入失败 workflow=%s run=%s", workflow_key, run_id)
 
 
 def _parse_hhmm(value: Any) -> time | None:

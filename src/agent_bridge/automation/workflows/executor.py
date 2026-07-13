@@ -8,7 +8,10 @@ from agent_bridge.automation.workflows.definition import WorkflowGraph, Workflow
 from agent_bridge.automation.workflows.handlers import NodeExecutionContext, NodeExecutionResult
 from agent_bridge.automation.workflows.models import WorkflowType
 from agent_bridge.automation.workflows.references import evaluate_condition
-from agent_bridge.automation.workflows.validation import validate_graph
+from agent_bridge.automation.workflows.validation import (
+    WorkflowDefinitionValidationError,
+    collect_graph_issues,
+)
 
 TERMINAL_NODE_STATUSES = {"completed", "skipped", "failed", "cancelled", "warning"}
 
@@ -24,9 +27,20 @@ class WorkflowExecutionResult:
 
 
 class WorkflowDagExecutor:
-    def __init__(self, *, store: Any, handlers: Any) -> None:
+    def __init__(
+        self,
+        *,
+        store: Any,
+        handlers: Any,
+        validator: Any = None,
+        validate_structure_on_run: bool | None = None,
+    ) -> None:
         self.store = store
         self.handlers = handlers
+        self.validator = validator
+        self._validate_structure_on_run = (
+            validator is None if validate_structure_on_run is None else validate_structure_on_run
+        )
 
     async def run(
         self, *, workflow: dict[str, Any], run_id: str, input_data: dict[str, Any], actor: str
@@ -35,7 +49,10 @@ class WorkflowDagExecutor:
         if isinstance(graph, dict):
             graph = WorkflowGraph.model_validate(graph)
         workflow_type = WorkflowType(workflow.get("workflow_type", WorkflowType.operation.value))
-        validate_graph(graph, workflow_type)
+        if self._validate_structure_on_run:
+            issues = collect_graph_issues(graph, workflow_type)
+            if issues:
+                raise WorkflowDefinitionValidationError(issues)
 
         nodes = {node.id: node for node in graph.nodes}
         incoming = {node.id: [] for node in graph.nodes}

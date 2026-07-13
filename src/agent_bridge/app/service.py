@@ -122,7 +122,12 @@ class AgentBridgeService:
             agent_service=self.agents, scripts=self.scripts, skill_service=self.skills,
             workflow_service=self.workflows, output_handler=self.workflow_output_handler,
         )
-        self.workflow_executor = WorkflowDagExecutor(store=store, handlers=self.workflow_handlers)
+        workflow_validator = self.workflows.validator
+        self.workflow_executor = WorkflowDagExecutor(
+            store=store,
+            handlers=self.workflow_handlers,
+            validator=workflow_validator,
+        )
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
@@ -130,6 +135,7 @@ class AgentBridgeService:
             store=store,
             admins=admins,
             executor=self.workflow_executor,
+            validator=workflow_validator,
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capability_hub.sources.builtin.codegraph import CodeGraphBuiltinProvider
