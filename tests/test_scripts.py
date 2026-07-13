@@ -92,6 +92,71 @@ def test_script_output_schema_round_trip_and_validation(wm_paths):
     assert "output_schema invalid" in run["error_message"]
 
 
+def test_builtin_workflow_validator_script_can_be_overridden_and_reset(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    default = service.scripts.get_script("root", "system.validate_workflow")
+    assert default["source"] == "default"
+    assert default["status"] == "active"
+    assert default["language"] == "python"
+    assert "workflow" in default["input_schema"]["required"]
+
+    with pytest.raises(ValidationError, match="cannot delete built-in"):
+        service.scripts.delete_script("root", "system.validate_workflow")
+    with pytest.raises(ValidationError, match="cannot disable built-in"):
+        service.scripts.upsert_script(
+            actor="root",
+            script_key="system.validate_workflow",
+            name="ignored",
+            description="ignored",
+            language="python",
+            code=default["code"],
+            input_schema=default["input_schema"],
+            output_schema=default["output_schema"],
+            status="disabled",
+            owner_type="system",
+            owner_key="",
+        )
+
+    service.scripts.upsert_script(
+        actor="root",
+        script_key="system.validate_workflow",
+        name="ignored",
+        description="ignored",
+        language="python",
+        code=default["code"],
+        input_schema=default["input_schema"],
+        output_schema=default["output_schema"],
+        status="active",
+        owner_type="system",
+        owner_key="",
+    )
+    assert service.scripts.get_script("root", "system.validate_workflow")["source"] == "database"
+
+    restored = service.scripts.reset_script("root", "system.validate_workflow")
+    assert restored["source"] == "default"
+
+
+def test_builtin_validate_workflow_tool_returns_structured_result(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    provider = service.capabilities.builtin_providers["built-in"]
+
+    tools = {tool.tool: tool for tool in provider.list_tools("root", None)}
+    assert tools["validate_workflow"].input_schema["required"] == ["workflow"]
+
+    result = asyncio.run(
+        service.capabilities.execute(
+            "root",
+            "built-in",
+            "validate_workflow",
+            {"workflow": {"workflow_type": "operation", "definition": {"nodes": [], "edges": []}}},
+        )
+    )
+
+    assert result["success"] is True
+    assert result["result"] == {"valid": True, "errors": [], "warnings": []}
+
+
 WORKFLOW_SCRIPT = """
 from agent_bridge_runtime import workflow_get_task, workflow_set_task, workflow_run_log
 
@@ -131,6 +196,22 @@ def _started_server(wm_paths):
         yield port
     finally:
         stop_server(wm_paths)
+
+
+def test_system_validate_workflow_default_script_runs_through_builtin_tool(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    with _started_server(wm_paths):
+        result = service.scripts.test_script(
+            actor="root",
+            script_key="system.validate_workflow",
+            script_params={"workflow": {"workflow_type": "operation", "definition": {"nodes": [], "edges": []}}},
+            timeout_seconds=10,
+        )
+
+    assert result["status"] == "success"
+    assert result["result"] == {"valid": True, "errors": [], "warnings": []}
+    assert service.scripts.get_script("root", "system.validate_workflow")["source"] == "default"
 
 
 def test_script_service_upserts_and_test_runs_python_script(wm_paths):

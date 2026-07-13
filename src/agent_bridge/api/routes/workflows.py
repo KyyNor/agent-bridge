@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from agent_bridge.api.schemas import WorkflowDefinitionRequest, WorkflowRunRequest
+from agent_bridge.api.schemas import WorkflowDefinitionRequest, WorkflowRunRequest, WorkflowValidationRequest
 
 
 def create_workflow_routes(service, actor):
@@ -18,6 +18,10 @@ def create_workflow_routes(service, actor):
     @router.post("/workflows")
     def upsert_workflow(payload: WorkflowDefinitionRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflows.upsert_definition(actor=current_actor, **payload.model_dump())
+
+    @router.post("/workflows/validate")
+    def validate_workflow(payload: WorkflowValidationRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.validate_workflow_draft(actor=current_actor, workflow=payload.workflow)
 
     @router.get("/workflows/{workflow_key}")
     def get_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:

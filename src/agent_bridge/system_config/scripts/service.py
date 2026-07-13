@@ -36,16 +36,60 @@ class ScriptProcessResult:
     timed_out: bool = False
 
 
+@dataclass(frozen=True)
+class BuiltInScriptDefinition:
+    script_key: str
+    name: str
+    description: str
+    default_path: Path
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any]
+
+
 class ScriptService:
     def __init__(self, *, paths: AgentBridgePaths, store: SQLiteStore, admins: set[str]) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.base_run_dir = paths.run_dir / "scripts"
+        defaults = Path(__file__).parent / "defaults"
+        self._builtins = {
+            "system.validate_workflow": BuiltInScriptDefinition(
+                script_key="system.validate_workflow",
+                name="Validate Workflow",
+                description="Validate an Agent Bridge workflow definition.",
+                default_path=defaults / "system_validate_workflow.py",
+                input_schema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "workflow": {
+                            "type": "object",
+                            "additionalProperties": True,
+                            "description": "Workflow definition draft to validate.",
+                        },
+                    },
+                    "required": ["workflow"],
+                },
+                output_schema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "valid": {"type": "boolean"},
+                        "errors": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                        "warnings": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+                    },
+                    "required": ["valid", "errors", "warnings"],
+                },
+            )
+        }
 
     def list_scripts(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        return [self._script_payload(script, include_code=False) for script in self.store.scripts.list_scripts()]
+        scripts = {script["script_key"]: script for script in self.store.scripts.list_scripts()}
+        for script_key, definition in self._builtins.items():
+            scripts.setdefault(script_key, self._default_script(definition))
+        return [self._script_payload(scripts[key], include_code=False) for key in sorted(scripts)]
 
     def get_script(self, actor: str, script_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -68,25 +112,36 @@ class ScriptService:
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
+        builtin = self._builtins.get(normalized_key)
         normalized_language = language.strip().lower()
         if normalized_language != "python":
             raise ValidationError("only python scripts are supported")
         normalized_status = self._validate_status(status)
         normalized_owner_type, normalized_owner_key = self._validate_owner(owner_type, owner_key)
+        if builtin is not None:
+            if normalized_status != "active":
+                raise ValidationError("cannot disable built-in script")
+            if normalized_owner_type != "system" or normalized_owner_key:
+                raise ValidationError("cannot change built-in script owner")
         normalized_code = code.rstrip() + "\n"
         if not normalized_code.strip():
             raise ValidationError("code is required")
-        normalized_name = name.strip() or normalized_key
+        normalized_name = builtin.name if builtin is not None else name.strip() or normalized_key
         if input_schema is None:
             raise ValidationError("input_schema is required")
         normalized_input_schema = self._validate_schema("input_schema", input_schema, require_object_root=True)
         normalized_output_schema = None
         if output_schema is not None:
             normalized_output_schema = self._validate_schema("output_schema", output_schema)
+        if builtin is not None:
+            if normalized_input_schema != builtin.input_schema:
+                raise ValidationError("cannot change built-in script input_schema")
+            if normalized_output_schema != builtin.output_schema:
+                raise ValidationError("cannot change built-in script output_schema")
         script = self.store.scripts.upsert_script(
             script_key=normalized_key,
             name=normalized_name,
-            description=description.strip(),
+            description=builtin.description if builtin is not None else description.strip(),
             language=normalized_language,
             code=normalized_code,
             input_schema=normalized_input_schema,
@@ -101,10 +156,22 @@ class ScriptService:
 
     def delete_script(self, actor: str, script_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        deleted = self.store.scripts.delete_script(self._validate_script_key(script_key))
+        normalized_key = self._validate_script_key(script_key)
+        if normalized_key in self._builtins:
+            raise ValidationError("cannot delete built-in script")
+        deleted = self.store.scripts.delete_script(normalized_key)
         if not deleted:
             raise NotFound("script not found")
         return {"script_key": script_key, "deleted": True}
+
+    def reset_script(self, actor: str, script_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        normalized_key = self._validate_script_key(script_key)
+        definition = self._builtins.get(normalized_key)
+        if definition is None:
+            raise NotFound("built-in script not found")
+        self.store.scripts.delete_script(normalized_key)
+        return self._script_payload(self._default_script(definition), include_code=True)
 
     def test_script(
         self,
@@ -199,21 +266,42 @@ class ScriptService:
                         if validation_error is not None:
                             status = "failed"
                             error_message = validation_error
-        run = self.store.scripts.create_script_run(
-            run_id=run_id,
-            script_key=script["script_key"],
-            run_type=run_type,
-            params={"script_params": script_params, "timeout_seconds": timeout, "profile_key": profile_key},
-            result=result,
-            stdout=process.stdout,
-            stderr=process.stderr,
-            status=status,
-            exit_code=process.exit_code,
-            error_message=error_message,
-            duration_ms=process.duration_ms,
-            actor=actor,
-        )
-        payload = self._run_payload(run, include_logs=True)
+        run_params = {"script_params": script_params, "timeout_seconds": timeout, "profile_key": profile_key}
+        if script.get("source") == "default":
+            payload = self._run_payload(
+                {
+                    "run_id": run_id,
+                    "script_key": script["script_key"],
+                    "run_type": run_type,
+                    "params_json": json.dumps(run_params, ensure_ascii=False, sort_keys=True),
+                    "result_json": json.dumps(result, ensure_ascii=False, sort_keys=True),
+                    "stdout": process.stdout,
+                    "stderr": process.stderr,
+                    "status": status,
+                    "exit_code": process.exit_code,
+                    "error_message": error_message,
+                    "duration_ms": process.duration_ms,
+                    "created_by": actor,
+                    "created_at": None,
+                },
+                include_logs=True,
+            )
+        else:
+            run = self.store.scripts.create_script_run(
+                run_id=run_id,
+                script_key=script["script_key"],
+                run_type=run_type,
+                params=run_params,
+                result=result,
+                stdout=process.stdout,
+                stderr=process.stderr,
+                status=status,
+                exit_code=process.exit_code,
+                error_message=error_message,
+                duration_ms=process.duration_ms,
+                actor=actor,
+            )
+            payload = self._run_payload(run, include_logs=True)
         if status != "success":
             raise ValidationError(f"script run failed: {error_message}")
         return payload
@@ -276,10 +364,39 @@ class ScriptService:
             )
 
     def _require_script(self, script_key: str) -> dict[str, Any]:
-        script = self.store.scripts.get_script(self._validate_script_key(script_key))
-        if script is None:
+        normalized_key = self._validate_script_key(script_key)
+        script = self.store.scripts.get_script(normalized_key)
+        if script is not None:
+            script["source"] = "database"
+            return script
+        definition = self._builtins.get(normalized_key)
+        if definition is None:
             raise NotFound("script not found")
-        return script
+        return self._default_script(definition)
+
+    def _default_script(self, definition: BuiltInScriptDefinition) -> dict[str, Any]:
+        try:
+            code = definition.default_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise NotFound("default script not found") from exc
+        return {
+            "script_key": definition.script_key,
+            "name": definition.name,
+            "description": definition.description,
+            "language": "python",
+            "code": code.rstrip() + "\n",
+            "status": "active",
+            "owner_type": "system",
+            "owner_key": "",
+            "content_hash": self._content_hash(code.rstrip() + "\n"),
+            "input_schema": definition.input_schema,
+            "output_schema": definition.output_schema,
+            "source": "default",
+            "created_by": None,
+            "updated_by": None,
+            "created_at": None,
+            "updated_at": None,
+        }
 
     def _validate_script_key(self, script_key: str) -> str:
         normalized = script_key.strip()
@@ -322,6 +439,7 @@ class ScriptService:
 
     def _script_payload(self, script: dict[str, Any], *, include_code: bool) -> dict[str, Any]:
         payload = dict(script)
+        payload.setdefault("source", "database")
         if not include_code:
             payload.pop("code", None)
             payload["code_preview"] = str(script.get("code") or "")[:160]

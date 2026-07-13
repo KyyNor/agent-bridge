@@ -3,6 +3,21 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
+def test_validate_workflow_endpoint_returns_structured_result(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
+    response = TestClient(create_app(wm_paths, {"root"})).post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"workflow": {"workflow_type": "operation", "definition": {"nodes": [], "edges": []}}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"valid": True, "errors": [], "warnings": []}
+
+
 def test_workflow_api_saves_structured_definition(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService

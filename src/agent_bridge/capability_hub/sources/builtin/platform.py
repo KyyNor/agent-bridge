@@ -56,6 +56,23 @@ class PlatformBuiltinProvider:
                 },
                 ToolType.action.value,
             ),
+            BuiltinTool(
+                "validate_workflow",
+                "Validate Workflow",
+                "校验工作流定义并返回结构化错误与警告。",
+                {
+                    "type": "object",
+                    "properties": {
+                        "workflow": {
+                            "type": "object",
+                            "additionalProperties": True,
+                            "description": "要校验的工作流定义或草稿。",
+                        },
+                    },
+                    "required": ["workflow"],
+                },
+                ToolType.action.value,
+            ),
         ]
 
     def resource_from_arguments(self, tool: str, arguments: dict[str, Any]) -> BuiltinResourceRef | None:
@@ -99,5 +116,10 @@ class PlatformBuiltinProvider:
                 workflow_context=workflow_context,
                 run_type="mcp",
             )
+        if tool == "validate_workflow":
+            workflow = arguments.get("workflow")
+            if not isinstance(workflow, dict):
+                raise ValidationError("workflow must be an object")
+            return self.service.validate_workflow_draft(actor=actor, workflow=workflow)
         else:
             raise NotFound("tool not found")

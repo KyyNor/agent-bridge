@@ -245,6 +245,10 @@ class WorkflowRunRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowValidationRequest(BaseModel):
+    workflow: dict[str, Any]
+
+
 class SkillPromptRequest(BaseModel):
     prompt: str
 
