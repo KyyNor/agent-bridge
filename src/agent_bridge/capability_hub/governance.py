@@ -685,13 +685,15 @@ class CapabilityGovernanceService:
         created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[dict[str, Any]]:
+        search: str | None = None,
+        paginated: bool = False,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_source_type = self._optional_enum(source_type, SourceType, "source type")
         normalized_status = self._optional_enum(status, CallLogStatus, "call log status")
         normalized_failure_stage = self._optional_enum(failure_stage, FailureStage, "failure stage")
         normalized_failure_owner = self._optional_enum(failure_owner, FailureOwner, "failure owner")
-        return self.store.list_tool_call_logs(
+        kwargs = dict(
             entrypoint=entrypoint,
             source_type=normalized_source_type,
             source_key=source_key,
@@ -707,7 +709,14 @@ class CapabilityGovernanceService:
             created_to=created_to,
             limit=limit,
             offset=offset,
+            search=search,
         )
+        if paginated:
+            return self.store.governance.list_tool_call_logs_page(**kwargs)
+        if search is not None:
+            return self.store.governance.list_tool_call_logs(**kwargs)
+        kwargs.pop("search")
+        return self.store.list_tool_call_logs(**kwargs)
 
     def get_log(self, *, actor: str, log_id: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

@@ -56,6 +56,8 @@ import type {
   WorkflowArtifactSearchResult,
   WorkflowArtifactHistoryResult,
   WorkflowArtifactDetail,
+  AgentRunPage,
+  ToolCallLogPage,
   WorkflowClearResult,
   WorkflowDefinition,
   WorkflowRun,
@@ -254,6 +256,7 @@ export const api = {
     tags?: string[]
     format?: string
     limit?: number
+    offset?: number
   } = {}) => {
     const qs = new URLSearchParams()
     if (params.profile_key) qs.set('profile_key', params.profile_key)
@@ -267,6 +270,7 @@ export const api = {
     if (params.full) qs.set('full', 'true')
     if (params.format) qs.set('format', params.format)
     if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset != null) qs.set('offset', String(params.offset))
     ;(params.tags || []).forEach(tag => qs.append('tags', tag))
     return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)
   },
@@ -314,6 +318,11 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => qs.set(k, String(v)))
     return get<ToolCallLog[]>(`/tool-call-logs?${qs}`)
   },
+  listLogsPage: (params: Record<string, string | number | boolean> = {}) => {
+    const qs = new URLSearchParams()
+    Object.entries({ ...params, paginated: true }).forEach(([k, v]) => qs.set(k, String(v)))
+    return get<ToolCallLogPage>(`/tool-call-logs?${qs}`)
+  },
   getLog: (id: string) => get<ToolCallLog>(`/tool-call-logs/${id}`),
   stats: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params)
@@ -325,6 +334,11 @@ export const api = {
     const qs = new URLSearchParams()
     Object.entries(params).forEach(([k, v]) => qs.set(k, String(v)))
     return get<AgentRun[]>(`/agent-runs?${qs}`)
+  },
+  listAgentRunsPage: (params: Record<string, string | number | boolean> = {}) => {
+    const qs = new URLSearchParams()
+    Object.entries({ ...params, paginated: true }).forEach(([k, v]) => qs.set(k, String(v)))
+    return get<AgentRunPage>(`/agent-runs?${qs}`)
   },
   getAgentRun: (runKey: string) => get<AgentRun>(`/agent-runs/${runKey}`),
   /** Live event stream for an agent run (reads events.jsonl in real time,

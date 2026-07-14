@@ -525,7 +525,155 @@ class GovernanceRepository:
         created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        search: str | None = None,
     ) -> list[dict[str, Any]]:
+        filters, params = self._tool_call_log_filters(
+            entrypoint=entrypoint,
+            source_type=source_type,
+            source_key=source_key,
+            tool_name=tool_name,
+            profile_key=profile_key,
+            status=status,
+            failure_stage=failure_stage,
+            failure_owner=failure_owner,
+            error_type=error_type,
+            resource_type=resource_type,
+            resource_key=resource_key,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        params.extend([limit, offset])
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM tool_call_logs
+                {where_clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_tool_call_logs_page(
+        self,
+        *,
+        entrypoint: str | None = None,
+        source_type: str | None = None,
+        source_key: str | None = None,
+        tool_name: str | None = None,
+        profile_key: str | None = None,
+        status: CallLogStatus | str | None = None,
+        failure_stage: str | None = None,
+        failure_owner: str | None = None,
+        error_type: str | None = None,
+        resource_type: str | None = None,
+        resource_key: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        bounded_limit = min(max(limit, 1), 200)
+        bounded_offset = max(offset, 0)
+        filters, params = self._tool_call_log_filters(
+            entrypoint=entrypoint,
+            source_type=source_type,
+            source_key=source_key,
+            tool_name=tool_name,
+            profile_key=profile_key,
+            status=status,
+            failure_stage=failure_stage,
+            failure_owner=failure_owner,
+            error_type=error_type,
+            resource_type=resource_type,
+            resource_key=resource_key,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        base_filters, base_params = self._tool_call_log_filters(
+            entrypoint=entrypoint,
+            source_type=source_type,
+            source_key=source_key,
+            tool_name=tool_name,
+            profile_key=profile_key,
+            status=None,
+            failure_stage=failure_stage,
+            failure_owner=failure_owner,
+            error_type=error_type,
+            resource_type=resource_type,
+            resource_key=resource_key,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        base_where_clause = f"WHERE {' AND '.join(base_filters)}" if base_filters else ""
+        with self._connect() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS total FROM tool_call_logs {where_clause}",
+                params,
+            ).fetchone()["total"]
+            count_row = conn.execute(
+                f"""
+                SELECT
+                  COUNT(*) AS all_count,
+                  SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
+                  SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error,
+                  SUM(CASE WHEN status = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+                  SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running
+                FROM tool_call_logs {base_where_clause}
+                """,
+                base_params,
+            ).fetchone()
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM tool_call_logs
+                {where_clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, bounded_limit, bounded_offset),
+            ).fetchall()
+        return {
+            "items": [dict(row) for row in rows],
+            "total": int(total),
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+            "counts": {
+                "all": int(count_row["all_count"] or 0),
+                "success": int(count_row["success"] or 0),
+                "failed": int(count_row["error"] or 0),
+                "running": int(count_row["running"] or 0),
+                "error": int(count_row["error"] or 0),
+                "blocked": int(count_row["blocked"] or 0),
+            },
+        }
+
+    @staticmethod
+    def _tool_call_log_filters(
+        *,
+        entrypoint: str | None,
+        source_type: str | None,
+        source_key: str | None,
+        tool_name: str | None,
+        profile_key: str | None,
+        status: CallLogStatus | str | None,
+        failure_stage: str | None,
+        failure_owner: str | None,
+        error_type: str | None,
+        resource_type: str | None,
+        resource_key: str | None,
+        created_from: str | None,
+        created_to: str | None,
+        search: str | None,
+    ) -> tuple[list[str], list[Any]]:
         filters: list[str] = []
         params: list[Any] = []
         for column, value in [
@@ -550,20 +698,17 @@ class GovernanceRepository:
         if created_to is not None:
             filters.append("created_at < ?")
             params.append(created_to)
-        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-        params.extend([limit, offset])
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT *
-                FROM tool_call_logs
-                {where_clause}
-                ORDER BY created_at DESC, id DESC
-                LIMIT ? OFFSET ?
-                """,
-                params,
-            ).fetchall()
-            return [dict(row) for row in rows]
+        if search:
+            like = f"%{search.lower()}%"
+            filters.append(
+                "(lower(COALESCE(tool_name, '')) LIKE ? "
+                "OR lower(COALESCE(actor, '')) LIKE ? "
+                "OR lower(COALESCE(entrypoint, '')) LIKE ? "
+                "OR lower(COALESCE(source_type, '')) LIKE ? "
+                "OR lower(COALESCE(source_key, '')) LIKE ?)"
+            )
+            params.extend([like] * 5)
+        return filters, params
 
     def aggregate_tool_call_stats(
         self,

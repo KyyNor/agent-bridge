@@ -58,3 +58,18 @@ test('countAgentRunTabs is independent of the active status list', () => {
   const activeList = baseline.filter(item => item.status === 'failed')
   assert.deepEqual(countAgentRunTabs(baseline), countAgentRunTabs(baseline, activeList))
 })
+
+test('filter tabs consume server-side counts instead of the current page', () => {
+  assert.deepEqual(countToolCallTabs({ all: 2000, success: 1800, failed: 150, running: 0, error: 140, blocked: 60 }), [
+    { key: '', label: '全部', count: 2000 },
+    { key: 'success', label: '成功', count: 1800 },
+    { key: 'error', label: '失败', count: 140 },
+    { key: 'blocked', label: '拦截', count: 60 },
+  ])
+  assert.deepEqual(countAgentRunTabs({ all: 3000, success: 2700, failed: 250, running: 50 }), [
+    { key: '', label: '全部', count: 3000 },
+    { key: 'running', label: '执行中', count: 50 },
+    { key: 'success', label: '成功', count: 2700 },
+    { key: 'failed', label: '失败', count: 250 },
+  ])
+})

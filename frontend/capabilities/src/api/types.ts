@@ -203,6 +203,9 @@ export interface WorkflowArtifact {
 
 export interface WorkflowArtifactSearchResult {
   items: WorkflowArtifact[]
+  total?: number
+  limit?: number
+  offset?: number
 }
 
 export interface WorkflowArtifactHistoryVersion {
@@ -469,6 +472,23 @@ export interface ToolCallStats {
   items: Record<string, unknown>[]
 }
 
+export interface ToolCallLogCounts {
+  all: number
+  success: number
+  failed: number
+  running: number
+  error: number
+  blocked: number
+}
+
+export interface ToolCallLogPage {
+  items: ToolCallLog[]
+  total: number
+  limit: number
+  offset: number
+  counts: ToolCallLogCounts
+}
+
 export interface AgentRun {
   id: number
   run_key: string
@@ -494,6 +514,21 @@ export interface AgentRun {
   // produced by agent_runtime/events.py); the unified WorkflowRunEvent type is
   // the canonical one. Sub-agent fields are simply absent for plain agent runs.
   events?: WorkflowRunEvent[]
+}
+
+export interface AgentRunCounts {
+  all: number
+  success: number
+  failed: number
+  running: number
+}
+
+export interface AgentRunPage {
+  items: AgentRun[]
+  total: number
+  limit: number
+  offset: number
+  counts: AgentRunCounts
 }
 
 export interface WorkflowDesignResult {

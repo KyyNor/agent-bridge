@@ -97,9 +97,10 @@ def create_governance_routes(service, actor):
         resource_type: str | None = None, resource_key: str | None = None,
         created_from: str | None = None, created_to: str | None = None,
         limit: int = 50, offset: int = 0,
+        search: str | None = None, paginated: bool = False,
         current_actor: str = Depends(actor),
-    ) -> list[dict[str, Any]]:
-        return service.governance.list_logs(actor=current_actor, entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, profile_key=profile_key, status=status, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, created_from=created_from, created_to=created_to, limit=limit, offset=offset)
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        return service.governance.list_logs(actor=current_actor, entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, profile_key=profile_key, status=status, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, created_from=created_from, created_to=created_to, limit=limit, offset=offset, search=search, paginated=paginated)
 
     @router.get("/tool-call-logs/{log_id}")
     def get_tool_call_log(log_id: str, current_actor: str = Depends(actor)) -> dict[str, Any]:

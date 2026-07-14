@@ -24,6 +24,11 @@ import {
   distinctTypes,
   taskStats as computeTaskStats,
   taskStatusLabel as labelTaskStatus,
+  taskId,
+  toggleTaskSelection,
+  togglePageTaskSelection,
+  runWorkflowTaskQueue,
+  runWorkflowTaskResetQueue,
 } from '../../lib/workflowTasks'
 import {
   distinctActors,
@@ -35,6 +40,7 @@ import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const WORKFLOW_RUN_LIMIT = 200
+const ARTIFACT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 const props = defineProps<{ routeKey: string }>()
 
 const workflows = ref<WorkflowDefinition[]>([])
@@ -45,6 +51,9 @@ const loading = ref(true)
 const workflowPage = ref(1)
 const workflowPageSize = ref(10)
 const artifactLoading = ref(false)
+const artifactTotal = ref(0)
+const artifactPage = ref(1)
+const artifactPageSize = ref(50)
 const error = ref('')
 const artifactError = ref('')
 const saving = ref(false)
@@ -112,10 +121,16 @@ const taskActionLoading = ref<Set<string>>(new Set())
 const taskActionError = ref('')
 const resetTarget = ref<WorkflowTask | null>(null)
 const resetting = ref(false)
+const selectedTaskIds = ref<Set<string>>(new Set())
+const batchAction = ref<'reset' | 'run' | ''>('')
+const batchProgress = ref({ current: 0, total: 0 })
+const batchSummary = ref('')
+let batchToken = 0
 // Per-task sub-agent event filter (feature 5). Keyed by task id; "" = all.
 const taskActorFilter = ref<Record<string, string>>({})
 const taskArtifactActive = ref<Record<string, string>>({})
 let taskSearchDebounce: ReturnType<typeof setTimeout> | null = null
+let artifactRequestToken = 0
 const testing = ref(false)
 const testingRunId = ref('')
 const testError = ref('')
@@ -236,6 +251,14 @@ const filteredTasks = computed(() =>
 )
 const pagedWorkflows = computed(() => paginate(workflows.value, workflowPage.value, workflowPageSize.value))
 const pagedTasks = computed(() => paginate(filteredTasks.value, taskPage.value, taskPageSize.value))
+const selectedTasks = computed(() => filteredTasks.value.filter(task => selectedTaskIds.value.has(taskId(task))))
+const allVisibleTasksSelected = computed(() =>
+  pagedTasks.value.length > 0 && pagedTasks.value.every(task => selectedTaskIds.value.has(taskId(task))),
+)
+const someVisibleTasksSelected = computed(() =>
+  pagedTasks.value.some(task => selectedTaskIds.value.has(taskId(task))),
+)
+const batchBusy = computed(() => batchAction.value !== '')
 const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 function resetTaskFilters() {
   taskStatusFilter.value = ALL_STATUS_SENTINEL
@@ -328,10 +351,17 @@ watch(selectedKey, () => {
 
 watch(
   () => props.routeKey,
-  async () => applyRoute(),
+  async () => {
+    batchToken += 1
+    if (batchAction.value) batchAction.value = ''
+    await applyRoute()
+  },
 )
 
-onUnmounted(() => stopTestPolling())
+onUnmounted(() => {
+  stopTestPolling()
+  batchToken += 1
+})
 
 async function loadAll() {
   loading.value = true
@@ -378,6 +408,7 @@ async function loadRunsForWorkflows(items = workflows.value) {
 }
 
 async function searchArtifacts() {
+  const token = ++artifactRequestToken
   artifactLoading.value = true
   artifactError.value = ''
   try {
@@ -388,15 +419,28 @@ async function searchArtifacts() {
       path: artifactPath.value || undefined,
       tags: artifactTags.value.split(',').map(tag => tag.trim()).filter(Boolean),
       format: 'all',
-      limit: 30,
+      limit: artifactPageSize.value,
+      offset: (artifactPage.value - 1) * artifactPageSize.value,
     })
+    if (token !== artifactRequestToken) return
     artifacts.value = result.items
+    artifactTotal.value = result.total ?? result.items.length
   } catch (e: unknown) {
+    if (token !== artifactRequestToken) return
     artifactError.value = errorMessage(e)
+    artifactTotal.value = 0
   } finally {
-    artifactLoading.value = false
+    if (token === artifactRequestToken) artifactLoading.value = false
   }
 }
+
+function resetArtifactPage() {
+  artifactPage.value = 1
+}
+
+watch([artifactPage, artifactPageSize], () => {
+  if (selectedWorkflow.value) searchArtifacts()
+})
 
 function openCreate() {
   window.location.hash = 'workflow/new'
@@ -533,6 +577,7 @@ async function openDetail(item: WorkflowDefinition) {
 
 async function prepareDetail(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
+  resetArtifactPage()
   await Promise.all([searchArtifacts(), loadRuns(item.workflow_key)])
 }
 
@@ -917,7 +962,7 @@ function isTaskActionLoading(task: WorkflowTask) {
 
 async function executeTask(task: WorkflowTask) {
   const key = taskActionKey(task)
-  if (isTaskActionLoading(task)) return
+  if (batchBusy.value || isTaskActionLoading(task)) return
   const loading = new Set(taskActionLoading.value)
   loading.add(key)
   taskActionLoading.value = loading
@@ -948,7 +993,7 @@ function closeResetConfirm() {
 
 async function confirmResetTask() {
   const task = resetTarget.value
-  if (!task || resetting.value) return
+  if (!task || resetting.value || batchBusy.value) return
   resetting.value = true
   taskActionError.value = ''
   try {
@@ -959,6 +1004,109 @@ async function confirmResetTask() {
     taskActionError.value = errorMessage(e)
   } finally {
     resetting.value = false
+  }
+}
+
+function setTaskSelectedFromEvent(task: WorkflowTask, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  selectedTaskIds.value = toggleTaskSelection(selectedTaskIds.value, task, checked)
+}
+
+function setVisibleTasksSelectedFromEvent(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  selectedTaskIds.value = togglePageTaskSelection(selectedTaskIds.value, pagedTasks.value, checked)
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, milliseconds))
+}
+
+function shouldStopBatchError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /(?:^|\s)(?:4\d\d|5\d\d):/.test(message)
+    || /already running|conflict|network|failed to fetch|fetch failed|页面队列已停止/i.test(message)
+}
+
+async function waitForBatchRun(runId: string, token: number): Promise<WorkflowRun> {
+  while (true) {
+    if (token !== batchToken) throw new Error('页面队列已停止')
+    const run = await api.getWorkflowRun(runId)
+    if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) return run
+    await sleep(1000)
+  }
+}
+
+async function resetSelectedTasks() {
+  if (batchBusy.value || !selectedTasks.value.length) return
+  const queue = [...selectedTasks.value]
+  const token = ++batchToken
+  batchAction.value = 'reset'
+  batchProgress.value = { current: 0, total: queue.length }
+  batchSummary.value = ''
+  taskActionError.value = ''
+  let success = 0
+  let skipped = 0
+  let failed = 0
+  try {
+    const result = await runWorkflowTaskResetQueue(queue, {
+      canReset: canResetTask,
+      reset: task => api.resetWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined).then(() => undefined),
+      isCancelled: () => token !== batchToken,
+      shouldStopOnError: shouldStopBatchError,
+      onTaskStart: (_task, index, total) => {
+        batchProgress.value = { current: index + 1, total }
+      },
+    })
+    if (token !== batchToken) return
+    success = result.outcomes.filter(item => item.status === 'success').length
+    skipped = result.outcomes.filter(item => item.status === 'skipped').length
+    failed = result.outcomes.filter(item => item.status === 'failed').length
+    const stoppedText = result.stopped ? `，队列已停止，剩余 ${result.remaining.length} 个任务未执行` : ''
+    batchSummary.value = `批量重置完成：成功 ${success}，跳过 ${skipped}，失败 ${failed}${stoppedText}`
+    const firstError = result.outcomes.find(item => item.error)?.error
+    if (firstError) taskActionError.value = firstError
+    selectedTaskIds.value = result.stopped
+      ? new Set(result.remaining.map(taskId))
+      : new Set()
+    if (token === batchToken && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
+  } finally {
+    if (token === batchToken) batchAction.value = ''
+  }
+}
+
+async function runSelectedTasks() {
+  if (batchBusy.value || !selectedTasks.value.length) return
+  const queue = [...selectedTasks.value]
+  const token = ++batchToken
+  batchAction.value = 'run'
+  batchProgress.value = { current: 0, total: queue.length }
+  batchSummary.value = ''
+  taskActionError.value = ''
+  try {
+    const result = await runWorkflowTaskQueue(queue, {
+      canExecute: canExecuteTask,
+      execute: task => api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined),
+      waitForRun: runId => waitForBatchRun(runId, token),
+      isCancelled: () => token !== batchToken,
+      shouldStopOnError: shouldStopBatchError,
+      onTaskStart: (_task, index, total) => {
+        batchProgress.value = { current: index + 1, total }
+      },
+    })
+    if (token !== batchToken) return
+    const success = result.outcomes.filter(item => item.status === 'success').length
+    const failed = result.outcomes.filter(item => item.status === 'failed').length
+    const skipped = result.outcomes.filter(item => item.status === 'skipped').length
+    const stoppedText = result.stopped ? `，队列已停止，剩余 ${result.remaining.length} 个任务未执行` : ''
+    batchSummary.value = `批量运行完成：成功 ${success}，跳过 ${skipped}，失败 ${failed}${stoppedText}`
+    const firstError = result.outcomes.find(item => item.error)?.error
+    if (firstError) taskActionError.value = firstError
+    selectedTaskIds.value = result.stopped
+      ? new Set(result.remaining.map(taskId))
+      : new Set()
+    if (token === batchToken && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
+  } finally {
+    if (token === batchToken) batchAction.value = ''
   }
 }
 
@@ -1199,10 +1347,6 @@ async function openProgressHtmlReport() {
   openArtifactFullscreen(artifact)
 }
 
-function taskId(task: WorkflowTask) {
-  return `${task.workflow_key}:${task.task_key}:${task.task_version}`
-}
-
 function taskRunLogKey(task: WorkflowTask) {
   return task.lease_run_id || taskId(task)
 }
@@ -1245,6 +1389,9 @@ async function openTasks(item: WorkflowDefinition) {
 async function prepareTasks(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
   taskWorkflowKey.value = item.workflow_key
+  selectedTaskIds.value = new Set()
+  batchSummary.value = ''
+  batchAction.value = ''
   await loadTasks(item.workflow_key)
 }
 
@@ -1644,17 +1791,17 @@ async function confirmClearWorkflow() {
             <div class="flex flex-wrap items-end gap-3">
               <div class="min-w-[220px] flex-1">
                 <label class="mb-1 block text-xs text-muted-foreground">检索</label>
-                <Input v-model="artifactQuery" placeholder="标题、摘要、路径" @keyup.enter="searchArtifacts" />
+                <Input v-model="artifactQuery" placeholder="标题、摘要、路径" @keyup.enter="resetArtifactPage(); searchArtifacts()" />
               </div>
               <div class="min-w-[180px] flex-1">
                 <label class="mb-1 block text-xs text-muted-foreground">path</label>
-                <Input v-model="artifactPath" placeholder="reports/page-a/" @keyup.enter="searchArtifacts" />
+                <Input v-model="artifactPath" placeholder="reports/page-a/" @keyup.enter="resetArtifactPage(); searchArtifacts()" />
               </div>
               <div class="min-w-[180px] flex-1">
                 <label class="mb-1 block text-xs text-muted-foreground">tags</label>
-                <Input v-model="artifactTags" placeholder="finance, report" @keyup.enter="searchArtifacts" />
+                <Input v-model="artifactTags" placeholder="finance, report" @keyup.enter="resetArtifactPage(); searchArtifacts()" />
               </div>
-              <Button :disabled="artifactLoading" @click="searchArtifacts">{{ artifactLoading ? '检索中' : '检索产物' }}</Button>
+              <Button :disabled="artifactLoading" @click="resetArtifactPage(); searchArtifacts()">{{ artifactLoading ? '检索中' : '检索产物' }}</Button>
             </div>
             <div v-if="artifactError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {{ artifactError }}
@@ -1702,6 +1849,13 @@ async function confirmClearWorkflow() {
                 </div>
               </template>
             </div>
+            <PaginationBar
+              v-if="artifactTotal"
+              v-model:page="artifactPage"
+              v-model:page-size="artifactPageSize"
+              :total="artifactTotal"
+              :page-size-options="ARTIFACT_PAGE_SIZE_OPTIONS"
+            />
           </section>
 
           <section class="space-y-4 rounded-md border p-4">
@@ -1852,6 +2006,37 @@ async function confirmClearWorkflow() {
               重置筛选
             </Button>
             <div class="ml-auto flex items-center gap-3">
+              <label v-if="pagedTasks.length" class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  :checked="allVisibleTasksSelected"
+                  :indeterminate.prop="someVisibleTasksSelected && !allVisibleTasksSelected"
+                  :disabled="batchBusy"
+                  @change="setVisibleTasksSelectedFromEvent"
+                />
+                本页全选
+              </label>
+              <span v-if="selectedTasks.length" class="text-xs text-blue-600">已选 {{ selectedTasks.length }}</span>
+              <Button
+                v-if="selectedTasks.length"
+                variant="outline"
+                size="sm"
+                class="h-8 text-xs text-amber-600"
+                :disabled="batchBusy"
+                @click="resetSelectedTasks"
+              >
+                {{ batchAction === 'reset' ? `重置中 ${batchProgress.current}/${batchProgress.total}` : '批量重置' }}
+              </Button>
+              <Button
+                v-if="selectedTasks.length"
+                variant="outline"
+                size="sm"
+                class="h-8 text-xs text-blue-600"
+                :disabled="batchBusy"
+                @click="runSelectedTasks"
+              >
+                {{ batchAction === 'run' ? `运行中 ${batchProgress.current}/${batchProgress.total}` : '批量运行' }}
+              </Button>
               <span class="text-xs text-muted-foreground">
                 {{ filteredTasks.length }} / {{ tasks.length }}
               </span>
@@ -1873,13 +2058,24 @@ async function confirmClearWorkflow() {
           <div v-if="taskActionError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {{ taskActionError }}
           </div>
+          <div v-if="batchSummary" class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+            {{ batchSummary }}
+          </div>
           <div v-if="tasksLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!tasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无任务</div>
           <div v-else-if="!filteredTasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">没有符合筛选条件的任务</div>
           <div v-else class="space-y-2">
             <div v-for="task in pagedTasks" :key="taskId(task)" class="rounded-md border">
               <div class="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
-                <div class="min-w-0">
+                <div class="flex min-w-0 items-start gap-2">
+                  <input
+                    type="checkbox"
+                    class="mt-1"
+                    :checked="selectedTaskIds.has(taskId(task))"
+                    :disabled="batchBusy"
+                    @change="setTaskSelectedFromEvent(task, $event)"
+                  />
+                  <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="font-mono text-sm font-medium text-foreground">{{ task.task_key }}</span>
                     <Badge variant="outline" :class="taskBadgeClass(task.status)">{{ taskStatusLabel(task.status) }}</Badge>
@@ -1897,6 +2093,7 @@ async function confirmClearWorkflow() {
                   <div v-if="task.last_error" class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
                     {{ task.last_error }}
                   </div>
+                  </div>
                 </div>
                 <div class="flex items-center gap-1">
                   <Button
@@ -1904,7 +2101,7 @@ async function confirmClearWorkflow() {
                     variant="ghost"
                     size="sm"
                     class="h-8 text-xs text-blue-600"
-                    :disabled="isTaskActionLoading(task)"
+                    :disabled="batchBusy || isTaskActionLoading(task)"
                     @click="executeTask(task)"
                   >
                     {{ isTaskActionLoading(task) ? '执行中' : '执行' }}
@@ -1921,7 +2118,7 @@ async function confirmClearWorkflow() {
                     variant="ghost"
                     size="sm"
                     class="h-8 text-xs text-amber-600"
-                    :disabled="isTaskActionLoading(task)"
+                    :disabled="batchBusy || isTaskActionLoading(task)"
                     @click="openResetConfirm(task)"
                   >
                     重置

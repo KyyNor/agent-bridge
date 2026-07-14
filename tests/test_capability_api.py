@@ -741,6 +741,86 @@ def test_tool_call_log_api_filters_by_failure_classification(wm_paths) -> None:
     assert [item["log_id"] for item in response.json()] == ["call_failed_upstream"]
 
 
+def test_tool_call_log_api_paginates_search_and_status_counts(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    for index, status in enumerate(("success", "error", "blocked")):
+        store.create_tool_call_log(
+            log_id=f"shared_api_call_{index}",
+            actor="shared-api-actor",
+            profile_key="safe",
+            entrypoint="metamcp_execute",
+            source_type=SourceType.mcp_service.value,
+            source_key="shared-api-source",
+            tool_name="query_sql",
+            request={},
+            response={},
+            status=status,
+        )
+
+    response = client.get(
+        "/tool-call-logs",
+        params={"paginated": "true", "search": "shared-api", "status": "error", "limit": 1, "offset": -3},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["log_id"] for item in body["items"]] == ["shared_api_call_1"]
+    assert body["total"] == 1
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert body["counts"] == {
+        "all": 3,
+        "success": 1,
+        "failed": 1,
+        "running": 0,
+        "error": 1,
+        "blocked": 1,
+    }
+
+
+def test_tool_call_log_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    for index in range(205):
+        store.create_tool_call_log(
+            log_id=f"bulk_api_call_{index:03d}",
+            actor="bulk-actor",
+            profile_key="safe",
+            entrypoint="metamcp_execute",
+            source_type=SourceType.mcp_service.value,
+            source_key="bulk-source",
+            tool_name="query_sql",
+            request={},
+            response={},
+            status="success",
+        )
+
+    headers = {"X-Agent-Bridge-User": "root"}
+    first = client.get(
+        "/tool-call-logs",
+        params={"paginated": "true", "limit": 10, "offset": 0},
+        headers=headers,
+    ).json()
+    last = client.get(
+        "/tool-call-logs",
+        params={"paginated": "true", "limit": 10, "offset": 200},
+        headers=headers,
+    ).json()
+
+    assert first["total"] == 205
+    assert len(first["items"]) == 10
+    assert len(last["items"]) == 5
+    assert {item["log_id"] for item in first["items"]}.isdisjoint(
+        item["log_id"] for item in last["items"]
+    )
+
+
 def test_tool_call_stats_api_groups_by_dimensions(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

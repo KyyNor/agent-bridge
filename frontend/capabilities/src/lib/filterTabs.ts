@@ -1,4 +1,4 @@
-import type { AgentRun, ToolCallLog } from '../api/types'
+import type { AgentRun, AgentRunCounts, ToolCallLog, ToolCallLogCounts } from '../api/types'
 import { agentRunBadgeVariant, type AgentRunFilter } from './agentRunStatus'
 
 export interface FilterTabCount<T extends string = string> {
@@ -7,7 +7,15 @@ export interface FilterTabCount<T extends string = string> {
   count: number
 }
 
-export function countToolCallTabs(baseline: ToolCallLog[], _activeRows?: ToolCallLog[]): FilterTabCount[] {
+export function countToolCallTabs(baseline: ToolCallLog[] | ToolCallLogCounts, _activeRows?: ToolCallLog[]): FilterTabCount[] {
+  if (!Array.isArray(baseline)) {
+    return [
+      { key: '', label: '全部', count: baseline.all },
+      { key: 'success', label: '成功', count: baseline.success },
+      { key: 'error', label: '失败', count: baseline.error },
+      { key: 'blocked', label: '拦截', count: baseline.blocked },
+    ]
+  }
   return [
     { key: '', label: '全部', count: baseline.length },
     { key: 'success', label: '成功', count: baseline.filter(row => row.status === 'success').length },
@@ -16,7 +24,15 @@ export function countToolCallTabs(baseline: ToolCallLog[], _activeRows?: ToolCal
   ]
 }
 
-export function countAgentRunTabs(baseline: AgentRun[], _activeRows?: AgentRun[]): FilterTabCount<AgentRunFilter>[] {
+export function countAgentRunTabs(baseline: AgentRun[] | AgentRunCounts, _activeRows?: AgentRun[]): FilterTabCount<AgentRunFilter>[] {
+  if (!Array.isArray(baseline)) {
+    return [
+      { key: '', label: '全部', count: baseline.all },
+      { key: 'running', label: '执行中', count: baseline.running },
+      { key: 'success', label: '成功', count: baseline.success },
+      { key: 'failed', label: '失败', count: baseline.failed },
+    ]
+  }
   return [
     { key: '', label: '全部', count: baseline.length },
     { key: 'running', label: '执行中', count: baseline.filter(row => row.status === 'running').length },

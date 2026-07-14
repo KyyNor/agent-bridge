@@ -96,8 +96,24 @@ def create_agent_runs_routes(service, actor):
         created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        search: str | None = None,
+        paginated: bool = False,
         current_actor: str = Depends(actor),
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        if paginated:
+            return service.store.agent_runs.list_paginated(
+                agent_name=agent_name,
+                profile_key=profile_key,
+                workflow_key=workflow_key,
+                workflow_run_id=workflow_run_id,
+                ok=ok,
+                status=status,
+                created_from=created_from,
+                created_to=created_to,
+                search=search,
+                limit=limit,
+                offset=offset,
+            )
         return service.store.agent_runs.list(
             agent_name=agent_name,
             profile_key=profile_key,
@@ -109,6 +125,7 @@ def create_agent_runs_routes(service, actor):
             created_to=created_to,
             limit=limit,
             offset=offset,
+            search=search,
         )
 
     @router.get("/agent-runs/{run_key}")

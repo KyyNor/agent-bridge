@@ -10,6 +10,9 @@ import {
   taskStats,
   taskStatusLabel,
   matchTaskFilter,
+  taskId,
+  toggleTaskSelection,
+  togglePageTaskSelection,
 } from '../src/lib/workflowTasks.ts'
 import type { WorkflowTask } from '../src/api/types.ts'
 
@@ -130,4 +133,26 @@ test('matchTaskFilter returns true with empty filters', () => {
 
 test('matchTaskFilter excludes a non-matching status', () => {
   assert.equal(matchTaskFilter(sample[0], filters({ status: 'completed' })), false)
+})
+
+test('task selection uses workflow, task, and version so versions stay distinct', () => {
+  const v1 = sample[0]
+  const v2 = makeTask({ task_key: v1.task_key, task_version: 'v2' })
+  assert.notEqual(taskId(v1), taskId(v2))
+  assert.equal(taskId(v1), 'w\u0000page:alpha\u0000')
+})
+
+test('togglePageTaskSelection only changes the visible page ids', () => {
+  const selected = new Set([taskId(sample[2])])
+  const next = togglePageTaskSelection(selected, sample.slice(0, 2), true)
+  assert.deepEqual([...next], [taskId(sample[2]), taskId(sample[0]), taskId(sample[1])])
+  const deselected = togglePageTaskSelection(next, sample.slice(0, 2), false)
+  assert.deepEqual([...deselected], [taskId(sample[2])])
+})
+
+test('toggleTaskSelection changes one task without losing selections from other pages', () => {
+  const selected = new Set([taskId(sample[0])])
+  const next = toggleTaskSelection(selected, sample[1], true)
+  assert.deepEqual([...next], [taskId(sample[0]), taskId(sample[1])])
+  assert.deepEqual([...toggleTaskSelection(next, sample[0], false)], [taskId(sample[1])])
 })

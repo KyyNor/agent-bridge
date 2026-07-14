@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { Search, RotateCw } from 'lucide-vue-next'
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { api } from '../../api/client'
-import type { ToolCallLog } from '../../api/types'
+import type { ToolCallLog, ToolCallLogCounts } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -13,10 +13,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { countToolCallTabs } from '../../lib/filterTabs'
-import { LOG_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
 
 const logs = ref<ToolCallLog[]>([])
-const logTabBase = ref<ToolCallLog[]>([])
+const logTotal = ref(0)
+const logCounts = ref<ToolCallLogCounts>({ all: 0, success: 0, failed: 0, running: 0, error: 0, blocked: 0 })
 const loading = ref(false)
 const statusFilter = ref('')
 const sourceFilter = ref('__all__')
@@ -27,6 +28,8 @@ const pageSize = ref(100)
 const showDetail = ref(false)
 const detailLog = ref<ToolCallLog | null>(null)
 const detailLoading = ref(false)
+let listRequestToken = 0
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
 function todayRange() {
   const end = new Date()
@@ -46,57 +49,76 @@ const dateFrom = ref(formatDate(new Date(Date.now() - 86400000)))
 const dateTo = ref(formatDate(new Date()))
 
 onMounted(() => loadLogData())
+onUnmounted(() => {
+  if (searchDebounce) clearTimeout(searchDebounce)
+})
 
 function baseParams(): Record<string, string | number> {
-  const params: Record<string, string | number> = { limit: Math.max(...LOG_PAGE_SIZE_OPTIONS) }
+  const params: Record<string, string | number> = {
+    limit: pageSize.value,
+    offset: (page.value - 1) * pageSize.value,
+  }
   if (sourceFilter.value !== '__all__') params.source_type = sourceFilter.value
   if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
   if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
+  if (search.value.trim()) params.search = search.value.trim()
   return params
 }
 
-async function loadLogs() {
+async function loadLogData() {
+  const token = ++listRequestToken
   loading.value = true
   const params = baseParams()
-  if (statusFilter.value) params.status = statusFilter.value
-  try { logs.value = await api.listLogs(params) } catch { logs.value = [] }
-  loading.value = false
-}
-
-async function loadLogTabBase() {
-  try { logTabBase.value = await api.listLogs(baseParams()) } catch { logTabBase.value = [] }
-}
-
-async function loadLogData() {
-  loading.value = true
+  const activeParams = { ...params }
+  if (statusFilter.value) activeParams.status = statusFilter.value
   try {
-    const params = baseParams()
-    const activeParams = { ...params }
-    if (statusFilter.value) activeParams.status = statusFilter.value
     const [baseRows, activeRows] = await Promise.all([
-      api.listLogs(params),
-      api.listLogs(activeParams),
+      api.listLogsPage(params),
+      api.listLogsPage(activeParams),
     ])
-    logTabBase.value = baseRows
-    logs.value = activeRows
+    if (token !== listRequestToken) return
+    logCounts.value = baseRows.counts
+    logs.value = activeRows.items
+    logTotal.value = activeRows.total
   } catch {
-    logTabBase.value = []
+    if (token !== listRequestToken) return
     logs.value = []
+    logTotal.value = 0
+    logCounts.value = { all: 0, success: 0, failed: 0, running: 0, error: 0, blocked: 0 }
   } finally {
-    loading.value = false
+    if (token === listRequestToken) loading.value = false
   }
 }
 
 function applyFilter(status: string) {
   statusFilter.value = status
+  const wasFirstPage = page.value === 1
   page.value = 1
-  loadLogs()
+  if (wasFirstPage) loadLogData()
 }
 
 function applyDateFilter() {
+  const wasFirstPage = page.value === 1
   page.value = 1
-  loadLogData()
+  if (wasFirstPage) loadLogData()
 }
+
+function applySourceFilter() {
+  const wasFirstPage = page.value === 1
+  page.value = 1
+  if (wasFirstPage) loadLogData()
+}
+
+function scheduleSearch() {
+  page.value = 1
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => loadLogData(), 250)
+}
+
+watch([page, pageSize], () => {
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => loadLogData(), 0)
+})
 
 async function openDetail(log: ToolCallLog) {
   detailLog.value = log
@@ -108,20 +130,9 @@ async function openDetail(log: ToolCallLog) {
   detailLoading.value = false
 }
 
-const displayLogs = computed(() => {
-  if (!search.value) return logs.value
-  const q = search.value.toLowerCase()
-  return logs.value.filter(l =>
-    l.tool_name?.toLowerCase().includes(q) ||
-    l.actor?.toLowerCase().includes(q) ||
-    l.entrypoint?.toLowerCase().includes(q) ||
-    l.source_type?.toLowerCase().includes(q) ||
-    l.source_key?.toLowerCase().includes(q)
-  )
-})
-
-const filterTabs = computed(() => countToolCallTabs(logTabBase.value, logs.value))
-const pagedLogs = computed(() => paginate(displayLogs.value, page.value, pageSize.value))
+const displayLogs = computed(() => logs.value)
+const filterTabs = computed(() => countToolCallTabs(logCounts.value))
+const pagedLogs = computed(() => displayLogs.value)
 
 const sourceOptions = [
   { value: '__all__', label: '全部来源' },
@@ -182,9 +193,9 @@ function entrypointLabel(entrypoint: string): string {
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[280px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-        <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" />
+        <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" @update:model-value="scheduleSearch" />
       </div>
-      <Select v-model="sourceFilter" @update:model-value="() => { page = 1; loadLogData() }">
+      <Select v-model="sourceFilter" @update:model-value="applySourceFilter">
         <SelectTrigger class="w-[160px]">
           <SelectValue placeholder="全部来源" />
         </SelectTrigger>
@@ -218,7 +229,7 @@ function entrypointLabel(entrypoint: string): string {
     <!-- Table -->
     <Card>
       <CardContent class="p-0">
-        <div v-if="displayLogs.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无调用日志</div>
+        <div v-if="logTotal === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无调用日志</div>
         <table v-else class="w-full">
           <thead>
             <tr class="border-b border-border">
@@ -263,7 +274,7 @@ function entrypointLabel(entrypoint: string): string {
     <PaginationBar
       v-model:page="page"
       v-model:page-size="pageSize"
-      :total="displayLogs.length"
+      :total="logTotal"
       :page-size-options="LOG_PAGE_SIZE_OPTIONS"
     />
 

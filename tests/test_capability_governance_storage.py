@@ -101,6 +101,56 @@ def test_tool_call_log_allows_missing_profile(wm_paths: AgentBridgePaths) -> Non
     assert store.list_tool_call_logs(profile_key="missing") == []
 
 
+def test_tool_call_log_page_search_and_status_counts(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    for index, status in enumerate(("success", "error", "blocked")):
+        store.create_tool_call_log(
+            log_id=f"shared_call_{index}",
+            actor="shared-actor",
+            profile_key="safe-readonly",
+            entrypoint="metamcp_execute",
+            source_type=SourceType.mcp_service.value,
+            source_key="shared-source",
+            tool_name="query_sql",
+            request={},
+            response={},
+            status=status,
+        )
+
+    page = store.governance.list_tool_call_logs_page(
+        entrypoint=None,
+        source_type=None,
+        source_key=None,
+        tool_name=None,
+        profile_key=None,
+        status="error",
+        failure_stage=None,
+        failure_owner=None,
+        error_type=None,
+        resource_type=None,
+        resource_key=None,
+        created_from=None,
+        created_to=None,
+        search="shared",
+        limit=1,
+        offset=-2,
+    )
+
+    assert [item["log_id"] for item in page["items"]] == ["shared_call_1"]
+    assert page["total"] == 1
+    assert page["limit"] == 1
+    assert page["offset"] == 0
+    assert page["counts"] == {
+        "all": 3,
+        "success": 1,
+        "failed": 1,
+        "running": 0,
+        "error": 1,
+        "blocked": 1,
+    }
+
+
 def test_policy_context_defaults_are_profile_optional() -> None:
     mysql_source = SourceRef(SourceType.mcp_service.value, "mysql")
     context = PolicyContext(actor="root", allow_sources={mysql_source})

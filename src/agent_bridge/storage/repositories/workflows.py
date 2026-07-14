@@ -792,7 +792,99 @@ class WorkflowsRepository:
         include_history: bool = False,
         format: str | None = None,
     ) -> list[dict[str, Any]]:
-        clauses = []
+        clauses, params = self._artifact_search_filters(
+            profile_key=profile_key,
+            query=query,
+            tags=tags,
+            path=path,
+            workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+            run_id=run_id,
+            include_history=include_history,
+            format=format,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM workflow_artifacts
+                {where}
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+        return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def search_workflow_artifacts_page(
+        self,
+        *,
+        profile_key: str | None,
+        query: str | None,
+        tags: list[str],
+        path: str | None,
+        workflow_key: str | None,
+        limit: int,
+        offset: int = 0,
+        task_key: str | None = None,
+        task_version: str | None = None,
+        run_id: str | None = None,
+        include_history: bool = False,
+        format: str | None = None,
+    ) -> dict[str, Any]:
+        clauses, params = self._artifact_search_filters(
+            profile_key=profile_key,
+            query=query,
+            tags=tags,
+            path=path,
+            workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+            run_id=run_id,
+            include_history=include_history,
+            format=format,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        bounded_limit = min(max(limit, 1), 50)
+        bounded_offset = max(offset, 0)
+        with self._connect() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS total FROM workflow_artifacts {where}",
+                params,
+            ).fetchone()["total"]
+            rows = conn.execute(
+                f"""
+                SELECT * FROM workflow_artifacts
+                {where}
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, bounded_limit, bounded_offset),
+            ).fetchall()
+        items = [item for row in rows if (item := _row_payload(row)) is not None]
+        return {
+            "items": items,
+            "total": int(total),
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+        }
+
+    @staticmethod
+    def _artifact_search_filters(
+        *,
+        profile_key: str | None,
+        query: str | None,
+        tags: list[str],
+        path: str | None,
+        workflow_key: str | None,
+        task_key: str | None,
+        task_version: str | None,
+        run_id: str | None,
+        include_history: bool,
+        format: str | None,
+    ) -> tuple[list[str], list[Any]]:
+        clauses: list[str] = []
         params: list[Any] = []
         if not include_history:
             clauses.append("is_current = 1")
@@ -833,19 +925,4 @@ class WorkflowsRepository:
                 "(lower(title) LIKE ? OR lower(summary) LIKE ? OR lower(content) LIKE ? OR lower(path) LIKE ?)"
             )
             params.extend([lowered, lowered, lowered, lowered])
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT * FROM workflow_artifacts
-                {where}
-                ORDER BY updated_at DESC, id DESC
-                LIMIT ?
-                """,
-                (*params, limit),
-            ).fetchall()
-        items = [item for row in rows if (item := _row_payload(row)) is not None]
-        if tags:
-            required = set(tags)
-            items = [item for item in items if required.issubset(set(item.get("tags", [])))]
-        return items
+        return clauses, params

@@ -638,6 +638,70 @@ def test_workflow_artifacts_keep_same_version_outputs_for_different_runs(wm_path
     ]
 
 
+def test_workflow_artifact_page_reuses_filters_for_items_and_total(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        status="active",
+        created_by="root",
+    )
+    for index in range(3):
+        store.upsert_workflow_artifact(
+            workflow_key="page-report",
+            profile_key="report-plane",
+            run_id=f"run_{index}",
+            task_key=f"page:{index}",
+            title=f"Finance page {index}",
+            path=f"pages/{index}.md",
+            tags=["finance"],
+            format="markdown",
+            summary="finance summary",
+            content="finance body",
+            metadata={},
+        )
+    store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_other",
+        task_key="page:other",
+        title="Other page",
+        path="pages/other.md",
+        tags=["other"],
+        format="markdown",
+        summary="other summary",
+        content="other body",
+        metadata={},
+    )
+
+    page = store.workflows.search_workflow_artifacts_page(
+        profile_key="report-plane",
+        query="finance",
+        tags=["finance"],
+        path="pages/",
+        workflow_key="page-report",
+        task_key=None,
+        task_version=None,
+        run_id=None,
+        include_history=False,
+        format=None,
+        limit=1,
+        offset=-10,
+    )
+
+    assert page["total"] == 3
+    assert page["limit"] == 1
+    assert page["offset"] == 0
+    assert len(page["items"]) == 1
+
+
 def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm_paths):
     from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA
     from agent_bridge.storage.sqlite import SQLiteStore

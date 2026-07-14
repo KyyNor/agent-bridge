@@ -79,6 +79,7 @@ def create_workflow_routes(service, actor):
         tags: list[str] = Query(default=[]),
         format: str | None = None,
         limit: int = 20,
+        offset: int = 0,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         return service.workflows.search_artifacts(
@@ -94,7 +95,9 @@ def create_workflow_routes(service, actor):
             include_history=include_history,
             full=full,
             limit=limit,
+            offset=offset,
             format=format,
+            paginated=True,
         )
 
     @router.get("/workflow-artifacts/history")

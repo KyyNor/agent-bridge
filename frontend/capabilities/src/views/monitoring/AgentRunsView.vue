@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { Search, RotateCw, ArrowLeft } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { AgentRun, WorkflowSubagentDetail } from '../../api/types'
+import type { AgentRun, AgentRunCounts, WorkflowSubagentDetail } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -20,13 +20,14 @@ import {
   type AgentRunFilter,
 } from '../../lib/agentRunStatus'
 import { countAgentRunTabs } from '../../lib/filterTabs'
-import { LOG_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
 import type { WorkflowRunEvent } from '../../api/types'
 
 const props = defineProps<{ routeKey?: string }>()
 
 const runs = ref<AgentRun[]>([])
-const runTabBase = ref<AgentRun[]>([])
+const runTotal = ref(0)
+const runCounts = ref<AgentRunCounts>({ all: 0, success: 0, failed: 0, running: 0 })
 const loading = ref(false)
 const okFilter = ref<AgentRunFilter>('')
 const search = ref('')
@@ -41,6 +42,8 @@ const detailLoading = ref(false)
 const detailError = ref('')
 const detailEvents = ref<WorkflowRunEvent[]>([])
 let detailEventsPoll: ReturnType<typeof setInterval> | null = null
+let listRequestToken = 0
+let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
 // Sub-agent transcript detail (lazy-loaded when a sub-agent is expanded).
 const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
@@ -101,55 +104,75 @@ onMounted(() => {
 onUnmounted(() => stopDetailEventsPolling())
 
 function baseRunParams(): Record<string, string | number | boolean> {
-  const params: Record<string, string | number | boolean> = { limit: Math.max(...LOG_PAGE_SIZE_OPTIONS) }
+  const params: Record<string, string | number | boolean> = {
+    limit: pageSize.value,
+    offset: (page.value - 1) * pageSize.value,
+  }
   if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
   if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
+  if (search.value.trim()) params.search = search.value.trim()
   return params
 }
 
-async function loadRuns() {
-  loading.value = true
-  const params = baseRunParams()
+function addActiveRunFilter(params: Record<string, string | number | boolean>) {
   const okParam = agentRunOkFilterParam(okFilter.value)
   const statusParam = agentRunStatusFilterParam(okFilter.value)
   if (okParam != null) params.ok = okParam
   if (statusParam) params.status = statusParam
-  try {
-    runs.value = await api.listAgentRuns(params)
-  } catch {
-    runs.value = []
-  }
-  loading.value = false
+  return params
 }
 
 async function loadRunData() {
+  const token = ++listRequestToken
   loading.value = true
+  const params = baseRunParams()
+  const activeParams = addActiveRunFilter({ ...params })
   try {
-    const params = baseRunParams()
-    const activeParams = { ...params }
-    const okParam = agentRunOkFilterParam(okFilter.value)
-    const statusParam = agentRunStatusFilterParam(okFilter.value)
-    if (okParam != null) activeParams.ok = okParam
-    if (statusParam) activeParams.status = statusParam
-    const [baseRows, activeRows] = await Promise.all([
-      api.listAgentRuns(params),
-      api.listAgentRuns(activeParams),
+    const [basePage, activePage] = await Promise.all([
+      api.listAgentRunsPage(params),
+      api.listAgentRunsPage(activeParams),
     ])
-    runTabBase.value = baseRows
-    runs.value = activeRows
+    if (token !== listRequestToken) return
+    runCounts.value = basePage.counts
+    runs.value = activePage.items
+    runTotal.value = activePage.total
   } catch {
-    runTabBase.value = []
+    if (token !== listRequestToken) return
+    runCounts.value = { all: 0, success: 0, failed: 0, running: 0 }
     runs.value = []
+    runTotal.value = 0
   } finally {
-    loading.value = false
+    if (token === listRequestToken) loading.value = false
   }
 }
 
 function applyOkFilter(key: AgentRunFilter) {
   okFilter.value = key
+  const wasFirstPage = page.value === 1
   page.value = 1
-  loadRuns()
+  if (wasFirstPage) loadRunData()
 }
+
+function applyDateFilter() {
+  const wasFirstPage = page.value === 1
+  page.value = 1
+  if (wasFirstPage) loadRunData()
+}
+
+function scheduleSearch() {
+  page.value = 1
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => loadRunData(), 250)
+}
+
+watch([page, pageSize], () => {
+  if (searchDebounce) clearTimeout(searchDebounce)
+  searchDebounce = setTimeout(() => loadRunData(), 0)
+})
+
+onUnmounted(() => {
+  if (searchDebounce) clearTimeout(searchDebounce)
+})
 
 /** Open a run's detail as a sub-route (deep-linkable). */
 function openDetail(run: AgentRun) {
@@ -245,20 +268,9 @@ watch(activeRunKey, (key) => {
   }
 })
 
-const displayRuns = computed(() => {
-  if (!search.value) return runs.value
-  const q = search.value.toLowerCase()
-  return runs.value.filter(
-    r =>
-      r.agent_name?.toLowerCase().includes(q) ||
-      r.profile_key?.toLowerCase().includes(q) ||
-      r.workflow_key?.toLowerCase().includes(q) ||
-      r.error?.toLowerCase().includes(q),
-  )
-})
-
-const filterTabs = computed(() => countAgentRunTabs(runTabBase.value, runs.value))
-const pagedRuns = computed(() => paginate(displayRuns.value, page.value, pageSize.value))
+const displayRuns = computed(() => runs.value)
+const filterTabs = computed(() => countAgentRunTabs(runCounts.value))
+const pagedRuns = computed(() => displayRuns.value)
 
 function formatCost(v: number | null | undefined): string {
   if (v == null) return '—'
@@ -390,12 +402,12 @@ function formatCost(v: number | null | undefined): string {
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[280px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-        <Input v-model="search" placeholder="搜索 Agent、Profile 或工作流..." class="pl-8" />
+        <Input v-model="search" placeholder="搜索 Agent、Profile 或工作流..." class="pl-8" @update:model-value="scheduleSearch" />
       </div>
       <div class="flex items-center gap-2 text-sm">
-        <Input v-model="dateFrom" type="date" class="w-[140px]" @change="() => { page = 1; loadRunData() }" />
+        <Input v-model="dateFrom" type="date" class="w-[140px]" @change="applyDateFilter" />
         <span class="text-muted-foreground">至</span>
-        <Input v-model="dateTo" type="date" class="w-[140px]" @change="() => { page = 1; loadRunData() }" />
+        <Input v-model="dateTo" type="date" class="w-[140px]" @change="applyDateFilter" />
       </div>
       <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
         <button
@@ -421,7 +433,7 @@ function formatCost(v: number | null | undefined): string {
     <!-- Table -->
     <Card>
       <CardContent class="p-0">
-        <div v-if="displayRuns.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
+        <div v-if="runTotal === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
           暂无 Agent 运行记录
         </div>
         <table v-else class="w-full">
@@ -487,7 +499,7 @@ function formatCost(v: number | null | undefined): string {
     <PaginationBar
       v-model:page="page"
       v-model:page-size="pageSize"
-      :total="displayRuns.length"
+      :total="runTotal"
       :page-size-options="LOG_PAGE_SIZE_OPTIONS"
     />
   </div>

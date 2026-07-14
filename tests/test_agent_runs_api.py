@@ -119,6 +119,87 @@ def test_agent_runs_api_filters_by_workflow_run_id(wm_paths) -> None:
     assert {row["run_key"] for row in rows} == {"workflow_runA", "workflow_runB"}
 
 
+def test_agent_runs_api_paginated_search_and_status_counts(wm_paths) -> None:
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="shared_success",
+        agent_name="planner",
+        profile_key="p1",
+        workflow_key="shared-workflow",
+        ok=True,
+        status="completed",
+    )
+    svc.store.agent_runs.create(
+        run_key="shared_failed",
+        agent_name="planner",
+        profile_key="p1",
+        workflow_key="shared-workflow",
+        ok=False,
+        status="failed",
+        error="failed",
+    )
+    svc.store.agent_runs.create(
+        run_key="shared_running",
+        agent_name="planner",
+        profile_key="p1",
+        workflow_key="shared-workflow",
+        ok=False,
+        status="running",
+    )
+
+    client = _client(wm_paths)
+    response = client.get(
+        "/agent-runs",
+        params={"paginated": "true", "search": "shared", "status": "failed", "limit": 1, "offset": -4},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["run_key"] for item in body["items"]] == ["shared_failed"]
+    assert body["total"] == 1
+    assert body["limit"] == 1
+    assert body["offset"] == 0
+    assert body["counts"] == {"all": 3, "success": 1, "failed": 1, "running": 1}
+
+
+def test_agent_runs_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    for index in range(205):
+        svc.store.agent_runs.create(
+            run_key=f"bulk_{index:03d}",
+            agent_name="bulk-agent",
+            ok=True,
+            status="completed",
+        )
+
+    client = _client(wm_paths)
+    headers = {"X-Agent-Bridge-User": "root"}
+    first = client.get(
+        "/agent-runs",
+        params={"paginated": "true", "limit": 10, "offset": 0},
+        headers=headers,
+    ).json()
+    last = client.get(
+        "/agent-runs",
+        params={"paginated": "true", "limit": 10, "offset": 200},
+        headers=headers,
+    ).json()
+
+    assert first["total"] == 205
+    assert len(first["items"]) == 10
+    assert len(last["items"]) == 5
+    assert {item["run_key"] for item in first["items"]}.isdisjoint(
+        item["run_key"] for item in last["items"]
+    )
+
+
 def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path) -> None:
     """The /agent-runs/{run_key}/events endpoint serves the live events.jsonl
     (written in real time) when present, falling back to persisted DB events."""

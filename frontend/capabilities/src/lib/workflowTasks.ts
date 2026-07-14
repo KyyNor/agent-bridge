@@ -4,7 +4,7 @@
  * Kept side-effect free and framework-agnostic so they can be unit-tested with
  * the native node:test runner, mirroring the pattern in {@link ./navigation.ts}.
  */
-import type { WorkflowTask } from '../api/types'
+import type { WorkflowRun, WorkflowTask } from '../api/types'
 
 export interface WorkflowTaskFilters {
   /** Sentinel {@link ALL_STATUS_SENTINEL} means "no status filter" (reka-ui Select rejects empty values). */
@@ -87,4 +87,140 @@ function compareTask(a: WorkflowTask, b: WorkflowTask, sort: string): number {
 export function filterAndSortTasks(tasks: WorkflowTask[], filters: WorkflowTaskFilters): WorkflowTask[] {
   const matched = tasks.filter(task => matchTaskFilter(task, filters))
   return filters.sort === 'default' ? matched : [...matched].sort((a, b) => compareTask(a, b, filters.sort))
+}
+
+/** Stable client-side identity for a task/version across task-list pages. */
+export function taskId(task: WorkflowTask): string {
+  return `${task.workflow_key}\u0000${task.task_key}\u0000${task.task_version || ''}`
+}
+
+export function toggleTaskSelection(selected: Set<string>, task: WorkflowTask, checked: boolean): Set<string> {
+  const next = new Set(selected)
+  const id = taskId(task)
+  if (checked) next.add(id)
+  else next.delete(id)
+  return next
+}
+
+export function togglePageTaskSelection(selected: Set<string>, tasks: WorkflowTask[], checked: boolean): Set<string> {
+  const next = new Set(selected)
+  for (const task of tasks) {
+    const id = taskId(task)
+    if (checked) next.add(id)
+    else next.delete(id)
+  }
+  return next
+}
+
+export interface WorkflowTaskQueueOutcome {
+  task: WorkflowTask
+  status: 'success' | 'failed' | 'skipped'
+  run?: WorkflowRun
+  error?: string
+}
+
+export interface WorkflowTaskQueueResult {
+  outcomes: WorkflowTaskQueueOutcome[]
+  stopped: boolean
+  remaining: WorkflowTask[]
+}
+
+export interface WorkflowTaskQueueOptions {
+  canExecute: (task: WorkflowTask) => boolean
+  execute: (task: WorkflowTask) => Promise<{ run_id?: string | null }>
+  waitForRun: (runId: string) => Promise<WorkflowRun>
+  onTaskStart?: (task: WorkflowTask, index: number, total: number) => void
+  isCancelled?: () => boolean
+  /** Return true for errors that should stop the page-local queue. */
+  shouldStopOnError?: (error: unknown) => boolean
+}
+
+/**
+ * Runs selected tasks serially. The queue intentionally lives in the caller's
+ * page; it has no persistence or backend batch lifecycle.
+ */
+export async function runWorkflowTaskQueue(
+  tasks: WorkflowTask[],
+  options: WorkflowTaskQueueOptions,
+): Promise<WorkflowTaskQueueResult> {
+  const outcomes: WorkflowTaskQueueOutcome[] = []
+  const shouldStopOnError = options.shouldStopOnError || (() => false)
+
+  for (let index = 0; index < tasks.length; index += 1) {
+    const task = tasks[index]
+    if (options.isCancelled?.()) {
+      return { outcomes, stopped: true, remaining: tasks.slice(index) }
+    }
+    if (!options.canExecute(task)) {
+      outcomes.push({ task, status: 'skipped', error: '任务当前不可执行' })
+      continue
+    }
+
+    try {
+      options.onTaskStart?.(task, index, tasks.length)
+      const started = await options.execute(task)
+      if (!started.run_id) {
+        outcomes.push({ task, status: 'failed', error: '执行未返回 run_id' })
+        continue
+      }
+      const run = await options.waitForRun(started.run_id)
+      const status = run.status === 'completed' || run.status === 'no_task' ? 'success' : 'failed'
+      outcomes.push({ task, status, run, error: run.error || undefined })
+    } catch (error: unknown) {
+      outcomes.push({
+        task,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      })
+      if (shouldStopOnError(error)) {
+        return { outcomes, stopped: true, remaining: tasks.slice(index + 1) }
+      }
+    }
+  }
+
+  return { outcomes, stopped: false, remaining: [] }
+}
+
+export interface WorkflowTaskResetQueueOptions {
+  canReset: (task: WorkflowTask) => boolean
+  reset: (task: WorkflowTask) => Promise<void>
+  onTaskStart?: (task: WorkflowTask, index: number, total: number) => void
+  isCancelled?: () => boolean
+  shouldStopOnError?: (error: unknown) => boolean
+}
+
+/** Runs page-local task resets in order without introducing a batch API. */
+export async function runWorkflowTaskResetQueue(
+  tasks: WorkflowTask[],
+  options: WorkflowTaskResetQueueOptions,
+): Promise<WorkflowTaskQueueResult> {
+  const outcomes: WorkflowTaskQueueOutcome[] = []
+  const shouldStopOnError = options.shouldStopOnError || (() => false)
+
+  for (let index = 0; index < tasks.length; index += 1) {
+    const task = tasks[index]
+    if (options.isCancelled?.()) {
+      return { outcomes, stopped: true, remaining: tasks.slice(index) }
+    }
+    if (!options.canReset(task)) {
+      outcomes.push({ task, status: 'skipped', error: '任务当前不可重置' })
+      continue
+    }
+    try {
+      options.onTaskStart?.(task, index, tasks.length)
+      await options.reset(task)
+      outcomes.push({ task, status: 'success' })
+    } catch (error: unknown) {
+      outcomes.push({
+        task,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      })
+      if (shouldStopOnError(error)) {
+        return { outcomes, stopped: true, remaining: tasks.slice(index + 1) }
+      }
+    }
+  }
+
+  return { outcomes, stopped: false, remaining: [] }
 }

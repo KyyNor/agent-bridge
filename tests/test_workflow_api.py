@@ -111,6 +111,94 @@ def test_workflow_api_lists_artifacts(wm_paths):
     assert response.json()["items"][0]["title"] == "Page A"
 
 
+def test_workflow_api_paginates_artifacts_with_total_and_offset(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        status="active",
+    )
+    for index in range(3):
+        svc.workflows.save_artifact(
+            workflow_key="page-report",
+            profile_key="report-plane",
+            run_id=f"run_{index}",
+            task_key=f"page:{index}",
+            title=f"Page {index}",
+            path=f"pages/{index}.md",
+            tags=["finance"],
+            format="markdown",
+            summary="Finance report",
+            content=f"# Page {index}",
+            metadata={},
+        )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    response = client.get(
+        "/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&limit=1&offset=1",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 3
+    assert response.json()["limit"] == 1
+    assert response.json()["offset"] == 1
+    assert [item["task_key"] for item in response.json()["items"]] == ["page:1"]
+
+
+def test_workflow_api_artifact_page_crosses_the_original_thirty_row_limit(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        workflow_js="",
+        status="active",
+    )
+    for index in range(31):
+        svc.workflows.save_artifact(
+            workflow_key="page-report",
+            profile_key="report-plane",
+            run_id=f"run_{index}",
+            task_key=f"page:{index}",
+            title=f"Page {index}",
+            path=f"pages/{index}.md",
+            tags=["finance"],
+            format="markdown",
+            summary="Finance report",
+            content=f"# Page {index}",
+            metadata={},
+        )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    body = client.get(
+        "/workflow-artifacts",
+        params={"workflow_key": "page-report", "limit": 1, "offset": 30},
+        headers={"X-Agent-Bridge-User": "root"},
+    ).json()
+
+    assert body["total"] == 31
+    assert body["limit"] == 1
+    assert body["offset"] == 30
+    assert len(body["items"]) == 1
+
+
 def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService
@@ -439,7 +527,7 @@ def test_workflow_api_clears_execution_data_without_deleting_definition(wm_paths
         "/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&include_history=true",
         headers={"X-Agent-Bridge-User": "root"},
     )
-    assert artifacts.json() == {"items": []}
+    assert artifacts.json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
 
 
 def test_workflow_api_deletes_workflow_and_cascades(wm_paths):

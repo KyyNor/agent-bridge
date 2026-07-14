@@ -153,7 +153,134 @@ class AgentRunsRepository:
         created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        search: str | None = None,
     ) -> list[dict[str, Any]]:
+        clauses, params = self._filters(
+            agent_name=agent_name,
+            profile_key=profile_key,
+            workflow_key=workflow_key,
+            workflow_run_id=workflow_run_id,
+            ok=ok,
+            status=status,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        bounded_limit = min(max(limit, 1), 200)
+        bounded_offset = max(offset, 0)
+        sql = (
+            f"SELECT * FROM agent_runs{where} "
+            "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+        )
+        with self._connect() as conn:
+            rows = conn.execute(sql, (*params, bounded_limit, bounded_offset)).fetchall()
+            return [self._summary(row_to_dict(row)) for row in rows]
+
+    def list_paginated(
+        self,
+        *,
+        agent_name: str | None = None,
+        profile_key: str | None = None,
+        workflow_key: str | None = None,
+        workflow_run_id: str | None = None,
+        ok: bool | None = None,
+        status: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        search: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        bounded_limit = min(max(limit, 1), 200)
+        bounded_offset = max(offset, 0)
+        list_clauses, list_params = self._filters(
+            agent_name=agent_name,
+            profile_key=profile_key,
+            workflow_key=workflow_key,
+            workflow_run_id=workflow_run_id,
+            ok=ok,
+            status=status,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        base_clauses, base_params = self._filters(
+            agent_name=agent_name,
+            profile_key=profile_key,
+            workflow_key=workflow_key,
+            workflow_run_id=workflow_run_id,
+            ok=None,
+            status=None,
+            created_from=created_from,
+            created_to=created_to,
+            search=search,
+        )
+        list_where = (" WHERE " + " AND ".join(list_clauses)) if list_clauses else ""
+        base_where = (" WHERE " + " AND ".join(base_clauses)) if base_clauses else ""
+        with self._connect() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS total FROM agent_runs{list_where}",
+                list_params,
+            ).fetchone()["total"]
+            count_row = conn.execute(
+                f"""
+                SELECT
+                  COUNT(*) AS all_count,
+                  SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running,
+                  SUM(
+                    CASE
+                      WHEN status = 'failed'
+                        OR (status <> 'running' AND ok = 0)
+                      THEN 1 ELSE 0
+                    END
+                  ) AS failed,
+                  SUM(
+                    CASE
+                      WHEN status <> 'running'
+                        AND status <> 'failed'
+                        AND (status IN ('completed', 'success') OR ok = 1)
+                      THEN 1 ELSE 0
+                    END
+                  ) AS success
+                FROM agent_runs{base_where}
+                """,
+                base_params,
+            ).fetchone()
+            rows = conn.execute(
+                f"""
+                SELECT * FROM agent_runs{list_where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*list_params, bounded_limit, bounded_offset),
+            ).fetchall()
+        return {
+            "items": [self._summary(row_to_dict(row)) for row in rows],
+            "total": int(total),
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+            "counts": {
+                "all": int(count_row["all_count"] or 0),
+                "success": int(count_row["success"] or 0),
+                "failed": int(count_row["failed"] or 0),
+                "running": int(count_row["running"] or 0),
+            },
+        }
+
+    @staticmethod
+    def _filters(
+        *,
+        agent_name: str | None,
+        profile_key: str | None,
+        workflow_key: str | None,
+        workflow_run_id: str | None,
+        ok: bool | None,
+        status: str | None,
+        created_from: str | None,
+        created_to: str | None,
+        search: str | None,
+    ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if agent_name:
@@ -180,16 +307,18 @@ class AgentRunsRepository:
         if created_to:
             clauses.append("created_at <= ?")
             params.append(created_to)
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        bounded_limit = min(max(limit, 1), 200)
-        bounded_offset = max(offset, 0)
-        sql = (
-            f"SELECT * FROM agent_runs{where} "
-            "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
-        )
-        with self._connect() as conn:
-            rows = conn.execute(sql, (*params, bounded_limit, bounded_offset)).fetchall()
-            return [self._summary(row_to_dict(row)) for row in rows]
+        if search:
+            like = f"%{search.lower()}%"
+            clauses.append(
+                "(lower(COALESCE(agent_name, '')) LIKE ? "
+                "OR lower(COALESCE(profile_key, '')) LIKE ? "
+                "OR lower(COALESCE(workflow_key, '')) LIKE ? "
+                "OR lower(COALESCE(error, '')) LIKE ? "
+                "OR lower(COALESCE(run_key, '')) LIKE ? "
+                "OR lower(COALESCE(status, '')) LIKE ?)"
+            )
+            params.extend([like] * 6)
+        return clauses, params
 
     def purge_created_before(self, cutoff_created_at: str) -> int:
         with self._connect() as conn:

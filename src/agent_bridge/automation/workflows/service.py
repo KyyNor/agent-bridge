@@ -599,6 +599,7 @@ class WorkflowService:
         path: str | None,
         workflow_key: str | None,
         limit: int,
+        offset: int = 0,
         task_key: str | None = None,
         task_version: str | None = None,
         run_id: str | None = None,
@@ -606,6 +607,7 @@ class WorkflowService:
         trusted_profile_context: bool = False,
         full: bool = False,
         format: str | None = None,
+        paginated: bool = False,
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
             raise AccessDenied("capability profile is required")
@@ -620,19 +622,37 @@ class WorkflowService:
         if limit < 1:
             raise ValidationError("limit must be positive")
         bounded_limit = min(limit, 50)
-        items = self.store.search_workflow_artifacts(
-            profile_key=profile_key,
-            query=query,
-            tags=tags,
-            path=path,
-            workflow_key=workflow_key,
-            task_key=task_key,
-            task_version=task_version,
-            run_id=run_id,
-            include_history=include_history,
-            limit=bounded_limit,
-            format=format,
-        )
+        bounded_offset = max(offset, 0)
+        if paginated:
+            page = self.store.workflows.search_workflow_artifacts_page(
+                profile_key=profile_key,
+                query=query,
+                tags=tags,
+                path=path,
+                workflow_key=workflow_key,
+                task_key=task_key,
+                task_version=task_version,
+                run_id=run_id,
+                include_history=include_history,
+                limit=bounded_limit,
+                offset=bounded_offset,
+                format=format,
+            )
+            items = page["items"]
+        else:
+            items = self.store.search_workflow_artifacts(
+                profile_key=profile_key,
+                query=query,
+                tags=tags,
+                path=path,
+                workflow_key=workflow_key,
+                task_key=task_key,
+                task_version=task_version,
+                run_id=run_id,
+                include_history=include_history,
+                limit=bounded_limit,
+                format=format,
+            )
         def _entry(item: dict[str, Any]) -> dict[str, Any]:
             entry = {
                 "artifact_id": item["artifact_id"],
@@ -658,7 +678,16 @@ class WorkflowService:
                 entry["content"] = item["content"]
             return entry
 
-        return {"items": [_entry(item) for item in items]}
+        result = {"items": [_entry(item) for item in items]}
+        if paginated:
+            result.update(
+                {
+                    "total": page["total"],
+                    "limit": page["limit"],
+                    "offset": page["offset"],
+                }
+            )
+        return result
 
     def list_artifact_history(
         self,
