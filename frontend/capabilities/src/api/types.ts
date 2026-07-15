@@ -707,6 +707,64 @@ export interface KnowledgeFolder extends FolderCounts {
   updated_at: string
 }
 
+export interface KnowledgeBrowseContext {
+  kind: 'folder' | 'zip'
+  id: number
+  name: string
+  relative_path: string
+  parent_id: number | null
+  parent_folder_id: number | null
+  archive_entry_id: number | null
+}
+
+export interface KnowledgeBrowseFolderEntry {
+  kind: 'folder'
+  id: number
+  name: string
+  relative_path: string
+  parent_id: number | null
+  parent_folder_id: number | null
+  archive_entry_id?: number | null
+  child_count: number
+}
+
+export interface KnowledgeBrowseZipEntry {
+  kind: 'zip'
+  id: number
+  name: string
+  relative_path: string
+  parent_id: number | null
+  parent_folder_id: number | null
+  archive_entry_id: number
+  child_count: number
+}
+
+export interface KnowledgeBrowseDocumentEntry {
+  kind: 'document'
+  id: number
+  doc_id: number
+  name: string
+  relative_path: string
+  parent_id: number | null
+  parent_folder_id: number | null
+  slug: string
+  title: string
+  original_filename: string
+  version: number
+  version_no: number
+  sync_status: string
+  archive_entry_id: number | null
+  status: string
+}
+
+export type KnowledgeBrowseEntry = KnowledgeBrowseFolderEntry | KnowledgeBrowseZipEntry | KnowledgeBrowseDocumentEntry
+
+export interface KnowledgeBrowseResponse {
+  context: KnowledgeBrowseContext
+  parent: KnowledgeBrowseContext | null
+  entries: KnowledgeBrowseEntry[]
+}
+
 export interface DocumentPlacement {
   doc_id: number
   kb_id: number

@@ -19,6 +19,7 @@ import type {
   ExecuteCapabilityResult,
   KnowledgeBase,
   KnowledgeBaseSummary,
+  KnowledgeBrowseResponse,
   KbRepoSource,
   KbRepoSourceSyncResult,
   OpenApiImportResult,
@@ -576,6 +577,13 @@ export const api = {
 
   // Knowledge-base folders
   listFolders: (kbSlug: string) => get<KnowledgeFolder[]>(`/kbs/${kbSlug}/folders`),
+  listBrowse: (kbSlug: string, folderId?: number, archiveEntryId?: number) => {
+    const qs = new URLSearchParams()
+    if (folderId != null) qs.set('folder_id', String(folderId))
+    if (archiveEntryId != null) qs.set('archive_entry_id', String(archiveEntryId))
+    const tail = qs.toString() ? `?${qs}` : ''
+    return get<KnowledgeBrowseResponse>(`/kbs/${kbSlug}/browse${tail}`)
+  },
   createFolder: (kbSlug: string, parentFolderId: number | null, name: string) =>
     post<KnowledgeFolder>(`/kbs/${kbSlug}/folders`, { parent_folder_id: parentFolderId, name }),
   updateFolder: (
