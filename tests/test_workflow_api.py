@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +25,18 @@ def _task_import_workbook_bytes(
         return output.getvalue()
     finally:
         workbook.close()
+
+
+def _malformed_worksheet_workbook_bytes() -> bytes:
+    source_bytes = _task_import_workbook_bytes([])
+    output = BytesIO()
+    with ZipFile(BytesIO(source_bytes)) as source, ZipFile(output, "w", ZIP_DEFLATED) as target:
+        for name in source.namelist():
+            data = source.read(name)
+            if name == "xl/worksheets/sheet1.xml":
+                data = b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:C1"/><sheetData>'
+            target.writestr(name, data)
+    return output.getvalue()
 
 
 def test_workflow_api_creates_and_lists_workflows(wm_paths):
@@ -502,6 +515,7 @@ def test_workflow_api_task_import_row_errors_disable_confirmation(wm_paths):
     [
         ("tasks.csv", _task_import_workbook_bytes([["task:new", "v1", "repo"]])),
         ("tasks.xlsx", b"not an xlsx"),
+        ("tasks.xlsx", _malformed_worksheet_workbook_bytes()),
     ],
 )
 def test_workflow_api_rejects_invalid_task_import_files(wm_paths, filename, content):

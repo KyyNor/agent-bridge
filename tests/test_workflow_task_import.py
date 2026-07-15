@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -26,6 +27,18 @@ def workbook_bytes(
 
     output = BytesIO()
     workbook.save(output)
+    return output.getvalue()
+
+
+def malformed_worksheet_workbook_bytes() -> bytes:
+    source_bytes = workbook_bytes(["task_key", "task_version", "type"], [])
+    output = BytesIO()
+    with ZipFile(BytesIO(source_bytes)) as source, ZipFile(output, "w", ZIP_DEFLATED) as target:
+        for name in source.namelist():
+            data = source.read(name)
+            if name == "xl/worksheets/sheet1.xml":
+                data = b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:C1"/><sheetData>'
+            target.writestr(name, data)
     return output.getvalue()
 
 
@@ -186,6 +199,13 @@ def test_parse_task_import_rejects_invalid_extension_and_corrupt_zip():
 
     with pytest.raises(TaskImportFormatError, match="无效"):
         parse_task_import(b"not an xlsx", filename="tasks.xlsx")
+
+
+def test_parse_task_import_rejects_malformed_worksheet_xml():
+    from agent_bridge.automation.workflows.task_import import TaskImportFormatError, parse_task_import
+
+    with pytest.raises(TaskImportFormatError, match="无效"):
+        parse_task_import(malformed_worksheet_workbook_bytes(), filename="tasks.xlsx")
 
 
 def test_parse_task_import_enforces_maximum_of_5000_non_empty_rows():

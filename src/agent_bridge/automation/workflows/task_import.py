@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from io import BytesIO
 from typing import Any
+from xml.etree.ElementTree import ParseError
 from zipfile import BadZipFile
 
 from openpyxl import Workbook, load_workbook
@@ -43,7 +44,15 @@ def parse_task_import(content: bytes, *, filename: str) -> ParsedTaskImport:
 
     try:
         workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
-    except (BadZipFile, InvalidFileException, OSError, ValueError, EOFError, KeyError) as exc:
+    except (
+        BadZipFile,
+        InvalidFileException,
+        OSError,
+        ParseError,
+        ValueError,
+        EOFError,
+        KeyError,
+    ) as exc:
         raise TaskImportFormatError("xlsx 文件无效") from exc
 
     try:
@@ -124,6 +133,8 @@ def parse_task_import(content: bytes, *, filename: str) -> ParsedTaskImport:
             sheet_name=worksheet.title,
             rows=tuple(rows),
         )
+    except (BadZipFile, ParseError, OSError, EOFError, KeyError) as exc:
+        raise TaskImportFormatError("xlsx 文件无效") from exc
     finally:
         workbook.close()
 
