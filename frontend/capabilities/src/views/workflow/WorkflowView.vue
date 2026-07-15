@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, AgentRun } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, AgentRun } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -11,6 +11,7 @@ import { Input } from '../../components/ui/input'
 import { confirm, alert } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowDagGraph from './WorkflowDagGraph.vue'
+import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
@@ -125,6 +126,11 @@ const selectedTaskIds = ref<Set<string>>(new Set())
 const batchAction = ref<'reset' | 'run' | ''>('')
 const batchProgress = ref({ current: 0, total: 0 })
 const batchSummary = ref('')
+const showTaskImport = ref(false)
+const taskImportPreview = ref<WorkflowTaskImportPreview | null>(null)
+const taskImportLoading = ref(false)
+const taskImportConfirming = ref(false)
+const taskImportError = ref('')
 let batchToken = 0
 // Per-task sub-agent event filter (feature 5). Keyed by task id; "" = all.
 const taskActorFilter = ref<Record<string, string>>({})
@@ -352,6 +358,7 @@ watch(selectedKey, () => {
 watch(
   () => props.routeKey,
   async () => {
+    closeTaskImport()
     batchToken += 1
     if (batchAction.value) batchAction.value = ''
     await applyRoute()
@@ -859,6 +866,96 @@ async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '
     workflowTasks.value = { ...workflowTasks.value, [key]: [] }
   } finally {
     tasksLoading.value = false
+  }
+}
+
+function resetTaskImportState() {
+  taskImportPreview.value = null
+  taskImportLoading.value = false
+  taskImportConfirming.value = false
+  taskImportError.value = ''
+}
+
+function taskImportWorkflowKey() {
+  return routeMode.value === 'tasks' ? routeWorkflowKey.value : ''
+}
+
+function openTaskImport() {
+  if (!taskImportWorkflowKey() || !taskWorkflow.value || batchBusy.value) return
+  resetTaskImportState()
+  showTaskImport.value = true
+}
+
+function closeTaskImport() {
+  showTaskImport.value = false
+  resetTaskImportState()
+}
+
+async function previewTaskImport(file: File) {
+  const workflowKey = taskImportWorkflowKey()
+  if (!workflowKey || !taskWorkflow.value || batchBusy.value) return
+  taskImportPreview.value = null
+  taskImportError.value = ''
+  taskImportLoading.value = true
+  try {
+    const preview = await api.previewWorkflowTaskImport(workflowKey, file)
+    if (showTaskImport.value && taskImportWorkflowKey() === workflowKey) {
+      taskImportPreview.value = preview
+    }
+  } catch (e: unknown) {
+    taskImportError.value = errorMessage(e)
+  } finally {
+    taskImportLoading.value = false
+  }
+}
+
+async function downloadTaskImportTemplate() {
+  const workflowKey = taskImportWorkflowKey()
+  if (!workflowKey || !taskWorkflow.value || batchBusy.value) return
+  let objectUrl = ''
+  let anchor: HTMLAnchorElement | null = null
+  try {
+    const blob = await api.downloadWorkflowTaskTemplate(workflowKey)
+    objectUrl = URL.createObjectURL(blob)
+    anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = `${workflowKey}-tasks-template.xlsx`
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+  } catch (e: unknown) {
+    taskImportError.value = errorMessage(e)
+  } finally {
+    anchor?.remove()
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function confirmTaskImport() {
+  const workflowKey = taskImportWorkflowKey()
+  const preview = taskImportPreview.value
+  if (
+    !workflowKey
+    || !taskWorkflow.value
+    || !preview?.import_id
+    || !preview.can_confirm
+    || taskImportConfirming.value
+    || batchBusy.value
+  ) return
+  taskImportConfirming.value = true
+  taskImportError.value = ''
+  try {
+    const result = await api.confirmWorkflowTaskImport(workflowKey, preview.import_id)
+    closeTaskImport()
+    selectedTaskIds.value = new Set()
+    batchSummary.value = `导入完成：新增 ${result.created}，更新 ${result.updated}，跳过（运行中） ${result.skipped_running}，跳过（已完成） ${result.skipped_completed}，重开（已过期） ${result.reopened_expired}`
+    if (routeMode.value === 'tasks' && routeWorkflowKey.value === workflowKey) {
+      await loadTasks(workflowKey)
+    }
+  } catch (e: unknown) {
+    taskImportError.value = errorMessage(e)
+  } finally {
+    taskImportConfirming.value = false
   }
 }
 
@@ -1940,6 +2037,19 @@ async function confirmClearWorkflow() {
       </DialogContent>
     </Dialog>
 
+    <WorkflowTaskImportDialog
+      v-if="routeMode === 'tasks'"
+      v-model:open="showTaskImport"
+      :preview="taskImportPreview"
+      :loading="taskImportLoading"
+      :confirming="taskImportConfirming"
+      :error="taskImportError || null"
+      @update:open="(open: boolean) => { if (!open) closeTaskImport() }"
+      @select-file="previewTaskImport"
+      @download-template="downloadTaskImportTemplate"
+      @confirm="confirmTaskImport"
+    />
+
     <section v-if="routeMode === 'tasks' && !routeError" class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
@@ -2040,6 +2150,23 @@ async function confirmClearWorkflow() {
               <span class="text-xs text-muted-foreground">
                 {{ filteredTasks.length }} / {{ tasks.length }}
               </span>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-8 text-xs"
+                :disabled="!taskWorkflow || batchBusy"
+                @click="downloadTaskImportTemplate"
+              >
+                下载模板
+              </Button>
+              <Button
+                size="sm"
+                class="h-8 text-xs"
+                :disabled="!taskWorkflow || batchBusy"
+                @click="openTaskImport"
+              >
+                导入 Excel
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
