@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工作流任务 Excel 导入设计</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#5d687b; --line:#d9e0ea; --soft:#f5f7fa; --accent:#1f5eff; --good:#0f7a47; --warn:#9a5b00; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#eef2f7; color:var(--ink); font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",Arial,sans-serif; }
+    main { max-width:980px; margin:40px auto; padding:0 24px 56px; }
+    article { background:#fff; border:1px solid var(--line); border-radius:16px; padding:42px 52px; box-shadow:0 12px 34px rgba(25,42,70,.07); }
+    h1 { margin:0 0 8px; font-size:32px; letter-spacing:-.03em; }
+    h2 { margin:34px 0 10px; padding-top:20px; border-top:1px solid var(--line); font-size:21px; }
+    h3 { margin:22px 0 6px; font-size:16px; }
+    p { margin:9px 0; }
+    .meta { color:var(--muted); font-size:13px; }
+    .lead { margin:24px 0; padding:16px 18px; background:#f2f6ff; border-left:4px solid var(--accent); border-radius:8px; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .card { border:1px solid var(--line); border-radius:10px; padding:14px 16px; background:#fff; }
+    .label { color:var(--muted); font-size:12px; }
+    .value { font-weight:600; }
+    table { width:100%; border-collapse:collapse; margin:12px 0 18px; font-size:14px; }
+    th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+    th { background:var(--soft); font-weight:600; }
+    code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    code { background:#f2f4f7; border-radius:4px; padding:1px 4px; }
+    pre { overflow:auto; padding:14px 16px; background:#172033; color:#edf3ff; border-radius:8px; font-size:13px; line-height:1.6; }
+    ul,ol { margin:8px 0 12px; padding-left:24px; }
+    .good { color:var(--good); }
+    .warn { color:var(--warn); }
+    .small { color:var(--muted); font-size:13px; }
+    .checklist { list-style:none; padding-left:0; }
+    .checklist li { margin:5px 0; }
+    .checklist li::before { content:"□"; display:inline-block; width:22px; color:var(--accent); }
+    @media (max-width:700px) { main { margin:0 auto; padding:0 10px 28px; } article { padding:28px 20px; border-radius:10px; } .grid { grid-template-columns:1fr; } h1 { font-size:27px; } }
+  </style>
+</head>
+<body>
+<main>
+  <article>
+    <header>
+      <h1>工作流任务 Excel 导入设计</h1>
+      <div class="meta">状态：待实施计划&nbsp; · &nbsp;日期：2026-07-15&nbsp; · &nbsp;范围：工作流任务进度页</div>
+    </header>
+
+    <div class="lead">
+      在现有“任务进度”页增加 Excel 导入能力。用户上传 <code>.xlsx</code> 文件后先获得服务端预览，确认无错误后再由服务端原子写入任务队列；自动获取任务和手动导入任务继续复用同一套任务语义。
+    </div>
+
+    <h2>1. 已确认的产品决策</h2>
+    <div class="grid">
+      <div class="card"><div class="label">入口</div><div class="value">任务进度页内弹窗导入，不新增独立页面</div></div>
+      <div class="card"><div class="label">文件范围</div><div class="value">首期只支持 .xlsx，最多 5,000 条数据行</div></div>
+      <div class="card"><div class="label">工作表</div><div class="value">只读取第一个工作表</div></div>
+      <div class="card"><div class="label">提交方式</div><div class="value">后端预览 → 用户确认 → 后端提交</div></div>
+    </div>
+
+    <h3>Excel 列规则</h3>
+    <table>
+      <thead><tr><th>列</th><th>要求</th><th>落库位置</th></tr></thead>
+      <tbody>
+        <tr><td><code>task_key</code></td><td>必填，去除首尾空白后不能为空</td><td>任务固定字段</td></tr>
+        <tr><td><code>task_version</code></td><td>可选，空值按空字符串处理</td><td>任务固定字段</td></tr>
+        <tr><td><code>type</code></td><td>可选，空值按空字符串处理</td><td>任务固定字段</td></tr>
+        <tr><td>其他列</td><td>列名作为 payload key；空单元格不写入 payload</td><td><code>payload</code> JSON 对象</td></tr>
+      </tbody>
+    </table>
+    <p class="small">同一文件内以 <code>task_key + task_version</code> 判断重复；空行忽略。第一行必须是表头，表头重复、缺少 <code>task_key</code>、单行 task_key 为空等问题在预览阶段逐行提示。</p>
+
+    <h2>2. 用户流程</h2>
+    <ol>
+      <li>任务进度页工具栏新增“下载 Excel 模板”和“导入 Excel”。</li>
+      <li>用户选择文件后，弹窗显示解析状态；服务端完成解析、校验和冲突预估。</li>
+      <li>预览显示总行数、可导入数、新增数、更新数、跳过数和错误数，并列出行号、task_key、type、预期动作与错误信息。</li>
+      <li>存在错误时“确认导入”禁用；用户可重新上传或关闭弹窗。</li>
+      <li>确认成功后关闭弹窗、刷新当前工作流任务列表、保留导入统计提示，并清理本次导入快照。</li>
+    </ol>
+
+    <h2>3. 技术架构</h2>
+    <p>采用“后端预览 + 后端确认”的两阶段方案。预览时服务端保存标准化任务快照和预览报告，确认时只接受服务端生成的 <code>import_id</code>，不信任前端回传的任务内容。</p>
+    <div class="grid">
+      <div class="card"><div class="label">前端</div><div class="value"><code>WorkflowView.vue</code> 增加工具栏、导入弹窗、预览表格和状态管理</div></div>
+      <div class="card"><div class="label">API</div><div class="value"><code>routes/workflows.py</code> 增加模板、预览、确认接口</div></div>
+      <div class="card"><div class="label">业务服务</div><div class="value"><code>WorkflowService</code> 负责权限、解析编排、快照校验和提交</div></div>
+      <div class="card"><div class="label">解析模块</div><div class="value">新增独立 Excel 解析器，使用 read-only 模式读取首个工作表</div></div>
+      <div class="card"><div class="label">存储</div><div class="value">新增导入快照表，任务正式写入仍复用 workflows repository</div></div>
+      <div class="card"><div class="label">依赖</div><div class="value">增加 <code>openpyxl</code>，用于读取和生成 xlsx</div></div>
+    </div>
+
+    <h3>导入快照表</h3>
+    <p>建议新增 <code>workflow_task_imports</code>，字段包括：</p>
+    <pre>import_id       TEXT UNIQUE
+workflow_key    TEXT NOT NULL
+actor           TEXT NOT NULL
+filename        TEXT NOT NULL
+sheet_name      TEXT NOT NULL
+tasks_json      TEXT NOT NULL
+preview_json    TEXT NOT NULL
+status          TEXT NOT NULL DEFAULT 'previewed'
+expires_at      TEXT NOT NULL
+created_at      TEXT NOT NULL
+confirmed_at    TEXT</pre>
+    <p>快照绑定工作流和操作人，默认 30 分钟过期；确认成功或过期清理。确认接口必须检查工作流、操作人和快照状态。</p>
+
+    <h2>4. API 契约</h2>
+    <table>
+      <thead><tr><th>接口</th><th>输入</th><th>输出/行为</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /workflows/{key}/tasks/import/template</code></td><td>工作流 key</td><td>返回包含固定表头和说明页的 xlsx 文件</td></tr>
+        <tr><td><code>POST /workflows/{key}/tasks/import/preview</code></td><td>multipart 文件</td><td>解析、校验、保存快照，返回 import_id、统计、逐行预览和过期时间</td></tr>
+        <tr><td><code>POST /workflows/{key}/tasks/import/confirm</code></td><td><code>{"import_id":"..."}</code></td><td>重新检查状态并原子写入，返回实际 created/updated/skipped/reopened 统计</td></tr>
+      </tbody>
+    </table>
+
+    <h3>预览响应核心结构</h3>
+    <pre>{
+  "import_id": "task_import_xxx",
+  "filename": "tasks.xlsx",
+  "sheet_name": "tasks",
+  "expires_at": "2026-07-15T12:30:00+00:00",
+  "can_confirm": true,
+  "summary": {
+    "total_rows": 100,
+    "valid_rows": 99,
+    "invalid_rows": 1,
+    "created": 96,
+    "updated": 3,
+    "skipped_running": 0,
+    "skipped_completed": 0,
+    "reopened_expired": 0
+  },
+  "rows": [
+    {"row_number": 2, "task_key": "owner/repo-a", "type": "repo", "action": "created", "errors": []},
+    {"row_number": 4, "task_key": "", "type": "repo", "action": "error", "errors": ["task_key 不能为空"]}
+  ]
+}</pre>
+
+    <h2>5. 任务写入与并发语义</h2>
+    <table>
+      <thead><tr><th>现有状态</th><th>确认导入时的行为</th></tr></thead>
+      <tbody>
+        <tr><td><code>pending</code> / <code>failed</code> / <code>abandoned</code></td><td>更新 type 和 payload，回到 pending</td></tr>
+        <tr><td>有效租约中的 <code>running</code></td><td>跳过，不覆盖执行中的任务</td></tr>
+        <tr><td><code>completed</code></td><td>默认跳过；超过配置的重跑周期才重新打开</td></tr>
+        <tr><td>预览后状态发生变化</td><td>确认时以最新状态重新判断并返回实际统计</td></tr>
+      </tbody>
+    </table>
+    <p>服务端应把预览分类逻辑与现有 <code>upsert_workflow_tasks</code> 的状态判断集中到共享方法，避免预览结果和正式导入规则漂移。正式导入必须在同一个 SQLite 事务内完成；数据库异常时整批回滚。</p>
+
+    <h2>6. 错误处理与安全边界</h2>
+    <ul>
+      <li>所有接口沿用工作流管理接口的管理员权限校验。</li>
+      <li>文件扩展名不是 <code>.xlsx</code>、工作簿损坏、缺少表头、重复表头、超过 5,000 行时，预览失败并返回可读错误。</li>
+      <li>行级错误只阻止确认，不写入任何任务。</li>
+      <li>没有有效行时不可确认。</li>
+      <li>import_id 过期、已确认、跨工作流或跨操作人使用时拒绝确认。</li>
+      <li>确认失败不刷新任务列表；服务端记录文件名、工作流、操作人、统计和失败原因。</li>
+    </ul>
+
+    <h2>7. 测试与验收</h2>
+    <ul class="checklist">
+      <li>解析首个工作表、固定列和 payload 列映射正确。</li>
+      <li>空行、空 payload、数字/日期等单元格可以稳定转换为 JSON。</li>
+      <li>缺少 task_key、重复表头、行内重复 key、超过 5,000 行均能在预览阶段发现。</li>
+      <li>新增、更新、有效 running 跳过、completed 跳过、过期重开符合既有规则。</li>
+      <li>预览后状态变化时，确认结果以最新数据库状态为准。</li>
+      <li>确认过程发生数据库错误时，不留下半批任务。</li>
+      <li>不同工作流/操作人不能复用 import_id，过期快照不能确认。</li>
+      <li>前端可以下载模板、上传文件、展示逐行错误、禁用错误确认并在成功后刷新列表。</li>
+      <li>后端 pytest、前端 typecheck/build 均通过。</li>
+    </ul>
+
+    <h2>8. 非目标</h2>
+    <ul>
+      <li>首期不支持 <code>.xls</code>、CSV、多工作表选择和字段自定义映射。</li>
+      <li>不允许 Excel 直接修改 status、租约、尝试次数和完成时间等系统字段。</li>
+      <li>不改变现有自动获取任务、任务租约和产物处理流程。</li>
+    </ul>
+  </article>
+</main>
+</body>
+</html>
