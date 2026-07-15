@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -49,6 +50,108 @@ def test_admin_adds_doc_to_multiple_kbs(wm_paths, tmp_path: Path) -> None:
     assert doc["current_version_no"] == 1
     assert len(service.list_docs(actor="root", kb_slug="frontend-docs")) == 1
     assert len(service.list_docs(actor="root", kb_slug="backend-docs")) == 1
+
+
+def test_duplicate_content_in_same_kb_is_skipped(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    first_source = tmp_path / "guide.md"
+    second_source = tmp_path / "copy.md"
+    first_source.write_bytes(b"same content")
+    second_source.write_bytes(b"same content")
+
+    service.add_document("root", first_source, ["kb"], later=True)
+    second = service.add_document("root", second_source, ["kb"], later=True)
+
+    assert second["skipped"] is True
+    assert second["skip_reason"] == "duplicate_content"
+    assert len(service.list_docs("root", "kb")) == 1
+    assert len(service.store.list_pending_jobs()) == 1
+
+
+def test_same_filename_with_different_content_keeps_unique_slug(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    first_source = tmp_path / "guide.md"
+    second_source = tmp_path / "other.md"
+    first_source.write_bytes(b"one")
+    second_source.write_bytes(b"two")
+
+    first = service.add_document("root", first_source, ["kb"], later=True)
+    second = service.add_document(
+        "root", second_source, ["kb"], later=True, original_filename="guide.md"
+    )
+
+    assert [first["slug"], second["slug"]] == ["guide", "guide-2"]
+    assert len(service.list_docs("root", "kb")) == 2
+
+
+def test_duplicate_content_is_scoped_to_the_target_kb(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"same content")
+
+    first = service.add_document("root", source, ["kb-a"], later=True)
+    second = service.add_document("root", source, ["kb-b"], later=True)
+
+    assert first.get("skipped") is not True
+    assert second.get("skipped") is not True
+    assert len(service.list_docs("root", "kb-a")) == 1
+    assert len(service.list_docs("root", "kb-b")) == 1
+
+
+def test_zip_imports_supported_nested_documents_and_skips_duplicate_content(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    archive = tmp_path / "docs.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("root.md", b"one")
+        zf.writestr("nested/guide.pdf", b"two")
+        zf.writestr("nested/copy.txt", b"one")
+        zf.writestr("image.png", b"ignored")
+        zf.writestr("nested/inner.zip", b"ignored")
+
+    result = service.add_document("root", archive, ["kb"], later=True)
+
+    assert result["uploaded_count"] == 2
+    assert result["skipped_count"] == 1
+    assert {doc["slug"] for doc in service.list_docs("root", "kb")} == {"copy", "guide"}
+
+
+def test_zip_rejects_malformed_archive_without_creating_documents(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    archive = tmp_path / "broken.zip"
+    archive.write_bytes(b"not a zip")
+
+    with pytest.raises(ValidationError, match="invalid zip archive"):
+        service.add_document("root", archive, ["kb"], later=True)
+
+    assert service.list_docs("root", "kb") == []
+
+
+def test_zip_rejects_path_traversal_and_empty_archives(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    traversal = tmp_path / "traversal.zip"
+    with zipfile.ZipFile(traversal, "w") as zf:
+        zf.writestr("../escape.md", b"escape")
+
+    with pytest.raises(ValidationError, match="unsafe zip member path"):
+        service.add_document("root", traversal, ["kb"], later=True)
+
+    empty = tmp_path / "empty.zip"
+    with zipfile.ZipFile(empty, "w") as zf:
+        zf.writestr("image.png", b"ignored")
+
+    with pytest.raises(ValidationError, match="no supported documents"):
+        service.add_document("root", empty, ["kb"], later=True)
+
+    assert service.list_docs("root", "kb") == []
 
 
 def test_update_document_creates_new_version(wm_paths, tmp_path: Path) -> None:
@@ -114,7 +217,7 @@ def test_purge_requires_confirmation(wm_paths, tmp_path: Path) -> None:
         service.purge_document("root", doc["slug"])
 
 
-def test_purge_keeps_shared_archive_until_last_reference_is_removed(wm_paths, tmp_path: Path) -> None:
+def test_duplicate_content_upload_reuses_existing_document_and_archive(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     first = tmp_path / "Guide-A.pdf"
@@ -123,15 +226,13 @@ def test_purge_keeps_shared_archive_until_last_reference_is_removed(wm_paths, tm
     second.write_bytes(b"same bytes")
     doc_a = service.add_document("root", first, ["frontend-docs"], later=True)
     doc_b = service.add_document("root", second, ["frontend-docs"], later=True)
-    version_b = service.store.list_versions(doc_b["id"])[0]
-    archive_path = Path(version_b["archive_path"])
+    version_a = service.store.list_versions(doc_a["id"])[0]
+    archive_path = Path(version_a["archive_path"])
 
     assert archive_path.exists()
-    service.purge_document("root", doc_a["slug"], confirm=True)
-
-    assert archive_path.exists()
-    assert archive_path.read_bytes() == b"same bytes"
-    assert service.store.list_versions(doc_b["id"])[0]["archive_path"] == str(archive_path)
+    assert doc_b["id"] == doc_a["id"]
+    assert doc_b["skipped"] is True
+    assert len(service.list_docs("root", "frontend-docs")) == 1
 
     service.purge_document("root", doc_b["slug"], confirm=True)
     assert not archive_path.exists()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+from tempfile import TemporaryDirectory
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,7 @@ from typing import Any, Callable
 
 from agent_bridge.agent_runtime.service import AgentService
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
+from agent_bridge.knowledge_management.docs_knowledge.uploads import extract_zip_documents
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
 from agent_bridge.capability_hub.service import CapabilityService
 from agent_bridge.knowledge_management.code_knowledge.scheduler import CodeGraphScheduler
@@ -49,6 +51,7 @@ ALLOWED_EXTENSIONS = {
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
     ".txt", ".md", ".markdown", ".csv", ".json",
 }
+UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | {".zip"}
 SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
 
 
@@ -280,10 +283,61 @@ class AgentBridgeService:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
         require_admin_user(actor, self.admins)
-        self._validate_source(source)
+        self._validate_source(source, allowed_extensions=UPLOAD_EXTENSIONS)
         kbs = [self._require_kb_admin_visible(actor, kb_slug) for kb_slug in kb_slugs]
 
         display_name = original_filename or source.name
+        if source.suffix.lower() == ".zip":
+            return self._add_zip_documents(actor, source, display_name, kbs, later, source_type, source_repo_key)
+        return self._add_single_document(
+            actor=actor,
+            source=source,
+            kb_targets=kbs,
+            display_name=display_name,
+            later=later,
+            source_type=source_type,
+            source_repo_key=source_repo_key,
+            slug_override=slug_override,
+        )
+
+    def _add_single_document(
+        self,
+        actor: str,
+        source: Path,
+        kb_targets: list[dict[str, Any]],
+        display_name: str,
+        later: bool,
+        source_type: str = "manual",
+        source_repo_key: str = "",
+        slug_override: str | None = None,
+    ) -> dict[str, Any]:
+        content_hash = self.archive.content_hash(source)
+        existing = next(
+            (
+                found
+                for kb in kb_targets
+                if (found := self.store.find_current_document_by_content_hash(kb["id"], content_hash))
+            ),
+            None,
+        )
+        if existing is not None:
+            existing_kb_ids = {item["id"] for item in self.store.get_document_kbs(existing["id"])}
+            for kb in kb_targets:
+                if kb["id"] in existing_kb_ids:
+                    continue
+                self.store.attach_document_to_kb(existing["id"], kb["id"], actor)
+                self._queue_create_sync_jobs(existing["id"], existing["current_version_id"], [kb])
+            existing["current_version_no"] = existing["current_version_no"]
+            existing["kb_slugs"] = [
+                kb["slug"] for kb in self.store.get_document_kbs(existing["id"])
+            ]
+            existing["skipped"] = True
+            existing["skip_reason"] = "duplicate_content"
+            logger.info("跳过重复文档 doc=%s hash=%s", existing["slug"], content_hash)
+            if not later:
+                self.sync(actor=actor, all_users=False)
+            return existing
+
         slug = slug_override or unique_slug(make_slug(display_name), self.store.list_document_slugs())
         archived = self.archive.store(source)
         doc = self.store.create_document(
@@ -299,24 +353,68 @@ class AgentBridgeService:
             archive_path=str(archived.archive_path),
             created_by=actor,
         )
-        for kb in kbs:
+        self._queue_create_sync_jobs(doc["id"], version["id"], kb_targets)
+        for kb in kb_targets:
             self.store.attach_document_to_kb(doc["id"], kb["id"], actor)
-            targets = self.store.list_backend_targets(kb["id"])
-            for target in targets:
-                if target["status"] == "active":
-                    self.store.create_sync_job(
-                        doc["id"], kb["id"], Operation.create, version["id"],
-                        backend_slug=target["slug"],
-                    )
 
         doc["current_version_no"] = version["version_no"]
-        doc["kb_slugs"] = [kb["slug"] for kb in kbs]
+        doc["kb_slugs"] = [kb["slug"] for kb in kb_targets]
         logger.info(
-            "文档已入档 doc=%s KB数=%d 立即同步=%s", slug, len(kbs), not later
+            "文档已入档 doc=%s KB数=%d 立即同步=%s", slug, len(kb_targets), not later
         )
         if not later:
             self.sync(actor=actor, all_users=False)
         return doc
+
+    def _queue_create_sync_jobs(
+        self,
+        doc_id: int,
+        version_id: int,
+        kb_targets: list[dict[str, Any]],
+    ) -> None:
+        for kb in kb_targets:
+            targets = self.store.list_backend_targets(kb["id"])
+            for target in targets:
+                if target["status"] == "active":
+                    self.store.create_sync_job(
+                        doc_id, kb["id"], Operation.create, version_id,
+                        backend_slug=target["slug"],
+                    )
+
+    def _add_zip_documents(
+        self,
+        actor: str,
+        source: Path,
+        display_name: str,
+        kb_targets: list[dict[str, Any]],
+        later: bool,
+        source_type: str,
+        source_repo_key: str,
+    ) -> dict[str, Any]:
+        with TemporaryDirectory(prefix="agent-bridge-upload-") as temp_dir:
+            extracted = extract_zip_documents(source, Path(temp_dir), ALLOWED_EXTENSIONS)
+            results = [
+                self._add_single_document(
+                    actor=actor,
+                    source=path,
+                    kb_targets=kb_targets,
+                    display_name=path.name,
+                    later=later,
+                    source_type=source_type,
+                    source_repo_key=source_repo_key,
+                )
+                for path in extracted
+            ]
+        skipped = [result for result in results if result.get("skipped")]
+        uploaded = [result for result in results if not result.get("skipped")]
+        return {
+            "source_filename": display_name,
+            "source_type": "zip",
+            "documents": uploaded,
+            "skipped": skipped,
+            "uploaded_count": len(uploaded),
+            "skipped_count": len(skipped),
+        }
 
     def update_document(
         self,
@@ -1222,10 +1320,10 @@ class AgentBridgeService:
         if not profile_key:
             raise AccessDenied("capability profile is required")
 
-    def _validate_source(self, source: Path) -> None:
+    def _validate_source(self, source: Path, allowed_extensions: set[str] | None = None) -> None:
         if not source.is_file():
             raise ValidationError("source file does not exist")
-        if source.suffix.lower() not in ALLOWED_EXTENSIONS:
+        if source.suffix.lower() not in (allowed_extensions or ALLOWED_EXTENSIONS):
             raise ValidationError("unsupported file type")
 
     def _require_doc_admin_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:
