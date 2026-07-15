@@ -691,6 +691,15 @@ export interface DocumentDetail {
   sync_states: SyncState[]
 }
 
+export interface DocumentUploadSummary {
+  source_filename: string
+  source_type: 'zip'
+  documents: DocumentDetail[]
+  skipped: DocumentDetail[]
+  uploaded_count: number
+  skipped_count: number
+}
+
 export interface SyncJob {
   id: number
   doc_id: number

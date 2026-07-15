@@ -2,7 +2,7 @@
 import { Plus, RotateCw, Upload, File, Folder, Trash2, GitBranch, ArrowLeft } from 'lucide-vue-next'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource } from '../../api/types'
+import type { KnowledgeBaseSummary, Document, DocumentDetail, DocumentUploadSummary, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -73,7 +73,8 @@ const uploadKb = ref<KnowledgeBaseSummary | null>(null)
 const uploadFiles = ref<File[]>([])
 const uploading = ref(false)
 const uploadDragOver = ref(false)
-const ALLOWED_DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md']
+const uploadError = ref('')
+const ALLOWED_DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md', '.zip']
 const allProfiles = ref<ProjectProfile[]>([])
 const selectedProfileKeys = ref<string[]>([])
 const pendingProfileKeys = ref<string[]>([])
@@ -539,21 +540,39 @@ function traverseEntry(entry: FileSystemEntry, allowed: string[]) {
 function openUploadDialog(kb: KnowledgeBaseSummary) {
   uploadKb.value = kb
   uploadFiles.value = []
+  uploadError.value = ''
   showUploadDialog.value = true
+}
+
+function isUploadSummary(result: DocumentDetail | DocumentUploadSummary): result is DocumentUploadSummary {
+  return 'uploaded_count' in result && 'skipped_count' in result
 }
 
 async function uploadDocuments() {
   if (!uploadKb.value || uploadFiles.value.length === 0) return
   uploading.value = true
+  uploadError.value = ''
   try {
+    const results: Array<DocumentDetail | DocumentUploadSummary> = []
     for (const file of uploadFiles.value) {
-      await api.addDocument(file, [uploadKb.value.slug], true)
+      results.push(await api.addDocument(file, [uploadKb.value.slug], true))
+    }
+    const uploadedCount = results.reduce((count, result) => count + (isUploadSummary(result) ? result.uploaded_count : 1), 0)
+    const skippedCount = results.reduce((count, result) => count + (isUploadSummary(result) ? result.skipped_count : 0), 0)
+    if (skippedCount > 0) {
+      await alert({
+        title: '上传完成',
+        description: `成功入库 ${uploadedCount} 个文件，跳过 ${skippedCount} 个重复文件。`,
+      })
     }
     showUploadDialog.value = false
     uploadFiles.value = []
     await loadKbs()
-  } catch { /* ignore */ }
-  uploading.value = false
+  } catch (e: unknown) {
+    uploadError.value = e instanceof Error ? e.message : '上传失败'
+  } finally {
+    uploading.value = false
+  }
 }
 
 function getFileSizeLabel(bytes: number) {
@@ -1054,12 +1073,12 @@ async function savePlaneProfiles() {
           >
             <Upload :size="40" stroke="#9ca3af" stroke-width="1.5" class="mx-auto mb-3" />
             <div class="text-sm font-medium mb-1">拖拽文件或文件夹到此处</div>
-            <div class="text-xs text-muted-foreground mb-4">支持 PDF、Word、Excel、PPT、TXT、Markdown — 上传后将由定时任务自动同步</div>
+            <div class="text-xs text-muted-foreground mb-4">支持 PDF、Word、Excel、PPT、TXT、Markdown、ZIP — 压缩包将自动识别其中的文档</div>
             <div class="flex items-center justify-center gap-3">
               <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium cursor-pointer hover:bg-primary/80">
                 <File :size="14" />
                 选择文件
-                <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md" @change="onUploadFilesSelected" />
+                <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip" @change="onUploadFilesSelected" />
               </label>
               <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm border border-border bg-background text-sm font-medium cursor-pointer hover:bg-muted">
                 <Folder :size="14" />
@@ -1086,8 +1105,11 @@ async function savePlaneProfiles() {
             </div>
             <label class="block mt-3 py-2 border border-dashed border-border rounded text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/50 transition-colors">
               + 继续添加文件
-              <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md" @change="onUploadFilesSelected" />
+              <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip" @change="onUploadFilesSelected" />
             </label>
+          </div>
+          <div v-if="uploadError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {{ uploadError }}
           </div>
         </div>
         <DialogFooter>

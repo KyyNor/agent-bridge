@@ -15,3 +15,19 @@ test('upload dialog provides extra horizontal room for document names', () => {
   const uploadDialog = file.slice(file.indexOf('<!-- 上传文档对话框 -->'))
   assert.match(uploadDialog, /<DialogContent class="sm:max-w-\[640px\]">/)
 })
+
+test('upload dialog accepts zip archives and surfaces upload outcomes', () => {
+  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
+  assert.match(file, /const ALLOWED_DOC_EXTENSIONS = \[[^\]]*'\.zip'/)
+  assert.match(file, /accept="[^"]*\.zip[^"]*"/)
+  assert.match(file, /const uploadError = ref\(''\)/)
+  assert.match(file, /v-if="uploadError"/)
+  assert.match(file, /skipped_count/)
+})
+
+test('upload API types include the zip summary response', () => {
+  const types = readFileSync(resolve(root, 'src/api/types.ts'), 'utf-8')
+  const client = readFileSync(resolve(root, 'src/api/client.ts'), 'utf-8')
+  assert.match(types, /export interface DocumentUploadSummary[\s\S]*uploaded_count: number[\s\S]*skipped_count: number/)
+  assert.match(client, /postFormData<DocumentDetail \| DocumentUploadSummary>\('\/docs'/)
+})

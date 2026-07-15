@@ -11,6 +11,7 @@ import type {
   CodeRepository,
   Document,
   DocumentDetail,
+  DocumentUploadSummary,
   ExecuteCapabilityPayload,
   ExecuteCapabilityResult,
   KnowledgeBase,
@@ -508,7 +509,7 @@ export const api = {
     form.append('file', file)
     kbs.forEach(kb => form.append('kb', kb))
     if (later) form.append('later', 'true')
-    return postFormData<DocumentDetail>('/docs', form)
+    return postFormData<DocumentDetail | DocumentUploadSummary>('/docs', form)
   },
   updateDocument: (slug: string, file: File, later = false) => {
     const form = new FormData()
