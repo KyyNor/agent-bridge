@@ -291,6 +291,46 @@ export interface WorkflowTasksResult {
   tasks: WorkflowTask[]
 }
 
+export interface WorkflowTaskImportRow {
+  row_number: number
+  task_key: string
+  task_version: string
+  type: string
+  payload: Record<string, unknown>
+  action: 'created' | 'updated' | 'skipped_running' | 'skipped_completed' | 'reopened_expired' | 'error'
+  errors: string[]
+}
+
+export interface WorkflowTaskImportSummary {
+  total_rows: number
+  valid_rows: number
+  invalid_rows: number
+  created: number
+  updated: number
+  skipped_running: number
+  skipped_completed: number
+  reopened_expired: number
+}
+
+export interface WorkflowTaskImportPreview {
+  import_id: string
+  filename: string
+  sheet_name: string
+  expires_at: string
+  can_confirm: boolean
+  summary: WorkflowTaskImportSummary
+  rows: WorkflowTaskImportRow[]
+}
+
+export interface WorkflowTaskImportResult {
+  import_id: string
+  created: number
+  updated: number
+  skipped_running: number
+  skipped_completed: number
+  reopened_expired: number
+}
+
 /** Server-side query params for listing a workflow's tasks (筛选/搜索/排序). */
 export interface WorkflowTaskListParams {
   status?: string

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 
-from agent_bridge.api.schemas import WorkflowDefinitionRequest
+from agent_bridge.api.schemas import WorkflowDefinitionRequest, WorkflowTaskImportConfirmRequest
 
 
 def create_workflow_routes(service, actor):
@@ -131,6 +131,46 @@ def create_workflow_routes(service, actor):
     @router.post("/workflows/{workflow_key}/run")
     def run_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflow_scheduler.run_workflow_now(workflow_key)
+
+    @router.get("/workflows/{workflow_key}/tasks/import/template")
+    def download_task_import_template(
+        workflow_key: str,
+        current_actor: str = Depends(actor),
+    ) -> Response:
+        content = service.workflows.build_task_import_template(
+            actor=current_actor,
+            workflow_key=workflow_key,
+        )
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="workflow-task-template.xlsx"'},
+        )
+
+    @router.post("/workflows/{workflow_key}/tasks/import/preview")
+    async def preview_task_import(
+        workflow_key: str,
+        file: UploadFile = File(...),
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.preview_task_import(
+            actor=current_actor,
+            workflow_key=workflow_key,
+            filename=file.filename or "",
+            content=await file.read(),
+        )
+
+    @router.post("/workflows/{workflow_key}/tasks/import/confirm")
+    def confirm_task_import(
+        workflow_key: str,
+        payload: WorkflowTaskImportConfirmRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.confirm_task_import(
+            actor=current_actor,
+            workflow_key=workflow_key,
+            import_id=payload.import_id,
+        )
 
     @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/execute")
     def execute_task(

@@ -629,6 +629,59 @@ class SQLiteStore:
     def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]) -> dict[str, int]:
         return self.workflows.upsert_workflow_tasks(workflow_key, tasks)
 
+    def preview_workflow_task_actions(
+        self,
+        workflow_key: str,
+        tasks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self.workflows.preview_workflow_task_actions(workflow_key, tasks)
+
+    def create_workflow_task_import(
+        self,
+        *,
+        import_id: str,
+        workflow_key: str,
+        actor: str,
+        filename: str,
+        sheet_name: str,
+        tasks: list[dict[str, Any]],
+        preview: dict[str, Any],
+        expires_at: datetime | str,
+    ) -> dict[str, Any]:
+        return self.workflows.create_workflow_task_import(
+            import_id=import_id,
+            workflow_key=workflow_key,
+            actor=actor,
+            filename=filename,
+            sheet_name=sheet_name,
+            tasks=tasks,
+            preview=preview,
+            expires_at=expires_at,
+        )
+
+    def get_workflow_task_import(self, import_id: str) -> dict[str, Any] | None:
+        return self.workflows.get_workflow_task_import(import_id)
+
+    def confirm_workflow_task_import(
+        self,
+        workflow_key: str,
+        *,
+        import_id: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        return self.workflows.confirm_workflow_task_import(
+            workflow_key,
+            import_id=import_id,
+            actor=actor,
+        )
+
+    def delete_expired_workflow_task_imports(
+        self,
+        *,
+        now: datetime | str | None = None,
+    ) -> int:
+        return self.workflows.delete_expired_workflow_task_imports(now=now)
+
     def get_workflow_task(
         self,
         workflow_key: str,

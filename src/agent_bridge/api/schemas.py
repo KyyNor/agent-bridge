@@ -228,6 +228,10 @@ class WorkflowDefinitionRequest(BaseModel):
     workflow_type: str = "operation"
 
 
+class WorkflowTaskImportConfirmRequest(BaseModel):
+    import_id: str
+
+
 class SkillPromptRequest(BaseModel):
     prompt: str
 

@@ -480,6 +480,25 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
 CREATE INDEX IF NOT EXISTS idx_workflow_tasks_pick
   ON workflow_tasks(workflow_key, status, lease_expires_at, id);
 
+CREATE TABLE IF NOT EXISTS workflow_task_imports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_id TEXT NOT NULL UNIQUE,
+  workflow_key TEXT NOT NULL REFERENCES workflow_definitions(workflow_key) ON DELETE CASCADE,
+  actor TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  sheet_name TEXT NOT NULL,
+  tasks_json TEXT NOT NULL DEFAULT '[]',
+  preview_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'previewed',
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  confirmed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_task_imports_expiry
+  ON workflow_task_imports(status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_task_imports_workflow
+  ON workflow_task_imports(workflow_key, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS workflow_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id TEXT NOT NULL UNIQUE,
