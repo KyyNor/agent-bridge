@@ -60,6 +60,10 @@ const routeError = ref('')
 const selectedDocSlugs = ref<Set<string>>(new Set())
 const allDocsSelected = computed(() => detailDocs.value.length > 0 && detailDocs.value.every(d => selectedDocSlugs.value.has(d.slug)))
 const someDocsSelected = computed(() => detailDocs.value.some(d => selectedDocSlugs.value.has(d.slug)))
+const detailTotalDocumentCount = computed(() => {
+  const slug = detailKb.value?.slug
+  return kbs.value.find(kb => kb.slug === slug)?.document_count ?? detailKb.value?.document_count ?? 0
+})
 const rootFolder = computed(() => detailFolders.value.find(folder => folder.is_root) || detailFolders.value[0] || null)
 const currentFolder = computed(() => detailFolders.value.find(folder => folder.id === selectedFolderId.value) || null)
 const currentFolderBreadcrumbs = computed(() => {
@@ -175,6 +179,13 @@ watch(() => detailTab.value, () => {
 
 async function loadKbs() {
   try { kbs.value = await api.listWikiKbs() } catch { kbs.value = [] }
+}
+
+async function refreshDetailKbSummary() {
+  await loadKbs()
+  if (!detailKb.value) return
+  const latest = kbs.value.find(kb => kb.slug === detailKb.value?.slug)
+  if (latest) detailKb.value = latest
 }
 
 async function deleteKb(kb: KnowledgeBaseSummary) {
@@ -382,6 +393,7 @@ async function removeFolder(folder: KnowledgeFolder) {
       showingAllDocuments.value = false
       selectedFolderId.value = parentId
     }
+    await refreshDetailKbSummary()
     await refreshFoldersAndDocs(removedCurrent ? parentId : selectedFolderId.value)
     await alert({
       title: '目录已删除',
@@ -554,6 +566,7 @@ async function deleteDoc(slug: string, docTitle: string) {
   if (!ok) return
   try {
     await api.deleteDocumentFromKb(detailKb.value.slug, slug)
+    await refreshDetailKbSummary()
     await refreshFoldersAndDocs()
     selectedDocSlugs.value = new Set([...selectedDocSlugs.value].filter(s => s !== slug))
   } catch (e: any) {
@@ -575,6 +588,7 @@ async function batchDeleteDocs() {
   const results = await Promise.allSettled(slugs.map(slug => api.deleteDocumentFromKb(detailKb.value!.slug, slug)))
   const failed = results.filter(r => r.status === 'rejected').length
   const succeeded = results.length - failed
+  await refreshDetailKbSummary()
   await refreshFoldersAndDocs()
   selectedDocSlugs.value = new Set()
   if (failed > 0) {
@@ -665,6 +679,7 @@ async function syncRepoSource(source: KbRepoSource) {
       refreshCurrentDocs(),
       api.getSyncStatus(),
     ])
+    await refreshDetailKbSummary()
     detailRepoSources.value = repoSources
     detailSyncJobs.value = syncStatus.jobs.filter((j: SyncJob) => j.kb_slug === detailKb.value!.slug)
     repoSourceMessage.value = `已同步：新增 ${result.added}，删除 ${result.removed}，更新 ${result.updated}`
@@ -692,6 +707,7 @@ async function deleteRepoSource(source: KbRepoSource) {
       api.listKbRepoSources(detailKb.value.slug),
       refreshCurrentDocs(),
     ])
+    await refreshDetailKbSummary()
     detailRepoSources.value = repoSources
     repoSourceMessage.value = '已移除数据源'
   } catch (e: any) {
@@ -862,7 +878,7 @@ async function uploadDocuments() {
     }
     showUploadDialog.value = false
     uploadFiles.value = []
-    await loadKbs()
+    await refreshDetailKbSummary()
     if (detailKb.value?.slug === uploadKb.value.slug) await refreshFoldersAndDocs(selectedFolderId.value)
   } catch (e: unknown) {
     uploadError.value = e instanceof Error ? e.message : '上传失败'
@@ -1078,7 +1094,7 @@ async function savePlaneProfiles() {
         <!-- Tabs -->
         <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
           <button v-for="t in [
-            { key: 'docs', label: `文档 (${detailDocs.length})` },
+            { key: 'docs', label: `文档 (${detailTotalDocumentCount})` },
             { key: 'sync', label: `同步 (${detailSyncJobs.length})` },
             { key: 'sources', label: `Git 数据源 (${detailRepoSources.length})` },
             { key: 'search', label: '检索' },
@@ -1099,7 +1115,7 @@ async function savePlaneProfiles() {
               :selected-id="selectedFolderId"
               :all-selected="showingAllDocuments"
               :root-label="detailKb.name"
-              :all-count="detailKb.document_count"
+              :all-count="detailTotalDocumentCount"
               :loading="folderTreeLoading"
               @select="selectFolder"
               @create="openCreateFolder"
