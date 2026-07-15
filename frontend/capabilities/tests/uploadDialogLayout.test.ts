@@ -5,9 +5,11 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
 
-test('long upload filenames stay within the dialog row and remain inspectable', () => {
+test('long upload paths stay inside a constrained filename column and remain inspectable', () => {
   const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  assert.match(file, /<span class="min-w-0 flex-1 truncate" :title="f\.name">\{\{ f\.name \}\}<\/span>/)
+  const uploadDialog = file.slice(file.indexOf('<!-- 上传文档对话框 -->'))
+  assert.match(uploadDialog, /class="[^\"]*grid-cols-\[auto_minmax\(0,1fr\)_auto\][^\"]*"/)
+  assert.match(uploadDialog, /<span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="f\.relativePath">\{\{ f\.relativePath \}\}<\/span>/)
 })
 
 test('upload dialog provides extra horizontal room for document names', () => {

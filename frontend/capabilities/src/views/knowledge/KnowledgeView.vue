@@ -1518,12 +1518,12 @@ async function savePlaneProfiles() {
               <span class="text-sm font-medium">已选择 <span class="text-green-700">{{ uploadFiles.length }}</span> 个文件</span>
               <Button variant="ghost" size="xs" class="h-7 text-xs text-muted-foreground" @click="uploadFiles = []">清除</Button>
             </div>
-            <div class="space-y-1.5 max-h-[240px] overflow-y-auto">
+            <div class="min-w-0 space-y-1.5 max-h-[240px] overflow-y-auto">
               <div v-for="(f, i) in uploadFiles" :key="i"
-                class="flex items-center gap-2.5 px-3 py-2 rounded border border-border bg-background text-sm"
+                class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 overflow-hidden rounded border border-border bg-background px-3 py-2 text-sm"
               >
-                <File :size="14" stroke="#9ca3af" />
-                <span class="min-w-0 flex-1 truncate" :title="f.relativePath">{{ f.relativePath }}</span>
+                <File :size="14" stroke="#9ca3af" class="shrink-0" />
+                <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="f.relativePath">{{ f.relativePath }}</span>
                 <span class="text-xs text-muted-foreground shrink-0">{{ getFileSizeLabel(f.file.size) }}</span>
               </div>
             </div>
