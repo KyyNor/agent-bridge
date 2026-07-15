@@ -124,11 +124,22 @@ def _top_similar_names(query: str, candidates: list[str], *, limit: int = 3, cut
     return [candidate for _, candidate in ranked[:limit]]
 
 
-def _friendly_not_found_message(kind: str, noun: str, suggestions: list[str]) -> str:
+def _friendly_not_found_message(
+    kind: str,
+    noun: str,
+    suggestions: list[str],
+    *,
+    search_command: str,
+) -> str:
     base = f"{kind}_not_found"
-    if not suggestions:
-        return base
-    return f"{base}，可用的类似{noun}有：[{', '.join(suggestions)}]"
+    message = base
+    if suggestions:
+        message += f"，可用的类似{noun}有：[{', '.join(suggestions)}]"
+    if noun == "工具":
+        detail = "该服务下工具及参数"
+    else:
+        detail = "当前可用服务及工具"
+    return f"{message}。请使用 {search_command} 查看{detail}的详细说明。"
 
 
 def _attach_log_id(exc: Exception, log_id: str) -> None:
@@ -962,6 +973,7 @@ class CapabilityService:
                     "service",
                     "服务",
                     self._similar_service_names(actor, service_key, profile_key),
+                    search_command="search()",
                 )
             raise mark_builtin_failure(
                 NotFound(message),
@@ -1030,6 +1042,7 @@ class CapabilityService:
                     "tool",
                     "工具",
                     self._similar_tool_names(actor, service_key, tool_name, profile_key, source_type),
+                    search_command=f"search(path='{service_key}')",
                 )
             raise mark_builtin_failure(
                 NotFound(message),

@@ -353,7 +353,7 @@ def test_sync_deactivates_removed_tools_and_hides_stale_tools(wm_paths: AgentBri
 
     assert [tool["tool"] for tool in service.list_tools("alice", "docs-api")] == ["list_docs"]
     assert [item["tool"] for item in service.search("alice", "docs-api", None)["items"]] == ["list_docs"]
-    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[list_docs\] .*log_id: call_"):
+    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[list_docs\].*log_id: call_"):
         asyncio.run(service.execute("alice", "docs-api", "get_doc", {"doc_id": "doc-1"}))
 
 
@@ -712,9 +712,9 @@ def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) 
         examples=[],
     )
 
-    with pytest.raises(NotFound, match=r"service_not_found，可用的类似服务有：\[docs-api, docs-admin, docs-archive\] .*log_id: call_") as missing_service_exc:
+    with pytest.raises(NotFound, match=r"service_not_found，可用的类似服务有：\[docs-api, docs-admin, docs-archive\].*log_id: call_") as missing_service_exc:
         asyncio.run(service.execute("alice", "docs-ap", "search_docs", {}))
-    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[search_docs, search_documents, research_docs\] .*log_id: call_") as missing_tool_exc:
+    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[search_docs, search_documents, research_docs\].*log_id: call_") as missing_tool_exc:
         asyncio.run(service.execute("alice", "docs-api", "search_doc", {}))
 
     logs = service.governance.list_logs(actor="root", status=CallLogStatus.error.value)
@@ -729,7 +729,10 @@ def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) 
         "params": {},
         "profile_key": None,
     }
-    expected_service_error = "service_not_found，可用的类似服务有：[docs-api, docs-admin, docs-archive]"
+    expected_service_error = (
+        "service_not_found，可用的类似服务有：[docs-api, docs-admin, docs-archive]。"
+        "请使用 search() 查看当前可用服务及工具的详细说明。"
+    )
     assert json.loads(missing_service_log["response_json"])["error"] == expected_service_error
     assert missing_service_log["error_message"] == expected_service_error
     assert missing_tool_log["log_id"] in str(missing_tool_exc.value)
@@ -741,7 +744,10 @@ def test_execute_requires_existing_service_and_tool(wm_paths: AgentBridgePaths) 
         "params": {},
         "profile_key": None,
     }
-    expected_tool_error = "tool_not_found，可用的类似工具有：[search_docs, search_documents, research_docs]"
+    expected_tool_error = (
+        "tool_not_found，可用的类似工具有：[search_docs, search_documents, research_docs]。"
+        "请使用 search(path='docs-api') 查看该服务下工具及参数的详细说明。"
+    )
     assert json.loads(missing_tool_log["response_json"])["error"] == expected_tool_error
     assert missing_tool_log["error_message"] == expected_tool_error
 
@@ -763,10 +769,11 @@ def test_execute_missing_tool_suggestions_stay_within_same_service_and_fall_back
         examples=[],
     )
 
-    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[search_docs, delete_doc\] .*log_id: call_") as same_service_exc:
+    with pytest.raises(NotFound, match=r"tool_not_found，可用的类似工具有：\[search_docs, delete_doc\].*log_id: call_") as same_service_exc:
         asyncio.run(service.execute("alice", "docs-api", "search_doc", {}))
-    with pytest.raises(NotFound, match=r"tool_not_found .*log_id: call_") as no_match_exc:
+    with pytest.raises(NotFound, match=r"tool_not_found.*log_id: call_") as no_match_exc:
         asyncio.run(service.execute("alice", "docs-api", "zzzzzz", {}))
 
     assert "search_reports" not in str(same_service_exc.value)
     assert "可用的类似工具有" not in str(no_match_exc.value)
+    assert "search(path='docs-api')" in str(no_match_exc.value)
