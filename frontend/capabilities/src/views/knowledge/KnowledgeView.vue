@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Plus, RotateCw, Upload, File, Folder, Trash2, GitBranch, ArrowLeft } from 'lucide-vue-next'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { KnowledgeBaseSummary, Document, DocumentDetail, DocumentUploadSummary, KnowledgeFolder, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
@@ -44,6 +44,15 @@ const folderDialogName = ref('')
 const folderDialogTargetId = ref<number | null>(null)
 const folderDialogError = ref('')
 const folderDialogSaving = ref(false)
+const FOLDER_PANE_DEFAULT_WIDTH = 300
+const FOLDER_PANE_MIN_WIDTH = 240
+const FOLDER_PANE_MAX_WIDTH = 420
+const folderPaneWidth = ref(FOLDER_PANE_DEFAULT_WIDTH)
+const isResizingFolderPane = ref(false)
+let folderPaneResizeStartX = 0
+let folderPaneResizeStartWidth = FOLDER_PANE_DEFAULT_WIDTH
+let previousBodyCursor = ''
+let previousBodyUserSelect = ''
 const placementDialogOpen = ref(false)
 const placementDialogMode = ref<'place' | 'attach'>('place')
 const placementDoc = ref<Document | null>(null)
@@ -94,6 +103,58 @@ const placementRootLabel = computed(() => {
   if (placementDialogMode.value === 'place') return detailKb.value?.name || '根目录'
   return kbs.value.find(kb => kb.slug === placementKbSlug.value)?.name || '根目录'
 })
+
+function clampFolderPaneWidth(width: number) {
+  return Math.min(FOLDER_PANE_MAX_WIDTH, Math.max(FOLDER_PANE_MIN_WIDTH, width))
+}
+
+function setFolderPaneWidth(width: number) {
+  folderPaneWidth.value = clampFolderPaneWidth(width)
+}
+
+function handleFolderPanePointerMove(event: PointerEvent) {
+  if (!isResizingFolderPane.value) return
+  setFolderPaneWidth(folderPaneResizeStartWidth + event.clientX - folderPaneResizeStartX)
+}
+
+function stopFolderPaneResize() {
+  if (!isResizingFolderPane.value) return
+  isResizingFolderPane.value = false
+  window.removeEventListener('pointermove', handleFolderPanePointerMove)
+  window.removeEventListener('pointerup', stopFolderPaneResize)
+  window.removeEventListener('pointercancel', stopFolderPaneResize)
+  document.body.style.cursor = previousBodyCursor
+  document.body.style.userSelect = previousBodyUserSelect
+}
+
+function startFolderPaneResize(event: PointerEvent) {
+  if (event.button !== 0 || isResizingFolderPane.value) return
+  event.preventDefault()
+  isResizingFolderPane.value = true
+  folderPaneResizeStartX = event.clientX
+  folderPaneResizeStartWidth = folderPaneWidth.value
+  previousBodyCursor = document.body.style.cursor
+  previousBodyUserSelect = document.body.style.userSelect
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', handleFolderPanePointerMove)
+  window.addEventListener('pointerup', stopFolderPaneResize)
+  window.addEventListener('pointercancel', stopFolderPaneResize)
+}
+
+function handleFolderPaneKeydown(event: KeyboardEvent) {
+  const step = event.shiftKey ? 40 : 10
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    setFolderPaneWidth(folderPaneWidth.value - step)
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    setFolderPaneWidth(folderPaneWidth.value + step)
+  }
+}
+
+onBeforeUnmount(stopFolderPaneResize)
+
 // Sync
 const syncing = ref(false)
 // Git repo sources
@@ -1104,8 +1165,12 @@ async function savePlaneProfiles() {
         </div>
 
         <!-- Documents Tab -->
-        <div v-if="detailTab === 'docs'" class="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
-          <aside class="min-w-0 rounded-lg border border-border bg-card p-2">
+        <div
+          v-if="detailTab === 'docs'"
+          class="grid gap-4 lg:flex lg:items-stretch lg:gap-0"
+          :style="{ '--folder-pane-width': folderPaneWidth + 'px' }"
+        >
+          <aside class="min-w-0 rounded-lg border border-border bg-card p-2 lg:w-[var(--folder-pane-width)] lg:shrink-0">
             <div class="mb-2 flex items-center justify-between px-2">
               <span class="text-xs font-semibold text-muted-foreground">目录</span>
               <span class="text-[11px] text-muted-foreground">{{ detailFolders.length }} 项</span>
@@ -1125,7 +1190,23 @@ async function savePlaneProfiles() {
             />
           </aside>
 
-          <section class="min-w-0 space-y-3">
+          <div
+            data-testid="knowledge-folder-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整目录宽度"
+            :aria-valuenow="folderPaneWidth"
+            :aria-valuemin="FOLDER_PANE_MIN_WIDTH"
+            :aria-valuemax="FOLDER_PANE_MAX_WIDTH"
+            tabindex="0"
+            class="group hidden w-4 shrink-0 cursor-col-resize touch-none items-center justify-center lg:flex"
+            @pointerdown="startFolderPaneResize"
+            @keydown="handleFolderPaneKeydown"
+          >
+            <span class="h-12 w-1 rounded-full bg-border transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
+          </div>
+
+          <section class="min-w-0 flex-1 space-y-3">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-1 text-sm font-medium">

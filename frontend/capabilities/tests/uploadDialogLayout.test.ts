@@ -33,3 +33,16 @@ test('upload API types include the zip summary response', () => {
   assert.match(types, /export interface DocumentUploadSummary[\s\S]*uploaded_count: number[\s\S]*skipped_count: number/)
   assert.match(client, /postFormData<DocumentDetail \| DocumentUploadSummary>\('\/docs'/)
 })
+
+test('knowledge folder pane exposes a bounded desktop resizer and keeps mobile layout responsive', () => {
+  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
+  const documentsTab = file.slice(file.indexOf('<!-- Documents Tab -->'))
+  assert.match(file, /const FOLDER_PANE_DEFAULT_WIDTH = 300/)
+  assert.match(file, /const FOLDER_PANE_MIN_WIDTH = 240/)
+  assert.match(file, /const FOLDER_PANE_MAX_WIDTH = 420/)
+  assert.match(file, /function startFolderPaneResize/)
+  assert.match(documentsTab, /data-testid="knowledge-folder-resizer"/)
+  assert.match(documentsTab, /role="separator"/)
+  assert.match(documentsTab, /:style="\{ '--folder-pane-width': folderPaneWidth \+ 'px' \}"/)
+  assert.match(documentsTab, /lg:w-\[var\(--folder-pane-width\)\]/)
+})
