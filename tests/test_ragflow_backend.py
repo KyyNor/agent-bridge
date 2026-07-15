@@ -26,11 +26,16 @@ def test_upload(respx_mock, tmp_path):
     respx_mock.post(f"{base_url}/api/v1/datasets/ds-123/documents").mock(
         return_value=httpx.Response(200, json={"data": {"id": "doc-456"}})
     )
+    parse_route = respx_mock.post(f"{base_url}/api/v1/datasets/ds-123/chunks").mock(
+        return_value=httpx.Response(200, json={"code": 0, "data": True})
+    )
     backend = RagFlowBackend(base_url=base_url, api_key="test-key", timeout=30)
     file_path = tmp_path / "test.pdf"
     file_path.write_bytes(b"content")
     doc_id = backend.upload("ds-123", "test-doc", file_path, "test.pdf")
     assert doc_id == "doc-456"
+    assert parse_route.called
+    assert parse_route.calls.last.request.content == b'{"document_ids":["doc-456"]}'
 
 
 def test_delete(respx_mock):

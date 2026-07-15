@@ -185,8 +185,20 @@ class RagFlowBackend:
         data = response.json()["data"]
         # RagFlow returns a list of uploaded documents.
         if isinstance(data, list):
-            return data[0]["id"]
-        return data["id"]
+            document_id = data[0]["id"]
+        else:
+            document_id = data["id"]
+
+        # Uploading a document only creates it with run=UNSTART.  For the
+        # built-in chunking pipeline, parsing must be explicitly started via
+        # the dataset-scoped chunks endpoint.
+        parse_response = self._request(
+            "POST",
+            f"{self.base_url}/api/v1/datasets/{backend_kb_id}/chunks",
+            json={"document_ids": [document_id]},
+        )
+        self._raise(parse_response)
+        return document_id
 
     def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
         response = self._request(
