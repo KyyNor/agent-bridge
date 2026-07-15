@@ -128,3 +128,49 @@ def test_document_placement_attach_and_scoped_delete_api(wm_paths, tmp_path: Pat
     assert removed.status_code == 200
     assert client.get("/docs", params={"kb": "kb-a"}, headers=headers).json() == []
     assert client.get("/docs", params={"kb": "kb-b"}, headers=headers).json()[0]["slug"] == slug
+
+
+def test_upload_api_preserves_browser_folder_relative_path(wm_paths, tmp_path: Path) -> None:
+    client = _client(wm_paths)
+    headers = _headers()
+    client.post("/admin/init", headers=headers)
+    client.post("/kbs", json={"slug": "docs", "name": "Docs"}, headers=headers)
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"guide")
+
+    with source.open("rb") as handle:
+        uploaded = client.post(
+            "/docs",
+            data={"kb": ["docs"], "relative_path": r"Guides\\API\\Guide.md", "later": "true"},
+            files={"file": ("Guide.md", handle, "text/markdown")},
+            headers=headers,
+        )
+
+    assert uploaded.status_code == 200, uploaded.text
+    slug = uploaded.json()["slug"]
+    docs = client.get("/docs", params={"kb": "docs"}, headers=headers).json()
+    assert docs[0]["folder_path"] == "Guides/API"
+    assert not docs[0]["folder_path"].startswith("root/")
+    detail = client.get(f"/docs/{slug}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["versions"][0]["original_filename"] == "Guides/API/Guide.md"
+
+
+def test_upload_api_rejects_relative_path_traversal(wm_paths, tmp_path: Path) -> None:
+    client = _client(wm_paths)
+    headers = _headers()
+    client.post("/admin/init", headers=headers)
+    client.post("/kbs", json={"slug": "docs", "name": "Docs"}, headers=headers)
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"guide")
+
+    with source.open("rb") as handle:
+        uploaded = client.post(
+            "/docs",
+            data={"kb": ["docs"], "relative_path": "../Guide.md", "later": "true"},
+            files={"file": ("Guide.md", handle, "text/markdown")},
+            headers=headers,
+        )
+
+    assert uploaded.status_code == 400
+    assert client.get("/docs", params={"kb": "docs"}, headers=headers).json() == []

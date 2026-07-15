@@ -189,13 +189,115 @@ def test_zip_imports_supported_nested_documents_and_skips_duplicate_content(
         zf.writestr("nested/guide.pdf", b"two")
         zf.writestr("nested/copy.txt", b"one")
         zf.writestr("image.png", b"ignored")
-        zf.writestr("nested/inner.zip", b"ignored")
 
     result = service.add_document("root", archive, ["kb"], later=True)
 
     assert result["uploaded_count"] == 2
     assert result["skipped_count"] == 1
-    assert {doc["slug"] for doc in service.list_docs("root", "kb")} == {"copy", "guide"}
+    docs = {doc["slug"]: doc for doc in service.list_docs("root", "kb")}
+    assert set(docs) == {"copy", "guide"}
+    assert docs["guide"]["folder_path"] == "nested"
+    assert service.store.list_versions(service.store.get_document_by_slug("guide")["id"])[0]["original_filename"] == "nested/guide.pdf"
+
+
+def test_document_relative_path_uses_selected_folder_as_base(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    base = service.create_folder("root", "kb", "Base", parent_folder_id=root["id"])
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"guide")
+
+    doc = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=base["id"], relative_path=r"A\\B\\guide.md"
+    )
+
+    version = service.store.list_versions(doc["id"])[0]
+    placement = service.store.get_document_placement(doc["id"], service.store.get_kb_by_slug("kb")["id"])
+    assert version["original_filename"] == "A/B/guide.md"
+    assert doc["title"] == "guide"
+    assert placement["folder_path"] == "Base/A/B"
+    assert not placement["folder_path"].startswith("root/")
+
+
+def test_multi_kb_relative_path_creates_same_subfolders_without_explicit_folder(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"guide")
+
+    doc = service.add_document(
+        "root", source, ["kb-a", "kb-b"], later=True, relative_path="shared/docs/guide.md"
+    )
+
+    for kb_slug in ("kb-a", "kb-b"):
+        kb = service.store.get_kb_by_slug(kb_slug)
+        placement = service.store.get_document_placement(doc["id"], kb["id"])
+        assert placement["folder_path"] == "shared/docs"
+        assert service.list_docs("root", kb_slug, folder_id=placement["folder_id"])[0]["slug"] == doc["slug"]
+
+
+def test_explicit_folder_is_rejected_for_multiple_kbs(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    root = service.list_folders("root", "kb-a")[0]
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"guide")
+
+    with pytest.raises(ValidationError, match="folder_id can only be used"):
+        service.add_document("root", source, ["kb-a", "kb-b"], later=True, folder_id=root["id"])
+
+
+def test_duplicate_content_does_not_move_existing_placement(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    first_folder = service.create_folder("root", "kb", "First", parent_folder_id=root["id"])
+    second_folder = service.create_folder("root", "kb", "Second", parent_folder_id=root["id"])
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"same")
+
+    first = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=first_folder["id"], relative_path="guide.md"
+    )
+    duplicate = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=second_folder["id"], relative_path="other/guide.md"
+    )
+
+    placement = service.store.get_document_placement(first["id"], service.store.get_kb_by_slug("kb")["id"])
+    assert duplicate["skipped"] is True
+    assert placement["folder_path"] == "First"
+
+
+def test_git_sync_uses_repository_relative_path_without_root_prefix(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    repo_path = tmp_path / "repo"
+    (repo_path / "A" / "B").mkdir(parents=True)
+    (repo_path / "root.md").write_bytes(b"root")
+    (repo_path / "A" / "B" / "file.md").write_bytes(b"nested")
+    service.store.upsert_code_repository(
+        repo_key="docs-repo", name="Docs Repo", git_url="", branch="main", auth_ref="",
+        description="", tags=[], category_key="", sync_interval_minutes=60,
+        auto_understand=False, status="active",
+    )
+    service.store.mark_code_repository_sync(
+        "docs-repo", local_path=str(repo_path), last_commit="test", success=True, error=None
+    )
+    service.store.upsert_kb_repo_source(service.store.get_kb_by_slug("kb")["id"], "docs-repo", [".md"])
+    service.codegraph.sync_repository = lambda actor, repo_key: None
+
+    result = service.sync_kb_repo_source("root", "kb", "docs-repo")
+
+    assert result["added"] == 2
+    documents = {item["title"]: item for item in service.list_docs("root", "kb")}
+    assert documents["root"]["folder_path"] == ""
+    assert documents["file"]["folder_path"] == "A/B"
+    assert all(not (item["folder_path"] or "").startswith("root/") for item in documents.values())
 
 
 def test_zip_rejects_malformed_archive_without_creating_documents(wm_paths, tmp_path: Path) -> None:

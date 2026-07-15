@@ -11,6 +11,10 @@ logger = logging.getLogger(__name__)
 from typing import Any, Callable
 
 from agent_bridge.agent_runtime.service import AgentService
+from agent_bridge.app.document_paths import (
+    normalize_relative_document_path,
+    split_document_path,
+)
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.knowledge_management.docs_knowledge.uploads import extract_zip_documents
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
@@ -538,6 +542,8 @@ class AgentBridgeService:
         folder_id: int | None = None,
         relative_path: str | None = None,
     ) -> dict[str, Any]:
+        document_path = normalize_relative_document_path(relative_path or display_name or source.name)
+        parent_parts, basename = split_document_path(document_path)
         content_hash = self.archive.content_hash(source)
         existing = next(
             (
@@ -557,7 +563,9 @@ class AgentBridgeService:
             for kb in kb_targets:
                 if kb["id"] in existing_kb_ids:
                     continue
-                target_folder_id = folder_id if len(kb_targets) == 1 else None
+                target_folder_id = self._ensure_document_parent_folder(
+                    kb["id"], folder_id if len(kb_targets) == 1 else None, parent_parts
+                )
                 self.store.attach_document_to_kb(
                     existing["id"], kb["id"], actor, folder_id=target_folder_id
                 )
@@ -575,26 +583,31 @@ class AgentBridgeService:
                 self.sync(actor=actor, all_users=False)
             return existing
 
-        slug = slug_override or unique_slug(make_slug(display_name), self.store.list_document_slugs())
+        target_folder_ids = {
+            kb["id"]: self._ensure_document_parent_folder(
+                kb["id"], folder_id if len(kb_targets) == 1 else None, parent_parts
+            )
+            for kb in kb_targets
+        }
+        slug = slug_override or unique_slug(make_slug(basename), self.store.list_document_slugs())
         archived = self.archive.store(source)
         doc = self.store.create_document(
-            slug=slug, title=Path(display_name).stem, owner_user=actor,
+            slug=slug, title=Path(basename).stem, owner_user=actor,
             source_type=source_type, source_repo_key=source_repo_key,
         )
         version = self.store.create_document_version(
             doc_id=doc["id"],
-            original_filename=display_name,
+            original_filename=document_path,
             content_hash=archived.content_hash,
             file_size=archived.file_size,
-            mime_type=self._mime_type(display_name),
+            mime_type=self._mime_type(document_path),
             archive_path=str(archived.archive_path),
             created_by=actor,
         )
         self._queue_create_sync_jobs(doc["id"], version["id"], kb_targets)
         for kb in kb_targets:
-            target_folder_id = folder_id if len(kb_targets) == 1 else None
             self.store.attach_document_to_kb(
-                doc["id"], kb["id"], actor, folder_id=target_folder_id
+                doc["id"], kb["id"], actor, folder_id=target_folder_ids[kb["id"]]
             )
 
         doc["current_version_no"] = version["version_no"]
@@ -605,6 +618,32 @@ class AgentBridgeService:
         if not later:
             self.sync(actor=actor, all_users=False)
         return doc
+
+    def _ensure_document_parent_folder(
+        self,
+        kb_id: int,
+        base_folder_id: int | None,
+        parent_parts: list[str],
+    ) -> int:
+        if base_folder_id is None:
+            current = self.store.ensure_root_folder(kb_id)
+        else:
+            current = self.store.get_folder(kb_id, base_folder_id)
+            if current is None:
+                raise NotFound("folder not found")
+
+        for name in parent_parts:
+            child = next(
+                (
+                    folder for folder in self.store.list_folder_tree(kb_id)
+                    if folder["parent_id"] == current["id"] and folder["name"] == name
+                ),
+                None,
+            )
+            if child is None:
+                child = self.store.create_folder(kb_id, current["id"], name)
+            current = child
+        return int(current["id"])
 
     def _queue_create_sync_jobs(
         self,
@@ -635,19 +674,26 @@ class AgentBridgeService:
     ) -> dict[str, Any]:
         with TemporaryDirectory(prefix="agent-bridge-upload-") as temp_dir:
             extracted = extract_zip_documents(source, Path(temp_dir), ALLOWED_EXTENSIONS)
+            archive_parent: list[str] = []
+            if relative_path:
+                archive_parent, _ = split_document_path(
+                    normalize_relative_document_path(relative_path)
+                )
             results = [
                 self._add_single_document(
                     actor=actor,
-                    source=path,
+                    source=item.path,
                     kb_targets=kb_targets,
-                    display_name=path.name,
+                    display_name=item.relative_path,
                     later=later,
                     source_type=source_type,
                     source_repo_key=source_repo_key,
                     folder_id=folder_id,
-                    relative_path=relative_path,
+                    relative_path=normalize_relative_document_path(
+                        "/".join([*archive_parent, item.relative_path])
+                    ),
                 )
-                for path in extracted
+                for item in extracted
             ]
         skipped = [result for result in results if result.get("skipped")]
         uploaded = [result for result in results if not result.get("skipped")]
@@ -909,18 +955,26 @@ class AgentBridgeService:
                 if path.suffix.lower() not in ALLOWED_EXTENSIONS:
                     continue
                 slug = unique_slug(make_slug(path.name), occupied_slugs | set(current.keys()))
-                current[slug] = {"path": path, "content_hash": self._sha256_file(path)}
+                current[slug] = {
+                    "path": path,
+                    "relative_path": path.relative_to(local_path).as_posix(),
+                    "content_hash": self._sha256_file(path),
+                }
 
             added = removed = updated = unchanged = 0
             # 新增 + 修改
             for slug, item in current.items():
                 if slug not in existing_slugs:
-                    self._import_repo_file(actor, kb_slug, repo_key, item["path"], slug)
+                    self._import_repo_file(
+                        actor, kb_slug, repo_key, item["path"], slug, item["relative_path"]
+                    )
                     added += 1
                 elif (existing[slug].get("content_hash") or "") != item["content_hash"]:
                     # 修改:先删后加
                     self._delete_git_document(actor, existing[slug])
-                    self._import_repo_file(actor, kb_slug, repo_key, item["path"], slug)
+                    self._import_repo_file(
+                        actor, kb_slug, repo_key, item["path"], slug, item["relative_path"]
+                    )
                     updated += 1
                 else:
                     unchanged += 1
@@ -945,10 +999,12 @@ class AgentBridgeService:
         repo_key: str,
         path: Path,
         slug: str,
+        relative_path: str,
     ) -> None:
         self.add_document(
             actor, path, [kb_slug], later=True,
-            original_filename=path.name,
+            original_filename=relative_path,
+            relative_path=relative_path,
             source_type="git", source_repo_key=repo_key,
             slug_override=slug,
         )
