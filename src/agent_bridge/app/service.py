@@ -1472,7 +1472,7 @@ class AgentBridgeService:
             logger.info("文档同步任务 #%d: 成功", job["id"])
             return True
         except Exception as exc:
-            if self._is_kb_gone(exc) and job.get("kb_name") and job.get("kb_slug"):
+            if op != Operation.move.value and self._is_kb_gone(exc) and job.get("kb_name") and job.get("kb_slug"):
                 logger.warning("文档同步任务 #%d: 后端 KB 已丢失，正在重建...", job["id"])
                 try:
                     new_id = adapter.create_kb(job["kb_slug"], job["kb_name"])

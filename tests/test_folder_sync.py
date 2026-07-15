@@ -11,6 +11,7 @@ from agent_bridge.knowledge_management.docs_knowledge.backends.registry import B
 class RecordingBackend:
     def __init__(self, supports_folders: bool) -> None:
         self._supports_folders = supports_folders
+        self.created_kbs: list[tuple[str, str]] = []
         self.uploads: list[dict] = []
         self.moves: list[dict] = []
         self.deletes: list[dict] = []
@@ -20,6 +21,7 @@ class RecordingBackend:
         return BackendCapabilities(supports_folders=self._supports_folders)
 
     def create_kb(self, slug: str, name: str) -> str:
+        self.created_kbs.append((slug, name))
         return f"remote-{slug}"
 
     def delete_kb(self, backend_kb_id: str) -> None:
@@ -188,18 +190,26 @@ def test_failed_move_records_retryable_job_and_sync_error(wm_paths, tmp_path: Pa
     doc = service.add_document("root", source, ["docs"], later=True, folder_id=folder["id"])
     service.sync("root", all_users=False)
     service.place_document("root", doc["slug"], "docs", root["id"])
+    move_job_id = next(
+        job["id"]
+        for job in service.status("root")["jobs"]
+        if job["operation"] == "move" and job["status"] == "pending"
+    )
 
     def fail_move(*args, **kwargs):
-        raise RuntimeError("move failed")
+        raise RuntimeError("Weknora API error: knowledge base not found (404, code 1003)")
 
     weknora.move = fail_move  # type: ignore[method-assign]
-    service.sync("root", all_users=False)
+    result = service.sync("root", all_users=False)
 
-    job = service.status("root")["jobs"][-1]
+    jobs = service.status("root")["jobs"]
+    assert any(job["id"] == move_job_id for job in jobs), "move job must not be removed by KB rebuild"
+    job = next(job for job in jobs if job["id"] == move_job_id)
     state = service.store.get_sync_state(doc["id"], kb["id"], "weknora")
     assert job["operation"] == "move"
     assert job["status"] == "failed"
-    assert "move failed" in job["error"]
+    assert "knowledge base not found" in job["error"]
     assert state["status"] == "sync_failed"
-    assert "move failed" in state["backend_error"]
-    assert service.sync("root", all_users=False)["processed"] == 1
+    assert "knowledge base not found" in state["backend_error"]
+    assert weknora.created_kbs == [("docs", "Docs")]
+    assert result == {"processed": 1, "succeeded": 0, "failed": 1}
