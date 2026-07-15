@@ -36,7 +36,7 @@ class ArchiveStorage:
         命中已存在目标(同 hash)时跳过拷贝实现去重。拷贝失败由调用方捕获;
         本函数不吞异常,以保留上层统一的错误处理。
         """
-        content_hash = self._sha256(source)
+        content_hash = self.content_hash(source)
         suffix = source.suffix.lower()
         target_dir = self.archive_dir / content_hash[:2] / content_hash[2:4]
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +52,10 @@ class ArchiveStorage:
             file_size=source.stat().st_size,
             archive_path=target,
         )
+
+    def content_hash(self, source: Path) -> str:
+        """计算源文件内容的 SHA-256，不写入归档。"""
+        return self._sha256(source)
 
     def remove(self, archive_path: Path) -> None:
         archive_path.unlink(missing_ok=True)

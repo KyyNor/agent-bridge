@@ -56,6 +56,14 @@ def test_archive_store_file_by_hash(tmp_path: Path) -> None:
     assert result.archive_path.read_bytes() == b"hello wiki"
 
 
+def test_archive_content_hash_matches_store_hash(tmp_path: Path) -> None:
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"same content")
+    archive = ArchiveStorage(tmp_path / "archive")
+
+    assert archive.content_hash(source) == archive.store(source).content_hash
+
+
 def test_sqlite_store_creates_kb_and_members(wm_paths: AgentBridgePaths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -85,6 +93,30 @@ def test_sqlite_store_document_version_and_jobs(wm_paths: AgentBridgePaths) -> N
     assert version["version_no"] == 1
     assert job["status"] == "pending"
     assert store.list_docs_for_kb(kb_id=kb["id"])[0]["slug"] == "guide"
+
+
+def test_find_current_document_by_content_hash_is_scoped_to_kb(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb_a = store.create_kb(slug="kb-a", name="KB A", description="", created_by="root")
+    kb_b = store.create_kb(slug="kb-b", name="KB B", description="", created_by="root")
+    doc = store.create_document(slug="guide", title="Guide", owner_user="root")
+    store.attach_document_to_kb(doc_id=doc["id"], kb_id=kb_a["id"], added_by="root")
+    store.create_document_version(
+        doc_id=doc["id"],
+        original_filename="guide.md",
+        content_hash="hash-a",
+        file_size=4,
+        mime_type="text/markdown",
+        archive_path="/a",
+        created_by="root",
+    )
+
+    found = store.find_current_document_by_content_hash(kb_a["id"], "hash-a")
+    assert found is not None
+    assert found["id"] == doc["id"]
+    assert found["current_version_no"] == 1
+    assert store.find_current_document_by_content_hash(kb_b["id"], "hash-a") is None
 
 
 def test_sqlite_store_list_document_slugs_includes_soft_deleted(wm_paths: AgentBridgePaths) -> None:

@@ -156,6 +156,28 @@ class KnowledgeRepository:
                 ).fetchone()
             return row_to_dict(row)
 
+    def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT d.*, v.version_no AS current_version_no,
+                       v.original_filename AS current_original_filename,
+                       v.content_hash AS current_content_hash,
+                       v.id AS current_version_id
+                FROM documents d
+                JOIN document_kbs dk ON dk.doc_id = d.id
+                JOIN document_versions v ON v.id = d.current_version_id
+                WHERE dk.kb_id = ?
+                  AND dk.status = 'active'
+                  AND d.status = 'active'
+                  AND v.content_hash = ?
+                ORDER BY d.id
+                LIMIT 1
+                """,
+                (kb_id, content_hash),
+            ).fetchone()
+            return row_to_dict(row)
+
     def attach_document_to_kb(self, doc_id: int, kb_id: int, added_by: str) -> None:
         with self._connect() as conn:
             conn.execute(
