@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
@@ -12,6 +13,11 @@ from agent_bridge.automation.workflows.models import (
     WorkflowType,
 )
 from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
+from agent_bridge.automation.workflows.task_import import (
+    TaskImportFormatError,
+    build_task_import_template as build_task_import_template_file,
+    parse_task_import,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +142,136 @@ class WorkflowService:
                 workflow_key, status=status, type=type, search=search, sort=sort
             )
         }
+
+    def preview_task_import(
+        self,
+        *,
+        actor: str,
+        workflow_key: str,
+        filename: str,
+        content: bytes,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+
+        self.store.delete_expired_workflow_task_imports()
+        try:
+            parsed = parse_task_import(content, filename=filename)
+        except TaskImportFormatError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        valid_rows = [row for row in parsed.rows if not row.errors]
+        tasks = [
+            {
+                "task_key": row.task_key,
+                "task_version": row.task_version,
+                "type": row.task_type,
+                "payload": row.payload,
+            }
+            for row in valid_rows
+        ]
+        actions = self.store.preview_workflow_task_actions(workflow_key, tasks)
+        action_by_key = {
+            (row["task_key"], row["task_version"]): row for row in actions["rows"]
+        }
+
+        rows: list[dict[str, Any]] = []
+        for parsed_row in parsed.rows:
+            key = (parsed_row.task_key, parsed_row.task_version)
+            if parsed_row.errors:
+                rows.append(
+                    {
+                        "row_number": parsed_row.row_number,
+                        "task_key": parsed_row.task_key,
+                        "task_version": parsed_row.task_version,
+                        "type": parsed_row.task_type,
+                        "payload": parsed_row.payload,
+                        "action": "error",
+                        "errors": list(parsed_row.errors),
+                    }
+                )
+                continue
+            action_row = action_by_key[key]
+            rows.append(
+                {
+                    "row_number": parsed_row.row_number,
+                    "task_key": parsed_row.task_key,
+                    "task_version": parsed_row.task_version,
+                    "type": parsed_row.task_type,
+                    "payload": action_row["payload"],
+                    "action": action_row["action"],
+                    "errors": [],
+                }
+            )
+
+        invalid_row_count = len(parsed.rows) - len(valid_rows)
+        can_confirm = bool(valid_rows) and invalid_row_count == 0
+        summary = {
+            "total_rows": len(parsed.rows),
+            "valid_rows": len(valid_rows),
+            "invalid_rows": invalid_row_count,
+            **actions["summary"],
+        }
+        import_id = f"task_import_{uuid.uuid4().hex}"
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+        report = {
+            "import_id": import_id,
+            "filename": parsed.filename,
+            "sheet_name": parsed.sheet_name,
+            "expires_at": expires_at.isoformat(),
+            "can_confirm": can_confirm,
+            "summary": summary,
+            "rows": rows,
+        }
+        self.store.create_workflow_task_import(
+            import_id=import_id,
+            workflow_key=workflow_key,
+            actor=actor,
+            filename=parsed.filename,
+            sheet_name=parsed.sheet_name,
+            tasks=tasks,
+            preview=report,
+            expires_at=expires_at,
+        )
+        return report
+
+    def confirm_task_import(
+        self,
+        *,
+        actor: str,
+        workflow_key: str,
+        import_id: str,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        snapshot = self.store.get_workflow_task_import(import_id)
+        if snapshot is None:
+            raise NotFound("workflow task import not found")
+        if not (snapshot.get("preview") or {}).get("can_confirm", True):
+            raise ValidationError("workflow task import cannot be confirmed")
+        try:
+            return self.store.confirm_workflow_task_import(
+                workflow_key,
+                import_id=import_id,
+                actor=actor,
+            )
+        except KeyError as exc:
+            raise NotFound("workflow task import not found") from exc
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+
+    def build_task_import_template(
+        self,
+        *,
+        actor: str,
+        workflow_key: str,
+    ) -> bytes:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        return build_task_import_template_file()
 
     @staticmethod
     def _is_leasable(task: dict[str, Any]) -> bool:

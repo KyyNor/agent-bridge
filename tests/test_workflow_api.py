@@ -1,6 +1,29 @@
 from __future__ import annotations
 
+from io import BytesIO
+
+import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
+
+
+def _task_import_workbook_bytes(
+    rows: list[list[object]],
+    *,
+    headers: list[object] | None = None,
+) -> bytes:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "tasks"
+    worksheet.append(headers or ["task_key", "task_version", "type"])
+    for row in rows:
+        worksheet.append(row)
+    output = BytesIO()
+    try:
+        workbook.save(output)
+        return output.getvalue()
+    finally:
+        workbook.close()
 
 
 def test_workflow_api_creates_and_lists_workflows(wm_paths):
@@ -396,6 +419,192 @@ def _seed_workflow(svc, key: str = "page-report") -> None:
         workflow_js="",
         status="active",
     )
+
+
+def _workflow_import_client(wm_paths, workflow_keys: tuple[str, ...] = ("page-report",)):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    for workflow_key in workflow_keys:
+        _seed_workflow(svc, workflow_key)
+    return svc, TestClient(create_app(wm_paths, {"root"}))
+
+
+def test_workflow_api_previews_and_confirms_task_import_as_admin(wm_paths):
+    svc, client = _workflow_import_client(wm_paths)
+    workbook_bytes = _task_import_workbook_bytes([["task:new", "v1", "repo"]])
+
+    preview_response = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers={"X-Agent-Bridge-User": "root"},
+        files={
+            "file": (
+                "tasks.xlsx",
+                workbook_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
+    assert preview["can_confirm"] is True
+    assert preview["summary"]["created"] == 1
+    assert preview["summary"]["total_rows"] == 1
+    assert svc.store.get_workflow_task_import(preview["import_id"])["tasks"] == [
+        {"payload": {}, "task_key": "task:new", "task_version": "v1", "type": "repo"}
+    ]
+
+    confirm_response = client.post(
+        "/workflows/page-report/tasks/import/confirm",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"import_id": preview["import_id"]},
+    )
+
+    assert confirm_response.status_code == 200, confirm_response.text
+    assert confirm_response.json()["created"] == 1
+    assert svc.store.get_workflow_task("page-report", "task:new", task_version="v1")["status"] == "pending"
+
+
+def test_workflow_api_task_import_row_errors_disable_confirmation(wm_paths):
+    svc, client = _workflow_import_client(wm_paths)
+    response = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers={"X-Agent-Bridge-User": "root"},
+        files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:valid", "v1", "repo"], ["", "v1", "repo"]]))},
+    )
+
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview["can_confirm"] is False
+    assert preview["summary"]["valid_rows"] == 1
+    assert preview["summary"]["invalid_rows"] == 1
+    assert preview["rows"][1]["action"] == "error"
+    assert preview["rows"][1]["errors"] == ["task_key 不能为空"]
+    assert svc.store.get_workflow_task_import(preview["import_id"])["tasks"] == [
+        {"payload": {}, "task_key": "task:valid", "task_version": "v1", "type": "repo"}
+    ]
+
+    confirm_response = client.post(
+        "/workflows/page-report/tasks/import/confirm",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"import_id": preview["import_id"]},
+    )
+    assert confirm_response.status_code == 400, confirm_response.text
+    assert svc.store.get_workflow_task("page-report", "task:valid", task_version="v1") is None
+
+
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        ("tasks.csv", _task_import_workbook_bytes([["task:new", "v1", "repo"]])),
+        ("tasks.xlsx", b"not an xlsx"),
+    ],
+)
+def test_workflow_api_rejects_invalid_task_import_files(wm_paths, filename, content):
+    _svc, client = _workflow_import_client(wm_paths)
+    response = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers={"X-Agent-Bridge-User": "root"},
+        files={"file": (filename, content)},
+    )
+
+    assert response.status_code == 400, response.text
+
+
+def test_workflow_api_rejects_task_imports_over_5000_rows(wm_paths):
+    _svc, client = _workflow_import_client(wm_paths)
+    content = _task_import_workbook_bytes(
+        [[f"task:{index}", "v1", "repo"] for index in range(5001)]
+    )
+
+    response = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers={"X-Agent-Bridge-User": "root"},
+        files={"file": ("tasks.xlsx", content)},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "5000" in response.text
+
+
+def test_workflow_api_rejects_non_admin_task_import_endpoints(wm_paths):
+    _svc, client = _workflow_import_client(wm_paths)
+    headers = {"X-Agent-Bridge-User": "alice"}
+
+    template_response = client.get("/workflows/page-report/tasks/import/template", headers=headers)
+    preview_response = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers=headers,
+        files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:new", "v1", "repo"]]))},
+    )
+    confirm_response = client.post(
+        "/workflows/page-report/tasks/import/confirm",
+        headers=headers,
+        json={"import_id": "not-used"},
+    )
+
+    assert template_response.status_code == 403
+    assert preview_response.status_code == 403
+    assert confirm_response.status_code == 403
+
+
+def test_workflow_api_rejects_second_task_import_confirmation(wm_paths):
+    _svc, client = _workflow_import_client(wm_paths)
+    headers = {"X-Agent-Bridge-User": "root"}
+    preview = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers=headers,
+        files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:new", "v1", "repo"]]))},
+    ).json()
+
+    assert client.post(
+        "/workflows/page-report/tasks/import/confirm",
+        headers=headers,
+        json={"import_id": preview["import_id"]},
+    ).status_code == 200
+    second = client.post(
+        "/workflows/page-report/tasks/import/confirm",
+        headers=headers,
+        json={"import_id": preview["import_id"]},
+    )
+
+    assert second.status_code == 400, second.text
+
+
+def test_workflow_api_rejects_cross_workflow_task_import_confirmation(wm_paths):
+    _svc, client = _workflow_import_client(wm_paths, ("page-report", "other-workflow"))
+    headers = {"X-Agent-Bridge-User": "root"}
+    preview = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers=headers,
+        files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:new", "v1", "repo"]]))},
+    ).json()
+
+    response = client.post(
+        "/workflows/other-workflow/tasks/import/confirm",
+        headers=headers,
+        json={"import_id": preview["import_id"]},
+    )
+
+    assert response.status_code == 400, response.text
+
+
+def test_workflow_api_downloads_task_import_template(wm_paths):
+    _svc, client = _workflow_import_client(wm_paths)
+
+    response = client.get(
+        "/workflows/page-report/tasks/import/template",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert response.headers["content-disposition"] == 'attachment; filename="workflow-task-template.xlsx"'
+    assert response.content.startswith(b"PK")
 
 
 def test_workflow_api_lists_runs_for_workflow(wm_paths):
