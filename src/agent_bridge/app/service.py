@@ -700,7 +700,7 @@ class AgentBridgeService:
         require_admin_user(actor, self.admins)
         doc = self._require_doc_admin_visible(actor, doc_slug)
         self._validate_source(source)
-        kbs = self.store.get_document_kbs(doc["id"])
+        kbs = self.store.get_document_kbs(doc["id"], active_only=True)
         display_name = original_filename or source.name
         archived = self.archive.store(source)
         version = self.store.create_document_version(

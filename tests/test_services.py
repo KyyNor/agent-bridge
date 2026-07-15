@@ -125,6 +125,29 @@ def test_get_doc_for_kb_hides_removed_document_association(wm_paths, tmp_path: P
     assert [item["slug"] for item in visible["kbs"]] == ["kb-b"]
 
 
+def test_update_document_ignores_removed_kb_placements(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb_a = service.create_kb("root", "kb-a", "KB A", "")
+    kb_b = service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"v1")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+    existing_job_ids = {job["id"] for job in service.status("root")["jobs"]}
+
+    updated_source = tmp_path / "Guide-v2.md"
+    updated_source.write_bytes(b"v2")
+    service.update_document("root", doc["slug"], updated_source, later=True)
+
+    new_jobs = [
+        job for job in service.status("root")["jobs"] if job["id"] not in existing_job_ids
+    ]
+    assert {(job["kb_id"], job["operation"]) for job in new_jobs} == {
+        (kb_b["id"], "update"),
+    }
+    assert not any(job["kb_id"] == kb_a["id"] for job in new_jobs)
+
+
 def test_update_folder_name_and_parent_is_atomic(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "kb", "KB", "")
