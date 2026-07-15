@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>知识库上传与文档浏览体验设计</title>
+  <style>
+    :root { color-scheme: light; --ink:#1f2937; --muted:#667085; --line:#d9e1ea; --panel:#f7f9fc; --blue:#256da6; --blue-soft:#eaf3fb; --red:#a33f32; --red-soft:#fff3f1; --green:#277445; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#eef2f6; color:var(--ink); font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif; }
+    main { max-width:1040px; margin:32px auto 64px; padding:0 24px; }
+    article { background:white; border:1px solid var(--line); border-radius:16px; padding:42px 52px; box-shadow:0 12px 36px rgba(31,41,55,.06); }
+    h1 { margin:0 0 8px; font-size:32px; letter-spacing:-.03em; }
+    h2 { margin:38px 0 12px; padding-bottom:7px; border-bottom:1px solid var(--line); font-size:22px; }
+    h3 { margin:24px 0 8px; font-size:17px; }
+    p { margin:9px 0; }
+    .lead { color:var(--muted); font-size:16px; }
+    .meta { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 28px; }
+    .tag { border:1px solid #c9d9e8; border-radius:999px; padding:3px 10px; color:var(--blue); background:var(--blue-soft); font-size:12px; }
+    .callout { margin:16px 0; padding:14px 16px; border-left:4px solid var(--blue); border-radius:8px; background:var(--panel); }
+    .warning { border-left-color:#c06b2d; background:#fff8ef; }
+    ul, ol { padding-left:24px; }
+    li { margin:5px 0; }
+    table { width:100%; border-collapse:collapse; margin:14px 0 18px; font-size:14px; }
+    th, td { padding:10px 11px; border:1px solid var(--line); vertical-align:top; text-align:left; }
+    th { background:var(--panel); font-weight:650; }
+    code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    code { padding:1px 4px; border-radius:4px; background:#f1f4f7; font-size:.92em; }
+    pre { overflow:auto; margin:12px 0; padding:14px 16px; border-radius:9px; background:#18212b; color:#e7edf3; font-size:12px; line-height:1.55; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .card { padding:14px 16px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+    .card h3 { margin-top:0; }
+    .check { color:var(--green); }
+    @media (max-width:760px) { main { margin:0 auto 32px; padding:0 10px; } article { padding:26px 20px; border-radius:12px; } h1 { font-size:26px; } .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+<article>
+  <h1>知识库上传与文档浏览体验设计</h1>
+  <p class="lead">覆盖上传进度、递归 ZIP、中文错误、ZIP/文件夹浏览、目录滚动、上传性能和同步任务实时刷新。</p>
+  <div class="meta"><span class="tag">状态：已确认设计</span><span class="tag">前端：Vue 3 + TypeScript</span><span class="tag">后端：FastAPI + SQLite</span><span class="tag">日期：2026-07-15</span></div>
+
+  <h2>1. 目标与边界</h2>
+  <p>上传弹窗是本次上传操作的唯一状态中心。上传过程中弹窗保持打开，展示每个顶层文件的网络上传进度和服务端处理阶段；失败项在弹窗内展开中文、可定位的错误详情。ZIP 按“整包原子”处理：外层 ZIP 或任意内层 ZIP 失败时，不为该 ZIP 创建任何文档、目录映射或同步任务。</p>
+  <p>ZIP 是用于浏览的特殊容器，不是检索后端的同步文档。ZIP 内的实际支持文档仍以普通文档入库、去重和同步；ZIP 本身不上传到 RAGFlow、WeKnora、PageIndex 或 Mock 后端，也不参与检索。</p>
+  <div class="callout"><strong>已确认的语义：</strong>一个上传动作可以包含多个普通文件和 ZIP。每个顶层 ZIP 自身原子失败；普通文件仍按文件独立处理。若一个 ZIP 中嵌套 ZIP 损坏，错误必须显示完整链路，例如“release.zip → manuals.zip → api-v2.zip”。</div>
+
+  <h2>2. 当前根因</h2>
+  <table>
+    <thead><tr><th>现象</th><th>当前原因</th><th>设计上的处理</th></tr></thead>
+    <tbody>
+      <tr><td>没有上传进度</td><td>客户端使用 <code>fetch</code> 提交 FormData，无法读取请求体上传进度；多个文件在前端串行发送。</td><td>上传 API 客户端改为 XHR，可读取 <code>upload.onprogress</code>；普通文件受限并发。</td></tr>
+      <tr><td>嵌套 ZIP 失败</td><td><code>extract_zip_documents</code> 当前把任何 <code>.zip</code> 成员直接判定为不允许。</td><td>递归读取 ZIP，先完成整棵压缩树的安全校验、CRC 校验和临时解压，再执行入库。</td></tr>
+      <tr><td>400 不友好</td><td>后端错误可能是英文，客户端把整个响应体拼接成“400: ...”，没有提取 <code>detail</code>。</td><td>后端错误统一中文且携带 ZIP 链路；客户端优先提取 JSON detail 并以中文标题显示。</td></tr>
+      <tr><td>文件名乱码</td><td>ZIP 使用默认 CP437 解码，未标 UTF-8 的 GBK/GB18030 文件名被错误解释。</td><td>按 UTF-8 标志优先，针对无标志名称在 UTF-8、GB18030、Big5、Shift-JIS、CP437 中选择可读编码。</td></tr>
+      <tr><td>右侧只有普通文件</td><td><code>GET /docs</code> 只返回文档行，目录只在左侧树中，ZIP 也没有持久化的容器关系。</td><td>新增轻量 ZIP 虚拟树和浏览 API，右侧返回文件夹、ZIP 和文件三种条目。</td></tr>
+      <tr><td>目录撑开整体页面</td><td>目录树没有固定可视高度，树的增长会影响详情页整体高度。</td><td>目录树容器使用固定高度和 <code>overflow-y:auto</code>，页面只保留主内容滚动。</td></tr>
+      <tr><td>添加文档慢</td><td>前端串行请求；普通文件先算一次 hash，归档时又算一次；ZIP 解压文件也会被重复读取。</td><td>hash 结果向归档层传递；ZIP 解压复制时同步计算 hash；普通文件最多 3 路并发。</td></tr>
+      <tr><td>同步任务需刷新页面</td><td>上传成功只刷新文档和知识库摘要，没有重新请求 <code>/status</code> 更新同步页签。</td><td>上传、Git 同步、目录变更后统一刷新文档、目录、摘要和同步任务。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. 整体架构</h2>
+  <div class="grid">
+    <div class="card"><h3>客户端</h3><p>上传弹窗维护顶层上传项状态：<code>queued</code>、<code>uploading</code>、<code>processing</code>、<code>succeeded</code>、<code>failed</code>。XHR 只负责网络进度；请求完成前显示“服务端处理中”，避免把网络百分比误认为入库百分比。</p></div>
+    <div class="card"><h3>服务端</h3><p>普通文件沿用现有入库入口；ZIP 先递归验证与临时展开，生成虚拟浏览树，再调用复用 hash 的单文件入库流程。ZIP 错误在所有数据库写入之前抛出。</p></div>
+    <div class="card"><h3>存储</h3><p>现有 <code>documents</code>、<code>document_versions</code> 和 <code>document_kbs</code> 继续保存可检索文档。新增 <code>knowledge_archive_entries</code> 保存 ZIP、ZIP 内目录、嵌套 ZIP 和文件之间的浏览关系。</p></div>
+    <div class="card"><h3>浏览</h3><p>左侧仍是知识库真实目录树；右侧改用 browse API，当前真实目录下显示子目录、ZIP 容器和未归入 ZIP 的普通文件。进入 ZIP 后只切换浏览上下文，不改变同步任务模型。</p></div>
+  </div>
+
+  <h2>4. ZIP 安全、递归和编码</h2>
+  <h3>4.1 递归规则</h3>
+  <ol>
+    <li>对每一级 ZIP 先读取成员清单，拒绝绝对路径、包含 <code>..</code> 的路径、符号链接和重复的规范化路径。</li>
+    <li>对当前 ZIP 调用 <code>testzip()</code>，发现 CRC 或读取校验错误时立即终止，并把当前压缩链路加入错误信息。</li>
+    <li>普通支持扩展名文件写入临时目录；<code>.zip</code> 成员读取为内存流并递归处理。嵌套 ZIP 不作为普通文件。</li>
+    <li>全棵树成功后才调用文档入库；任意内层失败时临时目录清理，数据库中不出现本次 ZIP 的文档、虚拟节点或同步任务。</li>
+    <li>递归深度限制为 8 层；超过限制返回“ZIP 嵌套层级超过 8 层”，防止压缩炸弹消耗无限资源。该限制不影响普通目录深度。</li>
+  </ol>
+  <h3>4.2 文件名解码</h3>
+  <p>若 ZIP 成员带 UTF-8 标志，使用 ZIP 标准解码结果；否则以可读性评分选择编码，候选顺序包含 UTF-8、GB18030、Big5、Shift-JIS 和 CP437。评分优先保留中文、日文等有效文字，惩罚控制字符、替换字符和典型 CP437 乱码符号。ASCII 名称在所有候选编码下保持不变。</p>
+  <p>如果任何候选都无法安全解码，错误中显示该 ZIP 的完整链路和“文件名编码无法识别”，不把乱码名称写进数据库。</p>
+  <h3>4.3 错误格式</h3>
+  <pre>ZIP 上传失败
+文件：release-assets.zip
+位置：release-assets.zip → manuals.zip → api-v2.zip
+原因：内层 ZIP 文件损坏，无法读取目录
+处理结果：本次 ZIP 未新增任何文件</pre>
+  <p>API 继续使用 HTTP 400 表示用户上传内容不合法，但响应体的 <code>detail</code> 是上述中文信息；客户端不再直接展示英文状态文本。</p>
+
+  <h2>5. ZIP 虚拟浏览树</h2>
+  <h3>5.1 数据模型</h3>
+  <p>新增表 <code>knowledge_archive_entries</code>。每行代表一个浏览条目，<code>kind</code> 为 <code>zip</code>、<code>folder</code> 或 <code>document</code>。外层 ZIP 的父级是知识库真实目录（<code>parent_folder_id</code>）；ZIP 内的条目通过 <code>parent_id</code> 形成树。文件条目通过 <code>doc_id</code> 指向现有文档实体。</p>
+  <pre>knowledge_archive_entries
+  id              INTEGER PRIMARY KEY
+  kb_id           INTEGER NOT NULL
+  parent_id       INTEGER NULL       -- ZIP 内部父条目
+  parent_folder_id INTEGER NULL      -- 仅外层 ZIP 使用
+  kind            TEXT NOT NULL      -- zip | folder | document
+  name            TEXT NOT NULL
+  relative_path   TEXT NOT NULL
+  doc_id          INTEGER NULL
+  status          TEXT NOT NULL DEFAULT 'active'
+  created_at      TEXT NOT NULL
+  updated_at      TEXT NOT NULL</pre>
+  <p>为支持“ZIP 内文档只在 ZIP 浏览上下文出现”，<code>document_kbs</code> 增加可空的 <code>archive_entry_id</code>。普通上传为空；ZIP 首次导入的文档指向对应文件条目。重复内容复用已有文档时，新 ZIP 文件条目仍可指向该文档，但不移动已有文档的原始目录位置。</p>
+  <p>解压成功后的整批入库使用 SQLite 单事务：文档、版本、知识库关联、虚拟节点和同步任务要么全部提交，要么全部回滚。归档文件采用回滚清理清单，只有本批次新写入且回滚后没有任何版本引用的内容寻址文件才会删除，避免产生半成品状态。</p>
+  <h3>5.2 浏览 API</h3>
+  <p>新增 <code>GET /kbs/{kb_slug}/browse</code>。<code>folder_id</code> 和 <code>archive_entry_id</code> 二选一；不传参数时进入知识库根目录。返回当前上下文和直接子条目：</p>
+  <pre>{
+  "context": {"kind": "folder", "id": 12, "name": "产品文档", "parent_id": null},
+  "entries": [
+    {"kind": "folder", "id": 21, "name": "API", "child_count": 4},
+    {"kind": "zip", "id": 88, "name": "release-assets.zip", "child_count": 12},
+    {"kind": "document", "doc_id": 31, "slug": "readme", "name": "readme.md", "sync_status": "synced"}
+  ]
+}</pre>
+  <p>右侧点击真实目录条目时选择该目录；点击 ZIP 或 ZIP 内目录时仅更新 browse 上下文；点击文件沿用现有文档详情。面包屑显示“知识库 / 真实目录 / ZIP / 内部目录”，返回按钮回到上一级上下文。</p>
+
+  <h2>6. 上传弹窗与进度</h2>
+  <ul>
+    <li>弹窗宽度保持可读范围，文件名列使用可收缩的 <code>minmax(0,1fr)</code>，长路径通过 title 或详情展示，不撑破布局。</li>
+    <li>上传开始后禁用关闭和重新选择；取消按钮只在队列尚未开始时可用。服务端处理完成后显示成功/失败汇总，用户点击“关闭”退出。</li>
+    <li>每个顶层项显示文件名、大小、进度、阶段和错误详情；ZIP 额外显示“解压中”“解析内层 ZIP”“创建浏览目录”等阶段。</li>
+    <li>普通文件请求最多并发 3 个；同一个 ZIP 请求不拆分，保证一个 ZIP 的原子性。上传成功后重新加载知识库摘要、目录树、右侧 browse 条目、当前文档列表和同步任务列表。</li>
+    <li>上传错误通过客户端统一解析：优先读取 JSON 的 <code>detail</code>，其次尝试纯文本，最后才使用“上传失败（HTTP 状态码）”。</li>
+  </ul>
+
+  <h2>7. 性能设计</h2>
+  <table>
+    <thead><tr><th>优化点</th><th>实现</th><th>收益与约束</th></tr></thead>
+    <tbody>
+      <tr><td>避免普通文件二次 hash</td><td><code>ArchiveStorage.store(source, content_hash=..., file_size=...)</code> 接收调用方已计算的结果。</td><td>每个文件从两次读降为一次 hash + 一次归档复制；内容去重逻辑不变。</td></tr>
+      <tr><td>ZIP 解压同时计算 hash</td><td>写临时文件时使用 hash wrapper，<code>ExtractedDocument</code> 携带 hash 和大小。</td><td>ZIP 子文件不再为去重额外完整读取一次；仍保留临时文件供归档复制。</td></tr>
+      <tr><td>前端受限并发</td><td>普通文件 3 路并发，单个 ZIP 作为一个请求；每项独立显示进度。</td><td>减少大量小文件的网络等待；不把 SQLite 写入并发扩大到不可控范围。</td></tr>
+      <tr><td>数据库索引</td><td>为 <code>knowledge_archive_entries(kb_id,parent_id,status)</code>、<code>(kb_id,parent_folder_id,status)</code> 和 <code>document_kbs(archive_entry_id)</code> 建索引。</td><td>右侧浏览只扫描当前父节点，避免每次加载整棵树。</td></tr>
+    </tbody>
+  </table>
+  <p>本次不引入后台上传任务、WebSocket 或 SSE；这样保留现有 API 兼容性，网络进度和服务端阶段反馈已经能覆盖用户可感知的等待过程。未来若需要跨刷新保留上传任务，再单独引入异步任务模型。</p>
+
+  <h2>8. 同步任务刷新</h2>
+  <p>抽取统一的前端刷新函数，在以下操作成功后调用：</p>
+  <ol>
+    <li>上传完成：刷新知识库摘要、目录树、browse 条目、当前文档和当前知识库的同步任务。</li>
+    <li>Git 数据源同步或删除：刷新数据源、文档、摘要和同步任务。</li>
+    <li>目录创建、重命名、移动、删除以及文档移动/关联：刷新目录、browse 条目、文档和同步任务。</li>
+  </ol>
+  <p>同步页签数量以最新 <code>GET /status</code> 响应为准，不依赖整页刷新。已经运行或失败的任务继续由后端状态返回，前端只负责重新拉取和展示。</p>
+
+  <h2>9. 测试与验收</h2>
+  <div class="grid">
+    <div class="card"><h3>ZIP / 编码</h3><ul><li class="check">递归导入两层以上 ZIP。</li><li class="check">损坏内层 ZIP 返回完整链路且 KB 无新增文档。</li><li class="check">GBK/GB18030 中文文件名可读；路径安全和符号链接继续拒绝。</li><li class="check">ZIP 虚拟树可浏览外层、内部目录、嵌套 ZIP 和文件。</li></ul></div>
+    <div class="card"><h3>上传 / 性能</h3><ul><li class="check">XHR 进度事件更新每个上传项。</li><li class="check">普通文件并发上限为 3，失败项显示中文原因。</li><li class="check">hash 只计算一次；ZIP 成员不重复读取。</li><li class="check">上传弹窗状态和完成汇总正确。</li></ul></div>
+    <div class="card"><h3>浏览 / 目录</h3><ul><li class="check">右侧同时显示文件夹、ZIP 和普通文件。</li><li class="check">目录树固定高度，超出后内部滚动。</li><li class="check">ZIP 图标与普通文件图标区分，点击进入内容。</li><li class="check">删除文档/目录后不留下失效虚拟节点。</li></ul></div>
+    <div class="card"><h3>同步 / 回归</h3><ul><li class="check">上传后同步页签立即显示新增任务。</li><li class="check">已有去重、目录、Git、后端同步测试继续通过。</li><li class="check">普通文件和 ZIP 的旧 API 响应兼容。</li><li class="check">前端 typecheck、build 与聚焦 Node 测试通过。</li></ul></div>
+  </div>
+
+  <h2>10. 不做的事情</h2>
+  <ul>
+    <li>不把 ZIP 原始二进制作为检索文档上传到任何后端。</li>
+    <li>不在本次引入后台异步上传任务、断点续传、跨刷新恢复。</li>
+    <li>不改变现有内容去重范围：仍按知识库内当前版本的 SHA-256 判断。</li>
+    <li>不把普通真实目录和 ZIP 虚拟目录混为同一个后端目录；ZIP 仅作为浏览容器，文档同步路径沿用文档内部相对路径。</li>
+  </ul>
+</article>
+</main>
+</body>
+</html>
