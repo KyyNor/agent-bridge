@@ -604,7 +604,7 @@ class KnowledgeRepository:
                   d.title AS doc_title,
                   kb.slug AS kb_slug,
                   kb.name AS kb_name,
-                  COALESCE(target.backend_kb_id, kb.slug) AS backend_kb_id,
+                  target.backend_kb_id AS backend_kb_id,
                   v.version_no AS version_no,
                   v.archive_path AS archive_path,
                   v.original_filename AS original_filename

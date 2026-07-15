@@ -614,6 +614,146 @@ def test_sync_uses_backend_kb_id_for_upload_and_delete(wm_paths, tmp_path: Path)
     assert backend.delete_kb_ids == ["backend-dataset-123"]
 
 
+def test_sync_recovers_one_missing_remote_kb_for_all_snapshot_documents(wm_paths, tmp_path: Path) -> None:
+    class RecoveringBackend:
+        def __init__(self) -> None:
+            self.created_kb_ids: list[str] = []
+            self.valid_kb_ids: set[str] = set()
+            self.upload_kb_ids: list[str] = []
+
+        def create_kb(self, slug: str, name: str) -> str:
+            backend_kb_id = f"remote-kb-{len(self.created_kb_ids) + 1}"
+            self.created_kb_ids.append(backend_kb_id)
+            self.valid_kb_ids.add(backend_kb_id)
+            return backend_kb_id
+
+        def delete_kb(self, backend_kb_id: str) -> None:
+            self.valid_kb_ids.discard(backend_kb_id)
+
+        def capabilities(self) -> BackendCapabilities:
+            return BackendCapabilities(supports_folders=False)
+
+        def upload(
+            self,
+            backend_kb_id: str,
+            doc_slug: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
+            if backend_kb_id not in self.valid_kb_ids:
+                raise RuntimeError("Weknora API error: knowledge base not found (404, code 1003)")
+            self.upload_kb_ids.append(backend_kb_id)
+            return f"{backend_kb_id}:{doc_slug}"
+
+        def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
+            pass
+
+        def get_status(self, backend_kb_id: str, backend_doc_id: str):
+            return None
+
+        def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6):
+            return []
+
+        def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None):
+            return None, ""
+
+    ensure_directories(wm_paths)
+    backend = RecoveringBackend()
+    service = AgentBridgeService.create(wm_paths, admins={"root"})
+    service.registry = BackendRegistry(
+        {"weknora": BackendConfig(slug="weknora", backend_type="mock")},
+        paths=tmp_path,
+    )
+    service.registry._adapters["weknora"] = backend  # type: ignore[attr-defined]
+    service.init_system()
+    kb = service.create_kb("root", "docs", "Docs", "")
+    old_backend_kb_id = backend.created_kb_ids[-1]
+    backend.valid_kb_ids.remove(old_backend_kb_id)
+
+    for filename in ("one.md", "two.md"):
+        source = tmp_path / filename
+        source.write_text(filename, encoding="utf-8")
+        service.add_document("root", source, ["docs"], later=True)
+
+    result = service.sync("root", all_users=False)
+
+    target = next(target for target in service.store.list_backend_targets(kb["id"]) if target["slug"] == "weknora")
+    assert result == {"processed": 2, "succeeded": 2, "failed": 0}
+    assert backend.created_kb_ids == [old_backend_kb_id, "remote-kb-2"]
+    assert backend.upload_kb_ids == ["remote-kb-2", "remote-kb-2"]
+    assert target["backend_kb_id"] == "remote-kb-2"
+
+
+def test_align_backends_repairs_existing_target_with_missing_backend_kb_id(wm_paths, tmp_path: Path) -> None:
+    class RecordingBackend:
+        def __init__(self) -> None:
+            self.created_kb_ids: list[str] = []
+            self.upload_kb_ids: list[str] = []
+
+        def create_kb(self, slug: str, name: str) -> str:
+            backend_kb_id = f"remote-kb-{len(self.created_kb_ids) + 1}"
+            self.created_kb_ids.append(backend_kb_id)
+            return backend_kb_id
+
+        def delete_kb(self, backend_kb_id: str) -> None:
+            pass
+
+        def capabilities(self) -> BackendCapabilities:
+            return BackendCapabilities(supports_folders=False)
+
+        def upload(
+            self,
+            backend_kb_id: str,
+            doc_slug: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
+            self.upload_kb_ids.append(backend_kb_id)
+            return f"{backend_kb_id}:{doc_slug}"
+
+        def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
+            pass
+
+        def get_status(self, backend_kb_id: str, backend_doc_id: str):
+            return None
+
+        def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6):
+            return []
+
+        def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None):
+            return None, ""
+
+    ensure_directories(wm_paths)
+    backend = RecordingBackend()
+    service = AgentBridgeService.create(wm_paths, admins={"root"})
+    service.registry = BackendRegistry(
+        {"weknora": BackendConfig(slug="weknora", backend_type="mock")},
+        paths=tmp_path,
+    )
+    service.registry._adapters["weknora"] = backend  # type: ignore[attr-defined]
+    service.init_system()
+    kb = service.create_kb("root", "docs", "Docs", "")
+    with service.store.connect() as conn:
+        conn.execute(
+            "UPDATE backend_targets SET backend_kb_id = NULL WHERE kb_id = ? AND slug = ?",
+            (kb["id"], "weknora"),
+        )
+
+    source = tmp_path / "guide.md"
+    source.write_text("guide", encoding="utf-8")
+    service.add_document("root", source, ["docs"], later=True)
+
+    service.align_backends()
+    service.sync("root", all_users=False)
+
+    target = next(target for target in service.store.list_backend_targets(kb["id"]) if target["slug"] == "weknora")
+    assert backend.created_kb_ids == ["remote-kb-1", "remote-kb-2"]
+    assert target["backend_kb_id"] == "remote-kb-2"
+    assert backend.upload_kb_ids == ["remote-kb-2"]
+
+
 def test_sync_processes_later_job(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
