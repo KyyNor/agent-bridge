@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import io
 from pathlib import Path
+import threading
+import time
 import zipfile
 
 import pytest
@@ -431,6 +434,115 @@ def test_zip_transaction_removes_new_archive_file_on_rollback(
     assert service.status("root")["jobs"] == []
 
 
+def test_concurrent_same_content_uploads_are_serialized_and_deduplicated(
+    wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    sources = []
+    for index in range(3):
+        source = tmp_path / f"guide-{index}.md"
+        source.write_bytes(b"same concurrent content")
+        sources.append(source)
+
+    active_hash_checks = 0
+    max_active_hash_checks = 0
+    counters_lock = threading.Lock()
+    original_find = service.store.find_current_document_by_content_hash
+
+    def tracked_find(kb_id: int, content_hash: str):
+        nonlocal active_hash_checks, max_active_hash_checks
+        with counters_lock:
+            active_hash_checks += 1
+            max_active_hash_checks = max(max_active_hash_checks, active_hash_checks)
+        try:
+            time.sleep(0.02)
+            return original_find(kb_id, content_hash)
+        finally:
+            with counters_lock:
+                active_hash_checks -= 1
+
+    monkeypatch.setattr(service.store, "find_current_document_by_content_hash", tracked_find)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(
+            executor.map(
+                lambda source: service.add_document("root", source, ["kb"], later=True),
+                sources,
+            )
+        )
+
+    assert max_active_hash_checks == 1
+    assert len(service.list_docs("root", "kb")) == 1
+    assert sum(bool(result.get("skipped")) for result in results) == 2
+
+
+def test_concurrent_zip_rollback_does_not_remove_successful_archive(
+    wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    failing_archive = tmp_path / "failing.zip"
+    successful_archive = tmp_path / "successful.zip"
+    with zipfile.ZipFile(failing_archive, "w") as archive:
+        archive.writestr("guide.md", b"failing upload")
+    with zipfile.ZipFile(successful_archive, "w") as archive:
+        archive.writestr("guide.md", b"successful upload")
+
+    active_snapshots = 0
+    max_active_snapshots = 0
+    snapshot_lock = threading.Lock()
+    original_archive_files = service._archive_files
+
+    def tracked_archive_files() -> set[Path]:
+        nonlocal active_snapshots, max_active_snapshots
+        with snapshot_lock:
+            active_snapshots += 1
+            max_active_snapshots = max(max_active_snapshots, active_snapshots)
+        try:
+            time.sleep(0.02)
+            return original_archive_files()
+        finally:
+            with snapshot_lock:
+                active_snapshots -= 1
+
+    monkeypatch.setattr(service, "_archive_files", tracked_archive_files)
+    original_update = service.store.update_archive_entry_document
+    upload_state = threading.local()
+
+    def fail_one_archive_entry(entry_id: int, doc_id: int) -> None:
+        if getattr(upload_state, "should_fail", False):
+            raise RuntimeError("forced concurrent rollback")
+        original_update(entry_id, doc_id)
+
+    monkeypatch.setattr(service.store, "update_archive_entry_document", fail_one_archive_entry)
+
+    def upload(source: Path, should_fail: bool):
+        upload_state.should_fail = should_fail
+        try:
+            return service.add_document("root", source, ["kb"], later=True)
+        finally:
+            del upload_state.should_fail
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        failed = executor.submit(upload, failing_archive, True)
+        successful = executor.submit(upload, successful_archive, False)
+        with pytest.raises(RuntimeError, match="forced concurrent rollback"):
+            failed.result()
+        result = successful.result()
+
+    assert max_active_snapshots == 1
+    assert result["uploaded_count"] == 1
+    assert len(service.list_docs("root", "kb")) == 1
+    document = result["documents"][0]
+    archive_path = Path(service.store.list_versions(document["id"])[0]["archive_path"])
+    assert archive_path.exists()
+    assert {
+        path
+        for path in service.paths.archive_dir.rglob("*")
+        if path.is_file()
+    } == {archive_path}
+
+
 def test_document_relative_path_uses_selected_folder_as_base(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "kb", "KB", "")
@@ -537,9 +649,10 @@ def test_zip_rejects_malformed_archive_without_creating_documents(wm_paths, tmp_
     archive = tmp_path / "broken.zip"
     archive.write_bytes(b"not a zip")
 
-    with pytest.raises(ValidationError, match="invalid zip archive"):
+    with pytest.raises(ValidationError, match="压缩包解压失败") as error:
         service.add_document("root", archive, ["kb"], later=True)
 
+    assert "invalid zip archive" not in str(error.value)
     assert service.list_docs("root", "kb") == []
 
 
@@ -550,14 +663,14 @@ def test_zip_rejects_path_traversal_and_empty_archives(wm_paths, tmp_path: Path)
     with zipfile.ZipFile(traversal, "w") as zf:
         zf.writestr("../escape.md", b"escape")
 
-    with pytest.raises(ValidationError, match="unsafe zip member path"):
+    with pytest.raises(ValidationError, match="压缩包成员路径不安全"):
         service.add_document("root", traversal, ["kb"], later=True)
 
     empty = tmp_path / "empty.zip"
     with zipfile.ZipFile(empty, "w") as zf:
         zf.writestr("image.png", b"ignored")
 
-    with pytest.raises(ValidationError, match="no supported documents"):
+    with pytest.raises(ValidationError, match="压缩包中没有支持的文档"):
         service.add_document("root", empty, ["kb"], later=True)
 
     assert service.list_docs("root", "kb") == []

@@ -196,6 +196,22 @@ def test_extract_zip_documents_reports_complete_chain_for_broken_inner_zip(tmp_p
     assert "manuals.zip/broken.zip" in message
 
 
+def test_extract_zip_documents_uses_display_archive_name_for_error_chain(tmp_path: Path) -> None:
+    source = tmp_path / "tmp-upload.zip"
+    source.write_bytes(_zip_bytes([("broken.zip", b"not a zip")]))
+
+    with pytest.raises(ValidationError) as error:
+        extract_zip_documents(
+            source,
+            tmp_path / "extracted",
+            {".md"},
+            archive_name="release.zip",
+        )
+
+    assert "release.zip -> broken.zip" in str(error.value)
+    assert "tmp-upload.zip" not in str(error.value)
+
+
 @pytest.mark.parametrize(
     "member_name",
     ["../outside.md", "/absolute.md", r"C:\\absolute.md", "docs/guide\x00.md", ""],

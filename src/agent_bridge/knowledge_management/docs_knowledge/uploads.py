@@ -155,10 +155,11 @@ def extract_zip_documents(
     source: Path,
     destination: Path,
     allowed_extensions: set[str],
+    archive_name: str | None = None,
 ) -> ExtractedZip:
     """Safely validate and recursively extract supported ZIP documents."""
     collector = _ExtractionCollector(destination, allowed_extensions)
-    chain = (source.name,)
+    chain = (archive_name or source.name,)
     try:
         _extract_archive(
             source,

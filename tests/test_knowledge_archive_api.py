@@ -209,7 +209,9 @@ def test_broken_inner_zip_returns_chinese_detail_and_no_state(wm_paths) -> None:
     assert response.status_code == 400
     detail = response.json()["detail"]
     assert "broken.zip" in detail
+    assert "release.zip" in detail
     assert "内层 ZIP" in detail
     assert "解压失败" in detail
+    assert "invalid zip archive" not in detail
     assert client.get("/docs", params={"kb": "docs"}, headers=headers).json() == []
     assert client.get("/kbs/docs/browse", headers=headers).json()["entries"] == []
