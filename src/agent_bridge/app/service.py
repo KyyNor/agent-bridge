@@ -451,8 +451,11 @@ class AgentBridgeService:
         doc = self._require_doc_admin_visible(actor, doc_slug)
         if self.store.get_folder(kb["id"], folder_id) is None:
             raise NotFound("folder not found")
-        if self.store.get_document_placement(doc["id"], kb["id"]) is None:
+        current_placement = self.store.get_document_placement(doc["id"], kb["id"])
+        if current_placement is None:
             raise NotFound("document knowledge-base association not found")
+        if current_placement["folder_id"] == folder_id:
+            return {**current_placement, "slug": doc_slug, "kb": kb_slug}
         placement = self.store.update_document_placement(doc["id"], kb["id"], folder_id)
         self._queue_placement_sync_jobs(doc, kb["id"])
         return {**placement, "slug": doc_slug, "kb": kb_slug}
@@ -907,7 +910,7 @@ class AgentBridgeService:
         - 新增文件 → add_document(source_type='git')
         - 仓库已删除 → delete_document(先生成 Operation.delete 任务再 soft_delete)
         - 内容修改 → 先删后加(doc_id 变化)
-        - 内容不变 → 跳过
+        - 内容不变 → 保留文档版本,按仓库相对路径对齐目录 placement
         """
         kb = self._require_kb_admin_visible(actor, kb_slug)
         source = self.store.get_kb_repo_source(kb["id"], repo_key)
@@ -971,6 +974,10 @@ class AgentBridgeService:
                     )
                     updated += 1
                 else:
+                    # 内容不变时只修正当前 KB 的目录 placement,不重新导入全局 document。
+                    self._import_repo_file(
+                        actor, kb_slug, repo_key, item["path"], slug, item["relative_path"]
+                    )
                     unchanged += 1
             # 删除
             for slug in existing_slugs - set(current.keys()):
@@ -995,6 +1002,51 @@ class AgentBridgeService:
         slug: str,
         relative_path: str,
     ) -> None:
+        existing = self.store.get_document_by_slug(slug)
+        if existing is not None:
+            kb = self._require_kb_admin_visible(actor, kb_slug)
+            placement = self.store.get_document_placement(existing["id"], kb["id"])
+            if placement is not None:
+                normalized_path = normalize_relative_document_path(relative_path)
+                parent_parts, basename = split_document_path(normalized_path)
+                current_document = self.store.get_document_by_id(existing["id"])
+                current_original_path = ""
+                if current_document and current_document.get("current_version_id"):
+                    current_version = next(
+                        (
+                            version
+                            for version in self.store.list_versions(existing["id"])
+                            if version["id"] == current_document["current_version_id"]
+                        ),
+                        None,
+                    )
+                    if current_version is not None:
+                        current_original_path = normalize_relative_document_path(
+                            current_version["original_filename"]
+                        )
+                        if split_document_path(current_original_path)[1] != basename:
+                            return
+
+                target_folder_path = "/".join(parent_parts)
+                current_folder_path = placement.get("folder_path") or ""
+                if (
+                    current_original_path == normalized_path
+                    and current_folder_path == target_folder_path
+                ):
+                    return
+                if current_folder_path == target_folder_path:
+                    return
+
+                target_folder_id = self._ensure_document_parent_folder(
+                    kb["id"], None, parent_parts
+                )
+                self.store.update_document_placement(
+                    existing["id"], kb["id"], target_folder_id
+                )
+                if current_document is not None:
+                    self._queue_placement_sync_jobs(current_document, kb["id"])
+                return
+
         self.add_document(
             actor, path, [kb_slug], later=True,
             original_filename=relative_path,

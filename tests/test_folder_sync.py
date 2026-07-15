@@ -160,6 +160,84 @@ def test_folder_move_skips_flat_reupload_but_keeps_content_update_and_moves_wekn
     assert next(job for job in service.status("root")["jobs"] if job["id"] == flat_update["id"])["status"] == "pending"
 
 
+def test_git_sync_moves_unchanged_document_when_repository_folder_changes(
+    wm_paths, tmp_path: Path
+):
+    weknora = RecordingBackend(supports_folders=True)
+    flat = RecordingBackend(supports_folders=False)
+    service = _service(wm_paths, tmp_path, {"weknora": weknora, "flat": flat})
+    kb = service.create_kb("root", "docs", "Docs", "")
+    repo_path = tmp_path / "repo"
+    old_path = repo_path / "A" / "guide.md"
+    old_path.parent.mkdir(parents=True)
+    old_path.write_text("# Guide", encoding="utf-8")
+    service.store.upsert_code_repository(
+        repo_key="docs-repo", name="Docs Repo", git_url="", branch="main", auth_ref="",
+        description="", tags=[], category_key="", sync_interval_minutes=60,
+        auto_understand=False, status="active",
+    )
+    service.store.mark_code_repository_sync(
+        "docs-repo", local_path=str(repo_path), last_commit="test", success=True, error=None
+    )
+    service.store.upsert_kb_repo_source(kb["id"], "docs-repo", [".md"])
+    service.codegraph.sync_repository = lambda actor, repo_key: None
+
+    first_sync = service.sync_kb_repo_source("root", "docs", "docs-repo")
+    assert first_sync["added"] == 1
+    doc = service.store.get_document_by_slug("guide")
+    assert doc is not None
+    service.sync("root", all_users=False)
+    before_job_ids = {job["id"] for job in service.status("root")["jobs"]}
+
+    new_path = repo_path / "B" / "guide.md"
+    new_path.parent.mkdir()
+    old_path.rename(new_path)
+    result = service.sync_kb_repo_source("root", "docs", "docs-repo")
+
+    assert result == {
+        "kb_slug": "docs", "repo_key": "docs-repo",
+        "added": 0, "removed": 0, "updated": 0, "unchanged": 1,
+    }
+    assert service.store.get_document_by_slug("guide")["id"] == doc["id"]
+    placement = service.store.get_document_placement(doc["id"], kb["id"])
+    assert placement["folder_path"] == "B"
+    new_jobs = [
+        job for job in service.status("root")["jobs"] if job["id"] not in before_job_ids
+    ]
+    assert [(job["backend_slug"], job["operation"]) for job in new_jobs] == [
+        ("weknora", "move")
+    ]
+    assert not any(job["backend_slug"] == "flat" for job in new_jobs)
+
+    service.sync("root", all_users=False)
+    assert weknora.moves[-1]["remote_path"] == "B/guide.md"
+    assert flat.moves == []
+
+
+def test_place_document_same_folder_is_a_noop(wm_paths, tmp_path: Path, monkeypatch):
+    weknora = RecordingBackend(supports_folders=True)
+    service = _service(wm_paths, tmp_path, {"weknora": weknora})
+    kb = service.create_kb("root", "docs", "Docs", "")
+    root = service.store.get_root_folder(kb["id"])
+    folder = service.create_folder("root", "docs", "A", root["id"])
+    source = tmp_path / "guide.md"
+    source.write_text("# Guide", encoding="utf-8")
+    doc = service.add_document("root", source, ["docs"], later=True, folder_id=folder["id"])
+    service.sync("root", all_users=False)
+    placement_before = service.store.get_document_placement(doc["id"], kb["id"])
+    jobs_before = service.status("root")["jobs"]
+
+    def unexpected_placement_update(*args, **kwargs):
+        raise AssertionError("same-folder placement must not update document_kbs")
+
+    monkeypatch.setattr(service.store, "update_document_placement", unexpected_placement_update)
+    result = service.place_document("root", doc["slug"], "docs", folder["id"])
+
+    assert result == {**placement_before, "slug": doc["slug"], "kb": "docs"}
+    assert service.store.get_document_placement(doc["id"], kb["id"]) == placement_before
+    assert service.status("root")["jobs"] == jobs_before
+
+
 def test_successive_folder_moves_only_sync_latest_placement(wm_paths, tmp_path: Path):
     weknora = RecordingBackend(supports_folders=True)
     service = _service(wm_paths, tmp_path, {"weknora": weknora})
