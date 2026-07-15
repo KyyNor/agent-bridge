@@ -5,7 +5,15 @@ import json
 import sqlite3
 from typing import Any
 
-from agent_bridge.core.domain import DocumentStatus, KbRole, NotFound, Operation, SyncJobStatus, SyncStateStatus
+from agent_bridge.core.domain import (
+    DocumentStatus,
+    KbRole,
+    NotFound,
+    Operation,
+    SyncJobStatus,
+    SyncStateStatus,
+    ValidationError,
+)
 from agent_bridge.storage.repositories.folders import FolderRepository
 from agent_bridge.storage.types import enum_value, row_to_dict
 
@@ -223,11 +231,12 @@ class KnowledgeRepository:
                 (doc_id, kb_id, folder_id, added_by),
             )
 
-    def get_document_kbs(self, doc_id: int) -> list[dict[str, Any]]:
+    def get_document_kbs(self, doc_id: int, *, active_only: bool = False) -> list[dict[str, Any]]:
         with self._connect() as conn:
+            status_clause = " AND dk.status = 'active'" if active_only else ""
             rows = conn.execute(
                 _FOLDER_TREE_CTE
-                + """
+                + f"""
                 SELECT kb.*, kb.id AS kb_id, dk.status AS document_kb_status,
                        dk.folder_id, folder_tree.name AS folder_name,
                        folder_tree.path AS folder_path
@@ -235,12 +244,149 @@ class KnowledgeRepository:
                 JOIN knowledge_bases kb ON kb.id = dk.kb_id
                 LEFT JOIN folder_tree ON folder_tree.id = dk.folder_id
                                       AND folder_tree.kb_id = dk.kb_id
-                WHERE dk.doc_id = ?
+                WHERE dk.doc_id = ?{status_clause}
                 ORDER BY kb.slug
                 """,
                 (doc_id,),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def delete_folder_subtree_atomic(self, kb_id: int, folder_id: int) -> dict[str, Any]:
+        """Delete a folder subtree and its KB-scoped document state atomically.
+
+        The immediate transaction locks writers before calculating counts and
+        the subtree. It then snapshots active placements, compacts pending
+        create/update jobs, creates only the required current-KB delete jobs,
+        detaches the placements, soft-deletes documents with no remaining
+        active KB, and removes the folder rows before releasing the lock.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            folder = self._folders._require_folder(conn, kb_id, folder_id)
+            if folder["is_root"]:
+                raise ValidationError("root folder cannot be deleted")
+            subtree_ids = self._folders._get_subtree_ids_with_conn(conn, kb_id, folder_id)
+            counts = self._folders._get_subtree_counts_with_conn(conn, kb_id, folder_id)
+            sorted_ids = sorted(subtree_ids)
+            placeholders = ", ".join("?" for _ in sorted_ids)
+
+            documents = conn.execute(
+                f"""
+                SELECT DISTINCT d.id, d.slug, d.current_version_id
+                FROM document_kbs dk
+                JOIN documents d ON d.id = dk.doc_id
+                WHERE dk.kb_id = ?
+                  AND dk.status = 'active'
+                  AND d.status = ?
+                  AND dk.folder_id IN ({placeholders})
+                ORDER BY d.id
+                """,
+                [kb_id, DocumentStatus.active.value, *sorted_ids],
+            ).fetchall()
+            targets = conn.execute(
+                "SELECT slug FROM backend_targets WHERE kb_id = ? AND status = 'active' ORDER BY slug",
+                (kb_id,),
+            ).fetchall()
+
+            for document in documents:
+                for target in targets:
+                    backend_slug = target["slug"]
+                    running = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM sync_jobs
+                        WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                          AND operation IN (?, ?)
+                          AND status = ?
+                        """,
+                        (
+                            document["id"], kb_id, backend_slug,
+                            Operation.create.value, Operation.update.value,
+                            SyncJobStatus.running.value,
+                        ),
+                    ).fetchone()["count"]
+                    conn.execute(
+                        """
+                        UPDATE sync_jobs
+                        SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
+                        WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                          AND operation IN (?, ?)
+                          AND status IN (?, ?)
+                        """,
+                        (
+                            SyncJobStatus.cancelled.value,
+                            document["id"], kb_id, backend_slug,
+                            Operation.create.value, Operation.update.value,
+                            SyncJobStatus.pending.value, SyncJobStatus.failed.value,
+                        ),
+                    )
+                    sync_state = conn.execute(
+                        """
+                        SELECT backend_doc_id
+                        FROM sync_states
+                        WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                        """,
+                        (document["id"], kb_id, backend_slug),
+                    ).fetchone()
+                    if (sync_state and sync_state["backend_doc_id"]) or running:
+                        conn.execute(
+                            """
+                            INSERT INTO sync_jobs (
+                              doc_id, kb_id, backend_slug, operation, version_id, status
+                            ) VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                document["id"], kb_id, backend_slug,
+                                Operation.delete.value, document["current_version_id"],
+                                SyncJobStatus.pending.value,
+                            ),
+                        )
+
+            conn.execute(
+                f"""
+                UPDATE document_kbs
+                SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP
+                WHERE kb_id = ? AND status = 'active'
+                  AND folder_id IN ({placeholders})
+                """,
+                [kb_id, *sorted_ids],
+            )
+            for document in documents:
+                active = conn.execute(
+                    """
+                    SELECT 1 FROM document_kbs
+                    WHERE doc_id = ? AND status = 'active'
+                    LIMIT 1
+                    """,
+                    (document["id"],),
+                ).fetchone()
+                if active is None:
+                    conn.execute(
+                        """
+                        UPDATE documents
+                        SET status = ?, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (DocumentStatus.deleted.value, document["id"]),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE document_kbs
+                        SET status = ?, deleted_at = CURRENT_TIMESTAMP
+                        WHERE doc_id = ?
+                        """,
+                        (DocumentStatus.deleted.value, document["id"]),
+                    )
+
+            conn.execute(
+                f"DELETE FROM document_kbs WHERE kb_id = ? AND folder_id IN ({placeholders})",
+                [kb_id, *sorted_ids],
+            )
+            conn.execute(
+                f"DELETE FROM knowledge_folders WHERE kb_id = ? AND id IN ({placeholders})",
+                [kb_id, *sorted_ids],
+            )
+            return {**counts, "directory_ids": sorted_ids}
 
     def get_document_placement(self, doc_id: int, kb_id: int) -> dict[str, Any] | None:
         with self._connect() as conn:

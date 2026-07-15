@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge.core.domain import ConflictError, NotFound, ValidationError
+from agent_bridge.core.domain import (
+    ConflictError,
+    NotFound,
+    Operation,
+    SyncStateStatus,
+    ValidationError,
+)
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -188,6 +194,48 @@ def test_delete_folder_subtree_removes_only_current_kb_placement_and_keeps_docum
     assert store.list_docs_for_kb(kb_a["id"]) == []
     assert store.list_docs_for_kb(kb_b["id"])[0]["slug"] == "shared"
     assert store.get_document_by_slug("shared")["status"] == "active"
+
+
+def test_atomic_folder_delete_detaches_docs_and_queues_current_kb_deletes(wm_paths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb_a = store.create_kb("a", "A", "", "root")
+    kb_b = store.create_kb("b", "B", "", "root")
+    root_a = store.get_root_folder(kb_a["id"])
+    folder = store.create_folder(kb_a["id"], root_a["id"], "A")
+    child = store.create_folder(kb_a["id"], folder["id"], "Child")
+    root_b = store.get_root_folder(kb_b["id"])
+    store.ensure_backend_target(kb_a["id"], "mock", "mock")
+
+    shared = store.create_document("shared", "Shared", "root")
+    store.attach_document_to_kb(shared["id"], kb_a["id"], "root", child["id"])
+    store.attach_document_to_kb(shared["id"], kb_b["id"], "root", root_b["id"])
+    store.create_sync_job(shared["id"], kb_a["id"], Operation.create, None)
+    store.upsert_sync_state(
+        shared["id"], kb_a["id"], "mock", "remote-shared", SyncStateStatus.synced
+    )
+
+    only_a = store.create_document("only-a", "Only A", "root")
+    store.attach_document_to_kb(only_a["id"], kb_a["id"], "root", folder["id"])
+    store.upsert_sync_state(
+        only_a["id"], kb_a["id"], "mock", "remote-only-a", SyncStateStatus.synced
+    )
+
+    result = store.delete_folder_subtree_atomic(kb_a["id"], folder["id"])
+
+    assert result["directory_count"] == 2
+    assert result["file_count"] == 2
+    assert store.list_docs_for_kb(kb_a["id"]) == []
+    assert store.list_docs_for_kb(kb_b["id"])[0]["slug"] == "shared"
+    jobs = store.list_all_jobs()
+    shared_jobs = [job for job in jobs if job["doc_id"] == shared["id"]]
+    assert [(job["operation"], job["status"]) for job in shared_jobs] == [
+        ("create", "cancelled"),
+        ("delete", "pending"),
+    ]
+    assert store.get_document_by_slug("shared")["status"] == "active"
+    assert store.get_document_by_slug("only-a") is None
+    assert store.get_document_by_slug("only-a", include_deleted=True)["status"] == "deleted"
 
 
 def test_backend_folder_mapping_is_scoped_and_upserted_by_folder(wm_paths) -> None:

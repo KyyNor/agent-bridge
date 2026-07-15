@@ -1342,6 +1342,23 @@ class SQLiteStore:
     def move_folder(self, kb_id: int, folder_id: int, parent_id: int | None) -> dict[str, Any]:
         return self.folders.move_folder(kb_id=kb_id, folder_id=folder_id, parent_id=parent_id)
 
+    def update_folder(
+        self,
+        kb_id: int,
+        folder_id: int,
+        *,
+        name: str | None = None,
+        parent_id: int | None = None,
+        parent_provided: bool = False,
+    ) -> dict[str, Any]:
+        return self.folders.update_folder(
+            kb_id=kb_id,
+            folder_id=folder_id,
+            name=name,
+            parent_id=parent_id,
+            parent_provided=parent_provided,
+        )
+
     def list_folder_tree(self, kb_id: int) -> list[dict[str, Any]]:
         return self.folders.list_folder_tree(kb_id=kb_id)
 
@@ -1353,6 +1370,9 @@ class SQLiteStore:
 
     def delete_folder_subtree(self, kb_id: int, folder_id: int) -> dict[str, Any]:
         return self.folders.delete_folder_subtree(kb_id=kb_id, folder_id=folder_id)
+
+    def delete_folder_subtree_atomic(self, kb_id: int, folder_id: int) -> dict[str, Any]:
+        return self.knowledge.delete_folder_subtree_atomic(kb_id=kb_id, folder_id=folder_id)
 
     def upsert_backend_folder_mapping(self, *args, **kwargs) -> dict[str, Any]:
         return self.folders.upsert_backend_folder_mapping(*args, **kwargs)
@@ -1490,8 +1510,8 @@ class SQLiteStore:
             doc_id=doc_id, kb_id=kb_id, added_by=added_by, folder_id=folder_id
         )
 
-    def get_document_kbs(self, doc_id: int) -> list[dict[str, Any]]:
-        return self.knowledge.get_document_kbs(doc_id=doc_id)
+    def get_document_kbs(self, doc_id: int, *, active_only: bool = False) -> list[dict[str, Any]]:
+        return self.knowledge.get_document_kbs(doc_id=doc_id, active_only=active_only)
 
     def get_document_placement(self, doc_id: int, kb_id: int) -> dict[str, Any] | None:
         return self.knowledge.get_document_placement(doc_id=doc_id, kb_id=kb_id)

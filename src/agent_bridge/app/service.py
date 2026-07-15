@@ -306,19 +306,14 @@ class AgentBridgeService:
         if name is None and not parent_provided:
             raise ValidationError("at least one folder field must be provided")
 
-        # Resolve the folder in this KB before applying either operation. The
-        # repository repeats the scoped check for the mutation itself.
-        if self.store.get_folder(kb["id"], folder_id) is None:
-            raise NotFound("folder not found")
-        folder = self.store.get_folder(kb["id"], folder_id)
-        if folder is None:
-            raise NotFound("folder not found")
-        if parent_provided:
-            parent_id = None if parent_folder_id is _UNSET else parent_folder_id
-            folder = self.store.move_folder(kb["id"], folder_id, parent_id)  # type: ignore[arg-type]
-        if name is not None:
-            folder = self.store.rename_folder(kb["id"], folder_id, name)
-        return folder
+        parent_id = None if parent_folder_id is _UNSET else parent_folder_id
+        return self.store.update_folder(
+            kb["id"],
+            folder_id,
+            name=name,
+            parent_id=parent_id,  # type: ignore[arg-type]
+            parent_provided=bool(parent_provided),
+        )
 
     def _folder_delete_preview(self, kb_id: int, folder_id: int) -> dict[str, Any]:
         folder = self.store.get_folder(kb_id, folder_id)
@@ -405,22 +400,10 @@ class AgentBridgeService:
         confirm: bool = False,
     ) -> dict[str, Any]:
         kb = self._require_kb_admin_visible(actor, kb_slug)
-        preview = self._folder_delete_preview(kb["id"], folder_id)
         if not confirm:
-            return preview
-
-        documents = self._documents_in_folder_subtree(kb["id"], folder_id)
-        for document in documents:
-            self._remove_document_from_kb_by_id(document, kb, actor=actor)
-        deleted = self.store.delete_folder_subtree(kb["id"], folder_id)
-        return {
-            "folder_id": folder_id,
-            "deleted": True,
-            "directory_count": preview["directory_count"],
-            "file_count": preview["file_count"],
-            "folder_count": preview["folder_count"],
-            "directory_ids": deleted["directory_ids"],
-        }
+            return self._folder_delete_preview(kb["id"], folder_id)
+        deleted = self.store.delete_folder_subtree_atomic(kb["id"], folder_id)
+        return {"folder_id": folder_id, "deleted": True, **deleted}
 
     def _queue_placement_sync_jobs(self, doc: dict[str, Any], kb_id: int) -> None:
         for target in self.store.list_backend_targets(kb_id):
@@ -772,8 +755,8 @@ class AgentBridgeService:
         doc = self.store.get_document_by_slug(doc_slug)
         if doc is None:
             raise NotFound("document not found")
-        kbs = self.store.get_document_kbs(doc["id"])
-        if not any(item["id"] == kb["id"] for item in kbs):
+        kbs = self.store.get_document_kbs(doc["id"], active_only=True)
+        if not any(item["kb_id"] == kb["id"] for item in kbs):
             raise NotFound("document not found")
         versions = self.store.list_versions(doc["id"])
         for version in versions:

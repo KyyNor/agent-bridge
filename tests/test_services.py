@@ -6,7 +6,7 @@ import zipfile
 import pytest
 
 from agent_bridge.core.config import BackendConfig, AgentBridgePaths, ensure_directories
-from agent_bridge.core.domain import AccessDenied, NotFound, SyncStateStatus, ValidationError
+from agent_bridge.core.domain import AccessDenied, ConflictError, NotFound, SyncStateStatus, ValidationError
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
 from agent_bridge.app.service import AgentBridgeService
 
@@ -107,6 +107,44 @@ def test_service_folder_delete_requires_confirmation_and_recursively_detaches_do
     assert service.list_docs("root", "kb-a") == []
     assert service.list_docs("root", "kb-b")[0]["slug"] == doc["slug"]
     assert service.store.get_document_by_slug(doc["slug"])["status"] == "active"
+
+
+def test_get_doc_for_kb_hides_removed_document_association(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Shared.md"
+    source.write_bytes(b"shared")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+
+    with pytest.raises(NotFound):
+        service.get_doc_for_kb("root", "kb-a", doc["slug"])
+    visible = service.get_doc_for_kb("root", "kb-b", doc["slug"])
+    assert [item["slug"] for item in visible["kbs"]] == ["kb-b"]
+
+
+def test_update_folder_name_and_parent_is_atomic(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    source = service.create_folder("root", "kb", "Source", parent_folder_id=root["id"])
+    target = service.create_folder("root", "kb", "Target", parent_folder_id=root["id"])
+    service.create_folder("root", "kb", "Collision", parent_folder_id=target["id"])
+
+    with pytest.raises(ConflictError):
+        service.update_folder(
+            "root",
+            "kb",
+            source["id"],
+            name="Collision",
+            parent_folder_id=target["id"],
+        )
+
+    unchanged = service.store.get_folder(service.store.get_kb_by_slug("kb")["id"], source["id"])
+    assert unchanged["name"] == "Source"
+    assert unchanged["parent_id"] == root["id"]
 
 
 def test_non_admin_cannot_create_kb(wm_paths, tmp_path: Path) -> None:

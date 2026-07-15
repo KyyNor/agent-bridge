@@ -248,6 +248,57 @@ class FolderRepository:
             )
             return self._get_folder_with_conn(conn, kb_id, folder_id)  # type: ignore[return-value]
 
+    def update_folder(
+        self,
+        kb_id: int,
+        folder_id: int,
+        *,
+        name: str | None = None,
+        parent_id: int | None = None,
+        parent_provided: bool = False,
+    ) -> dict[str, Any]:
+        """Atomically rename and/or move a folder within one KB."""
+        folder_name = self._normalise_name(name) if name is not None else None
+        if folder_name is None and not parent_provided:
+            raise ValidationError("at least one folder field must be provided")
+
+        with self._connect() as conn:
+            folder = self._require_folder(conn, kb_id, folder_id)
+            if folder["is_root"]:
+                if folder_name is not None:
+                    raise ValidationError("root folder cannot be renamed")
+                if parent_provided:
+                    raise ValidationError("root folder cannot be moved")
+
+            new_parent_id = folder["parent_id"]
+            if parent_provided:
+                parent = self._resolve_parent(conn, kb_id, parent_id)
+                subtree_ids = self._get_subtree_ids_with_conn(conn, kb_id, folder_id)
+                if int(parent["id"]) in subtree_ids:
+                    raise ValidationError("folder cannot be moved into itself or its descendant")
+                new_parent_id = parent["id"]
+
+            new_name = folder_name or folder["name"]
+            existing = conn.execute(
+                """
+                SELECT id FROM knowledge_folders
+                WHERE kb_id = ? AND parent_id IS ? AND name = ? AND id != ?
+                """,
+                (kb_id, new_parent_id, new_name, folder_id),
+            ).fetchone()
+            if existing is not None:
+                raise ConflictError("folder name already exists")
+
+            conn.execute(
+                """
+                UPDATE knowledge_folders
+                SET parent_id = ?, name = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE kb_id = ? AND id = ?
+                """,
+                (new_parent_id, new_name, kb_id, folder_id),
+            )
+            return self._get_folder_with_conn(conn, kb_id, folder_id)  # type: ignore[return-value]
+
     def list_folder_tree(self, kb_id: int) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
