@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工作流控制台扩展与批量任务操作实施方案</title>
+  <style>
+    :root { color-scheme: light; --ink:#1f2937; --muted:#64748b; --line:#dbe3ec; --accent:#2563eb; --soft:#f8fafc; --warn:#fff7ed; }
+    body { margin:0; background:#eef2f7; color:var(--ink); font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif; }
+    main { max-width:1080px; margin:32px auto 64px; padding:0 24px; }
+    article { background:#fff; border:1px solid var(--line); border-radius:18px; padding:42px 52px; box-shadow:0 12px 32px rgba(15,23,42,.06); }
+    h1 { margin:0 0 8px; font-size:32px; line-height:1.2; letter-spacing:-.02em; }
+    h2 { margin:38px 0 12px; padding-top:20px; border-top:1px solid var(--line); font-size:23px; }
+    h3 { margin:26px 0 8px; font-size:18px; }
+    p { margin:8px 0 12px; }
+    .lead { color:var(--muted); font-size:17px; }
+    .meta { color:var(--muted); font-size:13px; }
+    .callout { margin:18px 0; padding:16px 18px; border:1px solid #bfdbfe; border-left:4px solid var(--accent); border-radius:10px; background:#eff6ff; }
+    .warning { border-color:#fed7aa; border-left-color:#ea580c; background:var(--warn); }
+    table { width:100%; border-collapse:collapse; margin:12px 0 18px; font-size:14px; }
+    th, td { padding:9px 10px; border:1px solid var(--line); vertical-align:top; text-align:left; }
+    th { background:var(--soft); font-weight:650; }
+    code { padding:1px 4px; border-radius:4px; background:#f1f5f9; color:#0f172a; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.92em; }
+    pre { overflow:auto; margin:10px 0 14px; padding:14px 16px; border-radius:10px; background:#0f172a; color:#e2e8f0; font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    ul, ol { padding-left:24px; }
+    li { margin:5px 0; }
+    .files { color:#334155; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; }
+    .task { margin:20px 0; padding:18px 20px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    .task h3 { margin-top:0; }
+    .check { margin:5px 0; }
+    .done { color:#166534; }
+    .small { color:var(--muted); font-size:13px; }
+    @media (max-width:720px) { main { margin:0 auto; padding:0 10px; } article { padding:28px 20px; border-radius:12px; } h1 { font-size:27px; } }
+  </style>
+</head>
+<body>
+<main>
+<article>
+  <h1>工作流控制台扩展与批量任务操作实施方案</h1>
+  <p class="lead">为页面查看增加真正的服务端分页，并在工作流任务页加入多选、批量重置和串行批量运行。</p>
+  <p class="meta">日期：2026-07-14　范围：Agent Bridge 后端 API、SQLite 查询、Capabilities Vue 前端</p>
+
+  <div class="callout">
+    <strong>目标：</strong>页面不再被 30/50/200 条的单次拉取上限截断；MCP 的 <code>artifacts_search</code> 继续保持现有 limit 语义；工作流任务支持勾选多个任务后一次操作，其中批量运行严格等待前一个 run 进入终态后再开始下一个。
+  </div>
+
+  <h2>一、现状与根因</h2>
+  <table>
+    <thead><tr><th>问题</th><th>当前行为</th><th>根因</th><th>修改方向</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>工作流详情页产物</td>
+        <td>请求固定 <code>limit: 30</code>，没有分页控件。</td>
+        <td><code>WorkflowView.vue:384-392</code> 直接截断；后端搜索 SQL 只有 <code>LIMIT</code>。</td>
+        <td>HTTP 产物接口增加 <code>offset</code> 和 <code>total</code>，前端使用服务端分页；MCP 调用不改变。</td>
+      </tr>
+      <tr>
+        <td>Agent 运行</td>
+        <td>页面请求最多 200 条，然后只在这批数据上客户端分页和搜索。</td>
+        <td>后端仓储已经有 <code>offset</code>，但页面没有使用；列表响应没有总数，搜索字段在前端过滤。</td>
+        <td>增加分页响应和服务端全文过滤；保留旧数组响应以降低外部兼容风险。</td>
+      </tr>
+      <tr>
+        <td>调用日志</td>
+        <td>页面请求最多 200 条，然后只在这批数据上客户端分页和搜索。</td>
+        <td>后端仓储已有 <code>LIMIT ? OFFSET ?</code>，但没有 count 查询；前端仍一次性拉 200 条。</td>
+        <td>增加服务端分页、总数、搜索条件和状态统计。</td>
+      </tr>
+      <tr>
+        <td>工作流任务批量操作</td>
+        <td>每行只有单任务“执行”和“重置”按钮。</td>
+        <td>前后端接口都按一个 <code>task_key + task_version</code> 处理。</td>
+        <td>前端增加跨客户端分页的选择状态，复用单任务接口顺序调用；批量运行等待每个 run 终态。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>二、接口契约设计</h2>
+
+  <h3>2.1 产物页面接口</h3>
+  <p>保留当前返回的 <code>items</code>，HTTP 接口增加分页字段。因为当前接口本身已经返回对象，增加字段不会破坏现有读取 <code>result.items</code> 的调用。</p>
+  <pre><code>GET /workflow-artifacts?workflow_key=...&amp;limit=50&amp;offset=0
+
+{
+  "items": [...],
+  "total": 137,
+  "limit": 50,
+  "offset": 0
+}</code></pre>
+  <ul>
+    <li>后端继续把单次页面请求限制在最多 50 条；页面通过 offset 请求下一页。</li>
+    <li><code>total</code> 必须使用与列表完全相同的过滤条件：profile、workflow、query、path、task、run、tags、format、include_history。</li>
+    <li>仓储查询保持稳定排序：<code>updated_at DESC, id DESC</code>。</li>
+    <li>MCP 的 <code>artifacts_search</code> 仍调用服务方法的非分页模式，默认/最大 limit 不变，不暴露页面分页字段作为 MCP 需求。</li>
+  </ul>
+
+  <h3>2.2 Agent 运行与调用日志接口</h3>
+  <p>为避免把现有数组响应改成对象导致其他调用方破坏，增加可选的 <code>paginated=true</code>。不带该参数时继续返回旧数组；页面专用请求使用分页模式。</p>
+  <pre><code>GET /agent-runs?paginated=true&amp;limit=50&amp;offset=0&amp;search=workflow
+GET /tool-call-logs?paginated=true&amp;limit=100&amp;offset=0&amp;search=database
+
+{
+  "items": [...],
+  "total": 1234,
+  "limit": 50,
+  "offset": 0,
+  "counts": { "all": 1234, "success": 1100, "failed": 120, "running": 14 }
+}</code></pre>
+  <ul>
+    <li>Agent 运行的 <code>search</code> 覆盖当前页面已有的 agent_name、profile_key、workflow_key、error，并补充 run_key/status。</li>
+    <li>调用日志的 <code>search</code> 覆盖当前页面已有的 tool_name、actor、entrypoint、source_type、source_key。</li>
+    <li><code>counts</code> 以相同日期/搜索/来源等基础过滤为准，但不受当前状态 tab 的单项筛选影响，从而保持 tab 数字完整。</li>
+    <li>仓储增加与列表过滤完全一致的 <code>COUNT(*)</code> 查询；列表和 count 共用过滤条件构造逻辑，避免两套条件漂移。</li>
+    <li>原有 <code>limit</code>、<code>offset</code> 的非分页数组调用保持可用；现有工作流进度页按 run_id 查询的少量调用无需改成分页。</li>
+  </ul>
+
+  <h2>三、实施任务</h2>
+
+  <section class="task">
+    <h3>任务 1：补充分页查询基础能力</h3>
+    <p class="files">修改：src/agent_bridge/storage/repositories/workflows.py<br>
+      修改：src/agent_bridge/storage/repositories/agent_runs.py<br>
+      修改：src/agent_bridge/storage/repositories/governance.py<br>
+      测试：tests/test_workflow_storage.py、tests/test_agent_runs_api.py、tests/test_capability_governance_storage.py</p>
+    <div class="check">□ 让 <code>search_workflow_artifacts</code> 接收 <code>offset=0</code>，SQL 使用 <code>LIMIT ? OFFSET ?</code>。</div>
+    <div class="check">□ 抽取产物过滤条件构造函数，并复用于 page 查询和 count 查询；保持 tags 的“全部匹配”语义。</div>
+    <div class="check">□ 为 AgentRunsRepository 增加 <code>count(...)</code>，复用现有过滤字段、日期范围和稳定排序条件。</div>
+    <div class="check">□ 为 GovernanceRepository 增加 <code>count_tool_call_logs(...)</code>，并加入服务端 search 的 SQL 条件。</div>
+    <div class="check">□ 对 limit/offset 做边界处理：limit 至少为 1，offset 小于 0 时归零，继续保留当前 Agent 运行单页最大 200 的保护。</div>
+    <pre><code># 最小验证
+pytest -q tests/test_workflow_storage.py tests/test_agent_runs_api.py tests/test_capability_governance_storage.py</code></pre>
+  </section>
+
+  <section class="task">
+    <h3>任务 2：扩展后端页面分页响应</h3>
+    <p class="files">修改：src/agent_bridge/automation/workflows/service.py<br>
+      修改：src/agent_bridge/api/routes/workflows.py<br>
+      修改：src/agent_bridge/api/routes/agent_runs.py<br>
+      修改：src/agent_bridge/api/routes/governance.py<br>
+      修改：src/agent_bridge/capability_hub/governance.py<br>
+      测试：tests/test_workflow_api.py、tests/test_agent_runs_api.py、tests/test_capability_api.py</p>
+    <div class="check">□ 产物服务方法增加 page 查询所需的 offset/total 开关；HTTP route 返回 <code>items/total/limit/offset</code>，MCP 默认走原有非分页结果。</div>
+    <div class="check">□ Agent 运行和调用日志 route 增加 <code>search</code> 与 <code>paginated</code> 参数；<code>paginated=false</code> 继续返回数组。</div>
+    <div class="check">□ 分页响应中的 <code>total</code> 与 <code>counts</code> 使用同一基础筛选条件，避免页面 tab 只统计前 200 条。</div>
+    <div class="check">□ 增加覆盖：第二页不重复第一条、total 正确、过滤后 total 正确、旧数组调用兼容、越界 offset 返回空 items。</div>
+    <pre><code># 接口回归
+pytest -q tests/test_workflow_api.py tests/test_agent_runs_api.py tests/test_capability_api.py</code></pre>
+  </section>
+
+  <section class="task">
+    <h3>任务 3：工作流详情页接入产物服务端分页</h3>
+    <p class="files">修改：frontend/capabilities/src/api/types.ts<br>
+      修改：frontend/capabilities/src/api/client.ts<br>
+      修改：frontend/capabilities/src/views/workflow/WorkflowView.vue<br>
+      修改：frontend/capabilities/src/lib/pagination.ts（必要时增加页面专用选项）</p>
+    <div class="check">□ 为 <code>WorkflowArtifactSearchResult</code> 增加 total/limit/offset。</div>
+    <div class="check">□ 增加 artifactPage、artifactPageSize、artifactTotal 状态；详情页请求使用 <code>offset=(page-1)*pageSize</code>。</div>
+    <div class="check">□ 在产物树下加入 PaginationBar；切换页码或每页条数时重新请求服务端，不在当前 30/50 条数组内切片。</div>
+    <div class="check">□ 新检索、切换工作流、修改 query/path/tags 后都回到第 1 页；folder 计数明确表示当前页命中的产物数，不能冒充全库总数。</div>
+    <div class="check">□ 任务页和进度页保留 limit=50 的局部加载语义，因为它们是按 task/run 查看，不需要把所有工作流产物一次性展示。</div>
+  </section>
+
+  <section class="task">
+    <h3>任务 4：Agent 运行页接入服务端分页和搜索</h3>
+    <p class="files">修改：frontend/capabilities/src/api/types.ts<br>
+      修改：frontend/capabilities/src/api/client.ts<br>
+      修改：frontend/capabilities/src/views/monitoring/AgentRunsView.vue<br>
+      修改：frontend/capabilities/src/lib/filterTabs.ts（将 tab 计数改为消费服务端 counts）</p>
+    <div class="check">□ 将列表请求改为 <code>paginated=true</code>，每次只获取当前页；page/pageSize 改变时计算 offset 并请求后端。</div>
+    <div class="check">□ 将搜索从 displayRuns 的客户端 filter 改为请求参数，输入变化时 debounce，重置 page=1。</div>
+    <div class="check">□ 状态 tab 的数字来自 response.counts，不再从前 200 条运行记录推导。</div>
+    <div class="check">□ 详情页继续使用 <code>/agent-runs/{run_key}</code> 和事件接口，不受列表分页影响。</div>
+    <div class="check">□ 刷新、日期筛选、状态筛选、搜索都清理到第 1 页，并避免旧请求晚返回覆盖新筛选结果。</div>
+  </section>
+
+  <section class="task">
+    <h3>任务 5：调用日志页接入服务端分页和搜索</h3>
+    <p class="files">修改：frontend/capabilities/src/api/types.ts<br>
+      修改：frontend/capabilities/src/api/client.ts<br>
+      修改：frontend/capabilities/src/views/monitoring/LogsView.vue<br>
+      修改：frontend/capabilities/src/lib/filterTabs.ts</p>
+    <div class="check">□ 将列表请求改为 <code>paginated=true</code>，使用服务端 total/offset 分页。</div>
+    <div class="check">□ 将 tool/actor/entrypoint/source 的搜索条件传到后端；保留来源、日期和状态筛选。</div>
+    <div class="check">□ tab 数字消费服务端 counts；日志详情仍按 log_id 单独加载完整 request/response。</div>
+    <div class="check">□ 对筛选和分页请求做竞态保护：以递增 request token 或 AbortController 保证旧请求不能覆盖最新结果。</div>
+  </section>
+
+  <section class="task">
+    <h3>任务 6：工作流任务页增加多选和批量重置</h3>
+    <p class="files">修改：frontend/capabilities/src/views/workflow/WorkflowView.vue<br>
+      修改：frontend/capabilities/src/api/client.ts（复用单任务 reset，无需新增接口）<br>
+      测试：新增 frontend/capabilities/tests/workflowBatchSelection.test.ts（抽取的纯选择/排序辅助逻辑）</p>
+    <div class="check">□ 使用 <code>taskId(task)</code> 作为选择 key，选择状态跨客户端分页保留，并在切换工作流时清空。</div>
+    <div class="check">□ 每个任务卡增加 checkbox；工具栏增加“本页全选/取消全选”、已选数量、“批量重置”。</div>
+    <div class="check">□ 批量重置按显示顺序逐个调用现有 <code>resetWorkflowTask</code>，记录成功、跳过和失败项，完成后刷新任务列表并清理选择。</div>
+    <div class="check">□ 运行中的有效 lease 不允许批量重置；后端返回的逐项错误不能中断其他可处理任务。</div>
+  </section>
+
+  <section class="task">
+    <h3>任务 7：任务页维护串行批量队列</h3>
+    <p class="files">修改：frontend/capabilities/src/api/types.ts<br>
+      修改：frontend/capabilities/src/api/client.ts<br>
+      修改：frontend/capabilities/src/views/workflow/WorkflowView.vue<br>
+      修改：frontend/capabilities/src/lib/workflowTasks.ts<br>
+      测试：新增 frontend/capabilities/tests/workflowBatchSelection.test.ts、frontend/capabilities/tests/workflowBatchRunner.test.ts</p>
+    <div class="check">□ 使用 <code>taskId(task)</code> 作为选择 key，选择状态跨客户端分页保留，并在切换工作流时清空。</div>
+    <div class="check">□ 每个任务卡增加 checkbox；工具栏增加“本页全选/取消全选”、已选数量、“批量重置”和“批量运行”。</div>
+    <div class="check">□ 批量重置按显示顺序逐个调用现有 <code>resetWorkflowTask</code>，允许部分成功，展示成功/跳过/失败结果。</div>
+    <div class="check">□ 批量运行在页面内创建有序队列；每次只设置一个任务优先级并调用现有 <code>executeWorkflowTask</code>，拿到 run_id 后轮询 <code>getWorkflowRun</code> 到 completed/no_task/failed/stopped，再处理下一个。</div>
+    <pre><code>for (const task of queue) {
+  if (!canExecuteTask(task)) {
+    skipped.push(task)
+    continue
+  }
+  const started = await api.executeWorkflowTask(
+    task.workflow_key, task.task_key, task.task_version || undefined,
+  )
+  if (!started.run_id) {
+    failed.push({ task, reason: '未返回 run_id' })
+    continue
+  }
+  const run = await waitForWorkflowRun(started.run_id)
+  results.push({ task, run })
+}</code></pre>
+    <div class="check">□ 不一次给全部任务设置 priority；priority 是一次性标记，每次只处理当前任务。</div>
+    <div class="check">□ 单项 failed/no_task/stopped 记录结果后继续；网络错误或 workflow 已被其他运行占用时停止队列并保留未执行项。</div>
+    <div class="check">□ 队列运行期间禁用同一工作流的单任务执行/重置，显示“第 x/y 个任务”；完成后刷新任务、运行记录和可见产物。</div>
+    <div class="check">□ 单个任务执行仍保持现有行为：成功启动后进入 progress 页面。</div>
+  </section>
+
+  <section class="task">
+    <h3>任务 8：回归验证与构建</h3>
+    <p class="files">验证：后端测试、前端类型检查、前端构建、人工页面验收</p>
+    <div class="check">□ 后端：<code>pytest -q</code>。</div>
+    <div class="check">□ 前端：<code>cd frontend/capabilities &amp;&amp; npm run typecheck &amp;&amp; npm run build</code>。</div>
+    <div class="check">□ 产物页人工验收：第一页/第二页、筛选后分页、total、路径树、打开详情。</div>
+    <div class="check">□ Agent/日志人工验收：超过 200 条时翻到第 2 页，搜索能命中第 201 条之后的数据，tab 数字与总数一致。</div>
+    <div class="check">□ 任务人工验收：跨页勾选、批量重置逐项结果、批量运行顺序、单项失败继续、运行中任务保护、刷新页面恢复批次。</div>
+    <div class="check">□ 检查生成后的静态前端资源是否随既有发布流程更新；不能只修改源码而继续加载旧 bundle。</div>
+  </section>
+
+  <h2>四、关键取舍</h2>
+  <div class="callout warning">
+    <strong>批量运行的生命周期：</strong>批量运行只在当前页面内维护队列，不新增后台 batch 表、worker 或持久化状态。页面关闭后队列停止是预期行为；重新打开页面时，用户可以重新选择任务。页面仍会等待每个 workflow run 进入终态后再开始下一个，避免触发现有 workflow 级并发锁。
+  </div>
+  <ul>
+    <li>不把 MCP 的 limit 上限改成页面所需的无限量，避免 agent 检索返回过多正文、增加上下文成本。</li>
+    <li>不继续把所有记录拉到浏览器后再分页；total、search、status counts 都在 SQLite 侧完成。</li>
+    <li>不把当前任务页改成服务端分页，因为任务列表目前没有 200 条截断问题；先保持其客户端筛选/分页，批量选择 key 设计为跨页可用。</li>
+    <li>Offset 分页适合当前管理页；列表排序必须保留时间加数据库 id 的稳定 tie-breaker。若未来需要在高频写入下无重复/无遗漏地连续导出，再升级为 cursor 分页。</li>
+  </ul>
+
+  <h2>五、验收标准</h2>
+  <ol>
+    <li>工作流详情页可以浏览超过 30 条当前产物，页面显示服务端 total，翻页后不会只在首批数据中切片。</li>
+    <li>Agent 运行和调用日志超过 200 条时可以翻页访问全部保留期内数据；搜索和状态/日期筛选作用于全量匹配集。</li>
+    <li>MCP <code>artifacts_search</code> 的默认行为、返回字段和 limit 上限不变。</li>
+    <li>任务页可以跨当前客户端分页勾选多个任务，一次批量重置。</li>
+    <li>批量运行严格按任务顺序执行，前一个 workflow run 未进入终态时不会提交下一个 execute 请求。</li>
+    <li>批量运行中发生单项失败时有明确结果汇总；发生外部并发冲突或网络错误时停止并保留未执行项，避免静默丢任务。</li>
+  </ol>
+</article>
+</main>
+</body>
+</html>
