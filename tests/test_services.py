@@ -490,6 +490,22 @@ def test_get_doc_does_not_expose_archive_paths_to_admin_response(wm_paths, tmp_p
     assert "archive_path" not in visible["versions"][0]
 
 
+def test_get_doc_exposes_only_active_kb_placements(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+
+    visible = service.get_doc("root", doc["slug"])
+
+    assert [kb["slug"] for kb in visible["kbs"]] == ["kb-b"]
+    assert visible["kb_slugs"] == ["kb-b"]
+
+
 def test_invisible_kb_returns_not_found(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
@@ -608,6 +624,28 @@ def test_delete_cancels_unsynced_pending_create_without_delete_job(wm_paths, tmp
     jobs = service.status(actor="root")["jobs"]
     assert [(job["operation"], job["status"]) for job in jobs] == [("create", "cancelled")]
     assert service.sync(actor="root", all_users=False)["processed"] == 0
+
+
+def test_delete_document_ignores_removed_kb_placements(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb_a = service.create_kb("root", "kb-a", "KB A", "")
+    kb_b = service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=False)
+
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+    existing_job_ids = {job["id"] for job in service.status("root")["jobs"]}
+
+    service.delete_document("root", doc["slug"])
+
+    new_jobs = [
+        job for job in service.status("root")["jobs"] if job["id"] not in existing_job_ids
+    ]
+    assert {(job["kb_id"], job["operation"]) for job in new_jobs} == {
+        (kb_b["id"], "delete"),
+    }
+    assert not any(job["kb_id"] == kb_a["id"] for job in new_jobs)
 
 
 def test_delete_cancels_pending_update_but_keeps_delete_for_synced_doc(wm_paths, tmp_path: Path) -> None:

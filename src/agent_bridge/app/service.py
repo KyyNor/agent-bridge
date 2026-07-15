@@ -737,7 +737,7 @@ class AgentBridgeService:
 
     def get_doc(self, actor: str, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
         doc = self._require_doc_admin_visible(actor, doc_slug)
-        kbs = self.store.get_document_kbs(doc["id"])
+        kbs = self.store.get_document_kbs(doc["id"], active_only=True)
         versions = self.store.list_versions(doc["id"])
         for version in versions:
             version.pop("archive_path", None)
@@ -770,7 +770,7 @@ class AgentBridgeService:
     def delete_document(self, actor: str, doc_slug: str, later: bool = True) -> dict[str, str]:
         require_admin_user(actor, self.admins)
         doc = self._require_doc_admin_visible(actor, doc_slug)
-        kbs = self.store.get_document_kbs(doc["id"])
+        kbs = self.store.get_document_kbs(doc["id"], active_only=True)
         for kb in kbs:
             targets = self.store.list_backend_targets(kb["id"])
             for target in targets:
