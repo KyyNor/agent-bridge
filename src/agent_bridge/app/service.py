@@ -322,19 +322,20 @@ class AgentBridgeService:
         )
         if existing is not None:
             existing_kb_ids = {item["id"] for item in self.store.get_document_kbs(existing["id"])}
+            attached_new_kb = False
             for kb in kb_targets:
                 if kb["id"] in existing_kb_ids:
                     continue
                 self.store.attach_document_to_kb(existing["id"], kb["id"], actor)
                 self._queue_create_sync_jobs(existing["id"], existing["current_version_id"], [kb])
-            existing["current_version_no"] = existing["current_version_no"]
+                attached_new_kb = True
             existing["kb_slugs"] = [
                 kb["slug"] for kb in self.store.get_document_kbs(existing["id"])
             ]
             existing["skipped"] = True
             existing["skip_reason"] = "duplicate_content"
             logger.info("跳过重复文档 doc=%s hash=%s", existing["slug"], content_hash)
-            if not later:
+            if attached_new_kb and not later:
                 self.sync(actor=actor, all_users=False)
             return existing
 
