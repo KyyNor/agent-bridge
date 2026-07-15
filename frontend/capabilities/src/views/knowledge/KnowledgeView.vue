@@ -1034,7 +1034,7 @@ async function savePlaneProfiles() {
 
     <!-- 上传文档对话框 -->
     <Dialog :open="showUploadDialog" @update:open="showUploadDialog = $event">
-      <DialogContent class="sm:max-w-[520px]">
+      <DialogContent class="sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle>上传文档 — {{ uploadKb?.name || '' }}</DialogTitle>
         </DialogHeader>
@@ -1080,7 +1080,7 @@ async function savePlaneProfiles() {
                 class="flex items-center gap-2.5 px-3 py-2 rounded border border-border bg-background text-sm"
               >
                 <File :size="14" stroke="#9ca3af" />
-                <span class="flex-1 truncate">{{ f.name }}</span>
+                <span class="min-w-0 flex-1 truncate" :title="f.name">{{ f.name }}</span>
                 <span class="text-xs text-muted-foreground shrink-0">{{ getFileSizeLabel(f.size) }}</span>
               </div>
             </div>
