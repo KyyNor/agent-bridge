@@ -417,6 +417,8 @@ class AgentBridgeService:
                 continue
             adapter = self._get_adapter(target["slug"])
             supports_folders = self._backend_supports_folders(adapter)
+            if not supports_folders:
+                continue
             compacted = self.store.cancel_runnable_create_update_jobs(
                 doc["id"], kb_id, target["slug"]
             )
@@ -424,9 +426,8 @@ class AgentBridgeService:
             remote_exists = bool(sync_state and sync_state.get("backend_doc_id"))
             if remote_exists:
                 if compacted["running"] == 0:
-                    operation = Operation.move if supports_folders else Operation.update
                     self.store.create_sync_job(
-                        doc["id"], kb_id, operation, doc.get("current_version_id"),
+                        doc["id"], kb_id, Operation.move, doc.get("current_version_id"),
                         backend_slug=target["slug"],
                     )
             else:

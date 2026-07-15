@@ -125,6 +125,39 @@ def test_folder_sync_uses_capability_matrix_and_preserves_root_path(wm_paths, tm
     assert service.store.get_backend_folder_mapping(kb["id"], "weknora", root["id"])["backend_folder_id"] == ""
 
 
+def test_folder_move_skips_flat_reupload_but_keeps_content_update_and_moves_weknora(
+    wm_paths, tmp_path: Path
+):
+    weknora = RecordingBackend(supports_folders=True)
+    flat = RecordingBackend(supports_folders=False)
+    service = _service(wm_paths, tmp_path, {"weknora": weknora, "flat": flat})
+    kb = service.create_kb("root", "docs", "Docs", "")
+    root = service.store.get_root_folder(kb["id"])
+    folder = service.create_folder("root", "docs", "A", root["id"])
+    source = tmp_path / "guide.md"
+    source.write_text("# Guide", encoding="utf-8")
+
+    doc = service.add_document("root", source, ["docs"], later=True, folder_id=folder["id"])
+    service.sync("root", all_users=False)
+
+    updated_source = tmp_path / "guide-v2.md"
+    updated_source.write_text("# Guide v2", encoding="utf-8")
+    service.update_document("root", doc["slug"], updated_source, later=True)
+    before_move = service.status("root")["jobs"]
+    before_ids = {job["id"] for job in before_move}
+
+    service.place_document("root", doc["slug"], "docs", root["id"])
+
+    new_jobs = [job for job in service.status("root")["jobs"] if job["id"] not in before_ids]
+    assert [(job["backend_slug"], job["operation"]) for job in new_jobs] == [("weknora", "move")]
+    flat_update = next(
+        job
+        for job in before_move
+        if job["backend_slug"] == "flat" and job["operation"] == "update"
+    )
+    assert next(job for job in service.status("root")["jobs"] if job["id"] == flat_update["id"])["status"] == "pending"
+
+
 def test_folder_rename_queues_moves_for_descendant_documents(wm_paths, tmp_path: Path):
     weknora = RecordingBackend(supports_folders=True)
     service = _service(wm_paths, tmp_path, {"weknora": weknora})
