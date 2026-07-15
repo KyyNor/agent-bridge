@@ -1,15 +1,20 @@
 """Knowledge base, document, sync, search, and ask endpoints."""
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from agent_bridge.api.schemas import (
     AskRequest,
+    AttachDocumentRequest,
     CreateAgentRequest,
+    CreateFolderRequest,
     CreateKbRequest,
+    DeleteFolderRequest,
+    DocumentPlacementRequest,
     KbRepoSourceRequest,
     PurgeRequest,
     SyncRequest,
+    UpdateFolderRequest,
     UpdateKbDefaultsRequest,
     UpsertBackendRequest,
     UpdateBackendRequest,
@@ -76,6 +81,56 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
     def delete_kb(kb_slug: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.delete_kb(current_actor, kb_slug)
 
+    @router.get("/kbs/{kb_slug}/folders")
+    def list_folders(kb_slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return service.list_folders(current_actor, kb_slug)
+
+    @router.post("/kbs/{kb_slug}/folders")
+    def create_folder(
+        kb_slug: str,
+        payload: CreateFolderRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.create_folder(
+            current_actor,
+            kb_slug,
+            name=payload.name,
+            parent_folder_id=payload.parent_folder_id,
+        )
+
+    @router.patch("/kbs/{kb_slug}/folders/{folder_id}")
+    def update_folder(
+        kb_slug: str,
+        folder_id: int,
+        payload: UpdateFolderRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.update_folder(
+            current_actor,
+            kb_slug,
+            folder_id,
+            name=payload.name,
+            parent_folder_id=payload.parent_folder_id,
+            parent_provided="parent_folder_id" in payload.model_fields_set,
+        )
+
+    @router.delete("/kbs/{kb_slug}/folders/{folder_id}")
+    def delete_folder(
+        kb_slug: str,
+        folder_id: int,
+        payload: DeleteFolderRequest | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        result = service.delete_folder(
+            current_actor,
+            kb_slug,
+            folder_id,
+            confirm=bool(payload and payload.confirm),
+        )
+        if result.get("requires_confirmation"):
+            raise HTTPException(status_code=409, detail=result)
+        return result
+
     @router.get("/kbs/{kb_slug}/repo-sources")
     def list_kb_repo_sources(kb_slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.list_kb_repo_sources(current_actor, kb_slug)
@@ -107,16 +162,31 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
         file: UploadFile = File(),
         kb: list[str] = Form(),
         later: bool = Form(False),
+        folder_id: int | None = Form(None),
+        relative_path: str | None = Form(None),
     ) -> dict[str, Any]:
         upload_path = save_upload(file)
         try:
-            return service.add_document(current_actor, upload_path, kb, later, original_filename=upload_filename(file))
+            return service.add_document(
+                current_actor,
+                upload_path,
+                kb,
+                later,
+                original_filename=upload_filename(file),
+                folder_id=folder_id,
+                relative_path=relative_path,
+            )
         finally:
             upload_path.unlink(missing_ok=True)
 
     @router.get("/docs")
-    def list_docs(kb: str, backend: str | None = None, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return service.list_docs(current_actor, kb, backend=backend)
+    def list_docs(
+        kb: str,
+        folder_id: int | None = None,
+        backend: str | None = None,
+        current_actor: str = Depends(actor),
+    ) -> list[dict[str, Any]]:
+        return service.list_docs(current_actor, kb, backend=backend, folder_id=folder_id)
 
     @router.get("/docs/{doc_slug}")
     def get_doc(doc_slug: str, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -134,6 +204,34 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             return service.update_document(current_actor, doc_slug, upload_path, later, original_filename=upload_filename(file))
         finally:
             upload_path.unlink(missing_ok=True)
+
+    @router.post("/kbs/{kb_slug}/docs/{doc_slug}/delete")
+    def remove_document_from_kb(
+        kb_slug: str,
+        doc_slug: str,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, str]:
+        return service.remove_document_from_kb(current_actor, kb_slug, doc_slug)
+
+    @router.patch("/docs/{doc_slug}/placement")
+    def place_document(
+        doc_slug: str,
+        payload: DocumentPlacementRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.place_document(
+            current_actor, doc_slug, payload.kb, payload.folder_id
+        )
+
+    @router.post("/docs/{doc_slug}/attach")
+    def attach_document(
+        doc_slug: str,
+        payload: AttachDocumentRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.attach_document(
+            current_actor, doc_slug, payload.kb, payload.folder_id
+        )
 
     @router.post("/docs/{doc_slug}/delete")
     def delete_document(doc_slug: str, current_actor: str = Depends(actor)) -> dict[str, str]:

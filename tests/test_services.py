@@ -33,6 +33,82 @@ def test_admin_creates_kb_and_member_roles_are_disabled(wm_paths, tmp_path: Path
         service.grant_kb_member(actor="root", kb_slug="frontend-docs", linux_user="alice", role="contributor")
 
 
+def test_service_manages_folders_and_rejects_cross_kb_or_cyclic_moves(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+
+    root = service.list_folders("root", "kb-a")[0]
+    folder = service.create_folder("root", "kb-a", name="Guides", parent_folder_id=root["id"])
+    child = service.create_folder("root", "kb-a", name="API", parent_folder_id=folder["id"])
+    with pytest.raises(ValidationError):
+        service.update_folder("root", "kb-a", folder["id"], parent_folder_id=child["id"])
+    renamed = service.update_folder("root", "kb-a", folder["id"], name="Documentation")
+    assert renamed["name"] == "Documentation"
+    moved = service.update_folder("root", "kb-a", child["id"], parent_folder_id=root["id"])
+    assert moved["parent_id"] == root["id"]
+
+    other_root = service.list_folders("root", "kb-b")[0]
+    with pytest.raises(NotFound):
+        service.create_folder("root", "kb-a", name="Wrong KB", parent_folder_id=other_root["id"])
+    with pytest.raises(NotFound):
+        service.update_folder("root", "kb-a", folder["id"], parent_folder_id=other_root["id"])
+    with pytest.raises(ValidationError):
+        service.update_folder("root", "kb-a", root["id"], name="Cannot rename root")
+    with pytest.raises(ValidationError):
+        service.delete_folder("root", "kb-a", root["id"], confirm=True)
+
+
+def test_service_scoped_document_delete_preserves_shared_documents(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb_a = service.create_kb("root", "kb-a", "KB A", "")
+    kb_b = service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Shared.md"
+    source.write_bytes(b"shared")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=False)
+
+    result = service.remove_document_from_kb("root", "kb-a", doc["slug"])
+    assert result["status"] == "deleted"
+    assert service.list_docs("root", "kb-a") == []
+    assert service.list_docs("root", "kb-b")[0]["slug"] == doc["slug"]
+    assert service.store.get_document_by_slug(doc["slug"])["status"] == "active"
+    jobs = service.status("root")["jobs"]
+    assert any(job["operation"] == "delete" and job["kb_id"] == kb_a["id"] for job in jobs)
+
+    service.remove_document_from_kb("root", "kb-b", doc["slug"])
+    assert service.store.get_document_by_slug(doc["slug"]) is None
+    deleted = service.store.get_document_by_slug(doc["slug"], include_deleted=True)
+    assert deleted["status"] == "deleted"
+    assert any(job["operation"] == "delete" and job["kb_id"] == kb_b["id"] for job in service.status("root")["jobs"])
+
+
+def test_service_folder_delete_requires_confirmation_and_recursively_detaches_docs(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    root = service.list_folders("root", "kb-a")[0]
+    parent = service.create_folder("root", "kb-a", name="Parent", parent_folder_id=root["id"])
+    child = service.create_folder("root", "kb-a", name="Child", parent_folder_id=parent["id"])
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"guide")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+    service.place_document("root", doc["slug"], "kb-a", parent["id"])
+    service.store.update_document_placement(doc["id"], service.store.get_kb_by_slug("kb-a")["id"], child["id"])
+
+    preview = service.delete_folder("root", "kb-a", parent["id"], confirm=False)
+    assert preview["requires_confirmation"] is True
+    assert preview["directory_count"] == 2
+    assert preview["file_count"] == 1
+    assert service.store.get_folder(service.store.get_kb_by_slug("kb-a")["id"], parent["id"]) is not None
+
+    result = service.delete_folder("root", "kb-a", parent["id"], confirm=True)
+    assert result["directory_count"] == 2
+    assert result["file_count"] == 1
+    assert service.list_docs("root", "kb-a") == []
+    assert service.list_docs("root", "kb-b")[0]["slug"] == doc["slug"]
+    assert service.store.get_document_by_slug(doc["slug"])["status"] == "active"
+
+
 def test_non_admin_cannot_create_kb(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     with pytest.raises(AccessDenied):

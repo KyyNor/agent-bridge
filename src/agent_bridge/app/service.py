@@ -53,6 +53,7 @@ ALLOWED_EXTENSIONS = {
 }
 UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | {".zip"}
 SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
+_UNSET = object()
 
 
 class AgentBridgeService:
@@ -269,6 +270,219 @@ class AgentBridgeService:
             raise NotFound("knowledge base not found")
         return []
 
+    # -- Knowledge-base folders and document placements --
+
+    def list_folders(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        return self.store.list_folder_tree(kb["id"])
+
+    def create_folder(
+        self,
+        actor: str,
+        kb_slug: str,
+        name: str,
+        parent_folder_id: int | None = None,
+    ) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        return self.store.create_folder(kb["id"], parent_folder_id, name)
+
+    def update_folder(
+        self,
+        actor: str,
+        kb_slug: str,
+        folder_id: int,
+        *,
+        name: str | None = None,
+        parent_folder_id: int | None | object = _UNSET,
+        parent_provided: bool | None = None,
+    ) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        if parent_provided is None:
+            parent_provided = parent_folder_id is not _UNSET
+        if name is None and not parent_provided:
+            raise ValidationError("at least one folder field must be provided")
+
+        # Resolve the folder in this KB before applying either operation. The
+        # repository repeats the scoped check for the mutation itself.
+        if self.store.get_folder(kb["id"], folder_id) is None:
+            raise NotFound("folder not found")
+        folder = self.store.get_folder(kb["id"], folder_id)
+        if folder is None:
+            raise NotFound("folder not found")
+        if parent_provided:
+            parent_id = None if parent_folder_id is _UNSET else parent_folder_id
+            folder = self.store.move_folder(kb["id"], folder_id, parent_id)  # type: ignore[arg-type]
+        if name is not None:
+            folder = self.store.rename_folder(kb["id"], folder_id, name)
+        return folder
+
+    def _folder_delete_preview(self, kb_id: int, folder_id: int) -> dict[str, Any]:
+        folder = self.store.get_folder(kb_id, folder_id)
+        if folder is None:
+            raise NotFound("folder not found")
+        if folder["is_root"]:
+            raise ValidationError("root folder cannot be deleted")
+        counts = self.store.get_subtree_counts(kb_id, folder_id)
+        return {
+            "requires_confirmation": True,
+            "folder_id": folder_id,
+            "directory_count": counts["directory_count"],
+            "file_count": counts["file_count"],
+            "folder_count": counts["folder_count"],
+        }
+
+    def _documents_in_folder_subtree(self, kb_id: int, folder_id: int) -> list[dict[str, Any]]:
+        documents: dict[int, dict[str, Any]] = {}
+        for subtree_folder_id in self.store.get_subtree_ids(kb_id, folder_id):
+            for document in self.store.list_docs_for_kb(kb_id, folder_id=subtree_folder_id):
+                full_document = self.store.get_document_by_slug(document["slug"])
+                documents[int(document["id"])] = full_document or document
+        return list(documents.values())
+
+    def _queue_scoped_document_delete(self, doc: dict[str, Any], kb_id: int) -> None:
+        for target in self.store.list_backend_targets(kb_id):
+            if target["status"] != "active":
+                continue
+            compacted = self.store.cancel_runnable_create_update_jobs(
+                doc["id"], kb_id, target["slug"]
+            )
+            sync_state = self.store.get_sync_state(doc["id"], kb_id, target["slug"])
+            remote_exists = bool(sync_state and sync_state.get("backend_doc_id"))
+            if remote_exists or compacted["running"] > 0:
+                self.store.create_sync_job(
+                    doc["id"], kb_id, Operation.delete, doc.get("current_version_id"),
+                    backend_slug=target["slug"],
+                )
+
+    def _remove_document_from_kb_by_id(
+        self,
+        doc: dict[str, Any],
+        kb: dict[str, Any],
+        *,
+        actor: str | None = None,
+        later: bool = True,
+    ) -> dict[str, str]:
+        placement = self.store.get_document_placement(doc["id"], kb["id"])
+        if placement is None:
+            raise NotFound("document knowledge-base association not found")
+        self._queue_scoped_document_delete(doc, kb["id"])
+        if not self.store.remove_document_from_kb(doc["id"], kb["id"]):
+            raise NotFound("document knowledge-base association not found")
+
+        active_associations = [
+            item
+            for item in self.store.get_document_kbs(doc["id"])
+            if item.get("document_kb_status") == "active"
+        ]
+        if not active_associations:
+            self.store.soft_delete_document(doc["id"])
+        if not later:
+            self.sync(actor=actor or doc.get("owner_user") or "", all_users=False)
+        return {"slug": doc["slug"], "status": "deleted", "kb": kb["slug"]}
+
+    def remove_document_from_kb(
+        self,
+        actor: str,
+        kb_slug: str,
+        doc_slug: str,
+        *,
+        later: bool = True,
+    ) -> dict[str, str]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        doc = self._require_doc_admin_visible(actor, doc_slug)
+        return self._remove_document_from_kb_by_id(doc, kb, actor=actor, later=later)
+
+    def delete_folder(
+        self,
+        actor: str,
+        kb_slug: str,
+        folder_id: int,
+        *,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        preview = self._folder_delete_preview(kb["id"], folder_id)
+        if not confirm:
+            return preview
+
+        documents = self._documents_in_folder_subtree(kb["id"], folder_id)
+        for document in documents:
+            self._remove_document_from_kb_by_id(document, kb, actor=actor)
+        deleted = self.store.delete_folder_subtree(kb["id"], folder_id)
+        return {
+            "folder_id": folder_id,
+            "deleted": True,
+            "directory_count": preview["directory_count"],
+            "file_count": preview["file_count"],
+            "folder_count": preview["folder_count"],
+            "directory_ids": deleted["directory_ids"],
+        }
+
+    def _queue_placement_sync_jobs(self, doc: dict[str, Any], kb_id: int) -> None:
+        for target in self.store.list_backend_targets(kb_id):
+            if target["status"] != "active":
+                continue
+            compacted = self.store.cancel_runnable_create_update_jobs(
+                doc["id"], kb_id, target["slug"]
+            )
+            sync_state = self.store.get_sync_state(doc["id"], kb_id, target["slug"])
+            remote_exists = bool(sync_state and sync_state.get("backend_doc_id"))
+            if remote_exists:
+                if compacted["running"] == 0:
+                    self.store.create_sync_job(
+                        doc["id"], kb_id, Operation.update, doc.get("current_version_id"),
+                        backend_slug=target["slug"],
+                    )
+            else:
+                # A pending create is replaced so the next task observes the
+                # latest placement. This also covers a placement change made
+                # after an unsynced upload was queued.
+                self.store.create_sync_job(
+                    doc["id"], kb_id, Operation.create, doc.get("current_version_id"),
+                    backend_slug=target["slug"],
+                )
+
+    def place_document(
+        self,
+        actor: str,
+        doc_slug: str,
+        kb_slug: str,
+        folder_id: int,
+    ) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        doc = self._require_doc_admin_visible(actor, doc_slug)
+        if self.store.get_folder(kb["id"], folder_id) is None:
+            raise NotFound("folder not found")
+        if self.store.get_document_placement(doc["id"], kb["id"]) is None:
+            raise NotFound("document knowledge-base association not found")
+        placement = self.store.update_document_placement(doc["id"], kb["id"], folder_id)
+        self._queue_placement_sync_jobs(doc, kb["id"])
+        return {**placement, "slug": doc_slug, "kb": kb_slug}
+
+    def attach_document(
+        self,
+        actor: str,
+        doc_slug: str,
+        kb_slug: str,
+        folder_id: int,
+    ) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        doc = self._require_doc_admin_visible(actor, doc_slug)
+        if self.store.get_folder(kb["id"], folder_id) is None:
+            raise NotFound("folder not found")
+        existing = self.store.get_document_placement(doc["id"], kb["id"])
+        if existing is not None:
+            if existing["folder_id"] == folder_id:
+                return {**existing, "slug": doc_slug, "kb": kb_slug}
+            return self.place_document(actor, doc_slug, kb_slug, folder_id)
+
+        self.store.attach_document_to_kb(doc["id"], kb["id"], actor, folder_id=folder_id)
+        self._queue_create_sync_jobs(doc["id"], doc.get("current_version_id"), [kb])
+        placement = self.store.get_document_placement(doc["id"], kb["id"])
+        if placement is None:
+            raise NotFound("document knowledge-base association not found")
+        return {**placement, "slug": doc_slug, "kb": kb_slug}
+
     def add_document(
         self,
         actor: str,
@@ -279,16 +493,25 @@ class AgentBridgeService:
         source_type: str = "manual",
         source_repo_key: str = "",
         slug_override: str | None = None,
+        folder_id: int | None = None,
+        relative_path: str | None = None,
     ) -> dict[str, Any]:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
         require_admin_user(actor, self.admins)
         self._validate_source(source, allowed_extensions=UPLOAD_EXTENSIONS)
+        if folder_id is not None and len(kb_slugs) != 1:
+            raise ValidationError("folder_id can only be used with one knowledge base")
         kbs = [self._require_kb_admin_visible(actor, kb_slug) for kb_slug in kb_slugs]
+        if folder_id is not None and self.store.get_folder(kbs[0]["id"], folder_id) is None:
+            raise NotFound("folder not found")
 
         display_name = original_filename or source.name
         if source.suffix.lower() == ".zip":
-            return self._add_zip_documents(actor, source, display_name, kbs, later, source_type, source_repo_key)
+            return self._add_zip_documents(
+                actor, source, display_name, kbs, later, source_type, source_repo_key,
+                folder_id=folder_id, relative_path=relative_path,
+            )
         return self._add_single_document(
             actor=actor,
             source=source,
@@ -298,6 +521,8 @@ class AgentBridgeService:
             source_type=source_type,
             source_repo_key=source_repo_key,
             slug_override=slug_override,
+            folder_id=folder_id,
+            relative_path=relative_path,
         )
 
     def _add_single_document(
@@ -310,6 +535,8 @@ class AgentBridgeService:
         source_type: str = "manual",
         source_repo_key: str = "",
         slug_override: str | None = None,
+        folder_id: int | None = None,
+        relative_path: str | None = None,
     ) -> dict[str, Any]:
         content_hash = self.archive.content_hash(source)
         existing = next(
@@ -321,16 +548,25 @@ class AgentBridgeService:
             None,
         )
         if existing is not None:
-            existing_kb_ids = {item["id"] for item in self.store.get_document_kbs(existing["id"])}
+            existing_kb_ids = {
+                item["kb_id"]
+                for item in self.store.get_document_kbs(existing["id"])
+                if item.get("document_kb_status") == "active"
+            }
             attached_new_kb = False
             for kb in kb_targets:
                 if kb["id"] in existing_kb_ids:
                     continue
-                self.store.attach_document_to_kb(existing["id"], kb["id"], actor)
+                target_folder_id = folder_id if len(kb_targets) == 1 else None
+                self.store.attach_document_to_kb(
+                    existing["id"], kb["id"], actor, folder_id=target_folder_id
+                )
                 self._queue_create_sync_jobs(existing["id"], existing["current_version_id"], [kb])
                 attached_new_kb = True
             existing["kb_slugs"] = [
-                kb["slug"] for kb in self.store.get_document_kbs(existing["id"])
+                kb["slug"]
+                for kb in self.store.get_document_kbs(existing["id"])
+                if kb.get("document_kb_status") == "active"
             ]
             existing["skipped"] = True
             existing["skip_reason"] = "duplicate_content"
@@ -356,7 +592,10 @@ class AgentBridgeService:
         )
         self._queue_create_sync_jobs(doc["id"], version["id"], kb_targets)
         for kb in kb_targets:
-            self.store.attach_document_to_kb(doc["id"], kb["id"], actor)
+            target_folder_id = folder_id if len(kb_targets) == 1 else None
+            self.store.attach_document_to_kb(
+                doc["id"], kb["id"], actor, folder_id=target_folder_id
+            )
 
         doc["current_version_no"] = version["version_no"]
         doc["kb_slugs"] = [kb["slug"] for kb in kb_targets]
@@ -391,6 +630,8 @@ class AgentBridgeService:
         later: bool,
         source_type: str,
         source_repo_key: str,
+        folder_id: int | None = None,
+        relative_path: str | None = None,
     ) -> dict[str, Any]:
         with TemporaryDirectory(prefix="agent-bridge-upload-") as temp_dir:
             extracted = extract_zip_documents(source, Path(temp_dir), ALLOWED_EXTENSIONS)
@@ -403,6 +644,8 @@ class AgentBridgeService:
                     later=later,
                     source_type=source_type,
                     source_repo_key=source_repo_key,
+                    folder_id=folder_id,
+                    relative_path=relative_path,
                 )
                 for path in extracted
             ]
@@ -453,9 +696,15 @@ class AgentBridgeService:
             self.sync(actor=actor, all_users=False)
         return doc
 
-    def list_docs(self, actor: str, kb_slug: str, backend: str | None = None) -> list[dict[str, Any]]:
+    def list_docs(
+        self,
+        actor: str,
+        kb_slug: str,
+        backend: str | None = None,
+        folder_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         kb = self._require_kb_admin_visible(actor, kb_slug)
-        return self.store.list_docs_for_kb(kb["id"])
+        return self.store.list_docs_for_kb(kb["id"], folder_id=folder_id)
 
     def get_doc(self, actor: str, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
         doc = self._require_doc_admin_visible(actor, doc_slug)
