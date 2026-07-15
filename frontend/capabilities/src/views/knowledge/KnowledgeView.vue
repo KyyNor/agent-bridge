@@ -2,7 +2,7 @@
 import { Plus, RotateCw, Upload, File, Folder, Trash2, GitBranch, ArrowLeft } from 'lucide-vue-next'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, DocumentDetail, DocumentUploadSummary, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource } from '../../api/types'
+import type { KnowledgeBaseSummary, Document, DocumentDetail, DocumentUploadSummary, KnowledgeFolder, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import PaginationBar from '../../components/PaginationBar.vue'
+import FolderTree from '../../components/knowledge/FolderTree.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
@@ -31,6 +32,26 @@ const createError = ref('')
 const detailKb = ref<KnowledgeBaseSummary | null>(null)
 const detailTab = ref<'docs' | 'sync' | 'sources' | 'search'>('docs')
 const detailDocs = ref<Document[]>([])
+const detailFolders = ref<KnowledgeFolder[]>([])
+const selectedFolderId = ref<number | null>(null)
+const showingAllDocuments = ref(false)
+const folderTreeLoading = ref(false)
+const folderDialogOpen = ref(false)
+const folderDialogMode = ref<'create' | 'rename' | 'move'>('create')
+const folderDialogFolder = ref<KnowledgeFolder | null>(null)
+const folderDialogParentId = ref<number | null>(null)
+const folderDialogName = ref('')
+const folderDialogTargetId = ref<number | null>(null)
+const folderDialogError = ref('')
+const folderDialogSaving = ref(false)
+const placementDialogOpen = ref(false)
+const placementDialogMode = ref<'place' | 'attach'>('place')
+const placementDoc = ref<Document | null>(null)
+const placementFolders = ref<KnowledgeFolder[]>([])
+const placementKbSlug = ref('')
+const placementTargetFolderId = ref<number | null>(null)
+const placementError = ref('')
+const placementSaving = ref(false)
 const detailSyncJobs = ref<SyncJob[]>([])
 const detailRepoSources = ref<KbRepoSource[]>([])
 const detailLoading = ref(false)
@@ -39,6 +60,36 @@ const routeError = ref('')
 const selectedDocSlugs = ref<Set<string>>(new Set())
 const allDocsSelected = computed(() => detailDocs.value.length > 0 && detailDocs.value.every(d => selectedDocSlugs.value.has(d.slug)))
 const someDocsSelected = computed(() => detailDocs.value.some(d => selectedDocSlugs.value.has(d.slug)))
+const rootFolder = computed(() => detailFolders.value.find(folder => folder.is_root) || detailFolders.value[0] || null)
+const currentFolder = computed(() => detailFolders.value.find(folder => folder.id === selectedFolderId.value) || null)
+const currentFolderBreadcrumbs = computed(() => {
+  if (showingAllDocuments.value) return ['全部文档']
+  if (!currentFolder.value || !currentFolder.value.path) return [detailKb.value?.name || '根目录']
+  return [detailKb.value?.name || '根目录', ...currentFolder.value.path.split('/').filter(Boolean)]
+})
+const activeBackendType = computed(() => {
+  const slug = detailKb.value?.default_backend_slug
+  return backends.value.find(backend => backend.slug === slug)?.backend_type
+    || detailKb.value?.backend_targets.find(target => target.status === 'active')?.backend_type
+    || ''
+})
+const folderCapabilityLabel = computed(() => activeBackendType.value === 'weknora' ? '目录同步' : '本地分目录，后端平铺')
+const folderDialogTitle = computed(() => {
+  if (folderDialogMode.value === 'create') return '新建目录'
+  if (folderDialogMode.value === 'rename') return `重命名目录「${folderDialogFolder.value?.name || ''}」`
+  return `移动目录「${folderDialogFolder.value?.name || ''}」`
+})
+const folderDialogTargets = computed(() => {
+  const folder = folderDialogFolder.value
+  if (!folder || folderDialogMode.value !== 'move') return detailFolders.value
+  const prefix = folder.path ? `${folder.path}/` : ''
+  return detailFolders.value.filter(candidate => candidate.id !== folder.id && !candidate.path.startsWith(prefix))
+})
+const placementFoldersForDialog = computed(() => placementDialogMode.value === 'place' ? detailFolders.value : placementFolders.value)
+const placementRootLabel = computed(() => {
+  if (placementDialogMode.value === 'place') return detailKb.value?.name || '根目录'
+  return kbs.value.find(kb => kb.slug === placementKbSlug.value)?.name || '根目录'
+})
 // Sync
 const syncing = ref(false)
 // Git repo sources
@@ -70,7 +121,12 @@ const planeKb = ref<KnowledgeBaseSummary | null>(null)
 // 上传对话框
 const showUploadDialog = ref(false)
 const uploadKb = ref<KnowledgeBaseSummary | null>(null)
-const uploadFiles = ref<File[]>([])
+interface UploadItem {
+  file: File
+  relativePath: string
+}
+const uploadFiles = ref<UploadItem[]>([])
+const uploadFolderId = ref<number | null>(null)
 const uploading = ref(false)
 const uploadDragOver = ref(false)
 const uploadError = ref('')
@@ -193,11 +249,229 @@ async function openDetail(kb: KnowledgeBaseSummary) {
   window.location.hash = 'knowledge/' + kb.slug
 }
 
+async function loadFolderTree(preferredFolderId?: number | null) {
+  if (!detailKb.value) return
+  folderTreeLoading.value = true
+  try {
+    detailFolders.value = await api.listFolders(detailKb.value.slug)
+    const preferred = preferredFolderId != null ? detailFolders.value.find(folder => folder.id === preferredFolderId) : null
+    const fallback = preferred || rootFolder.value
+    if (!showingAllDocuments.value) selectedFolderId.value = fallback?.id ?? null
+  } catch (e: unknown) {
+    detailFolders.value = []
+    if (!showingAllDocuments.value) selectedFolderId.value = null
+    throw e
+  } finally {
+    folderTreeLoading.value = false
+  }
+}
+
+async function refreshCurrentDocs() {
+  if (!detailKb.value) return
+  const folderId = showingAllDocuments.value ? undefined : selectedFolderId.value ?? undefined
+  detailDocs.value = await api.listDocs(detailKb.value.slug, undefined, folderId)
+  selectedDocSlugs.value = new Set()
+}
+
+async function refreshFoldersAndDocs(preferredFolderId?: number | null) {
+  if (!detailKb.value) return
+  try {
+    await loadFolderTree(preferredFolderId)
+    await refreshCurrentDocs()
+  } catch (e: any) {
+    detailDocs.value = []
+    if (e) routeError.value = e.message || '目录加载失败'
+  }
+}
+
+async function selectFolder(folderId: number | null) {
+  if (!detailKb.value) return
+  showingAllDocuments.value = folderId === null
+  if (folderId !== null) selectedFolderId.value = folderId
+  try {
+    await refreshCurrentDocs()
+  } catch (e: any) {
+    await alert({ title: '加载文档失败', description: e.message || '加载文档失败', destructive: true })
+  }
+}
+
+function openCreateFolder(parentFolderId: number) {
+  folderDialogMode.value = 'create'
+  folderDialogFolder.value = null
+  folderDialogParentId.value = parentFolderId
+  folderDialogName.value = ''
+  folderDialogTargetId.value = parentFolderId
+  folderDialogError.value = ''
+  folderDialogOpen.value = true
+}
+
+function openRenameFolder(folder: KnowledgeFolder) {
+  if (folder.is_root) return
+  folderDialogMode.value = 'rename'
+  folderDialogFolder.value = folder
+  folderDialogParentId.value = folder.parent_id
+  folderDialogName.value = folder.name
+  folderDialogTargetId.value = folder.parent_id ?? rootFolder.value?.id ?? null
+  folderDialogError.value = ''
+  folderDialogOpen.value = true
+}
+
+function openMoveFolder(folder: KnowledgeFolder) {
+  if (folder.is_root) return
+  folderDialogMode.value = 'move'
+  folderDialogFolder.value = folder
+  folderDialogParentId.value = folder.parent_id
+  folderDialogName.value = ''
+  folderDialogTargetId.value = folder.parent_id ?? rootFolder.value?.id ?? null
+  folderDialogError.value = ''
+  folderDialogOpen.value = true
+}
+
+async function submitFolderDialog() {
+  if (!detailKb.value) return
+  folderDialogError.value = ''
+  const name = folderDialogName.value.trim()
+  if ((folderDialogMode.value === 'create' || folderDialogMode.value === 'rename') && !name) {
+    folderDialogError.value = '请输入目录名称'
+    return
+  }
+  if (folderDialogMode.value === 'move' && folderDialogTargetId.value == null) {
+    folderDialogError.value = '请选择目标目录'
+    return
+  }
+  folderDialogSaving.value = true
+  try {
+    if (folderDialogMode.value === 'create') {
+      await api.createFolder(detailKb.value.slug, folderDialogParentId.value, name)
+    } else if (folderDialogFolder.value) {
+      await api.updateFolder(
+        detailKb.value.slug,
+        folderDialogFolder.value.id,
+        folderDialogMode.value === 'rename' ? { name } : { parent_folder_id: folderDialogTargetId.value },
+      )
+    }
+    folderDialogOpen.value = false
+    await refreshFoldersAndDocs(selectedFolderId.value)
+  } catch (e: any) {
+    folderDialogError.value = e.message || '保存目录失败'
+  } finally {
+    folderDialogSaving.value = false
+  }
+}
+
+function isInFolderSubtree(folder: KnowledgeFolder, candidate: KnowledgeFolder | null) {
+  if (!candidate) return false
+  return candidate.id === folder.id || (!!folder.path && candidate.path.startsWith(`${folder.path}/`))
+}
+
+async function removeFolder(folder: KnowledgeFolder) {
+  if (!detailKb.value || folder.is_root) return
+  const parentId = folder.parent_id ?? rootFolder.value?.id ?? null
+  try {
+    const preview = await api.deleteFolder(detailKb.value.slug, folder.id, false)
+    const ok = await confirm({
+      title: '删除目录',
+      description: `你删除的目录下有 ${preview.directory_count ?? preview.folder_count ?? 0} 个目录、${preview.file_count ?? preview.descendant_file_count ?? 0} 个文件，确认删除后都会删除且不能恢复。`,
+      destructive: true,
+      confirmText: '确认删除',
+    })
+    if (!ok) return
+    const result = await api.deleteFolder(detailKb.value.slug, folder.id, true)
+    const removedCurrent = !showingAllDocuments.value && isInFolderSubtree(folder, currentFolder.value)
+    if (removedCurrent) {
+      showingAllDocuments.value = false
+      selectedFolderId.value = parentId
+    }
+    await refreshFoldersAndDocs(removedCurrent ? parentId : selectedFolderId.value)
+    await alert({
+      title: '目录已删除',
+      description: `已删除 ${result.directory_count ?? result.folder_count ?? 0} 个目录、${result.file_count ?? result.descendant_file_count ?? 0} 个文件。`,
+    })
+  } catch (e: any) {
+    await alert({ title: '删除目录失败', description: e.message || '删除目录失败', destructive: true })
+  }
+}
+
+async function openPlaceDialog(document: Document) {
+  if (!detailKb.value) return
+  placementDialogMode.value = 'place'
+  placementDoc.value = document
+  placementKbSlug.value = detailKb.value.slug
+  placementFolders.value = detailFolders.value
+  placementTargetFolderId.value = document.folder_id ?? rootFolder.value?.id ?? null
+  placementError.value = ''
+  placementDialogOpen.value = true
+}
+
+const otherKnowledgeBases = computed(() => kbs.value.filter(kb => kb.slug !== detailKb.value?.slug))
+
+async function openAttachDialog(document: Document) {
+  if (!detailKb.value || otherKnowledgeBases.value.length === 0) return
+  placementDialogMode.value = 'attach'
+  placementDoc.value = document
+  placementKbSlug.value = otherKnowledgeBases.value[0].slug
+  placementFolders.value = []
+  placementTargetFolderId.value = null
+  placementError.value = ''
+  placementDialogOpen.value = true
+  await loadPlacementFolders(placementKbSlug.value)
+}
+
+async function loadPlacementFolders(kbSlug: string) {
+  placementFolders.value = []
+  if (!kbSlug) return
+  try {
+    placementFolders.value = await api.listFolders(kbSlug)
+    placementTargetFolderId.value = placementFolders.value.find(folder => folder.is_root)?.id || placementFolders.value[0]?.id || null
+  } catch (e: any) {
+    placementError.value = e.message || '加载目标目录失败'
+  }
+}
+
+async function changePlacementKb(kbSlug: string) {
+  placementKbSlug.value = kbSlug
+  await loadPlacementFolders(kbSlug)
+}
+
+function selectPlacementFolder(folderId: number | null) {
+  if (folderId != null) placementTargetFolderId.value = folderId
+}
+
+function selectFolderDialogTarget(folderId: number | null) {
+  if (folderId != null) folderDialogTargetId.value = folderId
+}
+
+async function submitPlacement() {
+  if (!placementDoc.value || !placementKbSlug.value || placementTargetFolderId.value == null) {
+    placementError.value = '请选择目标目录'
+    return
+  }
+  placementSaving.value = true
+  placementError.value = ''
+  try {
+    if (placementDialogMode.value === 'place' && detailKb.value) {
+      await api.placeDocument(placementDoc.value.slug, detailKb.value.slug, placementTargetFolderId.value)
+    } else {
+      await api.attachDocument(placementDoc.value.slug, placementKbSlug.value, placementTargetFolderId.value)
+      await loadKbs()
+    }
+    placementDialogOpen.value = false
+    await refreshFoldersAndDocs(selectedFolderId.value)
+  } catch (e: any) {
+    placementError.value = e.message || '保存文档目录失败'
+  } finally {
+    placementSaving.value = false
+  }
+}
+
 // Load detail data for the kb referenced by the current route (props.routeKey).
 async function loadDetail() {
   if (!props.routeKey) {
     detailKb.value = null
     routeError.value = ''
+    detailFolders.value = []
+    selectedFolderId.value = null
+    showingAllDocuments.value = false
     selectedDocSlugs.value = new Set()
     return
   }
@@ -205,6 +479,9 @@ async function loadDetail() {
   if (!kb) {
     detailKb.value = null
     routeError.value = '无法加载该知识库（可能已被删除或不存在）'
+    detailFolders.value = []
+    selectedFolderId.value = null
+    showingAllDocuments.value = false
     selectedDocSlugs.value = new Set()
     return
   }
@@ -222,15 +499,24 @@ async function loadDetail() {
   detailRepoSources.value = []
   repoSourceError.value = ''
   repoSourceMessage.value = ''
+  detailFolders.value = []
+  selectedFolderId.value = null
+  showingAllDocuments.value = false
   selectedDocSlugs.value = new Set()
   try {
-    const [docs, syncStatus, repoSources, repos] = await Promise.allSettled([
-      api.listDocs(kb.slug),
+    const [folders, syncStatus, repoSources, repos] = await Promise.allSettled([
+      api.listFolders(kb.slug),
       api.getSyncStatus(),
       api.listKbRepoSources(kb.slug),
       api.listCodeRepos(),
     ])
-    detailDocs.value = docs.status === 'fulfilled' ? docs.value : []
+    detailFolders.value = folders.status === 'fulfilled' ? folders.value : []
+    selectedFolderId.value = rootFolder.value?.id ?? null
+    try {
+      detailDocs.value = await api.listDocs(kb.slug, undefined, selectedFolderId.value ?? undefined)
+    } catch {
+      detailDocs.value = []
+    }
     detailSyncJobs.value = syncStatus.status === 'fulfilled' ? syncStatus.value.jobs.filter((j: SyncJob) => j.kb_slug === kb.slug) : []
     detailRepoSources.value = repoSources.status === 'fulfilled' ? repoSources.value : []
     codeRepos.value = repos.status === 'fulfilled' ? repos.value : []
@@ -267,8 +553,8 @@ async function deleteDoc(slug: string, docTitle: string) {
   })
   if (!ok) return
   try {
-    await api.deleteDocument(slug)
-    detailDocs.value = await api.listDocs(detailKb.value.slug)
+    await api.deleteDocumentFromKb(detailKb.value.slug, slug)
+    await refreshFoldersAndDocs()
     selectedDocSlugs.value = new Set([...selectedDocSlugs.value].filter(s => s !== slug))
   } catch (e: any) {
     await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
@@ -286,10 +572,10 @@ async function batchDeleteDocs() {
     confirmText: '删除',
   })
   if (!ok) return
-  const results = await Promise.allSettled(slugs.map(slug => api.deleteDocument(slug)))
+  const results = await Promise.allSettled(slugs.map(slug => api.deleteDocumentFromKb(detailKb.value!.slug, slug)))
   const failed = results.filter(r => r.status === 'rejected').length
   const succeeded = results.length - failed
-  detailDocs.value = await api.listDocs(detailKb.value.slug)
+  await refreshFoldersAndDocs()
   selectedDocSlugs.value = new Set()
   if (failed > 0) {
     await alert({
@@ -376,11 +662,10 @@ async function syncRepoSource(source: KbRepoSource) {
     const result = await api.syncKbRepoSource(detailKb.value.slug, source.repo_key)
     const [repoSources, docs, syncStatus] = await Promise.all([
       api.listKbRepoSources(detailKb.value.slug),
-      api.listDocs(detailKb.value.slug),
+      refreshCurrentDocs(),
       api.getSyncStatus(),
     ])
     detailRepoSources.value = repoSources
-    detailDocs.value = docs
     detailSyncJobs.value = syncStatus.jobs.filter((j: SyncJob) => j.kb_slug === detailKb.value!.slug)
     repoSourceMessage.value = `已同步：新增 ${result.added}，删除 ${result.removed}，更新 ${result.updated}`
   } catch (e: any) {
@@ -403,12 +688,11 @@ async function deleteRepoSource(source: KbRepoSource) {
   repoSourceDeleting.value = { ...repoSourceDeleting.value, [source.repo_key]: true }
   try {
     await api.deleteKbRepoSource(detailKb.value.slug, source.repo_key)
-    const [repoSources, docs] = await Promise.all([
+    const [repoSources] = await Promise.all([
       api.listKbRepoSources(detailKb.value.slug),
-      api.listDocs(detailKb.value.slug),
+      refreshCurrentDocs(),
     ])
     detailRepoSources.value = repoSources
-    detailDocs.value = docs
     repoSourceMessage.value = '已移除数据源'
   } catch (e: any) {
     repoSourceError.value = e.message || '删除失败'
@@ -470,14 +754,22 @@ async function saveDefaultBackend() {
   savingDefaultBackend.value = false
 }
 
+function normalizeRelativePath(path: string) {
+  return path.replace(/\\/g, '/').replace(/^\/+/, '') || path
+}
+
+function addUploadItem(file: File, relativePath?: string) {
+  const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+  if (!ALLOWED_DOC_EXTENSIONS.includes(ext)) return
+  uploadFiles.value.push({ file, relativePath: normalizeRelativePath(relativePath || file.name) })
+}
+
 function onUploadFilesSelected(e: Event) {
   const target = e.target as HTMLInputElement
   if (target.files && target.files.length > 0) {
-    const allowed = ALLOWED_DOC_EXTENSIONS
     for (let i = 0; i < target.files.length; i++) {
       const f = target.files[i]
-      const ext = '.' + f.name.split('.').pop()?.toLowerCase()
-      if (allowed.includes(ext)) uploadFiles.value.push(f)
+      addUploadItem(f, f.webkitRelativePath || f.name)
     }
   }
   target.value = ''
@@ -511,25 +803,25 @@ function addFilesFromDataTransfer(dt: DataTransfer) {
   if (entries.length === 0) {
     for (let i = 0; i < dt.files.length; i++) {
       const f = dt.files[i]
-      const ext = '.' + f.name.split('.').pop()?.toLowerCase()
-      if (allowed.includes(ext)) uploadFiles.value.push(f)
+      addUploadItem(f, f.webkitRelativePath || f.name)
     }
     return
   }
   entries.forEach(entry => traverseEntry(entry, allowed))
 }
 
-function traverseEntry(entry: FileSystemEntry, allowed: string[]) {
+function traverseEntry(entry: FileSystemEntry, allowed: string[], parentPath = '') {
+  const relativePath = parentPath ? `${parentPath}/${entry.name}` : entry.name
   if (entry.isFile) {
     const ext = '.' + entry.name.split('.').pop()?.toLowerCase()
     if (!allowed.includes(ext)) return
-    ;(entry as FileSystemFileEntry).file(f => uploadFiles.value.push(f))
+    ;(entry as FileSystemFileEntry).file(f => addUploadItem(f, relativePath))
   } else if (entry.isDirectory) {
     const reader = (entry as FileSystemDirectoryEntry).createReader()
     const readAll = () => {
       reader.readEntries(entries => {
         if (entries.length === 0) return
-        entries.forEach(e => traverseEntry(e, allowed))
+        entries.forEach(e => traverseEntry(e, allowed, relativePath))
         readAll()
       })
     }
@@ -540,6 +832,9 @@ function traverseEntry(entry: FileSystemEntry, allowed: string[]) {
 function openUploadDialog(kb: KnowledgeBaseSummary) {
   uploadKb.value = kb
   uploadFiles.value = []
+  uploadFolderId.value = kb.slug === detailKb.value?.slug
+    ? (showingAllDocuments.value ? rootFolder.value?.id ?? null : selectedFolderId.value)
+    : null
   uploadError.value = ''
   showUploadDialog.value = true
 }
@@ -554,8 +849,8 @@ async function uploadDocuments() {
   uploadError.value = ''
   try {
     const results: Array<DocumentDetail | DocumentUploadSummary> = []
-    for (const file of uploadFiles.value) {
-      results.push(await api.addDocument(file, [uploadKb.value.slug], true))
+    for (const item of uploadFiles.value) {
+      results.push(await api.addDocument(item.file, [uploadKb.value.slug], true, uploadFolderId.value, item.relativePath))
     }
     const uploadedCount = results.reduce((count, result) => count + (isUploadSummary(result) ? result.uploaded_count : 1), 0)
     const skippedCount = results.reduce((count, result) => count + (isUploadSummary(result) ? result.skipped_count : 0), 0)
@@ -568,6 +863,7 @@ async function uploadDocuments() {
     showUploadDialog.value = false
     uploadFiles.value = []
     await loadKbs()
+    if (detailKb.value?.slug === uploadKb.value.slug) await refreshFoldersAndDocs(selectedFolderId.value)
   } catch (e: unknown) {
     uploadError.value = e instanceof Error ? e.message : '上传失败'
   } finally {
@@ -703,10 +999,6 @@ async function savePlaneProfiles() {
               </td>
               <td class="px-4 py-3">
                 <div class="flex gap-2">
-                  <Button size="sm" @click="openUploadDialog(k)" class="h-8 text-xs">
-                    <Upload :size="12" />
-                    上传
-                  </Button>
                   <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
                   <Button variant="outline" size="sm" @click="openPlaneDialog(k)" class="h-8 text-xs">能力平面</Button>
                   <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteKb(k)">
@@ -796,49 +1088,90 @@ async function savePlaneProfiles() {
         </div>
 
         <!-- Documents Tab -->
-        <div v-if="detailTab === 'docs'" class="space-y-3">
-          <div class="text-xs text-muted-foreground">点击右上角「上传」按钮添加文档，上传后由定时任务自动同步</div>
-          <!-- Batch toolbar -->
-          <div v-if="selectedDocSlugs.size > 0" class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
-            <span class="text-sm font-medium">已选 {{ selectedDocSlugs.size }} 项</span>
-            <Button variant="destructive" size="sm" class="h-7 text-xs" @click="batchDeleteDocs">
-              <Trash2 :size="12" class="mr-1" />
-              批量删除
-            </Button>
-            <Button variant="ghost" size="sm" class="h-7 text-xs text-muted-foreground" @click="selectedDocSlugs = new Set()">取消选择</Button>
-          </div>
-          <div v-if="detailDocs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无文档</div>
-          <table v-else class="w-full">
-            <thead><tr class="border-b border-border">
-              <th class="px-3 py-2 text-left" style="width: 28px;">
-                <input type="checkbox" class="size-4 rounded" :checked="allDocsSelected"
-                  :indeterminate.prop="someDocsSelected && !allDocsSelected" @change="toggleAllDocs" />
-              </th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">上传者</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
-            </tr></thead>
-            <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
-              <td class="px-3 py-2">
-                <input type="checkbox" class="size-4 rounded" :value="d.slug"
-                  :checked="selectedDocSlugs.has(d.slug)" @change="toggleDocSelected(d.slug)" />
-              </td>
-              <td class="px-3 py-2 text-sm font-medium">{{ d.title }}</td>
-              <td class="px-3 py-2 text-xs text-muted-foreground">{{ d.owner_user }}</td>
-              <td class="px-3 py-2 text-xs tabular-nums">v{{ d.current_version_no || 0 }}</td>
-              <td class="px-3 py-2">
-                <Badge variant="secondary" class="text-[11px]"
-                  :class="d.sync_status === 'synced' ? 'bg-green-50 text-green-700' : d.sync_status === 'sync_failed' ? 'bg-red-50 text-red-700' : ''">
-                  {{ d.sync_status || d.status }}
-                </Badge>
-              </td>
-              <td class="px-3 py-2">
-                <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(d.slug, d.title)">删除</Button>
-              </td>
-            </tr></tbody>
-          </table>
+        <div v-if="detailTab === 'docs'" class="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
+          <aside class="min-w-0 rounded-lg border border-border bg-card p-2">
+            <div class="mb-2 flex items-center justify-between px-2">
+              <span class="text-xs font-semibold text-muted-foreground">目录</span>
+              <span class="text-[11px] text-muted-foreground">{{ detailFolders.length }} 项</span>
+            </div>
+            <FolderTree
+              :folders="detailFolders"
+              :selected-id="selectedFolderId"
+              :all-selected="showingAllDocuments"
+              :root-label="detailKb.name"
+              :all-count="detailKb.document_count"
+              :loading="folderTreeLoading"
+              @select="selectFolder"
+              @create="openCreateFolder"
+              @rename="openRenameFolder"
+              @move="openMoveFolder"
+              @remove="removeFolder"
+            />
+          </aside>
+
+          <section class="min-w-0 space-y-3">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-1 text-sm font-medium">
+                  <template v-for="(crumb, index) in currentFolderBreadcrumbs" :key="`${crumb}-${index}`">
+                    <span v-if="index > 0" class="text-muted-foreground">/</span>
+                    <span class="truncate">{{ crumb }}</span>
+                  </template>
+                </div>
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{{ showingAllDocuments ? '全部文档是快捷查询，不作为目录同步路径' : '当前目录仅显示直接文件' }}</span>
+                  <Badge variant="secondary" class="text-[10px]">{{ folderCapabilityLabel }}</Badge>
+                </div>
+              </div>
+            </div>
+
+            <!-- Batch toolbar -->
+            <div v-if="selectedDocSlugs.size > 0" class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <span class="text-sm font-medium">已选 {{ selectedDocSlugs.size }} 项</span>
+              <Button variant="destructive" size="sm" class="h-7 text-xs" @click="batchDeleteDocs">
+                <Trash2 :size="12" class="mr-1" />批量删除
+              </Button>
+              <Button variant="ghost" size="sm" class="h-7 text-xs text-muted-foreground" @click="selectedDocSlugs = new Set()">取消选择</Button>
+            </div>
+            <div v-if="detailDocs.length === 0" class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">暂无文档</div>
+            <div v-else class="overflow-x-auto rounded-lg border border-border">
+              <table class="w-full">
+                <thead><tr class="border-b border-border">
+                  <th class="px-3 py-2 text-left" style="width: 28px;">
+                    <input type="checkbox" class="size-4 rounded" :checked="allDocsSelected"
+                      :indeterminate.prop="someDocsSelected && !allDocsSelected" @change="toggleAllDocs" />
+                  </th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标题</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">目录</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">版本</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
+                  <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
+                </tr></thead>
+                <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                  <td class="px-3 py-2">
+                    <input type="checkbox" class="size-4 rounded" :value="d.slug"
+                      :checked="selectedDocSlugs.has(d.slug)" @change="toggleDocSelected(d.slug)" />
+                  </td>
+                  <td class="px-3 py-2 text-sm font-medium">{{ d.title }}</td>
+                  <td class="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground" :title="d.folder_path || '根目录'">{{ d.folder_path || '根目录' }}</td>
+                  <td class="px-3 py-2 text-xs tabular-nums">v{{ d.current_version_no || 0 }}</td>
+                  <td class="px-3 py-2">
+                    <Badge variant="secondary" class="text-[11px]"
+                      :class="d.sync_status === 'synced' ? 'bg-green-50 text-green-700' : d.sync_status === 'sync_failed' ? 'bg-red-50 text-red-700' : ''">
+                      {{ d.sync_status || d.status }}
+                    </Badge>
+                  </td>
+                  <td class="px-3 py-2">
+                    <div class="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openPlaceDialog(d)">移动</Button>
+                      <Button v-if="otherKnowledgeBases.length > 0" variant="ghost" size="sm" class="h-7 text-xs" @click="openAttachDialog(d)">关联</Button>
+                      <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(d.slug, d.title)">删除</Button>
+                    </div>
+                  </td>
+                </tr></tbody>
+              </table>
+            </div>
+          </section>
         </div>
 
         <!-- Sync Tab -->
@@ -1051,6 +1384,80 @@ async function savePlaneProfiles() {
       </DialogContent>
     </Dialog>
 
+    <!-- 目录操作对话框 -->
+    <Dialog :open="folderDialogOpen" @update:open="folderDialogOpen = $event">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader><DialogTitle>{{ folderDialogTitle }}</DialogTitle></DialogHeader>
+        <form class="space-y-4" @submit.prevent="submitFolderDialog">
+          <div v-if="folderDialogMode === 'create'" class="text-xs text-muted-foreground">
+            将在「{{ detailFolders.find(folder => folder.id === folderDialogParentId)?.path || detailKb?.name || '根目录' }}」下创建目录
+          </div>
+          <div v-if="folderDialogMode !== 'move'" class="space-y-1.5">
+            <label class="text-sm font-medium">目录名称 <span class="text-destructive">*</span></label>
+            <Input v-model="folderDialogName" placeholder="例如：产品文档" autofocus />
+          </div>
+          <div v-else class="space-y-1.5">
+            <label class="text-sm font-medium">目标目录</label>
+            <div class="max-h-64 overflow-y-auto rounded-md border border-border p-1">
+              <FolderTree
+                :folders="folderDialogTargets"
+                :selected-id="folderDialogTargetId"
+                :root-label="detailKb?.name || '根目录'"
+                :show-all="false"
+                :actions-enabled="false"
+                :compact="true"
+                @select="selectFolderDialogTarget"
+              />
+            </div>
+          </div>
+          <div v-if="folderDialogError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{{ folderDialogError }}</div>
+        </form>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
+          <Button type="button" @click="submitFolderDialog" :disabled="folderDialogSaving">
+            {{ folderDialogSaving ? '保存中...' : (folderDialogMode === 'create' ? '创建' : '确定') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 文档移动/关联对话框 -->
+    <Dialog :open="placementDialogOpen" @update:open="placementDialogOpen = $event">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader><DialogTitle>{{ placementDialogMode === 'place' ? '移动文档' : '关联文档' }}</DialogTitle></DialogHeader>
+        <div class="space-y-4">
+          <div class="text-sm font-medium truncate" :title="placementDoc?.title">{{ placementDoc?.title }}</div>
+          <div v-if="placementDialogMode === 'attach'" class="space-y-1.5">
+            <label class="text-xs font-medium text-muted-foreground">目标知识库</label>
+            <select v-model="placementKbSlug" class="h-9 w-full rounded-md border border-border bg-background px-2 text-sm" @change="changePlacementKb(($event.target as HTMLSelectElement).value)">
+              <option v-for="kb in otherKnowledgeBases" :key="kb.slug" :value="kb.slug">{{ kb.name }}（{{ kb.slug }}）</option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-muted-foreground">目标目录</label>
+            <div class="max-h-64 overflow-y-auto rounded-md border border-border p-1">
+              <FolderTree
+                :folders="placementFoldersForDialog"
+                :selected-id="placementTargetFolderId"
+                :root-label="placementRootLabel"
+                :show-all="false"
+                :actions-enabled="false"
+                :compact="true"
+                @select="selectPlacementFolder"
+              />
+            </div>
+          </div>
+          <div v-if="placementError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{{ placementError }}</div>
+        </div>
+        <DialogFooter>
+          <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
+          <Button type="button" @click="submitPlacement" :disabled="placementSaving || placementTargetFolderId == null">
+            {{ placementSaving ? '保存中...' : '确定' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- 上传文档对话框 -->
     <Dialog :open="showUploadDialog" @update:open="showUploadDialog = $event">
       <DialogContent class="sm:max-w-[640px]">
@@ -1061,6 +1468,7 @@ async function savePlaneProfiles() {
           <div class="text-xs text-muted-foreground">
             目标知识库：<span class="font-medium text-foreground">{{ uploadKb?.name }}</span>
             <span class="font-mono ml-1">({{ uploadKb?.slug }})</span>
+            <span v-if="uploadKb?.slug === detailKb?.slug" class="ml-2">· 目标目录：{{ detailFolders.find(folder => folder.id === uploadFolderId)?.path || detailKb?.name || '根目录' }}</span>
           </div>
 
           <!-- 拖拽区域 -->
@@ -1099,8 +1507,8 @@ async function savePlaneProfiles() {
                 class="flex items-center gap-2.5 px-3 py-2 rounded border border-border bg-background text-sm"
               >
                 <File :size="14" stroke="#9ca3af" />
-                <span class="min-w-0 flex-1 truncate" :title="f.name">{{ f.name }}</span>
-                <span class="text-xs text-muted-foreground shrink-0">{{ getFileSizeLabel(f.size) }}</span>
+                <span class="min-w-0 flex-1 truncate" :title="f.relativePath">{{ f.relativePath }}</span>
+                <span class="text-xs text-muted-foreground shrink-0">{{ getFileSizeLabel(f.file.size) }}</span>
               </div>
             </div>
             <label class="block mt-3 py-2 border border-dashed border-border rounded text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/50 transition-colors">

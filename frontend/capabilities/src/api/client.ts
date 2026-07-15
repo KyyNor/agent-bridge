@@ -11,7 +11,10 @@ import type {
   CodeRepository,
   Document,
   DocumentDetail,
+  DocumentPlacement,
   DocumentUploadSummary,
+  FolderDeleteResult,
+  KnowledgeFolder,
   ExecuteCapabilityPayload,
   ExecuteCapabilityResult,
   KnowledgeBase,
@@ -97,6 +100,16 @@ async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string
 async function put<T>(url: string, body?: unknown): Promise<T> {
   const r = await fetch(url, {
     method: 'PUT',
+    headers: { ...headers(), 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  return r.json()
+}
+
+async function patch<T>(url: string, body?: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method: 'PATCH',
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
@@ -493,10 +506,36 @@ export const api = {
     post<{ kb_slug: string; repo_key: string; deleted_docs: number }>(`/kbs/${kbSlug}/repo-sources/${repoKey}/delete`),
   deleteKnowledgeBase: (kbSlug: string) => post<{ deleted: boolean }>(`/kbs/${kbSlug}/delete`),
 
+  // Knowledge-base folders
+  listFolders: (kbSlug: string) => get<KnowledgeFolder[]>(`/kbs/${kbSlug}/folders`),
+  createFolder: (kbSlug: string, parentFolderId: number | null, name: string) =>
+    post<KnowledgeFolder>(`/kbs/${kbSlug}/folders`, { parent_folder_id: parentFolderId, name }),
+  updateFolder: (
+    kbSlug: string,
+    folderId: number,
+    payload: { name?: string; parent_folder_id?: number | null },
+  ) => patch<KnowledgeFolder>(`/kbs/${kbSlug}/folders/${folderId}`, payload),
+  deleteFolder: async (kbSlug: string, folderId: number, confirm = false): Promise<FolderDeleteResult> => {
+    const r = await fetch(`/kbs/${kbSlug}/folders/${folderId}`, {
+      method: 'DELETE',
+      headers: { ...headers(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm }),
+    })
+    const raw = await r.text()
+    let payload: unknown = {}
+    try { payload = raw ? JSON.parse(raw) : {} } catch { payload = {} }
+    if (r.status === 409 && !confirm && payload && typeof payload === 'object' && 'detail' in payload) {
+      return (payload as { detail: FolderDeleteResult }).detail
+    }
+    if (!r.ok) throw new Error(`${r.status}: ${raw}`)
+    return payload as FolderDeleteResult
+  },
+
   // Documents
-  listDocs: (kb: string, backend?: string) => {
+  listDocs: (kb: string, backend?: string, folderId?: number) => {
     const qs = new URLSearchParams({ kb })
     if (backend) qs.set('backend', backend)
+    if (folderId != null) qs.set('folder_id', String(folderId))
     return get<Document[]>(`/docs?${qs}`)
   },
   getDoc: (slug: string, backend?: string) => {
@@ -504,11 +543,13 @@ export const api = {
     if (backend) qs.set('backend', backend)
     return get<DocumentDetail>(`/docs/${slug}${qs.toString() ? '?' + qs : ''}`)
   },
-  addDocument: (file: File, kbs: string[], later = false) => {
+  addDocument: (file: File, kbs: string[], later = false, folderId?: number | null, relativePath?: string) => {
     const form = new FormData()
     form.append('file', file)
     kbs.forEach(kb => form.append('kb', kb))
     if (later) form.append('later', 'true')
+    if (folderId != null) form.append('folder_id', String(folderId))
+    if (relativePath) form.append('relative_path', relativePath)
     return postFormData<DocumentDetail | DocumentUploadSummary>('/docs', form)
   },
   updateDocument: (slug: string, file: File, later = false) => {
@@ -519,6 +560,12 @@ export const api = {
   },
   deleteDocument: (slug: string) =>
     post<{ slug: string; status: string }>(`/docs/${slug}/delete`),
+  deleteDocumentFromKb: (kbSlug: string, slug: string) =>
+    post<{ slug: string; status: string; kb: string }>(`/kbs/${kbSlug}/docs/${slug}/delete`),
+  placeDocument: (slug: string, kbSlug: string, folderId: number) =>
+    patch<DocumentPlacement>(`/docs/${slug}/placement`, { kb: kbSlug, folder_id: folderId }),
+  attachDocument: (slug: string, kbSlug: string, folderId: number) =>
+    post<DocumentPlacement>(`/docs/${slug}/attach`, { kb: kbSlug, folder_id: folderId }),
   purgeDocument: (slug: string) =>
     post<{ slug: string; status: string }>(`/docs/${slug}/purge`, { confirm: true }),
 
