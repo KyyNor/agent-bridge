@@ -30,26 +30,35 @@ class ArchiveStorage:
     def __init__(self, archive_dir: Path) -> None:
         self.archive_dir = archive_dir
 
-    def store(self, source: Path) -> ArchivedFile:
+    def store(
+        self,
+        source: Path,
+        *,
+        content_hash: str | None = None,
+        file_size: int | None = None,
+    ) -> ArchivedFile:
         """把源文件拷进归档,返回内容寻址结果。
 
         命中已存在目标(同 hash)时跳过拷贝实现去重。拷贝失败由调用方捕获;
         本函数不吞异常,以保留上层统一的错误处理。
         """
-        content_hash = self.content_hash(source)
+        if content_hash is None:
+            content_hash = self.content_hash(source)
+        if file_size is None:
+            file_size = source.stat().st_size
         suffix = source.suffix.lower()
         target_dir = self.archive_dir / content_hash[:2] / content_hash[2:4]
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / f"{content_hash}{suffix}"
         if not target.exists():
             # 热路径:用 DEBUG 避免批量同步时刷屏
-            logger.debug("归档写入 sha256=%s size=%s", content_hash, source.stat().st_size)
+            logger.debug("归档写入 sha256=%s size=%s", content_hash, file_size)
             shutil.copy2(source, target)
         else:
             logger.debug("归档命中已存在 sha256=%s,跳过拷贝", content_hash)
         return ArchivedFile(
             content_hash=content_hash,
-            file_size=source.stat().st_size,
+            file_size=file_size,
             archive_path=target,
         )
 
