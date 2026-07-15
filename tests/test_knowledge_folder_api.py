@@ -53,6 +53,19 @@ def test_folder_api_crud_and_delete_confirmation(wm_paths, tmp_path: Path) -> No
     assert uploaded.status_code == 200
     doc_slug = uploaded.json()["slug"]
     assert client.get("/docs", params={"kb": "docs", "folder_id": folder["id"]}, headers=headers).json()[0]["slug"] == doc_slug
+    browse = client.get(
+        "/kbs/docs/browse",
+        params={"folder_id": folder["id"]},
+        headers=headers,
+    )
+    assert browse.status_code == 200
+    assert browse.json()["entries"] == [
+        {
+            **browse.json()["entries"][0],
+            "kind": "document",
+            "slug": doc_slug,
+        }
+    ]
 
     pending = client.delete(f"/kbs/docs/folders/{folder['id']}", headers=headers)
     assert pending.status_code == 409

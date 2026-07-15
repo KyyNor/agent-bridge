@@ -285,6 +285,238 @@ class AgentBridgeService:
         kb = self._require_kb_admin_visible(actor, kb_slug)
         return self.store.list_archive_entries(kb["id"])
 
+    def browse_kb(
+        self,
+        actor: str,
+        kb_slug: str,
+        *,
+        folder_id: int | None = None,
+        archive_entry_id: int | None = None,
+    ) -> dict[str, Any]:
+        if folder_id is not None and archive_entry_id is not None:
+            raise ValidationError("folder_id and archive_entry_id cannot be used together")
+
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        if archive_entry_id is not None:
+            return self._browse_archive_context(kb, archive_entry_id)
+        return self._browse_folder_context(kb, folder_id)
+
+    @staticmethod
+    def _browse_folder_context_payload(folder: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": "folder",
+            "id": int(folder["id"]),
+            "name": folder["name"],
+            "relative_path": folder.get("path") or "",
+            "parent_id": folder.get("parent_id"),
+            "parent_folder_id": None,
+            "archive_entry_id": None,
+        }
+
+    @staticmethod
+    def _browse_archive_context_payload(entry: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": entry["kind"],
+            "id": int(entry["id"]),
+            "name": entry["name"],
+            "relative_path": entry["relative_path"],
+            "parent_id": entry.get("parent_id"),
+            "parent_folder_id": entry.get("parent_folder_id"),
+            "archive_entry_id": int(entry["id"]),
+        }
+
+    def _browse_folder_context(
+        self,
+        kb: dict[str, Any],
+        folder_id: int | None,
+    ) -> dict[str, Any]:
+        kb_id = int(kb["id"])
+        folder = (
+            self.store.get_root_folder(kb_id)
+            if folder_id is None
+            else self.store.get_folder(kb_id, folder_id)
+        )
+        if folder is None:
+            raise NotFound("folder not found")
+
+        context = self._browse_folder_context_payload(folder)
+        parent = None
+        if folder.get("parent_id") is not None:
+            parent_folder = self.store.get_folder(kb_id, int(folder["parent_id"]))
+            if parent_folder is not None:
+                parent = self._browse_folder_context_payload(parent_folder)
+
+        folder_tree = self.store.list_folder_tree(kb_id)
+        direct_folders = [
+            item for item in folder_tree if item.get("parent_id") == folder["id"]
+        ]
+        archive_entries = self.store.list_archive_entries(
+            kb_id,
+            parent_folder_id=int(folder["id"]),
+        )
+        documents = [
+            item
+            for item in self.store.list_docs_for_kb(kb_id, folder_id=int(folder["id"]))
+            if item.get("archive_entry_id") is None
+        ]
+
+        folder_counts = {
+            int(item["id"]): sum(
+                1 for child in folder_tree if child.get("parent_id") == item["id"]
+            )
+            for item in direct_folders
+        }
+        entries: list[dict[str, Any]] = [
+            {
+                "kind": "folder",
+                "id": int(item["id"]),
+                "name": item["name"],
+                "relative_path": item.get("path") or "",
+                "parent_id": int(folder["id"]),
+                "parent_folder_id": None,
+                "child_count": folder_counts[int(item["id"])],
+            }
+            for item in direct_folders
+        ]
+        entries.extend(
+            {
+                "kind": "zip",
+                "id": int(item["id"]),
+                "name": item["name"],
+                "relative_path": item["relative_path"],
+                "parent_id": item.get("parent_id"),
+                "parent_folder_id": int(folder["id"]),
+                "archive_entry_id": int(item["id"]),
+                "child_count": len(
+                    self.store.list_archive_entries(kb_id, parent_id=int(item["id"]))
+                ),
+            }
+            for item in archive_entries
+        )
+        entries.extend(
+            self._browse_document_entry(
+                item,
+                parent_id=int(folder["id"]),
+                parent_folder_id=None,
+            )
+            for item in documents
+        )
+        entries.sort(key=lambda item: (self._browse_entry_order(item["kind"]), item["name"].lower(), item["id"]))
+        return {"context": context, "parent": parent, "entries": entries}
+
+    def _browse_archive_context(
+        self,
+        kb: dict[str, Any],
+        archive_entry_id: int,
+    ) -> dict[str, Any]:
+        kb_id = int(kb["id"])
+        entry = self.store.get_archive_entry(kb_id, archive_entry_id)
+        if entry is None:
+            raise NotFound("archive entry not found")
+        if entry["kind"] not in {"zip", "folder"}:
+            raise ValidationError("archive entry is not a container")
+
+        context = self._browse_archive_context_payload(entry)
+        parent = None
+        if entry.get("parent_id") is not None:
+            parent_entry = self.store.get_archive_entry(kb_id, int(entry["parent_id"]))
+            if parent_entry is not None:
+                parent = self._browse_archive_context_payload(parent_entry)
+        elif entry.get("parent_folder_id") is not None:
+            parent_folder = self.store.get_folder(kb_id, int(entry["parent_folder_id"]))
+            if parent_folder is not None:
+                parent = self._browse_folder_context_payload(parent_folder)
+
+        children = self.store.list_archive_entries(
+            kb_id,
+            parent_id=int(entry["id"]),
+        )
+        document_rows = {
+            int(item["id"]): item
+            for item in self.store.list_docs_for_kb(kb_id)
+            if item.get("archive_entry_id") is not None
+        }
+        entries: list[dict[str, Any]] = []
+        for child in children:
+            if child["kind"] in {"zip", "folder"}:
+                entries.append(
+                    {
+                        "kind": child["kind"],
+                        "id": int(child["id"]),
+                        "name": child["name"],
+                        "relative_path": child["relative_path"],
+                        "parent_id": int(entry["id"]),
+                        "parent_folder_id": None,
+                        "archive_entry_id": int(child["id"]),
+                        "child_count": len(
+                            self.store.list_archive_entries(
+                                kb_id,
+                                parent_id=int(child["id"]),
+                            )
+                        ),
+                    }
+                )
+                continue
+            document = document_rows.get(int(child["doc_id"])) if child.get("doc_id") is not None else None
+            if document is not None:
+                entries.append(
+                    self._browse_document_entry(
+                        document,
+                        parent_id=int(entry["id"]),
+                        parent_folder_id=None,
+                        archive_entry=child,
+                    )
+                )
+        entries.sort(key=lambda item: (self._browse_entry_order(item["kind"]), item["name"].lower(), item["id"]))
+        return {"context": context, "parent": parent, "entries": entries}
+
+    @staticmethod
+    def _browse_entry_order(kind: str) -> int:
+        return {"folder": 0, "zip": 1, "document": 2}.get(kind, 3)
+
+    def _browse_document_entry(
+        self,
+        document: dict[str, Any],
+        *,
+        parent_id: int | None,
+        parent_folder_id: int | None,
+        archive_entry: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        doc_id = int(document["id"])
+        full_document = self.store.get_document_by_id(doc_id) or document
+        versions = self.store.list_versions(doc_id)
+        current_version_id = full_document.get("current_version_id")
+        version = next(
+            (item for item in versions if item.get("id") == current_version_id),
+            None,
+        ) or (versions[-1] if versions else {})
+        original_filename = version.get("original_filename") or document.get("slug", "")
+        return {
+            "kind": "document",
+            "id": doc_id,
+            "doc_id": doc_id,
+            "name": Path(original_filename).name,
+            "relative_path": (
+                archive_entry["relative_path"]
+                if archive_entry is not None
+                else original_filename
+            ),
+            "parent_id": parent_id,
+            "parent_folder_id": parent_folder_id,
+            "slug": document["slug"],
+            "title": document["title"],
+            "original_filename": original_filename,
+            "version": int(version.get("version_no") or document.get("current_version_no") or 0),
+            "version_no": int(version.get("version_no") or document.get("current_version_no") or 0),
+            "sync_status": document.get("sync_status") or SyncStateStatus.not_synced.value,
+            "archive_entry_id": (
+                int(archive_entry["id"])
+                if archive_entry is not None
+                else document.get("archive_entry_id")
+            ),
+            "status": document.get("status", "active"),
+        }
+
     def create_folder(
         self,
         actor: str,

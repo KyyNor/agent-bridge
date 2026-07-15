@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -53,6 +53,69 @@ class UpdateFolderRequest(BaseModel):
 
 class DeleteFolderRequest(BaseModel):
     confirm: bool = False
+
+
+class KnowledgeBrowseContext(BaseModel):
+    kind: Literal["folder", "zip"]
+    id: int
+    name: str
+    relative_path: str = ""
+    parent_id: int | None = None
+    parent_folder_id: int | None = None
+    archive_entry_id: int | None = None
+
+
+class KnowledgeBrowseFolderEntry(BaseModel):
+    kind: Literal["folder"] = "folder"
+    id: int
+    name: str
+    relative_path: str
+    parent_id: int | None = None
+    parent_folder_id: int | None = None
+    child_count: int = 0
+
+
+class KnowledgeBrowseZipEntry(BaseModel):
+    kind: Literal["zip"] = "zip"
+    id: int
+    name: str
+    relative_path: str
+    parent_id: int | None = None
+    parent_folder_id: int | None = None
+    archive_entry_id: int
+    child_count: int = 0
+
+
+class KnowledgeBrowseDocumentEntry(BaseModel):
+    kind: Literal["document"] = "document"
+    id: int
+    doc_id: int
+    name: str
+    relative_path: str
+    parent_id: int | None = None
+    parent_folder_id: int | None = None
+    slug: str
+    title: str
+    original_filename: str
+    version: int
+    version_no: int
+    sync_status: str
+    archive_entry_id: int | None = None
+    status: str
+
+
+KnowledgeBrowseEntry = Annotated[
+    KnowledgeBrowseFolderEntry
+    | KnowledgeBrowseZipEntry
+    | KnowledgeBrowseDocumentEntry,
+    Field(discriminator="kind"),
+]
+
+
+class KnowledgeBrowseResponse(BaseModel):
+    context: KnowledgeBrowseContext
+    parent: KnowledgeBrowseContext | None = None
+    entries: list[KnowledgeBrowseEntry]
 
 
 class DocumentPlacementRequest(BaseModel):

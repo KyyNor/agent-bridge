@@ -12,6 +12,7 @@ from agent_bridge.api.schemas import (
     DeleteFolderRequest,
     DocumentPlacementRequest,
     KbRepoSourceRequest,
+    KnowledgeBrowseResponse,
     PurgeRequest,
     SyncRequest,
     UpdateFolderRequest,
@@ -84,6 +85,20 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
     @router.get("/kbs/{kb_slug}/folders")
     def list_folders(kb_slug: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.list_folders(current_actor, kb_slug)
+
+    @router.get("/kbs/{kb_slug}/browse", response_model=KnowledgeBrowseResponse)
+    def browse_kb(
+        kb_slug: str,
+        folder_id: int | None = None,
+        archive_entry_id: int | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.browse_kb(
+            current_actor,
+            kb_slug,
+            folder_id=folder_id,
+            archive_entry_id=archive_entry_id,
+        )
 
     @router.post("/kbs/{kb_slug}/folders")
     def create_folder(
