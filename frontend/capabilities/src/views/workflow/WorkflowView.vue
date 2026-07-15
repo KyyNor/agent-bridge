@@ -131,6 +131,7 @@ const taskImportPreview = ref<WorkflowTaskImportPreview | null>(null)
 const taskImportLoading = ref(false)
 const taskImportConfirming = ref(false)
 const taskImportError = ref('')
+let taskImportRequestToken = 0
 let batchToken = 0
 // Per-task sub-agent event filter (feature 5). Keyed by task id; "" = all.
 const taskActorFilter = ref<Record<string, string>>({})
@@ -870,6 +871,7 @@ async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '
 }
 
 function resetTaskImportState() {
+  taskImportRequestToken += 1
   taskImportPreview.value = null
   taskImportLoading.value = false
   taskImportConfirming.value = false
@@ -891,21 +893,26 @@ function closeTaskImport() {
   resetTaskImportState()
 }
 
+function isCurrentTaskImportRequest(token: number, workflowKey: string) {
+  return token === taskImportRequestToken
+    && showTaskImport.value
+    && taskImportWorkflowKey() === workflowKey
+}
+
 async function previewTaskImport(file: File) {
   const workflowKey = taskImportWorkflowKey()
   if (!workflowKey || !taskWorkflow.value || batchBusy.value) return
+  const requestToken = ++taskImportRequestToken
   taskImportPreview.value = null
   taskImportError.value = ''
   taskImportLoading.value = true
   try {
     const preview = await api.previewWorkflowTaskImport(workflowKey, file)
-    if (showTaskImport.value && taskImportWorkflowKey() === workflowKey) {
-      taskImportPreview.value = preview
-    }
+    if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportPreview.value = preview
   } catch (e: unknown) {
-    taskImportError.value = errorMessage(e)
+    if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportError.value = errorMessage(e)
   } finally {
-    taskImportLoading.value = false
+    if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportLoading.value = false
   }
 }
 
@@ -925,6 +932,7 @@ async function downloadTaskImportTemplate() {
     anchor.click()
   } catch (e: unknown) {
     taskImportError.value = errorMessage(e)
+    if (routeMode.value === 'tasks' && routeWorkflowKey.value === workflowKey) showTaskImport.value = true
   } finally {
     anchor?.remove()
     if (objectUrl) URL.revokeObjectURL(objectUrl)
@@ -942,10 +950,12 @@ async function confirmTaskImport() {
     || taskImportConfirming.value
     || batchBusy.value
   ) return
+  const requestToken = ++taskImportRequestToken
   taskImportConfirming.value = true
   taskImportError.value = ''
   try {
     const result = await api.confirmWorkflowTaskImport(workflowKey, preview.import_id)
+    if (!isCurrentTaskImportRequest(requestToken, workflowKey)) return
     closeTaskImport()
     selectedTaskIds.value = new Set()
     batchSummary.value = `导入完成：新增 ${result.created}，更新 ${result.updated}，跳过（运行中） ${result.skipped_running}，跳过（已完成） ${result.skipped_completed}，重开（已过期） ${result.reopened_expired}`
@@ -953,9 +963,9 @@ async function confirmTaskImport() {
       await loadTasks(workflowKey)
     }
   } catch (e: unknown) {
-    taskImportError.value = errorMessage(e)
+    if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportError.value = errorMessage(e)
   } finally {
-    taskImportConfirming.value = false
+    if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportConfirming.value = false
   }
 }
 

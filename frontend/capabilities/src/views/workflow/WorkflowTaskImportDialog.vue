@@ -4,7 +4,6 @@ import type { WorkflowTaskImportPreview, WorkflowTaskImportRow } from '../../api
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
-import { Input } from '../../components/ui/input'
 
 interface Props {
   open: boolean
@@ -25,6 +24,11 @@ const emit = defineEmits<{
 
 const isBusy = computed(() => props.loading || props.confirming)
 const canConfirm = computed(() => Boolean(props.preview?.can_confirm) && !isBusy.value)
+
+function onOpenChange(value: boolean) {
+  if (!value && isBusy.value) return
+  emit('update:open', value)
+}
 
 const summaryCards = computed(() => {
   const summary = props.preview?.summary
@@ -74,8 +78,8 @@ function onFileChange(event: Event) {
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="w-[min(1180px,calc(100vw-2rem))] sm:max-w-[1180px] max-h-[calc(100vh-2rem)] overflow-hidden">
+  <Dialog :open="open" @update:open="onOpenChange">
+    <DialogContent :show-close-button="!isBusy" class="w-[min(1180px,calc(100vw-2rem))] sm:max-w-[1180px] max-h-[calc(100vh-2rem)] overflow-hidden">
       <DialogHeader>
         <DialogTitle>导入工作流任务</DialogTitle>
         <p class="text-xs text-muted-foreground">
@@ -87,11 +91,12 @@ function onFileChange(event: Event) {
         <div class="flex flex-col gap-3 rounded-md border border-border bg-muted/20 p-3 sm:flex-row sm:items-end sm:justify-between">
           <div class="min-w-0 flex-1 space-y-1.5">
             <label for="workflow-task-import-file" class="text-sm font-medium">选择任务文件</label>
-            <Input
+            <input
               id="workflow-task-import-file"
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              class="h-9 cursor-pointer file:cursor-pointer"
+              data-slot="input"
+              class="dark:bg-input/30 border-input focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 dark:aria-invalid:border-destructive aria-invalid:border-destructive disabled:bg-input/50 dark:disabled:bg-input/80 h-9 rounded-sm border bg-transparent px-2.5 py-1 text-base transition-colors file:h-6 file:text-sm file:font-medium focus-visible:ring-3 aria-invalid:ring-3 md:text-sm w-full min-w-0 outline-none file:inline-flex file:border-0 file:bg-transparent file:text-foreground placeholder:text-placeholder disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer file:cursor-pointer"
               :disabled="isBusy"
               @change="onFileChange"
             />
@@ -181,7 +186,7 @@ function onFileChange(event: Event) {
       </div>
 
       <DialogFooter>
-        <Button variant="outline" type="button" @click="emit('update:open', false)">取消</Button>
+        <Button variant="outline" type="button" :disabled="isBusy" @click="onOpenChange(false)">取消</Button>
         <Button type="button" :disabled="!canConfirm" @click="emit('confirm')">
           {{ confirming ? '确认中...' : '确认导入' }}
         </Button>
