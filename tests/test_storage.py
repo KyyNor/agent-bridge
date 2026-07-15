@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.core.config import ServerConfig, AgentBridgePaths, default_root, ensure_directories, load_server_config
-from agent_bridge.core.domain import KbRole, Operation, SyncStateStatus
+from agent_bridge.core.domain import KbRole, Operation, SyncStateStatus, ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -93,6 +95,113 @@ def test_sqlite_store_document_version_and_jobs(wm_paths: AgentBridgePaths) -> N
     assert version["version_no"] == 1
     assert job["status"] == "pending"
     assert store.list_docs_for_kb(kb_id=kb["id"])[0]["slug"] == "guide"
+
+
+def test_archive_schema_and_document_placement_column_are_created(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+
+    with store.connect() as conn:
+        archive_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(knowledge_archive_entries)")
+        }
+        placement_columns = {row[1] for row in conn.execute("PRAGMA table_info(document_kbs)")}
+        archive_indexes = {
+            row[1] for row in conn.execute("PRAGMA index_list(knowledge_archive_entries)")
+        }
+        placement_indexes = {row[1] for row in conn.execute("PRAGMA index_list(document_kbs)")}
+
+    assert {
+        "id", "kb_id", "parent_id", "parent_folder_id", "kind", "name",
+        "relative_path", "doc_id", "status", "created_at", "updated_at",
+    } <= archive_columns
+    assert "archive_entry_id" in placement_columns
+    assert "idx_knowledge_archive_entries_parent" in archive_indexes
+    assert "idx_knowledge_archive_entries_folder" in archive_indexes
+    assert "idx_document_kbs_archive_entry" in placement_indexes
+
+
+def test_store_transaction_rolls_back_facade_document_archive_and_sync_rows(
+    wm_paths: AgentBridgePaths,
+) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb("kb", "KB", "", "root")
+    root_id = store.list_folder_tree(kb["id"])[0]["id"]
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        with store.transaction():
+            document = store.create_document("guide", "Guide", "root")
+            store.attach_document_to_kb(document["id"], kb["id"], "root")
+            entry = store.create_archive_entry(
+                kb["id"],
+                kind="zip",
+                name="docs.zip",
+                relative_path="docs.zip",
+                parent_folder_id=root_id,
+            )
+            store.update_document_placement(
+                document["id"], kb["id"], root_id, archive_entry_id=entry["id"]
+            )
+            store.create_sync_job(document["id"], kb["id"], Operation.create, None)
+            raise RuntimeError("rollback")
+
+    assert store.get_document_by_slug("guide") is None
+    assert store.list_archive_entries(kb["id"]) == []
+    assert store.list_all_jobs() == []
+
+
+def test_archive_entries_validate_parents_and_sort_direct_children_case_insensitively(
+    wm_paths: AgentBridgePaths,
+) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb("kb", "KB", "", "root")
+    root_id = store.list_folder_tree(kb["id"])[0]["id"]
+
+    first = store.create_archive_entry(
+        kb["id"], kind="zip", name="zeta.zip", relative_path="zeta.zip", parent_folder_id=root_id
+    )
+    second = store.create_archive_entry(
+        kb["id"], kind="zip", name="Alpha.zip", relative_path="Alpha.zip", parent_folder_id=root_id
+    )
+    third = store.create_archive_entry(
+        kb["id"], kind="zip", name="alpha.zip", relative_path="alpha.zip", parent_folder_id=root_id
+    )
+    nested = store.create_archive_entry(
+        kb["id"], kind="folder", name="nested", relative_path="nested", parent_id=first["id"]
+    )
+    document = store.create_document("guide", "Guide", "root")
+    store.update_archive_entry_document(nested["id"], document["id"])
+
+    children = store.list_archive_entries(kb["id"], parent_folder_id=root_id)
+    assert [(entry["name"], entry["id"]) for entry in children] == [
+        ("Alpha.zip", second["id"]),
+        ("alpha.zip", third["id"]),
+        ("zeta.zip", first["id"]),
+    ]
+    assert store.get_archive_entry(kb["id"], nested["id"])["doc_id"] == document["id"]
+    assert [entry["id"] for entry in store.list_archive_entries(kb["id"], parent_id=first["id"])] == [
+        nested["id"]
+    ]
+
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"], kind="invalid", name="bad", relative_path="bad", parent_id=first["id"]
+        )
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"], kind="document", name="bad", relative_path="bad"
+        )
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"],
+            kind="document",
+            name="bad",
+            relative_path="bad",
+            parent_id=first["id"],
+            parent_folder_id=root_id,
+        )
 
 
 def test_find_current_document_by_content_hash_is_scoped_to_kb(wm_paths: AgentBridgePaths) -> None:

@@ -94,7 +94,11 @@ def test_old_database_migration_backfills_active_placements_and_is_idempotent(tm
         assert {row["is_root"] for row in roots} == {1}
         assert len(roots) == 1
         assert placement["folder_id"] == roots[0]["id"]
-        assert "folder_id" in {row[1] for row in conn.execute("PRAGMA table_info(document_kbs)")}
+        placement_columns = {row[1] for row in conn.execute("PRAGMA table_info(document_kbs)")}
+        assert {"folder_id", "archive_entry_id"} <= placement_columns
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'knowledge_archive_entries'"
+        ).fetchone() is not None
 
     assert store.get_document_by_slug("legacy-doc")["slug"] == "legacy-doc"
 

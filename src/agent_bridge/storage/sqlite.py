@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from contextvars import ContextVar
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,6 +19,9 @@ class SQLiteStore:
         self._runtime_log_retention_days = 180
         self._last_runtime_log_prune_monotonic: float | None = None
         self._runtime_log_prune_interval_seconds = 3600.0
+        self._active_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
+            f"sqlite_store_connection_{id(self)}", default=None
+        )
 
         from agent_bridge.storage.repositories.agent_runs import AgentRunsRepository
         from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
@@ -39,14 +43,23 @@ class SQLiteStore:
         self.scripts = ScriptsRepository(db_path, self.connect)
         self.agent_runs = AgentRunsRepository(db_path, self.connect, prune_callback=self.maybe_prune_runtime_logs)
 
-    @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
+    def _open_connection(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        active = self._active_connection.get()
+        if active is not None:
+            yield active
+            return
+
+        conn = self._open_connection()
         try:
             yield conn
             conn.commit()
@@ -54,6 +67,26 @@ class SQLiteStore:
             conn.rollback()
             raise
         finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        active = self._active_connection.get()
+        if active is not None:
+            yield active
+            return
+
+        conn = self._open_connection()
+        token = self._active_connection.set(conn)
+        try:
+            conn.execute("BEGIN")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._active_connection.reset(token)
             conn.close()
 
     def init_schema(self) -> None:
@@ -306,6 +339,30 @@ class SQLiteStore:
             conn.execute("ALTER TABLE document_kbs ADD COLUMN folder_id INTEGER")
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS knowledge_archive_entries (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+              parent_id INTEGER REFERENCES knowledge_archive_entries(id) ON DELETE CASCADE,
+              parent_folder_id INTEGER REFERENCES knowledge_folders(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL CHECK (kind IN ('zip', 'folder', 'document')),
+              name TEXT NOT NULL,
+              relative_path TEXT NOT NULL,
+              doc_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+              status TEXT NOT NULL DEFAULT 'active',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              CHECK ((parent_id IS NULL) != (parent_folder_id IS NULL))
+            )
+            """
+        )
+        if "archive_entry_id" not in columns:
+            conn.execute(
+                """ALTER TABLE document_kbs
+                   ADD COLUMN archive_entry_id INTEGER
+                   REFERENCES knowledge_archive_entries(id) ON DELETE SET NULL"""
+            )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS knowledge_folders (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
@@ -358,6 +415,24 @@ class SQLiteStore:
             """
             CREATE INDEX IF NOT EXISTS idx_document_kbs_folder_status
             ON document_kbs(kb_id, folder_id, status)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_knowledge_archive_entries_parent
+            ON knowledge_archive_entries(kb_id, parent_id, status)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_knowledge_archive_entries_folder
+            ON knowledge_archive_entries(kb_id, parent_folder_id, status)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_document_kbs_archive_entry
+            ON document_kbs(archive_entry_id)
             """
         )
         kb_rows = conn.execute(
@@ -1555,15 +1630,65 @@ class SQLiteStore:
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
         return self.knowledge.find_current_document_by_content_hash(kb_id=kb_id, content_hash=content_hash)
 
+    def create_archive_entry(
+        self,
+        kb_id: int,
+        *,
+        kind: str,
+        name: str,
+        relative_path: str,
+        parent_id: int | None = None,
+        parent_folder_id: int | None = None,
+        doc_id: int | None = None,
+    ) -> dict[str, Any]:
+        return self.knowledge.create_archive_entry(
+            kb_id=kb_id,
+            kind=kind,
+            name=name,
+            relative_path=relative_path,
+            parent_id=parent_id,
+            parent_folder_id=parent_folder_id,
+            doc_id=doc_id,
+        )
+
+    def list_archive_entries(
+        self,
+        kb_id: int,
+        *,
+        parent_id: int | None = None,
+        parent_folder_id: int | None = None,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        return self.knowledge.list_archive_entries(
+            kb_id=kb_id,
+            parent_id=parent_id,
+            parent_folder_id=parent_folder_id,
+            active_only=active_only,
+        )
+
+    def get_archive_entry(self, kb_id: int, entry_id: int) -> dict[str, Any] | None:
+        return self.knowledge.get_archive_entry(kb_id=kb_id, entry_id=entry_id)
+
+    def update_archive_entry_document(self, entry_id: int, doc_id: int) -> None:
+        return self.knowledge.update_archive_entry_document(entry_id=entry_id, doc_id=doc_id)
+
+    def delete_archive_entries_for_kb(self, kb_id: int) -> None:
+        return self.knowledge.delete_archive_entries_for_kb(kb_id=kb_id)
+
     def attach_document_to_kb(
         self,
         doc_id: int,
         kb_id: int,
         added_by: str,
         folder_id: int | None = None,
+        archive_entry_id: int | None = None,
     ) -> None:
         return self.knowledge.attach_document_to_kb(
-            doc_id=doc_id, kb_id=kb_id, added_by=added_by, folder_id=folder_id
+            doc_id=doc_id,
+            kb_id=kb_id,
+            added_by=added_by,
+            folder_id=folder_id,
+            archive_entry_id=archive_entry_id,
         )
 
     def get_document_kbs(self, doc_id: int, *, active_only: bool = False) -> list[dict[str, Any]]:
@@ -1572,9 +1697,18 @@ class SQLiteStore:
     def get_document_placement(self, doc_id: int, kb_id: int) -> dict[str, Any] | None:
         return self.knowledge.get_document_placement(doc_id=doc_id, kb_id=kb_id)
 
-    def update_document_placement(self, doc_id: int, kb_id: int, folder_id: int) -> dict[str, Any]:
+    def update_document_placement(
+        self,
+        doc_id: int,
+        kb_id: int,
+        folder_id: int,
+        archive_entry_id: int | None = None,
+    ) -> dict[str, Any]:
         return self.knowledge.update_document_placement(
-            doc_id=doc_id, kb_id=kb_id, folder_id=folder_id
+            doc_id=doc_id,
+            kb_id=kb_id,
+            folder_id=folder_id,
+            archive_entry_id=archive_entry_id,
         )
 
     def remove_document_from_kb(self, doc_id: int, kb_id: int) -> bool:
