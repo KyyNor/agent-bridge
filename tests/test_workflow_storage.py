@@ -154,6 +154,12 @@ def test_workflow_task_version_allows_same_key_to_run_again(wm_paths):
         [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "a-again"}}],
     )
     assert same_version == task_counts(skipped_completed=1)
+    completed_preview = store.preview_workflow_task_actions(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "a-again"}}],
+    )
+    assert completed_preview["rows"][0]["action"] == "skipped_completed"
+    assert completed_preview["summary"] == task_counts(skipped_completed=1)
 
     next_version = store.upsert_workflow_tasks(
         "page-report",
@@ -210,6 +216,13 @@ def test_workflow_task_completed_same_version_reopens_after_configured_rerun_win
             """,
             (old_set_at, "page-report", "page:a", "v1"),
         )
+
+    rerun_preview = store.preview_workflow_task_actions(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v1", "payload": {"page": "new"}}],
+    )
+    assert rerun_preview["rows"][0]["action"] == "reopened_expired"
+    assert rerun_preview["summary"] == task_counts(reopened_expired=1)
 
     reopened = store.upsert_workflow_tasks(
         "page-report",
