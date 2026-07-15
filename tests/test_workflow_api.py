@@ -510,6 +510,44 @@ def test_workflow_api_task_import_row_errors_disable_confirmation(wm_paths):
     assert svc.store.get_workflow_task("page-report", "task:valid", task_version="v1") is None
 
 
+def test_workflow_api_rejects_duplicate_task_key_and_version_confirmation(wm_paths):
+    svc, client = _workflow_import_client(wm_paths)
+    headers = {"X-Agent-Bridge-User": "root"}
+    preview_response = client.post(
+        "/workflows/page-report/tasks/import/preview",
+        headers=headers,
+        files={
+            "file": (
+                "tasks.xlsx",
+                _task_import_workbook_bytes(
+                    [
+                        ["task:duplicate", "v1", "repo"],
+                        ["task:duplicate", "v1", "repo"],
+                    ]
+                ),
+            )
+        },
+    )
+
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
+    assert preview["can_confirm"] is False
+    assert preview["rows"][0]["action"] == "created"
+    assert preview["rows"][0]["errors"] == []
+    assert preview["rows"][1]["action"] == "error"
+    assert preview["rows"][1]["errors"] == ["task_key + task_version 重复"]
+
+    confirm_response = client.post(
+        "/workflows/page-report/tasks/import/confirm",
+        headers=headers,
+        json={"import_id": preview["import_id"]},
+    )
+
+    assert confirm_response.status_code == 400, confirm_response.text
+    assert svc.store.get_workflow_task("page-report", "task:duplicate", task_version="v1") is None
+    assert svc.store.get_workflow_task_import(preview["import_id"])["status"] == "previewed"
+
+
 @pytest.mark.parametrize(
     ("filename", "content"),
     [
