@@ -209,17 +209,23 @@ class KnowledgeRepository:
             raise ValidationError("archive entry kind is invalid")
         if (parent_id is None) == (parent_folder_id is None):
             raise ValidationError("exactly one archive parent is required")
+        if kind != "document" and doc_id is not None:
+            raise ValidationError("only document archive entries may reference a document")
 
         with self._connect() as conn:
             if parent_id is not None:
                 parent = conn.execute(
                     """
-                    SELECT id
+                    SELECT id, kind, status
                     FROM knowledge_archive_entries
-                    WHERE id = ? AND kb_id = ? AND status = 'active'
+                    WHERE id = ? AND kb_id = ?
                     """,
                     (parent_id, kb_id),
                 ).fetchone()
+                if parent is None:
+                    raise NotFound("archive entry parent not found")
+                if parent["status"] != "active" or parent["kind"] not in {"zip", "folder"}:
+                    raise ValidationError("archive parent must be an active zip or folder")
             else:
                 parent = conn.execute(
                     """
@@ -229,8 +235,18 @@ class KnowledgeRepository:
                     """,
                     (parent_folder_id, kb_id),
                 ).fetchone()
-            if parent is None:
-                raise NotFound("archive entry parent not found")
+                if parent is None:
+                    raise NotFound("archive folder parent not found")
+                if kind != "zip":
+                    raise ValidationError("only zip archive entries may be attached to a folder")
+
+            if doc_id is not None:
+                document = conn.execute(
+                    "SELECT 1 FROM documents WHERE id = ?",
+                    (doc_id,),
+                ).fetchone()
+                if document is None:
+                    raise NotFound("document not found")
 
             cursor = conn.execute(
                 """
@@ -297,6 +313,26 @@ class KnowledgeRepository:
 
     def update_archive_entry_document(self, entry_id: int, doc_id: int) -> None:
         with self._connect() as conn:
+            entry = conn.execute(
+                """
+                SELECT kind, doc_id
+                FROM knowledge_archive_entries
+                WHERE id = ?
+                """,
+                (entry_id,),
+            ).fetchone()
+            if entry is None:
+                raise NotFound("archive entry not found")
+            if entry["kind"] != "document":
+                raise ValidationError("only document archive entries may reference a document")
+            if entry["doc_id"] is not None and entry["doc_id"] != doc_id:
+                raise ValidationError("archive entry already references another document")
+            document = conn.execute(
+                "SELECT 1 FROM documents WHERE id = ?",
+                (doc_id,),
+            ).fetchone()
+            if document is None:
+                raise NotFound("document not found")
             cursor = conn.execute(
                 """
                 UPDATE knowledge_archive_entries
@@ -314,6 +350,26 @@ class KnowledgeRepository:
                 "DELETE FROM knowledge_archive_entries WHERE kb_id = ?",
                 (kb_id,),
             )
+
+    def _require_matching_archive_document(
+        self,
+        conn: sqlite3.Connection,
+        kb_id: int,
+        archive_entry_id: int,
+        doc_id: int,
+    ) -> None:
+        entry = conn.execute(
+            """
+            SELECT kind, doc_id
+            FROM knowledge_archive_entries
+            WHERE id = ? AND kb_id = ? AND status = 'active'
+            """,
+            (archive_entry_id, kb_id),
+        ).fetchone()
+        if entry is None:
+            raise NotFound("archive entry not found")
+        if entry["kind"] != "document" or entry["doc_id"] != doc_id:
+            raise ValidationError("archive entry does not reference this document")
 
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -352,16 +408,7 @@ class KnowledgeRepository:
             elif self._folders._get_folder_with_conn(conn, kb_id, folder_id) is None:
                 raise NotFound("folder not found")
             if archive_entry_id is not None:
-                archive_entry = conn.execute(
-                    """
-                    SELECT 1
-                    FROM knowledge_archive_entries
-                    WHERE id = ? AND kb_id = ? AND status = 'active'
-                    """,
-                    (archive_entry_id, kb_id),
-                ).fetchone()
-                if archive_entry is None:
-                    raise NotFound("archive entry not found")
+                self._require_matching_archive_document(conn, kb_id, archive_entry_id, doc_id)
             conn.execute(
                 """
                 INSERT INTO document_kbs (doc_id, kb_id, folder_id, archive_entry_id, added_by)
@@ -572,16 +619,7 @@ class KnowledgeRepository:
             if association is None:
                 raise NotFound("document knowledge-base association not found")
             if archive_entry_id is not None:
-                archive_entry = conn.execute(
-                    """
-                    SELECT 1
-                    FROM knowledge_archive_entries
-                    WHERE id = ? AND kb_id = ? AND status = 'active'
-                    """,
-                    (archive_entry_id, kb_id),
-                ).fetchone()
-                if archive_entry is None:
-                    raise NotFound("archive entry not found")
+                self._require_matching_archive_document(conn, kb_id, archive_entry_id, doc_id)
             conn.execute(
                 """
                 UPDATE document_kbs

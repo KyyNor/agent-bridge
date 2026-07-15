@@ -121,6 +121,47 @@ def test_archive_schema_and_document_placement_column_are_created(wm_paths: Agen
     assert "idx_document_kbs_archive_entry" in placement_indexes
 
 
+def test_connect_and_transaction_reuse_active_connection_and_rollback(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        with store.connect() as outer:
+            assert store._active_connection.get() is outer
+            outer.execute(
+                "INSERT INTO knowledge_bases (slug, name, description, created_by) "
+                "VALUES ('outer', 'Outer', '', 'root')"
+            )
+            with store.transaction() as nested:
+                assert nested is outer
+                nested.execute(
+                    "INSERT INTO knowledge_bases (slug, name, description, created_by) "
+                    "VALUES ('nested', 'Nested', '', 'root')"
+                )
+            raise RuntimeError("rollback")
+
+    assert store._active_connection.get() is None
+    assert store.list_kbs() == []
+
+
+def test_transaction_clears_active_connection_after_nested_connect_error(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        with store.transaction() as outer:
+            assert store._active_connection.get() is outer
+            try:
+                with store.connect() as nested:
+                    assert nested is outer
+                    raise RuntimeError("rollback")
+            except RuntimeError:
+                assert store._active_connection.get() is outer
+                raise
+
+    assert store._active_connection.get() is None
+
+
 def test_store_transaction_rolls_back_facade_document_archive_and_sync_rows(
     wm_paths: AgentBridgePaths,
 ) -> None:
@@ -133,13 +174,21 @@ def test_store_transaction_rolls_back_facade_document_archive_and_sync_rows(
         with store.transaction():
             document = store.create_document("guide", "Guide", "root")
             store.attach_document_to_kb(document["id"], kb["id"], "root")
-            entry = store.create_archive_entry(
+            archive = store.create_archive_entry(
                 kb["id"],
                 kind="zip",
                 name="docs.zip",
                 relative_path="docs.zip",
                 parent_folder_id=root_id,
             )
+            entry = store.create_archive_entry(
+                kb["id"],
+                kind="document",
+                name="guide.md",
+                relative_path="guide.md",
+                parent_id=archive["id"],
+            )
+            store.update_archive_entry_document(entry["id"], document["id"])
             store.update_document_placement(
                 document["id"], kb["id"], root_id, archive_entry_id=entry["id"]
             )
@@ -169,7 +218,7 @@ def test_archive_entries_validate_parents_and_sort_direct_children_case_insensit
         kb["id"], kind="zip", name="alpha.zip", relative_path="alpha.zip", parent_folder_id=root_id
     )
     nested = store.create_archive_entry(
-        kb["id"], kind="folder", name="nested", relative_path="nested", parent_id=first["id"]
+        kb["id"], kind="document", name="nested", relative_path="nested", parent_id=first["id"]
     )
     document = store.create_document("guide", "Guide", "root")
     store.update_archive_entry_document(nested["id"], document["id"])
@@ -201,6 +250,74 @@ def test_archive_entries_validate_parents_and_sort_direct_children_case_insensit
             relative_path="bad",
             parent_id=first["id"],
             parent_folder_id=root_id,
+        )
+
+
+def test_archive_entry_parent_and_document_link_validation(wm_paths: AgentBridgePaths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb = store.create_kb("kb", "KB", "", "root")
+    root_id = store.list_folder_tree(kb["id"])[0]["id"]
+    zip_entry = store.create_archive_entry(
+        kb["id"], kind="zip", name="docs.zip", relative_path="docs.zip", parent_folder_id=root_id
+    )
+    document = store.create_document("guide", "Guide", "root")
+    other_document = store.create_document("other", "Other", "root")
+    document_entry = store.create_archive_entry(
+        kb["id"], kind="document", name="guide.md", relative_path="guide.md", parent_id=zip_entry["id"]
+    )
+    folder_entry = store.create_archive_entry(
+        kb["id"], kind="folder", name="manuals", relative_path="manuals", parent_id=zip_entry["id"]
+    )
+
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"], kind="document", name="root.md", relative_path="root.md", parent_folder_id=root_id
+        )
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"], kind="folder", name="root-folder", relative_path="root-folder", parent_folder_id=root_id
+        )
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"], kind="document", name="nested.md", relative_path="nested.md", parent_id=document_entry["id"]
+        )
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"],
+            kind="folder",
+            name="invalid-folder",
+            relative_path="invalid-folder",
+            parent_id=zip_entry["id"],
+            doc_id=document["id"],
+        )
+
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE knowledge_archive_entries SET status = 'inactive' WHERE id = ?",
+            (folder_entry["id"],),
+        )
+    with pytest.raises(ValidationError):
+        store.create_archive_entry(
+            kb["id"], kind="document", name="inactive.md", relative_path="inactive.md", parent_id=folder_entry["id"]
+        )
+
+    with pytest.raises(ValidationError):
+        store.update_archive_entry_document(zip_entry["id"], document["id"])
+    store.update_archive_entry_document(document_entry["id"], document["id"])
+    with pytest.raises(ValidationError):
+        store.update_archive_entry_document(document_entry["id"], other_document["id"])
+
+    store.attach_document_to_kb(
+        document["id"], kb["id"], "root", archive_entry_id=document_entry["id"]
+    )
+    with pytest.raises(ValidationError):
+        store.attach_document_to_kb(
+            other_document["id"], kb["id"], "root", archive_entry_id=document_entry["id"]
+        )
+    with pytest.raises(ValidationError):
+        store.update_document_placement(
+            document["id"], kb["id"], root_id, archive_entry_id=zip_entry["id"]
         )
 
 

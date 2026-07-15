@@ -60,6 +60,7 @@ class SQLiteStore:
             return
 
         conn = self._open_connection()
+        token = self._active_connection.set(conn)
         try:
             yield conn
             conn.commit()
@@ -67,6 +68,7 @@ class SQLiteStore:
             conn.rollback()
             raise
         finally:
+            self._active_connection.reset(token)
             conn.close()
 
     @contextmanager
