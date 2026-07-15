@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 from agent_bridge.app.service import AgentBridgeService
@@ -125,6 +126,28 @@ def test_folder_sync_uses_capability_matrix_and_preserves_root_path(wm_paths, tm
     service.sync("root", all_users=False)
     assert weknora.moves[-1]["remote_path"] == "guide.md"
     assert service.store.get_backend_folder_mapping(kb["id"], "weknora", root["id"])["backend_folder_id"] == ""
+
+
+def test_folder_capable_sync_preserves_nested_archive_filename_but_flat_uses_basename(
+    wm_paths, tmp_path: Path
+):
+    weknora = RecordingBackend(supports_folders=True)
+    flat = RecordingBackend(supports_folders=False)
+    service = _service(wm_paths, tmp_path, {"weknora": weknora, "flat": flat})
+    kb = service.create_kb("root", "docs", "Docs", "")
+    root = service.store.get_root_folder(kb["id"])
+    selected = service.create_folder("root", "docs", "Selected", root["id"])
+    archive = tmp_path / "nested.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("manuals/api/guide.md", b"nested guide")
+
+    service.add_document("root", archive, ["docs"], later=True, folder_id=selected["id"])
+    service.sync("root", all_users=False)
+
+    assert weknora.uploads[-1]["filename"] == "guide.md"
+    assert weknora.uploads[-1]["remote_path"] == "Selected/manuals/api/guide.md"
+    assert flat.uploads[-1]["filename"] == "guide.md"
+    assert flat.uploads[-1]["remote_path"] is None
 
 
 def test_folder_move_skips_flat_reupload_but_keeps_content_update_and_moves_weknora(

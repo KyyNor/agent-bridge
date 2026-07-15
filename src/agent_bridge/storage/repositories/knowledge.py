@@ -368,7 +368,9 @@ class KnowledgeRepository:
         ).fetchone()
         if entry is None:
             raise NotFound("archive entry not found")
-        if entry["kind"] != "document" or entry["doc_id"] != doc_id:
+        if entry["kind"] != "document" or (
+            entry["doc_id"] is not None and entry["doc_id"] != doc_id
+        ):
             raise ValidationError("archive entry does not reference this document")
 
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:

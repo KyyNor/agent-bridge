@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 import zipfile
 
@@ -264,8 +265,141 @@ def test_zip_imports_supported_nested_documents_and_skips_duplicate_content(
     assert result["skipped_count"] == 1
     docs = {doc["slug"]: doc for doc in service.list_docs("root", "kb")}
     assert set(docs) == {"copy", "guide"}
-    assert docs["guide"]["folder_path"] == "nested"
+    assert docs["guide"]["folder_path"] == ""
     assert service.store.list_versions(service.store.get_document_by_slug("guide")["id"])[0]["original_filename"] == "nested/guide.pdf"
+
+
+def test_recursive_zip_import_creates_archive_tree_without_virtual_placements(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    nested_zip = io.BytesIO()
+    with zipfile.ZipFile(nested_zip, "w") as inner:
+        inner.writestr("deep/guide.md", b"deep guide")
+
+    archive = tmp_path / "docs.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("root.md", b"root guide")
+        outer.writestr("packs/manuals.zip", nested_zip.getvalue())
+
+    result = service.add_document("root", archive, ["kb"], later=True)
+
+    assert result["uploaded_count"] == 2
+    assert result["skipped_count"] == 0
+    docs = {item["slug"]: item for item in service.list_docs("root", "kb")}
+    assert {item["folder_path"] for item in docs.values()} == {""}
+    assert len(service.status("root")["jobs"]) == 2
+    assert all(job["status"] == "pending" for job in service.status("root")["jobs"])
+
+    entries = service.list_archive_entries("root", "kb")
+    by_path = {entry["relative_path"]: entry for entry in entries}
+    assert by_path["docs.zip"]["kind"] == "zip"
+    assert by_path["packs"]["kind"] == "folder"
+    assert by_path["packs/manuals.zip"]["kind"] == "zip"
+    assert by_path["packs/manuals.zip/deep"]["kind"] == "folder"
+    assert by_path["packs/manuals.zip/deep/guide.md"]["kind"] == "document"
+    assert by_path["root.md"]["kind"] == "document"
+    assert by_path["packs/manuals.zip"]["parent_id"] == by_path["packs"]["id"]
+    assert by_path["packs/manuals.zip/deep"]["parent_id"] == by_path["packs/manuals.zip"]["id"]
+
+    guide = docs["guide"]
+    guide_version = service.store.list_versions(guide["id"])[0]
+    assert guide_version["original_filename"] == "packs/manuals.zip/deep/guide.md"
+    assert by_path[guide_version["original_filename"]]["doc_id"] == guide["id"]
+    assert guide["archive_entry_id"] == by_path[guide_version["original_filename"]]["id"]
+
+
+def test_corrupt_inner_zip_rolls_back_all_service_state(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    archive = tmp_path / "broken-inner.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("nested/broken.zip", b"not a zip")
+
+    with pytest.raises(ValidationError):
+        service.add_document("root", archive, ["kb"], later=True)
+
+    assert service.list_docs("root", "kb") == []
+    assert service.list_archive_entries("root", "kb") == []
+    assert service.status("root")["jobs"] == []
+
+
+def test_zip_duplicate_preserves_real_placement_and_existing_archive_file(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    first_folder = service.create_folder("root", "kb", "First", root["id"])
+    second_folder = service.create_folder("root", "kb", "Second", root["id"])
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"same content")
+    first = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=first_folder["id"]
+    )
+    first_archive_path = Path(service.store.list_versions(first["id"])[0]["archive_path"])
+
+    archive = tmp_path / "duplicate.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("nested/guide.md", b"same content")
+
+    result = service.add_document(
+        "root", archive, ["kb"], later=True, folder_id=second_folder["id"]
+    )
+
+    assert result["uploaded_count"] == 0
+    assert result["skipped_count"] == 1
+    assert result["skipped"][0]["id"] == first["id"]
+    assert len(service.store.list_versions(first["id"])) == 1
+    placement = service.store.get_document_placement(
+        first["id"], service.store.get_kb_by_slug("kb")["id"]
+    )
+    assert placement["folder_path"] == "First"
+    assert first_archive_path.exists()
+    assert {folder["name"] for folder in service.list_folders("root", "kb")} == {
+        "KB", "First", "Second"
+    }
+    document_entry = next(
+        entry
+        for entry in service.list_archive_entries("root", "kb")
+        if entry["relative_path"] == "nested/guide.md"
+    )
+    assert document_entry["doc_id"] == first["id"]
+    assert placement["archive_entry_id"] == document_entry["id"]
+    assert len(service.status("root")["jobs"]) == 1
+
+
+def test_zip_transaction_removes_new_archive_file_on_rollback(
+    wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    archive = tmp_path / "rollback.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("guide.md", b"transactional content")
+    before = {
+        path
+        for path in service.paths.archive_dir.rglob("*")
+        if path.is_file()
+    }
+
+    def fail_archive_link(*args, **kwargs):
+        raise RuntimeError("forced archive link failure")
+
+    monkeypatch.setattr(service.store, "update_archive_entry_document", fail_archive_link)
+    with pytest.raises(RuntimeError, match="forced archive link failure"):
+        service.add_document("root", archive, ["kb"], later=True)
+
+    after = {
+        path
+        for path in service.paths.archive_dir.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    assert service.list_docs("root", "kb") == []
+    assert service.list_archive_entries("root", "kb") == []
+    assert service.status("root")["jobs"] == []
 
 
 def test_document_relative_path_uses_selected_folder_as_base(wm_paths, tmp_path: Path) -> None:
