@@ -812,6 +812,10 @@ class AgentBridgeService:
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, int]:
         require_admin_user(actor, self.admins)
+        # A target may have been created by an older migration without its
+        # remote ID.  Repair it before taking the job snapshot so that the
+        # sync path never needs to use the local KB slug as a remote ID.
+        self.align_backends()
         jobs = self.store.list_runnable_jobs(
             actor=None,
             backend_slug=backend,
@@ -819,19 +823,53 @@ class AgentBridgeService:
         logger.info("文档同步: %d 个待处理任务", len(jobs))
         succeeded = 0
         failed = 0
+        recovery_backend_kbs: dict[tuple[int, str], str] = {}
+        recovered_job_keys: set[tuple[int, int, str]] = set()
+        processed_job_keys: set[tuple[int, int, str]] = set()
+        pending_jobs = list(jobs)
         if progress_callback:
             progress_callback({"event": "start", "total": len(jobs), "processed": 0, "succeeded": 0, "failed": 0})
-        for index, job in enumerate(jobs, start=1):
+        while pending_jobs:
+            job = pending_jobs.pop(0)
+            job_key = (job["doc_id"], job["kb_id"], job["backend_slug"])
+            if job_key in processed_job_keys:
+                continue
             if progress_callback:
                 progress_callback({
                     "event": "job_start",
                     "total": len(jobs),
-                    "processed": index - 1,
+                    "processed": len(processed_job_keys),
                     "succeeded": succeeded,
                     "failed": failed,
                     "current_job": self._sync_job_progress_payload(job),
                 })
-            ok = self._run_job(job)
+            ok = self._run_job(job, recovery_backend_kbs, recovered_job_keys)
+            if job_key in recovered_job_keys:
+                # rebuild_backend_target replaces the whole runnable queue for
+                # this KB/backend.  Put the replacement jobs at the front so
+                # this sync processes them before stale snapshot entries; the
+                # group key prevents those stale entries from being run again.
+                recovered_job_keys.remove(job_key)
+                refreshed_jobs = self.store.list_runnable_jobs(
+                    actor=None,
+                    backend_slug=backend,
+                )
+                for refreshed_job in reversed(refreshed_jobs):
+                    if (
+                        refreshed_job["kb_id"] != job["kb_id"]
+                        or refreshed_job["backend_slug"] != job["backend_slug"]
+                    ):
+                        continue
+                    refreshed_key = (
+                        refreshed_job["doc_id"],
+                        refreshed_job["kb_id"],
+                        refreshed_job["backend_slug"],
+                    )
+                    if refreshed_key not in processed_job_keys:
+                        pending_jobs.insert(0, refreshed_job)
+                continue
+
+            processed_job_keys.add(job_key)
             if ok:
                 succeeded += 1
             else:
@@ -840,15 +878,15 @@ class AgentBridgeService:
                 progress_callback({
                     "event": "job_done",
                     "total": len(jobs),
-                    "processed": index,
+                    "processed": len(processed_job_keys),
                     "succeeded": succeeded,
                     "failed": failed,
                     "current_job": self._sync_job_progress_payload(job),
                 })
         logger.info("文档同步完成: %d 成功, %d 失败", succeeded, failed)
         if progress_callback:
-            progress_callback({"event": "finish", "total": len(jobs), "processed": len(jobs), "succeeded": succeeded, "failed": failed})
-        return {"processed": len(jobs), "succeeded": succeeded, "failed": failed}
+            progress_callback({"event": "finish", "total": len(jobs), "processed": len(processed_job_keys), "succeeded": succeeded, "failed": failed})
+        return {"processed": len(processed_job_keys), "succeeded": succeeded, "failed": failed}
 
     # -- Code repo categories --
 
@@ -1423,7 +1461,12 @@ class AgentBridgeService:
             return True
         return False
 
-    def _run_job(self, job: dict[str, Any]) -> bool:
+    def _run_job(
+        self,
+        job: dict[str, Any],
+        recovery_backend_kbs: dict[tuple[int, str], str] | None = None,
+        recovered_job_keys: set[tuple[int, int, str]] | None = None,
+    ) -> bool:
         doc_title = job.get("doc_title", job.get("doc_slug", "?"))
         backend = job.get("backend_slug", "?")
         op = job.get("operation", "?")
@@ -1438,7 +1481,16 @@ class AgentBridgeService:
             job["doc_id"], job["kb_id"], job["backend_slug"]
         )
         try:
-            backend_kb_id = job.get("backend_kb_id") or job["kb_slug"]
+            recovery_key = (job["kb_id"], job["backend_slug"])
+            backend_kb_id = (
+                recovery_backend_kbs.get(recovery_key)
+                if recovery_backend_kbs is not None
+                else None
+            ) or job.get("backend_kb_id")
+            if not backend_kb_id:
+                raise RuntimeError(
+                    f"backend target '{job['backend_slug']}' has no remote knowledge-base ID"
+                )
             if job["operation"] == "delete":
                 backend_doc_id = previous_sync_state["backend_doc_id"] if previous_sync_state else None
                 if backend_doc_id:
@@ -1527,8 +1579,25 @@ class AgentBridgeService:
             if op != Operation.move.value and self._is_kb_gone(exc) and job.get("kb_name") and job.get("kb_slug"):
                 logger.warning("文档同步任务 #%d: 后端 KB 已丢失，正在重建...", job["id"])
                 try:
-                    new_id = adapter.create_kb(job["kb_slug"], job["kb_name"])
-                    doc_count = self.store.rebuild_backend_target(job["kb_id"], job["backend_slug"], new_id)
+                    recovery_key = (job["kb_id"], job["backend_slug"])
+                    new_id = (
+                        recovery_backend_kbs.get(recovery_key)
+                        if recovery_backend_kbs is not None
+                        else None
+                    )
+                    if new_id is None:
+                        new_id = adapter.create_kb(job["kb_slug"], job["kb_name"])
+                        doc_count = self.store.rebuild_backend_target(
+                            job["kb_id"], job["backend_slug"], new_id
+                        )
+                        if recovery_backend_kbs is not None:
+                            recovery_backend_kbs[recovery_key] = new_id
+                        if recovered_job_keys is not None:
+                            recovered_job_keys.add(
+                                (job["doc_id"], job["kb_id"], job["backend_slug"])
+                            )
+                    else:
+                        doc_count = 0
                     self.store.update_job_status(job["id"], SyncJobStatus.succeeded)
                     logger.info("文档同步任务 #%d: 后端 KB 已重建，%d 个文档已重新调度", job["id"], doc_count)
                     return True
@@ -1589,17 +1658,21 @@ class AgentBridgeService:
         kbs = self.store.list_kbs()
         for kb in kbs:
             existing_targets = self.store.list_backend_targets(kb["id"])
-            existing_slugs = {t["slug"] for t in existing_targets}
 
             # Mark removed backends as inactive
             for target in existing_targets:
                 if target["slug"] not in configured_slugs and target["status"] == "active":
                     self.store.set_backend_target_status(kb["id"], target["slug"], "inactive")
 
-            # Add new backends and create pending sync jobs for existing docs
+            # Add new backends, repair targets whose remote ID was lost, and
+            # create pending sync jobs for existing docs.
             for backend_slug in configured_slugs:
-                if backend_slug not in existing_slugs:
-                    adapter = self.registry.get(backend_slug)
+                adapter = self.registry.get(backend_slug)
+                target = next(
+                    (target for target in existing_targets if target["slug"] == backend_slug),
+                    None,
+                )
+                if target is None:
                     try:
                         backend_kb_id = adapter.create_kb(kb["slug"], kb["name"]) if adapter else None
                         self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
@@ -1607,17 +1680,16 @@ class AgentBridgeService:
                             self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
                     except Exception:
                         self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
-
-                # Reactivate previously inactive targets
-                for target in existing_targets:
-                    if target["slug"] == backend_slug and target["status"] == "inactive":
-                        adapter = self.registry.get(backend_slug)
-                        if adapter and not target.get("backend_kb_id"):
-                            try:
-                                backend_kb_id = adapter.create_kb(kb["slug"], kb["name"])
-                                self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
-                            except Exception:
-                                pass
+                else:
+                    if adapter and not target.get("backend_kb_id"):
+                        try:
+                            backend_kb_id = adapter.create_kb(kb["slug"], kb["name"])
+                            self.store.update_backend_target_kb_id(
+                                kb["id"], backend_slug, backend_kb_id
+                            )
+                        except Exception:
+                            pass
+                    if target["status"] == "inactive":
                         self.store.set_backend_target_status(kb["id"], backend_slug, "active")
                 self._backfill_missing_backend_jobs(kb, backend_slug)
 
