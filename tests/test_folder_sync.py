@@ -160,6 +160,33 @@ def test_folder_move_skips_flat_reupload_but_keeps_content_update_and_moves_wekn
     assert next(job for job in service.status("root")["jobs"] if job["id"] == flat_update["id"])["status"] == "pending"
 
 
+def test_successive_folder_moves_only_sync_latest_placement(wm_paths, tmp_path: Path):
+    weknora = RecordingBackend(supports_folders=True)
+    service = _service(wm_paths, tmp_path, {"weknora": weknora})
+    kb = service.create_kb("root", "docs", "Docs", "")
+    root = service.store.get_root_folder(kb["id"])
+    first = service.create_folder("root", "docs", "First", root["id"])
+    latest = service.create_folder("root", "docs", "Latest", root["id"])
+    source = tmp_path / "guide.md"
+    source.write_text("# Guide", encoding="utf-8")
+
+    doc = service.add_document("root", source, ["docs"], later=True, folder_id=first["id"])
+    service.sync("root", all_users=False)
+
+    service.place_document("root", doc["slug"], "docs", root["id"])
+    service.place_document("root", doc["slug"], "docs", latest["id"])
+
+    placement = service.store.get_document_placement(doc["id"], kb["id"])
+    assert placement["folder_id"] == latest["id"]
+    move_jobs = [job for job in service.status("root")["jobs"] if job["operation"] == "move"]
+    assert [job["status"] for job in move_jobs] == ["cancelled", "pending"]
+
+    result = service.sync("root", all_users=False)
+    assert result == {"processed": 1, "succeeded": 1, "failed": 0}
+    assert len(weknora.moves) == 1
+    assert weknora.moves[-1]["remote_path"] == "Latest/guide.md"
+
+
 def test_folder_rename_queues_moves_for_descendant_documents(wm_paths, tmp_path: Path):
     weknora = RecordingBackend(supports_folders=True)
     service = _service(wm_paths, tmp_path, {"weknora": weknora})

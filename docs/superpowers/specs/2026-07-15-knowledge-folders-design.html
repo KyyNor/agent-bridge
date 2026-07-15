@@ -176,7 +176,7 @@ documents ──&lt; document_kbs &gt;── knowledge_folders</pre>
           <li>删除 A 中的文档关联不会删除 B 中的关联。</li>
         </ul>
         <h3>3.3 后端目录映射</h3>
-        <p>新增后端目录映射表，至少保存 <code>kb_id</code>、<code>backend_slug</code>、<code>folder_id</code>、<code>backend_folder_id</code>、<code>path_snapshot</code> 和状态。只为真正支持目录的后端创建映射，当前主要用于 WeKnora。</p>
+        <p>新增后端目录映射表，至少保存 <code>kb_id</code>、<code>backend_slug</code>、<code>folder_id</code>、<code>backend_folder_id</code>、<code>path_snapshot</code> 和状态。对 WeKnora，<code>backend_folder_id</code> 记录的是规范化相对路径（例如 <code>A/B</code>），用于记录同步快照；它不是通过远端目录 CRUD 获得的独立目录 ID。</p>
       </section>
 
       <section>
@@ -198,29 +198,28 @@ documents ──&lt; document_kbs &gt;── knowledge_folders</pre>
         <table>
           <thead><tr><th>后端</th><th>本次分类</th><th>行为</th></tr></thead>
           <tbody>
-            <tr><td>WeKnora</td><td>支持目录</td><td>创建或复用远端目录，文件上传到对应目录；移动文档时同步远端位置。</td></tr>
+            <tr><td>WeKnora</td><td>支持目录路径</td><td>使用知识库文件上传接口的相对 <code>fileName</code> 表达目录；移动时删除旧知识后按新路径重传。</td></tr>
             <tr><td>PageIndex</td><td>不支持目录</td><td>本次按知识库平铺同步，不接入其闭源/付费产品的文件夹能力。</td></tr>
             <tr><td>RAGFlow</td><td>不支持知识库内目录</td><td>本次继续使用 dataset 文档上传，文件在远端知识库内平铺。</td></tr>
             <tr><td>Mock</td><td>不支持目录</td><td>保持现有平铺行为。</td></tr>
           </tbody>
         </table>
-        <p>RAGFlow 官方资料区分了全局文件管理器和知识库目录：文件管理器可以使用嵌套文件夹，但知识库对应目录内部不能创建子目录，因此不满足本项目“每个知识库独立保留目录树”的语义。参见 <a href="https://ragflow.com.cn/docs/dev/manage_files">RAGFlow 文件管理文档</a>。</p>
+        <p>RAGFlow 官方资料区分了全局文件管理器和知识库目录：文件管理器可以使用嵌套文件夹，但知识库对应目录内部不能创建子目录，因此不满足本项目“每个知识库独立保留目录树”的语义。本项目仍按 dataset 文档上传并在远端平铺。参见 <a href="https://ragflow.com.cn/docs/dev/manage_files">RAGFlow 文件管理文档</a>。</p>
         <p>PageIndex 官方 JavaScript SDK 文档确实描述了嵌套文件夹和 <code>folderId</code>，但该能力标注为 Max 计划；本项目本次明确不接入这一能力，当前适配器按平铺后端处理。参见 <a href="https://docs.pageindex.ai/js-sdk/folders">PageIndex 文件夹文档</a>。</p>
         <h3>5.1 适配器契约</h3>
-        <p>通用同步服务只依赖后端能力声明，不把 WeKnora 的接口细节写进服务层：</p>
+        <p>通用同步服务只依赖后端能力声明和统一的相对路径参数，不把 WeKnora 的 HTTP 细节写进服务层：</p>
         <pre>BackendCapabilities(
     supports_folders: bool,
 )
 
-ensure_folder_path(backend_kb_id, path_parts) -> remote_folder_id
-upload(..., remote_folder_id=None) -> remote_doc_id
-move_document(..., remote_folder_id) -> None
-delete_remote_folder(..., remote_folder_id) -> None</pre>
+upload(..., filename, remote_path=None) -> remote_doc_id
+move(..., backend_doc_id, filename, remote_path=None) -> remote_doc_id</pre>
         <ul>
-          <li>WeKnora 实现目录创建、目录复用、上传到目录和文档移动。</li>
+          <li>WeKnora 实际调用 <code>POST /api/v1/knowledge-bases/{id}/knowledge/file</code>，以 multipart 的 <code>fileName</code> 字段传递规范化相对路径，例如 <code>A/B/file.md</code>；上传文件字段仍为 <code>file</code>。当前没有独立的远端目录 CRUD。</li>
+          <li>WeKnora 的移动通过先调用旧知识删除接口，再使用新路径调用上述上传接口完成；它不是远端目录重命名。</li>
           <li>PageIndex、RAGFlow、Mock 声明 <code>supports_folders=false</code>，服务层不调用目录接口。</li>
           <li>不支持目录的后端仍接收普通上传参数，目录参数被忽略，保持兼容。</li>
-          <li>WeKnora 的目录接口失败时，同步任务标记失败并保留错误；不自动改为平铺上传。</li>
+          <li>WeKnora 的删除或重传失败时，同步任务标记失败并保留错误；不自动改为平铺上传，也不因移动失败重建知识库。</li>
         </ul>
       </section>
 
@@ -229,7 +228,7 @@ delete_remote_folder(..., remote_folder_id) -> None</pre>
         <div class="flow">
           <div><strong>1. 本地入库</strong>解析目录路径，创建缺失目录，把文档关联到目标 folder。</div>
           <div><strong>2. 生成任务</strong>按知识库已有后端目标创建同步任务，记录目标目录上下文。</div>
-          <div><strong>3. 后端执行</strong>WeKnora 确保远端路径后上传；其他后端直接上传到知识库根。</div>
+          <div><strong>3. 后端执行</strong>WeKnora 把相对路径写入 multipart <code>fileName</code> 后上传；其他后端直接上传到知识库根。</div>
         </div>
         <h3>上传来源</h3>
         <ul>
@@ -242,7 +241,7 @@ delete_remote_folder(..., remote_folder_id) -> None</pre>
         <ul>
           <li>本地先更新 <code>document_kbs.folder_id</code>。</li>
           <li>取消同一关联上尚未执行的旧位置任务，生成新的移动任务。</li>
-          <li>WeKnora 执行远端移动；平铺后端不生成移动任务，因为远端文件位置不变。</li>
+          <li>WeKnora 的移动任务删除旧知识，再按新的 <code>folder_path/fileName</code> 相对路径重传；平铺后端不生成移动任务，因为远端文件位置不变。</li>
         </ul>
       </section>
 
@@ -314,7 +313,7 @@ POST   /docs/{doc_slug}/attach       + target kb / folder</pre>
           <li>目录名称不能为空，拒绝路径分隔符、路径穿越片段和控制字符。</li>
           <li>创建目录和移动目录时校验同级重名及循环引用。</li>
           <li>ZIP 路径继续执行绝对路径、<code>..</code>、符号链接和嵌套压缩包校验。</li>
-          <li>WeKnora 目录创建失败时，任务进入失败状态并可重试；不隐藏失败或偷偷平铺。</li>
+          <li>WeKnora 删除旧知识或按新路径重传失败时，任务进入失败状态并可重试；不隐藏失败或偷偷平铺，也不重建知识库。</li>
           <li>目录删除确认前后都按当前知识库关联重新计算，避免确认期间数据变化导致误删。</li>
           <li>共享文档的归档文件只有在最后一个知识库关联删除后才清理。</li>
         </ul>
@@ -333,7 +332,7 @@ POST   /docs/{doc_slug}/attach       + target kb / folder</pre>
         </ul>
         <h3>后端适配器</h3>
         <ul>
-          <li>WeKnora：目录创建复用、上传到目录、移动文档、目录失败重试。</li>
+          <li>WeKnora：上传请求使用知识库文件接口、multipart <code>fileName</code> 传递 <code>A/B/file.md</code>；移动验证“删除旧知识后按新路径重传”，失败可重试且不重建知识库。</li>
           <li>RAGFlow、PageIndex、Mock：不调用目录接口，文件仍平铺上传。</li>
           <li>不同后端同一文档可以分别拥有自己的同步位置和同步状态。</li>
         </ul>

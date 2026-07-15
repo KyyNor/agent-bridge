@@ -78,6 +78,62 @@ def test_folder_api_crud_and_delete_confirmation(wm_paths, tmp_path: Path) -> No
     assert root_delete.status_code == 400
 
 
+def test_folder_delete_confirmation_recounts_live_subtree(wm_paths, tmp_path: Path) -> None:
+    client = _client(wm_paths)
+    headers = _headers()
+    assert client.post("/admin/init", headers=headers).status_code == 200
+    assert client.post("/kbs", json={"slug": "docs", "name": "Docs"}, headers=headers).status_code == 200
+
+    root = client.get("/kbs/docs/folders", headers=headers).json()[0]
+    parent = client.post(
+        "/kbs/docs/folders",
+        json={"parent_folder_id": root["id"], "name": "Parent"},
+        headers=headers,
+    ).json()
+    first_source = tmp_path / "first.md"
+    first_source.write_bytes(b"first")
+    with first_source.open("rb") as handle:
+        uploaded = client.post(
+            "/docs",
+            data={"kb": ["docs"], "folder_id": str(parent["id"]), "later": "true"},
+            files={"file": ("first.md", handle, "text/markdown")},
+            headers=headers,
+        )
+    assert uploaded.status_code == 200
+
+    preview = client.delete(f"/kbs/docs/folders/{parent['id']}", headers=headers)
+    assert preview.status_code == 409
+    assert preview.json()["detail"]["directory_count"] == 1
+    assert preview.json()["detail"]["file_count"] == 1
+
+    child = client.post(
+        "/kbs/docs/folders",
+        json={"parent_folder_id": parent["id"], "name": "Child"},
+        headers=headers,
+    ).json()
+    second_source = tmp_path / "second.md"
+    second_source.write_bytes(b"second")
+    with second_source.open("rb") as handle:
+        uploaded = client.post(
+            "/docs",
+            data={"kb": ["docs"], "folder_id": str(child["id"]), "later": "true"},
+            files={"file": ("second.md", handle, "text/markdown")},
+            headers=headers,
+        )
+    assert uploaded.status_code == 200
+
+    deleted = client.request(
+        "DELETE",
+        f"/kbs/docs/folders/{parent['id']}",
+        json={"confirm": True},
+        headers=headers,
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["directory_count"] == 2
+    assert deleted.json()["file_count"] == 2
+    assert client.get("/docs", params={"kb": "docs"}, headers=headers).json() == []
+
+
 def test_document_placement_attach_and_scoped_delete_api(wm_paths, tmp_path: Path) -> None:
     client = _client(wm_paths)
     headers = _headers()
