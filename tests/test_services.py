@@ -6,7 +6,14 @@ import zipfile
 import pytest
 
 from agent_bridge.core.config import BackendConfig, AgentBridgePaths, ensure_directories
-from agent_bridge.core.domain import AccessDenied, ConflictError, NotFound, SyncStateStatus, ValidationError
+from agent_bridge.core.domain import (
+    AccessDenied,
+    BackendCapabilities,
+    ConflictError,
+    NotFound,
+    SyncStateStatus,
+    ValidationError,
+)
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
 from agent_bridge.app.service import AgentBridgeService
 
@@ -537,9 +544,39 @@ def test_sync_uses_backend_kb_id_for_upload_and_delete(wm_paths, tmp_path: Path)
         def delete_kb(self, backend_kb_id: str) -> None:
             pass
 
-        def upload(self, backend_kb_id: str, doc_slug: str, file_path: Path, filename: str) -> str:
+        def capabilities(self) -> BackendCapabilities:
+            return BackendCapabilities(supports_folders=False)
+
+        def upload(
+            self,
+            backend_kb_id: str,
+            doc_slug: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
             self.upload_kb_ids.append(backend_kb_id)
             return "backend-doc-456"
+
+        def move(
+            self,
+            backend_kb_id: str,
+            backend_doc_id: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
+            raise NotImplementedError
+
+        def relocate(
+            self,
+            backend_kb_id: str,
+            backend_doc_id: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
+            return self.move(backend_kb_id, backend_doc_id, file_path, filename, remote_path)
 
         def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
             self.delete_kb_ids.append(backend_kb_id)

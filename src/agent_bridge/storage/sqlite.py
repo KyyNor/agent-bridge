@@ -1496,6 +1496,9 @@ class SQLiteStore:
     def get_document_by_slug(self, slug: str, include_deleted: bool = False) -> dict[str, Any] | None:
         return self.knowledge.get_document_by_slug(slug=slug, include_deleted=include_deleted)
 
+    def get_document_by_id(self, doc_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
+        return self.knowledge.get_document_by_id(doc_id=doc_id, include_deleted=include_deleted)
+
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
         return self.knowledge.find_current_document_by_content_hash(kb_id=kb_id, content_hash=content_hash)
 

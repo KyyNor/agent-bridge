@@ -183,6 +183,17 @@ class KnowledgeRepository:
                 ).fetchone()
             return row_to_dict(row)
 
+    def get_document_by_id(self, doc_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            if include_deleted:
+                row = conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM documents WHERE id = ? AND status != ?",
+                    (doc_id, DocumentStatus.deleted.value),
+                ).fetchone()
+            return row_to_dict(row)
+
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -296,12 +307,12 @@ class KnowledgeRepository:
                         SELECT COUNT(*) AS count
                         FROM sync_jobs
                         WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
-                          AND operation IN (?, ?)
+                          AND operation IN (?, ?, ?)
                           AND status = ?
                         """,
                         (
                             document["id"], kb_id, backend_slug,
-                            Operation.create.value, Operation.update.value,
+                            Operation.create.value, Operation.update.value, Operation.move.value,
                             SyncJobStatus.running.value,
                         ),
                     ).fetchone()["count"]
@@ -310,13 +321,13 @@ class KnowledgeRepository:
                         UPDATE sync_jobs
                         SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
                         WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
-                          AND operation IN (?, ?)
+                          AND operation IN (?, ?, ?)
                           AND status IN (?, ?)
                         """,
                         (
                             SyncJobStatus.cancelled.value,
                             document["id"], kb_id, backend_slug,
-                            Operation.create.value, Operation.update.value,
+                            Operation.create.value, Operation.update.value, Operation.move.value,
                             SyncJobStatus.pending.value, SyncJobStatus.failed.value,
                         ),
                     )
@@ -668,7 +679,7 @@ class KnowledgeRepository:
                 SELECT COUNT(*) AS count
                 FROM sync_jobs
                 WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
-                  AND operation IN (?, ?)
+                  AND operation IN (?, ?, ?)
                   AND status = ?
                 """,
                 (
@@ -677,6 +688,7 @@ class KnowledgeRepository:
                     backend_slug,
                     Operation.create.value,
                     Operation.update.value,
+                    Operation.move.value,
                     SyncJobStatus.running.value,
                 ),
             ).fetchone()
@@ -685,7 +697,7 @@ class KnowledgeRepository:
                 UPDATE sync_jobs
                 SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
-                  AND operation IN (?, ?)
+                  AND operation IN (?, ?, ?)
                   AND status IN (?, ?)
                 """,
                 (
@@ -695,6 +707,7 @@ class KnowledgeRepository:
                     backend_slug,
                     Operation.create.value,
                     Operation.update.value,
+                    Operation.move.value,
                     SyncJobStatus.pending.value,
                     SyncJobStatus.failed.value,
                 ),

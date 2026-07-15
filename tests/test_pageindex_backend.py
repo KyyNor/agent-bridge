@@ -154,6 +154,8 @@ def _backend(tmp_path: Path, **kwargs):
 def test_create_kb_creates_workspace(tmp_path: Path) -> None:
     backend = _backend(tmp_path)
 
+    assert backend.capabilities().supports_folders is False
+
     kb_id = backend.create_kb("finance-docs", "Finance Docs")
 
     assert kb_id == "finance-docs"

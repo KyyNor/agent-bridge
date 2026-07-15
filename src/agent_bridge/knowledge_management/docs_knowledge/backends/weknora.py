@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import AskResult, BackendCapabilities, BackendDocStatus, RetrievalResult
 
 logger = logging.getLogger(__name__)
 
@@ -159,22 +159,79 @@ class WeknoraBackend:
             return
         self._raise(response)
 
+    def capabilities(self) -> BackendCapabilities:
+        return BackendCapabilities(supports_folders=True)
+
+    @staticmethod
+    def _normalise_remote_path(path: str | None) -> str:
+        raw = (path or "").replace("\\", "/")
+        parts: list[str] = []
+        for part in raw.split("/"):
+            if not part or part == ".":
+                continue
+            if part == ".." or any(ord(char) < 32 or ord(char) == 127 for char in part):
+                raise ValueError("remote path is invalid")
+            parts.append(part)
+        return "/".join(parts)
+
+    @classmethod
+    def _remote_filename(cls, filename: str, remote_path: str | None) -> str:
+        filename_path = cls._normalise_remote_path(remote_path or filename)
+        if not filename_path:
+            raise ValueError("filename is required")
+        return filename_path
+
     def upload(
         self,
         backend_kb_id: str,
         doc_slug: str,
         file_path: Path,
         filename: str,
+        remote_path: str | None = None,
     ) -> str:
+        remote_filename = self._remote_filename(filename, remote_path)
         with file_path.open("rb") as file_handle:
             response = self._request(
                 "POST",
                 f"/api/v1/knowledge-bases/{backend_kb_id}/knowledge/file",
-                data={"fileName": filename, "channel": "api"},
-                files={"file": (filename, file_handle)},
+                data={"fileName": remote_filename, "channel": "api"},
+                files={"file": (remote_filename, file_handle)},
             )
         self._raise(response)
         return self._data(response)["id"]
+
+    def move(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        self.delete(backend_kb_id, backend_doc_id)
+        return self.upload(
+            backend_kb_id=backend_kb_id,
+            doc_slug=backend_doc_id,
+            file_path=file_path,
+            filename=filename,
+            remote_path=remote_path,
+        )
+
+    def relocate(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        return self.move(
+            backend_kb_id,
+            backend_doc_id,
+            file_path,
+            filename,
+            remote_path,
+        )
 
     def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
         response = self._request("DELETE", f"/api/v1/knowledge/{backend_doc_id}")

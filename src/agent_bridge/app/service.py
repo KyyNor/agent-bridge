@@ -307,13 +307,19 @@ class AgentBridgeService:
             raise ValidationError("at least one folder field must be provided")
 
         parent_id = None if parent_folder_id is _UNSET else parent_folder_id
-        return self.store.update_folder(
+        previous = self.store.get_folder(kb["id"], folder_id)
+        documents = self._documents_in_folder_subtree(kb["id"], folder_id) if previous else []
+        updated = self.store.update_folder(
             kb["id"],
             folder_id,
             name=name,
             parent_id=parent_id,  # type: ignore[arg-type]
             parent_provided=bool(parent_provided),
         )
+        if previous and previous.get("path") != updated.get("path"):
+            for document in documents:
+                self._queue_placement_sync_jobs(document, kb["id"])
+        return updated
 
     def _folder_delete_preview(self, kb_id: int, folder_id: int) -> dict[str, Any]:
         folder = self.store.get_folder(kb_id, folder_id)
@@ -409,6 +415,8 @@ class AgentBridgeService:
         for target in self.store.list_backend_targets(kb_id):
             if target["status"] != "active":
                 continue
+            adapter = self._get_adapter(target["slug"])
+            supports_folders = self._backend_supports_folders(adapter)
             compacted = self.store.cancel_runnable_create_update_jobs(
                 doc["id"], kb_id, target["slug"]
             )
@@ -416,18 +424,20 @@ class AgentBridgeService:
             remote_exists = bool(sync_state and sync_state.get("backend_doc_id"))
             if remote_exists:
                 if compacted["running"] == 0:
+                    operation = Operation.move if supports_folders else Operation.update
                     self.store.create_sync_job(
-                        doc["id"], kb_id, Operation.update, doc.get("current_version_id"),
+                        doc["id"], kb_id, operation, doc.get("current_version_id"),
                         backend_slug=target["slug"],
                     )
             else:
                 # A pending create is replaced so the next task observes the
                 # latest placement. This also covers a placement change made
                 # after an unsynced upload was queued.
-                self.store.create_sync_job(
-                    doc["id"], kb_id, Operation.create, doc.get("current_version_id"),
-                    backend_slug=target["slug"],
-                )
+                if compacted["running"] == 0:
+                    self.store.create_sync_job(
+                        doc["id"], kb_id, Operation.create, doc.get("current_version_id"),
+                        backend_slug=target["slug"],
+                    )
 
     def place_document(
         self,
@@ -1278,6 +1288,17 @@ class AgentBridgeService:
                 return adapter
         return self.mock_backend
 
+    @staticmethod
+    def _backend_supports_folders(adapter: Any) -> bool:
+        capability_attr = getattr(adapter, "capabilities", None)
+        if capability_attr is None:
+            return False
+        try:
+            capabilities = capability_attr() if callable(capability_attr) else capability_attr
+        except Exception:
+            return False
+        return bool(getattr(capabilities, "supports_folders", False))
+
     # -- Backend agents (Weknora) --
 
     def list_backend_agents(self, actor: str, slug: str) -> list[dict[str, Any]]:
@@ -1358,11 +1379,15 @@ class AgentBridgeService:
         adapter = self.registry.get(job["backend_slug"]) if self.registry else None
         if adapter is None:
             adapter = self.mock_backend
+        supports_folders = self._backend_supports_folders(adapter)
+        placement: dict[str, Any] | None = None
+        previous_sync_state = self.store.get_sync_state(
+            job["doc_id"], job["kb_id"], job["backend_slug"]
+        )
         try:
             backend_kb_id = job.get("backend_kb_id") or job["kb_slug"]
             if job["operation"] == "delete":
-                sync_state = self.store.get_sync_state(job["doc_id"], job["kb_id"], job["backend_slug"])
-                backend_doc_id = sync_state["backend_doc_id"] if sync_state else None
+                backend_doc_id = previous_sync_state["backend_doc_id"] if previous_sync_state else None
                 if backend_doc_id:
                     adapter.delete(backend_kb_id, backend_doc_id)
                 self.store.upsert_sync_state(
@@ -1373,12 +1398,68 @@ class AgentBridgeService:
                     SyncStateStatus.deleted,
                 )
             else:
-                backend_doc_id = adapter.upload(
-                    backend_kb_id=backend_kb_id,
-                    doc_slug=job["doc_slug"],
-                    file_path=Path(job["archive_path"]),
-                    filename=job.get("original_filename") or job["doc_slug"],
-                )
+                placement = self.store.get_document_placement(job["doc_id"], job["kb_id"])
+                if placement is None:
+                    raise NotFound("document knowledge-base placement not found")
+
+                archive_path = job.get("archive_path")
+                filename = job.get("original_filename") or job["doc_slug"]
+                current_document = self.store.get_document_by_id(job["doc_id"], include_deleted=True)
+                if current_document and current_document.get("current_version_id"):
+                    current_version = next(
+                        (
+                            version
+                            for version in self.store.list_versions(job["doc_id"])
+                            if version["id"] == current_document["current_version_id"]
+                        ),
+                        None,
+                    )
+                    if current_version is not None:
+                        archive_path = current_version["archive_path"]
+                        filename = current_version["original_filename"]
+                if not archive_path:
+                    raise NotFound("document archive not found")
+
+                folder_path = placement.get("folder_path") or ""
+                upload_filename = Path(filename).name
+                remote_path = "/".join(part for part in (folder_path, upload_filename) if part)
+                if job["operation"] == Operation.move.value:
+                    old_backend_doc_id = (
+                        previous_sync_state.get("backend_doc_id") if previous_sync_state else None
+                    )
+                    if not old_backend_doc_id:
+                        raise RuntimeError("cannot move document without an existing backend document")
+                    move_method = getattr(adapter, "move", None) or getattr(adapter, "relocate", None)
+                    if not callable(move_method):
+                        raise RuntimeError(f"backend '{job['backend_slug']}' does not implement move")
+                    backend_doc_id = move_method(
+                        backend_kb_id=backend_kb_id,
+                        backend_doc_id=old_backend_doc_id,
+                        file_path=Path(archive_path),
+                        filename=upload_filename,
+                        remote_path=remote_path,
+                    )
+                else:
+                    upload_kwargs: dict[str, Any] = {
+                        "backend_kb_id": backend_kb_id,
+                        "doc_slug": job["doc_slug"],
+                        "file_path": Path(archive_path),
+                        "filename": upload_filename,
+                    }
+                    if supports_folders:
+                        upload_kwargs["remote_path"] = remote_path
+                    backend_doc_id = adapter.upload(**upload_kwargs)
+
+                if supports_folders:
+                    self.store.upsert_backend_folder_mapping(
+                        job["kb_id"],
+                        job["backend_slug"],
+                        placement["folder_id"],
+                        folder_path,
+                        folder_path,
+                        status="synced",
+                        error=None,
+                    )
                 self.store.upsert_sync_state(
                     job["doc_id"],
                     job["kb_id"],
@@ -1406,11 +1487,30 @@ class AgentBridgeService:
             failed_status = (
                 SyncStateStatus.delete_failed if job["operation"] == "delete" else SyncStateStatus.sync_failed
             )
+            if supports_folders and placement is not None:
+                try:
+                    folder_path = placement.get("folder_path") or ""
+                    self.store.upsert_backend_folder_mapping(
+                        job["kb_id"],
+                        job["backend_slug"],
+                        placement["folder_id"],
+                        folder_path,
+                        folder_path,
+                        status="failed",
+                        error=str(exc),
+                    )
+                except Exception:
+                    logger.warning("保存后端目录映射失败: job=%s", job.get("id"), exc_info=True)
+            failed_backend_doc_id = (
+                previous_sync_state.get("backend_doc_id")
+                if job["operation"] == Operation.move.value and previous_sync_state
+                else None
+            )
             self.store.upsert_sync_state(
                 job["doc_id"],
                 job["kb_id"],
                 job["backend_slug"],
-                None,
+                failed_backend_doc_id,
                 failed_status,
                 backend_error=str(exc),
             )

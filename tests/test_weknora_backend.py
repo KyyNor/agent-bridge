@@ -60,6 +60,83 @@ def test_upload_uses_file_endpoint(respx_mock, tmp_path: Path):
     assert "multipart/form-data" in request.headers["content-type"]
 
 
+def test_weknora_declares_folder_capability_and_sends_relative_file_name(respx_mock, tmp_path: Path):
+    base_url = "http://localhost"
+    route = respx_mock.post(f"{base_url}/api/v1/knowledge-bases/kb-123/knowledge/file").mock(
+        return_value=httpx.Response(201, json={"success": True, "data": {"id": "know-456"}})
+    )
+    source = tmp_path / "guide.md"
+    source.write_text("# Guide", encoding="utf-8")
+
+    backend = WeknoraBackend(base_url=base_url, api_key="test-key")
+    assert backend.capabilities().supports_folders is True
+    backend.upload("kb-123", "guide", source, "guide.md", remote_path="A/B/guide.md")
+
+    content = route.calls.last.request.content
+    assert b'name="fileName"' in content
+    assert b"A/B/guide.md" in content
+    assert b'filename="A/B/guide.md"' in content
+    assert b"root/" not in content
+
+
+def test_weknora_root_upload_never_prefixes_virtual_root(respx_mock, tmp_path: Path):
+    base_url = "http://localhost"
+    route = respx_mock.post(f"{base_url}/api/v1/knowledge-bases/kb-123/knowledge/file").mock(
+        return_value=httpx.Response(201, json={"success": True, "data": {"id": "know-456"}})
+    )
+    source = tmp_path / "guide.md"
+    source.write_text("# Guide", encoding="utf-8")
+
+    backend = WeknoraBackend(base_url=base_url, api_key="test-key")
+    backend.upload("kb-123", "guide", source, "guide.md", remote_path="")
+
+    content = route.calls.last.request.content
+    assert b"guide.md" in content
+    assert b"root/" not in content
+
+
+def test_weknora_move_deletes_old_document_then_reuploads_at_new_path(respx_mock, tmp_path: Path):
+    base_url = "http://localhost"
+    delete_route = respx_mock.delete(f"{base_url}/api/v1/knowledge/old-doc").mock(
+        return_value=httpx.Response(204)
+    )
+    upload_route = respx_mock.post(f"{base_url}/api/v1/knowledge-bases/kb-123/knowledge/file").mock(
+        return_value=httpx.Response(201, json={"success": True, "data": {"id": "new-doc"}})
+    )
+    source = tmp_path / "guide.md"
+    source.write_text("# Guide", encoding="utf-8")
+
+    backend = WeknoraBackend(base_url=base_url, api_key="test-key")
+    new_id = backend.move(
+        "kb-123", "old-doc", source, "guide.md", remote_path="A/guide.md"
+    )
+
+    assert new_id == "new-doc"
+    assert delete_route.called
+    assert upload_route.called
+    assert b"A/guide.md" in upload_route.calls.last.request.content
+
+
+def test_weknora_move_does_not_flatten_path_when_reupload_fails(respx_mock, tmp_path: Path):
+    base_url = "http://localhost"
+    respx_mock.delete(f"{base_url}/api/v1/knowledge/old-doc").mock(
+        return_value=httpx.Response(204)
+    )
+    upload_route = respx_mock.post(f"{base_url}/api/v1/knowledge-bases/kb-123/knowledge/file").mock(
+        return_value=httpx.Response(500, text="upload failed")
+    )
+    source = tmp_path / "guide.md"
+    source.write_text("# Guide", encoding="utf-8")
+
+    backend = WeknoraBackend(base_url=base_url, api_key="test-key")
+    with pytest.raises(RuntimeError, match="500"):
+        backend.move("kb-123", "old-doc", source, "guide.md", remote_path="A/guide.md")
+
+    assert b"A/guide.md" in upload_route.calls.last.request.content
+    assert b"guide.md" in upload_route.calls.last.request.content
+    assert b"root/" not in upload_route.calls.last.request.content
+
+
 def test_get_status_maps_completed_and_failed(respx_mock):
     base_url = "http://localhost"
     backend = WeknoraBackend(base_url=base_url, api_key="test-key")
