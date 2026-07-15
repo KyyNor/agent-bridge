@@ -241,12 +241,7 @@ class KnowledgeRepository:
                     raise ValidationError("only zip archive entries may be attached to a folder")
 
             if doc_id is not None:
-                document = conn.execute(
-                    "SELECT 1 FROM documents WHERE id = ?",
-                    (doc_id,),
-                ).fetchone()
-                if document is None:
-                    raise NotFound("document not found")
+                self._require_active_document_placement(conn, kb_id, doc_id)
 
             cursor = conn.execute(
                 """
@@ -315,9 +310,9 @@ class KnowledgeRepository:
         with self._connect() as conn:
             entry = conn.execute(
                 """
-                SELECT kind, doc_id
+                SELECT kb_id, kind, doc_id
                 FROM knowledge_archive_entries
-                WHERE id = ?
+                WHERE id = ? AND status = 'active'
                 """,
                 (entry_id,),
             ).fetchone()
@@ -327,12 +322,7 @@ class KnowledgeRepository:
                 raise ValidationError("only document archive entries may reference a document")
             if entry["doc_id"] is not None and entry["doc_id"] != doc_id:
                 raise ValidationError("archive entry already references another document")
-            document = conn.execute(
-                "SELECT 1 FROM documents WHERE id = ?",
-                (doc_id,),
-            ).fetchone()
-            if document is None:
-                raise NotFound("document not found")
+            self._require_active_document_placement(conn, int(entry["kb_id"]), doc_id)
             cursor = conn.execute(
                 """
                 UPDATE knowledge_archive_entries
@@ -368,10 +358,29 @@ class KnowledgeRepository:
         ).fetchone()
         if entry is None:
             raise NotFound("archive entry not found")
-        if entry["kind"] != "document" or (
-            entry["doc_id"] is not None and entry["doc_id"] != doc_id
-        ):
+        if entry["kind"] != "document" or entry["doc_id"] != doc_id:
             raise ValidationError("archive entry does not reference this document")
+
+    @staticmethod
+    def _require_active_document_placement(
+        conn: sqlite3.Connection,
+        kb_id: int,
+        doc_id: int,
+    ) -> None:
+        placement = conn.execute(
+            """
+            SELECT 1
+            FROM documents d
+            JOIN document_kbs dk ON dk.doc_id = d.id
+            WHERE d.id = ?
+              AND d.status = 'active'
+              AND dk.kb_id = ?
+              AND dk.status = 'active'
+            """,
+            (doc_id, kb_id),
+        ).fetchone()
+        if placement is None:
+            raise NotFound("document knowledge-base placement not found")
 
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
         with self._connect() as conn:

@@ -779,10 +779,15 @@ class AgentBridgeService:
         file_size: int | None = None,
         archive_entry_id: int | None = None,
         archive_entry_ids: dict[int, int] | None = None,
+        archive_entry_pending: bool = False,
     ) -> dict[str, Any]:
         document_path = normalize_relative_document_path(relative_path or display_name or source.name)
         parent_parts, basename = split_document_path(document_path)
-        placement_parent_parts = [] if archive_entry_id is not None or archive_entry_ids else parent_parts
+        placement_parent_parts = (
+            []
+            if archive_entry_pending or archive_entry_id is not None or archive_entry_ids
+            else parent_parts
+        )
         content_hash = content_hash or self.archive.content_hash(source)
         existing = next(
             (
@@ -999,12 +1004,7 @@ class AgentBridgeService:
                             relative_path=item.relative_path,
                             content_hash=item.content_hash,
                             file_size=item.file_size,
-                            archive_entry_id=(
-                                next(iter(document_archive_entry_ids.values()))
-                                if len(document_archive_entry_ids) == 1
-                                else None
-                            ),
-                            archive_entry_ids=document_archive_entry_ids,
+                            archive_entry_pending=True,
                         )
                         for kb in kb_targets:
                             entry_id = document_archive_entry_ids[kb["id"]]
@@ -1012,12 +1012,13 @@ class AgentBridgeService:
                             placement = self.store.get_document_placement(result["id"], kb["id"])
                             if placement is None:
                                 raise NotFound("document knowledge-base placement not found")
-                            self.store.update_document_placement(
-                                result["id"],
-                                kb["id"],
-                                placement["folder_id"],
-                                archive_entry_id=entry_id,
-                            )
+                            if placement["archive_entry_id"] is None:
+                                self.store.update_document_placement(
+                                    result["id"],
+                                    kb["id"],
+                                    placement["folder_id"],
+                                    archive_entry_id=entry_id,
+                                )
                         results.append(result)
             except Exception:
                 self._remove_new_archive_files(archive_files_before)

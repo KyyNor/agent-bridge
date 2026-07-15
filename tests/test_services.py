@@ -333,12 +333,19 @@ def test_zip_duplicate_preserves_real_placement_and_existing_archive_file(
     root = service.list_folders("root", "kb")[0]
     first_folder = service.create_folder("root", "kb", "First", root["id"])
     second_folder = service.create_folder("root", "kb", "Second", root["id"])
-    source = tmp_path / "guide.md"
-    source.write_bytes(b"same content")
-    first = service.add_document(
+    source = tmp_path / "first.zip"
+    with zipfile.ZipFile(source, "w") as outer:
+        outer.writestr("guide.md", b"same content")
+    first_result = service.add_document(
         "root", source, ["kb"], later=True, folder_id=first_folder["id"]
     )
+    first = first_result["documents"][0]
     first_archive_path = Path(service.store.list_versions(first["id"])[0]["archive_path"])
+    original_entry = next(
+        entry
+        for entry in service.list_archive_entries("root", "kb")
+        if entry["kind"] == "document" and entry["relative_path"] == "guide.md"
+    )
 
     archive = tmp_path / "duplicate.zip"
     with zipfile.ZipFile(archive, "w") as outer:
@@ -356,6 +363,8 @@ def test_zip_duplicate_preserves_real_placement_and_existing_archive_file(
         first["id"], service.store.get_kb_by_slug("kb")["id"]
     )
     assert placement["folder_path"] == "First"
+    assert placement["archive_entry_id"] == original_entry["id"]
+    assert service.list_docs("root", "kb", folder_id=first_folder["id"])[0]["id"] == first["id"]
     assert first_archive_path.exists()
     assert {folder["name"] for folder in service.list_folders("root", "kb")} == {
         "KB", "First", "Second"
@@ -366,7 +375,27 @@ def test_zip_duplicate_preserves_real_placement_and_existing_archive_file(
         if entry["relative_path"] == "nested/guide.md"
     )
     assert document_entry["doc_id"] == first["id"]
-    assert placement["archive_entry_id"] == document_entry["id"]
+    duplicate_outer = next(
+        entry
+        for entry in service.list_archive_entries("root", "kb")
+        if entry["name"] == "duplicate.zip"
+    )
+    archive_view = service.browse_kb(
+        "root", "kb", archive_entry_id=duplicate_outer["id"]
+    )
+    nested_view = service.browse_kb(
+        "root", "kb", archive_entry_id=document_entry["parent_id"]
+    )
+    assert any(
+        entry["kind"] == "folder" and entry["archive_entry_id"] == document_entry["parent_id"]
+        for entry in archive_view["entries"]
+    )
+    assert any(
+        entry["kind"] == "document"
+        and entry["doc_id"] == first["id"]
+        and entry["archive_entry_id"] == document_entry["id"]
+        for entry in nested_view["entries"]
+    )
     assert len(service.status("root")["jobs"]) == 1
 
 

@@ -6,7 +6,7 @@ import pytest
 
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.core.config import ServerConfig, AgentBridgePaths, default_root, ensure_directories, load_server_config
-from agent_bridge.core.domain import KbRole, Operation, SyncStateStatus, ValidationError
+from agent_bridge.core.domain import KbRole, NotFound, Operation, SyncStateStatus, ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -221,6 +221,7 @@ def test_archive_entries_validate_parents_and_sort_direct_children_case_insensit
         kb["id"], kind="document", name="nested", relative_path="nested", parent_id=first["id"]
     )
     document = store.create_document("guide", "Guide", "root")
+    store.attach_document_to_kb(document["id"], kb["id"], "root")
     store.update_archive_entry_document(nested["id"], document["id"])
 
     children = store.list_archive_entries(kb["id"], parent_folder_id=root_id)
@@ -304,6 +305,7 @@ def test_archive_entry_parent_and_document_link_validation(wm_paths: AgentBridge
 
     with pytest.raises(ValidationError):
         store.update_archive_entry_document(zip_entry["id"], document["id"])
+    store.attach_document_to_kb(document["id"], kb["id"], "root")
     store.update_archive_entry_document(document_entry["id"], document["id"])
     with pytest.raises(ValidationError):
         store.update_archive_entry_document(document_entry["id"], other_document["id"])
@@ -318,6 +320,63 @@ def test_archive_entry_parent_and_document_link_validation(wm_paths: AgentBridge
     with pytest.raises(ValidationError):
         store.update_document_placement(
             document["id"], kb["id"], root_id, archive_entry_id=zip_entry["id"]
+        )
+
+
+def test_archive_document_links_require_kb_placement_and_bound_entry(
+    wm_paths: AgentBridgePaths,
+) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    kb_a = store.create_kb(slug="kb-a", name="KB A", description="", created_by="root")
+    kb_b = store.create_kb(slug="kb-b", name="KB B", description="", created_by="root")
+    root_a = store.list_folder_tree(kb_a["id"])[0]
+    zip_a = store.create_archive_entry(
+        kb_a["id"],
+        kind="zip",
+        name="docs.zip",
+        relative_path="docs.zip",
+        parent_folder_id=root_a["id"],
+    )
+
+    only_in_b = store.create_document("only-in-b", "Only in B", "root")
+    store.attach_document_to_kb(only_in_b["id"], kb_b["id"], "root")
+
+    with pytest.raises((NotFound, ValidationError)):
+        store.create_archive_entry(
+            kb_a["id"],
+            kind="document",
+            name="only-in-b.md",
+            relative_path="only-in-b.md",
+            parent_id=zip_a["id"],
+            doc_id=only_in_b["id"],
+        )
+
+    unbound_cross_kb = store.create_archive_entry(
+        kb_a["id"],
+        kind="document",
+        name="only-in-b.md",
+        relative_path="only-in-b.md",
+        parent_id=zip_a["id"],
+    )
+    with pytest.raises((NotFound, ValidationError)):
+        store.update_archive_entry_document(unbound_cross_kb["id"], only_in_b["id"])
+
+    only_in_a = store.create_document("only-in-a", "Only in A", "root")
+    store.attach_document_to_kb(only_in_a["id"], kb_a["id"], "root")
+    unbound_same_kb = store.create_archive_entry(
+        kb_a["id"],
+        kind="document",
+        name="only-in-a.md",
+        relative_path="only-in-a.md",
+        parent_id=zip_a["id"],
+    )
+    with pytest.raises(ValidationError):
+        store.attach_document_to_kb(
+            only_in_a["id"],
+            kb_a["id"],
+            "root",
+            archive_entry_id=unbound_same_kb["id"],
         )
 
 
