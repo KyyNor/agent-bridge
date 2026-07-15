@@ -67,6 +67,8 @@ import type {
   WorkflowSubagentDetail,
   WorkflowTasksResult,
   WorkflowTaskListParams,
+  WorkflowTaskImportPreview,
+  WorkflowTaskImportResult,
   ManagedScript,
   ScriptRun,
   ScriptRunListResult,
@@ -118,6 +120,12 @@ async function postFormData<T>(url: string, formData: FormData): Promise<T> {
   })
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
   return r.json()
+}
+
+async function getBlob(url: string): Promise<Blob> {
+  const r = await fetch(url, { headers: headers() })
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  return r.blob()
 }
 
 export const api = {
@@ -236,6 +244,21 @@ export const api = {
     const tail = qs.toString() ? `?${qs}` : ''
     return get<WorkflowTasksResult>(`/workflows/${key}/tasks${tail}`)
   },
+  downloadWorkflowTaskTemplate: (workflowKey: string) =>
+    getBlob(`/workflows/${workflowKey}/tasks/import/template`),
+  previewWorkflowTaskImport: (workflowKey: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return postFormData<WorkflowTaskImportPreview>(
+      `/workflows/${workflowKey}/tasks/import/preview`,
+      form,
+    )
+  },
+  confirmWorkflowTaskImport: (workflowKey: string, importId: string) =>
+    post<WorkflowTaskImportResult>(
+      `/workflows/${workflowKey}/tasks/import/confirm`,
+      { import_id: importId },
+    ),
   getWorkflowRunLogs: (runId: string) => get<WorkflowRunLog[]>(`/workflow-runs/${runId}/logs`),
   // Agent run events are unified under /agent-runs — fetch via the workflow_run_id
   // link that ClaudeWorkflowRunner forwards. getWorkflowRunEvents was removed.
