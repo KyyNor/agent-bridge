@@ -681,6 +681,50 @@ export interface KnowledgeBase {
   role?: string
 }
 
+export interface FolderCounts {
+  /** Number of directories in the subtree, including the selected directory. */
+  directory_count?: number
+  /** Backward-compatible alias for directory_count in delete responses. */
+  folder_count?: number
+  /** Number of active files in the subtree. */
+  file_count?: number
+  /** Number of active files placed directly in this directory. */
+  direct_file_count?: number
+  /** Number of active files in this directory and all descendants. */
+  descendant_file_count?: number
+  /** Number of descendant directories, excluding this directory. */
+  descendant_folder_count?: number
+}
+
+export interface KnowledgeFolder extends FolderCounts {
+  id: number
+  kb_id: number
+  parent_id: number | null
+  name: string
+  is_root: boolean
+  path: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DocumentPlacement {
+  doc_id: number
+  kb_id: number
+  folder_id: number
+  folder_name: string | null
+  folder_path: string | null
+  document_kb_status: string
+  slug?: string
+  kb?: string
+}
+
+export interface FolderDeleteResult extends FolderCounts {
+  folder_id: number
+  requires_confirmation?: boolean
+  deleted?: boolean
+  directory_ids?: number[]
+}
+
 export interface Document {
   id: number
   slug: string
@@ -689,6 +733,8 @@ export interface Document {
   status: string
   current_version_no: number | null
   sync_status: string
+  folder_id: number | null
+  folder_path: string | null
 }
 
 export interface DocumentVersion {

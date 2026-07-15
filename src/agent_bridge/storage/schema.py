@@ -22,6 +22,22 @@ CREATE TABLE IF NOT EXISTS knowledge_base_members (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (kb_id, linux_user)
 );
+CREATE TABLE IF NOT EXISTS knowledge_folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  parent_id INTEGER REFERENCES knowledge_folders(id),
+  name TEXT NOT NULL,
+  is_root INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (kb_id, parent_id, name),
+  CHECK ((is_root = 1 AND parent_id IS NULL) OR (is_root = 0 AND parent_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_folders_root
+  ON knowledge_folders(kb_id)
+  WHERE parent_id IS NULL AND is_root = 1;
+CREATE INDEX IF NOT EXISTS idx_knowledge_folders_parent_name
+  ON knowledge_folders(kb_id, parent_id, name);
 CREATE TABLE IF NOT EXISTS documents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   slug TEXT NOT NULL UNIQUE,
@@ -51,12 +67,28 @@ CREATE TABLE IF NOT EXISTS document_versions (
 CREATE TABLE IF NOT EXISTS document_kbs (
   doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  folder_id INTEGER REFERENCES knowledge_folders(id),
   added_by TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TEXT,
   PRIMARY KEY (doc_id, kb_id)
 );
+CREATE TABLE IF NOT EXISTS backend_folder_mappings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  backend_slug TEXT NOT NULL,
+  folder_id INTEGER NOT NULL REFERENCES knowledge_folders(id) ON DELETE CASCADE,
+  backend_folder_id TEXT NOT NULL,
+  path_snapshot TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (kb_id, backend_slug, folder_id)
+);
+CREATE INDEX IF NOT EXISTS idx_backend_folder_mappings_lookup
+  ON backend_folder_mappings(kb_id, backend_slug, folder_id, status);
 CREATE TABLE IF NOT EXISTS backends (
   slug TEXT PRIMARY KEY,
   backend_type TEXT NOT NULL,

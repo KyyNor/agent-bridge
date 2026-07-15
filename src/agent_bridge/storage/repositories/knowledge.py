@@ -5,14 +5,40 @@ import json
 import sqlite3
 from typing import Any
 
-from agent_bridge.core.domain import DocumentStatus, KbRole, Operation, SyncJobStatus, SyncStateStatus
+from agent_bridge.core.domain import (
+    DocumentStatus,
+    KbRole,
+    NotFound,
+    Operation,
+    SyncJobStatus,
+    SyncStateStatus,
+    ValidationError,
+)
+from agent_bridge.storage.repositories.folders import FolderRepository
 from agent_bridge.storage.types import enum_value, row_to_dict
 
 
+_FOLDER_TREE_CTE = """
+WITH RECURSIVE folder_tree AS (
+  SELECT id, kb_id, parent_id, name, is_root, '' AS path
+  FROM knowledge_folders
+  WHERE parent_id IS NULL AND is_root = 1
+  UNION ALL
+  SELECT child.id, child.kb_id, child.parent_id, child.name, child.is_root,
+         CASE WHEN folder_tree.path = '' THEN child.name
+              ELSE folder_tree.path || '/' || child.name END AS path
+  FROM knowledge_folders child
+  JOIN folder_tree ON folder_tree.id = child.parent_id
+                  AND folder_tree.kb_id = child.kb_id
+)
+"""
+
+
 class KnowledgeRepository:
-    def __init__(self, db_path, connect):
+    def __init__(self, db_path, connect, folder_repository: FolderRepository | None = None):
         self._db_path = db_path
         self._connect = connect
+        self._folders = folder_repository or FolderRepository(db_path, connect)
 
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         with self._connect() as conn:
@@ -20,6 +46,7 @@ class KnowledgeRepository:
                 "INSERT INTO knowledge_bases (slug, name, description, created_by) VALUES (?, ?, ?, ?)",
                 (slug, name, description, created_by),
             )
+            self._folders.ensure_root_folder(int(cursor.lastrowid), conn=conn)
             return self.get_kb_by_id(cursor.lastrowid, conn)
 
     def get_kb_by_id(self, kb_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
@@ -156,6 +183,17 @@ class KnowledgeRepository:
                 ).fetchone()
             return row_to_dict(row)
 
+    def get_document_by_id(self, doc_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            if include_deleted:
+                row = conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM documents WHERE id = ? AND status != ?",
+                    (doc_id, DocumentStatus.deleted.value),
+                ).fetchone()
+            return row_to_dict(row)
+
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
@@ -178,33 +216,247 @@ class KnowledgeRepository:
             ).fetchone()
             return row_to_dict(row)
 
-    def attach_document_to_kb(self, doc_id: int, kb_id: int, added_by: str) -> None:
+    def attach_document_to_kb(
+        self,
+        doc_id: int,
+        kb_id: int,
+        added_by: str,
+        folder_id: int | None = None,
+    ) -> None:
         with self._connect() as conn:
+            if folder_id is None:
+                folder = self._folders.ensure_root_folder(kb_id, conn=conn)
+                folder_id = int(folder["id"])
+            elif self._folders._get_folder_with_conn(conn, kb_id, folder_id) is None:
+                raise NotFound("folder not found")
             conn.execute(
                 """
-                INSERT INTO document_kbs (doc_id, kb_id, added_by)
-                VALUES (?, ?, ?)
+                INSERT INTO document_kbs (doc_id, kb_id, folder_id, added_by)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(doc_id, kb_id) DO UPDATE SET
+                  folder_id = excluded.folder_id,
                   status = 'active',
                   added_by = excluded.added_by,
                   deleted_at = NULL
                 """,
-                (doc_id, kb_id, added_by),
+                (doc_id, kb_id, folder_id, added_by),
             )
 
-    def get_document_kbs(self, doc_id: int) -> list[dict[str, Any]]:
+    def get_document_kbs(self, doc_id: int, *, active_only: bool = False) -> list[dict[str, Any]]:
         with self._connect() as conn:
+            status_clause = " AND dk.status = 'active'" if active_only else ""
             rows = conn.execute(
-                """
-                SELECT kb.*, dk.status AS document_kb_status
+                _FOLDER_TREE_CTE
+                + f"""
+                SELECT kb.*, kb.id AS kb_id, dk.status AS document_kb_status,
+                       dk.folder_id, folder_tree.name AS folder_name,
+                       folder_tree.path AS folder_path
                 FROM document_kbs dk
                 JOIN knowledge_bases kb ON kb.id = dk.kb_id
-                WHERE dk.doc_id = ?
+                LEFT JOIN folder_tree ON folder_tree.id = dk.folder_id
+                                      AND folder_tree.kb_id = dk.kb_id
+                WHERE dk.doc_id = ?{status_clause}
                 ORDER BY kb.slug
                 """,
                 (doc_id,),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def delete_folder_subtree_atomic(self, kb_id: int, folder_id: int) -> dict[str, Any]:
+        """Delete a folder subtree and its KB-scoped document state atomically.
+
+        The immediate transaction locks writers before calculating counts and
+        the subtree. It then snapshots active placements, compacts pending
+        create/update jobs, creates only the required current-KB delete jobs,
+        detaches the placements, soft-deletes documents with no remaining
+        active KB, and removes the folder rows before releasing the lock.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            folder = self._folders._require_folder(conn, kb_id, folder_id)
+            if folder["is_root"]:
+                raise ValidationError("root folder cannot be deleted")
+            subtree_ids = self._folders._get_subtree_ids_with_conn(conn, kb_id, folder_id)
+            counts = self._folders._get_subtree_counts_with_conn(conn, kb_id, folder_id)
+            sorted_ids = sorted(subtree_ids)
+            placeholders = ", ".join("?" for _ in sorted_ids)
+
+            documents = conn.execute(
+                f"""
+                SELECT DISTINCT d.id, d.slug, d.current_version_id
+                FROM document_kbs dk
+                JOIN documents d ON d.id = dk.doc_id
+                WHERE dk.kb_id = ?
+                  AND dk.status = 'active'
+                  AND d.status = ?
+                  AND dk.folder_id IN ({placeholders})
+                ORDER BY d.id
+                """,
+                [kb_id, DocumentStatus.active.value, *sorted_ids],
+            ).fetchall()
+            targets = conn.execute(
+                "SELECT slug FROM backend_targets WHERE kb_id = ? AND status = 'active' ORDER BY slug",
+                (kb_id,),
+            ).fetchall()
+
+            for document in documents:
+                for target in targets:
+                    backend_slug = target["slug"]
+                    running = conn.execute(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM sync_jobs
+                        WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                          AND operation IN (?, ?, ?)
+                          AND status = ?
+                        """,
+                        (
+                            document["id"], kb_id, backend_slug,
+                            Operation.create.value, Operation.update.value, Operation.move.value,
+                            SyncJobStatus.running.value,
+                        ),
+                    ).fetchone()["count"]
+                    conn.execute(
+                        """
+                        UPDATE sync_jobs
+                        SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
+                        WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                          AND operation IN (?, ?, ?)
+                          AND status IN (?, ?)
+                        """,
+                        (
+                            SyncJobStatus.cancelled.value,
+                            document["id"], kb_id, backend_slug,
+                            Operation.create.value, Operation.update.value, Operation.move.value,
+                            SyncJobStatus.pending.value, SyncJobStatus.failed.value,
+                        ),
+                    )
+                    sync_state = conn.execute(
+                        """
+                        SELECT backend_doc_id
+                        FROM sync_states
+                        WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                        """,
+                        (document["id"], kb_id, backend_slug),
+                    ).fetchone()
+                    if (sync_state and sync_state["backend_doc_id"]) or running:
+                        conn.execute(
+                            """
+                            INSERT INTO sync_jobs (
+                              doc_id, kb_id, backend_slug, operation, version_id, status
+                            ) VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                document["id"], kb_id, backend_slug,
+                                Operation.delete.value, document["current_version_id"],
+                                SyncJobStatus.pending.value,
+                            ),
+                        )
+
+            conn.execute(
+                f"""
+                UPDATE document_kbs
+                SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP
+                WHERE kb_id = ? AND status = 'active'
+                  AND folder_id IN ({placeholders})
+                """,
+                [kb_id, *sorted_ids],
+            )
+            for document in documents:
+                active = conn.execute(
+                    """
+                    SELECT 1 FROM document_kbs
+                    WHERE doc_id = ? AND status = 'active'
+                    LIMIT 1
+                    """,
+                    (document["id"],),
+                ).fetchone()
+                if active is None:
+                    conn.execute(
+                        """
+                        UPDATE documents
+                        SET status = ?, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (DocumentStatus.deleted.value, document["id"]),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE document_kbs
+                        SET status = ?, deleted_at = CURRENT_TIMESTAMP
+                        WHERE doc_id = ?
+                        """,
+                        (DocumentStatus.deleted.value, document["id"]),
+                    )
+
+            conn.execute(
+                f"DELETE FROM document_kbs WHERE kb_id = ? AND folder_id IN ({placeholders})",
+                [kb_id, *sorted_ids],
+            )
+            conn.execute(
+                f"DELETE FROM knowledge_folders WHERE kb_id = ? AND id IN ({placeholders})",
+                [kb_id, *sorted_ids],
+            )
+            return {**counts, "directory_ids": sorted_ids}
+
+    def get_document_placement(self, doc_id: int, kb_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                _FOLDER_TREE_CTE
+                + """
+                SELECT dk.doc_id, dk.kb_id, dk.folder_id,
+                       folder_tree.name AS folder_name,
+                       folder_tree.path AS folder_path,
+                       dk.status AS document_kb_status
+                FROM document_kbs dk
+                LEFT JOIN folder_tree ON folder_tree.id = dk.folder_id
+                                      AND folder_tree.kb_id = dk.kb_id
+                WHERE dk.doc_id = ? AND dk.kb_id = ? AND dk.status = 'active'
+                """,
+                (doc_id, kb_id),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def update_document_placement(self, doc_id: int, kb_id: int, folder_id: int) -> dict[str, Any]:
+        with self._connect() as conn:
+            if self._folders._get_folder_with_conn(conn, kb_id, folder_id) is None:
+                raise NotFound("folder not found")
+            association = conn.execute(
+                """
+                SELECT 1 FROM document_kbs
+                WHERE doc_id = ? AND kb_id = ? AND status = 'active'
+                """,
+                (doc_id, kb_id),
+            ).fetchone()
+            if association is None:
+                raise NotFound("document knowledge-base association not found")
+            conn.execute(
+                """
+                UPDATE document_kbs
+                SET folder_id = ?
+                WHERE doc_id = ? AND kb_id = ? AND status = 'active'
+                """,
+                (folder_id, doc_id, kb_id),
+            )
+        placement = self.get_document_placement(doc_id, kb_id)
+        if placement is None:
+            raise KeyError("document placement not found")
+        return placement
+
+    def remove_document_from_kb(self, doc_id: int, kb_id: int) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE document_kbs
+                SET status = 'deleted', deleted_at = CURRENT_TIMESTAMP
+                WHERE doc_id = ? AND kb_id = ? AND status = 'active'
+                """,
+                (doc_id, kb_id),
+            )
+            return cursor.rowcount > 0
+
+    def detach_document_from_kb(self, doc_id: int, kb_id: int) -> bool:
+        return self.remove_document_from_kb(doc_id, kb_id)
 
     def soft_delete_document(self, doc_id: int) -> None:
         with self._connect() as conn:
@@ -427,7 +679,7 @@ class KnowledgeRepository:
                 SELECT COUNT(*) AS count
                 FROM sync_jobs
                 WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
-                  AND operation IN (?, ?)
+                  AND operation IN (?, ?, ?)
                   AND status = ?
                 """,
                 (
@@ -436,6 +688,7 @@ class KnowledgeRepository:
                     backend_slug,
                     Operation.create.value,
                     Operation.update.value,
+                    Operation.move.value,
                     SyncJobStatus.running.value,
                 ),
             ).fetchone()
@@ -444,7 +697,7 @@ class KnowledgeRepository:
                 UPDATE sync_jobs
                 SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
-                  AND operation IN (?, ?)
+                  AND operation IN (?, ?, ?)
                   AND status IN (?, ?)
                 """,
                 (
@@ -454,6 +707,7 @@ class KnowledgeRepository:
                     backend_slug,
                     Operation.create.value,
                     Operation.update.value,
+                    Operation.move.value,
                     SyncJobStatus.pending.value,
                     SyncJobStatus.failed.value,
                 ),
@@ -554,28 +808,45 @@ class KnowledgeRepository:
             ).fetchall()
             return [row[0] for row in rows]
 
-    def list_docs_for_kb(self, kb_id: int) -> list[dict[str, Any]]:
+    def list_docs_for_kb(self, kb_id: int, folder_id: int | None = None) -> list[dict[str, Any]]:
         with self._connect() as conn:
+            if folder_id is not None and self._folders._get_folder_with_conn(conn, kb_id, folder_id) is None:
+                raise NotFound("folder not found")
+            clauses = [
+                "dk.kb_id = ?",
+                "dk.status = 'active'",
+                "d.status != ?",
+            ]
+            params: list[Any] = [kb_id, DocumentStatus.deleted.value]
+            if folder_id is not None:
+                clauses.append("dk.folder_id = ?")
+                params.append(folder_id)
             rows = conn.execute(
-                """
+                _FOLDER_TREE_CTE
+                + f"""
                 SELECT
                   d.id,
                   d.slug,
                   d.title,
                   d.owner_user,
                   d.status,
+                  dk.folder_id,
+                  folder_tree.name AS folder_name,
+                  folder_tree.path AS folder_path,
                   v.version_no AS current_version_no,
                   COALESCE(s.status, ?) AS sync_status
                 FROM document_kbs dk
                 JOIN documents d ON d.id = dk.doc_id
+                LEFT JOIN folder_tree ON folder_tree.id = dk.folder_id
+                                      AND folder_tree.kb_id = dk.kb_id
                 LEFT JOIN document_versions v ON v.id = d.current_version_id
-                LEFT JOIN sync_states s ON s.doc_id = d.id AND s.kb_id = dk.kb_id AND s.backend_slug = 'mock'
-                WHERE dk.kb_id = ?
-                  AND dk.status = 'active'
-                  AND d.status != ?
+                LEFT JOIN sync_states s ON s.doc_id = d.id
+                                      AND s.kb_id = dk.kb_id
+                                      AND s.backend_slug = 'mock'
+                WHERE {' AND '.join(clauses)}
                 ORDER BY d.slug
                 """,
-                (SyncStateStatus.not_synced.value, kb_id, DocumentStatus.deleted.value),
+                [SyncStateStatus.not_synced.value, *params],
             ).fetchall()
             return [dict(row) for row in rows]
 

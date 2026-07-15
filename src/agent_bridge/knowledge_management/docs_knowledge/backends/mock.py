@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import AskResult, BackendCapabilities, BackendDocStatus, RetrievalResult
 
 
 class MockBackend:
@@ -20,7 +20,18 @@ class MockBackend:
     def delete_kb(self, backend_kb_id: str) -> None:
         pass
 
-    def upload(self, backend_kb_id: str, doc_slug: str, file_path: Path, filename: str) -> str:
+    def capabilities(self) -> BackendCapabilities:
+        return BackendCapabilities(supports_folders=False)
+
+    def upload(
+        self,
+        backend_kb_id: str,
+        doc_slug: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        filename = Path(filename).name
         kb_dir = self.root / backend_kb_id
         kb_dir.mkdir(parents=True, exist_ok=True)
         backend_doc_id = f"{backend_kb_id}:{doc_slug}"
@@ -34,6 +45,26 @@ class MockBackend:
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         return backend_doc_id
+
+    def move(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        raise NotImplementedError("Mock backend does not support folder moves")
+
+    def relocate(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        return self.move(backend_kb_id, backend_doc_id, file_path, filename, remote_path)
 
     def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
         doc_slug = backend_doc_id.split(":")[-1]

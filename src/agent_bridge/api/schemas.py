@@ -35,6 +35,36 @@ class CreateKbRequest(BaseModel):
     description: str = ""
 
 
+class CreateFolderRequest(BaseModel):
+    parent_folder_id: int | None = Field(default=None, ge=1)
+    name: str = Field(min_length=1, max_length=255)
+
+
+class UpdateFolderRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    parent_folder_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _require_change(self) -> "UpdateFolderRequest":
+        if not self.model_fields_set.intersection({"name", "parent_folder_id"}):
+            raise ValueError("at least one folder field must be provided")
+        return self
+
+
+class DeleteFolderRequest(BaseModel):
+    confirm: bool = False
+
+
+class DocumentPlacementRequest(BaseModel):
+    kb: str = Field(min_length=1, max_length=255)
+    folder_id: int = Field(ge=1)
+
+
+class AttachDocumentRequest(BaseModel):
+    kb: str = Field(min_length=1, max_length=255)
+    folder_id: int = Field(ge=1)
+
+
 class SyncRequest(BaseModel):
     all_users: bool = False
 

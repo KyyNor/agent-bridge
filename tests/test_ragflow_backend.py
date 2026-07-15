@@ -21,6 +21,11 @@ def test_create_kb(respx_mock):
     assert kb_id == "ds-123"
 
 
+def test_ragflow_declares_flat_backend():
+    backend = RagFlowBackend(base_url="http://localhost:9380", api_key="test-key")
+    assert backend.capabilities().supports_folders is False
+
+
 def test_upload(respx_mock, tmp_path):
     base_url = "http://localhost:9380"
     respx_mock.post(f"{base_url}/api/v1/datasets/ds-123/documents").mock(

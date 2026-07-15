@@ -23,12 +23,14 @@ class SQLiteStore:
         from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
         from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
         from agent_bridge.storage.repositories.governance import GovernanceRepository
+        from agent_bridge.storage.repositories.folders import FolderRepository
         from agent_bridge.storage.repositories.knowledge import KnowledgeRepository
         from agent_bridge.storage.repositories.memory import MemoryRepository
         from agent_bridge.storage.repositories.scripts import ScriptsRepository
         from agent_bridge.storage.repositories.workflows import WorkflowsRepository
 
-        self.knowledge = KnowledgeRepository(db_path, self.connect)
+        self.folders = FolderRepository(db_path, self.connect)
+        self.knowledge = KnowledgeRepository(db_path, self.connect, self.folders)
         self.capabilities = CapabilitiesRepository(db_path, self.connect)
         self.governance = GovernanceRepository(db_path, self.connect)
         self.memory = MemoryRepository(db_path, self.connect)
@@ -132,6 +134,7 @@ class SQLiteStore:
                     "source_repo_key": "TEXT NOT NULL DEFAULT ''",
                 },
             )
+            self._migrate_knowledge_folders(conn)
 
             self.governance._migrate_tool_call_logs_nullable_profile(conn)
             self._ensure_columns(
@@ -295,6 +298,86 @@ class SQLiteStore:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_key, created_at DESC)")
             self._ensure_columns(conn, "workflow_tasks", {"type": "TEXT NOT NULL DEFAULT ''", "priority_flag": "TEXT"})
+
+    def _migrate_knowledge_folders(self, conn: sqlite3.Connection) -> None:
+        """Create folder storage and backfill legacy document placements atomically."""
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(document_kbs)").fetchall()}
+        if "folder_id" not in columns:
+            conn.execute("ALTER TABLE document_kbs ADD COLUMN folder_id INTEGER")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS knowledge_folders (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+              parent_id INTEGER REFERENCES knowledge_folders(id),
+              name TEXT NOT NULL,
+              is_root INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE (kb_id, parent_id, name)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_knowledge_folders_root
+            ON knowledge_folders(kb_id)
+            WHERE parent_id IS NULL AND is_root = 1
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_knowledge_folders_parent_name
+            ON knowledge_folders(kb_id, parent_id, name)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS backend_folder_mappings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+              backend_slug TEXT NOT NULL,
+              folder_id INTEGER NOT NULL REFERENCES knowledge_folders(id) ON DELETE CASCADE,
+              backend_folder_id TEXT NOT NULL,
+              path_snapshot TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active',
+              error TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE (kb_id, backend_slug, folder_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_backend_folder_mappings_lookup
+            ON backend_folder_mappings(kb_id, backend_slug, folder_id, status)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_document_kbs_folder_status
+            ON document_kbs(kb_id, folder_id, status)
+            """
+        )
+        kb_rows = conn.execute(
+            "SELECT id FROM knowledge_bases WHERE status = 'active' ORDER BY id"
+        ).fetchall()
+        for row in kb_rows:
+            self.folders.ensure_root_folder(int(row["id"]), conn=conn)
+        conn.execute(
+            """
+            UPDATE document_kbs
+            SET folder_id = (
+              SELECT folder.id
+              FROM knowledge_folders folder
+              WHERE folder.kb_id = document_kbs.kb_id
+                AND folder.parent_id IS NULL
+                AND folder.is_root = 1
+            )
+            WHERE status = 'active' AND folder_id IS NULL
+            """
+        )
 
     def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -1294,6 +1377,65 @@ class SQLiteStore:
     def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
         return self.knowledge.create_kb(slug=slug, name=name, description=description, created_by=created_by)
 
+    def ensure_root_folder(self, kb_id: int) -> dict[str, Any]:
+        return self.folders.ensure_root_folder(kb_id=kb_id)
+
+    def get_root_folder(self, kb_id: int) -> dict[str, Any] | None:
+        return self.folders.get_root_folder(kb_id=kb_id)
+
+    def get_folder(self, kb_id: int, folder_id: int) -> dict[str, Any] | None:
+        return self.folders.get_folder(kb_id=kb_id, folder_id=folder_id)
+
+    def create_folder(self, kb_id: int, parent_id: int | None, name: str) -> dict[str, Any]:
+        return self.folders.create_folder(kb_id=kb_id, parent_id=parent_id, name=name)
+
+    def rename_folder(self, kb_id: int, folder_id: int, name: str) -> dict[str, Any]:
+        return self.folders.rename_folder(kb_id=kb_id, folder_id=folder_id, name=name)
+
+    def move_folder(self, kb_id: int, folder_id: int, parent_id: int | None) -> dict[str, Any]:
+        return self.folders.move_folder(kb_id=kb_id, folder_id=folder_id, parent_id=parent_id)
+
+    def update_folder(
+        self,
+        kb_id: int,
+        folder_id: int,
+        *,
+        name: str | None = None,
+        parent_id: int | None = None,
+        parent_provided: bool = False,
+    ) -> dict[str, Any]:
+        return self.folders.update_folder(
+            kb_id=kb_id,
+            folder_id=folder_id,
+            name=name,
+            parent_id=parent_id,
+            parent_provided=parent_provided,
+        )
+
+    def list_folder_tree(self, kb_id: int) -> list[dict[str, Any]]:
+        return self.folders.list_folder_tree(kb_id=kb_id)
+
+    def get_subtree_ids(self, kb_id: int, folder_id: int) -> list[int]:
+        return self.folders.get_subtree_ids(kb_id=kb_id, folder_id=folder_id)
+
+    def get_subtree_counts(self, kb_id: int, folder_id: int) -> dict[str, int]:
+        return self.folders.get_subtree_counts(kb_id=kb_id, folder_id=folder_id)
+
+    def delete_folder_subtree(self, kb_id: int, folder_id: int) -> dict[str, Any]:
+        return self.folders.delete_folder_subtree(kb_id=kb_id, folder_id=folder_id)
+
+    def delete_folder_subtree_atomic(self, kb_id: int, folder_id: int) -> dict[str, Any]:
+        return self.knowledge.delete_folder_subtree_atomic(kb_id=kb_id, folder_id=folder_id)
+
+    def upsert_backend_folder_mapping(self, *args, **kwargs) -> dict[str, Any]:
+        return self.folders.upsert_backend_folder_mapping(*args, **kwargs)
+
+    def get_backend_folder_mapping(self, *args, **kwargs) -> dict[str, Any] | None:
+        return self.folders.get_backend_folder_mapping(*args, **kwargs)
+
+    def delete_backend_folder_mappings(self, *args, **kwargs) -> int:
+        return self.folders.delete_backend_folder_mappings(*args, **kwargs)
+
     def get_kb_by_id(self, kb_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any]:
         return self.knowledge.get_kb_by_id(kb_id=kb_id, conn=conn)
 
@@ -1407,14 +1549,39 @@ class SQLiteStore:
     def get_document_by_slug(self, slug: str, include_deleted: bool = False) -> dict[str, Any] | None:
         return self.knowledge.get_document_by_slug(slug=slug, include_deleted=include_deleted)
 
+    def get_document_by_id(self, doc_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
+        return self.knowledge.get_document_by_id(doc_id=doc_id, include_deleted=include_deleted)
+
     def find_current_document_by_content_hash(self, kb_id: int, content_hash: str) -> dict[str, Any] | None:
         return self.knowledge.find_current_document_by_content_hash(kb_id=kb_id, content_hash=content_hash)
 
-    def attach_document_to_kb(self, doc_id: int, kb_id: int, added_by: str) -> None:
-        return self.knowledge.attach_document_to_kb(doc_id=doc_id, kb_id=kb_id, added_by=added_by)
+    def attach_document_to_kb(
+        self,
+        doc_id: int,
+        kb_id: int,
+        added_by: str,
+        folder_id: int | None = None,
+    ) -> None:
+        return self.knowledge.attach_document_to_kb(
+            doc_id=doc_id, kb_id=kb_id, added_by=added_by, folder_id=folder_id
+        )
 
-    def get_document_kbs(self, doc_id: int) -> list[dict[str, Any]]:
-        return self.knowledge.get_document_kbs(doc_id=doc_id)
+    def get_document_kbs(self, doc_id: int, *, active_only: bool = False) -> list[dict[str, Any]]:
+        return self.knowledge.get_document_kbs(doc_id=doc_id, active_only=active_only)
+
+    def get_document_placement(self, doc_id: int, kb_id: int) -> dict[str, Any] | None:
+        return self.knowledge.get_document_placement(doc_id=doc_id, kb_id=kb_id)
+
+    def update_document_placement(self, doc_id: int, kb_id: int, folder_id: int) -> dict[str, Any]:
+        return self.knowledge.update_document_placement(
+            doc_id=doc_id, kb_id=kb_id, folder_id=folder_id
+        )
+
+    def remove_document_from_kb(self, doc_id: int, kb_id: int) -> bool:
+        return self.knowledge.remove_document_from_kb(doc_id=doc_id, kb_id=kb_id)
+
+    def detach_document_from_kb(self, doc_id: int, kb_id: int) -> bool:
+        return self.knowledge.detach_document_from_kb(doc_id=doc_id, kb_id=kb_id)
 
     def list_versions(self, doc_id: int) -> list[dict[str, Any]]:
         return self.knowledge.list_versions(doc_id=doc_id)
@@ -1479,8 +1646,8 @@ class SQLiteStore:
     def get_sync_state(self, doc_id: int, kb_id: int, backend_slug: str = "mock") -> dict[str, Any] | None:
         return self.knowledge.get_sync_state(doc_id=doc_id, kb_id=kb_id, backend_slug=backend_slug)
 
-    def list_docs_for_kb(self, kb_id: int) -> list[dict[str, Any]]:
-        return self.knowledge.list_docs_for_kb(kb_id=kb_id)
+    def list_docs_for_kb(self, kb_id: int, folder_id: int | None = None) -> list[dict[str, Any]]:
+        return self.knowledge.list_docs_for_kb(kb_id=kb_id, folder_id=folder_id)
 
     def list_jobs_for_user(self, linux_user: str, backend_slug: str | None = None) -> list[dict[str, Any]]:
         return self.knowledge.list_jobs_for_user(linux_user=linux_user, backend_slug=backend_slug)

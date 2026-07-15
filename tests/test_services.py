@@ -6,7 +6,14 @@ import zipfile
 import pytest
 
 from agent_bridge.core.config import BackendConfig, AgentBridgePaths, ensure_directories
-from agent_bridge.core.domain import AccessDenied, NotFound, SyncStateStatus, ValidationError
+from agent_bridge.core.domain import (
+    AccessDenied,
+    BackendCapabilities,
+    ConflictError,
+    NotFound,
+    SyncStateStatus,
+    ValidationError,
+)
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
 from agent_bridge.app.service import AgentBridgeService
 
@@ -31,6 +38,143 @@ def test_admin_creates_kb_and_member_roles_are_disabled(wm_paths, tmp_path: Path
     assert service.list_kbs(actor="root")[0]["slug"] == "frontend-docs"
     with pytest.raises(ValidationError, match="member roles are no longer supported"):
         service.grant_kb_member(actor="root", kb_slug="frontend-docs", linux_user="alice", role="contributor")
+
+
+def test_service_manages_folders_and_rejects_cross_kb_or_cyclic_moves(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+
+    root = service.list_folders("root", "kb-a")[0]
+    folder = service.create_folder("root", "kb-a", name="Guides", parent_folder_id=root["id"])
+    child = service.create_folder("root", "kb-a", name="API", parent_folder_id=folder["id"])
+    with pytest.raises(ValidationError):
+        service.update_folder("root", "kb-a", folder["id"], parent_folder_id=child["id"])
+    renamed = service.update_folder("root", "kb-a", folder["id"], name="Documentation")
+    assert renamed["name"] == "Documentation"
+    moved = service.update_folder("root", "kb-a", child["id"], parent_folder_id=root["id"])
+    assert moved["parent_id"] == root["id"]
+
+    other_root = service.list_folders("root", "kb-b")[0]
+    with pytest.raises(NotFound):
+        service.create_folder("root", "kb-a", name="Wrong KB", parent_folder_id=other_root["id"])
+    with pytest.raises(NotFound):
+        service.update_folder("root", "kb-a", folder["id"], parent_folder_id=other_root["id"])
+    with pytest.raises(ValidationError):
+        service.update_folder("root", "kb-a", root["id"], name="Cannot rename root")
+    with pytest.raises(ValidationError):
+        service.delete_folder("root", "kb-a", root["id"], confirm=True)
+
+
+def test_service_scoped_document_delete_preserves_shared_documents(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb_a = service.create_kb("root", "kb-a", "KB A", "")
+    kb_b = service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Shared.md"
+    source.write_bytes(b"shared")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=False)
+
+    result = service.remove_document_from_kb("root", "kb-a", doc["slug"])
+    assert result["status"] == "deleted"
+    assert service.list_docs("root", "kb-a") == []
+    assert service.list_docs("root", "kb-b")[0]["slug"] == doc["slug"]
+    assert service.store.get_document_by_slug(doc["slug"])["status"] == "active"
+    jobs = service.status("root")["jobs"]
+    assert any(job["operation"] == "delete" and job["kb_id"] == kb_a["id"] for job in jobs)
+
+    service.remove_document_from_kb("root", "kb-b", doc["slug"])
+    assert service.store.get_document_by_slug(doc["slug"]) is None
+    deleted = service.store.get_document_by_slug(doc["slug"], include_deleted=True)
+    assert deleted["status"] == "deleted"
+    assert any(job["operation"] == "delete" and job["kb_id"] == kb_b["id"] for job in service.status("root")["jobs"])
+
+
+def test_service_folder_delete_requires_confirmation_and_recursively_detaches_docs(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    root = service.list_folders("root", "kb-a")[0]
+    parent = service.create_folder("root", "kb-a", name="Parent", parent_folder_id=root["id"])
+    child = service.create_folder("root", "kb-a", name="Child", parent_folder_id=parent["id"])
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"guide")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+    service.place_document("root", doc["slug"], "kb-a", parent["id"])
+    service.store.update_document_placement(doc["id"], service.store.get_kb_by_slug("kb-a")["id"], child["id"])
+
+    preview = service.delete_folder("root", "kb-a", parent["id"], confirm=False)
+    assert preview["requires_confirmation"] is True
+    assert preview["directory_count"] == 2
+    assert preview["file_count"] == 1
+    assert service.store.get_folder(service.store.get_kb_by_slug("kb-a")["id"], parent["id"]) is not None
+
+    result = service.delete_folder("root", "kb-a", parent["id"], confirm=True)
+    assert result["directory_count"] == 2
+    assert result["file_count"] == 1
+    assert service.list_docs("root", "kb-a") == []
+    assert service.list_docs("root", "kb-b")[0]["slug"] == doc["slug"]
+    assert service.store.get_document_by_slug(doc["slug"])["status"] == "active"
+
+
+def test_get_doc_for_kb_hides_removed_document_association(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Shared.md"
+    source.write_bytes(b"shared")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+
+    with pytest.raises(NotFound):
+        service.get_doc_for_kb("root", "kb-a", doc["slug"])
+    visible = service.get_doc_for_kb("root", "kb-b", doc["slug"])
+    assert [item["slug"] for item in visible["kbs"]] == ["kb-b"]
+
+
+def test_update_document_ignores_removed_kb_placements(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb_a = service.create_kb("root", "kb-a", "KB A", "")
+    kb_b = service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"v1")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+    existing_job_ids = {job["id"] for job in service.status("root")["jobs"]}
+
+    updated_source = tmp_path / "Guide-v2.md"
+    updated_source.write_bytes(b"v2")
+    service.update_document("root", doc["slug"], updated_source, later=True)
+
+    new_jobs = [
+        job for job in service.status("root")["jobs"] if job["id"] not in existing_job_ids
+    ]
+    assert {(job["kb_id"], job["operation"]) for job in new_jobs} == {
+        (kb_b["id"], "update"),
+    }
+    assert not any(job["kb_id"] == kb_a["id"] for job in new_jobs)
+
+
+def test_update_folder_name_and_parent_is_atomic(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    source = service.create_folder("root", "kb", "Source", parent_folder_id=root["id"])
+    target = service.create_folder("root", "kb", "Target", parent_folder_id=root["id"])
+    service.create_folder("root", "kb", "Collision", parent_folder_id=target["id"])
+
+    with pytest.raises(ConflictError):
+        service.update_folder(
+            "root",
+            "kb",
+            source["id"],
+            name="Collision",
+            parent_folder_id=target["id"],
+        )
+
+    unchanged = service.store.get_folder(service.store.get_kb_by_slug("kb")["id"], source["id"])
+    assert unchanged["name"] == "Source"
+    assert unchanged["parent_id"] == root["id"]
 
 
 def test_non_admin_cannot_create_kb(wm_paths, tmp_path: Path) -> None:
@@ -113,13 +257,115 @@ def test_zip_imports_supported_nested_documents_and_skips_duplicate_content(
         zf.writestr("nested/guide.pdf", b"two")
         zf.writestr("nested/copy.txt", b"one")
         zf.writestr("image.png", b"ignored")
-        zf.writestr("nested/inner.zip", b"ignored")
 
     result = service.add_document("root", archive, ["kb"], later=True)
 
     assert result["uploaded_count"] == 2
     assert result["skipped_count"] == 1
-    assert {doc["slug"] for doc in service.list_docs("root", "kb")} == {"copy", "guide"}
+    docs = {doc["slug"]: doc for doc in service.list_docs("root", "kb")}
+    assert set(docs) == {"copy", "guide"}
+    assert docs["guide"]["folder_path"] == "nested"
+    assert service.store.list_versions(service.store.get_document_by_slug("guide")["id"])[0]["original_filename"] == "nested/guide.pdf"
+
+
+def test_document_relative_path_uses_selected_folder_as_base(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    base = service.create_folder("root", "kb", "Base", parent_folder_id=root["id"])
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"guide")
+
+    doc = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=base["id"], relative_path=r"A\\B\\guide.md"
+    )
+
+    version = service.store.list_versions(doc["id"])[0]
+    placement = service.store.get_document_placement(doc["id"], service.store.get_kb_by_slug("kb")["id"])
+    assert version["original_filename"] == "A/B/guide.md"
+    assert doc["title"] == "guide"
+    assert placement["folder_path"] == "Base/A/B"
+    assert not placement["folder_path"].startswith("root/")
+
+
+def test_multi_kb_relative_path_creates_same_subfolders_without_explicit_folder(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"guide")
+
+    doc = service.add_document(
+        "root", source, ["kb-a", "kb-b"], later=True, relative_path="shared/docs/guide.md"
+    )
+
+    for kb_slug in ("kb-a", "kb-b"):
+        kb = service.store.get_kb_by_slug(kb_slug)
+        placement = service.store.get_document_placement(doc["id"], kb["id"])
+        assert placement["folder_path"] == "shared/docs"
+        assert service.list_docs("root", kb_slug, folder_id=placement["folder_id"])[0]["slug"] == doc["slug"]
+
+
+def test_explicit_folder_is_rejected_for_multiple_kbs(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    root = service.list_folders("root", "kb-a")[0]
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"guide")
+
+    with pytest.raises(ValidationError, match="folder_id can only be used"):
+        service.add_document("root", source, ["kb-a", "kb-b"], later=True, folder_id=root["id"])
+
+
+def test_duplicate_content_does_not_move_existing_placement(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    first_folder = service.create_folder("root", "kb", "First", parent_folder_id=root["id"])
+    second_folder = service.create_folder("root", "kb", "Second", parent_folder_id=root["id"])
+    source = tmp_path / "guide.md"
+    source.write_bytes(b"same")
+
+    first = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=first_folder["id"], relative_path="guide.md"
+    )
+    duplicate = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=second_folder["id"], relative_path="other/guide.md"
+    )
+
+    placement = service.store.get_document_placement(first["id"], service.store.get_kb_by_slug("kb")["id"])
+    assert duplicate["skipped"] is True
+    assert placement["folder_path"] == "First"
+
+
+def test_git_sync_uses_repository_relative_path_without_root_prefix(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    repo_path = tmp_path / "repo"
+    (repo_path / "A" / "B").mkdir(parents=True)
+    (repo_path / "root.md").write_bytes(b"root")
+    (repo_path / "A" / "B" / "file.md").write_bytes(b"nested")
+    service.store.upsert_code_repository(
+        repo_key="docs-repo", name="Docs Repo", git_url="", branch="main", auth_ref="",
+        description="", tags=[], category_key="", sync_interval_minutes=60,
+        auto_understand=False, status="active",
+    )
+    service.store.mark_code_repository_sync(
+        "docs-repo", local_path=str(repo_path), last_commit="test", success=True, error=None
+    )
+    service.store.upsert_kb_repo_source(service.store.get_kb_by_slug("kb")["id"], "docs-repo", [".md"])
+    service.codegraph.sync_repository = lambda actor, repo_key: None
+
+    result = service.sync_kb_repo_source("root", "kb", "docs-repo")
+
+    assert result["added"] == 2
+    documents = {item["title"]: item for item in service.list_docs("root", "kb")}
+    assert documents["root"]["folder_path"] == ""
+    assert documents["file"]["folder_path"] == "A/B"
+    assert all(not (item["folder_path"] or "").startswith("root/") for item in documents.values())
 
 
 def test_zip_rejects_malformed_archive_without_creating_documents(wm_paths, tmp_path: Path) -> None:
@@ -251,6 +497,22 @@ def test_get_doc_does_not_expose_archive_paths_to_admin_response(wm_paths, tmp_p
     assert "archive_path" not in visible["versions"][0]
 
 
+def test_get_doc_exposes_only_active_kb_placements(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb-a", "KB A", "")
+    service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=True)
+
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+
+    visible = service.get_doc("root", doc["slug"])
+
+    assert [kb["slug"] for kb in visible["kbs"]] == ["kb-b"]
+    assert visible["kb_slugs"] == ["kb-b"]
+
+
 def test_invisible_kb_returns_not_found(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
@@ -282,9 +544,39 @@ def test_sync_uses_backend_kb_id_for_upload_and_delete(wm_paths, tmp_path: Path)
         def delete_kb(self, backend_kb_id: str) -> None:
             pass
 
-        def upload(self, backend_kb_id: str, doc_slug: str, file_path: Path, filename: str) -> str:
+        def capabilities(self) -> BackendCapabilities:
+            return BackendCapabilities(supports_folders=False)
+
+        def upload(
+            self,
+            backend_kb_id: str,
+            doc_slug: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
             self.upload_kb_ids.append(backend_kb_id)
             return "backend-doc-456"
+
+        def move(
+            self,
+            backend_kb_id: str,
+            backend_doc_id: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
+            raise NotImplementedError
+
+        def relocate(
+            self,
+            backend_kb_id: str,
+            backend_doc_id: str,
+            file_path: Path,
+            filename: str,
+            remote_path: str | None = None,
+        ) -> str:
+            return self.move(backend_kb_id, backend_doc_id, file_path, filename, remote_path)
 
         def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
             self.delete_kb_ids.append(backend_kb_id)
@@ -369,6 +661,28 @@ def test_delete_cancels_unsynced_pending_create_without_delete_job(wm_paths, tmp
     jobs = service.status(actor="root")["jobs"]
     assert [(job["operation"], job["status"]) for job in jobs] == [("create", "cancelled")]
     assert service.sync(actor="root", all_users=False)["processed"] == 0
+
+
+def test_delete_document_ignores_removed_kb_placements(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb_a = service.create_kb("root", "kb-a", "KB A", "")
+    kb_b = service.create_kb("root", "kb-b", "KB B", "")
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["kb-a", "kb-b"], later=False)
+
+    service.remove_document_from_kb("root", "kb-a", doc["slug"])
+    existing_job_ids = {job["id"] for job in service.status("root")["jobs"]}
+
+    service.delete_document("root", doc["slug"])
+
+    new_jobs = [
+        job for job in service.status("root")["jobs"] if job["id"] not in existing_job_ids
+    ]
+    assert {(job["kb_id"], job["operation"]) for job in new_jobs} == {
+        (kb_b["id"], "delete"),
+    }
+    assert not any(job["kb_id"] == kb_a["id"] for job in new_jobs)
 
 
 def test_delete_cancels_pending_update_but_keeps_delete_for_synced_doc(wm_paths, tmp_path: Path) -> None:

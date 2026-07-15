@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable
 
-from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import AskResult, BackendCapabilities, BackendDocStatus, RetrievalResult
 from agent_bridge.knowledge_management.docs_knowledge.backends._office_convert import (
     SOFFICE_TARGETS,
     convert_via_soffice,
@@ -173,6 +173,9 @@ class PageIndexBackend:
             self._save_docs(slug, {})
         return slug
 
+    def capabilities(self) -> BackendCapabilities:
+        return BackendCapabilities(supports_folders=False)
+
     def delete_kb(self, backend_kb_id: str) -> None:
         shutil.rmtree(self._kb_dir(backend_kb_id), ignore_errors=True)
         self._clients.pop(backend_kb_id, None)
@@ -183,7 +186,9 @@ class PageIndexBackend:
         doc_slug: str,
         file_path: Path,
         filename: str,
+        remote_path: str | None = None,
     ) -> str:
+        filename = Path(filename).name
         if not file_path.exists():
             raise FileNotFoundError(f"file not found: {file_path}")
         self._ensure_kb(backend_kb_id)
@@ -203,6 +208,26 @@ class PageIndexBackend:
         }
         self._save_docs(backend_kb_id, docs)
         return backend_doc_id
+
+    def move(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        raise NotImplementedError("PageIndex does not support folder moves")
+
+    def relocate(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        return self.move(backend_kb_id, backend_doc_id, file_path, filename, remote_path)
 
     def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
         docs = self._load_docs(backend_kb_id)

@@ -8,7 +8,7 @@ import httpx
 from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-from agent_bridge.core.domain import AskResult, BackendDocStatus, RetrievalResult
+from agent_bridge.core.domain import AskResult, BackendCapabilities, BackendDocStatus, RetrievalResult
 
 # Default RagFlow RSA public key (from /ragflow/conf/public.pem inside the
 # Docker container).  Kept as a module constant so callers do not need to
@@ -151,6 +151,9 @@ class RagFlowBackend:
     # Public API (BackendAdapter protocol)
     # ------------------------------------------------------------------
 
+    def capabilities(self) -> BackendCapabilities:
+        return BackendCapabilities(supports_folders=False)
+
     def create_kb(self, slug: str, name: str) -> str:
         response = self._request(
             "POST",
@@ -174,7 +177,9 @@ class RagFlowBackend:
         doc_slug: str,
         file_path: Path,
         filename: str,
+        remote_path: str | None = None,
     ) -> str:
+        filename = Path(filename).name
         with file_path.open("rb") as f:
             response = self._request(
                 "POST",
@@ -199,6 +204,26 @@ class RagFlowBackend:
         )
         self._raise(parse_response)
         return document_id
+
+    def move(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        raise NotImplementedError("RagFlow does not support folder moves")
+
+    def relocate(
+        self,
+        backend_kb_id: str,
+        backend_doc_id: str,
+        file_path: Path,
+        filename: str,
+        remote_path: str | None = None,
+    ) -> str:
+        return self.move(backend_kb_id, backend_doc_id, file_path, filename, remote_path)
 
     def delete(self, backend_kb_id: str, backend_doc_id: str) -> None:
         response = self._request(
