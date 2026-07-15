@@ -186,15 +186,23 @@ const planeKb = ref<KnowledgeBaseSummary | null>(null)
 // 上传对话框
 const showUploadDialog = ref(false)
 const uploadKb = ref<KnowledgeBaseSummary | null>(null)
+type UploadItemStatus = 'pending' | 'uploading' | 'processing' | 'success' | 'error'
 interface UploadItem {
   file: File
   relativePath: string
+  status: UploadItemStatus
+  progress: number
+  stage: string
+  error: string
 }
 const uploadFiles = ref<UploadItem[]>([])
 const uploadFolderId = ref<number | null>(null)
 const uploading = ref(false)
 const uploadDragOver = ref(false)
 const uploadError = ref('')
+const failedUploadCount = computed(() => uploadFiles.value.filter(item => item.status === 'error').length)
+const retryableUploadCount = computed(() => uploadFiles.value.filter(item => item.status !== 'success').length)
+let nextUploadIndex = 0
 const ALLOWED_DOC_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md', '.zip']
 const allProfiles = ref<ProjectProfile[]>([])
 const selectedProfileKeys = ref<string[]>([])
@@ -838,7 +846,14 @@ function normalizeRelativePath(path: string) {
 function addUploadItem(file: File, relativePath?: string) {
   const ext = '.' + file.name.split('.').pop()?.toLowerCase()
   if (!ALLOWED_DOC_EXTENSIONS.includes(ext)) return
-  uploadFiles.value.push({ file, relativePath: normalizeRelativePath(relativePath || file.name) })
+  uploadFiles.value.push({
+    file,
+    relativePath: normalizeRelativePath(relativePath || file.name),
+    status: 'pending',
+    progress: 0,
+    stage: '等待上传',
+    error: '',
+  })
 }
 
 function onUploadFilesSelected(e: Event) {
@@ -916,21 +931,102 @@ function openUploadDialog(kb: KnowledgeBaseSummary) {
   showUploadDialog.value = true
 }
 
+function updateUploadDialogOpen(open: boolean) {
+  if (!open && uploading.value) return
+  showUploadDialog.value = open
+}
+
 function isUploadSummary(result: DocumentDetail | DocumentUploadSummary): result is DocumentUploadSummary {
   return 'uploaded_count' in result && 'skipped_count' in result
 }
 
+function updateUploadItem(index: number, patch: Partial<UploadItem>) {
+  const item = uploadFiles.value[index]
+  if (!item) return
+  uploadFiles.value[index] = { ...item, ...patch }
+}
+
+function uploadProcessingStage(file: File) {
+  return file.name.toLowerCase().endsWith('.zip')
+    ? '正在解析 / 正在解压 / 正在入库 / 排队同步'
+    : '正在解析 / 正在入库 / 排队同步'
+}
+
+function uploadErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function uploadOne(index: number, kbSlug: string, folderId: number | null) {
+  const item = uploadFiles.value[index]
+  if (!item) return null
+  updateUploadItem(index, { status: 'uploading', progress: 0, stage: '正在上传', error: '' })
+  try {
+    const result = await api.addDocument(
+      item.file,
+      [kbSlug],
+      true,
+      folderId,
+      item.relativePath,
+      (loaded, total) => {
+        const progress = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0
+        const uploadFinished = total > 0 && loaded >= total
+        updateUploadItem(index, {
+          status: uploadFinished ? 'processing' : 'uploading',
+          progress,
+          stage: uploadFinished ? uploadProcessingStage(item.file) : `正在上传 ${progress}%`,
+        })
+      },
+    )
+    updateUploadItem(index, { status: 'success', progress: 100, stage: '上传成功', error: '' })
+    return result
+  } catch (error: unknown) {
+    updateUploadItem(index, { status: 'error', stage: '上传失败', error: uploadErrorMessage(error) })
+    return null
+  }
+}
+
+async function uploadWorker(
+  uploadIndexes: number[],
+  results: Array<DocumentDetail | DocumentUploadSummary | null>,
+  kbSlug: string,
+  folderId: number | null,
+) {
+  while (true) {
+    const queueIndex = nextUploadIndex++
+    const itemIndex = uploadIndexes[queueIndex]
+    if (itemIndex == null) return
+    results[itemIndex] = await uploadOne(itemIndex, kbSlug, folderId)
+  }
+}
+
 async function uploadDocuments() {
-  if (!uploadKb.value || uploadFiles.value.length === 0) return
+  const kb = uploadKb.value
+  if (!kb || uploadFiles.value.length === 0 || uploading.value) return
+  const uploadIndexes = uploadFiles.value
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.status !== 'success')
+    .map(({ index }) => index)
+  if (uploadIndexes.length === 0) return
   uploading.value = true
   uploadError.value = ''
   try {
-    const results: Array<DocumentDetail | DocumentUploadSummary> = []
-    for (const item of uploadFiles.value) {
-      results.push(await api.addDocument(item.file, [uploadKb.value.slug], true, uploadFolderId.value, item.relativePath))
+    uploadIndexes.forEach(index => updateUploadItem(index, { status: 'pending', progress: 0, stage: '等待上传', error: '' }))
+    const results: Array<DocumentDetail | DocumentUploadSummary | null> = []
+    nextUploadIndex = 0
+    const workerCount = Math.min(3, uploadIndexes.length)
+    await Promise.all(
+      Array.from({ length: workerCount }, () => uploadWorker(uploadIndexes, results, kb.slug, uploadFolderId.value)),
+    )
+    const completedResults = results.filter(
+      (result): result is DocumentDetail | DocumentUploadSummary => result !== null,
+    )
+    const failedCount = uploadIndexes.filter(index => uploadFiles.value[index]?.status === 'error').length
+    const uploadedCount = completedResults.reduce((count, result) => count + (isUploadSummary(result) ? result.uploaded_count : 1), 0)
+    const skippedCount = completedResults.reduce((count, result) => count + (isUploadSummary(result) ? result.skipped_count : 0), 0)
+    if (failedCount > 0) {
+      uploadError.value = `${failedCount} 个文件上传失败，请查看下方具体错误并重试。`
+      return
     }
-    const uploadedCount = results.reduce((count, result) => count + (isUploadSummary(result) ? result.uploaded_count : 1), 0)
-    const skippedCount = results.reduce((count, result) => count + (isUploadSummary(result) ? result.skipped_count : 0), 0)
     if (skippedCount > 0) {
       await alert({
         title: '上传完成',
@@ -940,9 +1036,9 @@ async function uploadDocuments() {
     showUploadDialog.value = false
     uploadFiles.value = []
     await refreshDetailKbSummary()
-    if (detailKb.value?.slug === uploadKb.value.slug) await refreshFoldersAndDocs(selectedFolderId.value)
+    if (detailKb.value?.slug === kb.slug) await refreshFoldersAndDocs(selectedFolderId.value)
   } catch (e: unknown) {
-    uploadError.value = e instanceof Error ? e.message : '上传失败'
+    uploadError.value = uploadErrorMessage(e) || '上传失败'
   } finally {
     uploading.value = false
   }
@@ -1556,8 +1652,8 @@ async function savePlaneProfiles() {
     </Dialog>
 
     <!-- 上传文档对话框 -->
-    <Dialog :open="showUploadDialog" @update:open="showUploadDialog = $event">
-      <DialogContent class="sm:max-w-[640px]">
+    <Dialog :open="showUploadDialog" @update:open="updateUploadDialogOpen">
+      <DialogContent :show-close-button="!uploading" class="sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle>上传文档 — {{ uploadKb?.name || '' }}</DialogTitle>
         </DialogHeader>
@@ -1583,12 +1679,12 @@ async function savePlaneProfiles() {
               <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm bg-primary text-primary-foreground text-sm font-medium cursor-pointer hover:bg-primary/80">
                 <File :size="14" />
                 选择文件
-                <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip" @change="onUploadFilesSelected" />
+                <input type="file" multiple class="hidden" :disabled="uploading" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip" @change="onUploadFilesSelected" />
               </label>
               <label class="inline-flex items-center gap-1.5 h-8 px-3 rounded-sm border border-border bg-background text-sm font-medium cursor-pointer hover:bg-muted">
                 <Folder :size="14" />
                 选择文件夹
-                <input type="file" multiple webkitdirectory class="hidden" @change="onUploadFilesSelected" />
+                <input type="file" multiple webkitdirectory class="hidden" :disabled="uploading" @change="onUploadFilesSelected" />
               </label>
             </div>
           </div>
@@ -1596,8 +1692,11 @@ async function savePlaneProfiles() {
           <!-- 文件列表 -->
           <div v-else class="rounded-lg border-2 border-green-200 bg-muted/20 p-4">
             <div class="flex items-center justify-between mb-3">
-              <span class="text-sm font-medium">已选择 <span class="text-green-700">{{ uploadFiles.length }}</span> 个文件</span>
-              <Button variant="ghost" size="xs" class="h-7 text-xs text-muted-foreground" @click="uploadFiles = []">清除</Button>
+              <div class="text-sm font-medium">
+                已选择 <span class="text-green-700">{{ uploadFiles.length }}</span> 个文件
+                <span v-if="failedUploadCount > 0" class="ml-2 text-destructive">失败 {{ failedUploadCount }} 个</span>
+              </div>
+              <Button variant="ghost" size="xs" class="h-7 text-xs text-muted-foreground" :disabled="uploading" @click="uploadFiles = []">清除</Button>
             </div>
             <div class="min-w-0 space-y-1.5 max-h-[240px] overflow-y-auto">
               <div v-for="(f, i) in uploadFiles" :key="i"
@@ -1605,12 +1704,29 @@ async function savePlaneProfiles() {
               >
                 <File :size="14" stroke="#9ca3af" class="shrink-0" />
                 <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="f.relativePath">{{ f.relativePath }}</span>
-                <span class="text-xs text-muted-foreground shrink-0">{{ getFileSizeLabel(f.file.size) }}</span>
+                <div class="flex shrink-0 flex-col items-end gap-0.5 text-xs">
+                  <span class="text-muted-foreground">{{ getFileSizeLabel(f.file.size) }}</span>
+                  <span :class="f.status === 'error' ? 'text-destructive' : f.status === 'success' ? 'text-green-700' : 'text-muted-foreground'">
+                    {{ f.status === 'success' ? '成功' : f.status === 'error' ? '失败' : f.status === 'processing' ? '处理中' : f.status === 'uploading' ? '上传中' : '等待中' }}
+                  </span>
+                </div>
+                <div class="col-span-full min-w-0 space-y-1">
+                  <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span class="min-w-0 truncate">{{ f.stage }}</span>
+                    <span class="shrink-0">{{ f.progress }}%</span>
+                  </div>
+                  <div class="h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div class="h-full rounded-full bg-primary transition-[width]" :style="{ width: `${f.progress}%` }"></div>
+                  </div>
+                  <div v-if="f.error" class="max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded border border-destructive/20 bg-destructive/5 px-2 py-1 text-xs text-destructive">
+                    {{ f.error }}
+                  </div>
+                </div>
               </div>
             </div>
             <label class="block mt-3 py-2 border border-dashed border-border rounded text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/50 transition-colors">
               + 继续添加文件
-              <input type="file" multiple class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip" @change="onUploadFilesSelected" />
+              <input type="file" multiple class="hidden" :disabled="uploading" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip" @change="onUploadFilesSelected" />
             </label>
           </div>
           <div v-if="uploadError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -1618,9 +1734,9 @@ async function savePlaneProfiles() {
           </div>
         </div>
         <DialogFooter>
-          <DialogClose as-child><Button variant="outline">取消</Button></DialogClose>
-          <Button @click="uploadDocuments" :disabled="uploadFiles.length === 0 || uploading">
-            {{ uploading ? '上传中...' : `上传 (${uploadFiles.length})` }}
+          <DialogClose as-child><Button variant="outline" :disabled="uploading">取消</Button></DialogClose>
+          <Button @click="uploadDocuments" :disabled="retryableUploadCount === 0 || uploading">
+            {{ uploading ? '上传中...' : failedUploadCount > 0 ? `重试失败 (${failedUploadCount})` : `上传 (${uploadFiles.length})` }}
           </Button>
         </DialogFooter>
       </DialogContent>

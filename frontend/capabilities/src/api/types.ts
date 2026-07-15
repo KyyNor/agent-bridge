@@ -777,6 +777,8 @@ export interface DocumentDetail {
   sync_states: SyncState[]
 }
 
+export type UploadProgressCallback = (loaded: number, total: number) => void
+
 export interface DocumentUploadSummary {
   source_filename: string
   source_type: 'zip'
