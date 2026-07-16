@@ -14,6 +14,7 @@ import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
+import WorkflowRunDetailPanel from '../../components/WorkflowRunDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { parseWorkflowDag } from './workflowDag'
@@ -103,6 +104,7 @@ const runPageSize = ref(10)
 const progressAgentRuns = ref<AgentRun[]>([])
 const progressAgentRunKey = ref('')
 const progressAgentRunsLoading = ref(false)
+const progressDetailError = ref('')
 /** Maps a workflow_run_id to its agent_runs.run_key, so subagent-detail (which is
  *  keyed by run_key under /agent-runs) can be resolved from the workflow view. */
 const runIdToAgentRunKey = ref<Record<string, string>>({})
@@ -124,7 +126,11 @@ const resetTarget = ref<WorkflowTask | null>(null)
 const resetting = ref(false)
 const selectedTaskIds = ref<Set<string>>(new Set())
 const batchAction = ref<'reset' | 'run' | ''>('')
-const batchProgress = ref({ current: 0, total: 0 })
+const batchProgress = ref({ current: 0, total: 0, completed: 0, success: 0, failed: 0, skipped: 0 })
+const batchCurrentTask = ref<WorkflowTask | null>(null)
+const batchCurrentTaskId = ref('')
+const batchCurrentRunId = ref('')
+const batchRunDetailError = ref('')
 const batchSummary = ref('')
 const showTaskImport = ref(false)
 const taskImportPreview = ref<WorkflowTaskImportPreview | null>(null)
@@ -266,6 +272,18 @@ const someVisibleTasksSelected = computed(() =>
   pagedTasks.value.some(task => selectedTaskIds.value.has(taskId(task))),
 )
 const batchBusy = computed(() => batchAction.value !== '')
+const batchProgressPercent = computed(() => batchProgress.value.total
+  ? Math.min(100, Math.round((batchProgress.value.completed / batchProgress.value.total) * 100))
+  : 0)
+const batchPendingCount = computed(() => Math.max(
+  0,
+  batchProgress.value.total
+    - batchProgress.value.completed
+    - (batchCurrentTask.value ? 1 : 0),
+))
+const batchRunDetailVisible = computed(() => routeMode.value === 'tasks'
+  && !!batchCurrentRunId.value
+  && (batchAction.value === 'run' || !!batchSummary.value))
 const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 function resetTaskFilters() {
   taskStatusFilter.value = ALL_STATUS_SENTINEL
@@ -362,6 +380,7 @@ watch(
     closeTaskImport()
     batchToken += 1
     if (batchAction.value) batchAction.value = ''
+    resetBatchRunDetail()
     await applyRoute()
   },
 )
@@ -369,6 +388,7 @@ watch(
 onUnmounted(() => {
   stopTestPolling()
   batchToken += 1
+  resetBatchRunDetail()
 })
 
 async function loadAll() {
@@ -781,6 +801,17 @@ function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
 }
 
+function createBatchProgress(total = 0) {
+  return { current: 0, total, completed: 0, success: 0, failed: 0, skipped: 0 }
+}
+
+function resetBatchRunDetail() {
+  batchCurrentTask.value = null
+  batchCurrentTaskId.value = ''
+  batchCurrentRunId.value = ''
+  batchRunDetailError.value = ''
+}
+
 async function openArtifact(item: WorkflowArtifact) {
   detailLoading.value = true
   showArtifact.value = true
@@ -1134,12 +1165,40 @@ function shouldStopBatchError(error: unknown): boolean {
     || /already running|conflict|network|failed to fetch|fetch failed|页面队列已停止/i.test(message)
 }
 
-async function waitForBatchRun(runId: string, token: number): Promise<WorkflowRun> {
+async function loadBatchRunDetail(task: WorkflowTask | null, runId: string, quiet: boolean) {
+  if (!task || !runId) return
+  const runChanged = batchCurrentRunId.value !== runId
+  batchCurrentTask.value = task
+  batchCurrentTaskId.value = taskId(task)
+  batchCurrentRunId.value = runId
+  progressWorkflowKey.value = task.workflow_key
+  progressRunId.value = runId
+  selectedRunId.value = runId
+  if (runChanged) {
+    progressAgentRunKey.value = ''
+    progressDetailError.value = ''
+  }
+  try {
+    await loadProgressAgentRuns()
+    await loadProgressAgentEvents({ quiet })
+  } catch (e: unknown) {
+    progressDetailError.value = errorMessage(e)
+  }
+  batchRunDetailError.value = progressDetailError.value
+}
+
+async function waitForBatchRun(
+  runId: string,
+  token: number,
+  onUpdate?: (run: WorkflowRun) => void | Promise<void>,
+): Promise<WorkflowRun> {
   while (true) {
     if (token !== batchToken) throw new Error('页面队列已停止')
     const run = await api.getWorkflowRun(runId)
+    mergeWorkflowRun(run)
+    await onUpdate?.(run)
     if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) return run
-    await sleep(1000)
+    await sleep(1500)
   }
 }
 
@@ -1148,7 +1207,8 @@ async function resetSelectedTasks() {
   const queue = [...selectedTasks.value]
   const token = ++batchToken
   batchAction.value = 'reset'
-  batchProgress.value = { current: 0, total: queue.length }
+  batchProgress.value = createBatchProgress(queue.length)
+  resetBatchRunDetail()
   batchSummary.value = ''
   taskActionError.value = ''
   let success = 0
@@ -1161,7 +1221,7 @@ async function resetSelectedTasks() {
       isCancelled: () => token !== batchToken,
       shouldStopOnError: shouldStopBatchError,
       onTaskStart: (_task, index, total) => {
-        batchProgress.value = { current: index + 1, total }
+        batchProgress.value = { ...batchProgress.value, current: index + 1, total }
       },
     })
     if (token !== batchToken) return
@@ -1186,18 +1246,34 @@ async function runSelectedTasks() {
   const queue = [...selectedTasks.value]
   const token = ++batchToken
   batchAction.value = 'run'
-  batchProgress.value = { current: 0, total: queue.length }
+  batchProgress.value = createBatchProgress(queue.length)
+  resetBatchRunDetail()
   batchSummary.value = ''
   taskActionError.value = ''
   try {
     const result = await runWorkflowTaskQueue(queue, {
       canExecute: canExecuteTask,
       execute: task => api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined),
-      waitForRun: runId => waitForBatchRun(runId, token),
+      waitForRun: (runId, onUpdate) => waitForBatchRun(runId, token, onUpdate),
       isCancelled: () => token !== batchToken,
       shouldStopOnError: shouldStopBatchError,
-      onTaskStart: (_task, index, total) => {
-        batchProgress.value = { current: index + 1, total }
+      onTaskStart: (task, index, total) => {
+        batchCurrentTask.value = task
+        batchCurrentTaskId.value = taskId(task)
+        batchProgress.value = { ...batchProgress.value, current: index + 1, total }
+      },
+      onRunStart: (task, runId) => loadBatchRunDetail(task, runId, false),
+      onRunUpdate: (task, run) => loadBatchRunDetail(task, run.run_id, true),
+      onTaskFinish: outcome => {
+        batchProgress.value = {
+          ...batchProgress.value,
+          completed: batchProgress.value.completed + 1,
+          success: batchProgress.value.success + (outcome.status === 'success' ? 1 : 0),
+          failed: batchProgress.value.failed + (outcome.status === 'failed' ? 1 : 0),
+          skipped: batchProgress.value.skipped + (outcome.status === 'skipped' ? 1 : 0),
+        }
+        batchCurrentTask.value = null
+        batchCurrentTaskId.value = ''
       },
     })
     if (token !== batchToken) return
@@ -1300,6 +1376,7 @@ async function loadProgressAgentRuns() {
   try {
     const runs = await api.listAgentRunsForWorkflowRun(workflowRunId)
     progressAgentRuns.value = runs
+    progressDetailError.value = ''
     // Default to the first agent run (oldest = main workflow agent).
     if (!progressAgentRunKey.value || !runs.some(r => r.run_key === progressAgentRunKey.value)) {
       progressAgentRunKey.value = runs[0]?.run_key || ''
@@ -1307,6 +1384,7 @@ async function loadProgressAgentRuns() {
   } catch (e: unknown) {
     progressAgentRuns.value = []
     progressAgentRunKey.value = ''
+    progressDetailError.value = errorMessage(e)
   } finally {
     progressAgentRunsLoading.value = false
   }
@@ -1323,10 +1401,12 @@ async function loadProgressAgentEvents(options: { quiet?: boolean } = {}) {
   try {
     const events = await api.getAgentRunEvents(agentRunKey)
     runEvents.value = events
+    progressDetailError.value = ''
     if (options.quiet) {
       await refreshProgressSubagentDetails(agentRunKey)
     }
   } catch (e: unknown) {
+    progressDetailError.value = errorMessage(e)
     if (!options.quiet) {
       runEvents.value = []
     }
@@ -1402,12 +1482,6 @@ async function ensureProgressSubagentDetail(taskIdStr: string) {
     done.delete(key)
     subagentDetailLoading.value = done
   }
-}
-
-function agentRunLabel(run: AgentRun): string {
-  if (run.agent_name === 'workflow') return 'Workflow Agent'
-  if (run.agent_name === 'workflow_html_reporter') return 'HTML Reporter'
-  return run.agent_name || 'Agent'
 }
 
 async function loadProgressArtifacts() {
@@ -1497,6 +1571,8 @@ async function prepareTasks(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
   taskWorkflowKey.value = item.workflow_key
   selectedTaskIds.value = new Set()
+  resetBatchRunDetail()
+  batchProgress.value = createBatchProgress()
   batchSummary.value = ''
   batchAction.value = ''
   await loadTasks(item.workflow_key)
@@ -2198,11 +2274,75 @@ async function confirmClearWorkflow() {
           <div v-if="batchSummary" class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
             {{ batchSummary }}
           </div>
+          <div
+            v-if="batchAction === 'run' || (batchSummary && batchCurrentRunId)"
+            class="space-y-3 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-3"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0 space-y-1">
+                <div class="text-sm font-semibold text-blue-900">
+                  {{ batchAction === 'run' ? '批量运行中' : '批量运行完成' }}
+                  · 当前第 {{ batchProgress.current }} / {{ batchProgress.total }} 项
+                </div>
+                <div class="truncate text-xs text-blue-700">
+                  当前任务：{{ batchCurrentTask?.task_key || progressRun?.task_key || '等待启动' }}
+                  <span v-if="batchCurrentRunId" class="font-mono"> · {{ batchCurrentRunId }}</span>
+                </div>
+              </div>
+              <Badge v-if="progressRun" variant="outline" :class="runBadgeClass(progressRun.status)">
+                {{ runStatusLabel(progressRun.status) }}
+              </Badge>
+            </div>
+            <div class="h-2 overflow-hidden rounded-full bg-blue-100">
+              <div
+                class="h-full rounded-full bg-blue-600 transition-[width] duration-300"
+                :style="{ width: batchProgressPercent + '%' }"
+              />
+            </div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-blue-700">
+              <span>已完成 {{ batchProgress.completed }} / {{ batchProgress.total }}</span>
+              <span>成功 {{ batchProgress.success }}</span>
+              <span>失败 {{ batchProgress.failed }}</span>
+              <span>跳过 {{ batchProgress.skipped }}</span>
+              <span>待执行 {{ batchPendingCount }}</span>
+            </div>
+          </div>
+          <div v-if="batchRunDetailVisible" class="space-y-3 rounded-md border bg-card px-3 py-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+              <div>
+                <div class="text-sm font-semibold text-foreground">当前运行详情</div>
+                <div class="text-xs text-muted-foreground">
+                  {{ batchCurrentTask?.task_key || progressRun?.task_key || '当前 Run' }}
+                </div>
+              </div>
+              <div class="truncate font-mono text-xs text-muted-foreground">{{ batchCurrentRunId }}</div>
+            </div>
+            <WorkflowRunDetailPanel
+              :events="runEvents"
+              :agent-runs="progressAgentRuns"
+              :selected-agent-run-key="progressAgentRunKey"
+              :events-loading="logsLoading"
+              :agent-runs-loading="progressAgentRunsLoading"
+              :context-key="'batch-run:' + progressAgentRunKey"
+              :detail-error="batchRunDetailError || progressDetailError"
+              :subagent-detail="progressSubagentDetail"
+              :subagent-detail-loading="progressSubagentDetailLoading"
+              :subagent-detail-error="progressSubagentDetailError"
+              @select-agent-run="selectProgressAgentRun"
+              @refresh="refreshProgress"
+              @expand-subagent="ensureProgressSubagentDetail"
+            />
+          </div>
           <div v-if="tasksLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!tasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无任务</div>
           <div v-else-if="!filteredTasks.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">没有符合筛选条件的任务</div>
           <div v-else class="space-y-2">
-            <div v-for="task in pagedTasks" :key="taskId(task)" class="rounded-md border">
+            <div
+              v-for="task in pagedTasks"
+              :key="taskId(task)"
+              class="rounded-md border"
+              :class="batchAction === 'run' && batchCurrentTaskId === taskId(task) ? 'border-blue-300 bg-blue-50/30' : ''"
+            >
               <div class="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
                 <div class="flex min-w-0 items-start gap-2">
                   <input
@@ -2434,52 +2574,26 @@ async function confirmClearWorkflow() {
               <div class="truncate font-mono text-xs text-muted-foreground">{{ progressRunId || '暂无运行 ID' }}</div>
               <div v-if="progressRun?.started_at" class="text-xs text-muted-foreground">{{ formatLocalDatetime(progressRun.started_at) }}</div>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <div v-if="progressAgentRuns.length > 1" class="flex flex-wrap items-center gap-1">
-                <button
-                  v-for="agentRun in progressAgentRuns"
-                  :key="agentRun.run_key"
-                  type="button"
-                  class="cursor-pointer"
-                  @click="selectProgressAgentRun(agentRun.run_key)"
-                >
-                  <Badge :variant="progressAgentRunKey === agentRun.run_key ? 'default' : 'outline'">
-                    {{ agentRunLabel(agentRun) }}
-                  </Badge>
-                </button>
-              </div>
-              <Button variant="outline" size="sm" :disabled="logsLoading || runsLoading || progressAgentRunsLoading" @click="refreshProgress">
-                {{ logsLoading || runsLoading || progressAgentRunsLoading ? '刷新中' : '刷新' }}
-              </Button>
-            </div>
           </div>
 
           <div v-if="logsLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!selectedRunId" class="py-8 text-center text-sm text-muted-foreground">暂无运行记录</div>
-          <div v-else class="space-y-2">
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-xs font-semibold text-foreground">Agent 输出</div>
-              <Badge variant="outline">{{ runEvents.length }}</Badge>
-            </div>
-            <div v-if="!runEvents.length" class="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
-              还没有 Agent 输出，任务被领取执行后这里会按时间顺序显示对话流。
-            </div>
-            <div v-else class="min-h-[calc(100vh-260px)] overflow-x-hidden overflow-y-visible pr-1">
-              <RunEventTimeline
-                :events="runEvents"
-                :context-key="'run:' + progressAgentRunKey"
-                show-agent-name
-                @expand="(taskId: string) => ensureProgressSubagentDetail(taskId)"
-              >
-                <template #subagent-body="{ taskId }">
-                  <SubagentDetailPanel
-                    :detail="progressSubagentDetail(taskId)"
-                    :loading="progressSubagentDetailLoading(taskId)"
-                    :error="progressSubagentDetailError(taskId)"
-                  />
-                </template>
-              </RunEventTimeline>
-            </div>
+          <div v-else>
+            <WorkflowRunDetailPanel
+              :events="runEvents"
+              :agent-runs="progressAgentRuns"
+              :selected-agent-run-key="progressAgentRunKey"
+              :events-loading="logsLoading"
+              :agent-runs-loading="runsLoading || progressAgentRunsLoading"
+              :context-key="'run:' + progressAgentRunKey"
+              :detail-error="progressDetailError"
+              :subagent-detail="progressSubagentDetail"
+              :subagent-detail-loading="progressSubagentDetailLoading"
+              :subagent-detail-error="progressSubagentDetailError"
+              @select-agent-run="selectProgressAgentRun"
+              @refresh="refreshProgress"
+              @expand-subagent="ensureProgressSubagentDetail"
+            />
           </div>
       </div>
     </section>
