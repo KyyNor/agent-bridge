@@ -25,3 +25,12 @@ test('reuses a sticky Agent tabs header across workflow run contexts', () => {
   assert.equal((workflow.match(/<AgentRunTabs/g) || []).length, 2)
   assert.equal((workflow.match(/:show-header="false"/g) || []).length, 2)
 })
+
+test('keeps the App content host as the actual viewport scroll container', () => {
+  const appShell = readSource('components/AppShell.vue')
+  const app = readSource('App.vue')
+
+  assert.match(appShell, /class="flex h-screen min-h-0 overflow-hidden"/)
+  assert.match(appShell, /class="ml-\[210px\] flex h-screen min-h-0 min-w-0 flex-1 flex-col"/)
+  assert.match(app, /class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto"/)
+})

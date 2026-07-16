@@ -26,7 +26,7 @@ function navigate(key: string) {
 </script>
 
 <template>
-  <div class="flex min-h-screen">
+  <div class="flex h-screen min-h-0 overflow-hidden">
     <!-- Sidebar -->
     <aside class="fixed top-0 left-0 bottom-0 z-50 flex w-[210px] flex-col bg-card">
       <!-- Logo -->
@@ -83,7 +83,7 @@ function navigate(key: string) {
     </aside>
 
     <!-- Main Content -->
-    <div class="ml-[210px] flex min-h-screen min-w-0 flex-1 flex-col">
+    <div class="ml-[210px] flex h-screen min-h-0 min-w-0 flex-1 flex-col">
       <slot />
     </div>
   </div>

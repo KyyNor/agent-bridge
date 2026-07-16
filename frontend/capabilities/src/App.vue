@@ -86,7 +86,7 @@ const view = computed(() => activeNavKey.value)
 
 <template>
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
-    <div class="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+    <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
       <!-- Page Header -->
       <div v-if="showPageHeader" class="bg-card px-7 py-5">
         <h1 class="text-base font-semibold text-foreground">{{ currentNav?.label || 'Agent Bridge' }}</h1>
