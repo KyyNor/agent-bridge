@@ -97,7 +97,7 @@ const view = computed(() => activeNavKey.value)
         <DashboardView v-if="view === 'dashboard'" />
         <ServicesView v-else-if="view === 'services'" :route-key="subRoute" />
         <ToolsView v-else-if="view === 'tools'" />
-        <ProfilesView v-else-if="view === 'profiles'" />
+        <ProfilesView v-else-if="view === 'profiles'" :route-key="subRoute" />
         <ToolDebugView v-else-if="view === 'tool-debug'" />
         <CodeRepoView v-else-if="view === 'code-repos'" />
         <KnowledgeView v-else-if="view === 'knowledge'" :route-key="subRoute" />
