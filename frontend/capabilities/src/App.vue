@@ -99,7 +99,7 @@ const view = computed(() => activeNavKey.value)
         <ToolsView v-else-if="view === 'tools'" />
         <ProfilesView v-else-if="view === 'profiles'" />
         <ToolDebugView v-else-if="view === 'tool-debug'" />
-        <CodeRepoView v-else-if="view === 'code-repos'" />
+        <CodeRepoView v-else-if="view === 'code-repos'" :route-key="subRoute" />
         <KnowledgeView v-else-if="view === 'knowledge'" :route-key="subRoute" />
         <MemoryView v-else-if="view === 'memory'" :route-key="subRoute" />
         <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />

@@ -1,5 +1,5 @@
 export function shouldShowPageHeader(activeNavKey: string, subRoute: string): boolean {
-  return !(['scripts', 'services', 'workflow', 'memory', 'knowledge', 'agent-runs'].includes(activeNavKey) && Boolean(subRoute))
+  return !(['scripts', 'services', 'workflow', 'memory', 'knowledge', 'code-repos', 'agent-runs'].includes(activeNavKey) && Boolean(subRoute))
 }
 
 export function buildWorkflowTaskProgressHash(workflowKey: string, runId: string): string {
