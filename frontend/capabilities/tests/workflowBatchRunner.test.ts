@@ -65,6 +65,32 @@ test('runWorkflowTaskQueue waits for each run before executing the next task', a
   assert.equal(result.stopped, false)
 })
 
+test('runWorkflowTaskQueue emits task and run lifecycle callbacks in order', async () => {
+  const events: string[] = []
+  const result = await runWorkflowTaskQueue([task('first')], {
+    canExecute: () => true,
+    execute: async () => ({ run_id: 'run-first' }),
+    waitForRun: async (runId, onUpdate) => {
+      events.push(`wait:${runId}`)
+      await onUpdate?.(run('run-first', 'running'))
+      return run('run-first', 'completed')
+    },
+    onTaskStart: current => events.push(`task-start:${current.task_key}`),
+    onRunStart: (current, runId) => events.push(`run-start:${current.task_key}:${runId}`),
+    onRunUpdate: (_current, currentRun) => events.push(`run-update:${currentRun.status}`),
+    onTaskFinish: outcome => events.push(`task-finish:${outcome.status}`),
+  })
+
+  assert.deepEqual(events, [
+    'task-start:first',
+    'run-start:first:run-first',
+    'wait:run-first',
+    'run-update:running',
+    'task-finish:success',
+  ])
+  assert.equal(result.outcomes[0].status, 'success')
+})
+
 test('runWorkflowTaskQueue skips unavailable tasks and continues after a task failure', async () => {
   const executed: string[] = []
   const result = await runWorkflowTaskQueue([task('skip', 'completed'), task('bad'), task('good')], {

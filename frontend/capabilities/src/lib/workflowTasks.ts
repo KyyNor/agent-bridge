@@ -128,8 +128,14 @@ export interface WorkflowTaskQueueResult {
 export interface WorkflowTaskQueueOptions {
   canExecute: (task: WorkflowTask) => boolean
   execute: (task: WorkflowTask) => Promise<{ run_id?: string | null }>
-  waitForRun: (runId: string) => Promise<WorkflowRun>
+  waitForRun: (
+    runId: string,
+    onUpdate?: (run: WorkflowRun) => void | Promise<void>,
+  ) => Promise<WorkflowRun>
   onTaskStart?: (task: WorkflowTask, index: number, total: number) => void
+  onRunStart?: (task: WorkflowTask, runId: string) => void | Promise<void>
+  onRunUpdate?: (task: WorkflowTask, run: WorkflowRun) => void | Promise<void>
+  onTaskFinish?: (outcome: WorkflowTaskQueueOutcome) => void | Promise<void>
   isCancelled?: () => boolean
   /** Return true for errors that should stop the page-local queue. */
   shouldStopOnError?: (error: unknown) => boolean
@@ -152,7 +158,9 @@ export async function runWorkflowTaskQueue(
       return { outcomes, stopped: true, remaining: tasks.slice(index) }
     }
     if (!options.canExecute(task)) {
-      outcomes.push({ task, status: 'skipped', error: '任务当前不可执行' })
+      const outcome = { task, status: 'skipped' as const, error: '任务当前不可执行' }
+      outcomes.push(outcome)
+      await options.onTaskFinish?.(outcome)
       continue
     }
 
@@ -160,18 +168,30 @@ export async function runWorkflowTaskQueue(
       options.onTaskStart?.(task, index, tasks.length)
       const started = await options.execute(task)
       if (!started.run_id) {
-        outcomes.push({ task, status: 'failed', error: '执行未返回 run_id' })
+        const outcome = { task, status: 'failed' as const, error: '执行未返回 run_id' }
+        outcomes.push(outcome)
+        await options.onTaskFinish?.(outcome)
         continue
       }
-      const run = await options.waitForRun(started.run_id)
-      const status = run.status === 'completed' || run.status === 'no_task' ? 'success' : 'failed'
-      outcomes.push({ task, status, run, error: run.error || undefined })
+      await options.onRunStart?.(task, started.run_id)
+      const run = await options.waitForRun(
+        started.run_id,
+        currentRun => options.onRunUpdate?.(task, currentRun),
+      )
+      const status: WorkflowTaskQueueOutcome['status'] = run.status === 'completed' || run.status === 'no_task'
+        ? 'success'
+        : 'failed'
+      const outcome = { task, status, run, error: run.error || undefined }
+      outcomes.push(outcome)
+      await options.onTaskFinish?.(outcome)
     } catch (error: unknown) {
-      outcomes.push({
+      const outcome = {
         task,
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
-      })
+      } as const
+      outcomes.push(outcome)
+      await options.onTaskFinish?.(outcome)
       if (shouldStopOnError(error)) {
         return { outcomes, stopped: true, remaining: tasks.slice(index + 1) }
       }
