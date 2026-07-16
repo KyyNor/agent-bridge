@@ -13,6 +13,9 @@ from agent_bridge.core.domain import NotFound, ValidationError
 from agent_bridge.app.service import AgentBridgeService
 
 
+pytestmark = pytest.mark.codegraph_cli
+
+
 def _git_repo(path: Path, content: str = "class App:\n    pass\n") -> Path:
     path.mkdir()
     subprocess.run(["git", "init", "--initial-branch=master"], cwd=path, check=True, capture_output=True)

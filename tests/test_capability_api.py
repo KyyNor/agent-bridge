@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.capability_hub.models import FailureOwner, FailureStage, SourceType, ToolType
@@ -562,7 +563,7 @@ def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None
 
 def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> None:
     knowledge = Path("frontend/capabilities/src/views/knowledge/KnowledgeView.vue").read_text(encoding="utf-8")
-    profiles = Path("frontend/capabilities/src/views/capabilities/ProfilesView.vue").read_text(encoding="utf-8")
+    profiles = Path("frontend/capabilities/src/views/capabilities/ProfileDetailView.vue").read_text(encoding="utf-8")
 
     assert "创建文档知识" in knowledge
     assert "暂无文档知识，点击「创建文档知识」开始" in knowledge
@@ -898,6 +899,7 @@ def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
     assert tool.json()["logs"][0]["log_id"] == "call_catalog_detail"
 
 
+@pytest.mark.codegraph_cli
 def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
     repo = _git_repo(tmp_path / "repo")
     app = create_app(paths=wm_paths, admins={"root"})
@@ -928,6 +930,7 @@ def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
     assert synced.json()["indexed"] >= 1
 
 
+@pytest.mark.codegraph_cli
 def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) -> None:
     repo = _git_repo(tmp_path / "repo")
     app = create_app(paths=wm_paths, admins={"root"})
@@ -996,6 +999,7 @@ def test_understand_summary_returns_empty_payload_when_graph_missing(tmp_path: P
     }
 
 
+@pytest.mark.codegraph_cli
 def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_paths) -> None:
     class FakeMcpClient:
         def __init__(self) -> None:
@@ -1166,6 +1170,7 @@ def test_frontend_tool_debug_view_exposes_profile_scoped_execute_debugging() -> 
     assert "executeCapability" in client_source
 
 
+@pytest.mark.codegraph_cli
 def test_sync_changes_imports_new_files(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -1180,6 +1185,7 @@ def test_sync_changes_imports_new_files(wm_paths, tmp_path: Path) -> None:
     assert {d["title"] for d in docs} == {"guide"}
 
 
+@pytest.mark.codegraph_cli
 def test_sync_changes_modifies_changed_file_as_delete_then_add(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -1207,6 +1213,7 @@ def test_sync_changes_modifies_changed_file_as_delete_then_add(wm_paths, tmp_pat
     assert unchanged.json()["updated"] == 0
 
 
+@pytest.mark.codegraph_cli
 def test_sync_changes_refreshes_repo_before_diff(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -1224,6 +1231,7 @@ def test_sync_changes_refreshes_repo_before_diff(wm_paths, tmp_path: Path) -> No
     assert r.json()["unchanged"] == 0
 
 
+@pytest.mark.codegraph_cli
 def test_sync_changes_handles_duplicate_slugs_stably(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -1256,6 +1264,7 @@ def test_sync_changes_handles_duplicate_slugs_stably(wm_paths, tmp_path: Path) -
     assert second.json()["unchanged"] == 2
 
 
+@pytest.mark.codegraph_cli
 def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -1281,6 +1290,7 @@ def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:
     assert any(j["operation"] == "delete" for j in jobs)
 
 
+@pytest.mark.codegraph_cli
 def test_delete_kb_repo_source_cancels_pending_create_without_delete_job(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
@@ -1307,6 +1317,7 @@ def test_delete_kb_repo_source_cancels_pending_create_without_delete_job(wm_path
     assert sources == []
 
 
+@pytest.mark.codegraph_cli
 def test_delete_kb_repo_source_removes_synced_docs_and_generates_delete_jobs(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

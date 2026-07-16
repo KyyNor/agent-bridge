@@ -9,17 +9,24 @@ function source(path: string): string {
   return readFileSync(resolve(root, path), 'utf-8')
 }
 
+function assertDeleteConfirmation(file: string, functionName: string, description: RegExp): void {
+  const functionBody = file.match(new RegExp(`async function ${functionName}[\\s\\S]*?(?=\\n(?:async )?function |\\n</script>|$)`))?.[0]
+  assert.ok(functionBody, `could not find ${functionName} function`)
+  assert.match(functionBody, /confirm\(\{/)
+  assert.match(functionBody, description)
+}
+
 test('knowledge document deletion requires explicit confirmation', () => {
   const file = source('src/views/knowledge/KnowledgeView.vue')
-  assert.match(file, /async function deleteDoc[\s\S]*confirm\(`确定删除文档「\$\{docTitle\}」？/)
+  assertDeleteConfirmation(file, 'deleteDoc', /description:\s*`确定删除文档「\$\{docTitle\}」？/)
 })
 
 test('knowledge backend deletion requires explicit confirmation', () => {
   const file = source('src/views/knowledge/KnowledgeProcessingConfigView.vue')
-  assert.match(file, /async function deleteBackend[\s\S]*confirm\(`确定删除知识后端「\$\{slug\}」？/)
+  assertDeleteConfirmation(file, 'deleteBackend', /description:\s*`确定删除知识后端「\$\{slug\}」？/)
 })
 
 test('code repository category deletion requires explicit confirmation', () => {
   const file = source('src/views/knowledge/KnowledgeProcessingConfigView.vue')
-  assert.match(file, /async function deleteCategory[\s\S]*confirm\(`确定删除代码仓库分类「\$\{key\}」？/)
+  assertDeleteConfirmation(file, 'deleteCategory', /description:\s*`确定删除代码仓库分类「\$\{key\}」？/)
 })

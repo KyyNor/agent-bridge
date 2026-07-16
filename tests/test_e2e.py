@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.api.app import create_app
+
+
+pytestmark = pytest.mark.e2e
 
 
 def _write_mock_backend_config(wm_paths) -> None:

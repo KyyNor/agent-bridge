@@ -218,6 +218,7 @@ def test_script_run_requires_main_to_return_object(wm_paths):
         )
 
 
+@pytest.mark.process
 def test_runtime_helper_execute_signature_rejects_profile_override(wm_paths):
     service = AgentBridgeService.create(wm_paths, {"root"})
     service.store.init_schema()
@@ -272,6 +273,7 @@ def test_workflow_helpers_require_runtime_context(wm_paths):
         )
 
 
+@pytest.mark.process
 def test_script_workflow_helpers_round_trip_tasks_and_logs(wm_paths):
     service = AgentBridgeService.create(wm_paths, {"root"})
     service.store.init_schema()
