@@ -119,7 +119,6 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
           <span class="tl-mini-kind" style="background:var(--muted);color:var(--muted-foreground)">内部子 Agent</span>
           <span class="tl-mini-target"><b>{{ props.detail.agent_count || props.detail.agents.length }}</b> 个</span>
         </div>
-        <div class="tl-mini-content">Workflow 工具只产生一个外层 Task；这里按 Claude transcript 里的内部 agent 拆开。</div>
       </div>
 
       <!-- 返回主 Agent 的结果（thread card 顶部高亮块） -->

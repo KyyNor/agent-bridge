@@ -225,7 +225,7 @@ function onToggle(taskId: string) {
 .tl-chevron{color:#7c3aed;transition:transform .15s ease;flex-shrink:0}
 :root.dark .tl-chevron{color:#a78bfa}
 .tl-sub.open .tl-chevron{transform:rotate(90deg)}
-.tl-sub-body{min-width:0;max-width:100%;padding:0 14px 14px;background:var(--card);border-top:1px solid color-mix(in oklch,#7c3aed 18%,var(--border));overflow-x:hidden}
+.tl-sub-body{min-width:0;max-width:100%;padding:8px 14px 14px;background:var(--card);border-top:1px solid color-mix(in oklch,#7c3aed 18%,var(--border));overflow-x:hidden}
 .tl-result{margin:12px 0 4px;padding:10px 12px;background:color-mix(in oklch,#7c3aed 5%,var(--card));border:1px solid color-mix(in oklch,#7c3aed 22%,var(--border));border-left:3px solid #7c3aed;border-radius:6px}
 .tl-sub.is-failed .tl-result{border-left-color:var(--destructive);background:color-mix(in oklch,var(--destructive) 5%,var(--card));border-color:color-mix(in oklch,var(--destructive) 22%,var(--border))}
 .tl-result-label{font-size:11px;font-weight:600;color:#5b21b6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;display:flex;align-items:center;gap:5px}
@@ -236,7 +236,7 @@ function onToggle(taskId: string) {
 
 /* ===== Mini timeline inside subagent (used by WorkflowSubagentDetailPanel) ===== */
 .tl-mini{position:relative;padding:6px 0 0 4px;margin-top:10px}
-.tl-mini::before{content:"";position:absolute;left:5px;top:10px;bottom:10px;width:2px;background:color-mix(in oklch,#7c3aed 18%,var(--border));border-radius:1px}
+.tl-mini::before{content:"";position:absolute;left:9px;top:10px;bottom:10px;width:2px;background:color-mix(in oklch,#7c3aed 18%,var(--border));border-radius:1px}
 .tl-mini-event{position:relative;padding:0 0 10px 22px}
 .tl-mini-event:last-child{padding-bottom:0}
 .tl-mavatar{position:absolute;left:0;top:1px;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid #7c3aed;z-index:2}
