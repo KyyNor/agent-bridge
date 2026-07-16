@@ -19,6 +19,7 @@ import type {
   ExecuteCapabilityResult,
   KnowledgeBase,
   KnowledgeBaseSummary,
+  KnowledgeBrowseResponse,
   KbRepoSource,
   KbRepoSourceSyncResult,
   OpenApiImportResult,
@@ -75,6 +76,7 @@ import type {
   ManagedScript,
   ScriptRun,
   ScriptRunListResult,
+  UploadProgressCallback,
 } from './types'
 
 const DEFAULT_USER = (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
@@ -133,6 +135,50 @@ async function postFormData<T>(url: string, formData: FormData): Promise<T> {
   })
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
   return r.json()
+}
+
+function parseUploadErrorDetail(raw: string): string | undefined {
+  if (!raw) return undefined
+  try {
+    const payload: unknown = JSON.parse(raw)
+    if (payload && typeof payload === 'object' && 'detail' in payload) {
+      const detail = (payload as { detail?: unknown }).detail
+      if (typeof detail === 'string' && detail) return detail
+      if (detail != null) return typeof detail === 'string' ? detail : JSON.stringify(detail)
+    }
+  } catch {
+    // The response may be plain text; the caller handles that fallback.
+  }
+  return undefined
+}
+
+function postFormDataWithProgress<T>(
+  url: string,
+  formData: FormData,
+  onProgress?: UploadProgressCallback,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    xhr.setRequestHeader('X-Agent-Bridge-User', DEFAULT_USER)
+    xhr.upload.onprogress = event => onProgress?.(event.loaded, event.total)
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as T)
+        } catch {
+          reject(new Error('上传响应解析失败'))
+        }
+        return
+      }
+      const detail = parseUploadErrorDetail(xhr.responseText)
+      const message = detail || xhr.responseText || `上传失败（HTTP ${xhr.status}）`
+      reject(new Error(message))
+    }
+    xhr.onerror = () => reject(new Error('网络错误：上传请求失败'))
+    xhr.onabort = () => reject(new Error('上传已取消'))
+    xhr.send(formData)
+  })
 }
 
 async function getBlob(url: string): Promise<Blob> {
@@ -531,6 +577,13 @@ export const api = {
 
   // Knowledge-base folders
   listFolders: (kbSlug: string) => get<KnowledgeFolder[]>(`/kbs/${kbSlug}/folders`),
+  listBrowse: (kbSlug: string, folderId?: number, archiveEntryId?: number) => {
+    const qs = new URLSearchParams()
+    if (folderId != null) qs.set('folder_id', String(folderId))
+    if (archiveEntryId != null) qs.set('archive_entry_id', String(archiveEntryId))
+    const tail = qs.toString() ? `?${qs}` : ''
+    return get<KnowledgeBrowseResponse>(`/kbs/${kbSlug}/browse${tail}`)
+  },
   createFolder: (kbSlug: string, parentFolderId: number | null, name: string) =>
     post<KnowledgeFolder>(`/kbs/${kbSlug}/folders`, { parent_folder_id: parentFolderId, name }),
   updateFolder: (
@@ -566,14 +619,21 @@ export const api = {
     if (backend) qs.set('backend', backend)
     return get<DocumentDetail>(`/docs/${slug}${qs.toString() ? '?' + qs : ''}`)
   },
-  addDocument: (file: File, kbs: string[], later = false, folderId?: number | null, relativePath?: string) => {
+  addDocument: (
+    file: File,
+    kbs: string[],
+    later = false,
+    folderId?: number | null,
+    relativePath?: string,
+    onProgress?: UploadProgressCallback,
+  ) => {
     const form = new FormData()
     form.append('file', file)
     kbs.forEach(kb => form.append('kb', kb))
     if (later) form.append('later', 'true')
     if (folderId != null) form.append('folder_id', String(folderId))
     if (relativePath) form.append('relative_path', relativePath)
-    return postFormData<DocumentDetail | DocumentUploadSummary>('/docs', form)
+    return postFormDataWithProgress<DocumentDetail | DocumentUploadSummary>('/docs', form, onProgress)
   },
   updateDocument: (slug: string, file: File, later = false) => {
     const form = new FormData()

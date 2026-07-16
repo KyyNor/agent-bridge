@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import io
 from pathlib import Path
+import threading
+import time
 import zipfile
 
 import pytest
@@ -264,8 +268,279 @@ def test_zip_imports_supported_nested_documents_and_skips_duplicate_content(
     assert result["skipped_count"] == 1
     docs = {doc["slug"]: doc for doc in service.list_docs("root", "kb")}
     assert set(docs) == {"copy", "guide"}
-    assert docs["guide"]["folder_path"] == "nested"
+    assert docs["guide"]["folder_path"] == ""
     assert service.store.list_versions(service.store.get_document_by_slug("guide")["id"])[0]["original_filename"] == "nested/guide.pdf"
+
+
+def test_recursive_zip_import_creates_archive_tree_without_virtual_placements(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    nested_zip = io.BytesIO()
+    with zipfile.ZipFile(nested_zip, "w") as inner:
+        inner.writestr("deep/guide.md", b"deep guide")
+
+    archive = tmp_path / "docs.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("root.md", b"root guide")
+        outer.writestr("packs/manuals.zip", nested_zip.getvalue())
+
+    result = service.add_document("root", archive, ["kb"], later=True)
+
+    assert result["uploaded_count"] == 2
+    assert result["skipped_count"] == 0
+    docs = {item["slug"]: item for item in service.list_docs("root", "kb")}
+    assert {item["folder_path"] for item in docs.values()} == {""}
+    assert len(service.status("root")["jobs"]) == 2
+    assert all(job["status"] == "pending" for job in service.status("root")["jobs"])
+
+    entries = service.list_archive_entries("root", "kb")
+    by_path = {entry["relative_path"]: entry for entry in entries}
+    assert by_path["docs.zip"]["kind"] == "zip"
+    assert by_path["packs"]["kind"] == "folder"
+    assert by_path["packs/manuals.zip"]["kind"] == "zip"
+    assert by_path["packs/manuals.zip/deep"]["kind"] == "folder"
+    assert by_path["packs/manuals.zip/deep/guide.md"]["kind"] == "document"
+    assert by_path["root.md"]["kind"] == "document"
+    assert by_path["packs/manuals.zip"]["parent_id"] == by_path["packs"]["id"]
+    assert by_path["packs/manuals.zip/deep"]["parent_id"] == by_path["packs/manuals.zip"]["id"]
+
+    guide = docs["guide"]
+    guide_version = service.store.list_versions(guide["id"])[0]
+    assert guide_version["original_filename"] == "packs/manuals.zip/deep/guide.md"
+    assert by_path[guide_version["original_filename"]]["doc_id"] == guide["id"]
+    assert guide["archive_entry_id"] == by_path[guide_version["original_filename"]]["id"]
+
+
+def test_corrupt_inner_zip_rolls_back_all_service_state(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    archive = tmp_path / "broken-inner.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("nested/broken.zip", b"not a zip")
+
+    with pytest.raises(ValidationError):
+        service.add_document("root", archive, ["kb"], later=True)
+
+    assert service.list_docs("root", "kb") == []
+    assert service.list_archive_entries("root", "kb") == []
+    assert service.status("root")["jobs"] == []
+
+
+def test_zip_duplicate_preserves_real_placement_and_existing_archive_file(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    root = service.list_folders("root", "kb")[0]
+    first_folder = service.create_folder("root", "kb", "First", root["id"])
+    second_folder = service.create_folder("root", "kb", "Second", root["id"])
+    source = tmp_path / "first.zip"
+    with zipfile.ZipFile(source, "w") as outer:
+        outer.writestr("guide.md", b"same content")
+    first_result = service.add_document(
+        "root", source, ["kb"], later=True, folder_id=first_folder["id"]
+    )
+    first = first_result["documents"][0]
+    first_archive_path = Path(service.store.list_versions(first["id"])[0]["archive_path"])
+    original_entry = next(
+        entry
+        for entry in service.list_archive_entries("root", "kb")
+        if entry["kind"] == "document" and entry["relative_path"] == "guide.md"
+    )
+
+    archive = tmp_path / "duplicate.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("nested/guide.md", b"same content")
+
+    result = service.add_document(
+        "root", archive, ["kb"], later=True, folder_id=second_folder["id"]
+    )
+
+    assert result["uploaded_count"] == 0
+    assert result["skipped_count"] == 1
+    assert result["skipped"][0]["id"] == first["id"]
+    assert len(service.store.list_versions(first["id"])) == 1
+    placement = service.store.get_document_placement(
+        first["id"], service.store.get_kb_by_slug("kb")["id"]
+    )
+    assert placement["folder_path"] == "First"
+    assert placement["archive_entry_id"] == original_entry["id"]
+    assert service.list_docs("root", "kb", folder_id=first_folder["id"])[0]["id"] == first["id"]
+    assert first_archive_path.exists()
+    assert {folder["name"] for folder in service.list_folders("root", "kb")} == {
+        "KB", "First", "Second"
+    }
+    document_entry = next(
+        entry
+        for entry in service.list_archive_entries("root", "kb")
+        if entry["relative_path"] == "nested/guide.md"
+    )
+    assert document_entry["doc_id"] == first["id"]
+    duplicate_outer = next(
+        entry
+        for entry in service.list_archive_entries("root", "kb")
+        if entry["name"] == "duplicate.zip"
+    )
+    archive_view = service.browse_kb(
+        "root", "kb", archive_entry_id=duplicate_outer["id"]
+    )
+    nested_view = service.browse_kb(
+        "root", "kb", archive_entry_id=document_entry["parent_id"]
+    )
+    assert any(
+        entry["kind"] == "folder" and entry["archive_entry_id"] == document_entry["parent_id"]
+        for entry in archive_view["entries"]
+    )
+    assert any(
+        entry["kind"] == "document"
+        and entry["doc_id"] == first["id"]
+        and entry["archive_entry_id"] == document_entry["id"]
+        for entry in nested_view["entries"]
+    )
+    assert len(service.status("root")["jobs"]) == 1
+
+
+def test_zip_transaction_removes_new_archive_file_on_rollback(
+    wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    archive = tmp_path / "rollback.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("guide.md", b"transactional content")
+    before = {
+        path
+        for path in service.paths.archive_dir.rglob("*")
+        if path.is_file()
+    }
+
+    def fail_archive_link(*args, **kwargs):
+        raise RuntimeError("forced archive link failure")
+
+    monkeypatch.setattr(service.store, "update_archive_entry_document", fail_archive_link)
+    with pytest.raises(RuntimeError, match="forced archive link failure"):
+        service.add_document("root", archive, ["kb"], later=True)
+
+    after = {
+        path
+        for path in service.paths.archive_dir.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    assert service.list_docs("root", "kb") == []
+    assert service.list_archive_entries("root", "kb") == []
+    assert service.status("root")["jobs"] == []
+
+
+def test_concurrent_same_content_uploads_are_serialized_and_deduplicated(
+    wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    sources = []
+    for index in range(3):
+        source = tmp_path / f"guide-{index}.md"
+        source.write_bytes(b"same concurrent content")
+        sources.append(source)
+
+    active_hash_checks = 0
+    max_active_hash_checks = 0
+    counters_lock = threading.Lock()
+    original_find = service.store.find_current_document_by_content_hash
+
+    def tracked_find(kb_id: int, content_hash: str):
+        nonlocal active_hash_checks, max_active_hash_checks
+        with counters_lock:
+            active_hash_checks += 1
+            max_active_hash_checks = max(max_active_hash_checks, active_hash_checks)
+        try:
+            time.sleep(0.02)
+            return original_find(kb_id, content_hash)
+        finally:
+            with counters_lock:
+                active_hash_checks -= 1
+
+    monkeypatch.setattr(service.store, "find_current_document_by_content_hash", tracked_find)
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(
+            executor.map(
+                lambda source: service.add_document("root", source, ["kb"], later=True),
+                sources,
+            )
+        )
+
+    assert max_active_hash_checks == 1
+    assert len(service.list_docs("root", "kb")) == 1
+    assert sum(bool(result.get("skipped")) for result in results) == 2
+
+
+def test_concurrent_zip_rollback_does_not_remove_successful_archive(
+    wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    failing_archive = tmp_path / "failing.zip"
+    successful_archive = tmp_path / "successful.zip"
+    with zipfile.ZipFile(failing_archive, "w") as archive:
+        archive.writestr("guide.md", b"failing upload")
+    with zipfile.ZipFile(successful_archive, "w") as archive:
+        archive.writestr("guide.md", b"successful upload")
+
+    active_snapshots = 0
+    max_active_snapshots = 0
+    snapshot_lock = threading.Lock()
+    original_archive_files = service._archive_files
+
+    def tracked_archive_files() -> set[Path]:
+        nonlocal active_snapshots, max_active_snapshots
+        with snapshot_lock:
+            active_snapshots += 1
+            max_active_snapshots = max(max_active_snapshots, active_snapshots)
+        try:
+            time.sleep(0.02)
+            return original_archive_files()
+        finally:
+            with snapshot_lock:
+                active_snapshots -= 1
+
+    monkeypatch.setattr(service, "_archive_files", tracked_archive_files)
+    original_update = service.store.update_archive_entry_document
+    upload_state = threading.local()
+
+    def fail_one_archive_entry(entry_id: int, doc_id: int) -> None:
+        if getattr(upload_state, "should_fail", False):
+            raise RuntimeError("forced concurrent rollback")
+        original_update(entry_id, doc_id)
+
+    monkeypatch.setattr(service.store, "update_archive_entry_document", fail_one_archive_entry)
+
+    def upload(source: Path, should_fail: bool):
+        upload_state.should_fail = should_fail
+        try:
+            return service.add_document("root", source, ["kb"], later=True)
+        finally:
+            del upload_state.should_fail
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        failed = executor.submit(upload, failing_archive, True)
+        successful = executor.submit(upload, successful_archive, False)
+        with pytest.raises(RuntimeError, match="forced concurrent rollback"):
+            failed.result()
+        result = successful.result()
+
+    assert max_active_snapshots == 1
+    assert result["uploaded_count"] == 1
+    assert len(service.list_docs("root", "kb")) == 1
+    document = result["documents"][0]
+    archive_path = Path(service.store.list_versions(document["id"])[0]["archive_path"])
+    assert archive_path.exists()
+    assert {
+        path
+        for path in service.paths.archive_dir.rglob("*")
+        if path.is_file()
+    } == {archive_path}
 
 
 def test_document_relative_path_uses_selected_folder_as_base(wm_paths, tmp_path: Path) -> None:
@@ -374,9 +649,10 @@ def test_zip_rejects_malformed_archive_without_creating_documents(wm_paths, tmp_
     archive = tmp_path / "broken.zip"
     archive.write_bytes(b"not a zip")
 
-    with pytest.raises(ValidationError, match="invalid zip archive"):
+    with pytest.raises(ValidationError, match="压缩包解压失败") as error:
         service.add_document("root", archive, ["kb"], later=True)
 
+    assert "invalid zip archive" not in str(error.value)
     assert service.list_docs("root", "kb") == []
 
 
@@ -387,14 +663,14 @@ def test_zip_rejects_path_traversal_and_empty_archives(wm_paths, tmp_path: Path)
     with zipfile.ZipFile(traversal, "w") as zf:
         zf.writestr("../escape.md", b"escape")
 
-    with pytest.raises(ValidationError, match="unsafe zip member path"):
+    with pytest.raises(ValidationError, match="压缩包成员路径不安全"):
         service.add_document("root", traversal, ["kb"], later=True)
 
     empty = tmp_path / "empty.zip"
     with zipfile.ZipFile(empty, "w") as zf:
         zf.writestr("image.png", b"ignored")
 
-    with pytest.raises(ValidationError, match="no supported documents"):
+    with pytest.raises(ValidationError, match="压缩包中没有支持的文档"):
         service.add_document("root", empty, ["kb"], later=True)
 
     assert service.list_docs("root", "kb") == []

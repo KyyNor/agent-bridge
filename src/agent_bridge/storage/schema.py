@@ -64,10 +64,29 @@ CREATE TABLE IF NOT EXISTS document_versions (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (doc_id, version_no)
 );
+CREATE TABLE IF NOT EXISTS knowledge_archive_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  parent_id INTEGER REFERENCES knowledge_archive_entries(id) ON DELETE CASCADE,
+  parent_folder_id INTEGER REFERENCES knowledge_folders(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('zip', 'folder', 'document')),
+  name TEXT NOT NULL,
+  relative_path TEXT NOT NULL,
+  doc_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK ((parent_id IS NULL) != (parent_folder_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_archive_entries_parent
+  ON knowledge_archive_entries(kb_id, parent_id, status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_archive_entries_folder
+  ON knowledge_archive_entries(kb_id, parent_folder_id, status);
 CREATE TABLE IF NOT EXISTS document_kbs (
   doc_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   kb_id INTEGER NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
   folder_id INTEGER REFERENCES knowledge_folders(id),
+  archive_entry_id INTEGER REFERENCES knowledge_archive_entries(id) ON DELETE SET NULL,
   added_by TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
