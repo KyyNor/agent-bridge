@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>能力平面配置二级详情页设计</title>
+  <style>
+    :root { color-scheme: light; --ink:#18212f; --muted:#5f6b7a; --line:#dce3ec; --soft:#f5f7fa; --accent:#2563eb; }
+    body { margin:0; background:#fff; color:var(--ink); font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif; }
+    main { max-width:920px; margin:0 auto; padding:48px 28px 72px; }
+    h1 { margin:0 0 8px; font-size:30px; letter-spacing:-.02em; }
+    h2 { margin:36px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); font-size:21px; }
+    h3 { margin:22px 0 6px; font-size:16px; }
+    p { margin:8px 0 12px; }
+    .meta { color:var(--muted); font-size:13px; }
+    .callout { margin:20px 0; padding:14px 16px; border-left:4px solid var(--accent); background:#eff6ff; }
+    table { width:100%; border-collapse:collapse; margin:12px 0 18px; }
+    th,td { padding:9px 10px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:var(--soft); font-weight:600; }
+    code { padding:1px 4px; border-radius:4px; background:var(--soft); font-size:.92em; }
+    li { margin:5px 0; }
+    .checklist { list-style:none; padding-left:0; }
+    .checklist li::before { content:"□"; display:inline-block; width:1.4em; color:var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>能力平面配置二级详情页设计</h1>
+    <p class="meta">日期：2026-07-16　·　范围：frontend/capabilities　·　状态：已获用户确认，待实施</p>
+
+    <div class="callout">
+      <strong>目标：</strong>将能力平面配置从小尺寸弹窗改为类似知识库的 hash 二级详情页，并让“取消 / 确认”始终可见。当前配置字段、API 和业务语义保持不变。
+    </div>
+
+    <h2>1. 已确认的交互方向</h2>
+    <ul>
+      <li>采用 A 方案：完整详情页，而不是左右分栏或大尺寸侧滑面板。</li>
+      <li>列表路由为 <code>#profiles</code>，详情路由为 <code>#profiles/&lt;profile_key&gt;</code>。</li>
+      <li>顶部返回、底部取消和浏览器后退在存在未保存修改时，都要先确认“放弃未保存修改”。</li>
+      <li>确认放弃后返回能力平面列表；取消放弃则恢复详情页并保留编辑内容。</li>
+      <li>添加能力平面仍使用小弹窗；只有已有能力平面的配置改为详情页。</li>
+    </ul>
+
+    <h2>2. 页面与组件结构</h2>
+    <table>
+      <thead><tr><th>位置</th><th>职责</th><th>变化</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>App.vue</code></td>
+          <td>读取复合 hash，并将 <code>subRoute</code> 传给能力平面页面。</td>
+          <td>改为渲染 <code>&lt;ProfilesView :route-key="subRoute" /&gt;</code>。</td>
+        </tr>
+        <tr>
+          <td><code>lib/navigation.ts</code></td>
+          <td>决定详情页是否显示顶层页面标题。</td>
+          <td>把 <code>profiles</code> 纳入二级路由隐藏页面标题的集合。</td>
+        </tr>
+        <tr>
+          <td><code>ProfilesView.vue</code></td>
+          <td>列表页、添加弹窗和路由控制器。</td>
+          <td>接收 <code>routeKey</code>；“配置”改为进入详情 hash；处理返回、取消、浏览器后退和列表刷新。</td>
+        </tr>
+        <tr>
+          <td>新增 <code>ProfileDetailView.vue</code></td>
+          <td>加载并编辑一个能力平面的完整配置。</td>
+          <td>承接现有配置弹窗的状态、API 调用和表单内容，暴露未保存状态给路由控制器。</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>详情组件通过 <code>profileKey</code> 接收当前 key，发出 <code>saved</code>、<code>back</code>、<code>cancel</code> 等事件。路由控制器统一决定何时把 hash 切回 <code>#profiles</code>，避免组件直接修改列表状态。</p>
+
+    <h2>3. 详情页布局</h2>
+    <ol>
+      <li>顶部使用知识库详情页同款返回区：返回按钮、能力平面名称、<code>profile_key</code>、描述和状态 Badge。</li>
+      <li>中间内容按现有配置顺序展示：接入命令、记忆、允许访问的服务、文档知识、代码仓库、高级选项。</li>
+      <li>详情根容器采用全高 flex 布局；中间内容区设置 <code>min-h-0</code> 和 <code>overflow-y-auto</code>，长列表和高级选项只在主体内滚动。</li>
+      <li>底部操作区位于主体滚动区之外，使用边框和背景与内容区分隔，始终展示“取消 / 确认”。</li>
+      <li>保存中禁用重复保存和离开；保存错误显示在操作区上方，不能因为滚动位置导致用户看不到。</li>
+      <li>移动端保持纵向堆叠，服务、知识库和代码仓库选择器继续使用现有响应式宽度。</li>
+    </ol>
+
+    <h2>4. 数据流与保存行为</h2>
+    <h3>加载</h3>
+    <p>进入详情后并行加载能力平面完整配置、能力目录、文档知识、代码仓库和记忆绑定；Pin 预览与 Profile 文档继续按现有异步流程加载。核心配置失败时显示整页错误；非核心资源失败时保留页面，并在对应区块显示错误。</p>
+
+    <h3>本地编辑与局部保存</h3>
+    <p>沿用当前 <code>pendingRules</code>、<code>pendingResources</code>、<code>pendingMemoryBlock</code>、Pin 和 Notes 状态。现有“保存 Pin”“保存手动补充”“重新生成/预览”等局部操作保留，成功后同步更新初始快照，避免保存后仍被误判为未保存。</p>
+
+    <h3>底部确认</h3>
+    <p>底部“确认”复用当前保存顺序：保存服务规则、资源规则、已加载的 Pin 配置、记忆绑定，刷新 Profile 文档并刷新列表。任何一步失败都停留在详情页，保留用户当前待保存值并展示错误。</p>
+
+    <h2>5. 未保存保护</h2>
+    <p><code>hasUnsavedChanges</code> 比较进入详情时的初始快照和当前编辑值，至少覆盖：</p>
+    <ul>
+      <li>服务允许规则和文档/代码资源规则；</li>
+      <li>记忆绑定；</li>
+      <li>手动 Pin、自动 Pin 模式、比例和数量；</li>
+      <li>尚未提交的手动 Notes。</li>
+    </ul>
+    <p>顶部返回与底部取消调用同一离开保护函数。浏览器后退导致详情 routeKey 被清空时，路由控制器先恢复详情状态并弹出确认；用户确认放弃后再完成列表导航，取消则停留在详情页。</p>
+
+    <h2>6. 非目标与兼容性</h2>
+    <ul>
+      <li>不新增后端接口，不改变能力平面配置的 API 契约。</li>
+      <li>不改动添加能力平面、启停、复制命令和列表筛选分页的业务行为。</li>
+      <li>不在本次范围内重做配置字段、Pin 规则或 Profile 文档的业务模型。</li>
+    </ul>
+
+    <h2>7. 验收与测试</h2>
+    <ul class="checklist">
+      <li><code>#profiles/&lt;key&gt;</code> 能直接打开详情，顶层“能力平面”页面标题隐藏。</li>
+      <li>列表“配置”进入详情；顶部返回无修改时直接回列表。</li>
+      <li>修改任一配置后，顶部返回、底部取消和浏览器后退都会触发放弃确认。</li>
+      <li>取消放弃时编辑内容保留；确认放弃后回到列表。</li>
+      <li>详情内容很长时，底部“取消 / 确认”仍保持可见。</li>
+      <li>加载核心配置失败、Pin/记忆/文档加载失败、保存失败均有可见反馈。</li>
+      <li>保存成功后回到列表，列表状态刷新。</li>
+      <li>运行前端单元/源码结构测试、<code>npm run typecheck</code> 和 <code>npm run build</code>。</li>
+    </ul>
+  </main>
+</body>
+</html>
