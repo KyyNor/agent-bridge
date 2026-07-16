@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+WIKI_SEARCH_ENABLED = False
+
 
 class WikiBuiltinProvider:
     source_key = "wiki"
@@ -42,7 +44,7 @@ class WikiBuiltinProvider:
         ]
 
     def list_tools(self, actor: str, profile_key: str | None) -> list[BuiltinTool]:
-        return [
+        tools = [
             BuiltinTool(
                 "ask",
                 "Wiki Ask",
@@ -93,25 +95,32 @@ class WikiBuiltinProvider:
                 },
                 ToolType.search.value,
             ),
-            BuiltinTool(
-                "search",
-                "Wiki Search",
-                "在已授权知识库中搜索片段。",
-                {
-                    "type": "object",
-                    "properties": {
-                        "kb": {"type": "string", "description": "要访问的知识库 slug。"},
-                        "question": {"type": "string", "description": "要检索的知识库问题。"},
-                        "top_k": {"type": "integer", "default": 6, "description": "最多返回的结果数量。"},
-                    },
-                    "required": ["kb", "question"],
-                },
-                ToolType.search.value,
-            ),
         ]
+        if WIKI_SEARCH_ENABLED:
+            tools.append(
+                BuiltinTool(
+                    "search",
+                    "Wiki Search",
+                    "在已授权知识库中搜索片段。",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "kb": {"type": "string", "description": "要访问的知识库 slug。"},
+                            "question": {"type": "string", "description": "要检索的知识库问题。"},
+                            "top_k": {"type": "integer", "default": 6, "description": "最多返回的结果数量。"},
+                        },
+                        "required": ["kb", "question"],
+                    },
+                    ToolType.search.value,
+                )
+            )
+        return tools
 
     def resource_from_arguments(self, tool: str, arguments: dict[str, Any]) -> BuiltinResourceRef | None:
-        if tool not in {"search", "search_all", "ask", "get_document"}:
+        supported_tools = {"search_all", "ask", "get_document"}
+        if WIKI_SEARCH_ENABLED:
+            supported_tools.add("search")
+        if tool not in supported_tools:
             return None
         kb_slug = str(arguments.get("kb") or arguments.get("kb_slug") or "").strip()
         if not kb_slug:
@@ -133,6 +142,8 @@ class WikiBuiltinProvider:
                     for kb in self.list_resources(actor, profile_key)
                 ]
             }
+        if tool == "search" and not WIKI_SEARCH_ENABLED:
+            raise NotFound("tool not found")
         if tool not in {"search", "search_all", "ask", "get_document"}:
             raise NotFound("tool not found")
         if tool == "search_all":

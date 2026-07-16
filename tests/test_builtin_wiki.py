@@ -32,7 +32,7 @@ def test_metamcp_root_search_lists_wiki_builtin_with_allowed_kbs(wm_paths: Agent
 
     wiki = next(item for item in result["items"] if item["service"] == "wiki")
     assert wiki["kind"] == "builtin"
-    assert wiki["tool_count"] == 5
+    assert wiki["tool_count"] == 4
     assert wiki["resources"] == [{"resource_type": "wiki_kb", "resource_key": "frontend-docs", "name": "Frontend Docs"}]
 
 
@@ -71,15 +71,13 @@ def test_metamcp_wiki_path_lists_fixed_tools(wm_paths: AgentBridgePaths) -> None
 
     result = service.capabilities.search("root", "wiki", None, profile_key="safe-readonly")
 
-    assert [item["tool"] for item in result["items"]] == ["ask", "get_document", "list_kbs", "search_all", "search"]
+    assert [item["tool"] for item in result["items"]] == ["ask", "get_document", "list_kbs", "search_all"]
     assert result["items"][0]["service"] == "wiki"
     assert result["items"][0]["display_tool"] == "wiki.ask"
     schemas = {item["tool"]: item["input_schema"] for item in result["items"]}
     assert schemas["ask"]["required"] == ["kb", "question"]
     assert schemas["get_document"]["required"] == ["kb", "doc_slug"]
     assert schemas["list_kbs"] == {"type": "object", "properties": {}}
-    assert schemas["search"]["required"] == ["kb", "question"]
-    assert "top_k" in schemas["search"]["properties"]
     assert schemas["ask"]["properties"]["kb"]["description"] == "要访问的知识库 slug。"
     assert schemas["ask"]["properties"]["question"]["description"] == "要向知识库提出的问题。"
     assert result["items"][0]["description"] == "向已授权知识库提问。"
@@ -95,14 +93,20 @@ def test_wiki_list_kbs_respects_profile_resources(wm_paths: AgentBridgePaths) ->
     assert [kb["slug"] for kb in result["result"]["kbs"]] == ["frontend-docs"]
 
 
-def test_wiki_search_does_not_block_event_loop(wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wiki_ask_does_not_block_event_loop(wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch) -> None:
     service = _service(wm_paths)
 
-    def slow_search(actor: str, kb_slug: str, question: str, top_k: int = 6, profile_key: str | None = None) -> list[object]:
+    def slow_ask(
+        actor: str,
+        kb_slug: str,
+        question: str,
+        session_id: str | None = None,
+        profile_key: str | None = None,
+    ) -> dict[str, object]:
         time.sleep(0.2)
-        return []
+        return {"answer": ""}
 
-    monkeypatch.setattr(service, "search", slow_search)
+    monkeypatch.setattr(service, "ask", slow_ask)
 
     async def run_concurrent_tasks() -> float:
         started = time.monotonic()
@@ -110,7 +114,7 @@ def test_wiki_search_does_not_block_event_loop(wm_paths: AgentBridgePaths, monke
             service.capabilities.execute(
                 "root",
                 "wiki",
-                "search",
+                "ask",
                 {"kb": "frontend-docs", "question": "css"},
                 profile_key="safe-readonly",
             )
@@ -123,6 +127,24 @@ def test_wiki_search_does_not_block_event_loop(wm_paths: AgentBridgePaths, monke
     assert asyncio.run(run_concurrent_tasks()) < 0.1
 
 
+def test_wiki_search_is_not_exposed_or_executable(wm_paths: AgentBridgePaths) -> None:
+    from agent_bridge.capability_hub.sources.builtin.wiki import WIKI_SEARCH_ENABLED
+
+    assert WIKI_SEARCH_ENABLED is False
+    service = _service(wm_paths)
+
+    with pytest.raises(NotFound, match="tool not found"):
+        asyncio.run(
+            service.capabilities.execute(
+                "root",
+                "wiki",
+                "search",
+                {"kb": "frontend-docs", "question": "css"},
+                profile_key="safe-readonly",
+            )
+        )
+
+
 def test_wiki_execute_blocks_unallowed_kb(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
 
@@ -131,7 +153,7 @@ def test_wiki_execute_blocks_unallowed_kb(wm_paths: AgentBridgePaths) -> None:
             service.capabilities.execute(
                 "root",
                 "wiki",
-                "search",
+                "ask",
                 {"kb": "payroll", "question": "salary"},
                 profile_key="safe-readonly",
             )
@@ -148,17 +170,23 @@ def test_wiki_execute_blocks_unallowed_kb(wm_paths: AgentBridgePaths) -> None:
 def test_wiki_backend_failure_is_classified(wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch) -> None:
     service = _service(wm_paths)
 
-    def fail_search(actor: str, kb_slug: str, question: str, top_k: int = 6, profile_key: str | None = None) -> list[object]:
+    def fail_ask(
+        actor: str,
+        kb_slug: str,
+        question: str,
+        session_id: str | None = None,
+        profile_key: str | None = None,
+    ) -> dict[str, object]:
         raise RuntimeError("backend unavailable")
 
-    monkeypatch.setattr(service, "search", fail_search)
+    monkeypatch.setattr(service, "ask", fail_ask)
 
     with pytest.raises(ValidationError, match=r"Wiki builtin backend failed: backend unavailable .*log_id: call_"):
         asyncio.run(
             service.capabilities.execute(
                 "root",
                 "wiki",
-                "search",
+                "ask",
                 {"kb": "frontend-docs", "question": "css"},
                 profile_key="safe-readonly",
             )
@@ -180,17 +208,23 @@ def test_wiki_domain_errors_are_not_classified_as_backend_failures(
 ) -> None:
     service = _service(wm_paths)
 
-    def fail_search(actor: str, kb_slug: str, question: str, top_k: int = 6, profile_key: str | None = None) -> list[object]:
+    def fail_ask(
+        actor: str,
+        kb_slug: str,
+        question: str,
+        session_id: str | None = None,
+        profile_key: str | None = None,
+    ) -> dict[str, object]:
         raise NotFound("knowledge base not found")
 
-    monkeypatch.setattr(service, "search", fail_search)
+    monkeypatch.setattr(service, "ask", fail_ask)
 
     with pytest.raises(NotFound, match=r"knowledge base not found .*log_id: call_"):
         asyncio.run(
             service.capabilities.execute(
                 "root",
                 "wiki",
-                "search",
+                "ask",
                 {"kb": "frontend-docs", "question": "css"},
                 profile_key="safe-readonly",
             )
