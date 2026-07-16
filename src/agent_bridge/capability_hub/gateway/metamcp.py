@@ -18,6 +18,7 @@ from pydantic import Field
 
 from agent_bridge.core.config import default_user
 from agent_bridge.app.service import AgentBridgeService
+from agent_bridge.capability_hub.sources.builtin.wiki import WIKI_SEARCH_ENABLED
 
 logger = logging.getLogger("agent_bridge.mcp")
 
@@ -25,13 +26,14 @@ _request_profile: ContextVar[str | None] = ContextVar("_request_profile", defaul
 _request_workflow_context: ContextVar[dict[str, Any] | None] = ContextVar("_request_workflow_context", default=None)
 
 DIRECT_BUILTIN_TOOLS = [
-    {"name": "wiki_search", "service_key": "wiki", "tool_name": "search"},
     {"name": "wiki_ask", "service_key": "wiki", "tool_name": "ask"},
     {"name": "codegraph_explore", "service_key": "codegraph", "tool_name": "codegraph_explore"},
     {"name": "memory_search", "service_key": "memory", "tool_name": "search"},
     {"name": "memory_timeline", "service_key": "memory", "tool_name": "timeline"},
     {"name": "memory_get", "service_key": "memory", "tool_name": "get"},
 ]
+if WIKI_SEARCH_ENABLED:
+    DIRECT_BUILTIN_TOOLS.insert(0, {"name": "wiki_search", "service_key": "wiki", "tool_name": "search"})
 
 
 def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:

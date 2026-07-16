@@ -49,8 +49,16 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     rendered = governance.render_profile_markdown("root", "safe")
 
     assert "# Agent Bridge Profile：Safe Profile" in rendered["markdown"]
-    assert "search" in rendered["markdown"]
-    assert "execute" in rendered["markdown"]
+    markdown = rendered["markdown"]
+    assert markdown.index("artifacts_search") < markdown.index("memory_search")
+    assert "用户描述需求时，优先使用 `artifacts_search` 检索已有产出物" in markdown
+    assert "用户询问过去做过什么、上次讨论或历史决策" in markdown
+    assert "用户询问后边列出的几个仓库的实现要调用 `codegraph_explore`" in markdown
+    assert "证据要求" not in markdown
+    assert "列表中没有的资源视为当前不可用" not in markdown
+    assert "wiki_search" not in markdown
+    assert "search" in markdown
+    assert "execute" in markdown
     assert "- MySQL (`mysql`)：Run SQL queries." in rendered["markdown"]
     assert "- Agent Bridge (`agent-bridge`)：Agent Bridge source repository." in rendered["markdown"]
     assert "- Frontend Docs (`frontend-docs`)：Frontend documentation." in rendered["markdown"]
