@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { AgentRun, WorkflowRunEvent, WorkflowSubagentDetail } from '../api/types'
-import { Badge } from './ui/badge'
-import { Button } from './ui/button'
+import AgentRunTabs from './AgentRunTabs.vue'
 import RunEventTimeline from './RunEventTimeline.vue'
 import SubagentDetailPanel from './SubagentDetailPanel.vue'
 
@@ -18,9 +17,11 @@ const props = withDefaults(defineProps<{
   subagentDetail: DetailFn<WorkflowSubagentDetail | null>
   subagentDetailLoading: DetailFn<boolean>
   subagentDetailError: DetailFn<string>
+  showHeader?: boolean
 }>(), {
   contextKey: 'run:detail',
   detailError: '',
+  showHeader: true,
 })
 
 const emit = defineEmits<{
@@ -36,47 +37,21 @@ function selectAgentRun(runKey: string) {
 function expandSubagent(taskId: string) {
   emit('expand-subagent', taskId)
 }
-
-function agentRunLabel(run: AgentRun) {
-  if (run.agent_name === 'workflow') return 'Workflow Agent'
-  if (run.agent_name === 'workflow_html_reporter') return 'HTML Reporter'
-  return run.agent_name || 'Agent'
-}
 </script>
 
 <template>
   <div class="space-y-2">
-    <div class="flex items-center justify-between gap-2">
-      <div class="flex flex-wrap items-center gap-1">
-        <div class="text-xs font-semibold text-foreground">Agent 输出</div>
-        <Badge variant="outline">{{ props.events.length }}</Badge>
-        <template v-if="props.agentRuns.length > 1">
-          <button
-            v-for="agentRun in props.agentRuns"
-            :key="agentRun.run_key"
-            type="button"
-            class="cursor-pointer"
-            @click="selectAgentRun(agentRun.run_key)"
-          >
-            <Badge :variant="props.selectedAgentRunKey === agentRun.run_key ? 'default' : 'outline'">
-              {{ agentRunLabel(agentRun) }}
-            </Badge>
-          </button>
-        </template>
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        :disabled="props.eventsLoading || props.agentRunsLoading"
-        @click="emit('refresh')"
-      >
-        {{ props.eventsLoading || props.agentRunsLoading ? '刷新中' : '刷新' }}
-      </Button>
-    </div>
-
-    <div v-if="props.detailError" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-      事件刷新暂时不可用，批量运行仍会继续：{{ props.detailError }}
-    </div>
+    <AgentRunTabs
+      v-if="props.showHeader"
+      :agent-runs="props.agentRuns"
+      :selected-agent-run-key="props.selectedAgentRunKey"
+      :event-count="props.events.length"
+      :events-loading="props.eventsLoading"
+      :agent-runs-loading="props.agentRunsLoading"
+      :detail-error="props.detailError"
+      @select-agent-run="selectAgentRun"
+      @refresh="emit('refresh')"
+    />
 
     <div v-if="props.eventsLoading" class="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
       加载中

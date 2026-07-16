@@ -14,6 +14,7 @@ import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
+import AgentRunTabs from '../../components/AgentRunTabs.vue'
 import WorkflowRunDetailPanel from '../../components/WorkflowRunDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
@@ -2271,41 +2272,58 @@ async function confirmClearWorkflow() {
           <div v-if="taskActionError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {{ taskActionError }}
           </div>
-          <div v-if="batchSummary" class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
-            {{ batchSummary }}
-          </div>
           <div
-            v-if="batchAction === 'run' || (batchSummary && batchCurrentRunId)"
-            class="space-y-3 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-3"
+            v-if="batchAction === 'run' || batchSummary"
+            class="workflow-batch-run-context sticky top-0 z-30 space-y-3 bg-background/95 pb-2 pt-1 backdrop-blur"
           >
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div class="min-w-0 space-y-1">
-                <div class="text-sm font-semibold text-blue-900">
-                  {{ batchAction === 'run' ? '批量运行中' : '批量运行完成' }}
-                  · 当前第 {{ batchProgress.current }} / {{ batchProgress.total }} 项
+            <div v-if="batchSummary" class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              {{ batchSummary }}
+            </div>
+            <div
+              v-if="batchAction === 'run' || (batchSummary && batchCurrentRunId)"
+              class="space-y-3 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-3"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0 space-y-1">
+                  <div class="text-sm font-semibold text-blue-900">
+                    {{ batchAction === 'run' ? '批量运行中' : '批量运行完成' }}
+                    · 当前第 {{ batchProgress.current }} / {{ batchProgress.total }} 项
+                  </div>
+                  <div class="truncate text-xs text-blue-700">
+                    当前任务：{{ batchCurrentTask?.task_key || progressRun?.task_key || '等待启动' }}
+                    <span v-if="batchCurrentRunId" class="font-mono"> · {{ batchCurrentRunId }}</span>
+                  </div>
                 </div>
-                <div class="truncate text-xs text-blue-700">
-                  当前任务：{{ batchCurrentTask?.task_key || progressRun?.task_key || '等待启动' }}
-                  <span v-if="batchCurrentRunId" class="font-mono"> · {{ batchCurrentRunId }}</span>
-                </div>
+                <Badge v-if="progressRun" variant="outline" :class="runBadgeClass(progressRun.status)">
+                  {{ runStatusLabel(progressRun.status) }}
+                </Badge>
               </div>
-              <Badge v-if="progressRun" variant="outline" :class="runBadgeClass(progressRun.status)">
-                {{ runStatusLabel(progressRun.status) }}
-              </Badge>
+              <div class="h-2 overflow-hidden rounded-full bg-blue-100">
+                <div
+                  class="h-full rounded-full bg-blue-600 transition-[width] duration-300"
+                  :style="{ width: batchProgressPercent + '%' }"
+                />
+              </div>
+              <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-blue-700">
+                <span>已完成 {{ batchProgress.completed }} / {{ batchProgress.total }}</span>
+                <span>成功 {{ batchProgress.success }}</span>
+                <span>失败 {{ batchProgress.failed }}</span>
+                <span>跳过 {{ batchProgress.skipped }}</span>
+                <span>待执行 {{ batchPendingCount }}</span>
+              </div>
             </div>
-            <div class="h-2 overflow-hidden rounded-full bg-blue-100">
-              <div
-                class="h-full rounded-full bg-blue-600 transition-[width] duration-300"
-                :style="{ width: batchProgressPercent + '%' }"
-              />
-            </div>
-            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-blue-700">
-              <span>已完成 {{ batchProgress.completed }} / {{ batchProgress.total }}</span>
-              <span>成功 {{ batchProgress.success }}</span>
-              <span>失败 {{ batchProgress.failed }}</span>
-              <span>跳过 {{ batchProgress.skipped }}</span>
-              <span>待执行 {{ batchPendingCount }}</span>
-            </div>
+            <AgentRunTabs
+              v-if="batchRunDetailVisible"
+              :agent-runs="progressAgentRuns"
+              :selected-agent-run-key="progressAgentRunKey"
+              :event-count="runEvents.length"
+              :events-loading="logsLoading"
+              :agent-runs-loading="progressAgentRunsLoading"
+              :detail-error="batchRunDetailError || progressDetailError"
+              :sticky="false"
+              @select-agent-run="selectProgressAgentRun"
+              @refresh="refreshProgress"
+            />
           </div>
           <div v-if="batchRunDetailVisible" class="space-y-3 rounded-md border bg-card px-3 py-3">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
@@ -2328,6 +2346,7 @@ async function confirmClearWorkflow() {
               :subagent-detail="progressSubagentDetail"
               :subagent-detail-loading="progressSubagentDetailLoading"
               :subagent-detail-error="progressSubagentDetailError"
+              :show-header="false"
               @select-agent-run="selectProgressAgentRun"
               @refresh="refreshProgress"
               @expand-subagent="ensureProgressSubagentDetail"
@@ -2576,6 +2595,19 @@ async function confirmClearWorkflow() {
             </div>
           </div>
 
+          <div class="workflow-progress-agent-context sticky top-0 z-30 bg-background/95 pb-2 pt-1 backdrop-blur">
+            <AgentRunTabs
+              :agent-runs="progressAgentRuns"
+              :selected-agent-run-key="progressAgentRunKey"
+              :event-count="runEvents.length"
+              :events-loading="logsLoading"
+              :agent-runs-loading="runsLoading || progressAgentRunsLoading"
+              :detail-error="progressDetailError"
+              :sticky="false"
+              @select-agent-run="selectProgressAgentRun"
+              @refresh="refreshProgress"
+            />
+          </div>
           <div v-if="logsLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <div v-else-if="!selectedRunId" class="py-8 text-center text-sm text-muted-foreground">暂无运行记录</div>
           <div v-else>
@@ -2590,6 +2622,7 @@ async function confirmClearWorkflow() {
               :subagent-detail="progressSubagentDetail"
               :subagent-detail-loading="progressSubagentDetailLoading"
               :subagent-detail-error="progressSubagentDetailError"
+              :show-header="false"
               @select-agent-run="selectProgressAgentRun"
               @refresh="refreshProgress"
               @expand-subagent="ensureProgressSubagentDetail"
