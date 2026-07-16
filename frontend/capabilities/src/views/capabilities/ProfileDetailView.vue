@@ -18,6 +18,7 @@ import type {
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
+import { profileConfigDraftKey, type ProfileConfigDraft } from './profileConfigSnapshot'
 
 const props = defineProps<{
   profileKey: string
@@ -59,6 +60,7 @@ const profileMarkdown = ref('')
 const manualNotes = ref('')
 const docSaving = ref(false)
 const docError = ref('')
+const initialDraft = ref<ProfileConfigDraft | null>(null)
 
 const copied = ref('')
 const pinToolTypes = ['overview', 'search', 'detail']
@@ -82,6 +84,27 @@ const manualPinGroups = computed(() =>
   }))
 )
 
+const currentDraft = computed<ProfileConfigDraft>(() => ({
+  sourceRules: pendingRules.value,
+  resourceRules: pendingResources.value,
+  memoryBlockKey: pendingMemoryBlock.value,
+  pins: pendingPins.value,
+  pinMode: pinMode.value,
+  pinRatio: pinRatio.value,
+  pinCount: pinCount.value,
+  manualNotes: manualNotes.value,
+}))
+
+const hasUnsavedChanges = computed(() => {
+  if (!initialDraft.value) return false
+  if (!pinsLoaded.value) {
+    const current = { ...currentDraft.value, pins: [], pinMode: 'disabled' as const, pinRatio: 10, pinCount: 3 }
+    const initial = { ...initialDraft.value, pins: [], pinMode: 'disabled' as const, pinRatio: 10, pinCount: 3 }
+    return profileConfigDraftKey(current) !== profileConfigDraftKey(initial)
+  }
+  return profileConfigDraftKey(currentDraft.value) !== profileConfigDraftKey(initialDraft.value)
+})
+
 const canSaveConfig = computed(() =>
   !!configProfile.value
   && !configLoading.value
@@ -90,6 +113,40 @@ const canSaveConfig = computed(() =>
   && !docSaving.value
   && !configError.value
 )
+
+function cloneDraft(draft: ProfileConfigDraft): ProfileConfigDraft {
+  return {
+    ...draft,
+    sourceRules: draft.sourceRules.map(rule => ({ ...rule })),
+    resourceRules: draft.resourceRules.map(rule => ({ ...rule })),
+    pins: draft.pins.map(pin => ({ ...pin })),
+  }
+}
+
+function captureInitialDraft() {
+  initialDraft.value = cloneDraft(currentDraft.value)
+}
+
+function syncInitialPinDraft() {
+  if (!initialDraft.value) return
+  initialDraft.value = {
+    ...initialDraft.value,
+    pins: pendingPins.value.map(pin => ({ ...pin })),
+    pinMode: pinMode.value,
+    pinRatio: pinRatio.value,
+    pinCount: pinCount.value,
+  }
+}
+
+function syncInitialNotesDraft() {
+  if (!initialDraft.value) return
+  initialDraft.value = { ...initialDraft.value, manualNotes: manualNotes.value }
+}
+
+defineExpose({
+  hasUnsavedChanges,
+  isBusy: computed(() => configLoading.value || configSaving.value || pinSaving.value || docSaving.value),
+})
 
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
@@ -120,6 +177,7 @@ function resetConfigState() {
   pinsLoaded.value = false
   profileMarkdown.value = ''
   manualNotes.value = ''
+  initialDraft.value = null
 }
 
 async function loadProfile(profileKey: string) {
@@ -154,6 +212,7 @@ async function loadProfile(profileKey: string) {
     return
   }
   await loadProfileMemory(profileKey)
+  captureInitialDraft()
   configLoading.value = false
   void loadProfilePins(profileKey)
   void loadProfileDoc(profileKey)
@@ -192,6 +251,7 @@ async function loadProfilePins(profileKey: string) {
     if (configProfile.value?.profile_key !== profileKey) return
     applyPinPreview(pins)
     pinsLoaded.value = true
+    syncInitialPinDraft()
   } catch (e: unknown) {
     if (configProfile.value?.profile_key === profileKey) {
       pinError.value = `加载 Pin 预览失败：${errorMessage(e)}`
@@ -319,9 +379,11 @@ async function saveConfig() {
         true,
       )
     }
+    if (manualNotes.value.trim()) await saveManualNotes(true)
     await refreshProfileDoc(true)
     configRules.value = [...pendingRules.value]
     configResources.value = [...pendingResources.value]
+    captureInitialDraft()
     emit('saved')
   } catch (e: unknown) {
     saveError.value = `保存配置失败：${errorMessage(e)}`
@@ -342,6 +404,7 @@ async function savePins(raiseError = false) {
     })
     applyPinPreview(pins)
     pinsLoaded.value = true
+    syncInitialPinDraft()
   } catch (e: unknown) {
     pinError.value = `保存 Pin 配置失败：${errorMessage(e)}`
     if (raiseError) throw e
@@ -358,13 +421,14 @@ async function refreshPins() {
     const pins = await api.refreshProfilePins(configProfile.value.profile_key)
     applyPinPreview(pins)
     pinsLoaded.value = true
+    syncInitialPinDraft()
   } catch (e: unknown) {
     pinError.value = `重新计算自动 Pin 失败：${errorMessage(e)}`
   }
   pinSaving.value = false
 }
 
-async function saveManualNotes() {
+async function saveManualNotes(raiseError = false) {
   if (!configProfile.value) return
   docSaving.value = true
   docError.value = ''
@@ -372,8 +436,10 @@ async function saveManualNotes() {
     const doc = await api.updateProfileManualNotes(configProfile.value.profile_key, manualNotes.value)
     applyProfileDoc(doc)
     manualNotes.value = ''
+    syncInitialNotesDraft()
   } catch (e: unknown) {
     docError.value = `保存手动补充失败：${errorMessage(e)}`
+    if (raiseError) throw e
   }
   docSaving.value = false
 }
