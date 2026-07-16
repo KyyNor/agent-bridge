@@ -573,7 +573,7 @@ def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> Non
 
 
 def test_frontend_codegraph_detail_uses_single_query_panel() -> None:
-    source = Path("frontend/capabilities/src/views/knowledge/CodeRepoView.vue").read_text(encoding="utf-8")
+    source = Path("frontend/capabilities/src/views/knowledge/CodeRepoDetailView.vue").read_text(encoding="utf-8")
 
     assert "detailTab === 'overview'" in source
     assert "detailTab === 'explore'" in source

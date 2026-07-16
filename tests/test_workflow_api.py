@@ -549,15 +549,21 @@ def test_workflow_api_rejects_duplicate_task_key_and_version_confirmation(wm_pat
 
 
 @pytest.mark.parametrize(
-    ("filename", "content"),
+    ("filename", "content_kind"),
     [
-        ("tasks.csv", _task_import_workbook_bytes([["task:new", "v1", "repo"]])),
-        ("tasks.xlsx", b"not an xlsx"),
-        ("tasks.xlsx", _malformed_worksheet_workbook_bytes()),
+        ("tasks.csv", "valid_workbook"),
+        ("tasks.xlsx", "plain_text"),
+        ("tasks.xlsx", "malformed_workbook"),
     ],
 )
-def test_workflow_api_rejects_invalid_task_import_files(wm_paths, filename, content):
+def test_workflow_api_rejects_invalid_task_import_files(wm_paths, filename, content_kind):
     _svc, client = _workflow_import_client(wm_paths)
+    if content_kind == "valid_workbook":
+        content = _task_import_workbook_bytes([["task:new", "v1", "repo"]])
+    elif content_kind == "plain_text":
+        content = b"not an xlsx"
+    else:
+        content = _malformed_worksheet_workbook_bytes()
     response = client.post(
         "/workflows/page-report/tasks/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
