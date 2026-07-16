@@ -567,6 +567,7 @@ export interface AgentRunCounts {
   success: number
   failed: number
   running: number
+  stopped: number
 }
 
 export interface AgentRunPage {

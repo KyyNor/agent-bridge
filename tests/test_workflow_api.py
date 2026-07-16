@@ -909,6 +909,34 @@ def test_workflow_api_stop_run_maps_stopping_terminal_and_conflict(wm_paths):
     assert missing.status_code == 404
 
 
+def test_workflow_api_stop_requires_admin_before_controller_lookup(wm_paths):
+    from fastapi.testclient import TestClient
+
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    svc.store.create_workflow_run(
+        run_id="run_api_non_admin",
+        workflow_key="page-report",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir="",
+    )
+    client = TestClient(create_app(wm_paths, {"root"}))
+
+    response = client.post(
+        "/workflow-runs/run_api_non_admin/stop",
+        headers={"X-Agent-Bridge-User": "viewer"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_workflow_api_returns_run_events_from_run_directory(wm_paths, tmp_path):
     # The /workflow-runs/{run_id}/events endpoint was removed — agent execution
     # events are now unified under /agent-runs (persisted in the agent_runs

@@ -67,6 +67,8 @@ class WorkflowScheduler:
         # to AgentService's own default timeout instead of applying a cap.
         self._max_runtime_minutes: int = 0
         self._lock = threading.Lock()
+        self._run_locks_lock = threading.Lock()
+        self._run_locks: dict[str, threading.RLock] = {}
 
     def start(self) -> None:
         self._load_window()
@@ -277,17 +279,18 @@ class WorkflowScheduler:
                 self._running.discard(workflow_key)
 
     def stop_workflow_run(self, run_id: str) -> dict[str, Any]:
-        run = self._store.get_workflow_run(run_id)
-        if run is None:
-            raise NotFound("workflow run not found")
-        if run.get("status") != "running":
-            return run
+        with self._workflow_run_lock(run_id):
+            run = self._store.get_workflow_run(run_id)
+            if run is None:
+                raise NotFound("workflow run not found")
+            if run.get("status") != "running":
+                return run
 
-        registry = self._control_registry()
-        if registry is None or not self._workflow_control_exists(registry, run_id):
-            raise ConflictError("workflow run controller is not available")
-        registry.request_workflow_stop(run_id)
-        return {"status": "stopping", "run_id": run_id}
+            registry = self._control_registry()
+            if registry is None or not self._workflow_control_exists(registry, run_id):
+                raise ConflictError("workflow run controller is not available")
+            registry.request_workflow_stop(run_id)
+            return {"status": "stopping", "run_id": run_id}
 
     def run_workflow_now(self, workflow_key: str) -> dict[str, Any]:
         """Launch a single on-demand run immediately — a "test run".
@@ -370,7 +373,7 @@ class WorkflowScheduler:
                     timeout_seconds=self._max_runtime_minutes * 60 or None,
                 ),
             )
-            if process_result.stopped:
+            if process_result.stopped or self._is_parent_stop_requested(run_id):
                 return self._finish_stopped(workflow_key, run_id, process_result)
             if process_result.exit_code != 0:
                 logger.error(
@@ -380,6 +383,8 @@ class WorkflowScheduler:
                     process_result.exit_code,
                 )
                 return self._finish_failed(workflow_key, run_id, process_result, "claude workflow runner failed")
+            if self._is_parent_stop_requested(run_id):
+                return self._finish_stopped(workflow_key, run_id, process_result)
             parsed = parse_workflow_result(process_result.run_dir)
             ingested = self._service.ingest_parsed_result(
                 workflow_key=workflow_key,
@@ -388,6 +393,8 @@ class WorkflowScheduler:
                 parsed=parsed,
             )
             final_status = ingested["status"]
+            if self._is_parent_stop_requested(run_id):
+                return self._finish_stopped(workflow_key, run_id, process_result)
             if final_status == "no_task":
                 self.finished_today.add(workflow_key)
             # For summary workflows, append a derived HTML report for human
@@ -395,15 +402,19 @@ class WorkflowScheduler:
             # the main run status (kept completed) — it only records a warning.
             if final_status == "completed":
                 self._maybe_generate_html_report(workflow_key, workflow, run_id)
-            self._store.finish_workflow_run(
-                run_id,
-                status=final_status,
-                exit_code=process_result.exit_code,
-                stdout_path=str(process_result.stdout_path),
-                stderr_path=str(process_result.stderr_path),
-                error=None,
-                duration_ms=process_result.duration_ms,
-            )
+            with self._workflow_run_lock(run_id):
+                if self._is_parent_stop_requested(run_id):
+                    return self._finish_stopped(workflow_key, run_id, process_result)
+                finished = self._store.finish_workflow_run(
+                    run_id,
+                    expected_status="running",
+                    status=final_status,
+                    exit_code=process_result.exit_code,
+                    stdout_path=str(process_result.stdout_path),
+                    stderr_path=str(process_result.stderr_path),
+                    error=None,
+                    duration_ms=process_result.duration_ms,
+                )
             logger.info(
                 "Workflow run 完成 workflow=%s run=%s 状态=%s 耗时=%dms",
                 workflow_key,
@@ -411,23 +422,32 @@ class WorkflowScheduler:
                 final_status,
                 process_result.duration_ms,
             )
+            if finished["status"] != final_status:
+                return {"status": finished["status"], "run_id": run_id}
             return ingested
         except Exception as exc:
             logger.exception("Workflow 执行失败 workflow=%s run=%s", workflow_key, run_id)
             stdout_path = str(process_result.stdout_path) if process_result else None
             stderr_path = str(process_result.stderr_path) if process_result else None
             duration_ms = process_result.duration_ms if process_result else None
-            self._store.finish_workflow_run(
-                run_id,
-                status="failed",
-                exit_code=process_result.exit_code if process_result else None,
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
-                error=str(exc),
-                duration_ms=duration_ms,
-            )
-            self._release_leased_tasks(workflow_key, run_id, str(exc))
-            return {"status": "failed", "error": str(exc)}
+            if self._is_parent_stop_requested(run_id):
+                return self._finish_stopped(workflow_key, run_id, process_result)
+            with self._workflow_run_lock(run_id):
+                if self._is_parent_stop_requested(run_id):
+                    return self._finish_stopped(workflow_key, run_id, process_result)
+                finished = self._store.finish_workflow_run(
+                    run_id,
+                    expected_status="running",
+                    status="failed",
+                    exit_code=process_result.exit_code if process_result else None,
+                    stdout_path=stdout_path,
+                    stderr_path=stderr_path,
+                    error=str(exc),
+                    duration_ms=duration_ms,
+                )
+            if finished["status"] == "failed":
+                self._release_leased_tasks(workflow_key, run_id, str(exc))
+            return {"status": finished["status"], "error": str(exc)}
         finally:
             self._finish_workflow_control(run_id)
 
@@ -457,33 +477,45 @@ class WorkflowScheduler:
         if registry is not None:
             registry.finish_workflow(run_id)
 
+    def _workflow_run_lock(self, run_id: str) -> threading.RLock:
+        with self._run_locks_lock:
+            lock = self._run_locks.get(run_id)
+            if lock is None:
+                lock = threading.RLock()
+                self._run_locks[run_id] = lock
+            return lock
+
+    def _is_parent_stop_requested(self, run_id: str) -> bool:
+        registry = self._control_registry()
+        return registry is not None and registry.is_workflow_stop_requested(run_id)
+
     @staticmethod
     def _workflow_control_exists(registry: Any, run_id: str) -> bool:
-        is_active = getattr(registry, "is_workflow_active", None)
-        if callable(is_active):
-            return bool(is_active(run_id))
-        controls = getattr(registry, "_workflows", None)
-        return isinstance(controls, dict) and run_id in controls
+        return bool(registry.is_workflow_active(run_id))
 
-    def _finish_stopped(self, workflow_key: str, run_id: str, result: Any) -> dict[str, Any]:
-        self._store.finish_workflow_run(
-            run_id,
-            status="stopped",
-            exit_code=result.exit_code,
-            stdout_path=str(result.stdout_path),
-            stderr_path=str(result.stderr_path),
-            error=STOPPED_ERROR,
-            duration_ms=result.duration_ms,
-        )
-        try:
-            self._store.workflows.release_tasks_for_stopped_run(
-                workflow_key,
+    def _finish_stopped(self, workflow_key: str, run_id: str, result: Any | None) -> dict[str, Any]:
+        with self._workflow_run_lock(run_id):
+            actual = self._store.finish_workflow_run(
                 run_id,
-                STOPPED_ERROR,
+                expected_status="running",
+                status="stopped",
+                exit_code=result.exit_code if result else None,
+                stdout_path=str(result.stdout_path) if result else None,
+                stderr_path=str(result.stderr_path) if result else None,
+                error=STOPPED_ERROR,
+                duration_ms=result.duration_ms if result else None,
             )
-        except Exception:
-            logger.exception("释放已停止工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
-        return {"status": "stopped", "run_id": run_id}
+            if actual["status"] != "stopped":
+                return {"status": actual["status"], "run_id": run_id}
+            try:
+                self._store.workflows.release_tasks_for_stopped_run(
+                    workflow_key,
+                    run_id,
+                    STOPPED_ERROR,
+                )
+            except Exception:
+                logger.exception("释放已停止工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
+            return {"status": "stopped", "run_id": run_id}
 
     def _maybe_generate_html_report(
         self,
@@ -556,17 +588,22 @@ class WorkflowScheduler:
                 logger.exception("写入 HTML 报告失败日志失败 workflow=%s run=%s", workflow_key, run_id)
 
     def _finish_failed(self, workflow_key: str, run_id: str, result: Any, error: str) -> dict[str, Any]:
-        self._store.finish_workflow_run(
-            run_id,
-            status="failed",
-            exit_code=result.exit_code,
-            stdout_path=str(result.stdout_path),
-            stderr_path=str(result.stderr_path),
-            error=error,
-            duration_ms=result.duration_ms,
-        )
-        self._release_leased_tasks(workflow_key, run_id, error)
-        return {"status": "failed", "error": error}
+        with self._workflow_run_lock(run_id):
+            if self._is_parent_stop_requested(run_id):
+                return self._finish_stopped(workflow_key, run_id, result)
+            actual = self._store.finish_workflow_run(
+                run_id,
+                expected_status="running",
+                status="failed",
+                exit_code=result.exit_code,
+                stdout_path=str(result.stdout_path),
+                stderr_path=str(result.stderr_path),
+                error=error,
+                duration_ms=result.duration_ms,
+            )
+        if actual["status"] == "failed":
+            self._release_leased_tasks(workflow_key, run_id, error)
+        return {"status": actual["status"], "error": error}
 
 
 def _parse_hhmm(value: Any) -> time | None:

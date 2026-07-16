@@ -144,6 +144,10 @@ class RunControlRegistry:
         with self._lock:
             return run_key in self._runs
 
+    def is_workflow_active(self, workflow_run_id: str) -> bool:
+        with self._lock:
+            return workflow_run_id in self._workflows
+
     def _tombstone_deadline(self) -> float:
         return time.monotonic() + self._tombstone_ttl_seconds
 

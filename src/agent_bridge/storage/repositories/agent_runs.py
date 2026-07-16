@@ -232,7 +232,7 @@ class AgentRunsRepository:
                   SUM(
                     CASE
                       WHEN status = 'failed'
-                        OR (status <> 'running' AND ok = 0)
+                        OR (status <> 'running' AND status <> 'stopped' AND ok = 0)
                       THEN 1 ELSE 0
                     END
                   ) AS failed,
@@ -240,10 +240,12 @@ class AgentRunsRepository:
                     CASE
                       WHEN status <> 'running'
                         AND status <> 'failed'
+                        AND status <> 'stopped'
                         AND (status IN ('completed', 'success') OR ok = 1)
                       THEN 1 ELSE 0
                     END
-                  ) AS success
+                  ) AS success,
+                  SUM(CASE WHEN status = 'stopped' THEN 1 ELSE 0 END) AS stopped
                 FROM agent_runs{base_where}
                 """,
                 base_params,
@@ -266,6 +268,7 @@ class AgentRunsRepository:
                 "success": int(count_row["success"] or 0),
                 "failed": int(count_row["failed"] or 0),
                 "running": int(count_row["running"] or 0),
+                "stopped": int(count_row["stopped"] or 0),
             },
         }
 

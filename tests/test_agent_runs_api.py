@@ -88,6 +88,7 @@ def test_agent_run_stop_api_handles_active_terminal_pending_and_missing(wm_paths
         ok=False,
         prompt="",
     )
+    svc.agents.control_registry.register("active_run")
     svc.store.agent_runs.create(
         run_key="completed_run",
         agent_name="workflow",
@@ -119,6 +120,46 @@ def test_agent_run_stop_api_handles_active_terminal_pending_and_missing(wm_paths
 
     missing = client.post("/agent-runs/missing_run/stop", headers=headers)
     assert missing.status_code == 404
+
+
+def test_agent_run_stop_requires_admin_and_active_controller_for_running_rows(wm_paths) -> None:
+    client = _client(wm_paths)
+    svc = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="stale_running",
+        agent_name="workflow",
+        status="running",
+        ok=False,
+        prompt="",
+    )
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    non_admin = client.post(
+        "/agent-runs/stale_running/stop",
+        headers={"X-Agent-Bridge-User": "viewer"},
+    )
+    assert non_admin.status_code == 403
+    assert not svc.agents.control_registry.has_pending_control("stale_running")
+
+    stale = client.post("/agent-runs/stale_running/stop", headers=headers)
+    assert stale.status_code == 409
+    assert not svc.agents.control_registry.has_pending_control("stale_running")
+
+
+def test_agent_run_stop_accepts_active_registration_before_database_row(wm_paths) -> None:
+    client = _client(wm_paths)
+    svc = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    svc.agents.control_registry.register("registered_before_row")
+
+    response = client.post(
+        "/agent-runs/registered_before_row/stop",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"status": "stopping", "run_key": "registered_before_row"}
 
 
 def test_agent_runs_api_filters_by_workflow_run_id(wm_paths) -> None:
@@ -193,6 +234,14 @@ def test_agent_runs_api_paginated_search_and_status_counts(wm_paths) -> None:
         ok=False,
         status="running",
     )
+    svc.store.agent_runs.create(
+        run_key="shared_stopped",
+        agent_name="planner",
+        profile_key="p1",
+        workflow_key="shared-workflow",
+        ok=False,
+        status="stopped",
+    )
 
     client = _client(wm_paths)
     response = client.get(
@@ -207,7 +256,7 @@ def test_agent_runs_api_paginated_search_and_status_counts(wm_paths) -> None:
     assert body["total"] == 1
     assert body["limit"] == 1
     assert body["offset"] == 0
-    assert body["counts"] == {"all": 3, "success": 1, "failed": 1, "running": 1}
+    assert body["counts"] == {"all": 4, "success": 1, "failed": 1, "running": 1, "stopped": 1}
 
 
 def test_agent_runs_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:

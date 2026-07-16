@@ -22,6 +22,16 @@ def test_finish_removes_active_control_and_repeated_stop_is_idempotent() -> None
     assert registry.request_stop("agent_run_1") is True
 
 
+def test_registry_exposes_active_workflow_without_private_state_access() -> None:
+    registry = RunControlRegistry(tombstone_ttl_seconds=60)
+
+    assert registry.is_workflow_active("workflow_1") is False
+    registry.register_workflow("workflow_1")
+    assert registry.is_workflow_active("workflow_1") is True
+    registry.finish_workflow("workflow_1")
+    assert registry.is_workflow_active("workflow_1") is False
+
+
 def test_workflow_stop_cancels_all_attached_agents() -> None:
     registry = RunControlRegistry(tombstone_ttl_seconds=60)
     registry.register_workflow("workflow_run_1")

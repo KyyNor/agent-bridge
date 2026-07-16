@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 
 from agent_bridge.api.schemas import WorkflowDefinitionRequest, WorkflowTaskImportConfirmRequest
+from agent_bridge.core.domain import require_admin_user
 
 
 def create_workflow_routes(service, actor):
@@ -71,6 +72,7 @@ def create_workflow_routes(service, actor):
         response: Response,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
+        require_admin_user(current_actor, service.admins)
         result = service.workflow_scheduler.stop_workflow_run(run_id)
         if result.get("status") == "stopping":
             response.status_code = 202

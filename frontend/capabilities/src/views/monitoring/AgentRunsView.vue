@@ -27,7 +27,7 @@ const props = defineProps<{ routeKey?: string }>()
 
 const runs = ref<AgentRun[]>([])
 const runTotal = ref(0)
-const runCounts = ref<AgentRunCounts>({ all: 0, success: 0, failed: 0, running: 0 })
+const runCounts = ref<AgentRunCounts>({ all: 0, success: 0, failed: 0, running: 0, stopped: 0 })
 const loading = ref(false)
 const okFilter = ref<AgentRunFilter>('')
 const search = ref('')
@@ -138,7 +138,7 @@ async function loadRunData() {
     runTotal.value = activePage.total
   } catch {
     if (token !== listRequestToken) return
-    runCounts.value = { all: 0, success: 0, failed: 0, running: 0 }
+    runCounts.value = { all: 0, success: 0, failed: 0, running: 0, stopped: 0 }
     runs.value = []
     runTotal.value = 0
   } finally {
@@ -482,7 +482,9 @@ function formatCost(v: number | null | undefined): string {
                     ? 'bg-green-50 text-green-700'
                     : agentRunBadgeVariant(r) === 'running'
                       ? 'bg-blue-50 text-blue-700'
-                      : 'bg-red-50 text-red-700'"
+                      : agentRunBadgeVariant(r) === 'stopped'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-red-50 text-red-700'"
                 >
                   {{ agentRunStatusLabel(r) }}
                 </Badge>

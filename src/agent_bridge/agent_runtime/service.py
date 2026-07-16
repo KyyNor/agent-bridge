@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 import shutil
+import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -35,6 +37,7 @@ from agent_bridge.agent_runtime.support import build_agent_bridge_server_config,
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
 from agent_bridge.agent_runtime.claude import claude_settings_env
 from agent_bridge.core.ids import new_run_id
+from agent_bridge.core.domain import ConflictError
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,7 @@ class AgentService:
         self.mcp_url = mcp_url or DEFAULT_MCP_URL
         self.base_run_dir: Path = paths.run_dir / "agent-runs"
         self.control_registry = RunControlRegistry()
+        self._client_run_key_lock = threading.Lock()
 
     async def run(
         self,
@@ -154,9 +158,16 @@ class AgentService:
 
         # Reserve the agent_runs row up front (status=running) so the run is
         # observable while in flight, and capture its run_key for the caller.
+        caller_run_key = run_key
         run_key = run_key or new_run_id(agent_name or "agent")
         workflow_run_id = run_id if workflow_key else None
-        control = self.control_registry.register(run_key, workflow_run_id=workflow_run_id)
+        if caller_run_key is not None:
+            with self._client_run_key_lock:
+                if self.control_registry.is_active(run_key):
+                    raise ConflictError("agent run key already exists")
+                control = self.control_registry.register(run_key, workflow_run_id=workflow_run_id)
+        else:
+            control = self.control_registry.register(run_key, workflow_run_id=workflow_run_id)
         try:
             self.store.agent_runs.create(
                 run_key=run_key,
@@ -171,6 +182,11 @@ class AgentService:
                 output_schema=output_schema,
                 started_at=started_iso,
             )
+        except sqlite3.IntegrityError as exc:
+            self.control_registry.finish(run_key)
+            if caller_run_key is not None:
+                raise ConflictError("agent run key already exists") from exc
+            logger.error("Agent run 占位记录创建失败 run_key=%s", run_key, exc_info=True)
         except Exception:
             logger.error("Agent run 占位记录创建失败 run_key=%s", run_key, exc_info=True)
 
@@ -291,6 +307,10 @@ class AgentService:
     def has_pending_control(self, run_key: str) -> bool:
         """Expose pre-registration stop tombstones for the future stop API."""
         return self.control_registry.has_pending_control(run_key)
+
+    def has_active_control(self, run_key: str) -> bool:
+        """Return whether an AgentService run currently owns a control handle."""
+        return self.control_registry.is_active(run_key)
 
     async def _drain_query_with_control(
         self,

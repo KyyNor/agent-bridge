@@ -23,6 +23,44 @@ def task_counts(**overrides):
     return result
 
 
+def test_finish_workflow_run_uses_running_compare_and_set(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="p", name="P", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="w",
+        name="W",
+        description="",
+        profile_key="p",
+        workflow_js="",
+        status="active",
+        created_by="root",
+    )
+    store.create_workflow_run(
+        run_id="run_cas",
+        workflow_key="w",
+        profile_key="p",
+        task_key=None,
+        status="completed",
+        temp_dir="",
+    )
+
+    actual = store.finish_workflow_run(
+        "run_cas",
+        expected_status="running",
+        status="stopped",
+        exit_code=1,
+        stdout_path=None,
+        stderr_path=None,
+        error="stop",
+        duration_ms=2,
+    )
+
+    assert actual["status"] == "completed"
+
+
 class _RecordingConnection:
     def __init__(self, conn: sqlite3.Connection, statements: list[str]) -> None:
         self._conn = conn

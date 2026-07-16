@@ -1,6 +1,6 @@
 import type { AgentRun } from '../api/types'
 
-export type AgentRunFilter = '' | 'success' | 'failed' | 'running'
+export type AgentRunFilter = '' | 'success' | 'failed' | 'running' | 'stopped'
 export type AgentRunBadgeVariant = 'success' | 'failed' | 'running' | 'stopped' | 'unknown'
 
 type AgentRunStatusInput = Pick<AgentRun, 'ok'> & { status?: string | null }
@@ -30,6 +30,6 @@ export function agentRunOkFilterParam(filter: AgentRunFilter): boolean | undefin
 }
 
 export function agentRunStatusFilterParam(filter: AgentRunFilter): string | undefined {
-  if (filter === 'failed' || filter === 'running') return filter
+  if (filter === 'failed' || filter === 'running' || filter === 'stopped') return filter
   return undefined
 }

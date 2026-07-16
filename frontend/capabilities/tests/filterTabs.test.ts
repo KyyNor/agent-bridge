@@ -66,10 +66,11 @@ test('filter tabs consume server-side counts instead of the current page', () =>
     { key: 'error', label: '失败', count: 140 },
     { key: 'blocked', label: '拦截', count: 60 },
   ])
-  assert.deepEqual(countAgentRunTabs({ all: 3000, success: 2700, failed: 250, running: 50 }), [
+  assert.deepEqual(countAgentRunTabs({ all: 3000, success: 2700, failed: 250, running: 50, stopped: 10 }), [
     { key: '', label: '全部', count: 3000 },
     { key: 'running', label: '执行中', count: 50 },
     { key: 'success', label: '成功', count: 2700 },
     { key: 'failed', label: '失败', count: 250 },
+    { key: 'stopped', label: '已停止', count: 10 },
   ])
 })

@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response
 
 from agent_bridge.api.schemas import DesignAgentRequest
-from agent_bridge.core.domain import NotFound, require_admin_user
+from agent_bridge.core.domain import ConflictError, NotFound, require_admin_user
 
 
 def _read_events_jsonl(path: Path) -> list[dict[str, Any]] | None:
@@ -162,11 +162,17 @@ def create_agent_runs_routes(service, actor):
         response: Response,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
+        require_admin_user(current_actor, service.admins)
         row = service.store.agent_runs.get(run_key)
         if row is not None and row.get("status") != "running":
             return row
-        if row is None and not service.agents.has_pending_control(run_key):
-            raise NotFound("agent run not found")
+        active = service.agents.has_active_control(run_key)
+        pending = service.agents.has_pending_control(run_key)
+        if row is None:
+            if not active and not pending:
+                raise NotFound("agent run not found")
+        elif not active:
+            raise ConflictError("agent run controller is not available")
         service.agents.request_stop(run_key)
         response.status_code = 202
         return {"status": "stopping", "run_key": run_key}

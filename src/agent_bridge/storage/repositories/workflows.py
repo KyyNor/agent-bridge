@@ -843,6 +843,7 @@ class WorkflowsRepository:
         self,
         run_id: str,
         *,
+        expected_status: str = "running",
         status: str,
         exit_code: int | None,
         stdout_path: str | None,
@@ -861,9 +862,9 @@ class WorkflowsRepository:
                     error = ?,
                     duration_ms = ?,
                     finished_at = CURRENT_TIMESTAMP
-                WHERE run_id = ?
+                WHERE run_id = ? AND status = ?
                 """,
-                (status, exit_code, stdout_path, stderr_path, error, duration_ms, run_id),
+                (status, exit_code, stdout_path, stderr_path, error, duration_ms, run_id, expected_status),
             )
             result = _row_payload(
                 conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()

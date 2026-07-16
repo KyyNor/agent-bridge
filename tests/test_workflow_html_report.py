@@ -305,6 +305,47 @@ def test_generate_report_invokes_agent_and_saves_html(wm_paths):
     assert saved["task_key"] == "page:a"
 
 
+def test_generate_report_does_not_save_when_workflow_stops_after_reporter(wm_paths):
+    from agent_bridge.agent_runtime.control import RunControlRegistry
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    _seed_profile_and_workflow(svc, workflow_type="summary")
+    md_id = _seed_markdown_artifact(svc)
+
+    class _StoppingReporter(_FakeAgentService):
+        def __init__(self):
+            super().__init__(
+                {
+                    "title": "人类报告",
+                    "summary": "一句话总结",
+                    "html": _valid_html(),
+                    "source_artifact_ids": [md_id],
+                }
+            )
+            self.control_registry = RunControlRegistry()
+            self.control_registry.register_workflow("run_1")
+
+        async def run(self, **kwargs: Any) -> Any:
+            result = await super().run(**kwargs)
+            self.control_registry.request_workflow_stop("run_1")
+            return result
+
+    fake = _StoppingReporter()
+    svc.workflows.agent_service = fake
+
+    outcome = svc.workflows.generate_html_report_for_run(
+        workflow_key="page-report", profile_key="report-plane", run_id="run_1", actor="root",
+    )
+
+    assert outcome == {"status": "stopped"}
+    assert svc.store.search_workflow_artifacts(
+        profile_key="report-plane", query=None, tags=[], path=None,
+        workflow_key="page-report", run_id="run_1", include_history=True,
+        format="html", limit=10,
+    ) == []
+
+
 def test_generate_report_rejects_non_html_output(wm_paths):
     from agent_bridge.app.service import AgentBridgeService
     from agent_bridge.core.domain import ValidationError

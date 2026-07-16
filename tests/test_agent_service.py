@@ -137,6 +137,56 @@ def test_run_success_text_result(wm_paths, monkeypatch) -> None:
     assert Path(res.run_dir).is_dir()
 
 
+def test_run_rejects_active_client_run_key_before_sdk_query(wm_paths, monkeypatch) -> None:
+    calls = 0
+
+    async def fake_query(*, prompt, options):
+        nonlocal calls
+        calls += 1
+        yield _result(result="first")
+
+    _patch_sdk(monkeypatch, fake_query)
+    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+    service.control_registry.register("occupied_key")
+
+    from agent_bridge.core.domain import ConflictError
+
+    try:
+        asyncio.run(service.run(prompt="second", agent_name="agent", run_key="occupied_key"))
+    except ConflictError as exc:
+        assert str(exc) == "agent run key already exists"
+    else:
+        raise AssertionError("expected duplicate active client run key to conflict")
+
+    assert calls == 0
+    assert service.control_registry.is_active("occupied_key") is True
+
+
+def test_run_rejects_existing_client_run_key_without_second_sdk_query(wm_paths, monkeypatch) -> None:
+    calls = 0
+
+    async def fake_query(*, prompt, options):
+        nonlocal calls
+        calls += 1
+        yield _result(result="first")
+
+    _patch_sdk(monkeypatch, fake_query)
+    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+    asyncio.run(service.run(prompt="first", agent_name="agent", run_key="existing_key"))
+
+    from agent_bridge.core.domain import ConflictError
+
+    try:
+        asyncio.run(service.run(prompt="second", agent_name="agent", run_key="existing_key"))
+    except ConflictError as exc:
+        assert str(exc) == "agent run key already exists"
+    else:
+        raise AssertionError("expected duplicate persisted client run key to conflict")
+
+    assert calls == 1
+    assert service.store.agent_runs.get("existing_key")["result"] == "first"
+
+
 def test_run_success_structured_result(wm_paths, monkeypatch) -> None:
     schema = {"type": "object", "properties": {"answer": {"type": "number"}}}
 

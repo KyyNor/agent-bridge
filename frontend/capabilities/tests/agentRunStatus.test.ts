@@ -30,4 +30,5 @@ test('agent run ok filter excludes running rows from failed filter', () => {
   assert.equal(agentRunStatusFilterParam('success'), undefined)
   assert.equal(agentRunStatusFilterParam('failed'), 'failed')
   assert.equal(agentRunStatusFilterParam('running'), 'running')
+  assert.equal(agentRunStatusFilterParam('stopped'), 'stopped')
 })

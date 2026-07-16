@@ -647,6 +647,9 @@ class WorkflowService:
             )
         )
 
+        registry = getattr(self.agent_service, "control_registry", None)
+        if registry is not None and registry.is_workflow_stop_requested(run_id):
+            return {"status": "stopped"}
         if not result.ok:
             raise ValidationError(f"html report agent failed: {result.error or 'unknown'}")
         payload = result.result or {}

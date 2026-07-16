@@ -973,6 +973,7 @@ class SQLiteStore:
         self,
         run_id: str,
         *,
+        expected_status: str = "running",
         status: str,
         exit_code: int | None,
         stdout_path: str | None,
@@ -982,6 +983,7 @@ class SQLiteStore:
     ) -> dict[str, Any]:
         return self.workflows.finish_workflow_run(
             run_id,
+            expected_status=expected_status,
             status=status,
             exit_code=exit_code,
             stdout_path=stdout_path,

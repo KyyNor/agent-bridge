@@ -31,6 +31,7 @@ export function countAgentRunTabs(baseline: AgentRun[] | AgentRunCounts, _active
       { key: 'running', label: '执行中', count: baseline.running },
       { key: 'success', label: '成功', count: baseline.success },
       { key: 'failed', label: '失败', count: baseline.failed },
+      { key: 'stopped', label: '已停止', count: baseline.stopped },
     ]
   }
   return [
@@ -38,5 +39,6 @@ export function countAgentRunTabs(baseline: AgentRun[] | AgentRunCounts, _active
     { key: 'running', label: '执行中', count: baseline.filter(row => row.status === 'running').length },
     { key: 'success', label: '成功', count: baseline.filter(row => agentRunBadgeVariant(row) === 'success').length },
     { key: 'failed', label: '失败', count: baseline.filter(row => agentRunBadgeVariant(row) === 'failed').length },
+    { key: 'stopped', label: '已停止', count: baseline.filter(row => agentRunBadgeVariant(row) === 'stopped').length },
   ]
 }
