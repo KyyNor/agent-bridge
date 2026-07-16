@@ -40,6 +40,7 @@ class WorkflowProcessResult:
     stdout_path: Path
     stderr_path: Path
     duration_ms: int
+    stopped: bool = False
 
 
 class WorkflowRunner(Protocol):
@@ -125,6 +126,7 @@ class ClaudeWorkflowRunner:
             stdout_path=stderr_path,  # raw messages now live in messages.jsonl; kept for compat
             stderr_path=stderr_path,
             duration_ms=int((time.monotonic() - started) * 1000),
+            stopped=bool(getattr(res, "stopped", False)),
         )
 
 

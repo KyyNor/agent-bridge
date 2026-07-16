@@ -358,6 +358,7 @@ class DesignAgentRequest(BaseModel):
     prompt: str
     current: dict[str, Any] = Field(default_factory=dict)
     profile_key: str | None = None
+    run_key: str | None = None
 
 
 class RuntimeWorkflowSetTaskRequest(BaseModel):

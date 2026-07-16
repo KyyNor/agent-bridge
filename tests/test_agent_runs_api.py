@@ -77,6 +77,50 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     assert missing.status_code == 404
 
 
+def test_agent_run_stop_api_handles_active_terminal_pending_and_missing(wm_paths) -> None:
+    client = _client(wm_paths)
+    svc = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="active_run",
+        agent_name="workflow",
+        status="running",
+        ok=False,
+        prompt="",
+    )
+    svc.store.agent_runs.create(
+        run_key="completed_run",
+        agent_name="workflow",
+        status="completed",
+        ok=True,
+        prompt="",
+        result={"ok": True},
+    )
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    active = client.post("/agent-runs/active_run/stop", headers=headers)
+    assert active.status_code == 202
+    assert active.json() == {"status": "stopping", "run_key": "active_run"}
+    assert svc.agents.control_registry.is_stop_requested("active_run") is True
+
+    repeated = client.post("/agent-runs/active_run/stop", headers=headers)
+    assert repeated.status_code == 202
+    assert repeated.json()["status"] == "stopping"
+
+    terminal = client.post("/agent-runs/completed_run/stop", headers=headers)
+    assert terminal.status_code == 200
+    assert terminal.json()["run_key"] == "completed_run"
+    assert terminal.json()["status"] == "completed"
+
+    svc.agents.request_stop("pending_run")
+    pending = client.post("/agent-runs/pending_run/stop", headers=headers)
+    assert pending.status_code == 202
+    assert pending.json() == {"status": "stopping", "run_key": "pending_run"}
+
+    missing = client.post("/agent-runs/missing_run/stop", headers=headers)
+    assert missing.status_code == 404
+
+
 def test_agent_runs_api_filters_by_workflow_run_id(wm_paths) -> None:
     """The workflow runner forwards workflow_key/run_id so each produced agent_runs
     row is lookable by workflow_run_id — the unified query path for run results."""

@@ -705,6 +705,34 @@ class WorkflowsRepository:
                     released += 1
         return {"released": released, "abandoned": abandoned}
 
+    def release_tasks_for_stopped_run(
+        self,
+        workflow_key: str,
+        run_id: str,
+        error_message: str,
+    ) -> int:
+        """Return tasks leased by a stopped run to the pending queue.
+
+        Stop is a user cancellation, not a failed attempt: the retry counter is
+        preserved and only the exact workflow/run lease is released.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET status = 'pending',
+                    lease_run_id = NULL,
+                    lease_expires_at = NULL,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE workflow_key = ?
+                  AND lease_run_id = ?
+                  AND status = 'running'
+                """,
+                (error_message, workflow_key, run_id),
+            )
+            return cursor.rowcount
+
     def force_workflow_task_lease_expiry(
         self,
         workflow_key: str,

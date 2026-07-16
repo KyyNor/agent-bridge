@@ -267,6 +267,50 @@ def test_workflow_task_lease_is_exclusive_and_expired_leases_are_reclaimed(wm_pa
     assert reclaimed["lease_run_id"] == "run_2"
 
 
+def test_release_tasks_for_stopped_run_is_exact_and_preserves_attempt_count(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    for workflow_key in ("workflow-a", "workflow-b"):
+        store.upsert_workflow_definition(
+            workflow_key=workflow_key,
+            name=workflow_key,
+            description="",
+            profile_key="report-plane",
+            workflow_js="",
+            status="active",
+            created_by="root",
+        )
+    store.upsert_workflow_tasks(
+        "workflow-a",
+        [{"task_key": "stopped", "payload": {}}, {"task_key": "other-run", "payload": {}}],
+    )
+    store.upsert_workflow_tasks("workflow-b", [{"task_key": "same-run-id", "payload": {}}])
+
+    stopped = store.lease_workflow_task("workflow-a", run_id="run_stopped", lease_seconds=7200)
+    other = store.lease_workflow_task("workflow-a", run_id="run_other", lease_seconds=7200)
+    cross_workflow = store.lease_workflow_task("workflow-b", run_id="run_stopped", lease_seconds=7200)
+    assert stopped["attempt_count"] == 1
+    assert other["lease_run_id"] == "run_other"
+    assert cross_workflow["lease_run_id"] == "run_stopped"
+
+    store.workflows.release_tasks_for_stopped_run(
+        "workflow-a", "run_stopped", "运行已由用户停止"
+    )
+
+    released = store.get_workflow_task("workflow-a", "stopped")
+    assert released["status"] == "pending"
+    assert released["lease_run_id"] is None
+    assert released["lease_expires_at"] is None
+    assert released["last_error"] == "运行已由用户停止"
+    assert released["attempt_count"] == 1
+    assert store.get_workflow_task("workflow-a", "other-run")["status"] == "running"
+    assert store.get_workflow_task("workflow-a", "other-run")["lease_run_id"] == "run_other"
+    assert store.get_workflow_task("workflow-b", "same-run-id")["status"] == "running"
+
+
 def test_workflow_task_lease_backfills_run_task_key(wm_paths):
     """Leasing a task stamps task_key onto the run's workflow_runs row.
 

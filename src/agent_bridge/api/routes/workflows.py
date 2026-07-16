@@ -65,6 +65,17 @@ def create_workflow_routes(service, actor):
         # /agent-runs (unified across all agent runs).
         return service.workflows.list_run_logs(current_actor, run_id)
 
+    @router.post("/workflow-runs/{run_id}/stop")
+    def stop_workflow_run(
+        run_id: str,
+        response: Response,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        result = service.workflow_scheduler.stop_workflow_run(run_id)
+        if result.get("status") == "stopping":
+            response.status_code = 202
+        return result
+
     @router.get("/workflow-artifacts")
     def search_artifacts(
         profile_key: str | None = None,

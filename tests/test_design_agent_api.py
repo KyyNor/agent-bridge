@@ -45,6 +45,7 @@ def test_workflow_design_agent_uses_design_workflow_skill(wm_paths) -> None:
             "mode": "modify",
             "prompt": "加一个清理输出的步骤",
             "profile_key": "report-plane",
+            "run_key": "design_workflow_fixed",
             "current": {"workflow_key": "page-report", "workflow_js": "old"},
         },
     )
@@ -53,6 +54,7 @@ def test_workflow_design_agent_uses_design_workflow_skill(wm_paths) -> None:
     assert response.json()["result"]["workflow"]["workflow_key"] == "page-report"
     assert captured["agent_name"] == "design_workflow"
     assert captured["profile"] == "report-plane"
+    assert captured["run_key"] == "design_workflow_fixed"
     assert "design_workflow 内容" in str(captured["prompt"])
     assert '"workflow_key": "page-report"' in str(captured["prompt"])
 
@@ -91,6 +93,7 @@ def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:
         json={
             "mode": "create",
             "prompt": "创建 echo 脚本",
+            "run_key": "design_script_fixed",
             "current": {"language": "python"},
         },
     )
@@ -98,5 +101,6 @@ def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:
     assert response.status_code == 200, response.text
     assert response.json()["result"]["script"]["script_key"] == "system.echo"
     assert captured["agent_name"] == "design_script"
+    assert captured["run_key"] == "design_script_fixed"
     assert "design_script 内容" in str(captured["prompt"])
     assert '"language": "python"' in str(captured["prompt"])

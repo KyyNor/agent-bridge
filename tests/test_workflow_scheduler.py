@@ -371,6 +371,148 @@ def test_run_workflow_now_bypasses_disabled_status(wm_paths, tmp_path):
     assert result["status"] == "started"
 
 
+def test_stopped_workflow_finishes_stopped_without_ingesting_and_releases_lease(wm_paths, tmp_path):
+    from agent_bridge.agent_runtime.service import STOPPED_ERROR
+    from agent_bridge.automation.workflows.runner import WorkflowProcessResult, prepare_run_directory
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _create_workflow(svc.store, "A")
+    svc.store.upsert_workflow_tasks("A", [{"task_key": "page:a", "payload": {}}])
+
+    class _StoppedRunner:
+        def run(self, base_dir, spec):
+            run_dir = prepare_run_directory(base_dir, spec)
+            leased = svc.store.lease_workflow_task(spec.workflow_key, run_id=spec.run_id, lease_seconds=7200)
+            assert leased is not None
+            return WorkflowProcessResult(
+                run_dir=run_dir,
+                exit_code=1,
+                stdout_path=run_dir / "stdout.log",
+                stderr_path=run_dir / "stderr.log",
+                duration_ms=1,
+                stopped=True,
+            )
+
+    def fail_ingest(**kwargs):
+        raise AssertionError("stopped workflows must not ingest result.json")
+
+    svc.workflows.ingest_parsed_result = fail_ingest
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        runner=_StoppedRunner(),
+        base_run_dir=tmp_path,
+    )
+
+    result = scheduler.run_one_workflow("A")
+
+    assert result["status"] == "stopped"
+    run = svc.store.get_workflow_run(result["run_id"])
+    assert run["status"] == "stopped"
+    task = svc.store.get_workflow_task("A", "page:a")
+    assert task["status"] == "pending"
+    assert task["attempt_count"] == 1
+    assert task["last_error"] == STOPPED_ERROR
+
+
+def test_stop_workflow_run_requests_parent_stop_and_finishes_stopped(wm_paths, tmp_path):
+    import threading
+
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runner import WorkflowProcessResult, prepare_run_directory
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _create_workflow(svc.store, "A")
+    entered = threading.Event()
+
+    class _ControlledRunner:
+        def run(self, base_dir, spec):
+            run_dir = prepare_run_directory(base_dir, spec)
+            entered.set()
+            while not svc.agents.control_registry.is_workflow_stop_requested(spec.run_id):
+                threading.Event().wait(0.01)
+            return WorkflowProcessResult(
+                run_dir=run_dir,
+                exit_code=1,
+                stdout_path=run_dir / "stdout.log",
+                stderr_path=run_dir / "stderr.log",
+                duration_ms=1,
+                stopped=True,
+            )
+
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        agent_service=svc.agents,
+        runner=_ControlledRunner(),
+        base_run_dir=tmp_path,
+    )
+    started = scheduler.run_workflow_now("A")
+    assert entered.wait(2)
+
+    stopping = scheduler.stop_workflow_run(started["run_id"])
+    assert stopping == {"status": "stopping", "run_id": started["run_id"]}
+    assert scheduler.stop_workflow_run(started["run_id"])["status"] == "stopping"
+
+    _wait_runs_done(scheduler)
+    run = svc.store.get_workflow_run(started["run_id"])
+    assert run["status"] == "stopped"
+    assert not svc.agents.control_registry.is_workflow_stop_requested(started["run_id"])
+
+
+def test_stop_workflow_run_is_idempotent_for_terminal_run_and_conflicts_without_controller(wm_paths, tmp_path):
+    import pytest
+
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.core.domain import ConflictError, NotFound
+    from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _create_workflow(svc.store, "A")
+    completed = svc.store.create_workflow_run(
+        run_id="run_completed",
+        workflow_key="A",
+        profile_key="report-plane",
+        task_key=None,
+        status="completed",
+        temp_dir="",
+    )
+    running = svc.store.create_workflow_run(
+        run_id="run_without_controller",
+        workflow_key="A",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir="",
+    )
+    scheduler = WorkflowScheduler(
+        service=svc.workflows,
+        store=svc.store,
+        admins={"root"},
+        agent_service=svc.agents,
+        runner=None,
+        base_run_dir=tmp_path,
+    )
+
+    assert scheduler.stop_workflow_run("run_completed") == completed
+    with pytest.raises(ConflictError):
+        scheduler.stop_workflow_run("run_without_controller")
+    assert svc.store.get_workflow_run("run_without_controller") == running
+    with pytest.raises(NotFound):
+        scheduler.stop_workflow_run("run_missing")
+
+
 class _AlwaysFailingRunner:
     """Runner that always raises. The run row lands as 'failed' and the workflow
     never enters finished_today (only a no_task result does), so it can be

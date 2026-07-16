@@ -12,6 +12,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from agent_bridge.core.domain import ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
+from agent_bridge.agent_runtime.service import STOPPED_ERROR
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.result_parser import parse_workflow_result
 from agent_bridge.automation.workflows.runner import ClaudeWorkflowRunner, WorkflowRunner, WorkflowRunSpec
@@ -270,8 +271,23 @@ class WorkflowScheduler:
         except Exception:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
         finally:
+            if run_id is not None:
+                self._finish_workflow_control(run_id)
             with self._lock:
                 self._running.discard(workflow_key)
+
+    def stop_workflow_run(self, run_id: str) -> dict[str, Any]:
+        run = self._store.get_workflow_run(run_id)
+        if run is None:
+            raise NotFound("workflow run not found")
+        if run.get("status") != "running":
+            return run
+
+        registry = self._control_registry()
+        if registry is None or not self._workflow_control_exists(registry, run_id):
+            raise ConflictError("workflow run controller is not available")
+        registry.request_workflow_stop(run_id)
+        return {"status": "stopping", "run_id": run_id}
 
     def run_workflow_now(self, workflow_key: str) -> dict[str, Any]:
         """Launch a single on-demand run immediately — a "test run".
@@ -297,6 +313,7 @@ class WorkflowScheduler:
                 status="running",
                 temp_dir=str(base_dir / run_id),
             )
+            self._register_workflow_control(run_id)
             self._running.add(workflow_key)
         logger.info(
             "Workflow 即时测试 run 启动 workflow=%s run=%s profile=%s",
@@ -333,6 +350,7 @@ class WorkflowScheduler:
                 status="running",
                 temp_dir=str(base_dir / run_id),
             )
+        self._register_workflow_control(run_id)
         logger.info(
             "Workflow run 开始执行 workflow=%s run=%s profile=%s",
             workflow_key,
@@ -352,6 +370,8 @@ class WorkflowScheduler:
                     timeout_seconds=self._max_runtime_minutes * 60 or None,
                 ),
             )
+            if process_result.stopped:
+                return self._finish_stopped(workflow_key, run_id, process_result)
             if process_result.exit_code != 0:
                 logger.error(
                     "Workflow runner 退出非零 workflow=%s run=%s exit_code=%d",
@@ -408,6 +428,8 @@ class WorkflowScheduler:
             )
             self._release_leased_tasks(workflow_key, run_id, str(exc))
             return {"status": "failed", "error": str(exc)}
+        finally:
+            self._finish_workflow_control(run_id)
 
     def _release_leased_tasks(self, workflow_key: str, run_id: str, error: str) -> None:
         """On a failed run, release the task it leased for fast retry, or
@@ -422,6 +444,47 @@ class WorkflowScheduler:
         except Exception:
             logger.exception("释放工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
 
+    def _control_registry(self) -> Any | None:
+        return getattr(self._agent_service, "control_registry", None)
+
+    def _register_workflow_control(self, run_id: str) -> None:
+        registry = self._control_registry()
+        if registry is not None:
+            registry.register_workflow(run_id)
+
+    def _finish_workflow_control(self, run_id: str) -> None:
+        registry = self._control_registry()
+        if registry is not None:
+            registry.finish_workflow(run_id)
+
+    @staticmethod
+    def _workflow_control_exists(registry: Any, run_id: str) -> bool:
+        is_active = getattr(registry, "is_workflow_active", None)
+        if callable(is_active):
+            return bool(is_active(run_id))
+        controls = getattr(registry, "_workflows", None)
+        return isinstance(controls, dict) and run_id in controls
+
+    def _finish_stopped(self, workflow_key: str, run_id: str, result: Any) -> dict[str, Any]:
+        self._store.finish_workflow_run(
+            run_id,
+            status="stopped",
+            exit_code=result.exit_code,
+            stdout_path=str(result.stdout_path),
+            stderr_path=str(result.stderr_path),
+            error=STOPPED_ERROR,
+            duration_ms=result.duration_ms,
+        )
+        try:
+            self._store.workflows.release_tasks_for_stopped_run(
+                workflow_key,
+                run_id,
+                STOPPED_ERROR,
+            )
+        except Exception:
+            logger.exception("释放已停止工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
+        return {"status": "stopped", "run_id": run_id}
+
     def _maybe_generate_html_report(
         self,
         workflow_key: str,
@@ -434,6 +497,8 @@ class WorkflowScheduler:
         main workflow run stays completed. Uses an admin actor so the reporter
         agent can call ``load_skill``.
         """
+        if self._control_registry() is not None and self._control_registry().is_workflow_stop_requested(run_id):
+            return
         if (workflow.get("workflow_type") or "operation") != "summary":
             return
         actor = sorted(self._admins)[0] if self._admins else "root"
@@ -444,6 +509,8 @@ class WorkflowScheduler:
                 run_id=run_id,
                 actor=actor,
             )
+            if self._control_registry() is not None and self._control_registry().is_workflow_stop_requested(run_id):
+                return
             status = outcome.get("status")
             if status == "generated":
                 self._store.append_workflow_run_log(

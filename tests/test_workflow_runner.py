@@ -286,3 +286,25 @@ def test_runner_forwards_timeout_seconds_to_agent_service(tmp_path):
     # looked up via ``?workflow_run_id=`` / ``?workflow_key=``.
     assert captured["workflow_key"] == "github-summary"
     assert captured["run_id"] == "run_t"
+
+
+def test_claude_runner_propagates_stopped_agent_result(tmp_path):
+    from agent_bridge.agent_runtime.service import AgentRunResult
+    from agent_bridge.automation.workflows.runner import ClaudeWorkflowRunner, WorkflowRunSpec
+
+    class _FakeAgentService:
+        async def run(self, **kwargs):
+            return AgentRunResult(ok=False, stopped=True, error="运行已由用户停止")
+
+    result = ClaudeWorkflowRunner(agent_service=_FakeAgentService()).run(
+        tmp_path,
+        WorkflowRunSpec(
+            run_id="run_stopped",
+            workflow_key="page-report",
+            profile_key="report-plane",
+            workflow_js="",
+            mcp_url="http://127.0.0.1:8765/mcp",
+        ),
+    )
+
+    assert result.stopped is True

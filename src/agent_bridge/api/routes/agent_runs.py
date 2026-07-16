@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from agent_bridge.api.schemas import DesignAgentRequest
 from agent_bridge.core.domain import NotFound, require_admin_user
@@ -156,6 +156,21 @@ def create_agent_runs_routes(service, actor):
                 return events
         return row.get("events") or []
 
+    @router.post("/agent-runs/{run_key}/stop")
+    def stop_agent_run(
+        run_key: str,
+        response: Response,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        row = service.store.agent_runs.get(run_key)
+        if row is not None and row.get("status") != "running":
+            return row
+        if row is None and not service.agents.has_pending_control(run_key):
+            raise NotFound("agent run not found")
+        service.agents.request_stop(run_key)
+        response.status_code = 202
+        return {"status": "stopping", "run_key": run_key}
+
     @router.get("/agent-runs/{run_key}/subagent-detail")
     def get_agent_run_subagent_detail(
         run_key: str,
@@ -197,6 +212,7 @@ def create_agent_runs_routes(service, actor):
             profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
             output_schema=WORKFLOW_DESIGN_SCHEMA,
             actor=current_actor,
+            run_key=payload.run_key,
             timeout=900,
         )
         return _design_response(service, result)
@@ -219,6 +235,7 @@ def create_agent_runs_routes(service, actor):
             profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
             output_schema=SCRIPT_DESIGN_SCHEMA,
             actor=current_actor,
+            run_key=payload.run_key,
             timeout=900,
         )
         return _design_response(service, result)

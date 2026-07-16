@@ -855,6 +855,60 @@ def test_workflow_api_get_run_404_for_unknown(wm_paths):
     assert response.status_code == 404
 
 
+def test_workflow_api_stop_run_maps_stopping_terminal_and_conflict(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    svc.store.create_workflow_run(
+        run_id="run_api_stop",
+        workflow_key="page-report",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir="",
+    )
+    svc.agents.control_registry.register_workflow("run_api_stop")
+    svc.store.create_workflow_run(
+        run_id="run_api_completed",
+        workflow_key="page-report",
+        profile_key="report-plane",
+        task_key=None,
+        status="completed",
+        temp_dir="",
+    )
+    svc.store.create_workflow_run(
+        run_id="run_api_conflict",
+        workflow_key="page-report",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir="",
+    )
+
+    app = create_app(wm_paths, {"root"})
+    app.state.agent_bridge_service.agents.control_registry.register_workflow("run_api_stop")
+    client = TestClient(app)
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    stopping = client.post("/workflow-runs/run_api_stop/stop", headers=headers)
+    assert stopping.status_code == 202
+    assert stopping.json() == {"status": "stopping", "run_id": "run_api_stop"}
+    assert client.post("/workflow-runs/run_api_stop/stop", headers=headers).status_code == 202
+
+    terminal = client.post("/workflow-runs/run_api_completed/stop", headers=headers)
+    assert terminal.status_code == 200
+    assert terminal.json()["status"] == "completed"
+
+    conflict = client.post("/workflow-runs/run_api_conflict/stop", headers=headers)
+    assert conflict.status_code == 409
+    missing = client.post("/workflow-runs/run_api_missing/stop", headers=headers)
+    assert missing.status_code == 404
+
+
 def test_workflow_api_returns_run_events_from_run_directory(wm_paths, tmp_path):
     # The /workflow-runs/{run_id}/events endpoint was removed — agent execution
     # events are now unified under /agent-runs (persisted in the agent_runs
