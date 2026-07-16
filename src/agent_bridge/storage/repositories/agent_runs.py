@@ -97,17 +97,17 @@ class AgentRunsRepository:
         result: Any | None = None,
         events: list[dict[str, Any]] | None = None,
         finished_at: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Backfill a run's outcome. Used when a placeholder ``running`` row was
         created at start and the run has now reached a terminal state."""
         with self._connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE agent_runs SET
                   ok = ?, status = ?, error = ?, session_id = ?, model = COALESCE(?, model),
                   duration_ms = ?, cost_usd = ?, num_turns = ?,
                   result_json = ?, events_json = ?, finished_at = ?
-                WHERE run_key = ?
+                WHERE run_key = ? AND status = 'running'
                 """,
                 (
                     1 if ok else 0,
@@ -124,6 +124,7 @@ class AgentRunsRepository:
                     run_key,
                 ),
             )
+            return bool(cursor.rowcount)
 
     def get(self, run_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:

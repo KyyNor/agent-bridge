@@ -22,6 +22,7 @@ from typing import Any, Callable
 from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
 from claude_agent_sdk.types import ResultMessage
 
+from agent_bridge.agent_runtime.control import RunControlRegistry
 from agent_bridge.agent_runtime.events import (
     Attribution,
     event_record,
@@ -39,6 +40,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MCP_URL = "http://127.0.0.1:8765/mcp"
 DEFAULT_TIMEOUT_SECONDS = 600.0
+STOPPED_ERROR = "运行已由用户停止"
+
+
+class AgentRunStopped(Exception):
+    """Internal signal used to distinguish user cancellation from failures."""
 
 
 @dataclass
@@ -51,6 +57,7 @@ class AgentRunResult:
     """
 
     ok: bool
+    stopped: bool = False
     result: Any | None = None
     error: str | None = None
     run_dir: str = ""
@@ -79,6 +86,7 @@ class AgentService:
         self.governance = governance
         self.mcp_url = mcp_url or DEFAULT_MCP_URL
         self.base_run_dir: Path = paths.run_dir / "agent-runs"
+        self.control_registry = RunControlRegistry()
 
     async def run(
         self,
@@ -103,6 +111,7 @@ class AgentService:
         max_turns: int | None = None,
         max_budget_usd: float | None = None,
         timeout: float | None = None,
+        run_key: str | None = None,
     ) -> AgentRunResult:
         """Run a one-shot Claude agent query and return a uniform result.
 
@@ -145,14 +154,16 @@ class AgentService:
 
         # Reserve the agent_runs row up front (status=running) so the run is
         # observable while in flight, and capture its run_key for the caller.
-        run_key = new_run_id(agent_name or "agent")
+        run_key = run_key or new_run_id(agent_name or "agent")
+        workflow_run_id = run_id if workflow_key else None
+        control = self.control_registry.register(run_key, workflow_run_id=workflow_run_id)
         try:
             self.store.agent_runs.create(
                 run_key=run_key,
                 agent_name=agent_name or "agent",
                 profile_key=profile,
                 workflow_key=workflow_key or None,
-                workflow_run_id=run_id if workflow_key else None,
+                workflow_run_id=workflow_run_id,
                 cwd=None,  # backfilled below once the work dir is known
                 model=model,
                 status="running",
@@ -213,10 +224,27 @@ class AgentService:
                 max_turns=max_turns,
                 max_budget_usd=max_budget_usd,
             )
-            result_msg = await asyncio.wait_for(
-                self._drain_query(prompt, options, work_dir, on_message, events, tool_names, attribution),
-                timeout=timeout_seconds,
+            if self.control_registry.is_stop_requested(run_key):
+                raise AgentRunStopped
+            result_msg = await self._drain_query_with_control(
+                prompt,
+                options,
+                work_dir,
+                on_message,
+                events,
+                tool_names,
+                attribution,
+                control.stop_requested,
+                timeout_seconds,
             )
+        except AgentRunStopped:
+            error = STOPPED_ERROR
+            stopped_event = event_record("status", status="stopped", message=STOPPED_ERROR)
+            error_event = event_record("error", status="stopped", message=STOPPED_ERROR)
+            events.extend((stopped_event, error_event))
+            self._append_live_event(work_dir, stopped_event)
+            self._append_live_event(work_dir, error_event)
+            logger.info("Agent run 已由用户停止 agent=%s", agent_name or "agent")
         except TimeoutError:
             error = f"agent timed out after {timeout_seconds}s"
             logger.warning("Agent run 超时 agent=%s 超时=%ss", agent_name or "agent", timeout_seconds)
@@ -230,7 +258,14 @@ class AgentService:
             events.append(error_event)
             self._append_live_event(work_dir, error_event)
 
-        result = self._build_result(work_dir, started, result_msg, output_schema, error)
+        result = self._build_result(
+            work_dir,
+            started,
+            result_msg,
+            output_schema,
+            error,
+            stopped=error == STOPPED_ERROR,
+        )
         result.run_key = run_key
         logger.info(
             "Agent run 完成 agent=%s 成功=%s 耗时=%dms",
@@ -238,13 +273,79 @@ class AgentService:
             result.ok,
             result.duration_ms,
         )
-        self._finish_run(
-            run_key=run_key,
-            started_iso=started_iso,
-            result=result,
-            events=events,
-        )
+        try:
+            self._finish_run(
+                run_key=run_key,
+                started_iso=started_iso,
+                result=result,
+                events=events,
+            )
+        finally:
+            self.control_registry.finish(run_key)
         return result
+
+    def request_stop(self, run_key: str) -> bool:
+        """Request cancellation of an active or not-yet-registered run."""
+        return self.control_registry.request_stop(run_key)
+
+    def has_pending_control(self, run_key: str) -> bool:
+        """Expose pre-registration stop tombstones for the future stop API."""
+        return self.control_registry.has_pending_control(run_key)
+
+    async def _drain_query_with_control(
+        self,
+        prompt: str,
+        options: Any,
+        work_dir: Path | None,
+        on_message: Callable[[Any], None] | None,
+        events: list[dict[str, Any]],
+        tool_names: dict[str, str],
+        attribution: Attribution,
+        stop_requested: Any,
+        timeout: float,
+    ) -> ResultMessage | None:
+        if stop_requested.is_set():
+            raise AgentRunStopped
+
+        query_task = asyncio.create_task(
+            self._drain_query(
+                prompt,
+                options,
+                work_dir,
+                on_message,
+                events,
+                tool_names,
+                attribution,
+            )
+        )
+        stop_task = asyncio.create_task(_wait_for_thread_event(stop_requested))
+        try:
+            done, _ = await asyncio.wait(
+                {query_task, stop_task},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if stop_task in done:
+                query_task.cancel()
+                await _await_cancelled_query(query_task)
+                raise AgentRunStopped
+            if query_task in done:
+                stop_task.cancel()
+                await _await_cancelled_query(stop_task)
+                return query_task.result()
+
+            query_task.cancel()
+            stop_task.cancel()
+            await _await_cancelled_query(query_task)
+            await _await_cancelled_query(stop_task)
+            raise TimeoutError(f"agent timed out after {timeout}s")
+        finally:
+            if not query_task.done():
+                query_task.cancel()
+                await _await_cancelled_query(query_task)
+            if not stop_task.done():
+                stop_task.cancel()
+                await _await_cancelled_query(stop_task)
 
     async def _drain_query(
         self,
@@ -302,16 +403,23 @@ class AgentService:
         result_msg: ResultMessage | None,
         output_schema: dict[str, Any] | None,
         error: str | None,
+        *,
+        stopped: bool = False,
     ) -> AgentRunResult:
         duration_ms = int((time.monotonic() - started) * 1000)
         run_dir = str(work_dir) if work_dir else ""
         if error is not None:
             return AgentRunResult(
-                ok=False, error=error, run_dir=run_dir, duration_ms=duration_ms
+                ok=False,
+                stopped=stopped,
+                error=error,
+                run_dir=run_dir,
+                duration_ms=duration_ms,
             )
         if result_msg is None:
             return AgentRunResult(
                 ok=False,
+                stopped=stopped,
                 error="agent produced no result message",
                 run_dir=run_dir,
                 duration_ms=duration_ms,
@@ -325,10 +433,10 @@ class AgentService:
         }
         if result_msg.is_error:
             return AgentRunResult(
-                ok=False, error=result_msg.result or result_msg.subtype, **meta
+                ok=False, stopped=stopped, error=result_msg.result or result_msg.subtype, **meta
             )
         return AgentRunResult(
-            ok=True, result=_extract_result(result_msg, output_schema), **meta
+            ok=True, stopped=stopped, result=_extract_result(result_msg, output_schema), **meta
         )
 
     def _record_cwd(self, run_key: str, work_dir: Path | None) -> None:
@@ -357,15 +465,15 @@ class AgentService:
         started_iso: str,
         result: AgentRunResult,
         events: list[dict[str, Any]],
-    ) -> None:
+    ) -> bool:
         """Update the placeholder row with the run's terminal outcome.
 
         Logging failures never break the run. Status maps from the result:
-        success -> completed, failure -> failed."""
-        status = "completed" if result.ok else "failed"
+        success -> completed, stopped -> stopped, failure -> failed."""
+        status = "stopped" if result.stopped else ("completed" if result.ok else "failed")
         finished_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         try:
-            self.store.agent_runs.finish_run(
+            return self.store.agent_runs.finish_run(
                 run_key,
                 ok=result.ok,
                 status=status,
@@ -381,6 +489,7 @@ class AgentService:
             )
         except Exception:
             logger.error("Agent run 结果回填失败 run_key=%s", run_key, exc_info=True)
+            return False
 
     def _make_work_dir(self, agent_name: str) -> Path:
         work_dir = self.base_run_dir / new_run_id(agent_name)
@@ -417,6 +526,20 @@ class AgentService:
         for admin in sorted(self.admins):
             return admin
         return "root"
+
+
+async def _wait_for_thread_event(stop_requested: Any) -> None:
+    """Poll a threading.Event without blocking the event loop."""
+    while not stop_requested.is_set():
+        await asyncio.sleep(0.05)
+
+
+async def _await_cancelled_query(task: asyncio.Task[Any]) -> None:
+    """Wait for a cancelled query/watcher and consume its cancellation."""
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 def _extract_result(result_msg: ResultMessage, output_schema: dict[str, Any] | None) -> Any:

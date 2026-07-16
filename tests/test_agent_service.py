@@ -196,6 +196,84 @@ def test_run_timeout(wm_paths, monkeypatch) -> None:
     assert "timed out" in res.error
 
 
+def test_run_stop_cancels_query_and_persists_stopped(wm_paths, monkeypatch) -> None:
+    entered = asyncio.Event()
+
+    async def fake_query(*, prompt, options):
+        entered.set()
+        await asyncio.sleep(10)
+        if False:
+            yield _result()
+
+    _patch_sdk(monkeypatch, fake_query)
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    run_key = "design_script_client_stop"
+
+    async def run_and_stop():
+        task = asyncio.create_task(
+            bundle.agents.run(prompt="long", agent_name="design_script", run_key=run_key)
+        )
+        await entered.wait()
+        assert bundle.agents.request_stop(run_key) is True
+        return await task
+
+    result = asyncio.run(run_and_stop())
+
+    assert result.ok is False
+    assert result.stopped is True
+    assert result.error == "运行已由用户停止"
+    assert bundle.store.agent_runs.get(run_key)["status"] == "stopped"
+    assert bundle.agents.control_registry.is_active(run_key) is False
+    events = bundle.store.agent_runs.get(run_key)["events"]
+    assert any(event["kind"] == "status" and event["status"] == "stopped" for event in events)
+    assert any(event["kind"] == "error" and event["message"] == "运行已由用户停止" for event in events)
+
+
+def test_run_stop_requested_before_query_does_not_call_sdk(wm_paths, monkeypatch) -> None:
+    called = False
+
+    async def fake_query(*, prompt, options):
+        nonlocal called
+        called = True
+        yield _result()
+
+    _patch_sdk(monkeypatch, fake_query)
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    run_key = "workflow_design_stop_before_start"
+    assert bundle.agents.request_stop(run_key) is True
+
+    result = asyncio.run(
+        bundle.agents.run(prompt="cancel", agent_name="workflow", run_key=run_key)
+    )
+
+    assert result.stopped is True
+    assert called is False
+    assert bundle.store.agent_runs.get(run_key)["status"] == "stopped"
+
+
+def test_agent_run_finish_only_updates_running_row(wm_paths) -> None:
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    bundle.store.agent_runs.create(
+        run_key="already_done",
+        agent_name="agent",
+        status="completed",
+        ok=True,
+        prompt="done",
+    )
+
+    updated = bundle.store.agent_runs.finish_run(
+        "already_done",
+        ok=False,
+        status="stopped",
+        error="运行已由用户停止",
+    )
+
+    assert updated is False
+    row = bundle.store.agent_runs.get("already_done")
+    assert row["status"] == "completed"
+    assert row["ok"] is True
+
+
 def test_run_copies_files_into_work_dir(wm_paths, monkeypatch, tmp_path) -> None:
     src = tmp_path / "data.txt"
     src.write_text("payload", encoding="utf-8")
