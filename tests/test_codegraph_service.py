@@ -32,6 +32,7 @@ def _commit_file(repo: Path, path: str, content: str, message: str) -> str:
     return result.stdout.strip()
 
 
+@pytest.mark.codegraph_cli
 def test_codegraph_register_sync_and_search(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)
@@ -120,6 +121,7 @@ def test_codegraph_sync_fails_for_missing_branch(tmp_path: Path, wm_paths: Agent
     assert "does-not-exist" in saved["last_error"]
 
 
+@pytest.mark.codegraph_cli
 def test_codegraph_sync_advances_existing_clone(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     store = SQLiteStore(wm_paths.db_path)
@@ -224,6 +226,7 @@ def test_dashboard_repo_by_token_matches_running_dashboard_url(
     assert service.dashboard_repo_by_token("missing-token") is None
 
 
+@pytest.mark.codegraph_cli
 def test_codegraph_index_skips_symlinks(tmp_path: Path, wm_paths: AgentBridgePaths) -> None:
     repo = _git_repo(tmp_path / "repo")
     external = tmp_path / "external.txt"

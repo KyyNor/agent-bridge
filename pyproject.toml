@@ -26,6 +26,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.0",
+    "pytest-xdist>=3.8.0",
     "respx>=0.23.1",
 ]
 
@@ -35,6 +36,9 @@ agb = "agent_bridge.cli:main"
 
 [tool.pytest.ini_options]
 markers = [
+    "e2e: end-to-end flows covering multiple application components",
+    "codegraph_cli: tests requiring the real CodeGraph CLI and repository indexing",
+    "process: tests that start or communicate with a real local server process",
     "ragflow: integration tests requiring a live RagFlow server",
     "weknora: integration tests requiring a live Weknora server",
 ]
