@@ -76,6 +76,7 @@ import type {
   ManagedScript,
   ScriptRun,
   ScriptRunListResult,
+  RunStopResponse,
   UploadProgressCallback,
 } from './types'
 
@@ -394,6 +395,8 @@ export const api = {
     )
   },
   getWorkflowRun: (runId: string) => get<WorkflowRun>(`/workflow-runs/${runId}`),
+  stopWorkflowRun: (runId: string) =>
+    post<RunStopResponse>(`/workflow-runs/${encodeURIComponent(runId)}/stop`),
 
   // Logs
   listLogs: (params: Record<string, string | number> = {}) => {
@@ -424,6 +427,8 @@ export const api = {
     return get<AgentRunPage>(`/agent-runs?${qs}`)
   },
   getAgentRun: (runKey: string) => get<AgentRun>(`/agent-runs/${runKey}`),
+  stopAgentRun: (runKey: string) =>
+    post<RunStopResponse>(`/agent-runs/${encodeURIComponent(runKey)}/stop`),
   /** Live event stream for an agent run (reads events.jsonl in real time,
    *  falls back to persisted DB events for historical runs). */
   getAgentRunEvents: (runKey: string) => get<WorkflowRunEvent[]>(`/agent-runs/${runKey}/events`),
@@ -449,9 +454,9 @@ export const api = {
     const rows = await get<AgentRun[]>(`/agent-runs?workflow_run_id=${encodeURIComponent(workflowRunId)}&limit=50`)
     return rows
   },
-  designWorkflow: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
+  designWorkflow: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
     post<DesignAgentResponse<WorkflowDesignResult>>('/agent-runs/design/workflow', body),
-  designScript: (body: { mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
+  designScript: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
     post<DesignAgentResponse<ScriptDesignResult>>('/agent-runs/design/script', body),
 
   // Catalog

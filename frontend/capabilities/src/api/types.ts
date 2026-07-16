@@ -247,7 +247,7 @@ export interface WorkflowRun {
   workflow_key: string
   profile_key: string
   task_key: string | null
-  status: string
+  status: 'running' | 'completed' | 'no_task' | 'failed' | 'stopped' | string
   temp_dir: string
   exit_code: number | null
   stdout_path: string | null
@@ -540,7 +540,7 @@ export interface AgentRun {
   cwd: string | null
   model: string | null
   ok: boolean
-  status?: 'running' | 'completed' | 'failed' | string
+  status?: 'running' | 'completed' | 'failed' | 'stopped' | string
   error: string | null
   duration_ms: number | null
   cost_usd: number | null
@@ -554,6 +554,12 @@ export interface AgentRun {
   // produced by agent_runtime/events.py); the unified WorkflowRunEvent type is
   // the canonical one. Sub-agent fields are simply absent for plain agent runs.
   events?: WorkflowRunEvent[]
+}
+
+export interface RunStopResponse {
+  status: string
+  run_key?: string
+  run_id?: string
 }
 
 export interface AgentRunCounts {

@@ -15,6 +15,13 @@ test('agent run status distinguishes running from failed even when ok is false',
   assert.equal(agentRunBadgeVariant(running), 'running')
 })
 
+test('agent run status labels stopped runs and uses a stopped badge', () => {
+  const stopped = { ok: false, status: 'stopped' }
+
+  assert.equal(agentRunStatusLabel(stopped), '已停止')
+  assert.equal(agentRunBadgeVariant(stopped), 'stopped')
+})
+
 test('agent run ok filter excludes running rows from failed filter', () => {
   assert.equal(agentRunOkFilterParam(''), undefined)
   assert.equal(agentRunOkFilterParam('success'), true)

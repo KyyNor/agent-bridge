@@ -114,7 +114,7 @@ export function togglePageTaskSelection(selected: Set<string>, tasks: WorkflowTa
 
 export interface WorkflowTaskQueueOutcome {
   task: WorkflowTask
-  status: 'success' | 'failed' | 'skipped'
+  status: 'success' | 'failed' | 'skipped' | 'stopped'
   run?: WorkflowRun
   error?: string
 }
@@ -137,6 +137,8 @@ export interface WorkflowTaskQueueOptions {
   onRunUpdate?: (task: WorkflowTask, run: WorkflowRun) => void | Promise<void>
   onTaskFinish?: (outcome: WorkflowTaskQueueOutcome) => void | Promise<void>
   isCancelled?: () => boolean
+  /** Stop a run that was created after the caller cancelled the queue. */
+  stopRun?: (runId: string) => void | Promise<void>
   /** Return true for errors that should stop the page-local queue. */
   shouldStopOnError?: (error: unknown) => boolean
 }
@@ -173,11 +175,25 @@ export async function runWorkflowTaskQueue(
         await options.onTaskFinish?.(outcome)
         continue
       }
+      if (options.isCancelled?.()) {
+        try {
+          await options.stopRun?.(started.run_id)
+        } catch {
+          // Keep polling until the backend reports a terminal state even if
+          // the stop request itself fails transiently.
+        }
+      }
       await options.onRunStart?.(task, started.run_id)
       const run = await options.waitForRun(
         started.run_id,
         currentRun => options.onRunUpdate?.(task, currentRun),
       )
+      if (run.status === 'stopped') {
+        const outcome = { task, status: 'stopped' as const, run, error: run.error || undefined }
+        outcomes.push(outcome)
+        await options.onTaskFinish?.(outcome)
+        return { outcomes, stopped: true, remaining: tasks.slice(index + 1) }
+      }
       const status: WorkflowTaskQueueOutcome['status'] = run.status === 'completed' || run.status === 'no_task'
         ? 'success'
         : 'failed'

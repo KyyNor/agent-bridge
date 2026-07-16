@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { api } from '../api/client'
 import type { AgentRun } from '../api/types'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -11,15 +13,60 @@ const props = withDefaults(defineProps<{
   agentRunsLoading: boolean
   detailError?: string
   sticky?: boolean
+  workflowRunId?: string
+  workflowRunStatus?: string
 }>(), {
   detailError: '',
   sticky: true,
+  workflowRunId: '',
+  workflowRunStatus: '',
 })
 
 const emit = defineEmits<{
   (event: 'select-agent-run', runKey: string): void
   (event: 'refresh'): void
 }>()
+
+const stopRequested = ref(false)
+const stopError = ref('')
+const terminalWorkflowStatuses = ['completed', 'no_task', 'failed', 'stopped']
+const workflowRunCanStop = computed(() => Boolean(
+  props.workflowRunId
+  && !stopRequested.value
+  && props.workflowRunStatus !== 'stopping'
+  && !terminalWorkflowStatuses.includes(props.workflowRunStatus),
+))
+const workflowRunStopping = computed(() => stopRequested.value || props.workflowRunStatus === 'stopping')
+
+watch(() => props.workflowRunId, () => {
+  stopRequested.value = false
+  stopError.value = ''
+})
+
+watch(() => props.workflowRunStatus, status => {
+  if (terminalWorkflowStatuses.includes(status)) {
+    stopRequested.value = false
+    stopError.value = ''
+  }
+})
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '未知错误'
+}
+
+async function stopWorkflowRun() {
+  const runId = props.workflowRunId
+  if (!runId || !workflowRunCanStop.value) return
+  stopRequested.value = true
+  stopError.value = ''
+  try {
+    await api.stopWorkflowRun(runId)
+    emit('refresh')
+  } catch (error: unknown) {
+    stopRequested.value = false
+    stopError.value = errorMessage(error)
+  }
+}
 
 function agentRunLabel(run: AgentRun) {
   if (run.agent_name === 'workflow') return 'Workflow Agent'
@@ -59,8 +106,21 @@ function agentRunLabel(run: AgentRun) {
       >
         {{ props.eventsLoading || props.agentRunsLoading ? '刷新中' : '刷新' }}
       </Button>
+      <Button
+        v-if="props.workflowRunId && !terminalWorkflowStatuses.includes(props.workflowRunStatus)"
+        variant="outline"
+        size="sm"
+        class="text-destructive"
+        :disabled="!workflowRunCanStop"
+        @click="stopWorkflowRun"
+      >
+        {{ workflowRunStopping ? '停止中' : '立即停止' }}
+      </Button>
     </div>
 
+    <div v-if="stopError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+      停止失败：{{ stopError }}
+    </div>
     <div v-if="props.detailError" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
       事件刷新暂时不可用，批量运行仍会继续：{{ props.detailError }}
     </div>

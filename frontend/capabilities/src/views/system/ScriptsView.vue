@@ -61,6 +61,8 @@ const designPrompt = ref('')
 const designing = ref(false)
 const designError = ref('')
 const designResponse = ref<DesignAgentResponse<ScriptDesignResult> | null>(null)
+const designRunKey = ref('')
+const designStopRequested = ref(false)
 
 const mode = computed<'list' | 'edit'>(() => (props.routeKey ? 'edit' : 'list'))
 const isNew = computed(() => props.routeKey === 'new')
@@ -221,6 +223,13 @@ function openScriptDesigner(mode: 'create' | 'modify' = 'modify') {
   designError.value = ''
 }
 
+function createDesignRunKey() {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `design-script-${suffix}`
+}
+
 function scriptDesignerCurrent() {
   if (designMode.value === 'modify') {
     return {
@@ -248,25 +257,50 @@ async function runScriptDesigner() {
     designError.value = '请输入提示词'
     return
   }
+  const runKey = createDesignRunKey()
+  designRunKey.value = runKey
+  designStopRequested.value = false
+  designResponse.value = null
   designing.value = true
   try {
-    designResponse.value = await api.designScript({
+    const response = await api.designScript({
+      run_key: runKey,
       mode: designMode.value,
       prompt: designPrompt.value,
       current: scriptDesignerCurrent(),
       profile_key: form.value.owner_type === 'profile' ? form.value.owner_key : undefined,
     })
+    if (designRunKey.value !== runKey || designStopRequested.value) return
+    designResponse.value = response
     if (!designResponse.value.ok) {
       designError.value = designResponse.value.error || '设计 agent 执行失败'
     }
   } catch (e: unknown) {
+    if (designRunKey.value !== runKey || designStopRequested.value) return
     designError.value = errorMessage(e)
   } finally {
-    designing.value = false
+    if (designRunKey.value === runKey) {
+      if (designStopRequested.value && !designError.value) designError.value = '已停止'
+      designing.value = false
+      designStopRequested.value = false
+    }
+  }
+}
+
+async function stopScriptDesigner() {
+  const runKey = designRunKey.value
+  if (!designing.value || !runKey || designStopRequested.value) return
+  designStopRequested.value = true
+  designError.value = ''
+  try {
+    await api.stopAgentRun(runKey)
+  } catch (e: unknown) {
+    designError.value = errorMessage(e)
   }
 }
 
 async function acceptScriptDesign() {
+  if (designing.value || designStopRequested.value) return
   const draft = scriptDesignDraft.value
   if (!draft) return
   form.value = {
@@ -862,9 +896,9 @@ def main(envelope):
             placeholder="描述希望 agent 设计或修改的脚本目标"
           />
         </div>
-        <Button class="w-full" :disabled="designing" @click="runScriptDesigner">
+        <Button class="w-full" :disabled="designStopRequested" @click="designing ? stopScriptDesigner() : runScriptDesigner()">
           <WandSparkles class="mr-1.5 h-4 w-4" />
-          {{ designing ? '生成中' : '生成方案' }}
+          {{ designing ? (designStopRequested ? '停止中' : '立即停止') : '生成方案' }}
         </Button>
 
         <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -891,7 +925,7 @@ def main(envelope):
       </div>
       <div class="flex items-center justify-end gap-2 border-t p-4">
         <Button variant="outline" :disabled="designing" @click="showDesigner = false">取消</Button>
-        <Button :disabled="!scriptDesignDraft || saving" @click="acceptScriptDesign">
+        <Button :disabled="designing || !scriptDesignDraft || saving" @click="acceptScriptDesign">
           <Check class="mr-1.5 h-4 w-4" />
           {{ saving ? '保存中' : '采纳并保存' }}
         </Button>

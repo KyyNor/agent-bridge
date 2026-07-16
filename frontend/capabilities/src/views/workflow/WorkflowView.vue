@@ -127,7 +127,7 @@ const resetTarget = ref<WorkflowTask | null>(null)
 const resetting = ref(false)
 const selectedTaskIds = ref<Set<string>>(new Set())
 const batchAction = ref<'reset' | 'run' | ''>('')
-const batchProgress = ref({ current: 0, total: 0, completed: 0, success: 0, failed: 0, skipped: 0 })
+const batchProgress = ref({ current: 0, total: 0, completed: 0, success: 0, failed: 0, skipped: 0, stopped: 0 })
 const batchCurrentTask = ref<WorkflowTask | null>(null)
 const batchCurrentTaskId = ref('')
 const batchCurrentRunId = ref('')
@@ -140,6 +140,7 @@ const taskImportConfirming = ref(false)
 const taskImportError = ref('')
 let taskImportRequestToken = 0
 let batchToken = 0
+const batchStopRequested = ref(false)
 // Per-task sub-agent event filter (feature 5). Keyed by task id; "" = all.
 const taskActorFilter = ref<Record<string, string>>({})
 const taskArtifactActive = ref<Record<string, string>>({})
@@ -155,6 +156,8 @@ const designPrompt = ref('')
 const designing = ref(false)
 const designError = ref('')
 const designResponse = ref<DesignAgentResponse<WorkflowDesignResult> | null>(null)
+const designRunKey = ref('')
+const designStopRequested = ref(false)
 let testPoll: ReturnType<typeof setInterval> | null = null
 
 const artifactHtml = computed(() =>
@@ -380,6 +383,7 @@ watch(
   async () => {
     closeTaskImport()
     batchToken += 1
+    batchStopRequested.value = false
     if (batchAction.value) batchAction.value = ''
     resetBatchRunDetail()
     await applyRoute()
@@ -389,6 +393,7 @@ watch(
 onUnmounted(() => {
   stopTestPolling()
   batchToken += 1
+  batchStopRequested.value = false
   resetBatchRunDetail()
 })
 
@@ -541,6 +546,13 @@ function openWorkflowDesigner(mode: 'create' | 'modify' = 'modify') {
   designError.value = ''
 }
 
+function createDesignRunKey() {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `design-workflow-${suffix}`
+}
+
 function workflowDesignerCurrent() {
   if (designMode.value === 'modify') {
     return {
@@ -566,25 +578,50 @@ async function runWorkflowDesigner() {
     designError.value = '请输入提示词'
     return
   }
+  const runKey = createDesignRunKey()
+  designRunKey.value = runKey
+  designStopRequested.value = false
+  designResponse.value = null
   designing.value = true
   try {
-    designResponse.value = await api.designWorkflow({
+    const response = await api.designWorkflow({
+      run_key: runKey,
       mode: designMode.value,
       prompt: designPrompt.value,
       current: workflowDesignerCurrent(),
       profile_key: form.value.profile_key || undefined,
     })
+    if (designRunKey.value !== runKey || designStopRequested.value) return
+    designResponse.value = response
     if (!designResponse.value.ok) {
       designError.value = designResponse.value.error || '设计 agent 执行失败'
     }
   } catch (e: unknown) {
+    if (designRunKey.value !== runKey || designStopRequested.value) return
     designError.value = errorMessage(e)
   } finally {
-    designing.value = false
+    if (designRunKey.value === runKey) {
+      if (designStopRequested.value && !designError.value) designError.value = '已停止'
+      designing.value = false
+      designStopRequested.value = false
+    }
+  }
+}
+
+async function stopWorkflowDesigner() {
+  const runKey = designRunKey.value
+  if (!designing.value || !runKey || designStopRequested.value) return
+  designStopRequested.value = true
+  designError.value = ''
+  try {
+    await api.stopAgentRun(runKey)
+  } catch (e: unknown) {
+    designError.value = errorMessage(e)
   }
 }
 
 async function acceptWorkflowDesign() {
+  if (designing.value || designStopRequested.value) return
   const draft = workflowDesignDraft.value
   if (!draft) return
   form.value = {
@@ -803,7 +840,7 @@ function errorMessage(e: unknown) {
 }
 
 function createBatchProgress(total = 0) {
-  return { current: 0, total, completed: 0, success: 0, failed: 0, skipped: 0 }
+  return { current: 0, total, completed: 0, success: 0, failed: 0, skipped: 0, stopped: 0 }
 }
 
 function resetBatchRunDetail() {
@@ -1194,7 +1231,7 @@ async function waitForBatchRun(
   onUpdate?: (run: WorkflowRun) => void | Promise<void>,
 ): Promise<WorkflowRun> {
   while (true) {
-    if (token !== batchToken) throw new Error('页面队列已停止')
+    if (token !== batchToken && !batchStopRequested.value) throw new Error('页面队列已停止')
     const run = await api.getWorkflowRun(runId)
     mergeWorkflowRun(run)
     await onUpdate?.(run)
@@ -1207,6 +1244,7 @@ async function resetSelectedTasks() {
   if (batchBusy.value || !selectedTasks.value.length) return
   const queue = [...selectedTasks.value]
   const token = ++batchToken
+  batchStopRequested.value = false
   batchAction.value = 'reset'
   batchProgress.value = createBatchProgress(queue.length)
   resetBatchRunDetail()
@@ -1246,6 +1284,7 @@ async function runSelectedTasks() {
   if (batchBusy.value || !selectedTasks.value.length) return
   const queue = [...selectedTasks.value]
   const token = ++batchToken
+  batchStopRequested.value = false
   batchAction.value = 'run'
   batchProgress.value = createBatchProgress(queue.length)
   resetBatchRunDetail()
@@ -1257,6 +1296,14 @@ async function runSelectedTasks() {
       execute: task => api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined),
       waitForRun: (runId, onUpdate) => waitForBatchRun(runId, token, onUpdate),
       isCancelled: () => token !== batchToken,
+      stopRun: async runId => {
+        try {
+          await api.stopWorkflowRun(runId)
+        } catch (error: unknown) {
+          taskActionError.value = errorMessage(error)
+          throw error
+        }
+      },
       shouldStopOnError: shouldStopBatchError,
       onTaskStart: (task, index, total) => {
         batchCurrentTask.value = task
@@ -1272,17 +1319,19 @@ async function runSelectedTasks() {
           success: batchProgress.value.success + (outcome.status === 'success' ? 1 : 0),
           failed: batchProgress.value.failed + (outcome.status === 'failed' ? 1 : 0),
           skipped: batchProgress.value.skipped + (outcome.status === 'skipped' ? 1 : 0),
+          stopped: batchProgress.value.stopped + (outcome.status === 'stopped' ? 1 : 0),
         }
         batchCurrentTask.value = null
         batchCurrentTaskId.value = ''
       },
     })
-    if (token !== batchToken) return
+    if (token !== batchToken && !batchStopRequested.value) return
     const success = result.outcomes.filter(item => item.status === 'success').length
     const failed = result.outcomes.filter(item => item.status === 'failed').length
     const skipped = result.outcomes.filter(item => item.status === 'skipped').length
     const stoppedText = result.stopped ? `，队列已停止，剩余 ${result.remaining.length} 个任务未执行` : ''
-    batchSummary.value = `批量运行完成：成功 ${success}，跳过 ${skipped}，失败 ${failed}${stoppedText}`
+    const stopped = result.outcomes.filter(item => item.status === 'stopped').length
+    batchSummary.value = `批量运行完成：成功 ${success}，跳过 ${skipped}，失败 ${failed}，停止 ${stopped}${stoppedText}`
     const firstError = result.outcomes.find(item => item.error)?.error
     if (firstError) taskActionError.value = firstError
     selectedTaskIds.value = result.stopped
@@ -1290,7 +1339,23 @@ async function runSelectedTasks() {
       : new Set()
     if (token === batchToken && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
   } finally {
-    if (token === batchToken) batchAction.value = ''
+    if (token === batchToken || batchStopRequested.value) {
+      batchAction.value = ''
+      batchStopRequested.value = false
+    }
+  }
+}
+
+async function stopBatchRun() {
+  if (batchAction.value !== 'run' || batchStopRequested.value) return
+  batchStopRequested.value = true
+  batchToken += 1
+  const runId = batchCurrentRunId.value
+  if (!runId) return
+  try {
+    await api.stopWorkflowRun(runId)
+  } catch (error: unknown) {
+    taskActionError.value = errorMessage(error)
   }
 }
 
@@ -2234,6 +2299,16 @@ async function confirmClearWorkflow() {
               >
                 {{ batchAction === 'run' ? `运行中 ${batchProgress.current}/${batchProgress.total}` : '批量运行' }}
               </Button>
+              <Button
+                v-if="batchAction === 'run'"
+                variant="outline"
+                size="sm"
+                class="h-8 text-xs text-destructive"
+                :disabled="batchStopRequested"
+                @click="stopBatchRun"
+              >
+                {{ batchStopRequested ? '停止中' : '停止批量' }}
+              </Button>
               <span class="text-xs text-muted-foreground">
                 {{ filteredTasks.length }} / {{ tasks.length }}
               </span>
@@ -2309,6 +2384,7 @@ async function confirmClearWorkflow() {
                 <span>成功 {{ batchProgress.success }}</span>
                 <span>失败 {{ batchProgress.failed }}</span>
                 <span>跳过 {{ batchProgress.skipped }}</span>
+                <span>停止 {{ batchProgress.stopped }}</span>
                 <span>待执行 {{ batchPendingCount }}</span>
               </div>
             </div>
@@ -2604,6 +2680,8 @@ async function confirmClearWorkflow() {
               :agent-runs-loading="runsLoading || progressAgentRunsLoading"
               :detail-error="progressDetailError"
               :sticky="false"
+              :workflow-run-id="selectedRunId"
+              :workflow-run-status="progressRun?.status || ''"
               @select-agent-run="selectProgressAgentRun"
               @refresh="refreshProgress"
             />
@@ -2762,9 +2840,9 @@ async function confirmClearWorkflow() {
               placeholder="描述希望 agent 设计或修改的工作流目标"
             />
           </div>
-          <Button class="w-full" :disabled="designing" @click="runWorkflowDesigner">
+          <Button class="w-full" :disabled="designStopRequested" @click="designing ? stopWorkflowDesigner() : runWorkflowDesigner()">
             <WandSparkles class="mr-1.5 h-4 w-4" />
-            {{ designing ? '生成中' : '生成方案' }}
+            {{ designing ? (designStopRequested ? '停止中' : '立即停止') : '生成方案' }}
           </Button>
 
           <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -2791,7 +2869,7 @@ async function confirmClearWorkflow() {
         </div>
         <div class="flex items-center justify-end gap-2 border-t p-4">
           <Button variant="outline" :disabled="designing" @click="showDesigner = false">取消</Button>
-          <Button :disabled="!workflowDesignDraft || saving" @click="acceptWorkflowDesign">
+          <Button :disabled="designing || !workflowDesignDraft || saving" @click="acceptWorkflowDesign">
             <Check class="mr-1.5 h-4 w-4" />
             {{ saving ? '保存中' : '采纳并保存' }}
           </Button>

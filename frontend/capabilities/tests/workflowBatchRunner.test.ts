@@ -65,6 +65,48 @@ test('runWorkflowTaskQueue waits for each run before executing the next task', a
   assert.equal(result.stopped, false)
 })
 
+test('runWorkflowTaskQueue marks a stopped run and leaves later tasks selected', async () => {
+  const executed: string[] = []
+  const result = await runWorkflowTaskQueue([task('first'), task('second')], {
+    canExecute: () => true,
+    execute: async current => {
+      executed.push(current.task_key)
+      return { run_id: `run-${current.task_key}` }
+    },
+    waitForRun: async runId => run(runId, 'stopped'),
+  })
+
+  assert.deepEqual(executed, ['first'])
+  assert.deepEqual(result.outcomes.map(item => item.status), ['stopped'])
+  assert.equal(result.stopped, true)
+  assert.deepEqual(result.remaining.map(item => item.task_key), ['second'])
+})
+
+test('runWorkflowTaskQueue stops a run returned after queue cancellation and still waits for its terminal state', async () => {
+  const events: string[] = []
+  let cancelled = false
+  const result = await runWorkflowTaskQueue([task('first'), task('second')], {
+    canExecute: () => true,
+    execute: async () => {
+      cancelled = true
+      return { run_id: 'run-first' }
+    },
+    stopRun: async runId => {
+      events.push(`stop:${runId}`)
+    },
+    waitForRun: async runId => {
+      events.push(`wait:${runId}`)
+      return run(runId, 'stopped')
+    },
+    isCancelled: () => cancelled,
+  })
+
+  assert.deepEqual(events, ['stop:run-first', 'wait:run-first'])
+  assert.deepEqual(result.outcomes.map(item => item.status), ['stopped'])
+  assert.equal(result.stopped, true)
+  assert.deepEqual(result.remaining.map(item => item.task_key), ['second'])
+})
+
 test('runWorkflowTaskQueue emits task and run lifecycle callbacks in order', async () => {
   const events: string[] = []
   const result = await runWorkflowTaskQueue([task('first')], {
