@@ -123,15 +123,16 @@ function nodeKindLabel(kind: WorkflowDagNode['kind']) {
 }
 
 function nodeKindClass(kind: WorkflowDagNode['kind']) {
-  if (kind === 'terminal') return 'border-stone-300 bg-stone-50 text-stone-700'
-  if (kind === 'parallel') return 'border-blue-300 bg-blue-50 text-blue-700'
+  if (kind === 'terminal') return 'border-border bg-neutral-soft text-neutral-soft-fg'
+  if (kind === 'parallel') return 'border-primary/30 bg-cat-blue text-cat-blue-fg'
   return 'border-border bg-background text-foreground'
 }
 
 function miniMapColor(node: Node<WorkflowNodeData>) {
-  if (node.data?.kind === 'terminal') return '#e7e5e4'
-  if (node.data?.kind === 'parallel') return '#dbeafe'
-  return '#f8fafc'
+  // vue-flow MiniMap 接受 CSS 色值，用语义 token 派生
+  if (node.data?.kind === 'terminal') return 'var(--neutral-soft)'
+  if (node.data?.kind === 'parallel') return 'var(--cat-blue)'
+  return 'var(--secondary)'
 }
 </script>
 
@@ -147,7 +148,7 @@ function miniMapColor(node: Node<WorkflowNodeData>) {
       </div>
     </div>
 
-    <div v-if="dag.warnings.length" class="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs leading-5 text-yellow-800">
+    <div v-if="dag.warnings.length" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning-soft-fg">
       <div v-for="warning in dag.warnings" :key="warning">{{ warning }}</div>
     </div>
 

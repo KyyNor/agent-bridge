@@ -18,6 +18,7 @@ import type {
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
+import StatusBadge from '../../components/StatusBadge.vue'
 import { profileConfigDraftKey, type ProfileConfigDraft } from './profileConfigSnapshot'
 
 const props = defineProps<{
@@ -472,8 +473,8 @@ async function refreshProfileDoc(raiseError = false) {
           <h2 class="text-lg font-semibold text-foreground">{{ configProfile.name }} — 配置</h2>
           <div class="mt-0.5 flex flex-wrap items-center gap-2">
             <p class="font-mono text-xs text-muted-foreground">{{ configProfile.profile_key }}</p>
-            <Badge v-if="configProfile.status === 'active'" variant="secondary" class="bg-green-50 text-[11px] text-green-700">启用</Badge>
-            <Badge v-else variant="secondary" class="text-[11px] text-muted-foreground">停用</Badge>
+            <StatusBadge v-if="configProfile.status === 'active'" status="enabled" label="启用" />
+            <StatusBadge v-else status="disabled" label="停用" />
           </div>
           <p v-if="configProfile.description" class="mt-1 text-xs text-muted-foreground">{{ configProfile.description }}</p>
         </div>
@@ -482,7 +483,7 @@ async function refreshProfileDoc(raiseError = false) {
 
     <div class="min-h-0 flex-1 overflow-y-auto pr-1">
       <div v-if="configLoading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
-      <div v-else-if="configError" class="rounded-lg border border-destructive/30 bg-red-50 p-4 text-sm text-destructive">
+      <div v-else-if="configError" class="rounded-lg border border-destructive/30 bg-destructive-soft p-4 text-sm text-destructive">
         {{ configError }}
       </div>
       <div v-else class="space-y-5 pb-4">
@@ -509,7 +510,7 @@ async function refreshProfileDoc(raiseError = false) {
             </Badge>
             <Badge v-else variant="secondary" class="text-muted-foreground">未绑定</Badge>
           </div>
-          <div v-if="memoryError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">
+          <div v-if="memoryError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">
             {{ memoryError }}
           </div>
           <select
@@ -542,15 +543,15 @@ async function refreshProfileDoc(raiseError = false) {
                 type="checkbox"
                 :checked="isServiceAllowed(svc.source_key)"
                 @change="toggleServiceAllow(svc)"
-                class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                class="h-4 w-4 rounded border-input text-primary focus:ring-primary"
               />
               <div class="min-w-0 flex-1">
                 <div class="break-all text-sm font-medium">{{ svc.name || svc.source_key }}</div>
                 <div class="break-all text-xs text-muted-foreground">{{ svc.source_key }} · {{ svc.source_type === 'openapi_service' ? 'OpenAPI' : 'MCP' }}</div>
               </div>
-              <Badge v-if="svc.status === 'enabled'" variant="secondary" class="bg-green-50 text-[11px] text-green-700">已启用</Badge>
-              <Badge v-else-if="svc.status === 'error'" variant="destructive" class="text-[11px]">异常</Badge>
-              <Badge v-else variant="secondary" class="text-[11px] text-muted-foreground">已停用</Badge>
+              <StatusBadge v-if="svc.status === 'enabled'" status="enabled" />
+              <StatusBadge v-else-if="svc.status === 'error'" status="error" label="异常" />
+              <StatusBadge v-else status="disabled" />
             </label>
           </div>
         </div>
@@ -570,7 +571,7 @@ async function refreshProfileDoc(raiseError = false) {
                 type="checkbox"
                 :checked="isResourceAllowed('wiki_kb', kb.slug)"
                 @change="toggleResource('wiki_kb', kb.slug)"
-                class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                class="h-4 w-4 rounded border-input text-primary focus:ring-primary"
               />
               <div class="min-w-0 flex-1">
                 <div class="break-all text-sm font-medium">{{ kb.name }}</div>
@@ -595,7 +596,7 @@ async function refreshProfileDoc(raiseError = false) {
                 type="checkbox"
                 :checked="isResourceAllowed('code_repo', repo.repo_key)"
                 @change="toggleResource('code_repo', repo.repo_key)"
-                class="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                class="h-4 w-4 rounded border-input text-primary focus:ring-primary"
               />
               <div class="min-w-0 flex-1">
                 <div class="break-all text-sm font-medium">{{ repo.name }}</div>
@@ -628,7 +629,7 @@ async function refreshProfileDoc(raiseError = false) {
                   </Button>
                 </div>
               </div>
-              <div v-if="pinError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ pinError }}</div>
+              <div v-if="pinError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ pinError }}</div>
 
               <div class="grid gap-3 sm:grid-cols-[160px_1fr_1fr]">
                 <label class="space-y-1">
@@ -673,7 +674,7 @@ async function refreshProfileDoc(raiseError = false) {
                       <div class="text-xs text-muted-foreground">{{ svc.source_key }} · {{ svc.source_type === 'openapi_service' ? 'OpenAPI' : 'MCP' }}</div>
                     </div>
                     <label v-for="toolType in pinToolTypes" :key="`${svc.source_key}-${toolType}`" :class="['inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors', pinsLoaded ? 'cursor-pointer hover:bg-background' : 'cursor-not-allowed opacity-60']">
-                      <input type="checkbox" :checked="manualPinExists(svc.source_key, toolType)" :disabled="!pinsLoaded" @change="toggleManualPin(svc.source_key, toolType)" class="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary" />
+                      <input type="checkbox" :checked="manualPinExists(svc.source_key, toolType)" :disabled="!pinsLoaded" @change="toggleManualPin(svc.source_key, toolType)" class="h-3.5 w-3.5 rounded border-input text-primary focus:ring-primary" />
                       {{ typeLabel(toolType) }}
                     </label>
                   </div>
@@ -700,7 +701,7 @@ async function refreshProfileDoc(raiseError = false) {
                 </div>
                 <Button variant="outline" size="sm" :disabled="docSaving" @click="refreshProfileDoc">{{ docSaving ? '生成中...' : '重新生成/预览' }}</Button>
               </div>
-              <div v-if="docError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ docError }}</div>
+              <div v-if="docError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ docError }}</div>
               <div class="space-y-2">
                 <label class="text-xs font-medium text-muted-foreground">手动补充 Notes</label>
                 <textarea v-model="manualNotes" class="min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" placeholder="补充该 profile 的使用边界、注意事项或协作约定..." />
@@ -717,7 +718,7 @@ async function refreshProfileDoc(raiseError = false) {
     </div>
 
     <div class="shrink-0 border-t border-border bg-card/95 px-1 py-3 backdrop-blur" aria-live="polite">
-      <div v-if="saveError" class="mb-3 rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ saveError }}</div>
+      <div v-if="saveError" class="mb-3 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ saveError }}</div>
       <div class="flex flex-wrap justify-end gap-2">
         <Button variant="outline" type="button" @click="emit('cancel')">取消</Button>
         <Button @click="saveConfig" :disabled="!canSaveConfig">{{ configSaving ? '保存中...' : '确认' }}</Button>

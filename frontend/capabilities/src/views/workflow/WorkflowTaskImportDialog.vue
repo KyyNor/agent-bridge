@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { WorkflowTaskImportPreview, WorkflowTaskImportRow } from '../../api/types'
-import { Badge } from '../../components/ui/badge'
+import type { WorkflowTaskImportPreview } from '../../api/types'
 import { Button } from '../../components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
+import CategoryBadge from '../../components/CategoryBadge.vue'
 
 interface Props {
   open: boolean
@@ -36,28 +36,15 @@ const summaryCards = computed(() => {
 
   return [
     { label: '总行数', value: summary.total_rows, class: 'text-foreground' },
-    { label: '有效', value: summary.valid_rows, class: 'text-green-700' },
+    { label: '有效', value: summary.valid_rows, class: 'text-success' },
     { label: '无效', value: summary.invalid_rows, class: 'text-destructive' },
-    { label: '新增', value: summary.created, class: 'text-blue-700' },
-    { label: '更新', value: summary.updated, class: 'text-violet-700' },
-    { label: '跳过（运行中）', value: summary.skipped_running, class: 'text-amber-700' },
-    { label: '跳过（已完成）', value: summary.skipped_completed, class: 'text-amber-700' },
-    { label: '重开（已过期）', value: summary.reopened_expired, class: 'text-amber-700' },
+    { label: '新增', value: summary.created, class: 'text-cat-blue-fg' },
+    { label: '更新', value: summary.updated, class: 'text-cat-violet-fg' },
+    { label: '跳过（运行中）', value: summary.skipped_running, class: 'text-cat-amber-fg' },
+    { label: '跳过（已完成）', value: summary.skipped_completed, class: 'text-cat-amber-fg' },
+    { label: '重开（已过期）', value: summary.reopened_expired, class: 'text-cat-teal-fg' },
   ]
 })
-
-const actionLabels: Record<WorkflowTaskImportRow['action'], string> = {
-  created: '新增',
-  updated: '更新',
-  skipped_running: '跳过（运行中）',
-  skipped_completed: '跳过（已完成）',
-  reopened_expired: '重开（已过期）',
-  error: '错误',
-}
-
-function actionLabel(action: WorkflowTaskImportRow['action']): string {
-  return actionLabels[action]
-}
 
 function formatPayload(payload: Record<string, unknown>): string {
   return JSON.stringify(payload, null, 2)
@@ -128,7 +115,7 @@ function onFileChange(event: Event) {
             </div>
           </div>
 
-          <div v-if="!preview.can_confirm" class="rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <div v-if="!preview.can_confirm" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg">
             预览中存在错误行，修正 Excel 后重新上传才能确认导入。
           </div>
 
@@ -153,9 +140,7 @@ function onFileChange(event: Event) {
                     <td class="whitespace-nowrap px-3 py-2 font-mono">{{ row.task_version || '—' }}</td>
                     <td class="whitespace-nowrap px-3 py-2">{{ row.type || '—' }}</td>
                     <td class="whitespace-nowrap px-3 py-2">
-                      <Badge :variant="row.action === 'error' ? 'destructive' : 'secondary'" :title="`原始状态：${row.action}`">
-                        {{ actionLabel(row.action) }}
-                      </Badge>
+                      <CategoryBadge kind="taskType" :value="row.action" />
                       <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ row.action }}</div>
                     </td>
                     <td class="px-3 py-2">
