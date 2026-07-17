@@ -4,12 +4,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { ProjectProfile } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
-import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
-import PaginationBar from '../../components/PaginationBar.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
+import PaginationBar from '../../components/PaginationBar.vue'
 import ProfileDetailView from './ProfileDetailView.vue'
 import { confirm } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
@@ -208,8 +208,8 @@ async function handleDetailSaved() {
                 <div class="mt-0.5 break-all text-xs text-muted-foreground">{{ profile.name }}</div>
               </td>
               <td class="px-4 py-3">
-                <Badge v-if="profile.status === 'active'" variant="secondary" class="bg-green-50 text-green-700">启用</Badge>
-                <Badge v-else variant="secondary" class="text-muted-foreground">停用</Badge>
+                <StatusBadge v-if="profile.status === 'active'" status="enabled" label="启用" />
+                <StatusBadge v-else status="disabled" label="停用" />
               </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ profile.allow_count || 0 }}</td>
               <td class="px-4 py-3">
@@ -246,7 +246,7 @@ async function handleDetailSaved() {
           <DialogTitle>添加能力平面</DialogTitle>
         </DialogHeader>
         <form @submit.prevent="createProfile" class="space-y-4">
-          <div v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ formError }}</div>
+          <div v-if="formError" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ formError }}</div>
           <div class="space-y-2">
             <label class="text-sm font-medium">能力平面标识 <span class="text-destructive">*</span></label>
             <Input v-model="form.profile_key" placeholder="safe-readonly" required />

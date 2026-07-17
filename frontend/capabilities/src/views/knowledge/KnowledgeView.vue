@@ -6,6 +6,7 @@ import type { KnowledgeBaseSummary, Document, DocumentDetail, DocumentUploadSumm
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
+import StatusBadge from '../../components/StatusBadge.vue'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
@@ -1231,6 +1232,13 @@ async function savePlaneProfiles() {
   } catch { /* ignore */ }
   planeSaving.value = false
 }
+
+// 同步/任务 status → StatusBadge 语义状态
+function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disabled' {
+  if (status === 'synced' || status === 'succeeded' || status === 'success') return 'success'
+  if (status === 'sync_failed' || status === 'failed' || status === 'error') return 'error'
+  return 'disabled'
+}
 </script>
 
 <template>
@@ -1458,7 +1466,7 @@ async function savePlaneProfiles() {
                     <tr v-if="entry.kind !== 'document'" class="border-b border-border/60 transition-colors hover:bg-muted/50">
                       <td colspan="6" class="px-3 py-2">
                         <button type="button" class="flex w-full items-center gap-2 text-left" @click="enterBrowseEntry(entry)">
-                          <Archive v-if="entry.kind === 'zip'" :size="16" class="shrink-0 text-amber-600" />
+                          <Archive v-if="entry.kind === 'zip'" :size="16" class="shrink-0 text-warning" />
                           <Folder v-else :size="16" class="shrink-0 text-primary/80" />
                           <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="entry.relative_path">{{ entry.name }}</span>
                           <Badge variant="outline" class="shrink-0 text-[10px]">{{ entry.kind === 'zip' ? 'ZIP' : '文件夹' }}</Badge>
@@ -1475,10 +1483,9 @@ async function savePlaneProfiles() {
                       <td class="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground" :title="entry.relative_path">{{ entry.name }}</td>
                       <td class="px-3 py-2 text-xs tabular-nums">v{{ entry.version_no || 0 }}</td>
                       <td class="px-3 py-2">
-                        <Badge variant="secondary" class="text-[11px]"
-                          :class="entry.sync_status === 'synced' ? 'bg-green-50 text-green-700' : entry.sync_status === 'sync_failed' ? 'bg-red-50 text-red-700' : ''">
-                          {{ entry.sync_status || entry.status }}
-                        </Badge>
+                        <StatusBadge
+                          :status="syncBadgeStatus(entry.sync_status)"
+                          :label="entry.sync_status || entry.status" />
                       </td>
                       <td class="px-3 py-2">
                         <div class="flex justify-end gap-1">
@@ -1516,10 +1523,9 @@ async function savePlaneProfiles() {
                   <td class="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground" :title="d.folder_path || '根目录'">{{ d.folder_path || '根目录' }}</td>
                   <td class="px-3 py-2 text-xs tabular-nums">v{{ d.current_version_no || 0 }}</td>
                   <td class="px-3 py-2">
-                    <Badge variant="secondary" class="text-[11px]"
-                      :class="d.sync_status === 'synced' ? 'bg-green-50 text-green-700' : d.sync_status === 'sync_failed' ? 'bg-red-50 text-red-700' : ''">
-                      {{ d.sync_status || d.status }}
-                    </Badge>
+                    <StatusBadge
+                      :status="syncBadgeStatus(d.sync_status)"
+                      :label="d.sync_status || d.status" />
                   </td>
                   <td class="px-3 py-2">
                     <div class="flex justify-end gap-1">
@@ -1555,13 +1561,10 @@ async function savePlaneProfiles() {
               <td class="px-3 py-2 text-sm">{{ j.doc_title }}</td>
               <td class="px-3 py-2 text-xs">{{ j.operation }}</td>
               <td class="px-3 py-2">
-                <Badge variant="secondary" class="text-[11px]"
-                  :class="j.status === 'succeeded' ? 'bg-green-50 text-green-700' : j.status === 'failed' ? 'bg-red-50 text-red-700' : ''">
-                  {{ j.status }}
-                </Badge>
+                <StatusBadge :status="syncBadgeStatus(j.status)" :label="j.status" />
               </td>
               <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.backend_slug }}</td>
-              <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-red-600" :title="j.error ?? ''">{{ j.error || '—' }}</td>
+              <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-destructive" :title="j.error ?? ''">{{ j.error || '—' }}</td>
               <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ formatLocalDatetime(j.updated_at) }}</td>
             </tr></tbody>
           </table>
@@ -1592,8 +1595,8 @@ async function savePlaneProfiles() {
                 </Button>
               </div>
             </div>
-            <div v-if="repoSourceError" class="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{{ repoSourceError }}</div>
-            <div v-if="repoSourceMessage" class="mt-3 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">{{ repoSourceMessage }}</div>
+            <div v-if="repoSourceError" class="mt-3 rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ repoSourceError }}</div>
+            <div v-if="repoSourceMessage" class="mt-3 rounded-md bg-success-soft px-3 py-2 text-xs text-success-soft-fg">{{ repoSourceMessage }}</div>
           </div>
 
           <div v-if="detailRepoSources.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无 Git 数据源</div>
@@ -1616,7 +1619,7 @@ async function savePlaneProfiles() {
                 </div>
               </td>
               <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ source.last_synced_at ? formatLocalDatetime(source.last_synced_at) : '未同步' }}</td>
-              <td class="px-3 py-2 max-w-[180px] overflow-hidden text-ellipsis text-xs text-red-600" :title="source.last_error ?? ''">{{ source.last_error || '—' }}</td>
+              <td class="px-3 py-2 max-w-[180px] overflow-hidden text-ellipsis text-xs text-destructive" :title="source.last_error ?? ''">{{ source.last_error || '—' }}</td>
               <td class="px-3 py-2 text-right">
                 <div class="flex justify-end gap-2">
                   <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="repoSourceSyncing[source.repo_key]">
@@ -1677,7 +1680,7 @@ async function savePlaneProfiles() {
           <DialogTitle>创建文档知识</DialogTitle>
         </DialogHeader>
         <form @submit.prevent="createKb" class="space-y-4">
-          <div v-if="createError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ createError }}</div>
+          <div v-if="createError" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ createError }}</div>
           <div class="space-y-2">
             <label class="text-sm font-medium">标识 <span class="text-destructive">*</span></label>
             <Input v-model="createForm.slug" placeholder="my-kb" required />
@@ -1886,10 +1889,10 @@ async function savePlaneProfiles() {
           </div>
 
           <!-- 文件列表 -->
-          <div v-else class="rounded-lg border-2 border-green-200 bg-muted/20 p-4">
+          <div v-else class="rounded-lg border-2 border-success/30 bg-muted/20 p-4">
             <div class="flex items-center justify-between mb-3">
               <div class="text-sm font-medium">
-                已选择 <span class="text-green-700">{{ uploadFiles.length }}</span> 个文件
+                已选择 <span class="text-success">{{ uploadFiles.length }}</span> 个文件
                 <span v-if="failedUploadCount > 0" class="ml-2 text-destructive">失败 {{ failedUploadCount }} 个</span>
               </div>
               <Button variant="ghost" size="xs" class="h-7 text-xs text-muted-foreground" :disabled="uploading" @click="uploadFiles = []">清除</Button>
@@ -1902,7 +1905,7 @@ async function savePlaneProfiles() {
                 <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="f.relativePath">{{ f.relativePath }}</span>
                 <div class="flex shrink-0 flex-col items-end gap-0.5 text-xs">
                   <span class="text-muted-foreground">{{ getFileSizeLabel(f.file.size) }}</span>
-                  <span :class="f.status === 'error' ? 'text-destructive' : f.status === 'success' ? 'text-green-700' : 'text-muted-foreground'">
+                  <span :class="f.status === 'error' ? 'text-destructive' : f.status === 'success' ? 'text-success' : 'text-muted-foreground'">
                     {{ f.status === 'success' ? '成功' : f.status === 'error' ? '失败' : f.status === 'processing' ? '处理中' : f.status === 'uploading' ? '上传中' : '等待中' }}
                   </span>
                 </div>

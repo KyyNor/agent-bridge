@@ -760,9 +760,9 @@ function runStatusLabel(status: string) {
 }
 
 function runBadgeClass(status: string) {
-  if (status === 'completed') return 'bg-green-50 text-green-700'
-  if (status === 'failed') return 'bg-red-50 text-red-700'
-  if (status === 'running') return 'bg-blue-50 text-blue-700'
+  if (status === 'completed') return 'bg-success-soft text-success-soft-fg'
+  if (status === 'failed') return 'bg-destructive-soft text-destructive-soft-fg'
+  if (status === 'running') return 'bg-info-soft text-info-soft-fg'
   return ''
 }
 
@@ -771,16 +771,16 @@ function taskStatusLabel(status: string) {
 }
 
 function taskBadgeClass(status: string) {
-  if (status === 'completed') return 'bg-green-50 text-green-700'
-  if (status === 'failed' || status === 'abandoned') return 'bg-red-50 text-red-700'
-  if (status === 'running') return 'bg-blue-50 text-blue-700'
-  if (status === 'pending') return 'bg-yellow-50 text-yellow-700'
+  if (status === 'completed') return 'bg-success-soft text-success-soft-fg'
+  if (status === 'failed' || status === 'abandoned') return 'bg-destructive-soft text-destructive-soft-fg'
+  if (status === 'running') return 'bg-info-soft text-info-soft-fg'
+  if (status === 'pending') return 'bg-warning-soft text-warning-soft-fg'
   return ''
 }
 
 function logLevelClass(level: string) {
-  if (level === 'error') return 'border-red-400'
-  if (level === 'warning' || level === 'warn') return 'border-yellow-400'
+  if (level === 'error') return 'border-destructive'
+  if (level === 'warning' || level === 'warn') return 'border-warning'
   return 'border-border'
 }
 
@@ -1950,7 +1950,7 @@ async function confirmClearWorkflow() {
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
                 <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
-                <Badge v-if="runningRunFor(item.workflow_key)" class="bg-blue-50 text-blue-700">运行中</Badge>
+                <Badge v-if="runningRunFor(item.workflow_key)" class="bg-info-soft text-info-soft-fg">运行中</Badge>
               </div>
               <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.workflow_key }}</div>
               <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || '无描述' }}</p>
@@ -2282,12 +2282,12 @@ async function confirmClearWorkflow() {
                 />
                 本页全选
               </label>
-              <span v-if="selectedTasks.length" class="text-xs text-blue-600">已选 {{ selectedTasks.length }}</span>
+              <span v-if="selectedTasks.length" class="text-xs text-primary">已选 {{ selectedTasks.length }}</span>
               <Button
                 v-if="selectedTasks.length"
                 variant="outline"
                 size="sm"
-                class="h-8 text-xs text-amber-600"
+                class="h-8 text-xs text-warning"
                 :disabled="batchBusy"
                 @click="resetSelectedTasks"
               >
@@ -2297,7 +2297,7 @@ async function confirmClearWorkflow() {
                 v-if="selectedTasks.length"
                 variant="outline"
                 size="sm"
-                class="h-8 text-xs text-blue-600"
+                class="h-8 text-xs text-primary"
                 :disabled="batchBusy"
                 @click="runSelectedTasks"
               >
@@ -2355,20 +2355,20 @@ async function confirmClearWorkflow() {
             v-if="batchAction === 'run' || batchSummary"
             class="workflow-batch-run-context sticky top-0 z-30 space-y-3 bg-background/95 pb-2 pt-1 backdrop-blur"
           >
-            <div v-if="batchSummary" class="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+            <div v-if="batchSummary" class="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-primary">
               {{ batchSummary }}
             </div>
             <div
               v-if="batchAction === 'run' || (batchSummary && batchCurrentRunId)"
-              class="space-y-3 rounded-md border border-blue-200 bg-blue-50/60 px-3 py-3"
+              class="space-y-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-3"
             >
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0 space-y-1">
-                  <div class="text-sm font-semibold text-blue-900">
+                  <div class="text-sm font-semibold text-primary">
                     {{ batchAction === 'run' ? '批量运行中' : '批量运行完成' }}
                     · 当前第 {{ batchProgress.current }} / {{ batchProgress.total }} 项
                   </div>
-                  <div class="truncate text-xs text-blue-700">
+                  <div class="truncate text-xs text-primary">
                     当前任务：{{ batchCurrentTask?.task_key || progressRun?.task_key || '等待启动' }}
                     <span v-if="batchCurrentRunId" class="font-mono"> · {{ batchCurrentRunId }}</span>
                   </div>
@@ -2377,13 +2377,13 @@ async function confirmClearWorkflow() {
                   {{ runStatusLabel(progressRun.status) }}
                 </Badge>
               </div>
-              <div class="h-2 overflow-hidden rounded-full bg-blue-100">
+              <div class="h-2 overflow-hidden rounded-full bg-primary/10">
                 <div
-                  class="h-full rounded-full bg-blue-600 transition-[width] duration-300"
+                  class="h-full rounded-full bg-primary transition-[width] duration-300"
                   :style="{ width: batchProgressPercent + '%' }"
                 />
               </div>
-              <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-blue-700">
+              <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-primary">
                 <span>已完成 {{ batchProgress.completed }} / {{ batchProgress.total }}</span>
                 <span>成功 {{ batchProgress.success }}</span>
                 <span>失败 {{ batchProgress.failed }}</span>
@@ -2440,7 +2440,7 @@ async function confirmClearWorkflow() {
               v-for="task in pagedTasks"
               :key="taskId(task)"
               class="rounded-md border"
-              :class="batchAction === 'run' && batchCurrentTaskId === taskId(task) ? 'border-blue-300 bg-blue-50/30' : ''"
+              :class="batchAction === 'run' && batchCurrentTaskId === taskId(task) ? 'border-primary/30 bg-primary/5' : ''"
             >
               <div class="flex flex-wrap items-start justify-between gap-3 px-3 py-3">
                 <div class="flex min-w-0 items-start gap-2">
@@ -2455,7 +2455,7 @@ async function confirmClearWorkflow() {
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="font-mono text-sm font-medium text-foreground">{{ task.task_key }}</span>
                     <Badge variant="outline" :class="taskBadgeClass(task.status)">{{ taskStatusLabel(task.status) }}</Badge>
-                    <Badge v-if="task.priority_flag" variant="outline" class="bg-blue-50 text-blue-700">优先执行</Badge>
+                    <Badge v-if="task.priority_flag" variant="outline" class="bg-accent text-accent-foreground">优先执行</Badge>
                     <Badge v-if="task.type" variant="outline">{{ task.type }}</Badge>
                     <Badge v-if="task.task_version" variant="outline">{{ task.task_version }}</Badge>
                   </div>
@@ -2476,7 +2476,7 @@ async function confirmClearWorkflow() {
                     v-if="canExecuteTask(task)"
                     variant="ghost"
                     size="sm"
-                    class="h-8 text-xs text-blue-600"
+                    class="h-8 text-xs text-primary"
                     :disabled="batchBusy || isTaskActionLoading(task)"
                     @click="executeTask(task)"
                   >
@@ -2493,7 +2493,7 @@ async function confirmClearWorkflow() {
                     v-if="canResetTask(task)"
                     variant="ghost"
                     size="sm"
-                    class="h-8 text-xs text-amber-600"
+                    class="h-8 text-xs text-warning"
                     :disabled="batchBusy || isTaskActionLoading(task)"
                     @click="openResetConfirm(task)"
                   >

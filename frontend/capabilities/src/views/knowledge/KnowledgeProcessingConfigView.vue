@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Badge } from '../../components/ui/badge'
+import StatusBadge from '../../components/StatusBadge.vue'
 import { confirm } from '../../composables/useConfirm'
 
 const loading = ref(true)
@@ -180,11 +181,12 @@ const runCountText = computed(() => {
   return entries.map(([k, v]) => `${k} ${v}/${cap}`).join('、')
 })
 
-function runBadgeClass(status?: string | null): string {
-  if (status === 'succeeded') return 'bg-green-50 text-green-700'
-  if (status === 'failed') return 'bg-red-50 text-red-700'
-  if (status === 'running') return 'bg-blue-50 text-blue-700'
-  return ''
+// 任务运行 status → StatusBadge 语义状态
+function runBadgeStatus(status?: string | null): 'success' | 'error' | 'running' | 'disabled' {
+  if (status === 'succeeded') return 'success'
+  if (status === 'failed') return 'error'
+  if (status === 'running') return 'running'
+  return 'disabled'
 }
 
 function runLabel(status?: string | null): string {
@@ -448,9 +450,7 @@ async function deleteBackend(slug: string) {
             <div>
               <div class="mb-2 flex items-center gap-3">
                 <span class="text-xs text-muted-foreground">代码同步</span>
-                <Badge :variant="schedulerStatus.code_sync.running ? 'secondary' : 'outline'" :class="schedulerStatus.code_sync.running ? 'bg-green-50 text-green-700' : ''">
-                  {{ schedulerStatus.code_sync.running ? '运行中' : '已暂停' }}
-                </Badge>
+                <StatusBadge :status="schedulerStatus.code_sync.running ? 'running' : 'disabled'" :label="schedulerStatus.code_sync.running ? '运行中' : '已暂停'" />
                 <span v-if="schedulerStatus.code_sync.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.code_sync.cron }}</span>
               </div>
               <div v-if="schedulerStatus.code_sync.jobs.length === 0" class="py-2 text-center text-xs text-muted-foreground">
@@ -469,9 +469,7 @@ async function deleteBackend(slug: string) {
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">
-                      <Badge v-if="j.progress" variant="secondary" class="mr-2 text-[11px]" :class="runBadgeClass(j.progress.status)">
-                        {{ runLabel(j.progress.status) }}
-                      </Badge>
+                      <StatusBadge v-if="j.progress" class="mr-2" :status="runBadgeStatus(j.progress.status)" :label="runLabel(j.progress.status)" />
                       <span>{{ j.progress?.message || '暂无执行记录' }}</span>
                     </td>
                   </tr>
@@ -481,9 +479,7 @@ async function deleteBackend(slug: string) {
             <div>
               <div class="mb-2 flex items-center gap-3">
                 <span class="text-xs text-muted-foreground">代码理解</span>
-                <Badge :variant="schedulerStatus.understand.running ? 'secondary' : 'outline'" :class="schedulerStatus.understand.running ? 'bg-green-50 text-green-700' : ''">
-                  {{ schedulerStatus.understand.running ? '运行中' : '已暂停' }}
-                </Badge>
+                <StatusBadge :status="schedulerStatus.understand.running ? 'running' : 'disabled'" :label="schedulerStatus.understand.running ? '运行中' : '已暂停'" />
                 <span v-if="schedulerStatus.understand.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.understand.cron }}</span>
               </div>
               <div v-if="schedulerStatus.understand.jobs.length === 0" class="py-2 text-center text-xs text-muted-foreground">
@@ -502,9 +498,7 @@ async function deleteBackend(slug: string) {
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">
-                      <Badge v-if="j.progress" variant="secondary" class="mr-2 text-[11px]" :class="runBadgeClass(j.progress.status)">
-                        {{ runLabel(j.progress.status) }}
-                      </Badge>
+                      <StatusBadge v-if="j.progress" class="mr-2" :status="runBadgeStatus(j.progress.status)" :label="runLabel(j.progress.status)" />
                       <span>{{ j.progress?.message || '暂无执行记录' }}</span>
                     </td>
                   </tr>
@@ -514,9 +508,7 @@ async function deleteBackend(slug: string) {
             <div>
               <div class="mb-2 flex items-center gap-3">
                 <span class="text-xs text-muted-foreground">插件更新</span>
-                <Badge :variant="schedulerStatus.plugin_update.running ? 'secondary' : 'outline'" :class="schedulerStatus.plugin_update.running ? 'bg-green-50 text-green-700' : ''">
-                  {{ schedulerStatus.plugin_update.running ? '运行中' : '已暂停' }}
-                </Badge>
+                <StatusBadge :status="schedulerStatus.plugin_update.running ? 'running' : 'disabled'" :label="schedulerStatus.plugin_update.running ? '运行中' : '已暂停'" />
               </div>
               <div v-if="schedulerStatus.plugin_update.jobs.length === 0" class="py-2 text-center text-xs text-muted-foreground">
                 {{ schedulerStatus.plugin_update.running ? '没有配置插件 Git URL' : '—' }}
@@ -534,9 +526,7 @@ async function deleteBackend(slug: string) {
                     <td class="px-3 py-2 text-sm font-mono">{{ j.plugin_key || j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">
-                      <Badge v-if="j.progress" variant="secondary" class="mr-2 text-[11px]" :class="runBadgeClass(j.progress.status)">
-                        {{ runLabel(j.progress.status) }}
-                      </Badge>
+                      <StatusBadge v-if="j.progress" class="mr-2" :status="runBadgeStatus(j.progress.status)" :label="runLabel(j.progress.status)" />
                       <span>{{ j.progress?.message || '暂无执行记录' }}</span>
                     </td>
                   </tr>
@@ -546,24 +536,18 @@ async function deleteBackend(slug: string) {
             <div>
               <div class="mb-2 flex items-center gap-3">
                 <span class="text-xs text-muted-foreground">知识同步</span>
-                <Badge :variant="schedulerStatus.doc_sync?.running ? 'secondary' : 'outline'" :class="schedulerStatus.doc_sync?.running ? 'bg-green-50 text-green-700' : ''">
-                  {{ schedulerStatus.doc_sync?.running ? '运行中' : '已暂停' }}
-                </Badge>
+                <StatusBadge :status="schedulerStatus.doc_sync?.running ? 'running' : 'disabled'" :label="schedulerStatus.doc_sync?.running ? '运行中' : '已暂停'" />
                 <span v-if="schedulerStatus.doc_sync?.cron" class="font-mono text-xs text-muted-foreground">{{ schedulerStatus.doc_sync.cron }}</span>
               </div>
               <div class="space-y-2 rounded-md border border-border bg-muted/20 p-3">
                 <div class="flex items-center gap-2 text-xs">
                   <span class="text-muted-foreground">当前执行</span>
-                  <Badge v-if="schedulerStatus.doc_sync?.current_run" variant="secondary" class="text-[11px]" :class="runBadgeClass(schedulerStatus.doc_sync.current_run.status)">
-                    {{ runLabel(schedulerStatus.doc_sync.current_run.status) }}
-                  </Badge>
+                  <StatusBadge v-if="schedulerStatus.doc_sync?.current_run" :status="runBadgeStatus(schedulerStatus.doc_sync.current_run.status)" :label="runLabel(schedulerStatus.doc_sync.current_run.status)" />
                   <span class="text-muted-foreground">{{ docRunText(schedulerStatus.doc_sync?.current_run) }}</span>
                 </div>
                 <div class="flex items-center gap-2 text-xs">
                   <span class="text-muted-foreground">最近一次</span>
-                  <Badge v-if="schedulerStatus.doc_sync?.last_run" variant="secondary" class="text-[11px]" :class="runBadgeClass(schedulerStatus.doc_sync.last_run.status)">
-                    {{ runLabel(schedulerStatus.doc_sync.last_run.status) }}
-                  </Badge>
+                  <StatusBadge v-if="schedulerStatus.doc_sync?.last_run" :status="runBadgeStatus(schedulerStatus.doc_sync.last_run.status)" :label="runLabel(schedulerStatus.doc_sync.last_run.status)" />
                   <span class="text-muted-foreground">{{ docRunText(schedulerStatus.doc_sync?.last_run) }}</span>
                   <span v-if="schedulerStatus.doc_sync?.last_run?.finished_at" class="font-mono text-muted-foreground">
                     {{ formatLocalDatetime(schedulerStatus.doc_sync.last_run.finished_at) }}
@@ -574,13 +558,11 @@ async function deleteBackend(slug: string) {
             <div>
               <div class="mb-2 flex items-center gap-3">
                 <span class="text-xs text-muted-foreground">工作流调度</span>
-                <Badge :variant="schedulerStatus.workflow?.running ? 'secondary' : 'outline'" :class="schedulerStatus.workflow?.running ? 'bg-green-50 text-green-700' : ''">
-                  {{ schedulerStatus.workflow?.running ? '运行中' : '已暂停' }}
-                </Badge>
+                <StatusBadge :status="schedulerStatus.workflow?.running ? 'running' : 'disabled'" :label="schedulerStatus.workflow?.running ? '运行中' : '已暂停'" />
                 <span class="font-mono text-xs text-muted-foreground">
                   每日 {{ schedulerStatus.workflow?.start_time || '--' }} → {{ schedulerStatus.workflow?.stop_time || '--' }}
                 </span>
-                <Badge v-if="schedulerStatus.workflow?.in_window" variant="secondary" class="bg-blue-50 text-blue-700">窗口内</Badge>
+                <Badge v-if="schedulerStatus.workflow?.in_window" variant="secondary" class="bg-info-soft text-info-soft-fg">窗口内</Badge>
                 <span class="text-xs text-muted-foreground">最多并发 {{ schedulerStatus.workflow?.max_concurrent_workflows || 2 }} 个工作流</span>
               </div>
               <div class="space-y-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
@@ -611,9 +593,7 @@ async function deleteBackend(slug: string) {
             <div class="text-sm shrink-0 whitespace-nowrap">共享 .env</div>
             <div class="flex min-w-0 items-center gap-2">
               <span class="truncate font-mono text-xs text-muted-foreground">{{ claudeMemConfig.env_file_path }}</span>
-              <Badge variant="secondary" class="text-[11px]" :class="claudeMemConfig.env_file_exists ? 'bg-green-50 text-green-700' : ''">
-                {{ claudeMemConfig.env_file_exists ? '已生成' : '未生成' }}
-              </Badge>
+              <StatusBadge :status="claudeMemConfig.env_file_exists ? 'enabled' : 'disabled'" :label="claudeMemConfig.env_file_exists ? '已生成' : '未生成'" />
             </div>
           </div>
           <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
@@ -636,9 +616,7 @@ async function deleteBackend(slug: string) {
             <div class="text-sm shrink-0 whitespace-nowrap">Auth Token</div>
             <div class="flex items-center gap-3">
               <Input v-model="claudeMemForm.auth_token" type="password" placeholder="留空保持不变" class="font-mono text-xs" :disabled="claudeMemForm.clear_auth_token" />
-              <Badge variant="secondary" class="text-[11px]" :class="claudeMemConfig.has_auth_token ? 'bg-green-50 text-green-700' : ''">
-                {{ claudeMemConfig.has_auth_token ? '已配置' : '未配置' }}
-              </Badge>
+              <StatusBadge :status="claudeMemConfig.has_auth_token ? 'enabled' : 'disabled'" :label="claudeMemConfig.has_auth_token ? '已配置' : '未配置'" />
               <label class="flex items-center gap-2 text-xs text-muted-foreground">
                 <input v-model="claudeMemForm.clear_auth_token" type="checkbox" class="h-4 w-4" />
                 清除
@@ -649,9 +627,7 @@ async function deleteBackend(slug: string) {
             <div class="text-sm shrink-0 whitespace-nowrap">API Key</div>
             <div class="flex items-center gap-3">
               <Input v-model="claudeMemForm.api_key" type="password" placeholder="留空保持不变" class="font-mono text-xs" :disabled="claudeMemForm.clear_api_key" />
-              <Badge variant="secondary" class="text-[11px]" :class="claudeMemConfig.has_api_key ? 'bg-green-50 text-green-700' : ''">
-                {{ claudeMemConfig.has_api_key ? '已配置' : '未配置' }}
-              </Badge>
+              <StatusBadge :status="claudeMemConfig.has_api_key ? 'enabled' : 'disabled'" :label="claudeMemConfig.has_api_key ? '已配置' : '未配置'" />
               <label class="flex items-center gap-2 text-xs text-muted-foreground">
                 <input v-model="claudeMemForm.clear_api_key" type="checkbox" class="h-4 w-4" />
                 清除
@@ -703,10 +679,9 @@ async function deleteBackend(slug: string) {
                 <td class="px-3 py-2 text-sm">{{ b.backend_type }}</td>
                 <td class="px-3 py-2 text-xs text-muted-foreground truncate max-w-[250px]">{{ b.base_url || '—' }}</td>
                 <td class="px-3 py-2">
-                  <Badge variant="secondary" class="text-[11px]"
-                    :class="b.runtime_status === 'active' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'">
-                    {{ b.runtime_status === 'active' ? '运行中' : '未激活' }}
-                  </Badge>
+                  <StatusBadge
+                    :status="b.runtime_status === 'active' ? 'running' : 'error'"
+                    :label="b.runtime_status === 'active' ? '运行中' : '未激活'" />
                 </td>
                 <td class="px-3 py-2 text-right">
                   <div class="flex justify-end gap-2">
@@ -773,7 +748,7 @@ async function deleteBackend(slug: string) {
           <DialogTitle>{{ editingBackend ? '编辑后端' : '添加后端' }}</DialogTitle>
         </DialogHeader>
         <form @submit.prevent="saveBackend" class="space-y-4">
-          <div v-if="backendError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ backendError }}</div>
+          <div v-if="backendError" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ backendError }}</div>
           <div class="space-y-2">
             <label class="text-sm font-medium">后端标识 <span class="text-destructive">*</span></label>
             <Input v-model="backendForm.slug" placeholder="my-ragflow" :disabled="editingBackend" required />

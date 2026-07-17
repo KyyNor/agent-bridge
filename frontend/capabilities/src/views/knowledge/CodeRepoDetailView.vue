@@ -19,6 +19,7 @@ import { formatLocalDatetime } from '../../lib/time'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
+import StatusBadge from '../../components/StatusBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 
 const props = defineProps<{
@@ -299,19 +300,19 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="!detailRepo" class="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+    <div v-if="!detailRepo" class="rounded-lg border border-destructive/30 bg-destructive-soft p-6 text-sm text-destructive">
       <div class="font-medium">{{ detailError || '仓库不存在或已被删除' }}</div>
       <Button variant="outline" size="sm" class="mt-4" @click="goBack">返回列表</Button>
     </div>
 
     <div v-else class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-      <div v-if="detailError" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+      <div v-if="detailError" class="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning-soft-fg">
         {{ detailError }}
       </div>
       <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
       <div v-else class="space-y-4">
         <!-- Status Banner -->
-        <div v-if="detailStatus && !detailStatus.codegraph_installed" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
+        <div v-if="detailStatus && !detailStatus.codegraph_installed" class="rounded-lg bg-warning-soft p-3 text-sm text-warning-soft-fg">
           {{ detailStatus.message }}
         </div>
 
@@ -366,7 +367,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div v-if="detailRepo.last_error" class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div v-if="detailRepo.last_error" class="rounded-lg border border-destructive/30 bg-destructive-soft p-4 text-sm text-destructive">
             <div class="mb-1 font-medium">同步错误</div>
             <div class="whitespace-pre-wrap break-words">{{ detailRepo.last_error }}</div>
           </div>
@@ -405,7 +406,7 @@ onBeforeUnmount(() => {
               {{ detailExploring ? '执行中...' : '执行' }}
             </Button>
           </div>
-          <div v-if="detailExploreError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div v-if="detailExploreError" class="rounded-lg border border-destructive/30 bg-destructive-soft p-3 text-sm text-destructive">
             {{ detailExploreError }}
           </div>
           <div v-if="detailExploring" class="py-4 text-center text-sm text-muted-foreground">执行中...</div>
@@ -427,21 +428,21 @@ onBeforeUnmount(() => {
           <div v-if="uaLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
           <template v-else>
             <!-- Availability Check -->
-            <div v-if="detailRepo.auto_understand" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+            <div v-if="detailRepo.auto_understand" class="rounded-lg border border-info/30 bg-info-soft p-3 text-sm text-info-soft-fg">
               此代码库已开启自动理解，将按定时任务周期自动运行分析。
             </div>
             <template v-else>
-              <div v-if="uaAvailability && !uaAvailability.ua_skill_available && !uaAvailability.ua_git_url_configured" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+              <div v-if="uaAvailability && !uaAvailability.ua_skill_available && !uaAvailability.ua_git_url_configured" class="rounded-lg border border-warning/30 bg-warning-soft p-4 text-sm text-warning-soft-fg">
                 <div class="font-medium">Understand Anything 不可用</div>
                 <div class="mt-1">请在「系统配置」页面填写 UA Git URL 以启用自动安装。</div>
               </div>
-              <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+              <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="flex items-center justify-between rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success-soft-fg">
                 <span>UA 技能未安装，将在运行分析时自动安装</span>
                 <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
                   {{ uaAnalyzing ? '安装并分析中...' : '安装并分析' }}
                 </Button>
               </div>
-              <div v-else-if="uaAvailability && uaAvailability.ua_skill_available" class="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+              <div v-else-if="uaAvailability && uaAvailability.ua_skill_available" class="flex items-center justify-between rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success-soft-fg">
                 <span>Understand Anything 技能已就绪</span>
                 <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
                   {{ uaAnalyzing ? '分析中...' : '运行分析' }}
@@ -450,21 +451,22 @@ onBeforeUnmount(() => {
             </template>
 
             <!-- Analyze Result -->
-            <div v-if="uaAnalyzeSuccess" class="rounded-lg bg-green-50 p-3 text-sm text-green-700">{{ uaAnalyzeSuccess }}</div>
-            <div v-if="uaAnalyzeError" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{{ uaAnalyzeError }}</div>
+            <div v-if="uaAnalyzeSuccess" class="rounded-lg bg-success-soft p-3 text-sm text-success-soft-fg">{{ uaAnalyzeSuccess }}</div>
+            <div v-if="uaAnalyzeError" class="rounded-lg border border-destructive/30 bg-destructive-soft p-3 text-sm text-destructive">{{ uaAnalyzeError }}</div>
 
-            <div v-if="uaUnderstandRun" class="rounded-lg border p-3 text-sm" :class="uaUnderstandRun.status === 'failed' ? 'border-red-200 bg-red-50 text-red-700' : uaUnderstandRun.status === 'succeeded' ? 'border-green-200 bg-green-50 text-green-700' : 'border-blue-200 bg-blue-50 text-blue-700'">
+            <div v-if="uaUnderstandRun" class="rounded-lg border border-border p-3 text-sm">
               <div class="flex items-center justify-between gap-2">
                 <div class="font-medium">最近一次定时分析</div>
-                <Badge variant="secondary" :class="uaUnderstandRun.status === 'failed' ? 'bg-red-100 text-red-700' : uaUnderstandRun.status === 'succeeded' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'">
-                  {{ uaUnderstandRun.status === 'succeeded' ? '成功' : uaUnderstandRun.status === 'failed' ? '失败' : uaUnderstandRun.status }}
-                </Badge>
+                <StatusBadge
+                  :status="uaUnderstandRun.status === 'succeeded' ? 'success' : uaUnderstandRun.status === 'failed' ? 'error' : 'running'"
+                  :label="uaUnderstandRun.status === 'succeeded' ? '成功' : uaUnderstandRun.status === 'failed' ? '失败' : uaUnderstandRun.status"
+                />
               </div>
               <div class="mt-2 grid gap-1 text-xs text-muted-foreground">
                 <div v-if="uaUnderstandRun.started_at">开始时间: {{ formatLocalDatetime(uaUnderstandRun.started_at) }}</div>
                 <div v-if="uaUnderstandRun.finished_at">结束时间: {{ formatLocalDatetime(uaUnderstandRun.finished_at) }}</div>
                 <div v-if="uaUnderstandRun.message">{{ uaUnderstandRun.message }}</div>
-                <div v-if="uaUnderstandRun.error" class="text-red-600">错误: {{ uaUnderstandRun.error }}</div>
+                <div v-if="uaUnderstandRun.error" class="text-destructive">错误: {{ uaUnderstandRun.error }}</div>
               </div>
             </div>
 
@@ -490,7 +492,7 @@ onBeforeUnmount(() => {
               <div class="mt-1 text-xs text-muted-foreground">可通过 Understand Anything 技能生成</div>
             </div>
             <template v-else>
-              <div class="rounded-lg bg-green-50 p-3 text-sm text-green-700">
+              <div class="rounded-lg bg-success-soft p-3 text-sm text-success-soft-fg">
                 知识图谱可用
               </div>
               <div class="grid grid-cols-4 gap-2">
@@ -518,8 +520,8 @@ onBeforeUnmount(() => {
                   <div class="text-sm text-muted-foreground">{{ uaSummary.description }}</div>
                 </div>
                 <div v-if="uaSummary.languages.length || uaSummary.frameworks.length" class="flex flex-wrap gap-1.5">
-                  <Badge v-for="lang in uaSummary.languages" :key="lang" variant="secondary" class="bg-blue-50 text-blue-700">{{ lang }}</Badge>
-                  <Badge v-for="fw in uaSummary.frameworks" :key="fw" variant="secondary" class="bg-green-50 text-green-700">{{ fw }}</Badge>
+                  <Badge v-for="lang in uaSummary.languages" :key="lang" variant="secondary" class="bg-info-soft text-info-soft-fg">{{ lang }}</Badge>
+                  <Badge v-for="fw in uaSummary.frameworks" :key="fw" variant="secondary" class="bg-success-soft text-success-soft-fg">{{ fw }}</Badge>
                 </div>
                 <div v-if="uaSummary.modules.length" class="rounded-lg border border-border">
                   <div class="border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">主要模块</div>
@@ -546,7 +548,7 @@ onBeforeUnmount(() => {
                 <div v-if="uaStatus?.git_commit">分析 commit: <span class="font-mono">{{ uaStatus.git_commit?.slice(0, 12) }}</span></div>
                 <div v-if="uaStatus?.analyzed_files != null">分析文件数: {{ uaStatus.analyzed_files }}</div>
                 <div v-if="uaStatus?.graph_path">图谱路径: <span class="font-mono text-[11px]">{{ uaStatus.graph_path }}</span></div>
-                <div v-if="uaStatus?.error" class="text-red-600">错误: {{ uaStatus.error }}</div>
+                <div v-if="uaStatus?.error" class="text-destructive">错误: {{ uaStatus.error }}</div>
               </div>
             </details>
           </template>

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * 低饱和分类徽标 —— 统一「工具层级 / 调用来源」两套分类。
+ * 低饱和分类徽标 —— 统一「工具层级 / 调用来源 / 任务类型」三套分类。
  *
  * 用 kind 区分映射，避免各页面重复定义。
- * 颜色成对来自 base.css 类别色令牌（cat-* / neutral-soft），禁止裸用调色盘。
+ * 颜色成对来自 base.css 类别色令牌（cat-* / neutral-soft / 软状态色），禁止裸用调色盘。
  */
 import { computed } from 'vue'
 
-type Kind = 'toolType' | 'source'
+type Kind = 'toolType' | 'source' | 'taskType'
 
 const props = defineProps<{
   kind: Kind
@@ -30,8 +30,22 @@ const SOURCE: Record<string, { bg: string; fg: string; text: string }> = {
   builtin:        { bg: 'bg-neutral-soft', fg: 'text-neutral-soft-fg', text: 'Builtin' },
 }
 
+// 任务导入操作类型：新增/更新/跳过/重开/错误（含细分值）
+const TASK_TYPE: Record<string, { bg: string; fg: string; text: string }> = {
+  created:           { bg: 'bg-cat-blue',   fg: 'text-cat-blue-fg',   text: '新增' },
+  updated:           { bg: 'bg-cat-violet', fg: 'text-cat-violet-fg', text: '更新' },
+  skipped:           { bg: 'bg-cat-amber',  fg: 'text-cat-amber-fg',  text: '跳过' },
+  skipped_running:   { bg: 'bg-cat-amber',  fg: 'text-cat-amber-fg',  text: '跳过' },
+  skipped_completed: { bg: 'bg-cat-amber',  fg: 'text-cat-amber-fg',  text: '跳过' },
+  reopened:          { bg: 'bg-cat-teal',   fg: 'text-cat-teal-fg',   text: '重开' },
+  reopened_expired:  { bg: 'bg-cat-teal',   fg: 'text-cat-teal-fg',   text: '重开' },
+  error:             { bg: 'bg-destructive-soft', fg: 'text-destructive-soft-fg', text: '错误' },
+}
+
+const MAPS = { toolType: TOOL_TYPE, source: SOURCE, taskType: TASK_TYPE } as const
+
 const m = computed(() => {
-  const map = props.kind === 'toolType' ? TOOL_TYPE : SOURCE
+  const map = MAPS[props.kind]
   return map[props.value] ?? { bg: 'bg-neutral-soft', fg: 'text-neutral-soft-fg', text: props.value || '未标记' }
 })
 </script>
