@@ -100,17 +100,60 @@ class SQLiteStore:
                 conn,
                 "agent_runs",
                 {
+                    "backend_key": "TEXT",
                     "status": "TEXT NOT NULL DEFAULT ''",
                     "started_at": "TEXT",
                     "finished_at": "TEXT",
                 },
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_agent_runs_backend_key ON agent_runs(backend_key)"
+            )
+            self._backfill_agent_run_backend_keys(conn)
             self._drop_column(conn, "workflow_definitions", "manifest_json")
             self._ensure_columns(
                 conn,
                 "workflow_definitions",
-                {"workflow_type": "TEXT NOT NULL DEFAULT 'operation'"},
+                {
+                    "workflow_type": "TEXT NOT NULL DEFAULT 'operation'",
+                    "definition_json": "TEXT",
+                },
             )
+            self._ensure_columns(
+                conn,
+                "workflow_runs",
+                {
+                    "definition_snapshot_json": "TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}'",
+                    "input_json": "TEXT NOT NULL DEFAULT '{}'",
+                    "output_json": "TEXT NOT NULL DEFAULT '{}'",
+                },
+            )
+            self._ensure_columns(
+                conn,
+                "scripts",
+                {
+                    "input_schema_json": "TEXT NOT NULL DEFAULT '{\"type\":\"object\",\"properties\":{},\"additionalProperties\":true}'",
+                    "output_schema_json": "TEXT",
+                },
+            )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workflow_node_runs (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+                  node_id TEXT NOT NULL,
+                  node_type TEXT NOT NULL,
+                  status TEXT NOT NULL DEFAULT 'pending',
+                  condition_results_json TEXT NOT NULL DEFAULT '[]',
+                  output_json TEXT NOT NULL DEFAULT '{}',
+                  error TEXT,
+                  agent_run_key TEXT,
+                  script_run_id TEXT,
+                  started_at TEXT,
+                  finished_at TEXT,
+                  UNIQUE (run_id, node_id)
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id, id)")
             self._ensure_columns(
                 conn,
                 "workflow_tasks",
@@ -304,6 +347,8 @@ class SQLiteStore:
                   owner_type TEXT NOT NULL DEFAULT 'system',
                   owner_key TEXT NOT NULL DEFAULT '',
                   content_hash TEXT NOT NULL DEFAULT '',
+                  input_schema_json TEXT NOT NULL DEFAULT '{"type":"object","properties":{},"additionalProperties":true}',
+                  output_schema_json TEXT,
                   created_by TEXT NOT NULL,
                   updated_by TEXT NOT NULL,
                   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -470,6 +515,23 @@ class SQLiteStore:
             return
         if sqlite3.sqlite_version_info >= (3, 35, 0):
             conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+
+    def _backfill_agent_run_backend_keys(self, conn: sqlite3.Connection) -> None:
+        """Infer backend_key for historical agent runs that predate the column."""
+        for backend_key, marker in [
+            ("opencode", "opencode_cli"),
+            ("codex", "codex_cli"),
+            ("claude", "claude_agent_sdk"),
+        ]:
+            conn.execute(
+                """
+                UPDATE agent_runs
+                SET backend_key = ?
+                WHERE (backend_key IS NULL OR backend_key = '')
+                  AND events_json LIKE ?
+                """,
+                (backend_key, f"%{marker}%"),
+            )
 
     def _has_unique_index(self, conn: sqlite3.Connection, table: str, columns: list[str]) -> bool:
         for index in conn.execute(f"PRAGMA index_list({table})").fetchall():
@@ -761,16 +823,18 @@ class SQLiteStore:
         name: str,
         description: str,
         profile_key: str,
-        workflow_js: str,
         status: str,
         created_by: str,
         workflow_type: str = "operation",
+        definition: dict[str, Any] | None = None,
+        workflow_js: str = "",
     ) -> dict[str, Any]:
         return self.workflows.upsert_workflow_definition(
             workflow_key=workflow_key,
             name=name,
             description=description,
             profile_key=profile_key,
+            definition=definition,
             workflow_js=workflow_js,
             status=status,
             created_by=created_by,
@@ -950,6 +1014,8 @@ class SQLiteStore:
         task_key: str | None,
         status: str,
         temp_dir: str,
+        definition_snapshot: dict[str, Any] | None = None,
+        input_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self.workflows.create_workflow_run(
             run_id=run_id,
@@ -958,6 +1024,8 @@ class SQLiteStore:
             task_key=task_key,
             status=status,
             temp_dir=temp_dir,
+            definition_snapshot=definition_snapshot,
+            input_data=input_data,
         )
 
     def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
@@ -980,6 +1048,7 @@ class SQLiteStore:
         stderr_path: str | None,
         error: str | None,
         duration_ms: int | None,
+        output: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self.workflows.finish_workflow_run(
             run_id,
@@ -990,7 +1059,25 @@ class SQLiteStore:
             stderr_path=stderr_path,
             error=error,
             duration_ms=duration_ms,
+            output=output,
         )
+
+    def create_workflow_node_runs(self, run_id: str, nodes: list[dict[str, Any]]) -> None:
+        self.workflows.create_workflow_node_runs(run_id, nodes)
+
+    def start_workflow_node_run(
+        self, run_id: str, node_id: str, condition_results: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        return self.workflows.start_workflow_node_run(run_id, node_id, condition_results)
+
+    def finish_workflow_node_run(self, run_id: str, node_id: str, **kwargs: Any) -> dict[str, Any]:
+        return self.workflows.finish_workflow_node_run(run_id, node_id, **kwargs)
+
+    def list_workflow_node_runs(self, run_id: str) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_node_runs(run_id)
+
+    def fail_workflow_task_for_run(self, workflow_key: str, run_id: str, error_message: str) -> bool:
+        return self.workflows.fail_workflow_task_for_run(workflow_key, run_id, error_message)
 
     def append_workflow_run_log(
         self,

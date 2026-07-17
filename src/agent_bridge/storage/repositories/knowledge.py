@@ -893,6 +893,26 @@ class KnowledgeRepository:
                     SyncJobStatus.running.value,
                 ),
             ).fetchone()
+            cancellable_rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM sync_jobs
+                WHERE doc_id = ? AND kb_id = ? AND backend_slug = ?
+                  AND operation IN (?, ?, ?)
+                  AND status IN (?, ?)
+                GROUP BY status
+                """,
+                (
+                    doc_id,
+                    kb_id,
+                    backend_slug,
+                    Operation.create.value,
+                    Operation.update.value,
+                    Operation.move.value,
+                    SyncJobStatus.pending.value,
+                    SyncJobStatus.failed.value,
+                ),
+            ).fetchall()
             cursor = conn.execute(
                 """
                 UPDATE sync_jobs
@@ -913,7 +933,13 @@ class KnowledgeRepository:
                     SyncJobStatus.failed.value,
                 ),
             )
-            return {"cancelled": cursor.rowcount, "running": int(running["count"])}
+            counts = {str(row["status"]): int(row["count"]) for row in cancellable_rows}
+            return {
+                "cancelled": cursor.rowcount,
+                "running": int(running["count"]),
+                "pending": counts.get(SyncJobStatus.pending.value, 0),
+                "failed": counts.get(SyncJobStatus.failed.value, 0),
+            }
 
     def list_jobs_for_user(self, linux_user: str, backend_slug: str | None = None) -> list[dict[str, Any]]:
         with self._connect() as conn:

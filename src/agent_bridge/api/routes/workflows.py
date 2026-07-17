@@ -5,7 +5,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 
-from agent_bridge.api.schemas import WorkflowDefinitionRequest, WorkflowTaskImportConfirmRequest
+from agent_bridge.api.schemas import (
+    WorkflowDefinitionRequest,
+    WorkflowRunRequest,
+    WorkflowTaskImportConfirmRequest,
+    WorkflowValidationRequest,
+)
 from agent_bridge.core.domain import require_admin_user
 
 
@@ -19,6 +24,10 @@ def create_workflow_routes(service, actor):
     @router.post("/workflows")
     def upsert_workflow(payload: WorkflowDefinitionRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflows.upsert_definition(actor=current_actor, **payload.model_dump())
+
+    @router.post("/workflows/validate")
+    def validate_workflow(payload: WorkflowValidationRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.validate_workflow_draft(actor=current_actor, workflow=payload.workflow)
 
     @router.get("/workflows/{workflow_key}")
     def get_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -142,8 +151,14 @@ def create_workflow_routes(service, actor):
         )
 
     @router.post("/workflows/{workflow_key}/run")
-    def run_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.workflow_scheduler.run_workflow_now(workflow_key)
+    def run_workflow(
+        workflow_key: str,
+        payload: WorkflowRunRequest | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflow_scheduler.run_workflow_now(
+            workflow_key, input_data=payload.input if payload else {}, actor=current_actor
+        )
 
     @router.get("/workflows/{workflow_key}/tasks/import/template")
     def download_task_import_template(
@@ -200,7 +215,7 @@ def create_workflow_routes(service, actor):
             task_key=task_key,
             task_version=task_version,
         )
-        started = service.workflow_scheduler.run_workflow_now(workflow_key)
+        started = service.workflow_scheduler.run_workflow_now(workflow_key, actor=current_actor)
         return {**flagged, "run_id": started.get("run_id"), "run_status": started.get("status")}
 
     @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/reset")

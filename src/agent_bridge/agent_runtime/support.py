@@ -1,7 +1,7 @@
 """Shared helpers for Claude Agent SDK runs (MCP config + file staging).
 
-These are extracted from ``workflows/runner.py`` so both the workflow runner
-and ``AgentService`` build the Agent Bridge MCP configuration the same way.
+Workflow DAG nodes and ``AgentService`` build the Agent Bridge MCP
+configuration through these shared helpers.
 """
 
 from __future__ import annotations

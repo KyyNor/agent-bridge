@@ -17,6 +17,7 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     svc.store.agent_runs.create(
         run_key="greeter_abc",
         agent_name="greeter",
+        backend_key="opencode",
         profile_key="p1",
         ok=True,
         prompt="hi",
@@ -67,6 +68,7 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
 
     # detail includes prompt / result / events
     detail = client.get("/agent-runs/greeter_abc", headers=headers).json()
+    assert detail["backend_key"] == "opencode"
     assert detail["prompt"] == "hi"
     assert detail["result"] == "hello"
     assert detail["ok"] is True
@@ -292,6 +294,110 @@ def test_agent_runs_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:
         item["run_key"] for item in last["items"]
     )
 
+def test_agent_runs_schema_migrates_backend_key_for_existing_database(wm_paths) -> None:
+    import sqlite3
+
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    wm_paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(wm_paths.db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE agent_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_key TEXT NOT NULL UNIQUE,
+              agent_name TEXT NOT NULL,
+              profile_key TEXT,
+              workflow_key TEXT,
+              workflow_run_id TEXT,
+              session_id TEXT,
+              cwd TEXT,
+              model TEXT,
+              ok INTEGER NOT NULL,
+              status TEXT NOT NULL DEFAULT '',
+              error TEXT,
+              duration_ms INTEGER,
+              cost_usd REAL,
+              num_turns INTEGER,
+              prompt TEXT NOT NULL,
+              output_schema_json TEXT,
+              result_json TEXT,
+              events_json TEXT NOT NULL DEFAULT '[]',
+              started_at TEXT,
+              finished_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+
+    row = store.agent_runs.create(
+        run_key="migrated_run",
+        agent_name="agent",
+        backend_key="codex",
+        prompt="x",
+    )
+
+    assert row["backend_key"] == "codex"
+
+
+def test_agent_runs_schema_backfills_backend_key_from_historical_events(wm_paths) -> None:
+    import json
+    import sqlite3
+
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    wm_paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(wm_paths.db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE agent_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_key TEXT NOT NULL UNIQUE,
+              agent_name TEXT NOT NULL,
+              backend_key TEXT,
+              profile_key TEXT,
+              workflow_key TEXT,
+              workflow_run_id TEXT,
+              session_id TEXT,
+              cwd TEXT,
+              model TEXT,
+              ok INTEGER NOT NULL,
+              status TEXT NOT NULL DEFAULT '',
+              error TEXT,
+              duration_ms INTEGER,
+              cost_usd REAL,
+              num_turns INTEGER,
+              prompt TEXT NOT NULL,
+              output_schema_json TEXT,
+              result_json TEXT,
+              events_json TEXT NOT NULL DEFAULT '[]',
+              started_at TEXT,
+              finished_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO agent_runs (run_key, agent_name, backend_key, ok, status, prompt, events_json)
+            VALUES (?, ?, NULL, 1, 'completed', ?, ?)
+            """,
+            (
+                "old_opencode_run",
+                "design_script",
+                "x",
+                json.dumps([{"kind": "agent_message", "source": "opencode_cli"}]),
+            ),
+        )
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+
+    assert store.agent_runs.get("old_opencode_run")["backend_key"] == "opencode"
+
 
 def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path) -> None:
     """The /agent-runs/{run_key}/events endpoint serves the live events.jsonl
@@ -344,6 +450,50 @@ def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path
     )
     events = client.get("/agent-runs/live_run/events", headers=headers).json()
     assert [e["kind"] for e in events] == ["result"]
+
+
+def test_agent_run_detail_recovers_schema_result_from_agent_message_events(wm_paths) -> None:
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="design_script_old_opencode",
+        agent_name="design_script",
+        ok=True,
+        status="completed",
+        prompt="make a script",
+        output_schema={
+            "type": "object",
+            "required": ["summary", "script"],
+            "properties": {
+                "summary": {"type": "string"},
+                "script": {"type": "object"},
+            },
+        },
+        result="done",
+        events=[
+            {"kind": "result", "message": "done"},
+            {
+                "kind": "agent_message",
+                "message": (
+                    "```json\n"
+                    '{"summary":"created","script":{"script_key":"fib","code":"def main(envelope):\\n    return {}\\n"}}'
+                    "\n```"
+                ),
+            },
+        ],
+    )
+
+    client = _client(wm_paths)
+    detail = client.get(
+        "/agent-runs/design_script_old_opencode",
+        headers={"X-Agent-Bridge-User": "root"},
+    ).json()
+
+    assert detail["result"]["summary"] == "created"
+    assert detail["result"]["script"]["script_key"] == "fib"
+    assert "def main" in detail["result"]["script"]["code"]
 
 
 def test_agent_run_events_includes_terminal_db_events_when_live_jsonl_is_stale(wm_paths, tmp_path) -> None:

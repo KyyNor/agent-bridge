@@ -1,284 +1,392 @@
 # design_workflow
 
-你正在为 Agent Bridge 编写工作流。先理解用户目标，再维护核心脚本：
+你正在为 Agent Bridge 设计工作流。交付物不是脚本，而是可保存、可校验、可执行的**结构化 JSON DAG 工作流对象**。
 
-1. `workflow.js`：Claude Code 动态工作流脚本（harness 运行时执行的**控制流脚本**）。
+请始终按这个顺序工作：读取输入信息 -> 选择节点 -> 设计数据契约 -> 生成完整 JSON -> 调用校验脚本 -> 根据稳定 `code` 修正并重跑 -> 交付最终对象。
 
-## workflow.js 是什么（务必先理解）
+## 交付格式
 
-`workflow.js` **不是 Node.js 脚本**，而是 Claude Code 动态工作流规范的可执行脚本。harness 的 JS 运行时只跑**控制流**（`if` / `await` / `for` / `parallel`），每个 `agent()` 调用**派生一个子 agent** 去真正调工具、写文件、上网。
-
-运行方式：claude 以 `Workflow({ scriptPath: "./workflow.js" })` 执行本脚本。平台会从 `workflow.js` 静态解析调用图，不再要求额外维护结构定义文件。
-
-### 铁律（违反会导致 run 失败）
-
-- ❌ 不要 `import` Node 模块（`fs` / `path` / `process` …），不要写 `async function main()`，不要顶层 `main().catch(...)`。
-- ❌ 不要在脚本里直接 `await workflow_get_task()` 或 `fs.writeFile(...)`——这些工具与能力只能由**子 agent** 调用。
-- ❌ `export const meta` 必须是脚本的**第一条语句**——前面不要写 `'use strict'` 或任何可执行语句（注释可以），否则 harness 编译直接失败（报错 `must be the FIRST statement`）。
-- ❌ 不要用 `new Date()` / `Date.now()` / `Math.random()`——harness 运行时禁用，调用即抛错。需要时间戳/随机数时：通过 `args` 传入，或交给子 agent（子 agent 是普通 agent，可用 Bash `date` 等，不受此限制）。
-- ✅ 一切工具调用（`workflow_get_task` / `workflow_set_task` / `workflow_run_log`，以及 `Write` / `Bash` / `WebFetch` / `WebSearch` …）都包在 `agent('指示子 agent 做什么', { schema })` 里。
-- ✅ 一次 run 只完成一个 task；`out/result.json` 的 `task_key` 必须等于本次 `workflow_get_task` 的租约值。
-- ✅ 产物 `file` 必须在 `./out/` 下、不以 `/` 开头、不含 `..`；`format` 只能 `"markdown"`。
-- ✅ `result.status` 只能 `"completed"`（需 `task_key` + 非空 `artifacts`）或 `"no_executable_task"`（带 `reason`）。
-
-## 可用 API（控制流原语）
-
-| API | 作用 |
-|---|---|
-| `export const meta = { name, description, phases }` | 顶部元信息，**必须纯字面量**；`phases` 供进度展示 |
-| `phase('Lease')` | 声明进入某阶段（进度分组） |
-| `agent(prompt, { label, phase, schema })` | 派生子 agent 执行；返回其结构化结果 |
-| `parallel([() => agent(...), () => agent(...)])` | 并行 fan-out，等全部完成 |
-| `log('msg')` | 输出一行进度 |
-
-- `schema` 是 JSON Schema，强制子 agent 用结构化输出返回；脚本据此做控制流分支。优先 `additionalProperties: false` + 明确 `required`。
-- `parallel` 的每个元素必须是 thunk `() => agent(...)`，不是直接 `agent(...)`。
-
-## 子 agent 输出稳定性
-
-优先用 `agent(prompt, { schema })` 约束结构化返回；这样 workflow.js 可以直接按字段做控制流，不需要解析自然语言。
-
-如果确实需要接收子 agent 的文本输出（例如让子 agent 生成一段 JSON 字符串、Markdown 片段，或读取外部工具返回的混合文本），请在 workflow.js 里先做**纯字符串清理**，再继续使用。常见污染包括：
-
-- `<think>...</think>` 思考标签。
-- ```json / ```markdown 代码围栏。
-- JSON 前后的解释、寒暄、日志或其它多余输出。
-
-可复用下面这类 helper（只做字符串处理，不直接调工具）：
-
-```js
-function stripThink(text) {
-  return String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-}
-
-function stripFence(text) {
-  return stripThink(text)
-    .replace(/^```[a-zA-Z0-9_-]*\s*/g, '')
-    .replace(/\s*```$/g, '')
-    .trim()
-}
-
-function extractJsonText(text) {
-  const cleaned = stripFence(text)
-  const start = cleaned.indexOf('{')
-  const end = cleaned.lastIndexOf('}')
-  return start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned
-}
-```
-
-要求：
-
-- 解析前先剥离 `<think>` 和围栏，再从首个 `{` 到最后一个 `}` 截取 JSON，降低“多说一句话”导致失败的概率。
-- 能用 `schema` 时不要改用手写 JSON 解析；手写清理只作为处理不可控文本的兜底。
-- 清理后的值仍要按固定返回格式校验，尤其是 `status`、`task_key`、`task_version`、`artifact.file` 和 `format`。
-
-## 骨架（正确范式，通用版）
-
-```js
-export const meta = {
-  name: 'example-summary',
-  description: '一句话说明这个工作流做什么：领任务 → 处理 → 产出 markdown。',
-  phases: [
-    { title: 'Lease', detail: 'workflow_get_task 租约任务；无则建任务再租约，或输出 no_executable_task' },
-    { title: 'Process', detail: '按 task.type 分支处理，必要时 parallel 并行' },
-    { title: 'Emit', detail: '写产物 markdown 与 out/result.json' },
-  ],
-}
-
-// ---- schemas：约束每个 agent() 的结构化返回 ----
-const TASK_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['task'],
-  properties: {
-    task: {
-      oneOf: [
-        { type: 'null' },
-        {
-          type: 'object', additionalProperties: false,
-          required: ['task_key'],
-          properties: {
-            task_key: { type: 'string' },
-            task_version: { type: 'string' },
-            type: { type: 'string' },
-            payload: { type: 'object' },
-          },
-        },
-      ],
-    },
-  },
-}
-
-// 任务键 → 安全文件名（artifact.file 不得含 / .. 等）
-function fileBase(key) {
-  return String(key || '').replace(/[^A-Za-z0-9._-]+/g, '-')
-}
-
-// ============================================================================
-// Phase 1 — 取任务
-// ============================================================================
-phase('Lease')
-let leased = await agent(
-  '调用 MCP 工具 workflow_get_task()（无入参）。注意：调用即「租约」——会立即把任务锁到本次 run 并 attempt_count+1，租期 7200s。\n' +
-  '只返回 workflow_get_task 的结果（{ task:{ task_key, task_version, type, payload } } 或 { task:null }），不要做其它事。',
-  { label: 'get_task', phase: 'Lease', schema: TASK_SCHEMA },
-)
-
-if (!leased.task) {
-  // 无可租约任务 → 合法的非失败终态（也可先 workflow_set_task 建任务，再 get_task）
-  await agent(
-    '用 Write 工具写 ./out/result.json，内容严格为：\n' +
-    '{"status":"no_executable_task","reason":"no pending task"}\n只做这一件事。',
-    { label: 'emit_no_task', phase: 'Lease' },
-  )
-  return { status: 'no_executable_task' }
-}
-
-const task = leased.task
-const base = fileBase(task.task_key)
-
-// ============================================================================
-// Phase 2 — 处理（按 task.type 分支；示例：取数据 + 并行调研）
-// ============================================================================
-phase('Process')
-const [dataOut, researchOut] = await parallel([
-  () => agent(
-    `按任务 ${task.task_key} 取所需数据（用 Bash / WebFetch 等工具）。返回结构化结果。软失败：抓不到就如实标注，不要中断。`,
-    { label: 'fetch_data', phase: 'Process' },
-  ),
-  () => agent(
-    `WebSearch 调研与 ${task.task_key} 相关的背景。软失败：无有价值结果就如实写「调研不足」，不要中断。`,
-    { label: 'research', phase: 'Process' },
-  ),
-])
-
-// ============================================================================
-// Phase 3 — 产出（写 markdown + result.json）
-// ============================================================================
-phase('Emit')
-const resultSkeleton = JSON.stringify({
-  status: 'completed',
-  task_key: task.task_key,
-  task_version: task.task_version || '',
-  artifacts: [{
-    title: task.task_key,
-    path: 'reports/' + task.task_key + '.md',
-    file: 'out/artifacts/' + base + '.md',
-    tags: [task.type || 'workflow'],
-    format: 'markdown',
-    summary: '<=80字一句话概述，需你填写>',
-  }],
-}, null, 2)
-
-await agent(
-  '用 Write 工具写两个文件：\n' +
-  `1) ./out/artifacts/${base}.md：按任务 ${task.task_key} 的内容生成 markdown。\n` +
-  '2) ./out/result.json：内容严格为下面这段 JSON（只把 summary 占位替换成真实的一句话概述，其余字节不变，保持合法 JSON）：\n' +
-  resultSkeleton + '\n\n' +
-  `硬约束（违反会被服务端拒绝、run 判失败）：result.json 的 task_key 必须等于本次租约值 "${task.task_key}"；file 不得以 / 开头、不得含 ..；format 只能 "markdown"；status 只能 "completed"。`,
-  { label: 'write_artifact', phase: 'Emit' },
-)
-
-return { status: 'completed' }
-```
-
-## 任务工具（都是 MCP 工具，通过 agent 调用）
-
-### workflow_get_task
-
-领取/租约当前工作流运行的一条任务。**调用即租约**：把任务锁到本次 run，`attempt_count+1`，租期 7200s。
-
-```js
-const leased = await agent(
-  '调用 MCP 工具 workflow_get_task()（无入参）。只返回结果，不做其它事。',
-  { label: 'get_task', schema: TASK_SCHEMA },
-)
-// leased.task: { task_key, task_version, type, payload } 或 null
-```
-
-`task` 为 `null` 表示当前没有待处理任务（可输出 `no_executable_task`，或先建任务再租约）。
-
-### workflow_set_task
-
-幂等地创建或刷新任务：`completed` 跳过、`running` 未过期保护、`pending`/过期/`abandoned` 重置为 `pending`。用于在没有可租约任务时自行生产任务。
-
-```js
-await agent(
-  '调用 MCP 工具 workflow_set_task({ tasks:[ { task_key, type, payload }, ... ] })。' +
-  '把返回的 { created, updated, skipped_completed, skipped_running } 直接返回。',
-  { label: 'seed_tasks', schema: SEED_SCHEMA },
-)
-```
-
-任务字段约定：
-
-- `task_key`：必填，稳定任务 ID。
-- `task_version`：可选，同一任务的新版本再次执行时使用。
-- `type`：可选，任务类型。可在脚本中按类型分支，例如 `page_summary`、`index_build`、`validation`。
-- `payload`：任务业务参数，必须是对象。
-
-### workflow_run_log
-
-记录运行过程中的业务日志（供运行记录面板展示）：
-
-```js
-await agent(
-  '调用 MCP 工具 workflow_run_log({ level:"info", stage:"lease", task_key:"<key>", message:"leased task", payload:{} })。',
-  { label: 'log_lease' },
-)
-```
-
-## 固定返回格式（out/result.json）
-
-成功完成一个任务时：
+- 只输出一个设计 Agent envelope，不要输出 envelope 之外的解释、注释、补丁、伪代码或 Markdown fence。
+- envelope 结构固定为：
 
 ```json
 {
-  "status": "completed",
-  "task_key": "page:a",
-  "task_version": "v1",
-  "artifacts": [
-    {
-      "title": "Page A Report",
-      "path": "reports/page-a.md",
-      "tags": ["page", "summary"],
-      "format": "markdown",
-      "file": "out/artifacts/page-a.md",
-      "summary": "short summary"
-    }
-  ]
+  "summary": "本次设计摘要",
+  "notes": ["需要用户注意的事项"],
+  "workflow": {
+    "workflow_key": "完整工作流对象从这里开始"
+  }
 }
 ```
 
-没有可执行任务时：
+- `summary` 必须是字符串，`notes` 必须是字符串数组，`workflow` 才是可保存、可校验的完整工作流对象。
+- `workflow` 至少包含：
+  - `workflow_key`
+  - `name`
+  - `description`
+  - `profile_key`
+  - `workflow_type`
+  - `status`
+  - `definition`
+- `definition` 必须是：
 
 ```json
-{ "status": "no_executable_task", "reason": "no pending task" }
+{
+  "nodes": [],
+  "edges": []
+}
 ```
+
+- 真实字段请使用系统里的 key，不要发明别名。例如：
+  - backend 用 `backend_key`
+  - 技能列表用 `skill_names`
+  - 托管脚本用 `script_key`
+  - 工作流定义用 `definition`
+
+## 先理解输入
+
+在生成前，先从用户需求和当前对象里明确这些问题：
+
+1. 这是 `operation` 还是 `summary` 工作流。
+2. 是否需要 `get_task` 作为唯一根节点，还是手动输入型工作流。
+3. 每个节点消费什么，产出什么，后续谁会引用它。
+4. 哪些步骤适合 Agent，哪些适合托管脚本，哪些需要落产物。
+5. 是否存在条件分支；若有，判断字段必须来自来源节点或其祖先。
+
+如果当前对象已经有可复用节点，优先在原结构上做增量修改，而不是无谓重排。
+
+## 顶层工作流对象
+
+- `workflow_key`：稳定标识，适合存储与复用。
+- `name` / `description`：面向人读。
+- `profile_key`：工作流绑定的能力平面。`mcp_enabled=true` 的 Agent 节点会使用它。
+- `workflow_type`：`operation` 或 `summary`。
+- `status`：`active` 或 `disabled`。
+- `definition.nodes`：节点数组。
+- `definition.edges`：边数组。
+
+## 四类节点
+
+### 1. 获取任务 `get_task`
+
+无业务配置，负责租约一条待处理任务。
+
+约束：
+
+- 一个工作流最多一个 `get_task` 节点。
+- 如果存在，它必须是**唯一的无入边根节点**。
+- 没租到任务时，本次运行以 `no_task` 结束，后续节点不执行。
+- 输出形如：
+
+```json
+{
+  "task": {
+    "task_key": "page:repo-a",
+    "task_version": "v1",
+    "type": "page",
+    "payload": {}
+  }
+}
+```
+
+### 2. Agent `agent`
+
+配置示例：
+
+```json
+{
+  "prompt": "分析仓库 {{ task.payload.repo }} 并输出结构化结果",
+  "backend_key": "codex",
+  "mcp_enabled": true,
+  "skill_names": ["code-review"],
+  "result_mode": "json",
+  "output_schema": {
+    "type": "object",
+    "required": ["summary"],
+    "properties": {
+      "summary": { "type": "string" }
+    }
+  }
+}
+```
+
+规则：
+
+- `backend_key` 必须是已注册且启用的后端，例如 `claude`、`codex`、`opencode`。
+- `mcp_enabled=true` 时复用工作流的 `profile_key`；节点内不改 profile。
+- `skill_names` 是系统技能 key 数组，按顺序拼进用户任务提示词前面。
+- `result_mode="text"` 时，节点输出规范化为 `{ "text": "..." }`。
+- `result_mode="json"` 时必须提供 `output_schema`，输出必须是 JSON 对象。
+
+### 3. 托管脚本 `script`
+
+配置示例：
+
+```json
+{
+  "script_key": "workflow.collect_pages",
+  "params": {
+    "repo": "{{ task.payload.repo }}",
+    "analysis": "{{ nodes.analyze.output }}"
+  },
+  "timeout_seconds": 60
+}
+```
+
+规则：
+
+- `script_key` 必须引用已启用的托管 Python 脚本。
+- 参数必须显式映射；不要假设系统会自动注入所有上游输出。
+- 脚本返回的 JSON 对象直接成为节点输出。
+- 节点里不内联脚本代码，代码只在脚本管理里维护。
+
+### 4. 输出结果 `output`
+
+这是带产物持久化语义的 Agent 节点，配置包含 Agent 节点全部字段，并额外包含：
+
+```json
+{
+  "format": "markdown",
+  "title": "项目分析报告",
+  "path": "reports/{{ task.task_key }}/index.md",
+  "tags": ["summary"],
+  "prompt": "根据上游结果生成 Markdown 报告",
+  "backend_key": "claude",
+  "mcp_enabled": false,
+  "skill_names": ["design_html_report"]
+}
+```
+
+规则：
+
+- `format` 只能是 `markdown` 或 `html`。
+- `path` 不能以 `/` 开头，也不能包含 `..`。
+- 输出节点必须返回固定结构：
+
+```json
+{
+  "title": "string",
+  "summary": "string",
+  "content": "string"
+}
+```
+
+- `markdown` 输出节点会自动看到全部祖先节点输出，适合汇总主报告。
+- `html` 输出节点只会消费其直接上游的 Markdown 产物，适合把主报告转为 HTML 成品。
+
+## 引用规则
+
+只允许三类引用：
+
+- `input.*`
+- `task.*`
+- `nodes.<ancestor_id>.output.*`
+
+示例：
+
+- `{{ input.topic }}`
+- `{{ task.payload.repo }}`
+- `{{ nodes.analyze.output.summary }}`
+
+硬约束：
+
+- 只能引用祖先节点，不能引用并行节点或下游节点。
+- 脚本参数如果整体就是单个引用，应保留原始 JSON 类型。
+- 引用被嵌入普通字符串时再转成文本。
+- 运行期字段缺失会导致节点失败，所以不要凭空引用不存在的路径。
+
+## 条件边
+
+边可以带 `condition`：
+
+```json
+{
+  "id": "classify-bug",
+  "source": "classify",
+  "target": "handle-bug",
+  "condition": {
+    "field": "nodes.classify.output.category",
+    "operator": "equals",
+    "value": "bug"
+  }
+}
+```
+
+规则：
+
+- `operator` 只用这五种：`equals`、`not_equals`、`exists`、`not_exists`、`contains`。
+- `field` 只能引用来源节点或其祖先。
+- 无条件边等价于恒成立。
+- 如果所有入边条件都不成立，节点会被跳过。
+
+## `summary` 工作流约束
+
+`workflow_type="summary"` 时，末端必须保留一对固定职责的输出节点：
+
+1. Markdown 主报告
+2. HTML 派生报告
 
 要求：
 
-- `task_key` 必须等于领取到的任务（租约值）。
-- 如果任务有 `task_version`，必须原样写回。
-- 当前只接受 `format: "markdown"`。
-- `file` 必须指向运行目录内真实存在的产物文件（在 `./out/` 下，安全文件名）。
-- `path` 是产物在工作流产物库中的逻辑路径，不能以 `/` 开头，不能包含 `..`。
+- 恰好一个 Markdown 输出节点和一个 HTML 输出节点。
+- Markdown 节点在前，HTML 节点在后。
+- HTML 节点只能直接依赖那个 Markdown 主报告。
+- Markdown -> HTML 连线不加条件。
+- HTML 节点必须是末端节点。
+- Markdown 负责内容汇总，HTML 负责最终展示。
 
-> 提示：result.json 里 `task_key` / `path` / `file` 通常都是确定的，只有 `summary` 需要子 agent 生成——可在脚本里先拼好 JSON 骨架（`JSON.stringify`），再让写文件的 agent 只替换 `summary` 占位，避免子 agent 改动其它字段破坏硬约束。
+## 设计步骤
 
-## 智能体协作方式
+### Step 1. 选择节点
 
-如果用户要求智能体协助编写工作流，应提示智能体先读取本技能：
+先判断是否需要：
+
+- `get_task` 取任务
+- `agent` 做分析/分类/提炼
+- `script` 做稳定、可复用、确定性的处理
+- `output` 落 Markdown 或 HTML 产物
+
+节点越少越好，但必须覆盖用户需求和数据流。
+
+### Step 2. 设计每个节点的数据契约
+
+为每个节点想清楚：
+
+- 它读取哪些输入
+- 它输出什么 JSON 形状
+- 下游具体引用哪个字段
+- 它是否需要条件分支
+
+如果某个 Agent 节点给后续分支提供判断依据，优先让它输出结构化 JSON，而不是模糊文本。
+
+### Step 3. 组装完整工作流对象
+
+交付时 `workflow` 必须包含完整对象，而不是只给 `definition` 片段。所有节点和边 ID 都要稳定、唯一、可读。
+
+### Step 4. 调用校验脚本
+
+生成完整对象后，必须执行下面这一步：
 
 ```text
-请执行 execute service='built-in' tool_name='load_skill' params={"skill_name":"design_workflow"} 读取技能，
-然后参照技能内容与我的需求，完成 workflow.js。
+execute service='built-in' tool_name='run_script'
+params={"script_key":"system.validate_workflow","script_params":{"workflow":<workflow 子对象>}}
 ```
 
-智能体完成后应检查：
+校验结果是结构化 JSON，至少包含：
 
-- 是否用 `agent()` 派生子 agent 调用工具/写文件（**而非**直接 `await workflow_get_task()` 或 `fs.writeFile`）？有没有误用 `import fs` / `async function main()`？
-- 顶部是否干净（`export const meta` 是第一条语句，没有 `'use strict'`）？脚本里有没有 `new Date()` / `Date.now()` / `Math.random()`（都必须剔除；时间戳交给子 agent 用 Bash `date` 填）？
-- 一次 run 是否只处理一个 task？`out/result.json` 的 `task_key` 是否用了 `workflow_get_task` 的租约值？
-- 是否为不同 `task.type` 设计了清晰分支？独立的子任务是否用 `parallel([...])` 并行？
-- `artifact.file` 是否在 `./out/` 下、文件名安全（无 `/` / `..`）？`format` 是否为 `"markdown"`？
-- 是否原样写回了 `task_version`？
+- `valid`
+- `errors`
+- `warnings`
+
+### Step 5. 按稳定 `code` 修正并重跑
+
+如果 `valid=false`：
+
+- 逐条读取 `errors[*].code`、`field`、`message`
+- 优先按稳定 `code` 修正，不要靠主观猜测
+- 修正后重新运行 `system.validate_workflow`
+- 直到 `valid=true` 再交付
+
+常见稳定 `code` 示例：
+
+- `duplicate_id`
+- `missing_node`
+- `cycle_detected`
+- `invalid_root`
+- `missing_output_schema`
+
+`warnings` 不一定阻塞交付，但必须确认是可接受的设计结果，而不是漏配。
+
+## 紧凑示例
+
+下面是一个总结型工作流对象的紧凑示例，字段名和结构要保持一致：
+
+```json
+{
+  "summary": "生成仓库总结报告",
+  "notes": [],
+  "workflow": {
+    "workflow_key": "repo-summary",
+    "name": "Repo Summary",
+    "description": "生成仓库总结报告",
+    "profile_key": "report-plane",
+    "workflow_type": "summary",
+    "status": "active",
+    "definition": {
+    "nodes": [
+      {
+        "id": "get-task",
+        "type": "get_task",
+        "name": "获取任务",
+        "position": { "x": 80, "y": 200 },
+        "config": {}
+      },
+      {
+        "id": "analyze",
+        "type": "agent",
+        "name": "仓库分析",
+        "position": { "x": 360, "y": 200 },
+        "config": {
+          "prompt": "分析仓库 {{ task.payload.repo }}，输出结构化总结",
+          "backend_key": "codex",
+          "mcp_enabled": true,
+          "skill_names": ["code-review"],
+          "result_mode": "json",
+          "output_schema": {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {
+              "summary": { "type": "string" }
+            }
+          }
+        }
+      },
+      {
+        "id": "markdown-output",
+        "type": "output",
+        "name": "Markdown 主报告",
+        "position": { "x": 700, "y": 140 },
+        "config": {
+          "format": "markdown",
+          "title": "{{ task.task_key }} 总结",
+          "path": "reports/{{ task.task_key }}/index.md",
+          "tags": ["summary"],
+          "prompt": "基于全部祖先节点输出生成 Markdown 总结报告",
+          "backend_key": "claude",
+          "mcp_enabled": false,
+          "skill_names": []
+        }
+      },
+      {
+        "id": "html-output",
+        "type": "output",
+        "name": "HTML 派生报告",
+        "position": { "x": 1020, "y": 140 },
+        "config": {
+          "format": "html",
+          "title": "{{ task.task_key }} 总结",
+          "path": "reports/{{ task.task_key }}/index.html",
+          "tags": ["summary"],
+          "prompt": "只根据直接上游 Markdown 主报告生成完整 HTML 文档",
+          "backend_key": "claude",
+          "mcp_enabled": false,
+          "skill_names": ["design_html_report"]
+        }
+      }
+    ],
+    "edges": [
+      { "id": "task-analyze", "source": "get-task", "target": "analyze" },
+      { "id": "analyze-markdown", "source": "analyze", "target": "markdown-output" },
+      { "id": "markdown-html", "source": "markdown-output", "target": "html-output" }
+      ]
+    }
+  }
+}
+```
+
+## 与用户协作时的行为
+
+- 如果用户要求“新增一步”“改成总结型”“补条件分支”，就在当前对象上做对应的结构化修改。
+- 如果当前对象缺关键字段，先补足能通过校验的最小完整结构。
+- 如果用户需求和已有结构冲突，优先保证 DAG、引用、条件、输出契约和校验通过。
+- 最终交付前，默认已经完成 `system.validate_workflow` 校验并按 `code` 修正过至少一轮。

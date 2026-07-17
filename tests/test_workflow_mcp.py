@@ -73,7 +73,9 @@ def test_workflow_mcp_context_sees_workflow_task_tools(wm_paths):
     assert "workflow_get_task" in names
     assert "workflow_set_task" in names
     assert "workflow_run_log" in names
-    assert tools_by_name["artifacts_search"].description == "搜索当前 profile 可见的工作流产物。"
+    assert tools_by_name["artifacts_search"].description == (
+        "搜索当前 profile 可见的工作流产物。请优先调用本工具检索已有产出物，拿到结果后再决定下一步。"
+    )
     assert tools_by_name["artifacts_search"].inputSchema["properties"]["query"]["description"] == "按标题、摘要或内容检索产物的关键词。"
     assert tools_by_name["artifacts_search"].inputSchema["properties"]["tags"]["description"] == "要匹配的产物标签列表。"
     assert tools_by_name["workflow_get_task"].description == "领取当前工作流运行中的一个待处理任务。"
@@ -181,8 +183,9 @@ def test_execute_builtin_load_skill_returns_design_workflow_prompt(wm_paths):
 
     assert result["success"] is True
     assert result["result"]["skill_name"] == "design_workflow"
-    assert "workflow_get_task" in result["result"]["prompt"]
-    assert "workflow_set_task" in result["result"]["prompt"]
+    assert "system.validate_workflow" in result["result"]["prompt"]
+    assert "run_script" in result["result"]["prompt"]
+    assert "code" in result["result"]["prompt"]
 
 
 def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):

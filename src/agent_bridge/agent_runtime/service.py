@@ -1,10 +1,10 @@
-"""AgentService: a general-purpose Claude Agent SDK runner.
+"""AgentService: a general-purpose coding-agent runner.
 
-Wraps ``claude_agent_sdk.query`` with Agent Bridge conventions: an isolated
-per-run working directory, optional profile-driven MCP access and CLAUDE.md
-guidance, optional workflow context, and optional JSON-Schema structured
-output. Results are returned as a uniform :class:`AgentRunResult` envelope —
-failures are reported via ``ok=False`` and never raised.
+Wraps a pluggable coding-agent adapter with Agent Bridge conventions: an
+isolated per-run working directory, optional profile-driven MCP access and
+guidance, optional workflow context, and optional JSON-Schema structured output.
+Results are returned as a uniform :class:`AgentRunResult` envelope — failures
+are reported via ``ok=False`` and never raised.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 import shutil
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass
@@ -21,21 +21,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from claude_agent_sdk import ClaudeAgentOptions, query as claude_query
-from claude_agent_sdk.types import ResultMessage
+from jsonschema import Draft202012Validator
 
 from agent_bridge.agent_runtime.control import RunControlRegistry
-from agent_bridge.agent_runtime.events import (
-    Attribution,
-    event_record,
-    is_noisy_partial_message,
-    message_events,
-    message_log_record,
-    write_event,
-)
+from agent_bridge.agent_runtime.events import event_record, write_event
+from agent_bridge.agent_runtime.registry import CodingAgentRegistry, create_coding_agent_registry
 from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
-from agent_bridge.agent_runtime.claude import claude_settings_env
+from agent_bridge.agent_runtime.types import CodingAgent, CodingAgentFinal, CodingAgentRequest
 from agent_bridge.core.ids import new_run_id
 from agent_bridge.core.domain import ConflictError
 
@@ -47,7 +40,7 @@ STOPPED_ERROR = "运行已由用户停止"
 
 
 class AgentRunStopped(Exception):
-    """Internal signal used to distinguish user cancellation from failures."""
+    """Internal signal used to settle a cancelled adapter run."""
 
 
 @dataclass
@@ -60,7 +53,6 @@ class AgentRunResult:
     """
 
     ok: bool
-    stopped: bool = False
     result: Any | None = None
     error: str | None = None
     run_dir: str = ""
@@ -69,10 +61,11 @@ class AgentRunResult:
     duration_ms: int = 0
     cost_usd: float | None = None
     num_turns: int | None = None
+    stopped: bool = False
 
 
 class AgentService:
-    """Runs Claude Agent SDK queries with Agent Bridge profile/workflow wiring."""
+    """Runs coding-agent queries with Agent Bridge profile/workflow wiring."""
 
     def __init__(
         self,
@@ -81,12 +74,25 @@ class AgentService:
         store: Any,
         admins: set[str],
         governance: Any,
+        coding_agent: CodingAgent | None = None,
+        coding_agents: CodingAgentRegistry | None = None,
         mcp_url: str | None = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
         self.governance = governance
+        if coding_agents is not None and coding_agent is not None:
+            raise ValueError("pass either coding_agent or coding_agents, not both")
+        if coding_agents is not None:
+            self.coding_agents = coding_agents
+        elif coding_agent is not None:
+            self.coding_agents = CodingAgentRegistry(
+                default_backend=coding_agent.backend_key,
+                agents=[coding_agent],
+            )
+        else:
+            self.coding_agents = create_coding_agent_registry()
         self.mcp_url = mcp_url or DEFAULT_MCP_URL
         self.base_run_dir: Path = paths.run_dir / "agent-runs"
         self.control_registry = RunControlRegistry()
@@ -114,10 +120,11 @@ class AgentService:
         model: str | None = None,
         max_turns: int | None = None,
         max_budget_usd: float | None = None,
+        backend_key: str | None = None,
         timeout: float | None = None,
         run_key: str | None = None,
     ) -> AgentRunResult:
-        """Run a one-shot Claude agent query and return a uniform result.
+        """Run a one-shot coding-agent query and return a uniform result.
 
         Two modes:
 
@@ -127,13 +134,13 @@ class AgentService:
           CLAUDE.md guidance and governed ``.mcp.json`` are installed.
 
         * **In-place** (``cwd`` given): the caller owns the directory (including
-          any CLAUDE.md / staged files); this method just runs the SDK loop
-          against it. Used by the workflow runner and other callers that
+          any agent guidance / staged files); this method just runs the adapter
+          loop against it. Used by the workflow runner and other callers that
           prepare their own run directory. MCP is opt-in via ``mcp_servers``
           (defaults to none) so analyzing a repo with its own ``.mcp.json``
           does not accidentally wire up those servers.
 
-        ``on_message`` (if given) is invoked with every streamed SDK message
+        ``on_message`` (if given) is invoked with every streamed native message
         before the final result is captured, enabling progress/event logging.
         Failures (query errors, timeouts, profile-not-found, ...) return
         ``ok=False`` rather than raising.
@@ -143,14 +150,14 @@ class AgentService:
         started_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         work_dir: Path | None = None
         events: list[dict[str, Any]] = []
-        tool_names: dict[str, str] = {}
-        attribution = Attribution()
-        result_msg: ResultMessage | None = None
+        result_msg: CodingAgentFinal | None = None
         error: str | None = None
         mode = "in-place" if cwd is not None else "managed"
+        effective_backend_key = backend_key or self.coding_agents.default_backend
         logger.info(
-            "Agent run 开始 agent=%s mode=%s profile=%s skills=%s",
+            "Agent run 开始 agent=%s backend=%s mode=%s profile=%s skills=%s",
             agent_name or "agent",
+            effective_backend_key,
             mode,
             profile,
             ",".join(skills) if skills else "",
@@ -172,6 +179,7 @@ class AgentService:
             self.store.agent_runs.create(
                 run_key=run_key,
                 agent_name=agent_name or "agent",
+                backend_key=effective_backend_key,
                 profile_key=profile,
                 workflow_key=workflow_key or None,
                 workflow_run_id=workflow_run_id,
@@ -214,42 +222,30 @@ class AgentService:
                     mcp_servers if mcp_servers is not None else work_dir / ".mcp.json"
                 )
             self._record_cwd(run_key, work_dir)
+            coding_agent = self.coding_agents.get(effective_backend_key)
 
-            options = ClaudeAgentOptions(
-                tools={"type": "preset", "preset": "claude_code"},
+            request = CodingAgentRequest(
+                prompt=prompt,
                 cwd=work_dir,
                 mcp_servers=effective_mcp_servers,
-                strict_mcp_config=True,
-                permission_mode="auto",
-                env=claude_settings_env(),
                 setting_sources=effective_setting_sources,
-                system_prompt={
-                    "type": "preset",
-                    "preset": "claude_code",
-                    "append": self._system_prompt_append(output_schema, system_prompt_append),
-                },
-                output_format=(
-                    {"type": "json_schema", "schema": output_schema}
-                    if output_schema
-                    else None
-                ),
+                output_schema=output_schema,
+                system_prompt_append=self._system_prompt_append(output_schema, system_prompt_append),
                 include_partial_messages=include_partial_messages,
                 skills=skills,
                 stderr=stderr,
                 model=model,
                 max_turns=max_turns,
                 max_budget_usd=max_budget_usd,
+                on_native_message=on_message,
             )
             if self.control_registry.is_stop_requested(run_key):
                 raise AgentRunStopped
-            result_msg = await self._drain_query_with_control(
-                prompt,
-                options,
+            result_msg = await self._drain_agent_with_control(
+                coding_agent,
+                request,
                 work_dir,
-                on_message,
                 events,
-                tool_names,
-                attribution,
                 control.stop_requested,
                 timeout_seconds,
             )
@@ -301,84 +297,61 @@ class AgentService:
         return result
 
     def request_stop(self, run_key: str) -> bool:
-        """Request cancellation of an active or not-yet-registered run."""
         return self.control_registry.request_stop(run_key)
 
     def has_pending_control(self, run_key: str) -> bool:
-        """Expose pre-registration stop tombstones for the future stop API."""
         return self.control_registry.has_pending_control(run_key)
 
     def has_active_control(self, run_key: str) -> bool:
-        """Return whether an AgentService run currently owns a control handle."""
         return self.control_registry.is_active(run_key)
 
-    async def _drain_query_with_control(
+    async def _drain_agent_with_control(
         self,
-        prompt: str,
-        options: Any,
+        coding_agent: CodingAgent,
+        request: CodingAgentRequest,
         work_dir: Path | None,
-        on_message: Callable[[Any], None] | None,
         events: list[dict[str, Any]],
-        tool_names: dict[str, str],
-        attribution: Attribution,
         stop_requested: Any,
         timeout: float,
-    ) -> ResultMessage | None:
+    ) -> CodingAgentFinal | None:
         if stop_requested.is_set():
             raise AgentRunStopped
-
-        query_task = asyncio.create_task(
-            self._drain_query(
-                prompt,
-                options,
-                work_dir,
-                on_message,
-                events,
-                tool_names,
-                attribution,
-            )
-        )
+        run_task = asyncio.create_task(self._drain_agent(coding_agent, request, work_dir, events))
         stop_task = asyncio.create_task(_wait_for_thread_event(stop_requested))
         try:
             done, _ = await asyncio.wait(
-                {query_task, stop_task},
-                timeout=timeout,
-                return_when=asyncio.FIRST_COMPLETED,
+                {run_task, stop_task}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
             )
             if stop_task in done:
-                query_task.cancel()
-                await _await_cancelled_query(query_task)
+                run_task.cancel()
+                await _await_cancelled_task(run_task)
                 raise AgentRunStopped
-            if query_task in done:
+            if run_task in done:
                 stop_task.cancel()
-                await _await_cancelled_query(stop_task)
-                return query_task.result()
-
-            query_task.cancel()
+                await _await_cancelled_task(stop_task)
+                return run_task.result()
+            run_task.cancel()
             stop_task.cancel()
-            await _await_cancelled_query(query_task)
-            await _await_cancelled_query(stop_task)
+            await _await_cancelled_task(run_task)
+            await _await_cancelled_task(stop_task)
             raise TimeoutError(f"agent timed out after {timeout}s")
         finally:
-            if not query_task.done():
-                query_task.cancel()
-                await _await_cancelled_query(query_task)
+            if not run_task.done():
+                run_task.cancel()
+                await _await_cancelled_task(run_task)
             if not stop_task.done():
                 stop_task.cancel()
-                await _await_cancelled_query(stop_task)
+                await _await_cancelled_task(stop_task)
 
-    async def _drain_query(
+    async def _drain_agent(
         self,
-        prompt: str,
-        options: Any,
+        coding_agent: CodingAgent,
+        request: CodingAgentRequest,
         work_dir: Path | None,
-        on_message: Callable[[Any], None] | None,
         events: list[dict[str, Any]],
-        tool_names: dict[str, str],
-        attribution: Attribution,
-    ) -> ResultMessage | None:
-        last: ResultMessage | None = None
-        # Persist every raw SDK message to messages.jsonl in the work dir so the
+    ) -> CodingAgentFinal | None:
+        last: CodingAgentFinal | None = None
+        # Persist every raw native message to messages.jsonl in the work dir so the
         # run is self-contained: subagent transcript discovery, debugging, and
         # the unified event replay all read from here. This replaces the per-
         # caller on_message file writing the workflow runner used to do.
@@ -394,21 +367,23 @@ class AgentService:
             except OSError:
                 raw_log = None
                 event_log = None
+        run = None
         try:
-            async for message in claude_query(prompt=prompt, options=options):
-                if on_message is not None:
-                    on_message(message)
-                if not is_noisy_partial_message(message):
-                    if raw_log is not None:
-                        raw_log.write(json.dumps(message_log_record(message), ensure_ascii=False) + "\n")
-                        raw_log.flush()
-                    new_events = message_events(message, tool_names, attribution=attribution)
-                    if event_log is not None:
-                        for record in new_events:
-                            write_event(event_log, record)
-                    events.extend(new_events)
-                if isinstance(message, ResultMessage):
-                    last = message
+            run = coding_agent.start(request)
+            async for update in run.updates():
+                if raw_log is not None and update.raw is not None:
+                    raw_log.write(json.dumps(update.raw, ensure_ascii=False) + "\n")
+                    raw_log.flush()
+                if event_log is not None:
+                    for record in update.events:
+                        write_event(event_log, record)
+                events.extend(update.events)
+                if update.final is not None:
+                    last = update.final
+        except asyncio.CancelledError:
+            if run is not None:
+                await run.abort()
+            raise
         finally:
             if raw_log is not None:
                 raw_log.close()
@@ -420,7 +395,7 @@ class AgentService:
         self,
         work_dir: Path | None,
         started: float,
-        result_msg: ResultMessage | None,
+        result_msg: CodingAgentFinal | None,
         output_schema: dict[str, Any] | None,
         error: str | None,
         *,
@@ -430,11 +405,7 @@ class AgentService:
         run_dir = str(work_dir) if work_dir else ""
         if error is not None:
             return AgentRunResult(
-                ok=False,
-                stopped=stopped,
-                error=error,
-                run_dir=run_dir,
-                duration_ms=duration_ms,
+                ok=False, stopped=stopped, error=error, run_dir=run_dir, duration_ms=duration_ms
             )
         if result_msg is None:
             return AgentRunResult(
@@ -448,16 +419,18 @@ class AgentService:
             "run_dir": run_dir,
             "duration_ms": duration_ms,
             "session_id": result_msg.session_id,
-            "cost_usd": result_msg.total_cost_usd,
+            "cost_usd": result_msg.cost_usd,
             "num_turns": result_msg.num_turns,
         }
         if result_msg.is_error:
             return AgentRunResult(
                 ok=False, stopped=stopped, error=result_msg.result or result_msg.subtype, **meta
             )
-        return AgentRunResult(
-            ok=True, stopped=stopped, result=_extract_result(result_msg, output_schema), **meta
-        )
+        result = _extract_result(result_msg, output_schema)
+        schema_error = _output_schema_error(output_schema, result)
+        if schema_error is not None:
+            return AgentRunResult(ok=False, stopped=stopped, error=schema_error, **meta)
+        return AgentRunResult(ok=True, stopped=stopped, result=result, **meta)
 
     def _record_cwd(self, run_key: str, work_dir: Path | None) -> None:
         """Backfill the work-dir path on the placeholder row once it is known."""
@@ -485,7 +458,7 @@ class AgentService:
         started_iso: str,
         result: AgentRunResult,
         events: list[dict[str, Any]],
-    ) -> bool:
+    ) -> None:
         """Update the placeholder row with the run's terminal outcome.
 
         Logging failures never break the run. Status maps from the result:
@@ -493,7 +466,7 @@ class AgentService:
         status = "stopped" if result.stopped else ("completed" if result.ok else "failed")
         finished_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         try:
-            return self.store.agent_runs.finish_run(
+            self.store.agent_runs.finish_run(
                 run_key,
                 ok=result.ok,
                 status=status,
@@ -509,7 +482,6 @@ class AgentService:
             )
         except Exception:
             logger.error("Agent run 结果回填失败 run_key=%s", run_key, exc_info=True)
-            return False
 
     def _make_work_dir(self, agent_name: str) -> Path:
         work_dir = self.base_run_dir / new_run_id(agent_name)
@@ -549,21 +521,19 @@ class AgentService:
 
 
 async def _wait_for_thread_event(stop_requested: Any) -> None:
-    """Poll a threading.Event without blocking the event loop."""
     while not stop_requested.is_set():
         await asyncio.sleep(0.05)
 
 
-async def _await_cancelled_query(task: asyncio.Task[Any]) -> None:
-    """Wait for a cancelled query/watcher and consume its cancellation."""
+async def _await_cancelled_task(task: asyncio.Task[Any]) -> None:
     try:
         await task
     except asyncio.CancelledError:
         pass
 
 
-def _extract_result(result_msg: ResultMessage, output_schema: dict[str, Any] | None) -> Any:
-    """Extract the final value from a ResultMessage.
+def _extract_result(result_msg: Any, output_schema: dict[str, Any] | None) -> Any:
+    """Extract the final value from an adapter final message.
 
     Prefers native ``structured_output``; falls back to parsing JSON out of the
     result text when a schema was requested; otherwise returns the result text.
@@ -574,6 +544,20 @@ def _extract_result(result_msg: ResultMessage, output_schema: dict[str, Any] | N
         return result_msg.structured_output
     parsed = _extract_json(result_msg.result or "")
     return parsed if parsed is not None else (result_msg.result or "")
+
+
+def _output_schema_error(output_schema: dict[str, Any] | None, result: Any) -> str | None:
+    if output_schema is None:
+        return None
+    errors = sorted(
+        Draft202012Validator(output_schema).iter_errors(result),
+        key=lambda item: (list(item.absolute_path), str(item.validator)),
+    )
+    if not errors:
+        return None
+    first = errors[0]
+    path = ".".join(str(part) for part in first.absolute_path) or "<root>"
+    return f"agent output_schema invalid field={path}: {first.message}"
 
 
 def _extract_json(text: str) -> Any:

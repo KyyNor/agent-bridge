@@ -53,9 +53,15 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         ("payload_json", "payload", {}),
         ("tags_json", "tags", []),
         ("metadata_json", "metadata", {}),
+        ("definition_snapshot_json", "definition_snapshot", {"nodes": [], "edges": []}),
+        ("input_json", "input", {}),
+        ("output_json", "output", {}),
+        ("condition_results_json", "condition_results", []),
     ]:
         if source in item:
             item[target] = _json_loads(item[source], default)
+    if "definition_json" in item:
+        item["definition"] = _json_loads(item["definition_json"], None)
     return item
 
 
@@ -84,23 +90,25 @@ class WorkflowsRepository:
         name: str,
         description: str,
         profile_key: str,
-        workflow_js: str,
         status: str,
         created_by: str,
         workflow_type: str = "operation",
+        definition: dict[str, Any] | None = None,
+        workflow_js: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO workflow_definitions (
-                  workflow_key, name, description, profile_key, workflow_js, status, workflow_type, created_by
+                  workflow_key, name, description, profile_key, workflow_js, definition_json, status, workflow_type, created_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
                   profile_key = excluded.profile_key,
                   workflow_js = excluded.workflow_js,
+                  definition_json = excluded.definition_json,
                   status = excluded.status,
                   workflow_type = excluded.workflow_type,
                   updated_at = CURRENT_TIMESTAMP
@@ -111,6 +119,7 @@ class WorkflowsRepository:
                     description,
                     profile_key,
                     workflow_js,
+                    _json_dumps(definition) if definition is not None else None,
                     status,
                     workflow_type,
                     created_by,
@@ -769,14 +778,23 @@ class WorkflowsRepository:
         task_key: str | None,
         status: str,
         temp_dir: str,
+        definition_snapshot: dict[str, Any] | None = None,
+        input_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO workflow_runs (run_id, workflow_key, profile_key, task_key, status, temp_dir)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO workflow_runs (
+                  run_id, workflow_key, profile_key, task_key, status, temp_dir,
+                  definition_snapshot_json, input_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, workflow_key, profile_key, task_key, status, temp_dir),
+                (
+                    run_id, workflow_key, profile_key, task_key, status, temp_dir,
+                    _json_dumps(definition_snapshot or {"nodes": [], "edges": []}),
+                    _json_dumps(input_data or {}),
+                ),
             )
             result = _row_payload(
                 conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
@@ -808,6 +826,11 @@ class WorkflowsRepository:
                 "DELETE FROM workflow_definitions WHERE workflow_key = ?",
                 (workflow_key,),
             )
+            if cursor.rowcount > 0:
+                conn.execute(
+                    "DELETE FROM workflow_run_logs WHERE workflow_key = ?",
+                    (workflow_key,),
+                )
             return cursor.rowcount > 0
 
     def clear_workflow_execution_data(self, workflow_key: str) -> dict[str, int]:
@@ -850,6 +873,7 @@ class WorkflowsRepository:
         stderr_path: str | None,
         error: str | None,
         duration_ms: int | None,
+        output: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
@@ -861,10 +885,11 @@ class WorkflowsRepository:
                     stderr_path = ?,
                     error = ?,
                     duration_ms = ?,
+                    output_json = ?,
                     finished_at = CURRENT_TIMESTAMP
                 WHERE run_id = ? AND status = ?
                 """,
-                (status, exit_code, stdout_path, stderr_path, error, duration_ms, run_id, expected_status),
+                (status, exit_code, stdout_path, stderr_path, error, duration_ms, _json_dumps(output or {}), run_id, expected_status),
             )
             result = _row_payload(
                 conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
@@ -872,6 +897,90 @@ class WorkflowsRepository:
             if result is None:
                 raise KeyError(f"workflow run not found: {run_id}")
             return result
+
+    def create_workflow_node_runs(self, run_id: str, nodes: list[dict[str, Any]]) -> None:
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO workflow_node_runs (run_id, node_id, node_type)
+                VALUES (?, ?, ?)
+                """,
+                [(run_id, str(node["node_id"]), str(node["node_type"])) for node in nodes],
+            )
+
+    def start_workflow_node_run(
+        self,
+        run_id: str,
+        node_id: str,
+        condition_results: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE workflow_node_runs
+                SET status = 'running', condition_results_json = ?, started_at = CURRENT_TIMESTAMP
+                WHERE run_id = ? AND node_id = ?
+                """,
+                (_json_dumps(condition_results or []), run_id, node_id),
+            )
+            result = _row_payload(conn.execute(
+                "SELECT * FROM workflow_node_runs WHERE run_id = ? AND node_id = ?", (run_id, node_id)
+            ).fetchone())
+            if result is None:
+                raise KeyError(f"workflow node run not found: {run_id}/{node_id}")
+            return result
+
+    def finish_workflow_node_run(
+        self,
+        run_id: str,
+        node_id: str,
+        *,
+        status: str,
+        condition_results: list[dict[str, Any]] | None = None,
+        output: dict[str, Any] | None = None,
+        error: str | None = None,
+        agent_run_key: str | None = None,
+        script_run_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE workflow_node_runs
+                SET status = ?, condition_results_json = ?, output_json = ?, error = ?,
+                    agent_run_key = ?, script_run_id = ?, finished_at = CURRENT_TIMESTAMP
+                WHERE run_id = ? AND node_id = ?
+                """,
+                (
+                    status, _json_dumps(condition_results or []), _json_dumps(output or {}), error,
+                    agent_run_key, script_run_id, run_id, node_id,
+                ),
+            )
+            result = _row_payload(conn.execute(
+                "SELECT * FROM workflow_node_runs WHERE run_id = ? AND node_id = ?", (run_id, node_id)
+            ).fetchone())
+            if result is None:
+                raise KeyError(f"workflow node run not found: {run_id}/{node_id}")
+            return result
+
+    def list_workflow_node_runs(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM workflow_node_runs WHERE run_id = ? ORDER BY id", (run_id,)
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def fail_workflow_task_for_run(self, workflow_key: str, run_id: str, error_message: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET status = 'failed', last_error = ?, lease_expires_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE workflow_key = ? AND lease_run_id = ? AND status = 'running'
+                """,
+                (error_message, workflow_key, run_id),
+            )
+            return cursor.rowcount > 0
 
     def append_workflow_run_log(
         self,

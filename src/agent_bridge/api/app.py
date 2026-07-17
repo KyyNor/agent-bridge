@@ -16,6 +16,7 @@ from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDas
 from agent_bridge.core.config import AgentBridgePaths, default_user, load_logging_config, load_server_config
 from agent_bridge.core.logging import setup_logging
 from agent_bridge.core.domain import AgentBridgeError
+from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.web.pages import capability_admin_page
 
@@ -106,6 +107,15 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     @app.exception_handler(AgentBridgeError)
     async def _handle_agent_bridge_error(request: Request, exc: AgentBridgeError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+    @app.exception_handler(WorkflowDefinitionValidationError)
+    async def _handle_workflow_validation_error(request: Request, exc: WorkflowDefinitionValidationError) -> JSONResponse:
+        from dataclasses import asdict
+
+        return JSONResponse(
+            status_code=400,
+            content={"detail": exc.message, "errors": [asdict(issue) for issue in exc.issues]},
+        )
 
     if admins is None:
         @app.middleware("http")

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Plus, Save, WandSparkles } from 'lucide-vue-next'
-import { api } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, AgentRun } from '../../api/types'
+import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Play, Plus, Save, WandSparkles } from 'lucide-vue-next'
+import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -10,8 +10,13 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '../../components/ui/input'
 import { confirm, alert } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
-import WorkflowDagGraph from './WorkflowDagGraph.vue'
 import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
+import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
+import WorkflowNodePalette from './WorkflowNodePalette.vue'
+import WorkflowConfigDrawer from './WorkflowConfigDrawer.vue'
+import WorkflowNodeConfigPanel from './WorkflowNodeConfigPanel.vue'
+import WorkflowEdgeConfigPanel from './WorkflowEdgeConfigPanel.vue'
+import WorkflowRunGraph from './WorkflowRunGraph.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import AgentRunTabs from '../../components/AgentRunTabs.vue'
@@ -19,7 +24,8 @@ import WorkflowRunDetailPanel from '../../components/WorkflowRunDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
-import { parseWorkflowDag } from './workflowDag'
+import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
+import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
@@ -49,6 +55,10 @@ const props = defineProps<{ routeKey: string }>()
 
 const workflows = ref<WorkflowDefinition[]>([])
 const profiles = ref<ProjectProfile[]>([])
+const scripts = ref<ManagedScript[]>([])
+const skills = ref<SkillPrompt[]>([])
+const defaultBackend = ref('codex')
+const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'claude', backends: [] })
 const artifacts = ref<WorkflowArtifact[]>([])
 const selectedKey = ref('')
 const loading = ref(true)
@@ -159,6 +169,18 @@ const designError = ref('')
 const designResponse = ref<DesignAgentResponse<WorkflowDesignResult> | null>(null)
 const designRunKey = ref('')
 const designStopRequested = ref(false)
+const selectedNodeId = ref<string | null>(null)
+const selectedEdgeId = ref<string | null>(null)
+const graphErrors = ref<WorkflowValidationError[]>([])
+const schemaEditorErrors = ref<Record<string, string>>({})
+const runValidationGuard = ref({ validating: false, token: 0 })
+const editedWorkflowRunBusy = computed(() => runValidationGuard.value.validating || testing.value)
+type WorkflowConfigDrawerMode = 'overlay' | 'fullscreen'
+const configDrawerOpen = ref(false)
+const configDrawerMode = ref<WorkflowConfigDrawerMode>('overlay')
+const manualInputValues = ref<Record<string, string>>({})
+const advancedInput = ref('{}')
+const progressRunDetail = ref<WorkflowRun | null>(null)
 let testPoll: ReturnType<typeof setInterval> | null = null
 
 const artifactHtml = computed(() =>
@@ -195,8 +217,8 @@ const form = ref({
   description: '',
   profile_key: '',
   status: 'active',
-  workflow_type: 'operation' as 'operation' | 'summary',
-  workflow_js: '',
+  workflow_type: 'operation' as WorkflowType,
+  definition: createDefaultGraph('operation', defaultBackend.value) as WorkflowGraph,
 })
 
 const selectedWorkflow = computed(() =>
@@ -212,12 +234,27 @@ watch(
   () => {
     if (suppressDirty) return
     formDirty.value = true
+    invalidateWorkflowValidationRun(runValidationGuard.value)
   },
   { deep: true },
 )
+watch(
+  () => form.value.definition.nodes.map(node => node.id),
+  (nodeIds) => {
+    const activeIds = new Set(nodeIds)
+    const next = Object.fromEntries(
+      Object.entries(schemaEditorErrors.value).filter(([nodeId]) => activeIds.has(nodeId)),
+    )
+    if (Object.keys(next).length !== Object.keys(schemaEditorErrors.value).length) {
+      schemaEditorErrors.value = next
+    }
+  },
+)
 function resetForm(next: typeof form.value) {
+  invalidateWorkflowValidationRun(runValidationGuard.value)
   suppressDirty = true
   form.value = { ...next }
+  schemaEditorErrors.value = {}
   formDirty.value = false
   // let the deep watcher's synchronous flush pass before re-enabling
   void nextTick(() => {
@@ -238,7 +275,20 @@ const pageWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === routeWorkflowKey.value) || null
 )
 
-const workflowDag = computed(() => parseWorkflowDag(selectedWorkflow.value?.workflow_js || ''))
+const selectedNode = computed(() => form.value.definition.nodes.find(node => node.id === selectedNodeId.value) || null)
+const selectedEdge = computed(() => form.value.definition.edges.find(edge => edge.id === selectedEdgeId.value) || null)
+const selectedNodeIssues = computed(() => scopedGraphIssues('node', selectedNode.value?.id || null))
+const selectedEdgeIssues = computed(() => scopedGraphIssues('edge', selectedEdge.value?.id || null))
+const configDrawerTitle = computed(() => {
+  if (selectedNode.value) return `节点配置 / ${selectedNode.value.name || selectedNode.value.id}`
+  if (selectedEdge.value) return `连线条件 / ${selectedEdge.value.id}`
+  return '配置'
+})
+const selectedNodeReferenceItems = computed(() => selectedNode.value ? deriveAvailableData(form.value.definition, { kind: 'node', id: selectedNode.value.id }, scripts.value) : [])
+const selectedEdgeReferenceItems = computed(() => selectedEdge.value ? deriveAvailableData(form.value.definition, { kind: 'edge', id: selectedEdge.value.id }, scripts.value) : [])
+const hasTaskNode = computed(() => form.value.definition.nodes.some(node => node.type === 'get_task'))
+const manualInputFields = computed(() => deriveManualInputFields(form.value.definition, scripts.value))
+const backendKeys = computed(() => deriveWorkflowBackendKeys(agentRuntimeConfig.value))
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
 const hasAnyRunningRun = computed(() =>
@@ -402,12 +452,19 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [workflowList, profileList] = await Promise.all([
+    const [workflowList, profileList, scriptList, skillList, runtimeConfig] = await Promise.all([
       api.listWorkflows(),
       api.listProfiles(),
+      api.listScripts(),
+      api.listSkills(),
+      api.getAgentRuntimeConfig(),
     ])
     workflows.value = workflowList
     profiles.value = profileList
+    scripts.value = scriptList
+    skills.value = skillList
+    agentRuntimeConfig.value = runtimeConfig
+    defaultBackend.value = runtimeConfig.default_backend || defaultBackend.value
     selectedKey.value = selectedKey.value || workflowList[0]?.workflow_key || ''
     await loadRunsForWorkflows(workflowList)
   } catch (e: unknown) {
@@ -489,9 +546,13 @@ function prepareCreateForm() {
     profile_key: profiles.value[0]?.profile_key || '',
     status: 'active',
     workflow_type: 'operation',
-    workflow_js: '',
+    definition: createDefaultGraph('operation', defaultBackend.value),
   })
   formError.value = ''
+  graphErrors.value = []
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  configDrawerOpen.value = false
 }
 
 function openEdit(item: WorkflowDefinition) {
@@ -506,9 +567,86 @@ function prepareEditForm(item: WorkflowDefinition) {
     profile_key: item.profile_key,
     status: item.status,
     workflow_type: item.workflow_type === 'summary' ? 'summary' : 'operation',
-    workflow_js: item.workflow_js,
+    definition: item.definition || createDefaultGraph(item.workflow_type === 'summary' ? 'summary' : 'operation', defaultBackend.value),
   })
   formError.value = ''
+  graphErrors.value = []
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  configDrawerOpen.value = false
+}
+
+function normalizeWorkflowIssue(value: unknown): WorkflowValidationError | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  const scope = raw.scope
+  if (scope !== 'workflow' && scope !== 'node' && scope !== 'edge') return null
+  const id = typeof raw.id === 'string' ? raw.id : null
+  const field = typeof raw.field === 'string' ? raw.field : null
+  const message = typeof raw.message === 'string' ? raw.message : ''
+  if (!message) return null
+  const code = typeof raw.code === 'string' ? raw.code : 'invalid_definition'
+  return { scope, id, field, message, code }
+}
+
+function collectWorkflowIssues(value: unknown): WorkflowValidationError[] {
+  if (Array.isArray(value)) return value.map(normalizeWorkflowIssue).filter((issue): issue is WorkflowValidationError => Boolean(issue))
+  if (!value || typeof value !== 'object') return []
+  const raw = value as Record<string, unknown>
+  for (const key of ['issues', 'errors']) {
+    const found = collectWorkflowIssues(raw[key])
+    if (found.length) return found
+  }
+  return collectWorkflowIssues(raw.detail)
+}
+
+function parseWorkflowIssues(message: string): WorkflowValidationError[] {
+  const body = message.replace(/^\d+:\s*/, '').trim()
+  try {
+    const parsed = JSON.parse(body)
+    const issues = collectWorkflowIssues(parsed)
+    if (issues.length) return issues
+  } catch {
+    // Some server errors are plain text containing a JSON issues array.
+  }
+  const match = message.match(/"(?:errors|issues)"\s*:\s*(\[[\s\S]*?\])\s*[},]?/)
+  if (!match) return []
+  try {
+    return collectWorkflowIssues(JSON.parse(match[1]))
+  } catch {
+    return []
+  }
+}
+
+function scopedGraphIssues(scope: WorkflowValidationError['scope'], id: string | null) {
+  return workflowValidationIssuesFor(graphErrors.value, scope, id)
+}
+
+function workflowDraft(): WorkflowDraft {
+  return {
+    workflow_key: form.value.workflow_key,
+    name: form.value.name,
+    description: form.value.description,
+    profile_key: form.value.profile_key,
+    status: form.value.status,
+    workflow_type: form.value.workflow_type,
+    definition: form.value.definition,
+  }
+}
+
+async function validateWorkflowDraft(options: { isCurrent?: () => boolean } = {}): Promise<boolean | null> {
+  graphErrors.value = []
+  const schemaError = Object.values(schemaEditorErrors.value).find(Boolean)
+  if (schemaError) {
+    formError.value = `保存前请修正 Schema：${schemaError}`
+    return false
+  }
+  const validation = await api.validateWorkflow(workflowDraft())
+  if (options.isCurrent && !options.isCurrent()) return null
+  if (!hasBlockingWorkflowValidationErrors(validation)) return true
+  graphErrors.value = validation.errors
+  formError.value = workflowValidationErrorMessage(validation)
+  return false
 }
 
 async function saveWorkflow(): Promise<WorkflowDefinition | null> {
@@ -519,6 +657,7 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
   }
   saving.value = true
   try {
+    if (!await validateWorkflowDraft()) return null
     const saved = await api.upsertWorkflow({
       workflow_key: form.value.workflow_key,
       name: form.value.name,
@@ -526,19 +665,30 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
       profile_key: form.value.profile_key,
       status: form.value.status,
       workflow_type: form.value.workflow_type,
-      workflow_js: form.value.workflow_js,
+      definition: form.value.definition,
     })
     selectedKey.value = saved.workflow_key
+    graphErrors.value = []
     workflows.value = await api.listWorkflows()
     await loadRunsForWorkflows()
     window.location.hash = `workflow/${saved.workflow_key}/detail`
     return saved
   } catch (e: unknown) {
     formError.value = errorMessage(e)
+    graphErrors.value = parseWorkflowIssues(formError.value)
     return null
   } finally {
     saving.value = false
   }
+}
+
+function changeWorkflowType(value: WorkflowType) {
+  const previous = form.value.workflow_type
+  form.value.workflow_type = value
+  form.value.definition = migrateWorkflowGraph(form.value.definition, previous, value, defaultBackend.value)
+  selectedNodeId.value = null
+  selectedEdgeId.value = null
+  configDrawerOpen.value = false
 }
 
 function openWorkflowDesigner(mode: 'create' | 'modify' = 'modify') {
@@ -554,22 +704,119 @@ function createDesignRunKey() {
   return `design-workflow-${suffix}`
 }
 
-function workflowDesignerCurrent() {
-  if (designMode.value === 'modify') {
-    return {
-      workflow_key: form.value.workflow_key,
-      name: form.value.name,
-      description: form.value.description,
-      profile_key: form.value.profile_key,
-      status: form.value.status,
-      workflow_type: form.value.workflow_type,
-      workflow_js: form.value.workflow_js,
-    }
-  }
+function workflowDesignerCurrent(): Record<string, unknown> {
+  if (designMode.value === 'modify') return { ...workflowDraft() }
   return {
     profile_key: form.value.profile_key,
     status: 'active',
     workflow_type: form.value.workflow_type,
+    definition: createDefaultGraph(form.value.workflow_type, defaultBackend.value),
+  }
+}
+
+function createNode(type: WorkflowNodeType, position = { x: 120 + form.value.definition.nodes.length * 36, y: 160 + form.value.definition.nodes.length * 32 }): WorkflowNode {
+  const id = `${type}-${Date.now()}`
+  if (type === 'get_task') return { id, type, name: '获取任务', position, config: {} }
+  if (type === 'agent') return { id, type, name: 'Agent', position, config: { prompt: '', backend_key: defaultBackend.value, mcp_enabled: true, skill_names: [], result_mode: 'text', output_schema: null } }
+  if (type === 'script') return { id, type, name: '托管脚本', position, config: { script_key: '', params: {}, timeout_seconds: 60 } }
+  return { id, type, name: '输出结果', position, config: { format: 'markdown', title: '输出结果', path: 'reports/output.md', tags: [], prompt: '', backend_key: defaultBackend.value, mcp_enabled: false, skill_names: [] } }
+}
+
+function addNode(type: WorkflowNodeType, position?: { x: number; y: number }) {
+  if (form.value.workflow_type === 'summary' && type === 'output') {
+    formError.value = '总结型工作流的输出节点已固定'
+    return
+  }
+  form.value.definition = { ...form.value.definition, nodes: [...form.value.definition.nodes, createNode(type, position)] }
+}
+
+function selectWorkflowNode(id: string) {
+  selectedNodeId.value = id
+  selectedEdgeId.value = null
+  configDrawerOpen.value = true
+}
+
+function selectWorkflowEdge(id: string) {
+  selectedEdgeId.value = id
+  selectedNodeId.value = null
+  configDrawerOpen.value = true
+}
+
+function setConfigDrawerOpen(open: boolean) {
+  configDrawerOpen.value = open
+}
+
+function setConfigDrawerMode(mode: WorkflowConfigDrawerMode) {
+  configDrawerMode.value = mode
+}
+
+function replaceNode(node: WorkflowNode) {
+  form.value.definition = { ...form.value.definition, nodes: form.value.definition.nodes.map(item => item.id === node.id ? node : item) }
+}
+
+function setNodeSchemaValidity(nodeId: string, valid: boolean, message: string) {
+  const next = { ...schemaEditorErrors.value }
+  if (valid) delete next[nodeId]
+  else next[nodeId] = message || 'Schema 不合法'
+  schemaEditorErrors.value = next
+}
+
+function replaceEdge(edge: WorkflowEdge) {
+  form.value.definition = { ...form.value.definition, edges: form.value.definition.edges.map(item => item.id === edge.id ? edge : item) }
+}
+
+function manualInput(): Record<string, unknown> | null {
+  let input: Record<string, unknown>
+  try {
+    const parsed = advancedInput.value.trim() ? JSON.parse(advancedInput.value) : {}
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
+    input = parsed as Record<string, unknown>
+  } catch {
+    testError.value = '高级 JSON 必须是对象'
+    return null
+  }
+  for (const field of manualInputFields.value) {
+    const raw = manualInputValues.value[field.path] || ''
+    if (field.required && !raw.trim()) {
+      testError.value = `${field.path} 为必填项`
+      return null
+    }
+    if (!raw.trim()) continue
+    const value: unknown = field.type === 'integer' || field.type === 'number' ? Number(raw) : field.type === 'boolean' ? raw === 'true' : raw
+    const parts = field.path.replace(/^input\./, '').split('.')
+    let current = input
+    parts.forEach((part, index) => {
+      if (index === parts.length - 1) current[part] = value
+      else current = (current[part] ||= {}) as Record<string, unknown>
+    })
+  }
+  return input
+}
+
+async function runEditedWorkflow() {
+  if (editedWorkflowRunBusy.value) return
+  const validationToken = beginWorkflowValidationRun(runValidationGuard.value)
+  if (validationToken === null) return
+  const isCurrentValidation = () => isCurrentWorkflowValidationRun(runValidationGuard.value, validationToken)
+  formError.value = ''
+  try {
+    const valid = await validateWorkflowDraft({ isCurrent: isCurrentValidation })
+    if (!isCurrentValidation() || valid !== true) return
+    if (formDirty.value) {
+      formError.value = '有未保存的修改，请先保存后再测试运行'
+      return
+    }
+    const workflow = selectedWorkflow.value
+    if (!workflow) return
+    const input = hasTaskNode.value ? {} : manualInput()
+    if (input === null) return
+    await runWorkflow(workflow, input)
+  } catch (e: unknown) {
+    if (!isCurrentValidation()) return
+    formError.value = errorMessage(e)
+    graphErrors.value = parseWorkflowIssues(formError.value)
+  } finally {
+    finishWorkflowValidationRun(runValidationGuard.value, validationToken)
   }
 }
 
@@ -594,9 +841,7 @@ async function runWorkflowDesigner() {
     })
     if (designRunKey.value !== runKey || designStopRequested.value) return
     designResponse.value = response
-    if (!designResponse.value.ok) {
-      designError.value = designResponse.value.error || '设计 agent 执行失败'
-    }
+    if (!response.ok) designError.value = response.error || '设计 agent 执行失败'
   } catch (e: unknown) {
     if (designRunKey.value !== runKey || designStopRequested.value) return
     designError.value = errorMessage(e)
@@ -625,15 +870,16 @@ async function acceptWorkflowDesign() {
   if (designing.value || designStopRequested.value) return
   const draft = workflowDesignDraft.value
   if (!draft) return
-  form.value = {
+  const workflowType = draft.workflow_type === 'summary' ? 'summary' : 'operation'
+  resetForm({
     workflow_key: draft.workflow_key,
     name: draft.name,
     description: draft.description,
     profile_key: draft.profile_key,
     status: draft.status,
-    workflow_type: draft.workflow_type === 'summary' ? 'summary' : 'operation',
-    workflow_js: draft.workflow_js,
-  }
+    workflow_type: workflowType,
+    definition: draft.definition || createDefaultGraph(workflowType, defaultBackend.value),
+  })
   const saved = await saveWorkflow()
   if (saved) showDesigner.value = false
 }
@@ -720,6 +966,7 @@ async function applyRoute() {
     progressAgentRunKey.value = ''
     await loadRuns(workflow.workflow_key)
     if (runId) {
+      progressRunDetail.value = await api.getWorkflowRun(runId)
       await loadProgressAgentRuns()
       await loadProgressAgentEvents()
     }
@@ -739,7 +986,7 @@ function profileName(profileKey: string) {
 }
 
 function workflowTypeLabel(workflowType?: string) {
-  if (workflowType === 'summary') return '总结（自动生成 HTML 报告）'
+  if (workflowType === 'summary') return '总结（Markdown + HTML 输出节点）'
   return '操作'
 }
 
@@ -1694,13 +1941,13 @@ function stopTestPolling() {
   }
 }
 
-async function runWorkflow(item: WorkflowDefinition) {
+async function runWorkflow(item: WorkflowDefinition, input: Record<string, unknown> = {}) {
   const wf = item
   if (!wf || testing.value) return
   testError.value = ''
   testing.value = true
   try {
-    const res = await api.runWorkflow(wf.workflow_key)
+    const res = await api.runWorkflow(wf.workflow_key, input)
     if (res.status === 'started' && res.run_id) {
       testingRunId.value = res.run_id
       progressWorkflowKey.value = wf.workflow_key
@@ -1737,6 +1984,7 @@ async function prepareProgress(item: WorkflowDefinition, runId?: string) {
   progressRunId.value = run.run_id
   selectedRunId.value = run.run_id
   progressAgentRunKey.value = ''
+  progressRunDetail.value = await api.getWorkflowRun(run.run_id)
   await loadProgressAgentRuns()
   await loadProgressAgentEvents()
   if (run.status === 'running') {
@@ -1753,6 +2001,20 @@ async function refreshProgress() {
   }
   await loadProgressAgentRuns()
   await loadProgressAgentEvents()
+  if (progressRunId.value) progressRunDetail.value = await api.getWorkflowRun(progressRunId.value)
+}
+
+async function openScriptRun(runId: string) {
+  try {
+    const scriptRun = await api.getScriptRun(runId)
+    window.location.hash = `scripts/${scriptRun.script_key}/run/${runId}`
+  } catch (e: unknown) {
+    testError.value = errorMessage(e)
+  }
+}
+
+function openAgentRun(runKey: string) {
+  window.location.hash = `agent-runs/${runKey}`
 }
 
 async function pollTestRun() {
@@ -1760,6 +2022,7 @@ async function pollTestRun() {
   if (!runId) return
   try {
     const run = await api.getWorkflowRun(runId)
+    progressRunDetail.value = run
     mergeWorkflowRun(run)
     // Refresh agent runs list (to pick up html reporter when it starts) and
     // refresh events for the currently selected agent run.
@@ -1877,8 +2140,8 @@ async function confirmClearWorkflow() {
         </DialogHeader>
         <div class="max-h-[74vh] space-y-4 overflow-auto pr-1 text-sm leading-6 text-muted-foreground">
           <section class="rounded-md border p-4">
-            <h3 class="mb-2 text-sm font-semibold text-foreground">workflow.js</h3>
-            <p>脚本在一次独立运行目录中执行，负责领取任务、创建任务、记录日志，并在结束时写入 <span class="font-mono text-foreground">out/result.json</span>。</p>
+            <h3 class="mb-2 text-sm font-semibold text-foreground">结构化 DAG</h3>
+            <p>画布由获取任务、Agent、托管脚本和输出结果四类节点组成；节点输出通过显式引用和条件连线传递。</p>
             <div class="mt-3 grid gap-3 md:grid-cols-3">
               <div class="rounded-md bg-muted/50 p-3">
                 <div class="font-mono text-xs text-foreground">workflow_get_task</div>
@@ -1896,7 +2159,7 @@ async function confirmClearWorkflow() {
           </section>
 
           <section class="rounded-md border p-4">
-            <h3 class="mb-2 text-sm font-semibold text-foreground">返回格式</h3>
+            <h3 class="mb-2 text-sm font-semibold text-foreground">节点输出</h3>
             <pre class="overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">{
   "status": "completed",
   "task_key": "page:a",
@@ -1912,14 +2175,12 @@ async function confirmClearWorkflow() {
     }
   ]
 }</pre>
-            <p class="mt-2">没有任务时输出 <span class="font-mono text-foreground">{"status":"no_executable_task","reason":"..."}</span>。如果任务带 <span class="font-mono text-foreground">task_version</span>，结果里必须原样写回。</p>
+            <p class="mt-2">获取任务节点没有领取到任务时，运行以 <span class="font-mono text-foreground">no_task</span> 结束；HTML 输出失败则记录为 warning，不影响 Markdown 主产物。</p>
           </section>
 
           <section class="rounded-md border p-4">
-            <h3 class="mb-2 text-sm font-semibold text-foreground">让智能体协助编写</h3>
-            <p>先让智能体读取内置技能，再基于用户需求生成 <span class="font-mono text-foreground">workflow.js</span>。</p>
-            <pre class="mt-3 overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">execute service='built-in' tool='load_skill' arguments={"skill_name":"design_workflow"}</pre>
-            <p class="mt-2">随后要求智能体参照技能内容完成开发，并检查任务类型分支、日志、产物路径和 <span class="font-mono text-foreground">out/result.json</span>。</p>
+            <h3 class="mb-2 text-sm font-semibold text-foreground">测试运行</h3>
+            <p>含获取任务节点时使用任务队列；其他工作流可由脚本参数中的 <span class="font-mono text-foreground" v-pre>{{ input.path }}</span> 引用推导输入字段，并用高级 JSON 补充值。</p>
           </section>
         </div>
         <DialogFooter>
@@ -2019,7 +2280,7 @@ async function confirmClearWorkflow() {
               </div>
               <p class="mt-2 text-sm text-muted-foreground">
                 {{ selectedWorkflow.description || '无描述' }}
-                <span v-if="selectedWorkflow.workflow_type === 'summary'" class="ml-1 text-xs">· 结束后自动生成 HTML 报告</span>
+                <span v-if="selectedWorkflow.workflow_type === 'summary'" class="ml-1 text-xs">· 固定 Markdown 与 HTML 输出节点</span>
               </p>
             </div>
           </div>
@@ -2035,7 +2296,11 @@ async function confirmClearWorkflow() {
             </div>
           </div>
 
-          <WorkflowDagGraph :dag="workflowDag" />
+          <div v-if="selectedWorkflow.definition" class="border p-4">
+            <div class="mb-3 text-sm font-semibold">工作流定义</div>
+            <WorkflowRunGraph :definition-snapshot="selectedWorkflow.definition" :node-runs="[]" @open-agent-run="() => undefined" @open-script-run="() => undefined" />
+          </div>
+          <div v-else class="border border-warning/30 bg-warning-soft p-4 text-sm text-warning-soft-fg">该历史工作流需要迁移。进入编辑页并显式保存后才会写入结构化定义。</div>
 
           <section class="space-y-4 rounded-md border p-4">
             <div class="flex flex-wrap items-end gap-3">
@@ -2659,6 +2924,13 @@ async function confirmClearWorkflow() {
         </div>
       </div>
       <div class="space-y-4">
+          <WorkflowRunGraph
+            v-if="progressRunDetail"
+            :definition-snapshot="progressRunDetail.definition_snapshot"
+            :node-runs="progressRunDetail.node_runs || []"
+            @open-agent-run="openAgentRun"
+            @open-script-run="openScriptRun"
+          />
           <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
             <div class="min-w-0 space-y-1">
               <div class="flex flex-wrap items-center gap-2">
@@ -2727,6 +2999,10 @@ async function confirmClearWorkflow() {
             <WandSparkles class="mr-1.5 h-4 w-4" />
             AI 设计
           </Button>
+          <Button variant="outline" size="sm" :disabled="editedWorkflowRunBusy" @click="runEditedWorkflow">
+            <Play class="mr-1.5 h-4 w-4" />
+            测试运行
+          </Button>
           <Button :disabled="saving" size="sm" @click="saveWorkflow">
             <Save class="mr-1.5 h-4 w-4" />
             {{ saving ? '保存中' : '保存' }}
@@ -2774,29 +3050,34 @@ async function confirmClearWorkflow() {
                   <span
                     class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-64 -translate-x-1/2 translate-y-1 rounded-md border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
                   >
-                    选择「总结」后：工作流需按 result.json 规范产出 Markdown 产物，run 完成后会自动调用报告 agent 生成面向人类阅读的 HTML 报告。「操作」类不生成 HTML 报告。
+                    总结型工作流会固定 Markdown 与 HTML 输出节点；HTML 失败仅记为 warning，Markdown 主产物仍可保留。
                   </span>
                 </span>
               </label>
-              <select v-model="form.workflow_type" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
+              <select :value="form.workflow_type" class="h-9 w-full rounded-md border bg-background px-3 text-sm" @change="changeWorkflowType(($event.target as HTMLSelectElement).value as WorkflowType)">
                 <option value="operation">操作</option>
                 <option value="summary">总结</option>
               </select>
             </div>
           </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-muted-foreground">Claude Code 工作流</label>
-            <textarea v-model="form.workflow_js" class="min-h-[34rem] w-full rounded-md border bg-background p-3 font-mono text-xs" />
+          <div class="workflow-editor-region relative grid min-h-[520px] grid-cols-[132px_minmax(0,1fr)] overflow-hidden">
+            <WorkflowNodePalette @add-node="addNode" />
+            <WorkflowEditorCanvas v-model:graph="form.definition" :workflow-type="form.workflow_type" :errors="graphErrors" @select-node="selectWorkflowNode" @select-edge="selectWorkflowEdge" @add-node="addNode" />
+            <WorkflowConfigDrawer
+              :open="configDrawerOpen && Boolean(selectedNode || selectedEdge)"
+              :mode="configDrawerMode"
+              :title="configDrawerTitle"
+              @update:open="setConfigDrawerOpen"
+              @update:mode="setConfigDrawerMode"
+            >
+              <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" :reference-items="selectedNodeReferenceItems" :issues="selectedNodeIssues" @replace="replaceNode" @schema-validity="setNodeSchemaValidity" />
+              <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" :reference-items="selectedEdgeReferenceItems" :issues="selectedEdgeIssues" @replace="replaceEdge" />
+            </WorkflowConfigDrawer>
           </div>
-
-          <div class="rounded-md border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
-            <div class="font-medium text-foreground">输出验收要求</div>
-            <div>Workflow 必须在运行目录写入 <span class="font-mono">out/result.json</span>。</div>
-            <div class="mt-2 font-mono">
-              {"status":"completed","task_key":"page:a","task_version":"sha256:...","artifacts":[{"title":"...","path":"reports/a.md","tags":[],"format":"markdown","file":"out/artifacts/a.md","summary":"..."}]}
-            </div>
-            <div class="mt-2">没有可执行任务时输出 <span class="font-mono">{"status":"no_executable_task","reason":"..."}</span>。如任务带 task_version，result.json 必须原样写回。artifact 文件必须在运行目录内，当前只接受 Markdown。</div>
+          <div v-if="!hasTaskNode" class="grid gap-3 border p-4 lg:grid-cols-2">
+            <div><div class="mb-2 text-sm font-semibold">测试输入</div><div v-for="field in manualInputFields" :key="field.path" class="mb-2"><label class="mb-1 block text-xs text-muted-foreground">{{ field.path }}<span v-if="field.required" class="text-destructive"> *</span></label><Input v-model="manualInputValues[field.path]" :placeholder="field.description || field.type" /></div><p v-if="!manualInputFields.length" class="text-xs text-muted-foreground">当前脚本参数没有可推导输入字段。</p></div>
+            <div><label class="mb-1 block text-sm font-semibold">高级 JSON</label><textarea v-model="advancedInput" class="min-h-40 w-full rounded-sm border bg-background p-2 font-mono text-xs" /></div>
           </div>
         <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {{ formError }}
@@ -2864,7 +3145,7 @@ async function confirmClearWorkflow() {
                 <div class="font-mono font-medium text-foreground">{{ workflowDesignDraft.workflow_key }}</div>
                 <div class="mt-1 text-muted-foreground">{{ workflowDesignDraft.name }}</div>
               </div>
-              <pre class="max-h-96 overflow-auto rounded-md border bg-muted/20 p-3 text-xs">{{ workflowDesignDraft.workflow_js }}</pre>
+              <pre class="max-h-96 overflow-auto rounded-md border bg-muted/20 p-3 text-xs">{{ JSON.stringify(workflowDesignDraft.definition, null, 2) }}</pre>
             </div>
           </section>
         </div>

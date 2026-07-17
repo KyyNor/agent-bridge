@@ -311,18 +311,40 @@ class ClaudeMemConfigRequest(BaseModel):
     clear_api_key: bool = False
 
 
+class AgentBackendConfigRequest(BaseModel):
+    slug: str
+    type: str
+    command: str | None = None
+    model: str | None = None
+
+
+class AgentRuntimeConfigRequest(BaseModel):
+    default_backend: str = "claude"
+    backends: list[AgentBackendConfigRequest] = Field(default_factory=list)
+
+
 class WorkflowDefinitionRequest(BaseModel):
     workflow_key: str
     name: str
     description: str = ""
     profile_key: str
-    workflow_js: str = ""
+    # Graph parsing belongs to WorkflowValidator so save and validation routes
+    # produce the same structured issue contract for malformed definitions.
+    definition: dict[str, Any]
     status: str = "active"
     workflow_type: str = "operation"
 
 
 class WorkflowTaskImportConfirmRequest(BaseModel):
     import_id: str
+
+
+class WorkflowRunRequest(BaseModel):
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowValidationRequest(BaseModel):
+    workflow: dict[str, Any]
 
 
 class SkillPromptRequest(BaseModel):
@@ -335,6 +357,8 @@ class ScriptRequest(BaseModel):
     description: str = ""
     language: str = "python"
     code: str
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None = None
     status: str = "active"
     owner_type: str = "system"
     owner_key: str = ""

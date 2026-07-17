@@ -1,0 +1,39 @@
+import pytest
+
+from agent_bridge.automation.workflows.definition import EdgeCondition
+from agent_bridge.automation.workflows.references import MissingReferenceError, evaluate_condition, parse_reference, render_text, render_value
+
+CONTEXT = {"input": {"limit": 20}, "task": {"payload": {"repo": "acme/demo"}}, "nodes": {"classify": {"output": {"category": "bug", "tags": ["ui"]}}}}
+
+
+def test_whole_reference_preserves_json_type():
+    assert render_value("{{ input.limit }}", CONTEXT) == 20
+
+
+def test_reference_parser_accepts_compact_and_spaced_input_paths():
+    assert parse_reference("{{input.topic}}") == "input.topic"
+    assert parse_reference("{{ input.topic }}") == "input.topic"
+
+
+def test_embedded_reference_becomes_text():
+    assert render_text("repo={{ task.payload.repo }}", CONTEXT) == "repo=acme/demo"
+
+
+def test_missing_prompt_reference_fails():
+    with pytest.raises(MissingReferenceError):
+        render_text("{{ task.payload.missing }}", CONTEXT)
+
+
+@pytest.mark.parametrize("operator,expected", [("equals", True), ("not_equals", False), ("exists", True), ("not_exists", False), ("contains", True)])
+def test_conditions(operator, expected):
+    value = "bug" if operator != "contains" else "ui"
+    result = evaluate_condition(EdgeCondition(field="nodes.classify.output.category" if operator != "contains" else "nodes.classify.output.tags", operator=operator, value=value), CONTEXT)
+    assert result.matched is expected
+
+
+def test_condition_equality_does_not_coerce_boolean_and_number_types():
+    context = {"input": {"enabled": True, "limit": 1}}
+
+    assert evaluate_condition(EdgeCondition(field="input.enabled", operator="equals", value=1), context).matched is False
+    assert evaluate_condition(EdgeCondition(field="input.enabled", operator="equals", value=True), context).matched is True
+    assert evaluate_condition(EdgeCondition(field="input.limit", operator="not_equals", value=True), context).matched is True

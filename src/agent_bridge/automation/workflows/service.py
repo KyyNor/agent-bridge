@@ -12,12 +12,13 @@ from agent_bridge.automation.workflows.models import (
     WorkflowStatus,
     WorkflowType,
 )
-from agent_bridge.automation.workflows.result_parser import ParsedWorkflowResult
 from agent_bridge.automation.workflows.task_import import (
     TaskImportFormatError,
     build_task_import_template as build_task_import_template_file,
     parse_task_import,
 )
+from agent_bridge.automation.workflows.definition import WorkflowGraph
+from agent_bridge.automation.workflows.validator import WorkflowValidator
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class WorkflowService:
         admins: set[str],
         agent_service: Any = None,
         skills: Any = None,
+        scripts: Any = None,
     ) -> None:
         self.store = store
         self.admins = admins
@@ -49,6 +51,13 @@ class WorkflowService:
         # this service stays usable in isolated tests.
         self.agent_service = agent_service
         self.skills = skills
+        self.scripts = scripts
+        self.validator = WorkflowValidator(
+            store=store,
+            agent_service=agent_service,
+            skills=skills,
+            scripts=scripts,
+        )
 
     def upsert_definition(
         self,
@@ -58,27 +67,36 @@ class WorkflowService:
         name: str,
         description: str,
         profile_key: str,
-        workflow_js: str,
         status: str,
         workflow_type: str = "operation",
+        definition: dict[str, Any] | WorkflowGraph | None = None,
+        workflow_js: str = "",
     ) -> dict[str, Any]:
+        # Kept only for internal callers that still construct historical test
+        # fixtures. New API schemas do not expose or execute this field.
+        del workflow_js
         require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise ValidationError("profile not found")
-        try:
-            next_status = WorkflowStatus(status).value
-        except ValueError as exc:
-            raise ValidationError(str(exc)) from exc
-        try:
-            next_type = WorkflowType(workflow_type).value
-        except ValueError as exc:
-            raise ValidationError(str(exc)) from exc
+        graph = self.validator.require_valid(
+            actor=actor,
+            workflow={
+                "workflow_key": workflow_key,
+                "name": name,
+                "description": description,
+                "profile_key": profile_key,
+                "definition": definition or {"nodes": [], "edges": []},
+                "status": status,
+                "workflow_type": workflow_type,
+            },
+        )
+        next_status = WorkflowStatus(status).value
+        next_type = WorkflowType(workflow_type).value
         result = self.store.upsert_workflow_definition(
             workflow_key=workflow_key,
             name=name,
             description=description,
             profile_key=profile_key,
-            workflow_js=workflow_js,
+            definition=graph.model_dump(mode="json"),
+            workflow_js="",
             status=next_status,
             workflow_type=next_type,
             created_by=actor,
@@ -91,18 +109,18 @@ class WorkflowService:
             next_type,
             actor,
         )
-        return result
+        return self._definition_payload(result)
 
     def list_definitions(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        return self.store.list_workflow_definitions()
+        return [self._definition_payload(item) for item in self.store.list_workflow_definitions()]
 
     def get_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         workflow = self.store.get_workflow_definition(workflow_key)
         if workflow is None:
             raise NotFound("workflow not found")
-        return workflow
+        return self._definition_payload(workflow)
 
     def delete_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -376,7 +394,15 @@ class WorkflowService:
         run = self.store.get_workflow_run(run_id)
         if run is None:
             raise NotFound("workflow run not found")
+        run["node_runs"] = self.store.list_workflow_node_runs(run_id)
         return run
+
+    @staticmethod
+    def _definition_payload(workflow: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(workflow)
+        payload.pop("definition_json", None)
+        payload.pop("workflow_js", None)
+        return payload
 
     def append_run_log(
         self,

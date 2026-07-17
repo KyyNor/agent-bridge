@@ -340,6 +340,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_key TEXT NOT NULL UNIQUE,
   agent_name TEXT NOT NULL,
+  backend_key TEXT,
   profile_key TEXT,
   workflow_key TEXT,
   workflow_run_id TEXT,
@@ -381,6 +382,8 @@ CREATE TABLE IF NOT EXISTS scripts (
   owner_type TEXT NOT NULL DEFAULT 'system',
   owner_key TEXT NOT NULL DEFAULT '',
   content_hash TEXT NOT NULL DEFAULT '',
+  input_schema_json TEXT NOT NULL DEFAULT '{"type":"object","properties":{},"additionalProperties":true}',
+  output_schema_json TEXT,
   created_by TEXT NOT NULL,
   updated_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -501,6 +504,7 @@ CREATE TABLE IF NOT EXISTS workflow_definitions (
   description TEXT NOT NULL DEFAULT '',
   profile_key TEXT NOT NULL REFERENCES project_profiles(profile_key) ON DELETE RESTRICT,
   workflow_js TEXT NOT NULL DEFAULT '',
+  definition_json TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   workflow_type TEXT NOT NULL DEFAULT 'operation',
   created_by TEXT NOT NULL,
@@ -558,6 +562,9 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   task_key TEXT,
   status TEXT NOT NULL,
   temp_dir TEXT NOT NULL DEFAULT '',
+  definition_snapshot_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+  input_json TEXT NOT NULL DEFAULT '{}',
+  output_json TEXT NOT NULL DEFAULT '{}',
   exit_code INTEGER,
   stdout_path TEXT,
   stderr_path TEXT,
@@ -567,6 +574,23 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   duration_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_key, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_node_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+  node_id TEXT NOT NULL,
+  node_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  condition_results_json TEXT NOT NULL DEFAULT '[]',
+  output_json TEXT NOT NULL DEFAULT '{}',
+  error TEXT,
+  agent_run_key TEXT,
+  script_run_id TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  UNIQUE (run_id, node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id, id);
 
 CREATE TABLE IF NOT EXISTS workflow_run_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

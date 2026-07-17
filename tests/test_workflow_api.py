@@ -39,6 +39,153 @@ def _malformed_worksheet_workbook_bytes() -> bytes:
     return output.getvalue()
 
 
+def test_malformed_definition_uses_structured_validator_issues_for_save_and_validate(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.init_schema()
+    service.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    client = TestClient(create_app(wm_paths, {"root"}))
+    workflow = {
+        "workflow_key": "malformed",
+        "name": "Malformed",
+        "description": "",
+        "profile_key": "report-plane",
+        "status": "active",
+        "workflow_type": "operation",
+        "definition": {
+            "nodes": [
+                {
+                    "id": "broken-agent",
+                    "type": "agent",
+                    "name": "Broken agent",
+                    "position": {"x": 0, "y": 0},
+                    "config": {"prompt": 42, "backend_key": "claude"},
+                }
+            ],
+            "edges": [],
+        },
+    }
+
+    saved = client.post("/workflows", headers={"X-Agent-Bridge-User": "root"}, json=workflow)
+    validated = client.post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"workflow": workflow},
+    )
+
+    assert saved.status_code == 400, saved.text
+    assert validated.status_code == 200, validated.text
+    assert saved.json()["errors"] == validated.json()["errors"]
+    assert saved.json()["errors"] == [
+        {
+            "scope": "node",
+            "id": "broken-agent",
+            "field": "prompt",
+            "code": "invalid_type",
+            "message": "字段类型不合法",
+        }
+    ]
+
+
+def test_validate_workflow_endpoint_requires_complete_workflow(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
+    response = TestClient(create_app(wm_paths, {"root"})).post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"workflow": {"workflow_type": "operation", "definition": {"nodes": [], "edges": []}}},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["valid"] is False
+    assert {issue["field"] for issue in payload["errors"]} >= {
+        "workflow_key",
+        "name",
+        "description",
+        "profile_key",
+        "status",
+    }
+
+
+def test_validate_workflow_endpoint_reports_missing_profile(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
+    response = TestClient(create_app(wm_paths, {"root"})).post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={
+            "workflow": {
+                "workflow_key": "missing-profile",
+                "name": "Missing Profile",
+                "description": "",
+                "profile_key": "does-not-exist",
+                "workflow_type": "operation",
+                "definition": {"nodes": [], "edges": []},
+                "status": "active",
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] is False
+    assert any(
+        issue["field"] == "profile_key"
+        and issue["code"] == "missing_profile"
+        and issue["message"] == "Profile 不存在"
+        for issue in response.json()["errors"]
+    )
+
+
+def test_validate_workflow_endpoint_does_not_persist_draft(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.init_schema()
+    service.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    client = TestClient(create_app(wm_paths, {"root"}))
+
+    response = client.post(
+        "/workflows/validate",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={
+            "workflow": {
+                "workflow_key": "draft-only",
+                "name": "Draft Only",
+                "description": "Should never be saved",
+                "profile_key": "report-plane",
+                "workflow_type": "operation",
+                "definition": {"nodes": [], "edges": []},
+                "status": "active",
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] is True
+    assert client.get("/workflows", headers={"X-Agent-Bridge-User": "root"}).json() == []
+
+
+def test_workflow_api_saves_structured_definition(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.store.init_schema()
+    service.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    response = TestClient(create_app(wm_paths, {"root"})).post("/workflows", headers={"X-Agent-Bridge-User": "root"}, json={"workflow_key": "structured", "name": "Structured", "profile_key": "report-plane", "definition": {"nodes": [], "edges": []}, "status": "active"})
+    assert response.status_code == 200
+    assert response.json()["definition"] == {"nodes": [], "edges": []}
+    assert "workflow_js" not in response.json()
+
+
 def test_workflow_api_creates_and_lists_workflows(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService
@@ -57,8 +204,7 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
             "name": "Page Report",
             "description": "Nightly page report",
             "profile_key": "report-plane",
-            "workflow_js": "export default async function workflow() {}",
-            "schedule": {"enabled": True, "start_time": "22:00", "stop_time": "07:00"},
+            "definition": {"nodes": [], "edges": []},
             "status": "active",
         },
     )
@@ -990,35 +1136,3 @@ def test_workflow_api_run_returns_409_when_already_running(wm_paths):
 
     response = client.post("/workflows/page-report/run", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 409
-
-
-def test_workflow_api_run_triggers_and_completes(wm_paths, tmp_path):
-    import time
-    from agent_bridge.api.app import create_app
-    from agent_bridge.app.service import AgentBridgeService
-    from agent_bridge.automation.workflows.runner import FakeWorkflowRunner
-
-    svc = AgentBridgeService.create(wm_paths, {"root"})
-    svc.store.init_schema()
-    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
-    _seed_workflow(svc)
-
-    app = create_app(wm_paths, {"root"})
-    # Swap the app's runner for an instant fake so the test does not shell out to claude.
-    app.state.agent_bridge_service.workflow_scheduler._runner = FakeWorkflowRunner(status="no_executable_task")
-    client = TestClient(app)
-
-    started = client.post("/workflows/page-report/run", headers={"X-Agent-Bridge-User": "root"})
-    assert started.status_code == 200, started.text
-    run_id = started.json()["run_id"]
-
-    status = "running"
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        r = client.get(f"/workflow-runs/{run_id}", headers={"X-Agent-Bridge-User": "root"})
-        assert r.status_code == 200
-        status = r.json()["status"]
-        if status != "running":
-            break
-        time.sleep(0.05)
-    assert status == "no_task"

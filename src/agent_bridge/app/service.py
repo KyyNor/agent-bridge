@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 from tempfile import TemporaryDirectory
+from dataclasses import asdict
 from pathlib import Path
 from threading import RLock
 
@@ -17,6 +18,7 @@ from agent_bridge.app.document_paths import (
     normalize_relative_document_path,
     split_document_path,
 )
+from agent_bridge.agent_runtime.registry import create_coding_agent_registry
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.knowledge_management.docs_knowledge.uploads import extract_zip_documents
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
@@ -25,7 +27,16 @@ from agent_bridge.knowledge_management.code_knowledge.scheduler import CodeGraph
 from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphService
 from agent_bridge.knowledge_management.code_knowledge.understand_scheduler import UnderstandingScheduler
 from agent_bridge.knowledge_management.docs_knowledge.doc_sync_scheduler import DocSyncScheduler
-from agent_bridge.core.config import AgentBridgePaths, BackendConfig, ensure_directories, migrate_toml_backends_to_db
+from agent_bridge.core.config import (
+    AgentBackendConfig,
+    AgentBridgePaths,
+    AgentRuntimeConfig,
+    BackendConfig,
+    ensure_directories,
+    load_agent_runtime_config,
+    migrate_toml_backends_to_db,
+    save_agent_runtime_config,
+)
 from agent_bridge.capability_hub.models import ProfileResourceType
 from agent_bridge.core.domain import (
     AccessDenied,
@@ -51,6 +62,9 @@ from agent_bridge.system_config.skills.service import SkillService
 from agent_bridge.system_config.plugin_update_scheduler import PluginUpdateScheduler
 from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 from agent_bridge.automation.workflows.service import WorkflowService
+from agent_bridge.automation.workflows.handlers import WorkflowNodeHandlers
+from agent_bridge.automation.workflows.output_handler import OutputHandler
+from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
 
 
 ALLOWED_EXTENSIONS = {
@@ -60,6 +74,32 @@ ALLOWED_EXTENSIONS = {
 UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | {".zip"}
 SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
 _UNSET = object()
+
+
+def _agent_runtime_config_payload(config: AgentRuntimeConfig, registry: Any = None) -> dict[str, Any]:
+    payload = {
+        "default_backend": config.default_backend,
+        "backends": [
+            {
+                "slug": backend.slug,
+                "type": backend.agent_type,
+                "command": backend.command,
+                "model": backend.model,
+            }
+            for backend in config.backends
+        ],
+    }
+    if registry is not None:
+        payload["available_backends"] = [
+            {
+                "slug": backend_key,
+                "display_name": registry.get(backend_key).display_name,
+                "source": registry.get(backend_key).source,
+                "capabilities": asdict(registry.get(backend_key).capabilities),
+            }
+            for backend_key in registry.keys()
+        ]
+    return payload
 
 
 class AgentBridgeService:
@@ -80,26 +120,44 @@ class AgentBridgeService:
         self.registry: BackendRegistry | None = None
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
-        self.agents = AgentService(paths=paths, store=store, admins=admins, governance=self.governance)
+        agent_runtime_config = load_agent_runtime_config(paths)
+        self.agents = AgentService(
+            paths=paths,
+            store=store,
+            admins=admins,
+            governance=self.governance,
+            coding_agents=create_coding_agent_registry(agent_runtime_config),
+        )
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins, agent_service=self.agents)
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
-        self.workflows = WorkflowService(store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
-        # The workflow service generates HTML reports for summary runs, which
-        # requires driving an agent run and reading the design skill. Wire
-        # those collaborators now that both services exist.
-        self.workflows.agent_service = self.agents
-        self.workflows.skills = self.skills
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
+        self.workflows = WorkflowService(
+            store=store, admins=admins, agent_service=self.agents, skills=self.skills, scripts=self.scripts
+        )
+        self.workflow_output_handler = OutputHandler(
+            agent_service=self.agents, skill_service=self.skills, workflow_service=self.workflows
+        )
+        self.workflow_handlers = WorkflowNodeHandlers(
+            agent_service=self.agents, scripts=self.scripts, skill_service=self.skills,
+            workflow_service=self.workflows, output_handler=self.workflow_output_handler,
+        )
+        workflow_validator = self.workflows.validator
+        self.workflow_executor = WorkflowDagExecutor(
+            store=store,
+            handlers=self.workflow_handlers,
+            validate_structure_on_run=False,
+        )
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
             store=store,
             admins=admins,
-            agent_service=self.agents,
+            executor=self.workflow_executor,
+            validator=workflow_validator,
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capability_hub.sources.builtin.codegraph import CodeGraphBuiltinProvider
@@ -139,6 +197,12 @@ class AgentBridgeService:
     def init_system(self) -> None:
         ensure_directories(self.paths)
         self.store.init_schema()
+
+    def validate_workflow_draft(self, *, actor: str, workflow: dict[str, Any]) -> dict[str, Any]:
+        result = self.workflows.validator.validate(actor=actor, workflow=workflow)
+        errors = [asdict(issue) for issue in result.errors]
+        warnings = [asdict(issue) for issue in result.warnings]
+        return {"valid": not errors, "errors": errors, "warnings": warnings}
 
     def ensure_weknora_agents(self) -> None:
         if not self.registry:
@@ -592,7 +656,10 @@ class AgentBridgeService:
             )
             sync_state = self.store.get_sync_state(doc["id"], kb_id, target["slug"])
             remote_exists = bool(sync_state and sync_state.get("backend_doc_id"))
-            if remote_exists or compacted["running"] > 0:
+            # A failed or in-flight write may have reached the remote backend
+            # before its local state was recorded. A never-started pending job
+            # has nothing remote to remove, so cancelling it is sufficient.
+            if remote_exists or compacted["running"] > 0 or compacted["failed"] > 0:
                 self.store.create_sync_job(
                     doc["id"], kb_id, Operation.delete, doc.get("current_version_id"),
                     backend_slug=target["slug"],
@@ -1141,9 +1208,11 @@ class AgentBridgeService:
                     compacted = self.store.cancel_runnable_create_update_jobs(
                         doc["id"], kb["id"], target["slug"]
                     )
-                    sync_state = self.store.get_sync_state(doc["id"], kb["id"], target["slug"])
+                    sync_state = self.store.get_sync_state(
+                        doc["id"], kb["id"], target["slug"]
+                    )
                     remote_exists = bool(sync_state and sync_state.get("backend_doc_id"))
-                    if remote_exists or compacted["running"] > 0:
+                    if remote_exists or compacted["running"] > 0 or compacted["failed"] > 0:
                         self.store.create_sync_job(
                             doc["id"], kb["id"], Operation.delete, doc["current_version_id"],
                             backend_slug=target["slug"],
@@ -1550,6 +1619,40 @@ class AgentBridgeService:
             "doc_sync": self.doc_sync_scheduler.get_status(),
             "workflow": self.workflow_scheduler.get_status(),
         }
+
+    def get_agent_runtime_config(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        config = load_agent_runtime_config(self.paths)
+        return _agent_runtime_config_payload(config, self.agents.coding_agents)
+
+    def save_agent_runtime_config(self, actor: str, payload: dict[str, Any]) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        backends = [
+            AgentBackendConfig(
+                slug=str(item.get("slug") or ""),
+                agent_type=str(item.get("type") or item.get("agent_type") or ""),
+                command=item.get("command") or None,
+                model=item.get("model") or None,
+            )
+            for item in payload.get("backends", [])
+            if isinstance(item, dict)
+        ]
+        config = AgentRuntimeConfig(
+            default_backend=str(payload.get("default_backend") or "claude"),
+            backends=tuple(backends),
+        )
+        try:
+            saved = save_agent_runtime_config(self.paths, config)
+            registry = create_coding_agent_registry(saved)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        self.agents.coding_agents = registry
+        logger.info(
+            "Agent runtime 配置已保存 default=%s backends=%s",
+            saved.default_backend,
+            [item.slug for item in saved.backends],
+        )
+        return _agent_runtime_config_payload(saved, registry)
 
     def get_claude_mem_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -2043,7 +2146,11 @@ class AgentBridgeService:
 
             # Mark removed backends as inactive
             for target in existing_targets:
-                if target["slug"] not in configured_slugs and target["status"] == "active":
+                if (
+                    target["slug"] not in configured_slugs
+                    and target["slug"] != "mock"
+                    and target["status"] == "active"
+                ):
                     self.store.set_backend_target_status(kb["id"], target["slug"], "inactive")
 
             # Add new backends, repair targets whose remote ID was lost, and

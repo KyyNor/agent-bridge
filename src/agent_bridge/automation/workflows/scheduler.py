@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import threading
+from dataclasses import asdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -14,8 +16,9 @@ from agent_bridge.core.domain import ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
 from agent_bridge.agent_runtime.service import STOPPED_ERROR
 from agent_bridge.storage.sqlite import SQLiteStore
-from agent_bridge.automation.workflows.result_parser import parse_workflow_result
-from agent_bridge.automation.workflows.runner import ClaudeWorkflowRunner, WorkflowRunner, WorkflowRunSpec
+from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
+from agent_bridge.automation.workflows.definition import WorkflowGraph
+from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -35,19 +38,19 @@ class WorkflowScheduler:
         service: Any,
         store: SQLiteStore,
         admins: set[str],
-        agent_service: Any = None,
-        runner: WorkflowRunner | None = None,
+        executor: WorkflowDagExecutor | None = None,
+        validator: Any = None,
         base_run_dir: Path | None = None,
-        mcp_url: str = "http://127.0.0.1:8765/mcp",
         max_concurrent_workflows: int = 2,
     ) -> None:
         self._service = service
         self._store = store
         self._admins = admins
-        self._agent_service = agent_service
-        self._runner = runner or ClaudeWorkflowRunner(agent_service)
+        if not admins:
+            raise ValueError("workflow scheduler requires at least one admin")
+        self._executor = executor
+        self._validator = validator or getattr(service, "validator", None)
         self._base_run_dir = base_run_dir
-        self._mcp_url = mcp_url
         self._max_concurrent = max_concurrent_workflows
         self._scheduler: BackgroundScheduler | None = None
         # Daily execution window [start, stop]; blank start+stop means always-on.
@@ -239,7 +242,7 @@ class WorkflowScheduler:
             workflows = [
                 item
                 for item in self._store.list_workflow_definitions()
-                if item.get("status") == "active"
+                if item.get("status") == "active" and item.get("definition") is not None
             ]
             candidates = {item["workflow_key"] for item in workflows} - self.finished_today
             if self._max_runs > 0:
@@ -255,7 +258,16 @@ class WorkflowScheduler:
                 )
                 return
             batch = self.next_workflow_batch(candidates, self._running)[:available]
+            workflows_by_key = {item["workflow_key"]: item for item in workflows}
             for workflow_key in batch:
+                workflow = workflows_by_key[workflow_key]
+                try:
+                    graph = self._require_valid_workflow(workflow, actor=None)
+                except WorkflowDefinitionValidationError as exc:
+                    self.finished_today.add(workflow_key)
+                    self._log_validation_failure(workflow_key, exc)
+                    continue
+                definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
                 self._running.add(workflow_key)
                 if self._max_runs > 0:
                     self.run_counts[workflow_key] = self.run_counts.get(workflow_key, 0) + 1
@@ -264,17 +276,34 @@ class WorkflowScheduler:
                     workflow_key,
                     "(pending)",
                 )
-                thread = threading.Thread(target=self._run_and_release, args=(workflow_key,), daemon=True)
+                thread = threading.Thread(
+                    target=self._run_and_release,
+                    args=(workflow_key, None, None, None, True, definition_snapshot),
+                    daemon=True,
+                )
                 thread.start()
 
-    def _run_and_release(self, workflow_key: str, run_id: str | None = None) -> None:
+    def _run_and_release(
+        self,
+        workflow_key: str,
+        run_id: str | None = None,
+        input_data: dict[str, Any] | None = None,
+        actor: str | None = None,
+        resources_validated: bool = False,
+        validated_definition: dict[str, Any] | None = None,
+    ) -> None:
         try:
-            self.run_one_workflow(workflow_key, run_id=run_id)
+            self.run_one_workflow(
+                workflow_key,
+                run_id=run_id,
+                input_data=input_data,
+                actor=actor,
+                resources_validated=resources_validated,
+                validated_definition=validated_definition,
+            )
         except Exception:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
         finally:
-            if run_id is not None:
-                self._finish_workflow_control(run_id)
             with self._lock:
                 self._running.discard(workflow_key)
 
@@ -285,14 +314,13 @@ class WorkflowScheduler:
                 raise NotFound("workflow run not found")
             if run.get("status") != "running":
                 return run
-
             registry = self._control_registry()
-            if registry is None or not self._workflow_control_exists(registry, run_id):
+            if registry is None or not registry.is_workflow_active(run_id):
                 raise ConflictError("workflow run controller is not available")
             registry.request_workflow_stop(run_id)
             return {"status": "stopping", "run_id": run_id}
 
-    def run_workflow_now(self, workflow_key: str) -> dict[str, Any]:
+    def run_workflow_now(self, workflow_key: str, input_data: dict[str, Any] | None = None, actor: str | None = None) -> dict[str, Any]:
         """Launch a single on-demand run immediately — a "test run".
 
         Bypasses the daily window and the active/disabled status check (those
@@ -306,6 +334,10 @@ class WorkflowScheduler:
             workflow = self._store.get_workflow_definition(workflow_key)
             if workflow is None:
                 raise NotFound("workflow not found")
+            if workflow.get("definition") is None:
+                from agent_bridge.core.domain import ValidationError
+                raise ValidationError("工作流需要通过新编辑器迁移")
+            graph = self._require_valid_workflow(workflow, actor=actor)
             run_id = new_run_id(workflow_key)
             base_dir = self._base_run_dir or Path("workflow-runs")
             self._store.create_workflow_run(
@@ -315,6 +347,8 @@ class WorkflowScheduler:
                 task_key=None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
+                definition_snapshot=graph.model_dump(mode="json") if isinstance(graph, WorkflowGraph) else workflow["definition"],
+                input_data=input_data or {},
             )
             self._register_workflow_control(run_id)
             self._running.add(workflow_key)
@@ -325,12 +359,23 @@ class WorkflowScheduler:
             workflow["profile_key"],
         )
         thread = threading.Thread(
-            target=self._run_and_release, args=(workflow_key, run_id), daemon=True
+            target=self._run_and_release,
+            args=(workflow_key, run_id, input_data, actor, True, None),
+            daemon=True,
         )
         thread.start()
         return {"status": "started", "run_id": run_id}
 
-    def run_one_workflow(self, workflow_key: str, run_id: str | None = None) -> dict[str, Any]:
+    def run_one_workflow(
+        self,
+        workflow_key: str,
+        run_id: str | None = None,
+        input_data: dict[str, Any] | None = None,
+        actor: str | None = None,
+        *,
+        resources_validated: bool = False,
+        validated_definition: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """执行单个 workflow run 的完整生命周期：建 run 行 -> 跑 agent -> 解析 result -> 入库。
 
         失败（agent 非零退出、result 解析不通过、异常）统一落 failed 状态并
@@ -342,9 +387,48 @@ class WorkflowScheduler:
             self.finished_today.add(workflow_key)
             return {"status": "missing"}
 
+        if workflow.get("definition") is None:
+            return {"status": "missing_definition"}
+
         base_dir = self._base_run_dir or Path("workflow-runs")
+        run = self._store.get_workflow_run(run_id) if run_id is not None else None
+        graph: WorkflowGraph | Any | None = None
+        if resources_validated:
+            if run_id is None and validated_definition is None:
+                raise RuntimeError("validated_definition is required when creating a pre-validated workflow run")
+        else:
+            validation_workflow = {
+                **workflow,
+                "definition": run["definition_snapshot"] if run is not None else workflow["definition"],
+            }
+            try:
+                graph = self._require_valid_workflow(validation_workflow, actor=actor)
+            except WorkflowDefinitionValidationError as exc:
+                self.finished_today.add(workflow_key)
+                self._log_validation_failure(workflow_key, exc, run_id=run_id)
+                if run_id is not None:
+                    self._store.finish_workflow_run(
+                        run_id,
+                        status="failed",
+                        exit_code=1,
+                        stdout_path=None,
+                        stderr_path=None,
+                        error=str(exc),
+                        duration_ms=None,
+                    )
+                    self._release_leased_tasks(workflow_key, run_id, str(exc))
+                return {
+                    "status": "failed",
+                    "error": str(exc),
+                    "issues": [asdict(issue) for issue in exc.issues],
+                }
         if run_id is None:
             run_id = new_run_id(workflow_key)
+            definition_snapshot = (
+                validated_definition
+                if resources_validated
+                else self._definition_snapshot(graph, workflow["definition"])
+            )
             self._store.create_workflow_run(
                 run_id=run_id,
                 workflow_key=workflow_key,
@@ -352,7 +436,10 @@ class WorkflowScheduler:
                 task_key=None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
+                definition_snapshot=definition_snapshot,
+                input_data=input_data or {},
             )
+            run = None
         self._register_workflow_control(run_id)
         logger.info(
             "Workflow run 开始执行 workflow=%s run=%s profile=%s",
@@ -360,112 +447,105 @@ class WorkflowScheduler:
             run_id,
             workflow["profile_key"],
         )
-        process_result = None
+        if self._executor is None:
+            raise RuntimeError("workflow DAG executor is not configured")
         try:
-            process_result = self._runner.run(
-                base_dir,
-                WorkflowRunSpec(
-                    run_id=run_id,
-                    workflow_key=workflow_key,
-                    profile_key=workflow["profile_key"],
-                    workflow_js=workflow["workflow_js"],
-                    mcp_url=self._mcp_url,
-                    timeout_seconds=self._max_runtime_minutes * 60 or None,
-                ),
-            )
-            if process_result.stopped or self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id, process_result)
-            if process_result.exit_code != 0:
-                logger.error(
-                    "Workflow runner 退出非零 workflow=%s run=%s exit_code=%d",
-                    workflow_key,
-                    run_id,
-                    process_result.exit_code,
-                )
-                return self._finish_failed(workflow_key, run_id, process_result, "claude workflow runner failed")
+            run = run or self._store.get_workflow_run(run_id)
+            if run is None:
+                raise RuntimeError("workflow run not found after creation")
             if self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id, process_result)
-            parsed = parse_workflow_result(process_result.run_dir)
-            ingested = self._service.ingest_parsed_result(
-                workflow_key=workflow_key,
-                profile_key=workflow["profile_key"],
+                return self._finish_stopped(workflow_key, run_id)
+            execution_workflow = {
+                **workflow,
+                "definition": run["definition_snapshot"],
+            }
+            execution = asyncio.run(self._executor.run(
+                workflow=execution_workflow,
                 run_id=run_id,
-                parsed=parsed,
-            )
-            final_status = ingested["status"]
+                input_data=run["input"],
+                actor=actor or sorted(self._admins)[0],
+            ))
             if self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id, process_result)
-            if final_status == "no_task":
+                return self._finish_stopped(workflow_key, run_id)
+            if execution.status == "no_task":
                 self.finished_today.add(workflow_key)
-            # For summary workflows, append a derived HTML report for human
-            # consumption. This is best-effort: a failure here must NOT change
-            # the main run status (kept completed) — it only records a warning.
-            if final_status == "completed":
-                self._maybe_generate_html_report(workflow_key, workflow, run_id)
-            with self._workflow_run_lock(run_id):
-                if self._is_parent_stop_requested(run_id):
-                    return self._finish_stopped(workflow_key, run_id, process_result)
-                finished = self._store.finish_workflow_run(
-                    run_id,
-                    expected_status="running",
-                    status=final_status,
-                    exit_code=process_result.exit_code,
-                    stdout_path=str(process_result.stdout_path),
-                    stderr_path=str(process_result.stderr_path),
-                    error=None,
-                    duration_ms=process_result.duration_ms,
+            if execution.status == "completed" and not any(
+                node.get("type") == "get_task"
+                for node in run["definition_snapshot"].get("nodes", [])
+            ):
+                # Manual-input workflows have no queue to drain. Run them at
+                # most once per scheduler window; explicit test runs remain
+                # available through run_workflow_now().
+                self.finished_today.add(workflow_key)
+            if execution.status == "completed" and execution.task is not None:
+                completed = self._store.complete_workflow_task(
+                    workflow_key,
+                    execution.task["task_key"],
+                    task_version=str(execution.task.get("task_version") or ""),
+                    run_id=run_id,
                 )
+                if not completed:
+                    raise RuntimeError("workflow task completion failed")
+            finished = self._store.finish_workflow_run(
+                run_id,
+                expected_status="running",
+                status=execution.status, exit_code=0 if execution.status != "failed" else 1,
+                stdout_path=None, stderr_path=None, error=execution.error, duration_ms=None, output=execution.output,
+            )
+            if execution.status == "failed":
+                self._release_leased_tasks(workflow_key, run_id, execution.error or "workflow failed")
             logger.info(
                 "Workflow run 完成 workflow=%s run=%s 状态=%s 耗时=%dms",
                 workflow_key,
                 run_id,
-                final_status,
-                process_result.duration_ms,
+                execution.status,
+                0,
             )
-            if finished["status"] != final_status:
-                return {"status": finished["status"], "run_id": run_id}
-            return ingested
+            return {
+                "status": self._finished_status(finished, execution.status),
+                "output": execution.output,
+                "warnings": execution.warnings,
+            }
         except Exception as exc:
             logger.exception("Workflow 执行失败 workflow=%s run=%s", workflow_key, run_id)
-            stdout_path = str(process_result.stdout_path) if process_result else None
-            stderr_path = str(process_result.stderr_path) if process_result else None
-            duration_ms = process_result.duration_ms if process_result else None
             if self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id, process_result)
-            with self._workflow_run_lock(run_id):
-                if self._is_parent_stop_requested(run_id):
-                    return self._finish_stopped(workflow_key, run_id, process_result)
-                finished = self._store.finish_workflow_run(
-                    run_id,
-                    expected_status="running",
-                    status="failed",
-                    exit_code=process_result.exit_code if process_result else None,
-                    stdout_path=stdout_path,
-                    stderr_path=stderr_path,
-                    error=str(exc),
-                    duration_ms=duration_ms,
-                )
-            if finished["status"] == "failed":
+                return self._finish_stopped(workflow_key, run_id)
+            finished = self._store.finish_workflow_run(
+                run_id,
+                expected_status="running",
+                status="failed",
+                exit_code=1,
+                stdout_path=None,
+                stderr_path=None,
+                error=str(exc),
+                duration_ms=None,
+            )
+            status = self._finished_status(finished, "failed")
+            if status == "failed":
                 self._release_leased_tasks(workflow_key, run_id, str(exc))
-            return {"status": finished["status"], "error": str(exc)}
+            return {"status": status, "error": str(exc)}
         finally:
             self._finish_workflow_control(run_id)
 
     def _release_leased_tasks(self, workflow_key: str, run_id: str, error: str) -> None:
-        """On a failed run, release the task it leased for fast retry, or
-        abandon it once retries are exhausted."""
-        try:
-            self._store.release_or_abandon_tasks_for_run(
+        """Release a failed task lease for retry, preserving the branch's DAG execution flow."""
+        release = getattr(self._store, "release_or_abandon_tasks_for_run", None)
+        if callable(release):
+            release(
                 workflow_key,
                 run_id,
                 max_attempts=_MAX_TASK_ATTEMPTS,
                 error_message=error,
             )
-        except Exception:
-            logger.exception("释放工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
+            return
+        self._store.fail_workflow_task_for_run(workflow_key, run_id, error)
+
+    @staticmethod
+    def _finished_status(result: Any, fallback: str) -> str:
+        return str(result.get("status") or fallback) if isinstance(result, dict) else fallback
 
     def _control_registry(self) -> Any | None:
-        return getattr(self._agent_service, "control_registry", None)
+        return getattr(getattr(self._service, "agent_service", None), "control_registry", None)
 
     def _register_workflow_control(self, run_id: str) -> None:
         registry = self._control_registry()
@@ -477,6 +557,10 @@ class WorkflowScheduler:
         if registry is not None:
             registry.finish_workflow(run_id)
 
+    def _is_parent_stop_requested(self, run_id: str) -> bool:
+        registry = self._control_registry()
+        return registry is not None and registry.is_workflow_stop_requested(run_id)
+
     def _workflow_run_lock(self, run_id: str) -> threading.RLock:
         with self._run_locks_lock:
             lock = self._run_locks.get(run_id)
@@ -485,125 +569,71 @@ class WorkflowScheduler:
                 self._run_locks[run_id] = lock
             return lock
 
-    def _is_parent_stop_requested(self, run_id: str) -> bool:
-        registry = self._control_registry()
-        return registry is not None and registry.is_workflow_stop_requested(run_id)
-
-    @staticmethod
-    def _workflow_control_exists(registry: Any, run_id: str) -> bool:
-        return bool(registry.is_workflow_active(run_id))
-
-    def _finish_stopped(self, workflow_key: str, run_id: str, result: Any | None) -> dict[str, Any]:
+    def _finish_stopped(self, workflow_key: str, run_id: str) -> dict[str, Any]:
         with self._workflow_run_lock(run_id):
-            actual = self._store.finish_workflow_run(
+            result = self._store.finish_workflow_run(
                 run_id,
                 expected_status="running",
                 status="stopped",
-                exit_code=result.exit_code if result else None,
-                stdout_path=str(result.stdout_path) if result else None,
-                stderr_path=str(result.stderr_path) if result else None,
+                exit_code=None,
+                stdout_path=None,
+                stderr_path=None,
                 error=STOPPED_ERROR,
-                duration_ms=result.duration_ms if result else None,
+                duration_ms=None,
             )
-            if actual["status"] != "stopped":
-                return {"status": actual["status"], "run_id": run_id}
-            try:
+            status = self._finished_status(result, "stopped")
+            if status == "stopped":
                 self._store.workflows.release_tasks_for_stopped_run(
                     workflow_key,
                     run_id,
                     STOPPED_ERROR,
                 )
-            except Exception:
-                logger.exception("释放已停止工作流任务失败 workflow=%s run=%s", workflow_key, run_id)
-            return {"status": "stopped", "run_id": run_id}
+            return {"status": status, "run_id": run_id}
 
-    def _maybe_generate_html_report(
+    def _default_actor(self, actor: str | None) -> str:
+        return actor or sorted(self._admins)[0]
+
+    def _require_valid_workflow(self, workflow: dict[str, Any], *, actor: str | None) -> WorkflowGraph | Any:
+        if self._validator is None:
+            return workflow["definition"]
+        return self._validator.require_valid(actor=self._default_actor(actor), workflow=workflow)
+
+    @staticmethod
+    def _definition_snapshot(definition: WorkflowGraph | Any, fallback: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(definition, WorkflowGraph):
+            return definition.model_dump(mode="json")
+        if isinstance(definition, dict):
+            return definition
+        return fallback
+
+    def _log_validation_failure(
         self,
         workflow_key: str,
-        workflow: dict[str, Any],
-        run_id: str,
+        exc: WorkflowDefinitionValidationError,
+        *,
+        run_id: str | None = None,
     ) -> None:
-        """Best-effort HTML report generation for summary workflows.
-
-        Any error is swallowed (logged + recorded as a warning run log) so the
-        main workflow run stays completed. Uses an admin actor so the reporter
-        agent can call ``load_skill``.
-        """
-        if self._control_registry() is not None and self._control_registry().is_workflow_stop_requested(run_id):
+        issues = [asdict(issue) for issue in exc.issues]
+        logger.warning(
+            "Workflow 执行前校验失败 workflow=%s run=%s issues=%s",
+            workflow_key,
+            run_id,
+            issues,
+        )
+        if run_id is None or not hasattr(self._service, "append_run_log"):
             return
-        if (workflow.get("workflow_type") or "operation") != "summary":
-            return
-        actor = sorted(self._admins)[0] if self._admins else "root"
         try:
-            outcome = self._service.generate_html_report_for_run(
+            self._service.append_run_log(
                 workflow_key=workflow_key,
-                profile_key=workflow["profile_key"],
                 run_id=run_id,
-                actor=actor,
+                task_key=None,
+                level="error",
+                stage="validate",
+                message="workflow validation failed before execution",
+                payload={"issues": issues},
             )
-            if self._control_registry() is not None and self._control_registry().is_workflow_stop_requested(run_id):
-                return
-            status = outcome.get("status")
-            if status == "generated":
-                self._store.append_workflow_run_log(
-                    run_id=run_id,
-                    workflow_key=workflow_key,
-                    task_key=None,
-                    level="info",
-                    stage="html_report",
-                    message="HTML 报告已生成",
-                    payload=outcome,
-                )
-            elif status == "skipped":
-                logger.debug("HTML 报告跳过 workflow=%s run=%s 原因=%s", workflow_key, run_id, outcome.get("reason"))
-            elif status == "no_markdown":
-                self._store.append_workflow_run_log(
-                    run_id=run_id,
-                    workflow_key=workflow_key,
-                    task_key=None,
-                    level="warning",
-                    stage="html_report",
-                    message="本轮无 Markdown 产物，未生成 HTML 报告",
-                    payload={},
-                )
-        except Exception as exc:
-            logger.warning(
-                "HTML 报告生成失败 workflow=%s run=%s error=%s",
-                workflow_key,
-                run_id,
-                exc,
-                exc_info=True,
-            )
-            try:
-                self._store.append_workflow_run_log(
-                    run_id=run_id,
-                    workflow_key=workflow_key,
-                    task_key=None,
-                    level="warning",
-                    stage="html_report",
-                    message=f"HTML 报告生成失败：{exc}",
-                    payload={},
-                )
-            except Exception:
-                logger.exception("写入 HTML 报告失败日志失败 workflow=%s run=%s", workflow_key, run_id)
-
-    def _finish_failed(self, workflow_key: str, run_id: str, result: Any, error: str) -> dict[str, Any]:
-        with self._workflow_run_lock(run_id):
-            if self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id, result)
-            actual = self._store.finish_workflow_run(
-                run_id,
-                expected_status="running",
-                status="failed",
-                exit_code=result.exit_code,
-                stdout_path=str(result.stdout_path),
-                stderr_path=str(result.stderr_path),
-                error=error,
-                duration_ms=result.duration_ms,
-            )
-        if actual["status"] == "failed":
-            self._release_leased_tasks(workflow_key, run_id, error)
-        return {"status": actual["status"], "error": error}
+        except Exception:
+            logger.exception("Workflow 校验失败日志写入失败 workflow=%s run=%s", workflow_key, run_id)
 
 
 def _parse_hhmm(value: Any) -> time | None:

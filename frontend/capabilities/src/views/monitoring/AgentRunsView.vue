@@ -287,6 +287,13 @@ function runBadgeStatus(run: AgentRun): 'success' | 'error' | 'running' | 'disab
   return 'error'
 }
 
+function backendBadgeClass(backend: string | null | undefined): string {
+  if (backend === 'claude') return 'border-info/30 bg-info-soft text-info-soft-fg'
+  if (backend === 'opencode') return 'border-success/30 bg-success-soft text-success-soft-fg'
+  if (backend === 'codex') return 'border-warning/30 bg-warning-soft text-warning-soft-fg'
+  return 'border-border bg-muted text-muted-foreground'
+}
+
 </script>
 
 <template>
@@ -312,6 +319,14 @@ function runBadgeStatus(run: AgentRun): 'success' | 'error' | 'running' | 'disab
         <div>
           <span class="text-muted-foreground">Agent</span>
           <div class="font-mono font-medium">{{ detailRun.agent_name }}</div>
+        </div>
+        <div>
+          <span class="text-muted-foreground">后端</span>
+          <div>
+            <Badge variant="outline" class="font-mono text-[11px]" :class="backendBadgeClass(detailRun.backend_key)">
+              {{ detailRun.backend_key || 'unknown' }}
+            </Badge>
+          </div>
         </div>
         <div>
           <span class="text-muted-foreground">状态</span>
@@ -432,6 +447,7 @@ function runBadgeStatus(run: AgentRun): 'success' | 'error' | 'running' | 'disab
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">时间</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Agent</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">后端</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Profile</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工作流</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">耗时</th>
@@ -452,6 +468,11 @@ function runBadgeStatus(run: AgentRun): 'success' | 'error' | 'running' | 'disab
                 {{ formatLocalDatetime(r.created_at) }}
               </td>
               <td class="px-4 py-3 font-mono text-sm">{{ r.agent_name }}</td>
+              <td class="px-4 py-3">
+                <Badge variant="outline" class="font-mono text-[11px]" :class="backendBadgeClass(r.backend_key)">
+                  {{ r.backend_key || 'unknown' }}
+                </Badge>
+              </td>
               <td class="px-4 py-3 text-sm">{{ r.profile_key || '—' }}</td>
               <td class="px-4 py-3 text-sm">
                 <span v-if="r.workflow_key" class="font-mono text-xs">{{ r.workflow_key }}</span>

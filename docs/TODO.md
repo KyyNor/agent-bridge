@@ -32,3 +32,6 @@
   - [x] 设计 memory block 与 claude-mem project/data dir 的映射，避免 profile 作用域和 claude-mem 默认 project 作用域混乱。
   - [ ] 保留 `<private>`/敏感字段过滤/截断策略，明确额外 observer LLM 调用带来的成本模型。
   - [x] SQLite 改 WAL 作为前置或同期工作，降低 hook 高频写入带来的锁冲突风险。
+# 工作流
+
+- [ ] 工作流执行日志聚合：一个 workflow run 作为顶层记录，内部关联多个 Agent Run；普通 Agent Run 继续独立展示。第一版先由 `workflow_node_runs` 保存关联关系。

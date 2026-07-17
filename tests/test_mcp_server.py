@@ -419,7 +419,7 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
             "name": "Built-in",
             "description": "平台内置辅助工具",
             "tags": ["builtin", "platform"],
-            "tool_count": 2,
+            "tool_count": 3,
             "status": "enabled",
             "resources": [],
         },

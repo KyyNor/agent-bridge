@@ -29,6 +29,7 @@ def _register_script(client: TestClient) -> None:
             "description": "",
             "language": "python",
             "code": SCRIPT_CODE,
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": True},
             "status": "active",
             "owner_type": "system",
             "owner_key": "",
@@ -190,3 +191,41 @@ def test_script_test_route_accepts_legacy_script_params_body(wm_paths):
 
     assert response.status_code == 200
     assert response.json()["result"]["profile_key"] is None
+
+
+def test_script_reset_route_restores_builtin_default(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    client = _create_client(wm_paths)
+    svc: AgentBridgeService = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    default = svc.scripts.get_script("root", "system.validate_workflow")
+
+    override_response = client.post(
+        "/scripts",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={
+            "script_key": "system.validate_workflow",
+            "name": "ignored",
+            "description": "ignored",
+            "language": "python",
+            "code": "def main(envelope):\n    return {'valid': True, 'errors': [], 'warnings': [{'source': 'override'}]}\n",
+            "input_schema": default["input_schema"],
+            "output_schema": default["output_schema"],
+            "status": "active",
+            "owner_type": "system",
+            "owner_key": "",
+        },
+    )
+    assert override_response.status_code == 200
+    assert override_response.json()["source"] == "database"
+
+    response = client.post(
+        "/scripts/system.validate_workflow/reset",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["script_key"] == "system.validate_workflow"
+    assert payload["source"] == "default"

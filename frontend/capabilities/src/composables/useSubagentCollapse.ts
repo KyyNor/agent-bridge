@@ -9,7 +9,7 @@
  * sub-agent task ids independently.
  */
 import { ref } from 'vue'
-import { subagentTaskIds } from '../lib/workflowEvents'
+import { subagentTaskIds } from '../lib/workflowEvents.ts'
 import type { WorkflowRunEvent } from '../api/types'
 
 export function useSubagentCollapse() {

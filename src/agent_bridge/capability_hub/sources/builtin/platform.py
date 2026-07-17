@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
+from agent_bridge.automation.workflows.validation import WORKFLOW_VALIDATION_INPUT_SCHEMA
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool
 from agent_bridge.capability_hub.models import ToolType
 from agent_bridge.core.domain import NotFound, ValidationError
@@ -56,6 +57,21 @@ class PlatformBuiltinProvider:
                 },
                 ToolType.action.value,
             ),
+            BuiltinTool(
+                "validate_workflow",
+                "Validate Workflow",
+                "校验工作流定义并返回结构化错误与警告。",
+                {
+                    "type": "object",
+                    "properties": {
+                        "workflow": {
+                            **WORKFLOW_VALIDATION_INPUT_SCHEMA,
+                        },
+                    },
+                    "required": ["workflow"],
+                },
+                ToolType.action.value,
+            ),
         ]
 
     def resource_from_arguments(self, tool: str, arguments: dict[str, Any]) -> BuiltinResourceRef | None:
@@ -99,5 +115,10 @@ class PlatformBuiltinProvider:
                 workflow_context=workflow_context,
                 run_type="mcp",
             )
+        if tool == "validate_workflow":
+            workflow = arguments.get("workflow")
+            if not isinstance(workflow, dict):
+                raise ValidationError("workflow must be an object")
+            return self.service.validate_workflow_draft(actor=actor, workflow=workflow)
         else:
             raise NotFound("tool not found")

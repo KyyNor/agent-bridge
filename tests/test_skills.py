@@ -10,7 +10,8 @@ def test_skill_prompt_override_and_reset(wm_paths):
 
     assert default_item["skill_name"] == "design_workflow"
     assert default_item["source"] == "default"
-    assert "workflow.js" in default_item["prompt"]
+    assert default_item["description"] == "设计 Agent Bridge 结构化 DAG 工作流的提示词。"
+    assert "definition" in default_item["prompt"]
     assert script_item["skill_name"] == "design_script"
     assert script_item["source"] == "default"
     assert "main(envelope)" in script_item["prompt"]
@@ -25,6 +26,34 @@ def test_skill_prompt_override_and_reset(wm_paths):
 
     assert reset["source"] == "default"
     assert reset["prompt"] == default_item["prompt"]
+
+
+def test_design_workflow_skill_mentions_structured_validation_and_omits_history_list(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    prompt = service.skills.get_skill("root", "design_workflow")["prompt"]
+
+    assert "system.validate_workflow" in prompt
+    assert "definition" in prompt
+    assert "workflow_js" not in prompt
+    assert "第一版明确不做" not in prompt
+    assert '"summary"' in prompt
+    assert '"notes"' in prompt
+    assert '"workflow"' in prompt
+    assert '"script_params":{"workflow":<workflow 子对象>}' in prompt
+
+
+def test_design_script_skill_preserves_and_documents_output_schema(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    prompt = service.skills.get_skill("root", "design_script")["prompt"]
+
+    assert "output_schema" in prompt
+    assert "不得清空已有 output_schema" in prompt
 
 
 def test_list_skills_includes_design_script(wm_paths):

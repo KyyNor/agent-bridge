@@ -2,7 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import CronExpressionParser from 'cron-parser'
 import { api } from '../../api/client'
-import type { BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../../api/types'
+import type { AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -40,6 +40,16 @@ const claudeMemForm = ref({ base_url: '', model: '', auth_token: '', api_key: ''
 const claudeMemSaving = ref(false)
 const claudeMemError = ref('')
 
+const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'claude', backends: [] })
+const agentRuntimeSaving = ref(false)
+const agentRuntimeError = ref('')
+const agentRuntimeMessage = ref('')
+const fixedAgentBackendDefs = [
+  { slug: 'claude', type: 'claude', command: null as string | null, model: null as string | null },
+  { slug: 'opencode', type: 'opencode', command: 'opencode', model: null as string | null },
+  { slug: 'codex', type: 'codex', command: 'codex', model: null as string | null },
+]
+
 // Categories
 const categories = ref<CodeRepoCategory[]>([])
 const showCategoryDialog = ref(false)
@@ -71,7 +81,7 @@ const isPageIndex = computed(() => backendForm.value.backend_type === 'pageindex
 const supportsModelConfig = computed(() => isWeknora.value || isPageIndex.value)
 
 onMounted(async () => {
-  await Promise.all([loadSyncConfig(), loadClaudeMemConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
+  await Promise.all([loadSyncConfig(), loadClaudeMemConfig(), loadAgentRuntimeConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
   loading.value = false
 })
 
@@ -93,6 +103,15 @@ async function loadClaudeMemConfig() {
     }
   } catch {
     claudeMemConfig.value = null
+  }
+}
+
+async function loadAgentRuntimeConfig() {
+  try {
+    agentRuntimeConfig.value = normalizeFixedAgentRuntimeConfig(await api.getAgentRuntimeConfig())
+    agentRuntimeError.value = ''
+  } catch (e: any) {
+    agentRuntimeError.value = e.message || '无法加载 Coding Agent 配置'
   }
 }
 
@@ -247,6 +266,47 @@ async function saveClaudeMemConfig() {
     claudeMemError.value = e.message || '保存失败'
   }
   claudeMemSaving.value = false
+}
+
+function normalizeFixedAgentRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
+  const bySlug = new Map(config.backends.map(item => [item.slug, item]))
+  const backends = fixedAgentBackendDefs.map(def => {
+    const current = bySlug.get(def.slug)
+    return {
+      slug: def.slug,
+      type: def.type,
+      command: current?.command ?? def.command,
+      model: current?.model ?? def.model,
+    }
+  })
+  const allowed = new Set(fixedAgentBackendDefs.map(item => item.slug))
+  return {
+    default_backend: allowed.has(config.default_backend) ? config.default_backend : 'claude',
+    backends,
+  }
+}
+
+async function saveAgentRuntimeConfig() {
+  agentRuntimeSaving.value = true
+  agentRuntimeError.value = ''
+  agentRuntimeMessage.value = ''
+  try {
+    const normalized = normalizeFixedAgentRuntimeConfig(agentRuntimeConfig.value)
+    const saved = await api.saveAgentRuntimeConfig({
+      default_backend: normalized.default_backend,
+      backends: normalized.backends.map(item => ({
+        slug: item.slug.trim(),
+        type: item.type,
+        command: item.command?.trim() || null,
+        model: item.model?.trim() || null,
+      })),
+    })
+    agentRuntimeConfig.value = normalizeFixedAgentRuntimeConfig(saved)
+    agentRuntimeMessage.value = '已保存并刷新运行时配置'
+  } catch (e: any) {
+    agentRuntimeError.value = e.message || '保存失败'
+  }
+  agentRuntimeSaving.value = false
 }
 
 function openAddCategory() {
@@ -572,6 +632,72 @@ async function deleteBackend(slug: string) {
               </div>
             </div>
           </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Coding Agent 运行配置 -->
+    <Card>
+      <CardContent class="space-y-4 p-5">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <div class="text-sm font-medium">Coding Agent 运行配置</div>
+            <div class="mt-1 text-xs text-muted-foreground">普通 Agent 运行三选一；工作流和 Understand Anything 当前仍固定使用 Claude</div>
+          </div>
+          <div class="flex gap-2">
+            <Button variant="outline" size="sm" @click="loadAgentRuntimeConfig()">刷新</Button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-[12rem_minmax(0,20rem)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">默认后端</div>
+          <select v-model="agentRuntimeConfig.default_backend" class="h-9 rounded-md border border-input bg-background px-3 text-sm">
+            <option v-for="backend in agentRuntimeConfig.backends" :key="backend.slug" :value="backend.slug">
+              {{ backend.slug }}
+            </option>
+          </select>
+          <span class="text-xs text-muted-foreground">保存后立即影响普通 Agent 运行</span>
+        </div>
+
+        <div class="rounded-md border border-border">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-border bg-muted/30">
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">标识</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">类型</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">命令</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">模型</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="backend in agentRuntimeConfig.backends" :key="backend.slug" class="border-b border-border/60">
+                <td class="px-3 py-2 font-mono text-sm">{{ backend.slug }}</td>
+                <td class="px-3 py-2 text-sm">{{ backend.type }}</td>
+                <td class="px-3 py-2">
+                  <Input
+                    v-if="backend.type !== 'claude'"
+                    :model-value="backend.command || ''"
+                    :placeholder="backend.type"
+                    class="h-8 font-mono text-xs"
+                    @update:model-value="backend.command = String($event || '')"
+                  />
+                  <span v-else class="text-xs text-muted-foreground">内置</span>
+                </td>
+                <td class="px-3 py-2">
+                  <Input :model-value="backend.model || ''" placeholder="默认模型" class="h-8 font-mono text-xs" @update:model-value="backend.model = String($event || '')" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <Button @click="saveAgentRuntimeConfig()" :disabled="agentRuntimeSaving" size="sm">
+            {{ agentRuntimeSaving ? '保存中...' : '保存配置' }}
+          </Button>
+          <span v-if="agentRuntimeError" class="text-xs text-destructive">{{ agentRuntimeError }}</span>
+          <span v-else-if="agentRuntimeMessage" class="text-xs text-success">{{ agentRuntimeMessage }}</span>
+          <span v-else class="text-xs text-muted-foreground">保存到 server.toml 的 [agents] 区块</span>
         </div>
       </CardContent>
     </Card>

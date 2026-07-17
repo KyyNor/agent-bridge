@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response
 
 from agent_bridge.api.schemas import DesignAgentRequest
+from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.core.domain import ConflictError, NotFound, require_admin_user
 
 
@@ -33,24 +34,96 @@ def _read_events_jsonl(path: Path) -> list[dict[str, Any]] | None:
     return events
 
 
+def _normalize_agent_run_result(row: dict[str, Any]) -> dict[str, Any]:
+    """Recover structured output for older non-native-schema agent runs.
+
+    Some adapters stream the useful JSON as an assistant text event while their
+    terminal result row only says ``done``. Keep the stored row immutable, but
+    make detail reads useful by deriving the schema result from the event log.
+    """
+    if not row.get("output_schema"):
+        return row
+    if not _is_generic_result(row.get("result")):
+        return row
+    recovered = _extract_json_from_agent_events(row.get("events") or [])
+    if recovered is None:
+        return row
+    normalized = dict(row)
+    normalized["result"] = recovered
+    return normalized
+
+
+def _is_generic_result(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().lower() in {
+        "",
+        "done",
+        "success",
+        "succeeded",
+        "complete",
+        "completed",
+        "ok",
+    }
+
+
+def _extract_json_from_agent_events(events: list[dict[str, Any]]) -> Any | None:
+    for event in reversed(events):
+        if event.get("kind") != "agent_message":
+            continue
+        message = event.get("message")
+        if not isinstance(message, str):
+            continue
+        parsed = _extract_json(message)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _extract_json(text: str) -> Any | None:
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+_WORKFLOW_GRAPH_SCHEMA = WorkflowGraph.model_json_schema(ref_template="#/$defs/{model}")
+_WORKFLOW_GRAPH_DEFS = _WORKFLOW_GRAPH_SCHEMA.pop("$defs", {})
+_WORKFLOW_GRAPH_SCHEMA["required"] = ["nodes", "edges"]
+
 WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$defs": _WORKFLOW_GRAPH_DEFS,
     "type": "object",
     "additionalProperties": False,
-    "required": ["summary", "workflow"],
+    "required": ["summary", "notes", "workflow"],
     "properties": {
         "summary": {"type": "string"},
         "notes": {"type": "array", "items": {"type": "string"}},
         "workflow": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["workflow_key", "name", "description", "profile_key", "status", "workflow_js"],
+            "required": [
+                "workflow_key",
+                "name",
+                "description",
+                "profile_key",
+                "workflow_type",
+                "status",
+                "definition",
+            ],
             "properties": {
                 "workflow_key": {"type": "string"},
                 "name": {"type": "string"},
                 "description": {"type": "string"},
                 "profile_key": {"type": "string"},
+                "workflow_type": {"type": "string", "enum": ["operation", "summary"]},
                 "status": {"type": "string", "enum": ["active", "disabled"]},
-                "workflow_js": {"type": "string"},
+                "definition": _WORKFLOW_GRAPH_SCHEMA,
             },
         },
     },
@@ -66,13 +139,35 @@ SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
         "script": {
             "type": "object",
             "additionalProperties": False,
-            "required": ["script_key", "name", "description", "language", "code", "status", "owner_type", "owner_key"],
+            "required": ["script_key", "name", "description", "language", "code", "input_schema", "output_schema", "status", "owner_type", "owner_key"],
             "properties": {
                 "script_key": {"type": "string"},
                 "name": {"type": "string"},
                 "description": {"type": "string"},
                 "language": {"type": "string", "enum": ["python"]},
                 "code": {"type": "string"},
+                "input_schema": {
+                    "type": "object",
+                    "required": ["type", "properties"],
+                    "properties": {
+                        "type": {"const": "object"},
+                        "properties": {
+                            "type": "object",
+                            "additionalProperties": {"type": "object"},
+                        },
+                        "required": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "uniqueItems": True,
+                        },
+                    },
+                },
+                "output_schema": {
+                    "anyOf": [
+                        {"type": "object"},
+                        {"type": "null"},
+                    ],
+                },
                 "status": {"type": "string", "enum": ["active", "disabled"]},
                 "owner_type": {"type": "string"},
                 "owner_key": {"type": "string"},
@@ -133,7 +228,7 @@ def create_agent_runs_routes(service, actor):
         row = service.store.agent_runs.get(run_key)
         if row is None:
             raise NotFound("agent run not found")
-        return row
+        return _normalize_agent_run_result(row)
 
     @router.get("/agent-runs/{run_key}/events")
     def get_agent_run_events(run_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
@@ -212,7 +307,7 @@ def create_agent_runs_routes(service, actor):
                 skill_name="design_workflow",
                 skill_prompt=service.skills.get_skill(current_actor, "design_workflow")["prompt"],
                 payload=payload,
-                expected_file="workflow.js",
+                expected_artifact="structured workflow definition",
             ),
             agent_name="design_workflow",
             profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
@@ -235,7 +330,7 @@ def create_agent_runs_routes(service, actor):
                 skill_name="design_script",
                 skill_prompt=service.skills.get_skill(current_actor, "design_script")["prompt"],
                 payload=payload,
-                expected_file="script.py",
+                expected_artifact="script.py",
             ),
             agent_name="design_script",
             profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
@@ -255,12 +350,12 @@ def _design_prompt(
     skill_name: str,
     skill_prompt: str,
     payload: DesignAgentRequest,
-    expected_file: str,
+    expected_artifact: str,
 ) -> str:
     mode = "modify" if payload.mode == "modify" else "create"
     return "\n\n".join(
         [
-            f"你是 Agent Bridge 的 {kind} 设计 agent。请根据用户需求生成可直接采纳的 {expected_file}。",
+            f"你是 Agent Bridge 的 {kind} 设计 agent。请根据用户需求生成可直接采纳的 {expected_artifact}。",
             f"必须先遵循内置技能 {skill_name}。如果你需要工具，请优先执行 execute service='built-in' tool_name='load_skill' params={{\"skill_name\":\"{skill_name}\"}}；下方也内联提供了当前技能内容作为约束。",
             "采纳结果会直接写回系统，所以请返回完整字段，不要只给 patch 或解释。",
             f"模式：{mode}。modify 表示在当前对象基础上改；create 表示生成一个新对象。",

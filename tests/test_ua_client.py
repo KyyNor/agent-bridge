@@ -9,11 +9,11 @@ from agent_bridge.knowledge_management.code_knowledge.ua_client import UA_DIR, U
 
 
 def test_analyze_uses_agent_sdk_options(wm_paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from agent_bridge.agent_runtime import service as agent_service_module
+    from agent_bridge.agent_runtime.adapters import claude as claude_agent
     from agent_bridge.app.service import AgentBridgeService
 
     # UA analysis now delegates the SDK loop to AgentService, so the SDK is
-    # patched on the agent_service module and the client is wired with one.
+    # patched on the Claude adapter module and the client is wired with one.
     agents = AgentBridgeService.create(wm_paths, {"root"}).agents
     client = UnderstandAnythingClient(agent_service=agents)
 
@@ -47,10 +47,10 @@ def test_analyze_uses_agent_sdk_options(wm_paths, tmp_path: Path, monkeypatch: p
             total_cost_usd=0.0,
         )
 
-    monkeypatch.setattr(agent_service_module, "ClaudeAgentOptions", _FakeOptions)
-    monkeypatch.setattr(agent_service_module, "claude_query", fake_query)
+    monkeypatch.setattr(claude_agent, "ClaudeAgentOptions", _FakeOptions)
+    monkeypatch.setattr(claude_agent, "claude_query", fake_query)
     monkeypatch.setattr(
-        agent_service_module, "claude_settings_env", lambda: {"ANTHROPIC_BASE_URL": "https://example.test"}
+        claude_agent, "claude_settings_env", lambda: {"ANTHROPIC_BASE_URL": "https://example.test"}
     )
 
     result = client.analyze(project_dir)

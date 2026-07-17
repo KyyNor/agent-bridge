@@ -1,5 +1,63 @@
 from __future__ import annotations
 
+
+def test_delete_workflow_definition_removes_run_logs_without_foreign_key(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="delete-me",
+        name="Delete Me",
+        description="",
+        profile_key="report-plane",
+        definition={"nodes": [], "edges": []},
+        status="active",
+        created_by="root",
+    )
+    store.create_workflow_run(
+        run_id="run-delete-me",
+        workflow_key="delete-me",
+        profile_key="report-plane",
+        task_key=None,
+        status="completed",
+        temp_dir="",
+    )
+    store.append_workflow_run_log(
+        run_id="run-delete-me",
+        workflow_key="delete-me",
+        task_key=None,
+        level="info",
+        stage="test",
+        message="delete this log",
+        payload={},
+    )
+
+    assert store.delete_workflow_definition("delete-me") is True
+
+    with store.connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM workflow_run_logs WHERE workflow_key = ?",
+            ("delete-me",),
+        ).fetchone()[0] == 0
+
+
+def test_workflow_definition_snapshot_and_node_runs_round_trip(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    definition = {"nodes": [], "edges": []}
+    store.upsert_workflow_definition(workflow_key="report", name="Report", description="", profile_key="report-plane", definition=definition, status="active", created_by="root")
+    run = store.create_workflow_run(run_id="run_1", workflow_key="report", profile_key="report-plane", task_key=None, status="running", temp_dir="", definition_snapshot=definition, input_data={"topic": "x"})
+    store.create_workflow_node_runs("run_1", [{"node_id": "a", "node_type": "agent"}])
+    store.start_workflow_node_run("run_1", "a")
+    store.finish_workflow_node_run("run_1", "a", status="completed", output={"text": "ok"})
+    assert run["definition_snapshot"] == definition
+    assert store.list_workflow_node_runs("run_1")[0]["output"] == {"text": "ok"}
+
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone

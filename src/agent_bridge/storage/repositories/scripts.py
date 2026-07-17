@@ -21,6 +21,8 @@ class ScriptsRepository:
         description: str,
         language: str,
         code: str,
+        input_schema: dict[str, Any],
+        output_schema: dict[str, Any] | None,
         status: str,
         owner_type: str,
         owner_key: str,
@@ -34,9 +36,9 @@ class ScriptsRepository:
                     """
                     INSERT INTO scripts (
                       script_key, name, description, language, code, status,
-                      owner_type, owner_key, content_hash, created_by, updated_by
+                      owner_type, owner_key, content_hash, input_schema_json, output_schema_json, created_by, updated_by
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         script_key,
@@ -48,6 +50,8 @@ class ScriptsRepository:
                         owner_type,
                         owner_key,
                         content_hash,
+                        self._dump_schema(input_schema),
+                        self._dump_schema(output_schema),
                         actor,
                         actor,
                     ),
@@ -64,6 +68,8 @@ class ScriptsRepository:
                         owner_type = ?,
                         owner_key = ?,
                         content_hash = ?,
+                        input_schema_json = ?,
+                        output_schema_json = ?,
                         updated_by = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE script_key = ?
@@ -77,6 +83,8 @@ class ScriptsRepository:
                         owner_type,
                         owner_key,
                         content_hash,
+                        self._dump_schema(input_schema),
+                        self._dump_schema(output_schema),
                         actor,
                         script_key,
                     ),
@@ -84,21 +92,53 @@ class ScriptsRepository:
             script = row_to_dict(conn.execute("SELECT * FROM scripts WHERE script_key = ?", (script_key,)).fetchone())
             if script is None:
                 raise KeyError(f"script not found: {script_key}")
-            return script
+            return self._payload(script)
 
     def list_scripts(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM scripts ORDER BY script_key").fetchall()
-            return [dict(row) for row in rows]
+            return [self._payload(dict(row)) for row in rows]
 
     def get_script(self, script_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:
-            return row_to_dict(conn.execute("SELECT * FROM scripts WHERE script_key = ?", (script_key,)).fetchone())
+            script = row_to_dict(conn.execute("SELECT * FROM scripts WHERE script_key = ?", (script_key,)).fetchone())
+            return self._payload(script) if script else None
+
+    @staticmethod
+    def _payload(script: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(script)
+        payload["input_schema"] = ScriptsRepository._load_schema(
+            payload.get("input_schema_json"),
+            fallback='{"type":"object","properties":{},"additionalProperties":true}',
+        )
+        payload["output_schema"] = ScriptsRepository._load_schema(payload.get("output_schema_json"))
+        return payload
+
+    @staticmethod
+    def _dump_schema(schema: dict[str, Any] | None) -> str | None:
+        if schema is None:
+            return None
+        return json.dumps(schema, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def _load_schema(value: str | None, *, fallback: str | None = None) -> dict[str, Any] | None:
+        raw = value if value is not None else fallback
+        if raw is None:
+            return None
+        return json.loads(raw)
 
     def delete_script(self, script_key: str) -> bool:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM scripts WHERE script_key = ?", (script_key,))
             return cursor.rowcount > 0
+
+    def has_script_runs(self, script_key: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM script_runs WHERE script_key = ? LIMIT 1",
+                (script_key,),
+            ).fetchone()
+            return row is not None
 
     def create_script_run(
         self,

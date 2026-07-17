@@ -155,14 +155,41 @@ export interface MemoryDashboardStatus {
   error?: string | null
 }
 
+export type WorkflowNodeType = 'get_task' | 'agent' | 'script' | 'output'
+export type WorkflowType = 'operation' | 'summary'
+export type ConditionOperator = 'equals' | 'not_equals' | 'exists' | 'not_exists' | 'contains'
+
+export interface WorkflowPosition { x: number; y: number }
+export interface WorkflowCondition { field: string; operator: ConditionOperator; value?: unknown }
+export interface WorkflowEdge { id: string; source: string; target: string; condition: WorkflowCondition | null; system_role?: 'summary_markdown_to_html' | null }
+export interface GetTaskWorkflowNode { id: string; type: 'get_task'; name: string; position: WorkflowPosition; config: Record<string, never> }
+export interface AgentWorkflowNode { id: string; type: 'agent'; name: string; position: WorkflowPosition; config: { prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; result_mode: 'text' | 'json'; output_schema: Record<string, unknown> | null } }
+export interface ScriptWorkflowNode { id: string; type: 'script'; name: string; position: WorkflowPosition; config: { script_key: string; params: Record<string, unknown>; timeout_seconds: number } }
+export interface OutputWorkflowNode { id: string; type: 'output'; name: string; position: WorkflowPosition; config: { format: 'markdown' | 'html'; title: string; path: string; tags: string[]; prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; system_role?: 'summary_markdown' | 'summary_html' | null } }
+export type WorkflowNode = GetTaskWorkflowNode | AgentWorkflowNode | ScriptWorkflowNode | OutputWorkflowNode
+export interface WorkflowGraph { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
+export interface WorkflowValidationIssue { scope: 'workflow' | 'node' | 'edge'; id: string | null; field: string | null; code: string; message: string }
+export type WorkflowValidationError = WorkflowValidationIssue
+export interface WorkflowValidationResult { valid: boolean; errors: WorkflowValidationIssue[]; warnings: WorkflowValidationIssue[] }
+export interface WorkflowDraft {
+  workflow_key: string
+  name: string
+  description: string
+  profile_key: string
+  definition: WorkflowGraph
+  status: string
+  workflow_type: WorkflowType
+}
+
 export interface WorkflowDefinition {
   workflow_key: string
   name: string
   description: string
   profile_key: string
-  workflow_js: string
+  /** Historical rows can have no structured graph. workflow_js is never executable. */
+  definition: WorkflowGraph | null
   status: string
-  workflow_type?: 'operation' | 'summary'
+  workflow_type: WorkflowType
   created_by: string
   created_at: string
   updated_at: string
@@ -256,6 +283,23 @@ export interface WorkflowRun {
   started_at: string
   finished_at: string | null
   duration_ms: number | null
+  definition_snapshot: WorkflowGraph
+  input: Record<string, unknown>
+  output: Record<string, unknown>
+  node_runs?: WorkflowNodeRun[]
+}
+
+export interface WorkflowNodeRun {
+  node_id: string
+  node_type: WorkflowNodeType
+  status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed' | 'cancelled' | 'warning'
+  condition_results: Array<{ edge_id: string; field: string | null; operator: ConditionOperator | null; expected: unknown; actual: unknown; matched: boolean }>
+  output: Record<string, unknown>
+  error: string | null
+  agent_run_key: string | null
+  script_run_id: string | null
+  started_at: string | null
+  finished_at: string | null
 }
 
 export interface WorkflowRunLog {
@@ -535,6 +579,7 @@ export interface AgentRun {
   id: number
   run_key: string
   agent_name: string
+  backend_key: string | null
   profile_key: string | null
   workflow_key: string | null
   workflow_run_id: string | null
@@ -589,8 +634,8 @@ export interface WorkflowDesignResult {
     description: string
     profile_key: string
     status: string
-    workflow_type?: 'operation' | 'summary'
-    workflow_js: string
+    workflow_type?: WorkflowType
+    definition?: WorkflowGraph
   }
 }
 
@@ -603,6 +648,8 @@ export interface ScriptDesignResult {
     description: string
     language: string
     code: string
+    input_schema: Record<string, unknown>
+    output_schema?: Record<string, unknown> | null
     status: string
     owner_type: string
     owner_key: string
@@ -969,6 +1016,35 @@ export interface KnowledgeSyncConfig {
   understand_timeout_minutes: number
 }
 
+export interface AgentBackendConfig {
+  slug: string
+  type: string
+  command: string | null
+  model: string | null
+}
+
+export interface AvailableAgentBackend {
+  slug: string
+  display_name: string
+  source: string
+  capabilities: Partial<{
+    supports_mcp: boolean
+    supports_native_json_schema: boolean
+    supports_skills: boolean
+    supports_subagents: boolean
+    supports_cost: boolean
+    supports_turn_count: boolean
+    supports_abort: boolean
+    supports_partial_messages: boolean
+  }>
+}
+
+export interface AgentRuntimeConfig {
+  default_backend: string
+  backends: AgentBackendConfig[]
+  available_backends?: AvailableAgentBackend[]
+}
+
 export interface ClaudeMemConfig {
   env_file_path: string
   config_file_path: string
@@ -1104,6 +1180,10 @@ export interface ManagedScript {
   updated_by: string
   created_at: string
   updated_at: string
+  input_schema: Record<string, unknown>
+  output_schema: Record<string, unknown> | null
+  is_builtin: boolean
+  source?: 'default' | 'database'
   code?: string
   code_preview?: string
 }

@@ -111,6 +111,20 @@ class BackendConfig:
     summary_model_id: str | None = None
 
 
+@dataclass(frozen=True)
+class AgentBackendConfig:
+    slug: str
+    agent_type: str
+    model: str | None = None
+    command: str | None = None
+
+
+@dataclass(frozen=True)
+class AgentRuntimeConfig:
+    default_backend: str = "claude"
+    backends: tuple[AgentBackendConfig, ...] = ()
+
+
 def ensure_directories(paths: AgentBridgePaths) -> None:
     for directory in (
         paths.config_dir,
@@ -244,6 +258,121 @@ def load_backend_configs(paths: AgentBridgePaths) -> list[BackendConfig]:
             summary_model_id=section.get("summary_model_id"),
         ))
     return result
+
+
+def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
+    """Read the general coding-agent runtime configuration.
+
+    ``[agents]`` controls general AgentService runs only. Claude-only runtimes
+    such as the current workflow runner may still pin ``backend_key="claude"``
+    while the broader agent abstraction evolves.
+    """
+    if not paths.server_config_path.exists():
+        return AgentRuntimeConfig()
+    raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
+    agents_raw = raw.get("agents", {})
+    if not agents_raw:
+        return AgentRuntimeConfig()
+    if not isinstance(agents_raw, dict):
+        raise ValueError("[agents] must be a TOML table")
+    default_backend = str(agents_raw.get("default", "claude"))
+    configs: list[AgentBackendConfig] = []
+    for slug, section in agents_raw.items():
+        if slug == "default":
+            continue
+        if not isinstance(section, dict):
+            raise ValueError(f"agent backend '{slug}' must be a TOML table")
+        if "type" not in section:
+            raise ValueError(f"agent backend '{slug}' missing required field: type")
+        configs.append(
+            AgentBackendConfig(
+                slug=str(slug),
+                agent_type=str(section["type"]),
+                model=section.get("model"),
+                command=section.get("command"),
+            )
+        )
+    return AgentRuntimeConfig(default_backend=default_backend, backends=tuple(configs))
+
+
+_AGENT_BACKEND_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_SUPPORTED_AGENT_TYPES = {"claude", "codex", "opencode"}
+
+
+def save_agent_runtime_config(paths: AgentBridgePaths, config: AgentRuntimeConfig) -> AgentRuntimeConfig:
+    """Persist ``[agents]`` into server.toml while preserving unrelated sections."""
+    ensure_directories(paths)
+    normalized = _normalize_agent_runtime_config(config)
+    existing = paths.server_config_path.read_text(encoding="utf-8") if paths.server_config_path.exists() else ""
+    kept = _strip_agents_toml_section(existing)
+    rendered = _render_agent_runtime_config(normalized)
+    next_text = kept.rstrip()
+    if next_text:
+        next_text += "\n\n"
+    next_text += rendered
+    paths.server_config_path.write_text(next_text + "\n", encoding="utf-8")
+    return normalized
+
+
+def _normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeConfig:
+    default_backend = str(config.default_backend or "claude").strip() or "claude"
+    if not _AGENT_BACKEND_SLUG_RE.fullmatch(default_backend):
+        raise ValueError(f"invalid default agent backend: {default_backend!r}")
+    backends: list[AgentBackendConfig] = []
+    seen: set[str] = set()
+    for backend in config.backends:
+        slug = str(backend.slug or "").strip()
+        agent_type = str(backend.agent_type or "").strip()
+        if not _AGENT_BACKEND_SLUG_RE.fullmatch(slug):
+            raise ValueError(f"invalid agent backend slug: {slug!r}")
+        if agent_type not in _SUPPORTED_AGENT_TYPES:
+            raise ValueError(f"unsupported agent backend type: {agent_type!r}")
+        if slug in seen:
+            raise ValueError(f"duplicate agent backend slug: {slug}")
+        seen.add(slug)
+        backends.append(
+            AgentBackendConfig(
+                slug=slug,
+                agent_type=agent_type,
+                model=str(backend.model).strip() if backend.model else None,
+                command=str(backend.command).strip() if backend.command else None,
+            )
+        )
+    if default_backend != "claude" and default_backend not in seen:
+        raise ValueError(f"default agent backend '{default_backend}' is not configured")
+    return AgentRuntimeConfig(default_backend=default_backend, backends=tuple(backends))
+
+
+def _strip_agents_toml_section(text: str) -> str:
+    lines = text.splitlines()
+    kept: list[str] = []
+    skipping = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped.strip("[]").strip()
+            skipping = section == "agents" or section.startswith("agents.")
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def _render_agent_runtime_config(config: AgentRuntimeConfig) -> str:
+    lines = [
+        "[agents]",
+        f"default = {json.dumps(config.default_backend)}",
+    ]
+    for backend in config.backends:
+        lines.extend([
+            "",
+            f"[agents.{backend.slug}]",
+            f"type = {json.dumps(backend.agent_type)}",
+        ])
+        if backend.command:
+            lines.append(f"command = {json.dumps(backend.command)}")
+        if backend.model:
+            lines.append(f"model = {json.dumps(backend.model)}")
+    return "\n".join(lines)
 
 
 def migrate_toml_backends_to_db(paths: AgentBridgePaths, store: Any) -> None:
