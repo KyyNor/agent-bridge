@@ -5,11 +5,13 @@ import { api } from '../../api/client'
 import type { ToolCallLog, ToolCallLogCounts } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
-import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
+import CategoryBadge from '../../components/CategoryBadge.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
+import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { countToolCallTabs } from '../../lib/filterTabs'
@@ -142,34 +144,16 @@ const sourceOptions = [
   { value: 'builtin', label: 'Builtin' },
 ]
 
-function sourceTypeLabel(sourceType: string | null | undefined): string {
-  switch (sourceType) {
-    case 'hook':
-      return 'Hook'
-    case 'mcp_service':
-      return 'MCP'
-    case 'openapi_service':
-      return 'OpenAPI'
-    case 'builtin':
-      return 'Builtin'
-    default:
-      return '未标记'
-  }
+// 调用日志 status → StatusBadge 的语义状态（success/error/blocked/running）
+type BadgeStatus = 'success' | 'error' | 'blocked' | 'running'
+function statusOf(status: string): BadgeStatus {
+  if (status === 'success' || status === 'error' || status === 'blocked' || status === 'running') return status
+  return 'success'
 }
 
-function sourceBadgeClass(sourceType: string | null | undefined): string {
-  switch (sourceType) {
-    case 'hook':
-      return 'bg-indigo-50 text-indigo-700'
-    case 'mcp_service':
-      return 'bg-blue-50 text-blue-700'
-    case 'openapi_service':
-      return 'bg-cyan-50 text-cyan-700'
-    case 'builtin':
-      return 'bg-stone-100 text-stone-700'
-    default:
-      return ''
-  }
+// 慢调用标记：≥1000ms 用 warning 色突出，便于扫读
+function durationClass(durationMs: number | null | undefined): string {
+  return durationMs != null && durationMs >= 1000 ? 'text-warning' : ''
 }
 
 function entrypointLabel(entrypoint: string): string {
@@ -192,7 +176,7 @@ function entrypointLabel(entrypoint: string): string {
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[280px]">
-        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" @update:model-value="scheduleSearch" />
       </div>
       <Select v-model="sourceFilter" @update:model-value="applySourceFilter">
@@ -208,18 +192,7 @@ function entrypointLabel(entrypoint: string): string {
         <span class="text-muted-foreground">至</span>
         <Input v-model="dateTo" type="date" class="w-[140px]" @change="applyDateFilter" />
       </div>
-      <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-        <button
-          v-for="tab in filterTabs" :key="tab.key"
-          :class="[
-            'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
-            statusFilter === tab.key
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          ]"
-          @click="applyFilter(tab.key)"
-        >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
-      </div>
+      <SegmentedTabs v-model="statusFilter" :tabs="filterTabs" @update:model-value="applyFilter" />
       <Button variant="outline" @click="loadLogData">
         <RotateCw :size="14" class="mr-1.5" />
         刷新
@@ -230,7 +203,8 @@ function entrypointLabel(entrypoint: string): string {
     <Card>
       <CardContent class="p-0">
         <div v-if="logTotal === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无调用日志</div>
-        <table v-else class="w-full">
+        <div v-else class="overflow-x-auto">
+        <table class="w-full">
           <thead>
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">时间</th>
@@ -248,18 +222,15 @@ function entrypointLabel(entrypoint: string): string {
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(l.created_at) }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
-                  <Badge variant="secondary" :class="sourceBadgeClass(l.source_type)">{{ sourceTypeLabel(l.source_type) }}</Badge>
+                  <CategoryBadge kind="source" :value="l.source_type || ''" />
                   <span class="font-mono text-xs text-muted-foreground">{{ l.source_key || '—' }}</span>
                 </div>
               </td>
               <td class="px-4 py-3 text-sm">{{ l.profile_key || '—' }}</td>
               <td class="px-4 py-3 font-mono text-sm">{{ l.tool_name || '—' }}</td>
-              <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">{{ l.duration_ms != null ? `${l.duration_ms}ms` : '—' }}</td>
+              <td class="px-4 py-3 text-sm font-mono tabular-nums text-muted-foreground" :class="durationClass(l.duration_ms)">{{ l.duration_ms != null ? `${l.duration_ms}ms` : '—' }}</td>
               <td class="px-4 py-3">
-                <Badge v-if="l.status === 'success'" variant="secondary" class="bg-green-50 text-green-700">成功</Badge>
-                <Badge v-else-if="l.status === 'error'" variant="destructive">失败</Badge>
-                <Badge v-else-if="l.status === 'blocked'" variant="secondary" class="bg-amber-50 text-amber-700">拦截</Badge>
-                <Badge v-else variant="secondary">{{ l.status }}</Badge>
+                <StatusBadge :status="statusOf(l.status)" />
               </td>
               <td class="max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ l.error_message || '—' }}</td>
               <td class="px-4 py-3">
@@ -268,6 +239,7 @@ function entrypointLabel(entrypoint: string): string {
             </tr>
           </tbody>
         </table>
+        </div>
       </CardContent>
     </Card>
 
@@ -295,22 +267,19 @@ function entrypointLabel(entrypoint: string): string {
             <div>
               <span class="text-muted-foreground">来源</span>
               <div class="flex items-center gap-2">
-                <Badge variant="secondary" :class="sourceBadgeClass(detailLog.source_type)">{{ sourceTypeLabel(detailLog.source_type) }}</Badge>
+                <CategoryBadge kind="source" :value="detailLog.source_type || ''" />
                 <span class="font-mono text-xs font-medium">{{ detailLog.source_key || '—' }}</span>
               </div>
             </div>
             <div><span class="text-muted-foreground">状态</span>
               <div>
-                <Badge v-if="detailLog.status === 'success'" variant="secondary" class="bg-green-50 text-green-700">成功</Badge>
-                <Badge v-else-if="detailLog.status === 'error'" variant="destructive">失败</Badge>
-                <Badge v-else-if="detailLog.status === 'blocked'" variant="secondary" class="bg-amber-50 text-amber-700">拦截</Badge>
-                <Badge v-else variant="secondary">{{ detailLog.status }}</Badge>
+                <StatusBadge :status="statusOf(detailLog.status)" />
               </div>
             </div>
             <div><span class="text-muted-foreground">时间</span><div class="font-medium">{{ formatLocalDatetime(detailLog.created_at) }}</div></div>
           </div>
 
-          <div v-if="detailLog.error_message" class="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive">
+          <div v-if="detailLog.error_message" class="rounded-lg border border-destructive/30 bg-destructive-soft px-4 py-3 text-sm text-destructive">
             {{ detailLog.error_message }}
           </div>
 

@@ -228,6 +228,10 @@ function toolTypeLabel(toolType: string) {
   return toolType
 }
 
+// TODO(redesign): 迁移到统一 CategoryBadge 组件后删除本函数。
+// 工具层级映射已集中到 src/components/CategoryBadge.vue（kind="toolType"），
+// 模板里改为 <CategoryBadge kind="toolType" :value="tool.tool_type" />。
+// 本次能力中枢重设计范围不含本页，先保留原逻辑，后续逐页迁移。
 function toolTypeClass(toolType: string) {
   if (toolType === 'overview') return 'bg-blue-50 text-blue-700'
   if (toolType === 'search') return 'bg-purple-50 text-purple-700'

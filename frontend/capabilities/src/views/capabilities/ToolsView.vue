@@ -4,9 +4,10 @@ import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, CapabilityTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
-import { Badge } from '../../components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Input } from '../../components/ui/input'
+import CategoryBadge from '../../components/CategoryBadge.vue'
+import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
@@ -72,11 +73,11 @@ const displayTools = computed(() => {
 const pagedTools = computed(() => paginate(displayTools.value, page.value, pageSize.value))
 
 const toolTypes = [
-  { value: 'overview', label: '概览', color: 'bg-blue-50 text-blue-700' },
-  { value: 'search', label: '检索', color: 'bg-purple-50 text-purple-700' },
-  { value: 'detail', label: '明细', color: 'bg-teal-50 text-teal-700' },
-  { value: 'action', label: '操作', color: 'bg-amber-50 text-amber-700' },
-  { value: 'unconfigured', label: '未配置', color: 'bg-gray-100 text-gray-600' },
+  { value: 'overview', label: '概览' },
+  { value: 'search', label: '检索' },
+  { value: 'detail', label: '明细' },
+  { value: 'action', label: '操作' },
+  { value: 'unconfigured', label: '未配置' },
 ]
 
 const filterTabs = computed(() => [
@@ -89,7 +90,6 @@ const filterTabs = computed(() => [
 ])
 
 function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label || v }
-function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color || '' }
 </script>
 
 <template>
@@ -98,21 +98,10 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[360px]">
-        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="search" placeholder="搜索工具名称或描述..." class="pl-8" />
       </div>
-      <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-        <button
-          v-for="tab in filterTabs" :key="tab.key"
-          :class="[
-            'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
-            typeFilter === tab.key
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          ]"
-          @click="() => { typeFilter = tab.key; page = 1 }"
-        >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
-      </div>
+      <SegmentedTabs v-model="typeFilter" :tabs="filterTabs" @update:model-value="page = 1" />
       <Select v-model="selectedService" @update:model-value="page = 1">
         <SelectTrigger class="w-[200px]">
           <SelectValue placeholder="全部服务" />
@@ -132,7 +121,8 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
         <div v-if="displayTools.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
           {{ allTools.length === 0 ? '暂无已同步的工具，请先在能力接入中同步工具。' : '无匹配结果' }}
         </div>
-        <table v-else class="w-full">
+        <div v-else class="overflow-x-auto">
+        <table class="w-full">
           <thead>
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具名称</th>
@@ -155,11 +145,11 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
                 </div>
               </td>
               <td class="px-4 py-3">
-                <Badge variant="secondary" :class="typeColor(t.tool_type)">{{ typeLabel(t.tool_type) }}</Badge>
+                <CategoryBadge kind="toolType" :value="t.tool_type" />
               </td>
               <td class="px-4 py-3">
                 <span v-if="t.tags?.length" class="flex flex-wrap gap-1">
-                  <span v-for="tag in t.tags" :key="tag" class="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{{ tag }}</span>
+                  <span v-for="tag in t.tags" :key="tag" class="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-card-foreground">{{ tag }}</span>
                 </span>
                 <span v-else class="text-xs text-muted-foreground">&mdash;</span>
               </td>
@@ -177,6 +167,7 @@ function typeColor(v: string) { return toolTypes.find(t => t.value === v)?.color
             </tr>
           </tbody>
         </table>
+        </div>
       </CardContent>
     </Card>
 
