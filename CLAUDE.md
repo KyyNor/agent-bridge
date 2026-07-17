@@ -41,6 +41,65 @@ npm run typecheck
 - 服务进程通过 `uvicorn agent_bridge.api.app:create_app --factory` 启动（见 `runtime/server_process.py`），用 PID 文件管理，5 秒健康检查。
 - `ragflow` / `weknora` 标记的测试需要真实的 RagFlow / Weknora 服务，本地通常用 `-m` 过滤掉。
 
+## 管理后台前端设计约定（`frontend/capabilities`）
+
+管理后台最近完成了一轮设计系统收敛。后续新增或改造页面应沿用以下约定；本轮设计改动只影响展示层，**不得改变路由、API 调用契约或数据结构**。
+
+### 设计令牌
+
+全局样式唯一入口是 `src/styles/base.css`。状态色、类别色和阴影必须先在 `:root` 与 `.dark` 中定义，再在 `@theme inline` 中注册 Tailwind 别名：
+
+- 软状态色：`success-soft`、`warning-soft`、`destructive-soft`、`info-soft`、`neutral-soft`，以及对应的 `*-fg` 深色文字。
+- 类别色：`cat-blue`、`cat-teal`、`cat-violet`、`cat-amber`，以及对应的 `*-fg`。
+- 阴影：`shadow-card`、`shadow-pop`、`shadow-btn`。
+
+视图和共享组件在本次设计迁移范围内禁止裸用 Tailwind 调色盘色（例如 `bg-red-50`、`text-gray-400`、`border-blue-300`）或直接写颜色 hex。应使用语义类，例如 `bg-destructive-soft text-destructive-soft-fg`、`bg-success-soft`、`text-placeholder`、`bg-cat-blue text-cat-blue-fg`、`border-primary/30`。新增颜色必须同时考虑暗色模式。
+
+通用尺度：卡片/弹窗/快捷操作格使用 `rounded-xl`，输入框/按钮/选择器/分段控件使用 `rounded-lg`，徽标使用 `rounded-md`；辅助信息使用 `text-xs text-muted-foreground`，表格正文使用 `text-sm`，工具名、时间、耗时和 key 使用 `font-mono`。
+
+### 共享组件
+
+组件位于 `src/components/`，映射逻辑只允许存在于组件内部，不要在页面中重新定义同类颜色映射：
+
+- `StatusBadge.vue`：`status` 支持 `success | error | blocked | running | enabled | disabled`，可用 `label` 覆盖文案；状态徽标使用软底/深字，并带语义圆点。
+- `CategoryBadge.vue`：`kind` 支持 `toolType | source | taskType`。`taskType` 用于任务导入动作（新增、更新、跳过、重开、错误）。
+- `SegmentedTabs.vue`：通过 `v-model` 管理当前 key，`tabs` 为 `{ key, label, count? }[]`；用于统一筛选分段控件。
+- `StatCard.vue`：提供 `label`、`value`、`sub` 和 icon slot；`tone` 支持 `neutral | ok | err | info`。默认及信息型卡片保持 `bg-card` 中性卡身，状态型 tone 只改变图标底和数值颜色，不给整张卡染色。
+
+### 统一页头与列表页
+
+`src/components/PageHeader.vue` 由 `App.vue` 统一渲染：标题在左，主操作在右，搜索/筛选单独位于第二行。页面通过延迟 Teleport 投放内容：
+
+- 主操作投放到 `#ph-actions`：`<Teleport to="#ph-actions" defer>`。
+- 搜索、筛选、排序投放到 `#ph-filters`：`<Teleport to="#ph-filters" defer>`。
+- 页头按钮使用 `size="lg"`，搜索 `Input` 使用 `h-9`，`SelectTrigger` 使用 `size="lg"`，保证页头控件统一为 36px。
+- 页面副标题不再渲染；导航配置中的 `description` 只保留作潜在复用数据。
+- 详情/编辑/运行等子路由由 `shouldShowPageHeader()` 隐藏全局页头；对应视图的 Teleport 也必须用当前列表模式/路由状态做条件渲染，避免投放到不存在的目标。
+
+当前已迁移到统一列表页头的 11 个页面是：
+
+`services`、`tools`、`profiles`、`knowledge`、`code-repos`、`memory`、`workflow`、`logs`、`agent-runs`、`stats`、`scripts`。
+
+`dashboard` 保留标题型页头但没有列表筛选；工具调试、系统配置、Skill 编辑和各详情页按自身上下文保留页面内操作，不要为了统一而把详情操作强行搬到全局页头。
+
+### 前端验收
+
+修改管理后台后至少执行：
+
+```bash
+cd frontend/capabilities
+npm run typecheck
+npm run build
+```
+
+设计迁移还应检查：
+
+- 四个共享组件各只有一份映射/样式实现。
+- 11 个列表页的页头操作/筛选没有回退为独立双层 toolbar。
+- 新增的视图代码没有裸用 Tailwind 调色盘色；颜色来自 `base.css` 语义令牌。
+- 窄屏表格使用 `overflow-x-auto` 或合理的截断策略。
+- 设计改动的 diff 不包含 `src/api`、路由定义或 API 类型结构变化。
+
 ## 部署与信任模型（务必先理解）
 
 - **数据根目录**默认 `/root/agent-bridge`，用环境变量 `AGENT_BRIDGE_ROOT` 覆盖；其下分 `config/ data/ logs/ run/ repos/`。`AgentBridgePaths`（`core/config.py`）是这些路径的单一来源。
