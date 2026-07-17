@@ -1238,17 +1238,17 @@ async function savePlaneProfiles() {
   <div v-else class="space-y-5">
     <!-- LIST MODE -->
     <template v-if="mode === 'list'">
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-4">
-      <Button @click="showCreate = true">
+    <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态） -->
+    <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
+      <Button variant="outline" size="lg" @click="loadKbs()">
+        <RotateCw :size="14" />
+        刷新
+      </Button>
+      <Button size="lg" class="shadow-btn" @click="showCreate = true">
         <Plus :size="14" />
         创建文档知识
       </Button>
-      <Button variant="outline" @click="loadKbs()">
-        <RotateCw :size="14" class="mr-1.5" />
-        刷新
-      </Button>
-    </div>
+    </Teleport>
 
     <!-- KB Table -->
     <Card>

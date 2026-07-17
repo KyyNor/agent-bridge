@@ -252,10 +252,22 @@ function categoryName(key: string) {
     @back="backToList"
   />
   <div v-else class="space-y-5">
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-4">
-      <div class="relative flex-1 max-w-[360px]">
-        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+    <!-- 页头操作：刷新 + 添加仓库进 #ph-actions（仅列表态） -->
+    <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
+      <Button variant="outline" size="lg" @click="loadRepos()">
+        <RotateCw :size="14" />
+        刷新
+      </Button>
+      <Button size="lg" class="shadow-btn" @click="openRepoForm('add')">
+        <Plus :size="14" />
+        添加仓库
+      </Button>
+    </Teleport>
+
+    <!-- 页头筛选：搜索 + 分类进 #ph-filters（仅列表态） -->
+    <Teleport v-if="mode === 'list'" to="#ph-filters" defer>
+      <div class="relative w-full max-w-[360px]">
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="searchQuery" placeholder="搜索仓库名称、标识或地址..." class="pl-8" />
       </div>
       <Select v-model="filterCategory" @update:model-value="page = 1">
@@ -267,15 +279,7 @@ function categoryName(key: string) {
           <SelectItem v-for="c in categories" :key="c.category_key" :value="c.category_key">{{ c.name }}</SelectItem>
         </SelectContent>
       </Select>
-      <Button @click="openRepoForm('add')">
-        <Plus :size="14" />
-        添加仓库
-      </Button>
-      <Button variant="outline" @click="loadRepos()">
-        <RotateCw :size="14" class="mr-1.5" />
-        刷新
-      </Button>
-    </div>
+    </Teleport>
 
     <!-- Code Repos Table -->
     <Card>

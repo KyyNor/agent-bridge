@@ -95,9 +95,9 @@ function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-4">
-      <div class="relative flex-1 max-w-[360px]">
+    <!-- 页头筛选：搜索 + 类型分段 + 服务筛选进 #ph-filters -->
+    <Teleport to="#ph-filters" defer>
+      <div class="relative w-full max-w-[360px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="search" placeholder="搜索工具名称或描述..." class="pl-8" />
       </div>
@@ -113,7 +113,7 @@ function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label
           </SelectItem>
         </SelectContent>
       </Select>
-    </div>
+    </Teleport>
 
     <!-- Table -->
     <Card>

@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import PaginationBar from '../../components/PaginationBar.vue'
+import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import ProfileDetailView from './ProfileDetailView.vue'
 import { confirm } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
@@ -168,29 +169,22 @@ async function handleDetailSaved() {
     @saved="handleDetailSaved"
   />
   <div v-else class="space-y-5">
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-4">
-      <div class="relative max-w-[360px] flex-1">
-        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-        <Input v-model="search" placeholder="搜索能力平面标识或名称..." class="pl-8" />
-      </div>
-      <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-        <button
-          v-for="tab in filterTabs" :key="tab.key"
-          :class="[
-            'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
-            statusFilter === tab.key
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          ]"
-          @click="() => { statusFilter = tab.key; page = 1 }"
-        >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
-      </div>
-      <Button @click="showAdd = true">
+    <!-- 页头操作：添加能力平面进 #ph-actions（仅列表态） -->
+    <Teleport v-if="!props.routeKey" to="#ph-actions" defer>
+      <Button size="lg" class="shadow-btn" @click="showAdd = true">
         <Plus :size="14" />
         添加能力平面
       </Button>
-    </div>
+    </Teleport>
+
+    <!-- 页头筛选：搜索 + 状态分段进 #ph-filters（仅列表态） -->
+    <Teleport v-if="!props.routeKey" to="#ph-filters" defer>
+      <div class="relative w-full max-w-[360px]">
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
+        <Input v-model="search" placeholder="搜索能力平面标识或名称..." class="pl-8" />
+      </div>
+      <SegmentedTabs v-model="statusFilter" :tabs="filterTabs" @update:model-value="page = 1" />
+    </Teleport>
 
     <!-- Table -->
     <Card>

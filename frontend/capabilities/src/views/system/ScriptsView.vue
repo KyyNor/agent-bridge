@@ -438,16 +438,17 @@ function errorMessage(e: unknown) {
 <template>
   <!-- 列表模式 -->
   <div v-if="mode === 'list'" class="space-y-5">
-    <div class="flex flex-wrap items-center gap-2">
-      <Button variant="outline" @click="showGuide = true">
-        <HelpCircle class="mr-1.5 h-4 w-4" />
+    <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态） -->
+    <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
+      <Button variant="outline" size="lg" @click="showGuide = true">
+        <HelpCircle :size="14" />
         使用指引
       </Button>
-      <Button @click="openCreate">
-        <Plus class="mr-1.5 h-4 w-4" />
+      <Button size="lg" class="shadow-btn" @click="openCreate">
+        <Plus :size="14" />
         新建脚本
       </Button>
-    </div>
+    </Teleport>
 
     <Dialog v-model:open="showGuide">
       <DialogContent class="w-[96vw] max-w-[980px] sm:max-w-[980px]">

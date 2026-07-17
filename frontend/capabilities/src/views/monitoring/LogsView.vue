@@ -173,9 +173,17 @@ function entrypointLabel(entrypoint: string): string {
 <template>
   <div v-if="loading && logs.length === 0" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-4">
-      <div class="relative flex-1 max-w-[280px]">
+    <!-- 页头操作：刷新进 #ph-actions（LogsView 无 primary 主操作） -->
+    <Teleport to="#ph-actions" defer>
+      <Button variant="outline" size="lg" @click="loadLogData">
+        <RotateCw :size="14" />
+        刷新
+      </Button>
+    </Teleport>
+
+    <!-- 页头筛选：搜索 + 来源 + 日期范围 + 状态分段进 #ph-filters -->
+    <Teleport to="#ph-filters" defer>
+      <div class="relative w-full max-w-[280px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" @update:model-value="scheduleSearch" />
       </div>
@@ -193,11 +201,7 @@ function entrypointLabel(entrypoint: string): string {
         <Input v-model="dateTo" type="date" class="w-[140px]" @change="applyDateFilter" />
       </div>
       <SegmentedTabs v-model="statusFilter" :tabs="filterTabs" @update:model-value="applyFilter" />
-      <Button variant="outline" @click="loadLogData">
-        <RotateCw :size="14" class="mr-1.5" />
-        刷新
-      </Button>
-    </div>
+    </Teleport>
 
     <!-- Table -->
     <Card>
