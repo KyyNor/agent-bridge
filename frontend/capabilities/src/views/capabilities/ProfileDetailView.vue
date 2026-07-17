@@ -269,6 +269,9 @@ async function loadProfileDoc(profileKey: string) {
     const doc = await api.renderProfileDoc(profileKey)
     if (configProfile.value?.profile_key !== profileKey) return
     applyProfileDoc(doc)
+    // The initial draft was captured before the async doc load pre-filled the
+    // textarea; re-sync so pre-filling saved notes isn't reported as unsaved.
+    syncInitialNotesDraft()
   } catch (e: unknown) {
     if (configProfile.value?.profile_key === profileKey) {
       docError.value = `加载 Profile 文档失败：${errorMessage(e)}`
@@ -290,6 +293,12 @@ function applyPinPreview(pins: ProfilePinPreview) {
 
 function applyProfileDoc(doc: ProfileDocRender) {
   profileMarkdown.value = doc.markdown
+  // Echoed manual_notes lets the edit textarea show what's already saved, so
+  // the user can tweak it instead of retyping the whole note. Only pre-fill
+  // when the user hasn't started typing (avoid clobbering in-flight edits).
+  if (typeof doc.manual_notes === 'string' && manualNotes.value === '') {
+    manualNotes.value = doc.manual_notes
+  }
 }
 
 function getProfileCommand(profile: ProjectProfile) {
@@ -435,8 +444,10 @@ async function saveManualNotes(raiseError = false) {
   docError.value = ''
   try {
     const doc = await api.updateProfileManualNotes(configProfile.value.profile_key, manualNotes.value)
+    // Re-render carries the saved manual_notes; reflect it so the textarea
+    // stays in sync with what was persisted (and is no longer "dirty").
     applyProfileDoc(doc)
-    manualNotes.value = ''
+    if (typeof doc.manual_notes === 'string') manualNotes.value = doc.manual_notes
     syncInitialNotesDraft()
   } catch (e: unknown) {
     docError.value = `保存手动补充失败：${errorMessage(e)}`
@@ -473,8 +484,8 @@ async function refreshProfileDoc(raiseError = false) {
           <h2 class="text-lg font-semibold text-foreground">{{ configProfile.name }} — 配置</h2>
           <div class="mt-0.5 flex flex-wrap items-center gap-2">
             <p class="font-mono text-xs text-muted-foreground">{{ configProfile.profile_key }}</p>
-            <StatusBadge v-if="configProfile.status === 'active'" status="enabled" label="启用" />
-            <StatusBadge v-else status="disabled" label="停用" />
+            <StatusBadge v-if="configProfile.status === 'active'" status="enabled" />
+            <StatusBadge v-else status="disabled" />
           </div>
           <p v-if="configProfile.description" class="mt-1 text-xs text-muted-foreground">{{ configProfile.description }}</p>
         </div>

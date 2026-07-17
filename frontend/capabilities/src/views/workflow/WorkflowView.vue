@@ -18,6 +18,7 @@ import AgentRunTabs from '../../components/AgentRunTabs.vue'
 import WorkflowRunDetailPanel from '../../components/WorkflowRunDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
 import { parseWorkflowDag } from './workflowDag'
 import {
   ALL_STATUS_SENTINEL,
@@ -735,12 +736,6 @@ async function applyRoute() {
 function profileName(profileKey: string) {
   const profile = profiles.value.find(item => item.profile_key === profileKey)
   return profile ? `${profile.name} / ${profile.profile_key}` : profileKey
-}
-
-function statusLabel(status: string) {
-  if (status === 'active') return '启用'
-  if (status === 'disabled') return '停用'
-  return status
 }
 
 function workflowTypeLabel(workflowType?: string) {
@@ -1949,7 +1944,8 @@ async function confirmClearWorkflow() {
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="truncate text-sm font-medium text-foreground">{{ item.name }}</span>
-                <Badge variant="outline">{{ statusLabel(item.status) }}</Badge>
+                <StatusBadge v-if="item.status === 'active'" status="enabled" />
+                <StatusBadge v-else status="disabled" />
                 <Badge v-if="runningRunFor(item.workflow_key)" class="bg-info-soft text-info-soft-fg">运行中</Badge>
               </div>
               <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.workflow_key }}</div>
@@ -2017,7 +2013,8 @@ async function confirmClearWorkflow() {
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <Badge>{{ selectedWorkflow.workflow_key }}</Badge>
-                <Badge variant="outline">{{ statusLabel(selectedWorkflow.status) }}</Badge>
+                <StatusBadge v-if="selectedWorkflow.status === 'active'" status="enabled" />
+                <StatusBadge v-else status="disabled" />
                 <Badge v-if="selectedWorkflow.workflow_type === 'summary'" variant="outline">总结类</Badge>
               </div>
               <p class="mt-2 text-sm text-muted-foreground">

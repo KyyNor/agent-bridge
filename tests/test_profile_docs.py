@@ -65,6 +65,9 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     assert "Use read-only queries only." in rendered["markdown"]
     assert "https://mysql.test/mcp" not in rendered["markdown"]
     assert "pin_mysql" not in rendered["markdown"]
+    # render response echoes the stored manual_notes so the UI can pre-fill the
+    # edit textarea (instead of forcing a full rewrite on every edit).
+    assert rendered["manual_notes"] == "## Manual Notes\nUse read-only queries only."
 
     cache = store.get_profile_doc_cache("safe")
     assert cache is not None

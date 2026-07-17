@@ -208,8 +208,8 @@ async function handleDetailSaved() {
                 <div class="mt-0.5 break-all text-xs text-muted-foreground">{{ profile.name }}</div>
               </td>
               <td class="px-4 py-3">
-                <StatusBadge v-if="profile.status === 'active'" status="enabled" label="启用" />
-                <StatusBadge v-else status="disabled" label="停用" />
+                <StatusBadge v-if="profile.status === 'active'" status="enabled" />
+                <StatusBadge v-else status="disabled" />
               </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ profile.allow_count || 0 }}</td>
               <td class="px-4 py-3">

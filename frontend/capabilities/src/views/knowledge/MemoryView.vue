@@ -249,9 +249,9 @@ function openDetail(block: MemoryBlock) {
   window.location.hash = 'memory/' + block.block_key
 }
 
-// 记忆区块 status → StatusBadge 语义状态
-function memoryBadgeStatus(status: string): 'success' | 'error' | 'disabled' {
-  if (status === 'active' || status === 'worker_ready' || status === 'ok') return 'success'
+// 记忆区块 status → StatusBadge 语义状态（active 统一为「启用」语义，与其它实体一致）
+function memoryBadgeStatus(status: string): 'enabled' | 'error' | 'disabled' {
+  if (status === 'active' || status === 'worker_ready' || status === 'ok') return 'enabled'
   if (status === 'error' || status === 'failed') return 'error'
   return 'disabled'
 }
@@ -303,7 +303,7 @@ function errorMessage(e: unknown) {
               </td>
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ block.block_key }}</td>
               <td class="px-4 py-3">
-                <StatusBadge :status="memoryBadgeStatus(block.status)" :label="block.status" />
+                <StatusBadge :status="memoryBadgeStatus(block.status)" />
               </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ block.bound_profile_count || 0 }}</td>
               <td class="px-4 py-3">
@@ -383,7 +383,7 @@ function errorMessage(e: unknown) {
             <div class="mt-1 break-all text-sm text-muted-foreground">{{ selected.description || selected.block_key }}</div>
           </div>
           <div class="flex items-center gap-2">
-            <StatusBadge :status="memoryBadgeStatus(selected.status)" :label="selected.status" />
+            <StatusBadge :status="memoryBadgeStatus(selected.status)" />
             <Badge variant="outline">{{ healthStatus }}</Badge>
           </div>
         </div>

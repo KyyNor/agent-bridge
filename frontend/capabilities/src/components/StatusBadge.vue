@@ -18,7 +18,7 @@ const props = defineProps<{
 // 唯一映射：status → { 软底/软字 + 圆点实心色 + 默认文案 }
 const MAP: Record<Status, { bg: string; fg: string; dot: string; text: string }> = {
   success:  { bg: 'bg-success-soft',     fg: 'text-success-soft-fg',     dot: 'bg-success',     text: '成功' },
-  enabled:  { bg: 'bg-success-soft',     fg: 'text-success-soft-fg',     dot: 'bg-success',     text: '已启用' },
+  enabled:  { bg: 'bg-success-soft',     fg: 'text-success-soft-fg',     dot: 'bg-success',     text: '启用' },
   error:    { bg: 'bg-destructive-soft', fg: 'text-destructive-soft-fg', dot: 'bg-destructive', text: '失败' },
   blocked:  { bg: 'bg-warning-soft',     fg: 'text-warning-soft-fg',     dot: 'bg-warning',     text: '拦截' },
   running:  { bg: 'bg-info-soft',        fg: 'text-info-soft-fg',        dot: 'bg-info',        text: '运行中' },

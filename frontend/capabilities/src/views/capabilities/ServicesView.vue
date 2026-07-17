@@ -143,8 +143,8 @@ const pagedServices = computed(() => paginate(filtered.value, page.value, pageSi
 
 const filterTabs = computed(() => [
   { key: 'all', label: '全部', count: services.value.length },
-  { key: 'enabled', label: '已启用', count: services.value.filter(s => s.status === 'enabled').length },
-  { key: 'disabled', label: '已停用', count: services.value.filter(s => s.status === 'disabled').length },
+  { key: 'enabled', label: '启用', count: services.value.filter(s => s.status === 'enabled').length },
+  { key: 'disabled', label: '停用', count: services.value.filter(s => s.status === 'disabled').length },
   { key: 'error', label: '异常', count: services.value.filter(s => s.status === 'error').length },
 ])
 

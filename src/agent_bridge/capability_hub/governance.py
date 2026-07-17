@@ -292,7 +292,7 @@ class CapabilityGovernanceService:
             markdown=markdown,
             mark_written=False,
         )
-        return {"profile_key": profile_key, "markdown": markdown, "rendered_hash": rendered_hash}
+        return {"profile_key": profile_key, "markdown": markdown, "rendered_hash": rendered_hash, "manual_notes": manual_notes}
 
     def profile_pin_preview(self, actor: str, profile_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

@@ -483,6 +483,8 @@ export interface ProfileDocRender {
   profile_key: string
   markdown: string
   rendered_hash: string
+  /** Stored manual notes — echoed so the edit textarea can be pre-filled. */
+  manual_notes?: string
 }
 
 export interface ToolCallLog {
