@@ -1092,7 +1092,11 @@ class AgentBridgeService:
         folder_id: int | None = None,
     ) -> list[dict[str, Any]]:
         kb = self._require_kb_admin_visible(actor, kb_slug)
-        return self.store.list_docs_for_kb(kb["id"], folder_id=folder_id)
+        return self.store.list_docs_for_kb(
+            kb["id"],
+            folder_id=folder_id,
+            backend_slug=backend,
+        )
 
     def get_doc(self, actor: str, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
         doc = self._require_doc_admin_visible(actor, doc_slug)

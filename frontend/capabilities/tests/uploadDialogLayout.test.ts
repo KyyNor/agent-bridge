@@ -76,6 +76,19 @@ test('upload dialog uses a shared queue index with at most three async workers',
   assert.match(file, /Promise\.all\(/)
 })
 
+test('batch upload starts one sync pass after all files are queued', () => {
+  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
+  const uploadFunction = file.slice(file.indexOf('async function uploadDocuments'))
+  assert.match(uploadFunction, /await api\.triggerSync\(\)/)
+})
+
+test('knowledge sync badges translate backend states into user-facing labels', () => {
+  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
+  assert.match(file, /function syncBadgeLabel\(/)
+  assert.match(file, /not_synced:\s*'未同步'/)
+  assert.match(file, /sync_failed:\s*'同步失败'/)
+})
+
 test('knowledge folder pane exposes a bounded desktop resizer and keeps mobile layout responsive', () => {
   const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
   const documentsTab = file.slice(file.indexOf('<!-- Documents Tab -->'))

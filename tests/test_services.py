@@ -808,6 +808,49 @@ def test_immediate_add_syncs_to_mock_backend(wm_paths, tmp_path: Path) -> None:
     assert docs[0]["sync_status"] == "synced"
 
 
+def test_list_docs_uses_kb_default_backend_sync_state(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "docs", "Docs", "")
+    service.store.ensure_backend_target(kb["id"], slug="weknora", backend_type="weknora")
+    service.update_kb_defaults("root", "docs", default_backend_slug="weknora")
+
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["docs"], later=True)
+    service.store.upsert_sync_state(
+        doc_id=doc["id"],
+        kb_id=kb["id"],
+        backend_slug="weknora",
+        backend_doc_id="remote-guide",
+        status=SyncStateStatus.synced,
+    )
+
+    docs = service.list_docs(actor="root", kb_slug="docs")
+
+    assert docs[0]["sync_status"] == "synced"
+
+
+def test_list_docs_honors_requested_backend_sync_state(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "docs", "Docs", "")
+    service.store.ensure_backend_target(kb["id"], slug="weknora", backend_type="weknora")
+
+    source = tmp_path / "Guide.md"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["docs"], later=True)
+    service.store.upsert_sync_state(
+        doc_id=doc["id"],
+        kb_id=kb["id"],
+        backend_slug="weknora",
+        backend_doc_id="remote-guide",
+        status=SyncStateStatus.synced,
+    )
+
+    docs = service.list_docs(actor="root", kb_slug="docs", backend="weknora")
+
+    assert docs[0]["sync_status"] == "synced"
+
+
 def test_sync_uses_backend_kb_id_for_upload_and_delete(wm_paths, tmp_path: Path) -> None:
     class RecordingBackend:
         def __init__(self) -> None:

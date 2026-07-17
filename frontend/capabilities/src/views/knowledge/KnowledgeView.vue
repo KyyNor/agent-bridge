@@ -1134,6 +1134,19 @@ async function uploadDocuments() {
       uploadError.value = `${failedCount} 个文件上传失败，请查看下方具体错误并重试。`
       return
     }
+    let syncStartError = ''
+    if (uploadedCount > 0) {
+      uploadIndexes.forEach(index => {
+        if (uploadFiles.value[index]?.status === 'success') {
+          updateUploadItem(index, { stage: '正在同步' })
+        }
+      })
+      try {
+        await api.triggerSync()
+      } catch {
+        syncStartError = '文件已入库，但同步未启动，请稍后点击“立即同步”。'
+      }
+    }
     if (skippedCount > 0) {
       await alert({
         title: '上传完成',
@@ -1144,6 +1157,9 @@ async function uploadDocuments() {
     uploadFiles.value = []
     if (detailKb.value?.slug === kb.slug) await refreshKnowledgeDetail(selectedFolderId.value)
     else await refreshDetailKbSummary()
+    if (syncStartError) {
+      await alert({ title: '同步未启动', description: syncStartError, destructive: true })
+    }
   } catch (e: unknown) {
     uploadError.value = uploadErrorMessage(e) || '上传失败'
   } finally {
@@ -1238,6 +1254,23 @@ function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disable
   if (status === 'synced' || status === 'succeeded' || status === 'success') return 'success'
   if (status === 'sync_failed' || status === 'failed' || status === 'error') return 'error'
   return 'disabled'
+}
+
+function syncBadgeLabel(status?: string | null) {
+  const labels: Record<string, string> = {
+    not_synced: '未同步',
+    synced: '已同步',
+    sync_failed: '同步失败',
+    delete_pending: '待删除',
+    delete_failed: '删除失败',
+    pending: '待处理',
+    running: '同步中',
+    succeeded: '已完成',
+    failed: '失败',
+    success: '成功',
+    error: '错误',
+  }
+  return labels[status || ''] || status || '未知'
 }
 </script>
 
@@ -1485,7 +1518,7 @@ function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disable
                       <td class="px-3 py-2">
                         <StatusBadge
                           :status="syncBadgeStatus(entry.sync_status)"
-                          :label="entry.sync_status || entry.status" />
+                          :label="syncBadgeLabel(entry.sync_status || entry.status)" />
                       </td>
                       <td class="px-3 py-2">
                         <div class="flex justify-end gap-1">
@@ -1525,7 +1558,7 @@ function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disable
                   <td class="px-3 py-2">
                     <StatusBadge
                       :status="syncBadgeStatus(d.sync_status)"
-                      :label="d.sync_status || d.status" />
+                      :label="syncBadgeLabel(d.sync_status || d.status)" />
                   </td>
                   <td class="px-3 py-2">
                     <div class="flex justify-end gap-1">
@@ -1561,7 +1594,7 @@ function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disable
               <td class="px-3 py-2 text-sm">{{ j.doc_title }}</td>
               <td class="px-3 py-2 text-xs">{{ j.operation }}</td>
               <td class="px-3 py-2">
-                <StatusBadge :status="syncBadgeStatus(j.status)" :label="j.status" />
+                <StatusBadge :status="syncBadgeStatus(j.status)" :label="syncBadgeLabel(j.status)" />
               </td>
               <td class="px-3 py-2 text-xs text-muted-foreground">{{ j.backend_slug }}</td>
               <td class="px-3 py-2 max-w-[200px] overflow-hidden text-ellipsis text-xs text-destructive" :title="j.error ?? ''">{{ j.error || '—' }}</td>

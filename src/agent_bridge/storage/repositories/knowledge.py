@@ -1009,7 +1009,12 @@ class KnowledgeRepository:
             ).fetchall()
             return [row[0] for row in rows]
 
-    def list_docs_for_kb(self, kb_id: int, folder_id: int | None = None) -> list[dict[str, Any]]:
+    def list_docs_for_kb(
+        self,
+        kb_id: int,
+        folder_id: int | None = None,
+        backend_slug: str | None = None,
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
             if folder_id is not None and self._folders._get_folder_with_conn(conn, kb_id, folder_id) is None:
                 raise NotFound("folder not found")
@@ -1039,16 +1044,28 @@ class KnowledgeRepository:
                   COALESCE(s.status, ?) AS sync_status
                 FROM document_kbs dk
                 JOIN documents d ON d.id = dk.doc_id
+                JOIN knowledge_bases kb ON kb.id = dk.kb_id
                 LEFT JOIN folder_tree ON folder_tree.id = dk.folder_id
                                       AND folder_tree.kb_id = dk.kb_id
                 LEFT JOIN document_versions v ON v.id = d.current_version_id
                 LEFT JOIN sync_states s ON s.doc_id = d.id
                                       AND s.kb_id = dk.kb_id
-                                      AND s.backend_slug = 'mock'
+                                      AND s.backend_slug = COALESCE(
+                                        ?,
+                                        NULLIF(kb.default_backend_slug, ''),
+                                        (
+                                          SELECT target.slug
+                                          FROM backend_targets target
+                                          WHERE target.kb_id = dk.kb_id
+                                            AND target.status = 'active'
+                                          ORDER BY target.slug
+                                          LIMIT 1
+                                        )
+                                      )
                 WHERE {' AND '.join(clauses)}
                 ORDER BY d.slug
                 """,
-                [SyncStateStatus.not_synced.value, *params],
+                [SyncStateStatus.not_synced.value, backend_slug, *params],
             ).fetchall()
             return [dict(row) for row in rows]
 

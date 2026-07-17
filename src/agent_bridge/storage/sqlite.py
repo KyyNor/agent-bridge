@@ -1784,8 +1784,17 @@ class SQLiteStore:
     def get_sync_state(self, doc_id: int, kb_id: int, backend_slug: str = "mock") -> dict[str, Any] | None:
         return self.knowledge.get_sync_state(doc_id=doc_id, kb_id=kb_id, backend_slug=backend_slug)
 
-    def list_docs_for_kb(self, kb_id: int, folder_id: int | None = None) -> list[dict[str, Any]]:
-        return self.knowledge.list_docs_for_kb(kb_id=kb_id, folder_id=folder_id)
+    def list_docs_for_kb(
+        self,
+        kb_id: int,
+        folder_id: int | None = None,
+        backend_slug: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.knowledge.list_docs_for_kb(
+            kb_id=kb_id,
+            folder_id=folder_id,
+            backend_slug=backend_slug,
+        )
 
     def list_jobs_for_user(self, linux_user: str, backend_slug: str | None = None) -> list[dict[str, Any]]:
         return self.knowledge.list_jobs_for_user(linux_user=linux_user, backend_slug=backend_slug)
