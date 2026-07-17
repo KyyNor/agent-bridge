@@ -264,16 +264,19 @@ function errorMessage(e: unknown) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else-if="mode === 'list'" class="space-y-5">
-    <div class="flex flex-wrap items-center gap-4">
-      <Button @click="showCreate = true">
-        <Plus :size="14" />
-        新建记忆区块
-      </Button>
-      <Button variant="outline" :disabled="loading" @click="loadBlocks">
+    <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态且页头存在时） -->
+    <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
+      <!-- 次要操作在前 -->
+      <Button variant="outline" size="lg" :disabled="loading" @click="loadBlocks">
         <RefreshCw :size="14" />
         刷新
       </Button>
-    </div>
+      <!-- 主操作固定最右：primary + shadow-btn -->
+      <Button size="lg" class="shadow-btn" @click="showCreate = true">
+        <Plus :size="14" />
+        新建记忆区块
+      </Button>
+    </Teleport>
 
     <div v-if="error" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ error }}</div>
 

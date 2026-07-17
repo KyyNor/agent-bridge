@@ -2,6 +2,7 @@
 import { defineAsyncComponent, ref, computed } from 'vue'
 import AppShell from './components/AppShell.vue'
 import type { NavGroup } from './components/AppShell.vue'
+import PageHeader from './components/PageHeader.vue'
 import ConfirmDialog from './components/ui/dialog/ConfirmDialog.vue'
 import { shouldShowPageHeader } from './lib/navigation'
 
@@ -87,11 +88,12 @@ const view = computed(() => activeNavKey.value)
 <template>
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
     <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
-      <!-- Page Header -->
-      <div v-if="showPageHeader" class="bg-card px-7 py-5">
-        <h1 class="text-base font-semibold text-foreground">{{ currentNav?.label || 'Agent Bridge' }}</h1>
-        <p v-if="currentNav?.description" class="mt-0.5 text-[13px] text-muted-foreground">{{ currentNav.description }}</p>
-      </div>
+      <!-- Page Header（标题取自导航配置；操作/筛选由各视图 Teleport 进 #ph-actions / #ph-filters） -->
+      <PageHeader
+        v-if="showPageHeader"
+        :title="currentNav?.label || 'Agent Bridge'"
+        :description="currentNav?.description"
+      />
       <!-- Content -->
       <div class="min-w-0 p-7">
         <DashboardView v-if="view === 'dashboard'" />
