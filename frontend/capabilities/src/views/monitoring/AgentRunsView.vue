@@ -399,23 +399,27 @@ function runBadgeStatus(run: AgentRun): 'success' | 'error' | 'running' | 'disab
     加载中...
   </div>
   <div v-else class="space-y-5">
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-4">
-      <div class="relative flex-1 max-w-[280px]">
-        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
-        <Input v-model="search" placeholder="搜索 Agent、Profile 或工作流..." class="pl-8" @update:model-value="scheduleSearch" />
-      </div>
-      <div class="flex items-center gap-2 text-sm">
-        <Input v-model="dateFrom" type="date" class="w-[140px]" @change="applyDateFilter" />
-        <span class="text-muted-foreground">至</span>
-        <Input v-model="dateTo" type="date" class="w-[140px]" @change="applyDateFilter" />
-      </div>
-      <SegmentedTabs v-model="okFilter" :tabs="filterTabs" @update:model-value="applyOkFilter" />
-      <Button variant="outline" @click="loadRunData">
-        <RotateCw :size="14" class="mr-1.5" />
+    <!-- 页头操作：刷新进 #ph-actions（仅列表态） -->
+    <Teleport v-if="!activeRunKey" to="#ph-actions" defer>
+      <Button variant="outline" size="lg" @click="loadRunData">
+        <RotateCw :size="14" />
         刷新
       </Button>
-    </div>
+    </Teleport>
+
+    <!-- 页头筛选：搜索 + 日期范围 + 状态分段进 #ph-filters（仅列表态） -->
+    <Teleport v-if="!activeRunKey" to="#ph-filters" defer>
+      <div class="relative w-full max-w-[280px]">
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
+        <Input v-model="search" placeholder="搜索 Agent、Profile 或工作流..." class="h-9 pl-8" @update:model-value="scheduleSearch" />
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <Input v-model="dateFrom" type="date" class="h-9 w-[140px]" @change="applyDateFilter" />
+        <span class="text-muted-foreground">至</span>
+        <Input v-model="dateTo" type="date" class="h-9 w-[140px]" @change="applyDateFilter" />
+      </div>
+      <SegmentedTabs v-model="okFilter" :tabs="filterTabs" @update:model-value="applyOkFilter" />
+    </Teleport>
 
     <!-- Table -->
     <Card>

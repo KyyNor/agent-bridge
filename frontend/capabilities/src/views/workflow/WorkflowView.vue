@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Save, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Plus, Save, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, AgentRun } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -1859,13 +1859,17 @@ async function confirmClearWorkflow() {
     </div>
 
     <template v-if="routeMode === 'list'">
-    <div class="flex flex-wrap items-center gap-2">
-      <Button variant="outline" @click="showGuide = true">
-        <HelpCircle class="mr-1.5 h-4 w-4" />
+    <!-- 页头操作：使用指引 + 新建工作流进 #ph-actions（仅列表态） -->
+    <Teleport v-if="routeMode === 'list'" to="#ph-actions" defer>
+      <Button variant="outline" size="lg" @click="showGuide = true">
+        <HelpCircle :size="14" />
         使用指引
       </Button>
-      <Button @click="openCreate">新建工作流</Button>
-    </div>
+      <Button size="lg" class="shadow-btn" @click="openCreate">
+        <Plus :size="14" />
+        新建工作流
+      </Button>
+    </Teleport>
 
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {{ error }}

@@ -92,7 +92,6 @@ const view = computed(() => activeNavKey.value)
       <PageHeader
         v-if="showPageHeader"
         :title="currentNav?.label || 'Agent Bridge'"
-        :description="currentNav?.description"
       />
       <!-- Content -->
       <div class="min-w-0 p-7">

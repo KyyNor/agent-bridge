@@ -99,11 +99,11 @@ function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label
     <Teleport to="#ph-filters" defer>
       <div class="relative w-full max-w-[360px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
-        <Input v-model="search" placeholder="搜索工具名称或描述..." class="pl-8" />
+        <Input v-model="search" placeholder="搜索工具名称或描述..." class="h-9 pl-8" />
       </div>
       <SegmentedTabs v-model="typeFilter" :tabs="filterTabs" @update:model-value="page = 1" />
       <Select v-model="selectedService" @update:model-value="page = 1">
-        <SelectTrigger class="w-[200px]">
+        <SelectTrigger size="lg" class="w-[200px]">
           <SelectValue placeholder="全部服务" />
         </SelectTrigger>
         <SelectContent>

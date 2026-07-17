@@ -402,14 +402,23 @@ const toolTypeOptions = [
   </div>
 
   <div v-else class="space-y-5">
-    <div class="flex flex-wrap items-center gap-4">
-      <div class="relative flex-1 max-w-[360px]">
+    <!-- 页头操作：新建服务进 #ph-actions（仅列表态） -->
+    <Teleport v-if="!isFormPage" to="#ph-actions" defer>
+      <Button size="lg" class="shadow-btn" @click="openCreate">
+        <Plus :size="14" />
+        新建服务
+      </Button>
+    </Teleport>
+
+    <!-- 页头筛选：搜索 + 状态分段 + 类型进 #ph-filters（仅列表态） -->
+    <Teleport v-if="!isFormPage" to="#ph-filters" defer>
+      <div class="relative w-full max-w-[360px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
-        <Input v-model="search" placeholder="搜索服务名称、地址或描述..." class="pl-8" />
+        <Input v-model="search" placeholder="搜索服务名称、地址或描述..." class="h-9 pl-8" />
       </div>
       <SegmentedTabs v-model="statusFilter" :tabs="filterTabs" @update:model-value="page = 1" />
       <Select v-model="sourceFilter" @update:model-value="page = 1">
-        <SelectTrigger class="w-[150px]">
+        <SelectTrigger size="lg" class="w-[150px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -418,11 +427,7 @@ const toolTypeOptions = [
           <SelectItem value="openapi_service">OpenAPI</SelectItem>
         </SelectContent>
       </Select>
-      <Button @click="openCreate">
-        <Plus :size="14" />
-        新建服务
-      </Button>
-    </div>
+    </Teleport>
 
     <Card>
       <CardContent class="p-0">

@@ -268,10 +268,10 @@ function categoryName(key: string) {
     <Teleport v-if="mode === 'list'" to="#ph-filters" defer>
       <div class="relative w-full max-w-[360px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
-        <Input v-model="searchQuery" placeholder="搜索仓库名称、标识或地址..." class="pl-8" />
+        <Input v-model="searchQuery" placeholder="搜索仓库名称、标识或地址..." class="h-9 pl-8" />
       </div>
       <Select v-model="filterCategory" @update:model-value="page = 1">
-        <SelectTrigger class="w-[160px]">
+        <SelectTrigger size="lg" class="w-[160px]">
           <SelectValue placeholder="全部分类" />
         </SelectTrigger>
         <SelectContent>

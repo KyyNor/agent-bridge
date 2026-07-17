@@ -185,10 +185,10 @@ function entrypointLabel(entrypoint: string): string {
     <Teleport to="#ph-filters" defer>
       <div class="relative w-full max-w-[280px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
-        <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="pl-8" @update:model-value="scheduleSearch" />
+        <Input v-model="search" placeholder="搜索工具、调用者或入口..." class="h-9 pl-8" @update:model-value="scheduleSearch" />
       </div>
       <Select v-model="sourceFilter" @update:model-value="applySourceFilter">
-        <SelectTrigger class="w-[160px]">
+        <SelectTrigger size="lg" class="w-[160px]">
           <SelectValue placeholder="全部来源" />
         </SelectTrigger>
         <SelectContent>
@@ -196,9 +196,9 @@ function entrypointLabel(entrypoint: string): string {
         </SelectContent>
       </Select>
       <div class="flex items-center gap-2 text-sm">
-        <Input v-model="dateFrom" type="date" class="w-[140px]" @change="applyDateFilter" />
+        <Input v-model="dateFrom" type="date" class="h-9 w-[140px]" @change="applyDateFilter" />
         <span class="text-muted-foreground">至</span>
-        <Input v-model="dateTo" type="date" class="w-[140px]" @change="applyDateFilter" />
+        <Input v-model="dateTo" type="date" class="h-9 w-[140px]" @change="applyDateFilter" />
       </div>
       <SegmentedTabs v-model="statusFilter" :tabs="filterTabs" @update:model-value="applyFilter" />
     </Teleport>

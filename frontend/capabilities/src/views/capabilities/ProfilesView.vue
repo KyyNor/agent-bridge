@@ -181,7 +181,7 @@ async function handleDetailSaved() {
     <Teleport v-if="!props.routeKey" to="#ph-filters" defer>
       <div class="relative w-full max-w-[360px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
-        <Input v-model="search" placeholder="搜索能力平面标识或名称..." class="pl-8" />
+        <Input v-model="search" placeholder="搜索能力平面标识或名称..." class="h-9 pl-8" />
       </div>
       <SegmentedTabs v-model="statusFilter" :tabs="filterTabs" @update:model-value="page = 1" />
     </Teleport>
