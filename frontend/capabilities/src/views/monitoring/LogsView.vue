@@ -222,7 +222,7 @@ function entrypointLabel(entrypoint: string): string {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="l in pagedLogs" :key="l.log_id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="l in pagedLogs" :key="l.log_id" class="border-b border-border/60">
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(l.created_at) }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">

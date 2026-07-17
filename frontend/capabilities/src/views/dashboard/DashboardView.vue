@@ -83,7 +83,7 @@ const disabledCount = computed(() => services.value.length - enabledCount.value 
           <h2 class="text-sm font-medium text-foreground">服务列表</h2>
           <span class="cursor-pointer text-xs text-primary hover:underline" @click="goto('services')">查看全部</span>
         </div>
-        <div v-if="services.length === 0" class="rounded-xl border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
+        <div v-if="services.length === 0" class="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
           暂无已登记的服务
         </div>
         <div v-else class="space-y-2">
@@ -108,7 +108,7 @@ const disabledCount = computed(() => services.value.length - enabledCount.value 
         <!-- Quick Actions -->
         <div class="grid grid-cols-2 gap-3">
           <button
-            class="flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-4 text-center transition-all hover:border-primary/40 hover:shadow-card"
+            class="flex flex-col items-center gap-2 rounded-lg border border-border bg-card p-4 text-center transition-all hover:border-primary/40 hover:shadow-card"
             @click="goto('services')"
           >
             <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-primary">
@@ -117,7 +117,7 @@ const disabledCount = computed(() => services.value.length - enabledCount.value 
             <span class="text-[13px] font-medium">新增服务</span>
           </button>
           <button
-            class="flex flex-col items-center gap-2 rounded-xl border border-border bg-card p-4 text-center transition-all hover:border-primary/40 hover:shadow-card"
+            class="flex flex-col items-center gap-2 rounded-lg border border-border bg-card p-4 text-center transition-all hover:border-primary/40 hover:shadow-card"
             @click="goto('tools')"
           >
             <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-primary">
@@ -128,7 +128,7 @@ const disabledCount = computed(() => services.value.length - enabledCount.value 
         </div>
 
         <!-- Health Overview -->
-        <div class="rounded-xl border border-border bg-card p-5 shadow-card">
+        <div class="rounded-lg border border-border bg-card p-5 shadow-card">
           <div class="mb-4 text-sm font-medium">服务健康概况</div>
 
           <div class="mb-4 flex h-2 overflow-hidden rounded-full bg-secondary">

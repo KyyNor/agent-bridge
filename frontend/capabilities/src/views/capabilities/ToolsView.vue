@@ -134,7 +134,7 @@ function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label
             </tr>
           </thead>
           <tbody>
-            <tr v-for="t in pagedTools" :key="`${t.service_key}:${t.tool_name}`" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="t in pagedTools" :key="`${t.service_key}:${t.tool_name}`" class="border-b border-border/60">
               <td class="px-4 py-3">
                 <span class="font-mono text-[13px] font-semibold text-foreground">{{ t.tool_name }}</span>
               </td>

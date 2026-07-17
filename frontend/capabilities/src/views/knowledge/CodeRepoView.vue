@@ -299,7 +299,7 @@ function categoryName(key: string) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in pagedRepos" :key="r.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="r in pagedRepos" :key="r.repo_key" class="border-b border-border/60">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ r.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ r.repo_key }}</div>
@@ -311,7 +311,7 @@ function categoryName(key: string) {
               <td class="max-w-[240px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">{{ r.git_url }}</td>
               <td class="px-4 py-3 text-sm">{{ r.branch }}</td>
               <td class="px-4 py-3">
-                <Badge v-if="r.status === 'active'" variant="secondary" class="bg-green-50 text-green-700">正常</Badge>
+                <Badge v-if="r.status === 'active'" variant="secondary" class="bg-success-soft text-success-soft-fg">正常</Badge>
                 <Badge v-else-if="r.status === 'error'" variant="destructive">异常</Badge>
                 <Badge v-else variant="secondary">{{ r.status }}</Badge>
               </td>
@@ -349,7 +349,7 @@ function categoryName(key: string) {
           <DialogTitle>{{ repoFormMode === 'add' ? '添加代码仓库' : '编辑代码仓库' }}</DialogTitle>
         </DialogHeader>
         <form @submit.prevent="saveRepo" class="space-y-4">
-          <div v-if="repoError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ repoError }}</div>
+          <div v-if="repoError" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive-soft-fg">{{ repoError }}</div>
           <div class="space-y-2">
             <label class="text-sm font-medium">仓库标识 <span v-if="repoFormMode === 'add'" class="text-destructive">*</span></label>
             <Input v-if="repoFormMode === 'add'" v-model="repoForm.repo_key" placeholder="my-project" required />
@@ -399,7 +399,7 @@ function categoryName(key: string) {
               <Button variant="outline" size="sm" @click="testCloneConnection" :disabled="testCloning || !repoForm.git_url">
                 {{ testCloning ? '测试中...' : '测试连接' }}
               </Button>
-              <div v-if="testCloneResult" :class="['text-xs', testCloneResult.success ? 'text-green-600' : 'text-red-600']">
+              <div v-if="testCloneResult" :class="['text-xs', testCloneResult.success ? 'text-success' : 'text-destructive']">
                 {{ testCloneResult.message }}
               </div>
             </div>
@@ -450,7 +450,7 @@ function categoryName(key: string) {
           <div v-if="allProfiles.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无能力平面</div>
           <div v-else class="max-h-[320px] space-y-1 overflow-y-auto rounded-lg border border-border p-1">
             <label v-for="p in allProfiles" :key="p.profile_key"
-              class="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-muted/50"
+              class="list-row-interactive flex cursor-pointer items-center gap-3 rounded-md px-3 py-2"
             >
               <input type="checkbox" :value="p.profile_key" :checked="pendingProfileKeys.includes(p.profile_key)"
                 @change="togglePlaneProfile(p.profile_key)" class="size-4 rounded" />

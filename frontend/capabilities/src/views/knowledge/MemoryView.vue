@@ -296,7 +296,7 @@ function errorMessage(e: unknown) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="block in pagedBlocks" :key="block.block_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="block in pagedBlocks" :key="block.block_key" class="border-b border-border/60">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ block.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ block.description }}</div>

@@ -465,7 +465,7 @@ async function deleteBackend(slug: string) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="j in schedulerStatus.code_sync.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                  <tr v-for="j in schedulerStatus.code_sync.jobs" :key="j.repo_key" class="border-b border-border/60">
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">
@@ -494,7 +494,7 @@ async function deleteBackend(slug: string) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="j in schedulerStatus.understand.jobs" :key="j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                  <tr v-for="j in schedulerStatus.understand.jobs" :key="j.repo_key" class="border-b border-border/60">
                     <td class="px-3 py-2 text-sm font-mono">{{ j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">
@@ -522,7 +522,7 @@ async function deleteBackend(slug: string) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="j in schedulerStatus.plugin_update.jobs" :key="j.plugin_key || j.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                  <tr v-for="j in schedulerStatus.plugin_update.jobs" :key="j.plugin_key || j.repo_key" class="border-b border-border/60">
                     <td class="px-3 py-2 text-sm font-mono">{{ j.plugin_key || j.repo_key }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">{{ formatLocalDatetime(j.next_run_at) }}</td>
                     <td class="px-3 py-2 text-xs text-muted-foreground">
@@ -674,7 +674,7 @@ async function deleteBackend(slug: string) {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="b in backends" :key="b.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+              <tr v-for="b in backends" :key="b.slug" class="border-b border-border/60">
                 <td class="px-3 py-2 font-mono text-sm">{{ b.slug }}</td>
                 <td class="px-3 py-2 text-sm">{{ b.backend_type }}</td>
                 <td class="px-3 py-2 text-xs text-muted-foreground truncate max-w-[250px]">{{ b.base_url || '—' }}</td>
@@ -725,7 +725,7 @@ async function deleteBackend(slug: string) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="c in categories" :key="c.category_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+              <tr v-for="c in categories" :key="c.category_key" class="border-b border-border/60">
               <td class="px-3 py-2 font-mono text-xs">{{ c.category_key }}</td>
               <td class="px-3 py-2 text-sm">{{ c.name }}</td>
               <td class="px-3 py-2 text-xs text-muted-foreground">{{ c.description || '—' }}</td>

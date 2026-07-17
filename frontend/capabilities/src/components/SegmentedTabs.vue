@@ -24,13 +24,13 @@ function select(key: string) {
 </script>
 
 <template>
-  <div class="inline-flex flex-wrap rounded-lg bg-secondary p-[3px] gap-0.5">
+  <div class="inline-flex h-9 flex-wrap items-center gap-0.5 rounded-md bg-secondary p-1">
     <button
       v-for="tab in tabs"
       :key="tab.key"
       type="button"
       :class="[
-        'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors inline-flex items-center gap-1.5',
+        'inline-flex h-7 items-center gap-1.5 rounded-sm px-3 text-[13px] font-medium transition-colors',
         modelValue === tab.key
           ? 'bg-card text-foreground shadow-card'
           : 'text-muted-foreground hover:text-foreground'

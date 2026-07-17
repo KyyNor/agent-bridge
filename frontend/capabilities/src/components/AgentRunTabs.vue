@@ -121,7 +121,7 @@ function agentRunLabel(run: AgentRun) {
     <div v-if="stopError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
       停止失败：{{ stopError }}
     </div>
-    <div v-if="props.detailError" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+    <div v-if="props.detailError" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning-soft-fg">
       事件刷新暂时不可用，批量运行仍会继续：{{ props.detailError }}
     </div>
   </div>

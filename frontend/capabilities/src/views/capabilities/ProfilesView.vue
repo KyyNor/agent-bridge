@@ -202,7 +202,7 @@ async function handleDetailSaved() {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="profile in pagedProfiles" :key="profile.profile_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="profile in pagedProfiles" :key="profile.profile_key" class="border-b border-border/60">
               <td class="min-w-0 px-4 py-3">
                 <span class="block break-all text-[13px] font-medium text-foreground">{{ profile.profile_key }}</span>
                 <div class="mt-0.5 break-all text-xs text-muted-foreground">{{ profile.name }}</div>

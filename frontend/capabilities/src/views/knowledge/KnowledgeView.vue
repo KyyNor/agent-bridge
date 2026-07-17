@@ -1306,7 +1306,7 @@ function syncBadgeLabel(status?: string | null) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="k in pagedKbs" :key="k.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="k in pagedKbs" :key="k.slug" class="border-b border-border/60">
               <td class="px-4 py-3">
                 <div class="text-sm font-medium">{{ k.name }}</div>
                 <div class="text-xs text-muted-foreground">{{ k.description }}</div>
@@ -1496,7 +1496,7 @@ function syncBadgeLabel(status?: string | null) {
                 </tr></thead>
                 <tbody>
                   <template v-for="entry in browseEntries" :key="`${entry.kind}-${entry.id}`">
-                    <tr v-if="entry.kind !== 'document'" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                    <tr v-if="entry.kind !== 'document'" class="border-b border-border/60">
                       <td colspan="6" class="px-3 py-2">
                         <button type="button" class="flex w-full items-center gap-2 text-left" @click="enterBrowseEntry(entry)">
                           <Archive v-if="entry.kind === 'zip'" :size="16" class="shrink-0 text-warning" />
@@ -1507,7 +1507,7 @@ function syncBadgeLabel(status?: string | null) {
                         </button>
                       </td>
                     </tr>
-                    <tr v-else-if="entry.kind === 'document'" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                    <tr v-else-if="entry.kind === 'document'" class="border-b border-border/60">
                       <td class="px-3 py-2">
                         <input type="checkbox" class="size-4 rounded" :value="entry.slug"
                           :checked="selectedDocSlugs.has(entry.slug)" @change="toggleDocSelected(entry.slug)" />
@@ -1547,7 +1547,7 @@ function syncBadgeLabel(status?: string | null) {
                   <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
                   <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
                 </tr></thead>
-                <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+                <tbody><tr v-for="d in detailDocs" :key="d.slug" class="border-b border-border/60">
                   <td class="px-3 py-2">
                     <input type="checkbox" class="size-4 rounded" :value="d.slug"
                       :checked="selectedDocSlugs.has(d.slug)" @change="toggleDocSelected(d.slug)" />
@@ -1590,7 +1590,7 @@ function syncBadgeLabel(status?: string | null) {
               <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">时间</th>
             </tr></thead>
-            <tbody><tr v-for="j in detailSyncJobs" :key="j.id" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tbody><tr v-for="j in detailSyncJobs" :key="j.id" class="border-b border-border/60">
               <td class="px-3 py-2 text-sm">{{ j.doc_title }}</td>
               <td class="px-3 py-2 text-xs">{{ j.operation }}</td>
               <td class="px-3 py-2">
@@ -1641,7 +1641,7 @@ function syncBadgeLabel(status?: string | null) {
               <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">错误</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground"></th>
             </tr></thead>
-            <tbody><tr v-for="source in detailRepoSources" :key="source.repo_key" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tbody><tr v-for="source in detailRepoSources" :key="source.repo_key" class="border-b border-border/60">
               <td class="px-3 py-2">
                 <div class="text-sm font-medium">{{ source.repo_name || source.repo_key }}</div>
                 <div class="font-mono text-xs text-muted-foreground">{{ source.repo_key }}</div>
@@ -1745,7 +1745,7 @@ function syncBadgeLabel(status?: string | null) {
           <div v-if="allProfiles.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无能力平面</div>
           <div v-else class="max-h-[400px] space-y-1 overflow-y-auto rounded-lg border border-border p-1">
             <div v-for="p in allProfiles" :key="p.profile_key"
-              class="rounded-md px-3 py-2 transition-colors hover:bg-muted/50"
+              class="list-row-interactive rounded-md px-3 py-2"
             >
               <label class="flex cursor-pointer items-center gap-3">
                 <input type="checkbox" :value="p.profile_key" :checked="pendingProfileKeys.includes(p.profile_key)"
@@ -1904,7 +1904,7 @@ function syncBadgeLabel(status?: string | null) {
             @dragleave="handleUploadDragLeave"
             @drop="handleUploadDrop"
           >
-            <Upload :size="40" stroke="#9ca3af" stroke-width="1.5" class="mx-auto mb-3" />
+            <Upload :size="40" stroke-width="1.5" class="mx-auto mb-3 text-placeholder" />
             <div class="text-sm font-medium mb-1">拖拽文件或文件夹到此处</div>
             <div class="text-xs text-muted-foreground mb-4">支持 PDF、Word、Excel、PPT、TXT、Markdown、ZIP — 压缩包将自动识别其中的文档</div>
             <div class="flex items-center justify-center gap-3">
@@ -1934,7 +1934,7 @@ function syncBadgeLabel(status?: string | null) {
               <div v-for="(f, i) in uploadFiles" :key="i"
                 class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 overflow-hidden rounded border border-border bg-background px-3 py-2 text-sm"
               >
-                <File :size="14" stroke="#9ca3af" class="shrink-0" />
+                <File :size="14" class="shrink-0 text-placeholder" />
                 <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="f.relativePath">{{ f.relativePath }}</span>
                 <div class="flex shrink-0 flex-col items-end gap-0.5 text-xs">
                   <span class="text-muted-foreground">{{ getFileSizeLabel(f.file.size) }}</span>

@@ -821,7 +821,7 @@ def main(envelope):
               <button
                 v-for="run in pagedRuns"
                 :key="run.run_id"
-                class="rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
+                class="list-row-interactive rounded-md border px-3 py-2 text-left"
                 :class="runDetail?.run_id === run.run_id ? 'border-primary/40 bg-primary/5' : ''"
                 @click="openRunDetail(run.run_id)"
               >

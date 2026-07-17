@@ -119,7 +119,7 @@ const pagedStats = computed(() => paginate(stats.value, page.value, pageSize.val
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(s, i) in pagedStats" :key="i" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="(s, i) in pagedStats" :key="i" class="border-b border-border/60">
               <td v-for="col in columns" :key="col" class="px-4 py-3 text-sm">{{ (s as Record<string, unknown>)[col] || '—' }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-3">

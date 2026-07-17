@@ -52,7 +52,7 @@ const m = computed(() => {
 
 <template>
   <span
-    class="inline-flex shrink-0 items-center h-[21px] px-2 rounded-md text-[11.5px] font-semibold whitespace-nowrap"
+    class="inline-flex shrink-0 items-center h-[21px] px-2 rounded-sm text-[11.5px] font-semibold whitespace-nowrap"
     :class="[m.bg, m.fg]"
   >{{ m.text }}</span>
 </template>

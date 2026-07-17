@@ -30,10 +30,10 @@ const toneClass = computed(() => TONE_CLASS[props.tone])
 </script>
 
 <template>
-  <div class="rounded-xl border border-border bg-card p-5 shadow-card">
+  <div class="rounded-lg border border-border bg-card p-5 shadow-card">
     <div class="flex items-center justify-between">
       <div class="text-xs text-muted-foreground">{{ label }}</div>
-      <div class="flex h-9 w-9 items-center justify-center rounded-lg" :class="toneClass.icon">
+      <div class="flex h-9 w-9 items-center justify-center rounded-md" :class="toneClass.icon">
         <slot name="icon" />
       </div>
     </div>

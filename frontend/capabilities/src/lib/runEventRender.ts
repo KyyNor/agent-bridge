@@ -47,22 +47,22 @@ export function eventMessage(event: WorkflowRunEvent): string {
   return event.status || ''
 }
 
-/** Tailwind classes for an event's Badge (background tint by kind/status). */
+/** Semantic classes for an event's Badge (background tint by kind/status). */
 export function eventKindClass(kind: string, status?: string): string {
-  if (kind === 'error' || status === 'failed') return 'bg-red-50 text-red-700'
-  if (kind === 'result' || status === 'success') return 'bg-green-50 text-green-700'
-  if (kind === 'tool_call') return 'bg-blue-50 text-blue-700'
-  if (kind === 'tool_result') return 'bg-violet-50 text-violet-700'
-  if (kind === 'subagent_end' && status !== 'failed') return 'bg-green-50 text-green-700'
-  if (kind === 'subagent_end' && status === 'failed') return 'bg-red-50 text-red-700'
+  if (kind === 'error' || status === 'failed') return 'bg-destructive-soft text-destructive-soft-fg'
+  if (kind === 'result' || status === 'success') return 'bg-success-soft text-success-soft-fg'
+  if (kind === 'tool_call') return 'bg-info-soft text-info-soft-fg'
+  if (kind === 'tool_result') return 'bg-cat-violet text-cat-violet-fg'
+  if (kind === 'subagent_end' && status !== 'failed') return 'bg-success-soft text-success-soft-fg'
+  if (kind === 'subagent_end' && status === 'failed') return 'bg-destructive-soft text-destructive-soft-fg'
   return 'bg-secondary text-muted-foreground'
 }
 
-/** Tailwind classes for a timeline node's left border accent. */
+/** Semantic classes for a timeline node's left border accent. */
 export function eventClass(event: WorkflowRunEvent): string {
-  if (event.kind === 'error' || event.status === 'failed') return 'border-red-400'
-  if (event.kind === 'tool_call') return 'border-blue-400'
-  if (event.kind === 'tool_result') return event.status === 'failed' ? 'border-red-400' : 'border-green-400'
+  if (event.kind === 'error' || event.status === 'failed') return 'border-destructive/50'
+  if (event.kind === 'tool_call') return 'border-info/50'
+  if (event.kind === 'tool_result') return event.status === 'failed' ? 'border-destructive/50' : 'border-success/50'
   if (event.kind === 'result') return 'border-foreground/40'
   return 'border-border'
 }
@@ -80,11 +80,11 @@ export function timelineKind(event: WorkflowRunEvent): TimelineKind {
   return 'message'
 }
 
-/** Tailwind classes for a sub-agent status Badge. */
+/** Semantic classes for a sub-agent status Badge. */
 export function subagentStatusBadgeClass(status: string | null | undefined): string {
-  if (!status) return 'bg-blue-50 text-blue-700' // running
-  if (status === 'completed') return 'bg-green-50 text-green-700'
-  if (status === 'failed' || status === 'error') return 'bg-red-50 text-red-700'
+  if (!status) return 'bg-info-soft text-info-soft-fg' // running
+  if (status === 'completed') return 'bg-success-soft text-success-soft-fg'
+  if (status === 'failed' || status === 'error') return 'bg-destructive-soft text-destructive-soft-fg'
   return 'bg-secondary text-muted-foreground'
 }
 

@@ -31,7 +31,7 @@ const text = computed(() => props.label ?? m.value.text)
 
 <template>
   <span
-    class="inline-flex shrink-0 items-center gap-1 h-[21px] px-2 rounded-md text-[11.5px] font-semibold whitespace-nowrap"
+    class="inline-flex shrink-0 items-center gap-1 h-[21px] px-2 rounded-sm text-[11.5px] font-semibold whitespace-nowrap"
     :class="[m.bg, m.fg]"
   >
     <span class="h-[6px] w-[6px] rounded-full" :class="m.dot" />

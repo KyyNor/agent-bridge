@@ -236,8 +236,8 @@ function miniMapColor(node: Node<WorkflowNodeData>) {
   width: 210px;
   min-height: 74px;
   border-width: 1px;
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   padding: 12px;
-  box-shadow: 0 8px 22px rgb(15 23 42 / 0.06);
+  box-shadow: var(--shadow-card);
 }
 </style>

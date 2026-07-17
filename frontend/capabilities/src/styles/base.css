@@ -31,6 +31,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+  --color-overlay-strong: var(--overlay-strong);
 
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
@@ -76,10 +78,11 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* 四级圆角：compact / control / card / overlay */
+  --radius-sm: var(--radius-compact);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-card);
+  --radius-xl: var(--radius-overlay);
 
   /* 阴影：注册到 @theme 以生成 shadow-* 工具类 */
   --shadow-card: var(--shadow-card);
@@ -108,6 +111,8 @@
   --border: oklch(0.93 0.005 250);            /* #eaecef */
   --input: oklch(0.93 0.005 250);
   --ring: oklch(0.55 0.18 255);
+  --overlay: rgb(0 0 0 / .10);
+  --overlay-strong: rgb(0 0 0 / .80);
 
   --success: oklch(0.53 0.13 155);           /* #0f8a5f */
   --success-foreground: #ffffff;
@@ -134,7 +139,12 @@
   --shadow-pop:  0 1px 2px rgb(16 24 40 / .04), 0 16px 40px -12px rgb(16 24 40 / .22), 0 6px 16px -8px rgb(16 24 40 / .10);
   --shadow-btn:  0 1px 2px rgb(16 24 40 / .10), inset 0 1px 0 rgb(255 255 255 / .18);
 
-  --radius: 0.5rem;
+  /* 圆角只保留四个实际尺寸；--radius 仅作为第三方默认值别名 */
+  --radius-compact: 4px;
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --radius-overlay: 14px;
+  --radius: var(--radius-control);
 
   --sidebar: oklch(0.99 0.002 250);
   --sidebar-foreground: oklch(0.155 0.012 250);
@@ -217,5 +227,30 @@
   body {
     @apply bg-background text-foreground;
     @apply font-sans;
+  }
+}
+
+@layer components {
+  /* 所有可交互列表行共用：muted 70% 底色 + primary 左侧强调条。 */
+  .list-row-interactive,
+  tbody > tr {
+    transition:
+      background-color 0.2s cubic-bezier(.22, .61, .36, 1),
+      box-shadow 0.2s cubic-bezier(.22, .61, .36, 1);
+  }
+
+  .list-row-interactive:hover,
+  tbody > tr:hover {
+    background-color: color-mix(in srgb, var(--muted) 70%, transparent);
+    box-shadow: inset 2px 0 0 var(--primary);
+  }
+
+  /* PageHeader Teleport 的最后一道兜底，避免页面自定义控件破坏顶部节奏。 */
+  #ph-actions > [data-slot='button'],
+  #ph-filters [data-slot='input'],
+  #ph-filters [data-slot='select-trigger'],
+  #ph-filters > input,
+  #ph-filters > select {
+    height: 2.25rem;
   }
 }

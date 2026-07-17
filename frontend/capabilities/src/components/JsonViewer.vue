@@ -31,7 +31,7 @@ const tokens = computed(() => tokenizeJson(formatted.value))
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-control);
   background: var(--secondary);
   padding: 0.75rem 1rem;
   font-family: var(--font-mono);

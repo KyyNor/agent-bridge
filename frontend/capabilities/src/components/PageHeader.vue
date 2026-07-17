@@ -40,9 +40,9 @@ withDefaults(
         <p v-if="description" class="mt-0.5 text-[13px] text-muted-foreground">{{ description }}</p>
       </div>
       <!-- Teleport 目标：主操作按钮（primary 固定最右） -->
-      <div id="ph-actions" class="flex shrink-0 flex-wrap items-center justify-end gap-2 empty:hidden" />
+      <div id="ph-actions" class="flex min-h-9 shrink-0 flex-wrap items-center justify-end gap-2 empty:hidden" />
     </div>
     <!-- Teleport 目标：搜索 / 筛选 / 排序；无内容时整行隐藏（empty:hidden 同时去掉 padding） -->
-    <div id="ph-filters" class="flex flex-wrap items-center gap-2 pb-3.5 empty:hidden empty:pb-0" />
+    <div id="ph-filters" class="flex min-h-9 flex-wrap items-center gap-2 pb-3.5 empty:hidden empty:pb-0" />
   </header>
 </template>

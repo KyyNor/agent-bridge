@@ -126,7 +126,7 @@ function errorMessage(e: unknown) {
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
       {{ error }}
     </div>
-    <div v-if="message" class="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+    <div v-if="message" class="rounded-md border border-success/30 bg-success-soft px-3 py-2 text-sm text-success-soft-fg">
       {{ message }}
     </div>
 
@@ -143,7 +143,7 @@ function errorMessage(e: unknown) {
             <button
               v-for="item in pagedSkills"
               :key="item.skill_name"
-              class="w-full px-4 py-3 text-left transition hover:bg-muted/50"
+              class="list-row-interactive w-full px-4 py-3 text-left"
               :class="selectedName === item.skill_name ? 'bg-muted/60' : ''"
               @click="selectSkill(item.skill_name)"
             >

@@ -2064,7 +2064,7 @@ async function confirmClearWorkflow() {
               <template v-for="row in artifactRows" :key="row.type + ':' + row.path">
                 <button
                   v-if="row.type === 'folder'"
-                  class="flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-semibold uppercase text-muted-foreground transition hover:bg-muted/50 hover:text-foreground"
+                  class="list-row-interactive flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
                   :style="{ paddingLeft: `${row.depth * 16 + 8}px` }"
                   @click="togglePath(row.path)"
                 >
@@ -2122,7 +2122,7 @@ async function confirmClearWorkflow() {
               <button
                 v-for="run in pagedRuns"
                 :key="run.run_id"
-                class="rounded-md border px-3 py-2 text-left transition hover:bg-muted/50"
+                class="list-row-interactive rounded-md border px-3 py-2 text-left"
                 @click="openProgress(selectedWorkflow, run.run_id)"
               >
                 <div class="flex items-center justify-between gap-2">
@@ -2552,7 +2552,7 @@ async function confirmClearWorkflow() {
                         v-if="activeTaskArtifact(task)?.format === 'html'"
                         :srcdoc="activeTaskArtifact(task)?.content || ''"
                         sandbox="allow-same-origin"
-                        class="min-h-[40vh] w-full rounded border bg-white text-xs"
+                        class="min-h-[40vh] w-full rounded-lg border bg-card text-xs"
                         :title="activeTaskArtifact(task)?.title || 'HTML 报告'"
                       />
                       <div
@@ -2898,7 +2898,7 @@ async function confirmClearWorkflow() {
               v-if="artifactDetail.format === 'html'"
               :srcdoc="artifactDetail.content"
               sandbox="allow-same-origin"
-              class="min-h-[60vh] w-full rounded-md border bg-white"
+              class="min-h-[60vh] w-full rounded-lg border bg-card"
               :title="artifactDetail.title || 'HTML 报告'"
             />
             <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="artifactHtml"></div>
@@ -2937,7 +2937,7 @@ async function confirmClearWorkflow() {
             <iframe
               :srcdoc="fullscreenArtifact.content"
               sandbox="allow-same-origin"
-              class="h-full min-h-[70vh] w-full rounded-md border bg-white"
+              class="h-full min-h-[70vh] w-full rounded-lg border bg-card"
               :title="fullscreenArtifact.title || 'HTML 报告'"
             />
           </div>
@@ -2982,7 +2982,7 @@ async function confirmClearWorkflow() {
                     v-if="item.format === 'html'"
                     :srcdoc="item.content"
                     sandbox="allow-same-origin"
-                    class="min-h-[50vh] w-full rounded-md border bg-white"
+                    class="min-h-[50vh] w-full rounded-lg border bg-card"
                     :title="item.title || 'HTML 报告'"
                   />
                   <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="renderMarkdown(item.content)"></div>

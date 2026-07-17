@@ -135,7 +135,7 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
           <component :is="isAgentExpanded(agent.agent_id) ? ChevronDown : ChevronRight" :size="13" class="shrink-0 text-muted-foreground" />
           <span class="shrink-0 font-medium text-foreground">{{ agentLabel(agent) }}</span>
           <span class="shrink-0 font-mono text-[11px] text-muted-foreground">{{ shortAgentId(agent.agent_id) }}</span>
-          <span class="shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px]" :class="agentStatus(agent) === 'completed' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'">
+          <span class="shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px]" :class="agentStatus(agent) === 'completed' ? 'bg-success-soft text-success-soft-fg' : 'bg-info-soft text-info-soft-fg'">
             {{ agentStatusLabel(agent) }}
           </span>
           <span class="shrink-0 text-[10px] text-muted-foreground">{{ agent.events.length }} events</span>

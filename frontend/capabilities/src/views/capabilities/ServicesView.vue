@@ -447,7 +447,7 @@ const toolTypeOptions = [
             </tr>
           </thead>
           <tbody>
-            <tr v-for="s in pagedServices" :key="serviceCountKey(s)" class="border-b border-border/60 transition-colors hover:bg-muted/50">
+            <tr v-for="s in pagedServices" :key="serviceCountKey(s)" class="border-b border-border/60">
               <td class="px-4 py-3">
                 <span class="text-[13px] font-medium text-foreground">{{ s.service_key }}</span>
                 <div class="mt-0.5 text-xs text-muted-foreground">{{ s.description || s.name }}</div>

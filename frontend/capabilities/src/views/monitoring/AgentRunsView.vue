@@ -445,7 +445,7 @@ function runBadgeStatus(run: AgentRun): 'success' | 'error' | 'running' | 'disab
             <tr
               v-for="r in pagedRuns"
               :key="r.run_key"
-              class="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/50"
+              class="cursor-pointer border-b border-border/60"
               @click="openDetail(r)"
             >
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">

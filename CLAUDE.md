@@ -52,10 +52,12 @@ npm run typecheck
 - 软状态色：`success-soft`、`warning-soft`、`destructive-soft`、`info-soft`、`neutral-soft`，以及对应的 `*-fg` 深色文字。
 - 类别色：`cat-blue`、`cat-teal`、`cat-violet`、`cat-amber`，以及对应的 `*-fg`。
 - 阴影：`shadow-card`、`shadow-pop`、`shadow-btn`。
+- 遮罩：`overlay`、`overlay-strong`；弹窗遮罩不得在组件中直接写 `bg-black/*`。
+- 圆角只保留四级：`rounded-sm` = 4px（compact，徽标/小标签）、`rounded-md` = 6px（control，按钮/输入/选择器/分段）、`rounded-lg` = 10px（card，卡片/区块）、`rounded-xl` = 14px（overlay，弹窗/大浮层）。`rounded-full` 只用于圆形点、头像和进度条，不作为第五级圆角；不要新增 `rounded-2xl` 及以上尺寸。
 
 视图和共享组件在本次设计迁移范围内禁止裸用 Tailwind 调色盘色（例如 `bg-red-50`、`text-gray-400`、`border-blue-300`）或直接写颜色 hex。应使用语义类，例如 `bg-destructive-soft text-destructive-soft-fg`、`bg-success-soft`、`text-placeholder`、`bg-cat-blue text-cat-blue-fg`、`border-primary/30`。新增颜色必须同时考虑暗色模式。
 
-通用尺度：卡片/弹窗/快捷操作格使用 `rounded-xl`，输入框/按钮/选择器/分段控件使用 `rounded-lg`，徽标使用 `rounded-md`；辅助信息使用 `text-xs text-muted-foreground`，表格正文使用 `text-sm`，工具名、时间、耗时和 key 使用 `font-mono`。
+通用尺度：组件应按上述四级圆角映射使用；辅助信息使用 `text-xs text-muted-foreground`，表格正文使用 `text-sm`，工具名、时间、耗时和 key 使用 `font-mono`。`base.css` 会让所有 `tbody > tr` 自动获得统一列表 hover；非表格列表项才使用共享类 `list-row-interactive`，统一获得 muted 70% 背景、200ms 缓动和 2px primary 左侧内阴影高亮条。不要在页面里重复写同一套 transition/hover 规则。
 
 ### 共享组件
 
@@ -73,6 +75,8 @@ npm run typecheck
 - 主操作投放到 `#ph-actions`：`<Teleport to="#ph-actions" defer>`。
 - 搜索、筛选、排序投放到 `#ph-filters`：`<Teleport to="#ph-filters" defer>`。
 - 页头按钮使用 `size="lg"`，搜索 `Input` 使用 `h-9`，`SelectTrigger` 使用 `size="lg"`，保证页头控件统一为 36px。
+- 页头 actions 与 filters 统一使用 `gap-2`（8px）；分段控件整体 `h-9`，内部选项 `h-7`，不要在页面里重新定义另一套高度或间距。
+- `PageHeader` 基础层会兜底将 Teleport 进来的按钮、输入和选择器设为 36px；页面应优先使用 `Button` 的 `size="lg"`、`Input` 的 `h-9`、`SelectTrigger` 的 `size="lg"` 表达语义，禁止另起 `h-7`/`h-8` 的页头控件样式。
 - 页面副标题不再渲染；导航配置中的 `description` 只保留作潜在复用数据。
 - 详情/编辑/运行等子路由由 `shouldShowPageHeader()` 隐藏全局页头；对应视图的 Teleport 也必须用当前列表模式/路由状态做条件渲染，避免投放到不存在的目标。
 
@@ -96,6 +100,7 @@ npm run build
 
 - 四个共享组件各只有一份映射/样式实现。
 - 11 个列表页的页头操作/筛选没有回退为独立双层 toolbar。
+- 表格行不重复添加页面级 hover 实现；非表格列表项才通过 `list-row-interactive` 接入统一效果。
 - 新增的视图代码没有裸用 Tailwind 调色盘色；颜色来自 `base.css` 语义令牌。
 - 窄屏表格使用 `overflow-x-auto` 或合理的截断策略。
 - 设计改动的 diff 不包含 `src/api`、路由定义或 API 类型结构变化。
