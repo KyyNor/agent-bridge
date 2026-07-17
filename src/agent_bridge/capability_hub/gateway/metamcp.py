@@ -198,7 +198,7 @@ def create_mcp_server(
             )
             raise
 
-    @mcp.tool(description="搜索当前 profile 可见的工作流产物。")
+    @mcp.tool(description="搜索当前 profile 可见的工作流产物。请优先调用本工具检索已有产出物，拿到结果后再决定下一步。")
     def artifacts_search(
         query: str = Field(default="", description="按标题、摘要或内容检索产物的关键词。"),
         tags: list[str] = Field(default_factory=list, description="要匹配的产物标签列表。"),
