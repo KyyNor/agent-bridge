@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -246,6 +247,37 @@ def test_artifacts_search_tool_returns_profile_artifacts(wm_paths):
     mcp = create_mcp_server(svc, profile_key="report-plane", workflow_context=None)
     _, result = asyncio.run(mcp.call_tool("artifacts_search", {"query": "finance_orders", "tags": ["finance"]}))
     assert result["items"][0]["title"] == "Page A"
+
+    logs = svc.governance.list_logs(
+        actor="root",
+        entrypoint="metamcp_search",
+        tool_name="artifacts_search",
+    )
+    assert len(logs) == 1
+    assert logs[0]["status"] == "success"
+    assert logs[0]["source_type"] == "builtin"
+    assert logs[0]["source_key"] == "workflow"
+    detail = svc.governance.get_log(actor="root", log_id=logs[0]["log_id"])
+    assert json.loads(detail["request_json"])["query"] == "finance_orders"
+
+
+def test_artifacts_search_logs_failure(wm_paths):
+    from agent_bridge.capability_hub.gateway.metamcp import create_mcp_server
+
+    svc = _create_service_with_workflow(wm_paths)
+    mcp = create_mcp_server(svc, profile_key="report-plane", workflow_context=None)
+
+    with pytest.raises(Exception, match="limit must be positive"):
+        asyncio.run(mcp.call_tool("artifacts_search", {"query": "finance_orders", "limit": 0}))
+
+    logs = svc.governance.list_logs(
+        actor="root",
+        entrypoint="metamcp_search",
+        tool_name="artifacts_search",
+    )
+    assert len(logs) == 1
+    assert logs[0]["status"] == "error"
+    assert logs[0]["error_message"] == "limit must be positive"
 
 
 def test_mcp_route_exposes_workflow_tools_only_with_complete_workflow_headers(wm_paths):

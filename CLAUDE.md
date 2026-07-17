@@ -138,7 +138,7 @@ npm run build
 **治理（`governance.py`）**：`CapabilityGovernanceService` 管四件事——Profile CRUD、策略校验、工具调用日志、Pin 管理。关键规则：
 - **来源级默认拒绝 + allow 后减 deny**：`filter_source_keys` 里若无 allow 规则则结果为空，deny 再从 allow 里扣。`profile_key is None` 时放行全部。
 - **资源级是纯 allow-list**（无 deny），按 `ProfileResourceType`（`wiki_kb` / `code_repo`）。
-- `log_tool_call` 是**唯一审计出口**：每次 `execute`/`search`（含被拒绝的）都写一行，带 `entrypoint`、`source_type`、`status`、`failure_stage`、`failure_owner`、`error_type`、`duration_ms`，失败时把 `log_id` 缝进异常信息便于关联。`invoke_logged_tool`（`service.py:144`）让工作流辅助工具/脚本运行也走同一套审计。
+- `log_tool_call` 是**唯一审计出口**：每次 `execute`/`search`/`artifacts_search`（含被拒绝的）都写一行，带 `entrypoint`、`source_type`、`status`、`failure_stage`、`failure_owner`、`error_type`、`duration_ms`，失败时把 `log_id` 缝进异常信息便于关联。`invoke_logged_tool`（`service.py:144`）让工作流辅助工具/脚本运行也走同一套审计。
 
 **Profile 文档与 Pin（`profiles/`）**：`docs.py` 仍提供 profile Markdown 渲染和 `install_profile_to_cwd` helper，主要供服务端托管 agent run 写隔离工作目录使用；`agb profile use` 不再写本地 profile md，也不再改用户/项目的 `CLAUDE.md`/`AGENTS.md`。Claude Code 交互会通过 `SessionStart` hook 从服务端实时注入 profile 指导。`pins.py` 里只有 `{overview, search, detail}` 类型工具可被 pin，pin 粒度是 `(service, tool_type)` 组而非单个工具，可按 ratio/count 自动选（基于 30 天用量，结果缓存 24h）。
 

@@ -209,18 +209,35 @@ def create_mcp_server(
         limit: int = Field(default=20, description="本次最多返回的产物数量。"),
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
-        result = service.workflows.search_artifacts(
+        result = bridge_service.capabilities.invoke_logged_tool(
             actor=default_user(),
             profile_key=active_profile,
-            query=query,
-            tags=tags or [],
-            path=path,
-            workflow_key=workflow_key,
-            task_key=task_key,
-            task_version=task_version,
-            include_history=False,
-            limit=limit,
-            trusted_profile_context=True,
+            entrypoint="metamcp_search",
+            source_type="builtin",
+            source_key="workflow",
+            tool_name="artifacts_search",
+            request={
+                "query": query,
+                "tags": tags or [],
+                "path": path,
+                "workflow_key": workflow_key,
+                "task_key": task_key,
+                "task_version": task_version,
+                "limit": limit,
+            },
+            handler=lambda: service.workflows.search_artifacts(
+                actor=default_user(),
+                profile_key=active_profile,
+                query=query,
+                tags=tags or [],
+                path=path,
+                workflow_key=workflow_key,
+                task_key=task_key,
+                task_version=task_version,
+                include_history=False,
+                limit=limit,
+                trusted_profile_context=True,
+            ),
         )
         # 引导 agent：命中结果默认只含摘要片段，用完整 path 再查一次可取全文。
         # 仅在有数据时提示，避免空结果噪声。

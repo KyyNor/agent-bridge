@@ -208,7 +208,7 @@ class CapabilityService:
     ) -> dict[str, Any]:
         """带审计的工作流辅助工具/脚本执行入口。
 
-        让 workflow_get_task / workflow_set_task / workflow_run_log / run_script
+        让 artifacts_search / workflow_get_task / workflow_set_task / workflow_run_log / run_script
         等也走和 ``execute`` 相同的 ``log_tool_call`` 审计路径。成功写一行
         success，失败捕获异常、写错误行、把 log_id 缝进异常再抛出。
         """
