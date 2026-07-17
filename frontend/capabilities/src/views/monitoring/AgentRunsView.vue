@@ -5,12 +5,13 @@ import { api } from '../../api/client'
 import type { AgentRun, AgentRunCounts, WorkflowSubagentDetail } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
-import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
+import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import {
   agentRunBadgeVariant,
@@ -146,8 +147,8 @@ async function loadRunData() {
   }
 }
 
-function applyOkFilter(key: AgentRunFilter) {
-  okFilter.value = key
+function applyOkFilter(key: string) {
+  okFilter.value = key as AgentRunFilter
   const wasFirstPage = page.value === 1
   page.value = 1
   if (wasFirstPage) loadRunData()
@@ -277,6 +278,15 @@ function formatCost(v: number | null | undefined): string {
   return `$${Number(v).toFixed(4)}`
 }
 
+// agent run 的 variant → StatusBadge 语义状态
+function runBadgeStatus(run: AgentRun): 'success' | 'error' | 'running' | 'disabled' {
+  const v = agentRunBadgeVariant(run)
+  if (v === 'success') return 'success'
+  if (v === 'running') return 'running'
+  if (v === 'stopped') return 'disabled'
+  return 'error'
+}
+
 </script>
 
 <template>
@@ -294,7 +304,7 @@ function formatCost(v: number | null | undefined): string {
     </div>
 
     <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
-    <div v-else-if="detailError" class="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive">
+    <div v-else-if="detailError" class="rounded-lg border border-destructive/30 bg-destructive-soft px-4 py-3 text-sm text-destructive">
       {{ detailError }}
     </div>
     <div v-else-if="detailRun" class="space-y-4">
@@ -306,16 +316,7 @@ function formatCost(v: number | null | undefined): string {
         <div>
           <span class="text-muted-foreground">状态</span>
           <div>
-            <Badge
-              variant="secondary"
-              :class="agentRunBadgeVariant(detailRun) === 'success'
-                ? 'bg-green-50 text-green-700'
-                : agentRunBadgeVariant(detailRun) === 'running'
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'bg-red-50 text-red-700'"
-            >
-              {{ agentRunStatusLabel(detailRun) }}
-            </Badge>
+            <StatusBadge :status="runBadgeStatus(detailRun)" :label="agentRunStatusLabel(detailRun)" />
           </div>
         </div>
         <div>
@@ -357,7 +358,7 @@ function formatCost(v: number | null | undefined): string {
 
       <div
         v-if="detailRun.error"
-        class="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive"
+        class="rounded-lg border border-destructive/30 bg-destructive-soft px-4 py-3 text-sm text-destructive"
       >
         {{ detailRun.error }}
       </div>
@@ -401,7 +402,7 @@ function formatCost(v: number | null | undefined): string {
     <!-- Toolbar -->
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[280px]">
-        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="search" placeholder="搜索 Agent、Profile 或工作流..." class="pl-8" @update:model-value="scheduleSearch" />
       </div>
       <div class="flex items-center gap-2 text-sm">
@@ -409,21 +410,7 @@ function formatCost(v: number | null | undefined): string {
         <span class="text-muted-foreground">至</span>
         <Input v-model="dateTo" type="date" class="w-[140px]" @change="applyDateFilter" />
       </div>
-      <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-        <button
-          v-for="tab in filterTabs"
-          :key="tab.key"
-          :class="[
-            'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
-            okFilter === tab.key
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground',
-          ]"
-          @click="applyOkFilter(tab.key)"
-        >
-          {{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span>
-        </button>
-      </div>
+      <SegmentedTabs v-model="okFilter" :tabs="filterTabs" @update:model-value="applyOkFilter" />
       <Button variant="outline" @click="loadRunData">
         <RotateCw :size="14" class="mr-1.5" />
         刷新
@@ -476,18 +463,7 @@ function formatCost(v: number | null | undefined): string {
                 {{ r.num_turns ?? '—' }}
               </td>
               <td class="px-4 py-3">
-                <Badge
-                  variant="secondary"
-                  :class="agentRunBadgeVariant(r) === 'success'
-                    ? 'bg-green-50 text-green-700'
-                    : agentRunBadgeVariant(r) === 'running'
-                      ? 'bg-blue-50 text-blue-700'
-                      : agentRunBadgeVariant(r) === 'stopped'
-                        ? 'bg-amber-50 text-amber-700'
-                        : 'bg-red-50 text-red-700'"
-                >
-                  {{ agentRunStatusLabel(r) }}
-                </Badge>
+                <StatusBadge :status="runBadgeStatus(r)" :label="agentRunStatusLabel(r)" />
               </td>
               <td class="px-4 py-3 text-right">
                 <Button variant="ghost" size="sm" class="h-8 text-xs" @click.stop="openDetail(r)">详情</Button>

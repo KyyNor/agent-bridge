@@ -9,11 +9,11 @@ import type {
   OpenApiTool,
   ProjectProfile,
 } from '../../api/types'
-import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Textarea } from '../../components/ui/textarea'
+import CategoryBadge from '../../components/CategoryBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 
 type ToolDebugSourceType = 'mcp_service' | 'openapi_service'
@@ -219,27 +219,6 @@ function profileLabel(profile: ProjectProfile) {
   return `${profile.name}${profile.status !== 'active' ? '（停用）' : ''}`
 }
 
-function toolTypeLabel(toolType: string) {
-  if (toolType === 'overview') return '概览'
-  if (toolType === 'search') return '检索'
-  if (toolType === 'detail') return '明细'
-  if (toolType === 'action') return '操作'
-  if (toolType === 'unconfigured') return '未配置'
-  return toolType
-}
-
-// TODO(redesign): 迁移到统一 CategoryBadge 组件后删除本函数。
-// 工具层级映射已集中到 src/components/CategoryBadge.vue（kind="toolType"），
-// 模板里改为 <CategoryBadge kind="toolType" :value="tool.tool_type" />。
-// 本次能力中枢重设计范围不含本页，先保留原逻辑，后续逐页迁移。
-function toolTypeClass(toolType: string) {
-  if (toolType === 'overview') return 'bg-blue-50 text-blue-700'
-  if (toolType === 'search') return 'bg-purple-50 text-purple-700'
-  if (toolType === 'detail') return 'bg-teal-50 text-teal-700'
-  if (toolType === 'action') return 'bg-amber-50 text-amber-700'
-  return 'bg-muted text-muted-foreground'
-}
-
 function isOpenApiTool(tool: ToolDebugTool): tool is ToolDebugTool & OpenApiTool {
   return tool.source_type === 'openapi_service' && 'method' in tool && 'path' in tool
 }
@@ -351,8 +330,8 @@ function errorMessage(e: unknown) {
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-mono text-sm font-semibold text-foreground">{{ selectedTool.tool_name }}</span>
-                  <Badge variant="secondary" :class="toolTypeClass(selectedTool.tool_type)">{{ toolTypeLabel(selectedTool.tool_type) }}</Badge>
-                  <Badge variant="outline">{{ sourceLabel(selectedTool.source_type) }}</Badge>
+                  <CategoryBadge kind="toolType" :value="selectedTool.tool_type" />
+                  <CategoryBadge kind="source" :value="selectedTool.source_type" />
                 </div>
                 <div class="mt-1 text-xs text-muted-foreground">
                   {{ selectedTool.service_name }}
@@ -369,7 +348,7 @@ function errorMessage(e: unknown) {
               <span
                 v-for="tag in selectedTool.tags"
                 :key="tag"
-                class="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600"
+                class="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-[11px] font-medium text-card-foreground"
               >
                 {{ tag }}
               </span>

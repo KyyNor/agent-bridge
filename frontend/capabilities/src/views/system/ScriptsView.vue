@@ -10,6 +10,7 @@ import CodeMirror from '../../components/CodeMirror.vue'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { Textarea } from '../../components/ui/textarea'
+import StatusBadge from '../../components/StatusBadge.vue'
 import { confirm } from '../../composables/useConfirm'
 import {
   Select,
@@ -421,18 +422,6 @@ function workflowName(key: string) {
   return w ? w.name : key
 }
 
-function runStatusLabel(status: string) {
-  if (status === 'success') return '成功'
-  if (status === 'failed') return '失败'
-  return status
-}
-
-function runBadgeClass(status: string) {
-  if (status === 'success') return 'bg-green-50 text-green-700'
-  if (status === 'failed') return 'bg-red-50 text-red-700'
-  return ''
-}
-
 function prettyJson(value: unknown) {
   try {
     return JSON.stringify(value, null, 2)
@@ -721,7 +710,7 @@ def main(envelope):
         <Card>
           <CardContent class="space-y-3 p-4">
             <div class="text-sm font-semibold text-foreground">测试运行</div>
-            <div v-if="isNew" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <div v-if="isNew" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning-soft-fg">
               新建脚本：点击「保存并运行」将先保存再执行。
             </div>
             <div>
@@ -789,7 +778,7 @@ def main(envelope):
             <div v-else-if="!runDetail" class="py-6 text-center text-sm text-muted-foreground">暂无运行结果，点击「运行」或在下方记录中选择</div>
             <div v-else class="space-y-3">
               <div class="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" :class="runBadgeClass(runDetail.status)">{{ runStatusLabel(runDetail.status) }}</Badge>
+                <StatusBadge :status="runDetail.status === 'success' ? 'success' : 'error'" />
                 <Badge variant="outline">{{ runDetail.run_type }}</Badge>
                 <span class="font-mono text-xs text-muted-foreground">{{ runDetail.run_id }}</span>
                 <span class="text-xs text-muted-foreground">{{ runDetail.duration_ms }} ms</span>
@@ -837,7 +826,7 @@ def main(envelope):
               >
                 <div class="flex items-center justify-between gap-2">
                   <span class="truncate font-mono text-xs">{{ run.run_id }}</span>
-                  <Badge variant="outline" :class="runBadgeClass(run.status)">{{ runStatusLabel(run.status) }}</Badge>
+                  <StatusBadge :status="run.status === 'success' ? 'success' : 'error'" />
                 </div>
                 <div class="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                   <span>{{ run.run_type }}</span>

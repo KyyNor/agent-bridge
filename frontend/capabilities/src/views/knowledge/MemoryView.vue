@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
+import StatusBadge from '../../components/StatusBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { confirm, alert } from '../../composables/useConfirm'
@@ -248,11 +249,11 @@ function openDetail(block: MemoryBlock) {
   window.location.hash = 'memory/' + block.block_key
 }
 
-function statusClass(status: string) {
-  if (status === 'active' || status === 'worker_ready' || status === 'ok') return 'bg-green-50 text-green-700'
-  if (status === 'disabled') return 'text-muted-foreground'
-  if (status === 'error' || status === 'failed') return 'bg-red-50 text-red-700'
-  return 'bg-blue-50 text-blue-700'
+// 记忆区块 status → StatusBadge 语义状态
+function memoryBadgeStatus(status: string): 'success' | 'error' | 'disabled' {
+  if (status === 'active' || status === 'worker_ready' || status === 'ok') return 'success'
+  if (status === 'error' || status === 'failed') return 'error'
+  return 'disabled'
 }
 
 function errorMessage(e: unknown) {
@@ -274,7 +275,7 @@ function errorMessage(e: unknown) {
       </Button>
     </div>
 
-    <div v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ error }}</div>
+    <div v-if="error" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ error }}</div>
 
     <Card>
       <CardContent class="p-0">
@@ -299,7 +300,7 @@ function errorMessage(e: unknown) {
               </td>
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ block.block_key }}</td>
               <td class="px-4 py-3">
-                <Badge variant="secondary" :class="statusClass(block.status)" class="text-[11px]">{{ block.status }}</Badge>
+                <StatusBadge :status="memoryBadgeStatus(block.status)" :label="block.status" />
               </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ block.bound_profile_count || 0 }}</td>
               <td class="px-4 py-3">
@@ -330,7 +331,7 @@ function errorMessage(e: unknown) {
           <DialogTitle>新建记忆区块</DialogTitle>
         </DialogHeader>
         <form class="space-y-4" @submit.prevent="createBlock">
-          <div v-if="createError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ createError }}</div>
+          <div v-if="createError" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ createError }}</div>
           <div class="space-y-2">
             <label class="text-sm font-medium">标识 <span class="text-destructive">*</span></label>
             <Input v-model="form.block_key" placeholder="dev-memory" required />
@@ -366,7 +367,7 @@ function errorMessage(e: unknown) {
       </Button>
     </div>
 
-    <div v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ error }}</div>
+    <div v-if="error" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ error }}</div>
 
     <Card v-if="selected">
       <CardContent class="space-y-5 p-5">
@@ -379,7 +380,7 @@ function errorMessage(e: unknown) {
             <div class="mt-1 break-all text-sm text-muted-foreground">{{ selected.description || selected.block_key }}</div>
           </div>
           <div class="flex items-center gap-2">
-            <Badge variant="secondary" :class="statusClass(selected.status)">{{ selected.status }}</Badge>
+            <StatusBadge :status="memoryBadgeStatus(selected.status)" :label="selected.status" />
             <Badge variant="outline">{{ healthStatus }}</Badge>
           </div>
         </div>
@@ -402,7 +403,7 @@ function errorMessage(e: unknown) {
               {{ healthLoading ? '检查中...' : '检查健康' }}
             </Button>
           </div>
-          <div v-if="healthError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ healthError }}</div>
+          <div v-if="healthError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ healthError }}</div>
           <JsonViewer :value="healthPreview" max-height="160px" />
         </div>
 
@@ -422,7 +423,7 @@ function errorMessage(e: unknown) {
               </Button>
             </div>
           </div>
-          <div v-if="dashboardError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ dashboardError }}</div>
+          <div v-if="dashboardError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ dashboardError }}</div>
           <div v-if="dashboardSrc" class="flex min-h-[60vh] flex-col overflow-hidden rounded-md border border-border">
             <div class="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-2">
               <div class="truncate font-mono text-xs text-muted-foreground">{{ dashboardSrc }}</div>
@@ -448,7 +449,7 @@ function errorMessage(e: unknown) {
               {{ timelineLoading ? '加载中...' : '时间线' }}
             </Button>
           </div>
-          <div v-if="searchError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ searchError }}</div>
+          <div v-if="searchError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ searchError }}</div>
           <div v-if="searchResult" class="space-y-2">
             <div class="text-xs font-medium text-muted-foreground">搜索结果 · {{ searchResult.status }}</div>
             <div v-if="searchResult.items.length === 0" class="rounded-md border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
@@ -465,7 +466,7 @@ function errorMessage(e: unknown) {
           </div>
         </div>
 
-        <div v-if="timelineError" class="rounded-md bg-red-50 px-3 py-2 text-xs text-destructive">{{ timelineError }}</div>
+        <div v-if="timelineError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ timelineError }}</div>
         <div v-if="timeline" class="space-y-2">
           <div class="flex items-center justify-between gap-2">
             <div class="text-xs font-medium text-muted-foreground">时间线 · {{ timeline.status }}</div>

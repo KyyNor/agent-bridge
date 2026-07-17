@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, Globe2, PlugZap, Plus, RotateCw, Save, Search, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, Plus, RotateCw, Save, Search, Trash2 } from 'lucide-vue-next'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
@@ -11,6 +11,9 @@ import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { confirm, alert } from '../../composables/useConfirm'
+import StatusBadge from '../../components/StatusBadge.vue'
+import CategoryBadge from '../../components/CategoryBadge.vue'
+import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import {
@@ -317,7 +320,7 @@ const toolTypeOptions = [
 
     <Card v-else>
       <CardContent class="space-y-4 p-4">
-        <div v-if="formError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ formError }}</div>
+        <div v-if="formError" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ formError }}</div>
         <div v-if="formMode === 'create'" class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
           <button type="button" :class="['flex-1 rounded-md px-3 py-1.5 text-sm font-medium', sourceType === 'mcp_service' ? 'bg-card shadow-sm' : 'text-muted-foreground']" @click="resetCreateForm('mcp_service')">MCP</button>
           <button type="button" :class="['flex-1 rounded-md px-3 py-1.5 text-sm font-medium', sourceType === 'openapi_service' ? 'bg-card shadow-sm' : 'text-muted-foreground']" @click="resetCreateForm('openapi_service')">OpenAPI</button>
@@ -401,19 +404,10 @@ const toolTypeOptions = [
   <div v-else class="space-y-5">
     <div class="flex flex-wrap items-center gap-4">
       <div class="relative flex-1 max-w-[360px]">
-        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+        <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="search" placeholder="搜索服务名称、地址或描述..." class="pl-8" />
       </div>
-      <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-        <button
-          v-for="tab in filterTabs" :key="tab.key"
-          :class="[
-            'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
-            statusFilter === tab.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-          ]"
-          @click="() => { statusFilter = tab.key; page = 1 }"
-        >{{ tab.label }} <span class="font-normal text-muted-foreground">{{ tab.count }}</span></button>
-      </div>
+      <SegmentedTabs v-model="statusFilter" :tabs="filterTabs" @update:model-value="page = 1" />
       <Select v-model="sourceFilter" @update:model-value="page = 1">
         <SelectTrigger class="w-[150px]">
           <SelectValue />
@@ -454,18 +448,13 @@ const toolTypeOptions = [
                 <div class="mt-0.5 text-xs text-muted-foreground">{{ s.description || s.name }}</div>
               </td>
               <td class="px-4 py-3">
-                <Badge v-if="s.source_type === 'openapi_service'" variant="secondary" class="bg-cyan-50 text-cyan-700">
-                  <Globe2 :size="12" /> OpenAPI
-                </Badge>
-                <Badge v-else variant="secondary" class="bg-indigo-50 text-indigo-700">
-                  <PlugZap :size="12" /> MCP
-                </Badge>
+                <CategoryBadge kind="source" :value="s.source_type" />
               </td>
               <td class="max-w-[280px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">{{ serviceUrl(s) }}</td>
               <td class="px-4 py-3">
-                <Badge v-if="s.status === 'enabled'" variant="secondary" class="bg-green-50 text-green-700">已启用</Badge>
-                <Badge v-else-if="s.status === 'error'" variant="destructive">连接失败</Badge>
-                <Badge v-else variant="secondary" class="text-muted-foreground">已停用</Badge>
+                <StatusBadge v-if="s.status === 'enabled'" status="enabled" />
+                <StatusBadge v-else-if="s.status === 'error'" status="error" label="连接失败" />
+                <StatusBadge v-else status="disabled" />
               </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ toolCounts[serviceCountKey(s)] ?? '...' }}</td>
               <td class="px-4 py-3 text-xs text-muted-foreground">{{ timeAgo(lastSyncAt(s)) }}</td>
@@ -507,7 +496,7 @@ const toolTypeOptions = [
         <DialogHeader>
           <DialogTitle>同步接口 · {{ importService?.name || importService?.service_key }}</DialogTitle>
         </DialogHeader>
-        <div v-if="importError" class="rounded-lg bg-red-50 p-3 text-sm text-destructive">{{ importError }}</div>
+        <div v-if="importError" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ importError }}</div>
         <div v-if="importing" class="py-10 text-center text-sm text-muted-foreground">解析 OpenAPI 文档中...</div>
         <div v-else class="max-h-[560px] overflow-auto rounded-lg border border-border">
           <table class="w-full">
