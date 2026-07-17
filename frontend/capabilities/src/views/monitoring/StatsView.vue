@@ -4,6 +4,7 @@ import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
+import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
@@ -87,25 +88,22 @@ const pagedStats = computed(() => paginate(stats.value, page.value, pageSize.val
       </Card>
     </div>
 
-    <!-- Toolbar -->
-    <div class="flex flex-wrap items-center gap-4">
-      <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
-        <button
-          v-for="d in dimensions" :key="d.key"
-          :class="[
-            'rounded-md px-3.5 py-1.5 text-[13px] font-medium transition-colors',
-            dimension === d.key
-              ? 'bg-card text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground'
-          ]"
-          @click="applyDimension(d.key)"
-        >{{ d.label }}</button>
-      </div>
-      <Button variant="outline" @click="loadStats">
-        <RotateCw :size="14" class="mr-1.5" />
+    <!-- 页头筛选：维度切换进全局 PageHeader 的 #ph-filters -->
+    <Teleport to="#ph-filters" defer>
+      <SegmentedTabs
+        :model-value="dimension"
+        :tabs="dimensions"
+        @update:model-value="applyDimension"
+      />
+    </Teleport>
+
+    <!-- 页头操作：刷新进全局 PageHeader 的 #ph-actions -->
+    <Teleport to="#ph-actions" defer>
+      <Button variant="outline" size="lg" @click="loadStats">
+        <RotateCw :size="14" />
         刷新
       </Button>
-    </div>
+    </Teleport>
 
     <!-- Table -->
     <Card>
