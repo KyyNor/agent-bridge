@@ -30,7 +30,7 @@ test('workflow detail implements the approved layered workbench without replacin
 
   assert.match(file, /import SegmentedTabs from ['"]\.\.\/\.\.\/components\/SegmentedTabs\.vue['"]/)
   assert.match(file, /import StatCard from ['"]\.\.\/\.\.\/components\/StatCard\.vue['"]/)
-  assert.match(file, /const detailTab = ref<'overview' \| 'tasks' \| 'artifacts' \| 'runs'>\('overview'\)/)
+  assert.match(file, /const detailTab = ref<'overview' \| 'tasks' \| 'artifacts' \| 'runs' \| 'versions'>\('overview'\)/)
   assert.match(file, /const detailTabs = computed\(/)
   assert.match(file, /await Promise\.all\(\[searchArtifacts\(\), loadRuns\(item\.workflow_key\), loadTasks\(item\.workflow_key\)\]\)/)
   assert.match(file, /<SegmentedTabs v-model="detailTab" :tabs="detailTabs"/)

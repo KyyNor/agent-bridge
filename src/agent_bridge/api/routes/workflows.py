@@ -41,6 +41,29 @@ def create_workflow_routes(service, actor):
     def clear_workflow_execution_data(workflow_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflows.clear_execution_data(current_actor, workflow_key)
 
+    @router.get("/workflows/{workflow_key}/revisions")
+    def list_workflow_revisions(
+        workflow_key: str, limit: int = 100, current_actor: str = Depends(actor)
+    ) -> list[dict[str, Any]]:
+        return service.workflows.list_revisions(current_actor, workflow_key, limit=limit)
+
+    @router.get("/workflows/{workflow_key}/revisions/{revision_no}")
+    def get_workflow_revision(
+        workflow_key: str, revision_no: int, current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.workflows.get_revision(current_actor, workflow_key, revision_no)
+
+    @router.get("/workflows/{workflow_key}/diff")
+    def diff_workflow(
+        workflow_key: str,
+        current_actor: str = Depends(actor),
+        from_revision: int | None = None,
+        to_revision: int | None = None,
+    ) -> dict[str, Any]:
+        return service.workflows.diff_revisions(
+            current_actor, workflow_key, from_no=from_revision, to_no=to_revision
+        )
+
     @router.get("/workflows/{workflow_key}/runs")
     def list_workflow_runs(
         workflow_key: str,

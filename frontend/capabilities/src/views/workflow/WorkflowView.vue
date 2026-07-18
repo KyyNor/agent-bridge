@@ -26,6 +26,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
+import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
@@ -87,7 +88,7 @@ const showArtifactHistory = ref(false)
 const fullscreenArtifact = ref<{ title: string; path: string; summary: string; tags: string[]; content: string; format: string } | null>(null)
 const showGuide = ref(false)
 const showClearConfirm = ref(false)
-const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs'>('overview')
+const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs' | 'versions'>('overview')
 const progressWorkflowKey = ref('')
 const progressRunId = ref('')
 const taskWorkflowKey = ref('')
@@ -326,6 +327,7 @@ const detailTabs = computed(() => [
   { key: 'tasks', label: '任务队列', count: pendingTaskCount.value || undefined },
   { key: 'artifacts', label: '工作流产物', count: artifactTotal.value || undefined },
   { key: 'runs', label: '运行记录', count: runs.value.length || undefined },
+  { key: 'versions', label: '版本历史' },
 ])
 /** Distinct status values present, in the canonical display order. */
 const taskStatuses = computed(() => distinctStatuses(tasks.value))
@@ -922,7 +924,7 @@ async function prepareDetail(item: WorkflowDefinition) {
 }
 
 async function selectDetailTab(value: string) {
-  if (value !== 'overview' && value !== 'tasks' && value !== 'artifacts' && value !== 'runs') return
+  if (value !== 'overview' && value !== 'tasks' && value !== 'artifacts' && value !== 'runs' && value !== 'versions') return
   detailTab.value = value
   if (value === 'tasks' && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
 }
@@ -2486,7 +2488,20 @@ async function confirmClearWorkflow() {
               v-model:page-size="runPageSize"
               :total="runs.length"
               :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+              />
+          </section>
+          <section v-if="detailTab === 'versions'" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold">版本历史</h3>
+              <span v-if="selectedWorkflow?.revision_no" class="rounded bg-secondary px-2 py-0.5 font-mono text-xs text-muted-foreground">当前 v{{ selectedWorkflow.revision_no }}</span>
+            </div>
+            <RevisionHistoryPanel
+              v-if="selectedWorkflow"
+              :key="`wf-${selectedWorkflow.workflow_key}`"
+              entity-type="workflow"
+              :entity-key="selectedWorkflow.workflow_key"
             />
+            <p v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</p>
           </section>
       </div>
       <div v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</div>

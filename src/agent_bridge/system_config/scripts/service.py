@@ -17,8 +17,10 @@ from jsonschema.exceptions import SchemaError
 from agent_bridge.automation.workflows.validation import WORKFLOW_VALIDATION_INPUT_SCHEMA
 from agent_bridge.core.config import AgentBridgePaths, load_server_config
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.diff import text_diff
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.runtime_support import render_runner, render_runtime_helper
+from agent_bridge.system_config.scripts.syntax import check_python_syntax
 
 
 SCRIPT_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -138,6 +140,10 @@ class ScriptService:
                 raise ValidationError("cannot change built-in script input_schema")
             if normalized_output_schema != builtin.output_schema:
                 raise ValidationError("cannot change built-in script output_schema")
+        new_content_hash = self._content_hash(normalized_code)
+        previous = self.store.scripts.get_script(normalized_key)
+        is_first_revision = previous is None
+        content_changed = bool(previous is None or previous.get("content_hash") != new_content_hash)
         script = self.store.scripts.upsert_script(
             script_key=normalized_key,
             name=normalized_name,
@@ -149,9 +155,21 @@ class ScriptService:
             status=normalized_status,
             owner_type=normalized_owner_type,
             owner_key=normalized_owner_key,
-            content_hash=self._content_hash(normalized_code),
+            content_hash=new_content_hash,
             actor=actor,
         )
+        # Archive a revision whenever content actually changed (or on first save).
+        revision_no = self.store.scripts.get_current_revision_no(normalized_key)
+        if content_changed or is_first_revision:
+            revision = self.store.scripts.create_revision(
+                script_key=normalized_key,
+                content_hash=new_content_hash,
+                snapshot=self._script_revision_snapshot(script),
+                actor=actor,
+            )
+            revision_no = revision["revision_no"]
+        script["revision_no"] = revision_no
+        script["syntax_check"] = check_python_syntax(normalized_code)
         return self._script_payload(script, include_code=True)
 
     def delete_script(self, actor: str, script_key: str) -> dict[str, Any]:
@@ -216,6 +234,12 @@ class ScriptService:
         if not isinstance(script_params, dict):
             raise ValidationError("script_params must be an object")
         self._validate_script_params(script["script_key"], script["input_schema"], script_params)
+        # Fast-fail on syntax errors before spawning a subprocess.
+        syntax = check_python_syntax(str(script.get("code") or ""))
+        if not syntax["ok"]:
+            first = syntax["errors"][0]
+            location = f"line {first['line']}" if first.get("line") else "unknown line"
+            raise ValidationError(f"script has syntax errors ({location}): {first.get('msg')}")
         if script.get("source") == "default":
             script = self._materialize_default_script(self._builtins[script["script_key"]])
         timeout = self._timeout(timeout_seconds)
@@ -301,6 +325,62 @@ class ScriptService:
         if run is None:
             raise NotFound("script run not found")
         return self._run_payload(run, include_logs=True)
+
+    # --- versioning & diff -----------------------------------------------
+
+    def list_revisions(self, actor: str, script_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        normalized_key = self._validate_script_key(script_key)
+        revisions = self.store.scripts.list_revisions(normalized_key, limit=limit)
+        current = self.store.scripts.get_current_revision_no(normalized_key)
+        for rev in revisions:
+            rev["is_current"] = rev.get("revision_no") == current
+        return revisions
+
+    def get_revision(self, actor: str, script_key: str, revision_no: int) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        normalized_key = self._validate_script_key(script_key)
+        revision = self.store.scripts.get_revision(normalized_key, revision_no)
+        if revision is None:
+            raise NotFound("script revision not found")
+        current = self.store.scripts.get_current_revision_no(normalized_key)
+        revision["is_current"] = revision.get("revision_no") == current
+        return revision
+
+    def diff_revisions(
+        self, actor: str, script_key: str, *, from_no: int | None, to_no: int | None
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        normalized_key = self._validate_script_key(script_key)
+        current = self.store.scripts.get_current_revision_no(normalized_key)
+        if current == 0:
+            raise NotFound("script has no revisions")
+        to_revision_no = to_no if to_no is not None else current
+        from_revision_no = from_no if from_no is not None else max(to_revision_no - 1, 1)
+        to_rev = self.store.scripts.get_revision(normalized_key, to_revision_no)
+        from_rev = self.store.scripts.get_revision(normalized_key, from_revision_no)
+        if to_rev is None:
+            raise NotFound(f"script revision {to_revision_no} not found")
+        if from_rev is None:
+            raise NotFound(f"script revision {from_revision_no} not found")
+        from_text = str((from_rev.get("snapshot") or {}).get("code") or "")
+        to_text = str((to_rev.get("snapshot") or {}).get("code") or "")
+        return {
+            "entity_type": "script",
+            "entity_key": normalized_key,
+            "from_revision": from_revision_no,
+            "to_revision": to_revision_no,
+            "text": text_diff(
+                from_text,
+                to_text,
+                from_label=f"revision {from_revision_no}",
+                to_label=f"revision {to_revision_no}",
+            ),
+        }
+
+    def validate_code(self, actor: str, code: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return check_python_syntax(code)
 
     def _run_python(
         self,
@@ -473,6 +553,21 @@ class ScriptService:
             payload.pop("code", None)
             payload["code_preview"] = str(script.get("code") or "")[:160]
         return payload
+
+    def _script_revision_snapshot(self, script: dict[str, Any]) -> dict[str, Any]:
+        """Capture the fields needed to reconstruct/diff a script version."""
+        return {
+            "script_key": script.get("script_key"),
+            "name": script.get("name"),
+            "description": script.get("description"),
+            "language": script.get("language"),
+            "code": script.get("code"),
+            "status": script.get("status"),
+            "owner_type": script.get("owner_type"),
+            "owner_key": script.get("owner_key"),
+            "input_schema": script.get("input_schema"),
+            "output_schema": script.get("output_schema"),
+        }
 
     def _run_payload(self, run: dict[str, Any], *, include_logs: bool) -> dict[str, Any]:
         result = dict(run)

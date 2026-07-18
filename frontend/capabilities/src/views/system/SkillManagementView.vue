@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { confirm } from '../../composables/useConfirm'
 import PaginationBar from '../../components/PaginationBar.vue'
+import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const skills = ref<SkillPrompt[]>([])
@@ -21,6 +22,7 @@ const saving = ref(false)
 const error = ref('')
 const message = ref('')
 const previewTab = ref<'edit' | 'preview'>('preview')
+const showHistory = ref(false)
 const copied = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
@@ -229,6 +231,27 @@ function errorMessage(e: unknown) {
             />
           </template>
           <div v-else class="py-12 text-center text-sm text-muted-foreground">请选择 Skill</div>
+
+          <!-- Version history -->
+          <template v-if="selected">
+            <div class="mt-4 border-t border-border pt-3">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+                @click="showHistory = !showHistory"
+              >
+                {{ showHistory ? '▾ 收起版本历史' : '▸ 查看版本历史' }}
+                <span v-if="selected.revision_no" class="rounded bg-secondary px-1.5 py-0.5 font-mono">v{{ selected.revision_no }}</span>
+              </button>
+              <div v-if="showHistory" class="mt-3">
+                <RevisionHistoryPanel
+                  :key="`skill-${selected.skill_name}`"
+                  entity-type="skill"
+                  :entity-key="selected.skill_name"
+                />
+              </div>
+            </div>
+          </template>
         </CardContent>
       </Card>
     </div>

@@ -150,6 +150,79 @@ class WorkflowsRepository:
             ).fetchall()
             return [item for row in rows if (item := _row_payload(row)) is not None]
 
+    # --- definition revisions --------------------------------------------
+
+    def create_definition_revision(
+        self, *, workflow_key: str, content_hash: str, snapshot: dict[str, Any], actor: str
+    ) -> dict[str, Any]:
+        snapshot_json = _json_dumps(snapshot)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(revision_no), 0) FROM workflow_definition_revisions WHERE workflow_key = ?",
+                (workflow_key,),
+            ).fetchone()
+            next_no = int(row[0]) + 1
+            conn.execute(
+                """
+                INSERT INTO workflow_definition_revisions (workflow_key, revision_no, content_hash, snapshot_json, created_by)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (workflow_key, next_no, content_hash, snapshot_json, actor),
+            )
+            conn.execute(
+                "UPDATE workflow_definitions SET current_revision_no = ? WHERE workflow_key = ?",
+                (next_no, workflow_key),
+            )
+            return dict(
+                conn.execute(
+                    """
+                    SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, created_at
+                    FROM workflow_definition_revisions WHERE workflow_key = ? AND revision_no = ?
+                    """,
+                    (workflow_key, next_no),
+                ).fetchone()
+            )
+
+    def list_definition_revisions(self, workflow_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        bounded = min(max(limit, 1), 500)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, created_at
+                FROM workflow_definition_revisions
+                WHERE workflow_key = ?
+                ORDER BY revision_no DESC
+                LIMIT ?
+                """,
+                (workflow_key, bounded),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_definition_revision(self, workflow_key: str, revision_no: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            item = row_to_dict(
+                conn.execute(
+                    """
+                    SELECT workflow_key AS entity_key, revision_no, content_hash, snapshot_json, created_by, created_at
+                    FROM workflow_definition_revisions
+                    WHERE workflow_key = ? AND revision_no = ?
+                    """,
+                    (workflow_key, revision_no),
+                ).fetchone()
+            )
+            if item is None:
+                return None
+            item["snapshot"] = _json_loads(item.pop("snapshot_json", None), {})
+            return item
+
+    def get_current_definition_revision_no(self, workflow_key: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT current_revision_no FROM workflow_definitions WHERE workflow_key = ?",
+                (workflow_key,),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
     def _workflow_task_action(
         self,
         *,

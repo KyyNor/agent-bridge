@@ -193,6 +193,8 @@ export interface WorkflowDefinition {
   created_by: string
   created_at: string
   updated_at: string
+  revision_no?: number
+  content_hash?: string
 }
 
 export interface SkillPrompt {
@@ -205,6 +207,7 @@ export interface SkillPrompt {
   prompt_preview?: string
   updated_at: string | null
   updated_by: string | null
+  revision_no?: number
 }
 
 export interface WorkflowArtifact {
@@ -1186,6 +1189,8 @@ export interface ManagedScript {
   source?: 'default' | 'database'
   code?: string
   code_preview?: string
+  revision_no?: number
+  syntax_check?: SyntaxCheckResult
 }
 
 export interface ScriptRun {
@@ -1208,4 +1213,68 @@ export interface ScriptRun {
 
 export interface ScriptRunListResult {
   runs: ScriptRun[]
+}
+
+// --- Versioning / diff / syntax-check -------------------------------------
+
+export type VersionedEntity = 'script' | 'workflow' | 'skill'
+
+export interface Revision {
+  entity_key: string
+  revision_no: number
+  content_hash: string
+  created_by: string
+  created_at: string
+  is_current?: boolean
+}
+
+export interface RevisionWithSnapshot extends Revision {
+  snapshot: Record<string, unknown>
+}
+
+export interface SyntaxCheckError {
+  line: number | null
+  col: number | null
+  msg: string
+  text?: string | null
+}
+
+export interface SyntaxCheckResult {
+  ok: boolean
+  errors: SyntaxCheckError[]
+}
+
+export interface DiffText {
+  format: 'unified'
+  content: string
+  from_label: string
+  to_label: string
+  identical: boolean
+}
+
+export interface WorkflowStructuredNodeChange {
+  id: string
+  type?: string
+  label?: string
+  source?: string
+  target?: string
+  source_handle?: string | null
+  target_handle?: string | null
+  changes?: { field: string; from: unknown; to: unknown }[]
+}
+
+export interface WorkflowStructuredDiff {
+  nodes: { added: WorkflowStructuredNodeChange[]; removed: WorkflowStructuredNodeChange[]; changed: WorkflowStructuredNodeChange[] }
+  edges: { added: WorkflowStructuredNodeChange[]; removed: WorkflowStructuredNodeChange[]; changed: WorkflowStructuredNodeChange[] }
+  metadata: { field: string; from: unknown; to: unknown }[]
+  identical: boolean
+}
+
+export interface DiffResult {
+  entity_type: VersionedEntity
+  entity_key: string
+  from_revision: number
+  to_revision: number
+  text: DiffText
+  structured?: WorkflowStructuredDiff
 }

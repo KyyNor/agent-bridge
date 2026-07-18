@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from contextvars import ContextVar
@@ -172,6 +173,21 @@ class SQLiteStore:
             )
             self._rebuild_workflow_tasks_if_needed(conn)
             self._rebuild_workflow_artifacts_if_needed(conn)
+            self._ensure_columns(
+                conn,
+                "scripts",
+                {"current_revision_no": "INTEGER NOT NULL DEFAULT 0"},
+            )
+            self._ensure_columns(
+                conn,
+                "workflow_definitions",
+                {"current_revision_no": "INTEGER NOT NULL DEFAULT 0"},
+            )
+            self._ensure_columns(
+                conn,
+                "skill_prompts",
+                {"current_revision_no": "INTEGER NOT NULL DEFAULT 0"},
+            )
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_current
@@ -683,6 +699,75 @@ class SQLiteStore:
         with self.connect() as conn:
             cursor = conn.execute("DELETE FROM skill_prompts WHERE skill_name = ?", (skill_name,))
             return cursor.rowcount > 0
+
+    # --- skill prompt revisions ------------------------------------------
+
+    def create_skill_prompt_revision(
+        self, *, skill_name: str, content_hash: str, snapshot: dict[str, Any], actor: str
+    ) -> dict[str, Any]:
+        snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(revision_no), 0) FROM skill_prompt_revisions WHERE skill_name = ?",
+                (skill_name,),
+            ).fetchone()
+            next_no = int(row[0]) + 1
+            conn.execute(
+                """
+                INSERT INTO skill_prompt_revisions (skill_name, revision_no, content_hash, snapshot_json, created_by)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (skill_name, next_no, content_hash, snapshot_json, actor),
+            )
+            # current_revision_no lives on skill_prompts; reset (delete override) means
+            # the row is gone, so we only bump it when an override still exists.
+            conn.execute(
+                "UPDATE skill_prompts SET current_revision_no = ? WHERE skill_name = ?",
+                (next_no, skill_name),
+            )
+            return dict(
+                conn.execute(
+                    """
+                    SELECT skill_name AS entity_key, revision_no, content_hash, created_by, created_at
+                    FROM skill_prompt_revisions WHERE skill_name = ? AND revision_no = ?
+                    """,
+                    (skill_name, next_no),
+                ).fetchone()
+            )
+
+    def list_skill_prompt_revisions(self, skill_name: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        bounded = min(max(limit, 1), 500)
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT skill_name AS entity_key, revision_no, content_hash, created_by, created_at
+                FROM skill_prompt_revisions
+                WHERE skill_name = ?
+                ORDER BY revision_no DESC
+                LIMIT ?
+                """,
+                (skill_name, bounded),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_skill_prompt_revision(self, skill_name: str, revision_no: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT skill_name AS entity_key, revision_no, content_hash, snapshot_json, created_by, created_at
+                FROM skill_prompt_revisions
+                WHERE skill_name = ? AND revision_no = ?
+                """,
+                (skill_name, revision_no),
+            ).fetchone()
+            if row is None:
+                return None
+            item = dict(row)
+            try:
+                item["snapshot"] = json.loads(item.pop("snapshot_json"))
+            except (json.JSONDecodeError, KeyError):
+                item["snapshot"] = {}
+            return item
 
     def upsert_code_repository(
         self,
