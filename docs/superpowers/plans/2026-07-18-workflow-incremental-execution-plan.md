@@ -1,4 +1,3 @@
-@@ -0,0 +1,277 @@
 # 工作流增量执行与历史产物复用 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -276,4 +275,3 @@
 - artifact 内容和来源可校验、可查询、不可跨任务版本混用，并发运行之间没有覆盖或污染。
 - API 支持预览、增量、强制全量；页面支持 stale/产物任务手动运行并展示每节点原因。
 - 十项验收场景、后端全量测试、前端测试、typecheck 和 build 全部通过。
-
