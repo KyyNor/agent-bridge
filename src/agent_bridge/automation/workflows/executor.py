@@ -108,6 +108,7 @@ class WorkflowDagExecutor:
             if skipped:
                 continue
 
+            reused_progress = False
             for node, condition_results in ready:
                 pending.remove(node.id)
                 statuses[node.id] = "running"
@@ -123,6 +124,7 @@ class WorkflowDagExecutor:
                         run_id, node, condition_results, result, statuses, outputs, node_plan
                     )
                     reused_sources[node.id] = self._source_payload(node_plan)
+                    reused_progress = True
                     if node.type == "get_task":
                         task = payload.get("task")
                         if task is None:
@@ -160,6 +162,8 @@ class WorkflowDagExecutor:
 
             if not running:
                 if pending:
+                    if reused_progress:
+                        continue
                     error = "工作流调度停滞：没有可运行节点"
                     for node_id in sorted(pending):
                         statuses[node_id] = "failed"

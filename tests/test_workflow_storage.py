@@ -62,6 +62,7 @@ def test_workflow_definition_snapshot_and_node_runs_round_trip(wm_paths):
 def test_workflow_incremental_storage_migrates_legacy_tables_idempotently(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 
+    wm_paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(wm_paths.db_path) as conn:
         conn.executescript(
             """
@@ -816,7 +817,7 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
     assert result == task_counts(updated=1)
     assert statements[0] == "BEGIN IMMEDIATE"
     assert statements[1].startswith("SELECT WORKFLOW_TASK_RERUN_DAYS")
-    assert statements[2].startswith("SELECT STATUS, LEASE_EXPIRES_AT, SET_AT")
+    assert statements[2].startswith("SELECT ID, STATUS, LEASE_EXPIRES_AT, SET_AT")
 
 
 def _seed_workflow_with_task(store, workflow_key: str = "w", task_key: str = "page:a") -> None:

@@ -79,11 +79,11 @@ def _as_list(value: Any) -> list[Any] | None:
     return None
 
 
-def _run_sort_key(run: Mapping[str, Any]) -> tuple[str, str, int]:
+def _run_sort_key(run: Mapping[str, Any]) -> tuple[str, int, str]:
     return (
         str(run.get("finished_at") or run.get("started_at") or run.get("created_at") or ""),
-        str(run.get("run_id") or ""),
         int(run.get("id") or 0),
+        str(run.get("run_id") or ""),
     )
 
 
