@@ -118,7 +118,7 @@ function agentRunLabel(run: AgentRun) {
       </Button>
     </div>
 
-    <div v-if="stopError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+    <div v-if="stopError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-xs text-destructive-soft-fg">
       停止失败：{{ stopError }}
     </div>
     <div v-if="props.detailError" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning-soft-fg">

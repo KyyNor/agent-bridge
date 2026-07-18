@@ -22,7 +22,7 @@ function onConfirm() {
         <div class="flex items-start gap-3">
           <div
             v-if="state.destructive && !state.singleButton"
-            class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive"
+            class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-destructive-soft text-destructive-soft-fg"
           >
             <AlertTriangle :size="16" />
           </div>

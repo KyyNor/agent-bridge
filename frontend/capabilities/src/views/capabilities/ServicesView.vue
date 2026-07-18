@@ -314,7 +314,7 @@ const toolTypeOptions = [
       </Button>
     </div>
 
-    <div v-if="serviceNotFound" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+    <div v-if="serviceNotFound" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
       无法加载该服务（可能已被删除或不存在）。请<a class="underline" href="#services" @click.prevent="goList">返回列表</a>。
     </div>
 

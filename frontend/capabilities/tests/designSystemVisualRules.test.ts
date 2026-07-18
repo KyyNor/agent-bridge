@@ -59,6 +59,14 @@ test('runtime components do not retain raw palette status colors', () => {
   }
 })
 
+test('runtime components use soft state tokens for destructive surfaces', () => {
+  const legacyDestructiveSurface = /bg-destructive\/(?:5|10)/
+
+  for (const file of sourceFiles('src')) {
+    assert.doesNotMatch(read(file), legacyDestructiveSurface, file)
+  }
+})
+
 test('page header owns a consistent control rhythm', () => {
   const pageHeader = read('src/components/PageHeader.vue')
   const segmentedTabs = read('src/components/SegmentedTabs.vue')

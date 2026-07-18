@@ -1343,7 +1343,7 @@ function syncBadgeLabel(status?: string | null) {
     <!-- DETAIL MODE (secondary page) -->
     <template v-else>
       <!-- Route error -->
-      <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+      <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
         {{ routeError }}。请<a class="underline" href="#knowledge" @click.prevent="goList">返回列表</a>。
       </div>
 
@@ -1479,7 +1479,7 @@ function syncBadgeLabel(status?: string | null) {
               <Button variant="ghost" size="sm" class="h-7 text-xs text-muted-foreground" @click="selectedDocSlugs = new Set()">取消选择</Button>
             </div>
             <div v-if="browseLoading" class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">目录加载中...</div>
-            <div v-else-if="browseError && !showingAllDocuments" class="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm text-destructive">{{ browseError }}</div>
+            <div v-else-if="browseError && !showingAllDocuments" class="rounded-lg border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">{{ browseError }}</div>
             <div v-else-if="!showingAllDocuments && browseEntries.length === 0" class="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">暂无子条目</div>
             <div v-else-if="!showingAllDocuments" class="min-h-0 max-h-[calc(100vh-420px)] overflow-x-auto overflow-y-auto rounded-lg border border-border">
               <table class="w-full">
@@ -1786,7 +1786,7 @@ function syncBadgeLabel(status?: string | null) {
       <DialogContent class="sm:max-w-[640px]">
         <DialogHeader><DialogTitle>文档详情</DialogTitle></DialogHeader>
         <div v-if="docDetailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中...</div>
-        <div v-else-if="docDetailError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{{ docDetailError }}</div>
+        <div v-else-if="docDetailError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">{{ docDetailError }}</div>
         <div v-else-if="docDetail" class="space-y-4 text-sm">
           <div class="grid gap-2 sm:grid-cols-2">
             <div><span class="text-xs text-muted-foreground">标题</span><div class="font-medium">{{ docDetail.title }}</div></div>
@@ -1835,7 +1835,7 @@ function syncBadgeLabel(status?: string | null) {
               />
             </div>
           </div>
-          <div v-if="folderDialogError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{{ folderDialogError }}</div>
+          <div v-if="folderDialogError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">{{ folderDialogError }}</div>
         </form>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
@@ -1872,7 +1872,7 @@ function syncBadgeLabel(status?: string | null) {
               />
             </div>
           </div>
-          <div v-if="placementError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{{ placementError }}</div>
+          <div v-if="placementError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">{{ placementError }}</div>
         </div>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>
@@ -1950,7 +1950,7 @@ function syncBadgeLabel(status?: string | null) {
                   <div class="h-1.5 overflow-hidden rounded-full bg-muted">
                     <div class="h-full rounded-full bg-primary transition-[width]" :style="{ width: `${f.progress}%` }"></div>
                   </div>
-                  <div v-if="f.error" class="max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded border border-destructive/20 bg-destructive/5 px-2 py-1 text-xs text-destructive">
+                  <div v-if="f.error" class="max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded border border-destructive/20 bg-destructive-soft px-2 py-1 text-xs text-destructive-soft-fg">
                     {{ f.error }}
                   </div>
                 </div>
@@ -1961,7 +1961,7 @@ function syncBadgeLabel(status?: string | null) {
               <input type="file" multiple class="hidden" :disabled="uploading" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.zip" @change="onUploadFilesSelected" />
             </label>
           </div>
-          <div v-if="uploadError" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <div v-if="uploadError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
             {{ uploadError }}
           </div>
         </div>

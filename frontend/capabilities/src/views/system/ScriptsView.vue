@@ -702,7 +702,7 @@ def main(envelope):
       </DialogContent>
     </Dialog>
 
-    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
       {{ error }}
     </div>
 
@@ -796,7 +796,7 @@ def main(envelope):
       </div>
     </div>
 
-    <div v-if="scriptNotFound" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+    <div v-if="scriptNotFound" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
       无法加载该脚本（可能已被删除或不存在）。请<a class="underline" href="#scripts" @click.prevent="goList">返回列表</a>。
     </div>
 
@@ -806,7 +806,7 @@ def main(envelope):
         <CardContent class="space-y-4 p-4">
           <div v-if="formLoading" class="py-16 text-center text-sm text-muted-foreground">加载中</div>
           <template v-else>
-            <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
               {{ formError }}
             </div>
             <div class="grid gap-3 md:grid-cols-2">
@@ -1015,7 +1015,7 @@ def main(envelope):
                 <span class="text-xs text-muted-foreground">{{ runDetail.duration_ms }} ms</span>
                 <span v-if="runDetail.exit_code !== null" class="text-xs text-muted-foreground">exit {{ runDetail.exit_code }}</span>
               </div>
-              <div v-if="runDetail.error_message" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div v-if="runDetail.error_message" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
                 {{ runDetail.error_message }}
               </div>
               <section class="rounded-md border bg-muted/20 p-3">
@@ -1121,7 +1121,7 @@ def main(envelope):
           {{ designing ? (designStopRequested ? '停止中' : '立即停止') : '生成方案' }}
         </Button>
 
-        <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
           {{ designError }}
         </div>
 

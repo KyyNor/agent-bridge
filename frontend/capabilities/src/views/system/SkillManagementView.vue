@@ -123,7 +123,7 @@ function errorMessage(e: unknown) {
 
 <template>
   <div class="space-y-5">
-    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
       {{ error }}
     </div>
     <div v-if="message" class="rounded-md border border-success/30 bg-success-soft px-3 py-2 text-sm text-success-soft-fg">

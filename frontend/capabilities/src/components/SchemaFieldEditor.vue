@@ -219,7 +219,7 @@ defineExpose({
 
     <div
       v-if="validationMessage"
-      class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+      class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-xs text-destructive-soft-fg"
     >
       {{ validationMessage }}
     </div>

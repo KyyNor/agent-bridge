@@ -265,7 +265,7 @@ function errorMessage(e: unknown) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
-    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
       {{ error }}
     </div>
 
@@ -359,7 +359,7 @@ function errorMessage(e: unknown) {
               <Textarea v-model="paramsText" class="min-h-[320px] font-mono text-xs" />
             </div>
 
-            <div v-if="executionError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div v-if="executionError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
               {{ executionError }}
             </div>
 

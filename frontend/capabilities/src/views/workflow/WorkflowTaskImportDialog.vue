@@ -103,7 +103,7 @@ function onFileChange(event: Event) {
         <div v-if="loading" class="rounded-md border border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
           正在解析并校验 Excel 文件...
         </div>
-        <div v-else-if="error" class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div v-else-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
           {{ error }}
         </div>
 
@@ -144,7 +144,7 @@ function onFileChange(event: Event) {
                       <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ row.action }}</div>
                     </td>
                     <td class="px-3 py-2">
-                      <div v-if="row.errors.length" class="space-y-1 rounded-sm border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-destructive">
+                      <div v-if="row.errors.length" class="space-y-1 rounded-sm border border-destructive/30 bg-destructive-soft px-2 py-1.5 text-destructive-soft-fg">
                         <div v-for="message in row.errors" :key="message">{{ message }}</div>
                       </div>
                       <span v-else class="text-muted-foreground">—</span>
