@@ -255,6 +255,71 @@ class WorkflowsRepository:
                 (revision_no, workflow_key),
             )
 
+    def mark_latest_task_stale_if_needed(
+        self,
+        workflow_key: str,
+        revision_no: int,
+        content_hash: str,
+    ) -> int:
+        """Mark only the current completed version of each task stale.
+
+        A task is stale when its most recent successful run was produced for a
+        different definition revision.  Older task versions and tasks that are
+        still pending/running/failed remain untouched.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_tasks AS task
+                SET status = 'stale',
+                    completed_at = NULL,
+                    priority_flag = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE task.workflow_key = ?
+                  AND task.status = 'completed'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM workflow_tasks AS newer
+                    WHERE newer.workflow_key = task.workflow_key
+                      AND newer.task_key = task.task_key
+                      AND (
+                        newer.set_at > task.set_at
+                        OR (newer.set_at = task.set_at AND newer.id > task.id)
+                      )
+                  )
+                  AND EXISTS (
+                    SELECT 1 FROM workflow_runs AS successful
+                    WHERE successful.workflow_key = task.workflow_key
+                      AND successful.task_key = task.task_key
+                      AND successful.task_version = task.task_version
+                      AND successful.status = 'completed'
+                  )
+                  AND (
+                    COALESCE((
+                      SELECT successful.workflow_revision_no
+                      FROM workflow_runs AS successful
+                      WHERE successful.workflow_key = task.workflow_key
+                        AND successful.task_key = task.task_key
+                        AND successful.task_version = task.task_version
+                        AND successful.status = 'completed'
+                      ORDER BY successful.finished_at DESC, successful.id DESC
+                      LIMIT 1
+                    ), -1) != ?
+                    OR COALESCE((
+                      SELECT successful.workflow_content_hash
+                      FROM workflow_runs AS successful
+                      WHERE successful.workflow_key = task.workflow_key
+                        AND successful.task_key = task.task_key
+                        AND successful.task_version = task.task_version
+                        AND successful.status = 'completed'
+                      ORDER BY successful.finished_at DESC, successful.id DESC
+                      LIMIT 1
+                    ), '') != ?
+                  )
+                """,
+                (workflow_key, revision_no, content_hash),
+            )
+            return cursor.rowcount
+
     def _workflow_task_action(
         self,
         *,
@@ -997,6 +1062,31 @@ class WorkflowsRepository:
             )
             return cursor.rowcount
 
+    def release_tasks_for_revision_mismatch(
+        self,
+        workflow_key: str,
+        run_id: str,
+        error_message: str,
+    ) -> int:
+        """Release a successful old-revision lease as stale for a fresh plan."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET status = 'stale',
+                    lease_run_id = NULL,
+                    lease_expires_at = NULL,
+                    lease_origin_status = NULL,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE workflow_key = ?
+                  AND lease_run_id = ?
+                  AND status = 'running'
+                """,
+                (error_message, workflow_key, run_id),
+            )
+            return cursor.rowcount
+
     def force_workflow_task_lease_expiry(
         self,
         workflow_key: str,
@@ -1086,6 +1176,30 @@ class WorkflowsRepository:
                 LIMIT ?
                 """,
                 (workflow_key, limit),
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def list_completed_workflow_runs_for_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        task_version: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        bounded = min(max(limit, 1), 500)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM workflow_runs
+                WHERE workflow_key = ?
+                  AND task_key = ?
+                  AND task_version = ?
+                  AND status = 'completed'
+                ORDER BY finished_at DESC, id DESC
+                LIMIT ?
+                """,
+                (workflow_key, task_key, task_version, bounded),
             ).fetchall()
             return [item for row in rows if (item := _row_payload(row)) is not None]
 

@@ -291,6 +291,7 @@ class WorkflowScheduler:
         actor: str | None = None,
         resources_validated: bool = False,
         validated_definition: dict[str, Any] | None = None,
+        plan: Any | None = None,
     ) -> None:
         try:
             self.run_one_workflow(
@@ -300,6 +301,7 @@ class WorkflowScheduler:
                 actor=actor,
                 resources_validated=resources_validated,
                 validated_definition=validated_definition,
+                plan=plan,
             )
         except Exception:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
@@ -320,7 +322,16 @@ class WorkflowScheduler:
             registry.request_workflow_stop(run_id)
             return {"status": "stopping", "run_id": run_id}
 
-    def run_workflow_now(self, workflow_key: str, input_data: dict[str, Any] | None = None, actor: str | None = None) -> dict[str, Any]:
+    def run_workflow_now(
+        self,
+        workflow_key: str,
+        input_data: dict[str, Any] | None = None,
+        actor: str | None = None,
+        *,
+        task_key: str | None = None,
+        task_version: str | None = None,
+        execution_mode: str = "normal",
+    ) -> dict[str, Any]:
         """Launch a single on-demand run immediately — a "test run".
 
         Bypasses the daily window and the active/disabled status check (those
@@ -329,6 +340,9 @@ class WorkflowScheduler:
         created synchronously so callers can poll it immediately.
         """
         with self._lock:
+            if execution_mode not in {"normal", "incremental", "force_full"}:
+                from agent_bridge.core.domain import ValidationError
+                raise ValidationError("unsupported workflow execution mode")
             if workflow_key in self._running:
                 raise ConflictError("workflow is already running")
             workflow = self._store.get_workflow_definition(workflow_key)
@@ -338,17 +352,46 @@ class WorkflowScheduler:
                 from agent_bridge.core.domain import ValidationError
                 raise ValidationError("工作流需要通过新编辑器迁移")
             graph = self._require_valid_workflow(workflow, actor=actor)
+            definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
+            selected_task = None
+            effective_mode = execution_mode
+            if task_key is not None:
+                selected_task = self._store.get_workflow_task(
+                    workflow_key, task_key, task_version=task_version
+                )
+                if selected_task is None:
+                    raise NotFound("workflow task not found")
+                if selected_task.get("status") == "stale" and execution_mode == "normal":
+                    effective_mode = "incremental"
+                self._store.set_priority_for_task(
+                    workflow_key,
+                    str(selected_task["task_key"]),
+                    task_version=str(selected_task.get("task_version") or ""),
+                )
+            plan = self._build_plan(
+                workflow=workflow,
+                definition=definition_snapshot,
+                actor=actor,
+                task=selected_task,
+                execution_mode=effective_mode,
+            )
             run_id = new_run_id(workflow_key)
             base_dir = self._base_run_dir or Path("workflow-runs")
             self._store.create_workflow_run(
                 run_id=run_id,
                 workflow_key=workflow_key,
                 profile_key=workflow["profile_key"],
-                task_key=None,
+                task_key=str(selected_task["task_key"]) if selected_task is not None else None,
                 status="running",
                 temp_dir=str(base_dir / run_id),
-                definition_snapshot=graph.model_dump(mode="json") if isinstance(graph, WorkflowGraph) else workflow["definition"],
+                definition_snapshot=definition_snapshot,
                 input_data=input_data or {},
+                workflow_revision_no=getattr(plan, "workflow_revision_no", None),
+                workflow_content_hash=getattr(plan, "workflow_content_hash", None),
+                task_version=str(getattr(plan, "task_version", "") or ""),
+                execution_mode=effective_mode,
+                execution_plan=self._plan_payload(plan),
+                source_run_id=getattr(plan, "baseline_run_id", None),
             )
             self._register_workflow_control(run_id)
             self._running.add(workflow_key)
@@ -360,7 +403,7 @@ class WorkflowScheduler:
         )
         thread = threading.Thread(
             target=self._run_and_release,
-            args=(workflow_key, run_id, input_data, actor, True, None),
+            args=(workflow_key, run_id, input_data, actor, True, None, plan),
             daemon=True,
         )
         thread.start()
@@ -375,6 +418,7 @@ class WorkflowScheduler:
         *,
         resources_validated: bool = False,
         validated_definition: dict[str, Any] | None = None,
+        plan: Any | None = None,
     ) -> dict[str, Any]:
         """执行单个 workflow run 的完整生命周期：建 run 行 -> 跑 agent -> 解析 result -> 入库。
 
@@ -429,6 +473,13 @@ class WorkflowScheduler:
                 if resources_validated
                 else self._definition_snapshot(graph, workflow["definition"])
             )
+            plan = plan or self._build_plan(
+                workflow=workflow,
+                definition=definition_snapshot,
+                actor=actor,
+                task=None,
+                execution_mode="normal",
+            )
             self._store.create_workflow_run(
                 run_id=run_id,
                 workflow_key=workflow_key,
@@ -438,6 +489,12 @@ class WorkflowScheduler:
                 temp_dir=str(base_dir / run_id),
                 definition_snapshot=definition_snapshot,
                 input_data=input_data or {},
+                workflow_revision_no=getattr(plan, "workflow_revision_no", None),
+                workflow_content_hash=getattr(plan, "workflow_content_hash", None),
+                task_version=str(getattr(plan, "task_version", "") or ""),
+                execution_mode=str(getattr(plan, "mode", "normal")),
+                execution_plan=self._plan_payload(plan),
+                source_run_id=getattr(plan, "baseline_run_id", None),
             )
             run = None
         self._register_workflow_control(run_id)
@@ -453,6 +510,7 @@ class WorkflowScheduler:
             run = run or self._store.get_workflow_run(run_id)
             if run is None:
                 raise RuntimeError("workflow run not found after creation")
+            plan = plan or self._plan_from_run(run)
             if self._is_parent_stop_requested(run_id):
                 return self._finish_stopped(workflow_key, run_id)
             execution_workflow = {
@@ -464,6 +522,7 @@ class WorkflowScheduler:
                 run_id=run_id,
                 input_data=run["input"],
                 actor=actor or sorted(self._admins)[0],
+                plan=plan,
             ))
             if self._is_parent_stop_requested(run_id):
                 return self._finish_stopped(workflow_key, run_id)
@@ -478,14 +537,17 @@ class WorkflowScheduler:
                 # available through run_workflow_now().
                 self.finished_today.add(workflow_key)
             if execution.status == "completed" and execution.task is not None:
-                completed = self._store.complete_workflow_task(
-                    workflow_key,
-                    execution.task["task_key"],
-                    task_version=str(execution.task.get("task_version") or ""),
-                    run_id=run_id,
-                )
-                if not completed:
-                    raise RuntimeError("workflow task completion failed")
+                if self._can_complete_task_for_run(workflow_key, run, execution.task):
+                    completed = self._store.complete_workflow_task(
+                        workflow_key,
+                        execution.task["task_key"],
+                        task_version=str(execution.task.get("task_version") or ""),
+                        run_id=run_id,
+                    )
+                    if not completed:
+                        raise RuntimeError("workflow task completion failed")
+                else:
+                    self._release_revision_mismatch_task(workflow_key, run_id)
             finished = self._store.finish_workflow_run(
                 run_id,
                 expected_status="running",
@@ -539,6 +601,73 @@ class WorkflowScheduler:
             )
             return
         self._store.fail_workflow_task_for_run(workflow_key, run_id, error)
+
+    def _build_plan(
+        self,
+        *,
+        workflow: dict[str, Any],
+        definition: dict[str, Any],
+        actor: str | None,
+        task: dict[str, Any] | None,
+        execution_mode: str,
+    ) -> Any | None:
+        build = getattr(self._service, "build_incremental_plan", None)
+        if not callable(build):
+            return None
+        return build(
+            actor=self._default_actor(actor),
+            workflow_key=str(workflow["workflow_key"]),
+            task_key=str(task["task_key"]) if task is not None else None,
+            task_version=str(task.get("task_version") or "") if task is not None else None,
+            execution_mode=execution_mode,
+            workflow=workflow,
+            definition=definition,
+        )
+
+    def _plan_payload(self, plan: Any | None) -> dict[str, Any]:
+        if plan is None:
+            return {}
+        payload = getattr(self._service, "incremental_plan_payload", None)
+        return payload(plan) if callable(payload) else {}
+
+    def _plan_from_run(self, run: dict[str, Any]) -> Any | None:
+        payload = run.get("execution_plan")
+        from_payload = getattr(self._service, "incremental_plan_from_payload", None)
+        if not isinstance(payload, dict) or not payload or not callable(from_payload):
+            return None
+        return from_payload(payload)
+
+    def _can_complete_task_for_run(
+        self,
+        workflow_key: str,
+        run: dict[str, Any],
+        task: dict[str, Any],
+    ) -> bool:
+        expected_key = run.get("task_key")
+        expected_version = str(run.get("task_version") or "")
+        actual_version = str(task.get("task_version") or "")
+        if expected_key is not None and (expected_key != task.get("task_key") or expected_version != actual_version):
+            return False
+        repository = getattr(self._store, "workflows", None)
+        current_revision = getattr(repository, "get_current_definition_revision_no", None)
+        get_revision = getattr(repository, "get_definition_revision", None)
+        if not callable(current_revision) or not callable(get_revision):
+            return True
+        revision_no = run.get("workflow_revision_no")
+        if revision_no is None or int(revision_no) != int(current_revision(workflow_key)):
+            return False
+        revision = get_revision(workflow_key, int(revision_no))
+        return revision is not None and revision.get("content_hash") == run.get("workflow_content_hash")
+
+    def _release_revision_mismatch_task(self, workflow_key: str, run_id: str) -> None:
+        repository = getattr(self._store, "workflows", None)
+        release = getattr(repository, "release_tasks_for_revision_mismatch", None)
+        if callable(release):
+            release(workflow_key, run_id, "workflow definition or task version changed during run")
+            return
+        self._release_leased_tasks(
+            workflow_key, run_id, "workflow definition or task version changed during run"
+        )
 
     @staticmethod
     def _finished_status(result: Any, fallback: str) -> str:
