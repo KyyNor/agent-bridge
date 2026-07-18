@@ -68,6 +68,20 @@ test('RevisionHistoryPanel switches between structured and text views for workfl
   assert.doesNotMatch(file, /(?:bg|text|border)-(?:emerald|rose|amber)-\d+/)
 })
 
+test('workflow version history exposes source labels and restore action', () => {
+  const file = readSrc('src/components/version/RevisionHistoryPanel.vue')
+  assert.match(file, /sourceLabel|来源/)
+  assert.match(file, /restoreWorkflowRevision|恢复此版本/)
+})
+
+test('workflow API client exposes export, restore, and import calls', () => {
+  const file = readSrc('src/api/client.ts')
+  assert.match(file, /restoreWorkflowRevision/)
+  assert.match(file, /exportWorkflow/)
+  assert.match(file, /previewWorkflowImport/)
+  assert.match(file, /confirmWorkflowImport/)
+})
+
 test('unifiedDiff parser classifies add / del / hunk rows', () => {
   const file = readSrc('src/lib/unifiedDiff.ts')
   assert.match(file, /export type DiffLineType = 'hunk' \| 'add' \| 'del' \| 'ctx'/)
@@ -113,4 +127,15 @@ test('workflow detail adds a versions tab wired into the segmented control', () 
   assert.match(file, /entity-type="workflow"/)
   // Guard accepts the new value.
   assert.match(file, /value !== 'versions'/)
+})
+
+test('workflow import UI supports new, overwrite, diff, and confirmation', () => {
+  const dialog = readSrc('src/components/workflow/WorkflowImportDialog.vue')
+  const view = readSrc('src/views/workflow/WorkflowView.vue')
+  assert.match(dialog, /新工作流/)
+  assert.match(dialog, /覆盖现有工作流/)
+  assert.match(dialog, /WorkflowStructuredDiff/)
+  assert.match(dialog, /确认导入/)
+  assert.match(view, /导出工作流/)
+  assert.match(view, /导入工作流/)
 })

@@ -1219,12 +1219,15 @@ export interface ScriptRunListResult {
 
 export type VersionedEntity = 'script' | 'workflow' | 'skill'
 
+export type WorkflowRevisionSource = 'edit' | 'import' | 'restore'
+
 export interface Revision {
   entity_key: string
   revision_no: number
   content_hash: string
   created_by: string
   created_at: string
+  source?: WorkflowRevisionSource
   is_current?: boolean
 }
 
@@ -1274,7 +1277,32 @@ export interface DiffResult {
   entity_type: VersionedEntity
   entity_key: string
   from_revision: number
-  to_revision: number
+  to_revision: number | null
   text: DiffText
   structured?: WorkflowStructuredDiff
+}
+
+export type WorkflowImportTargetMode = 'auto' | 'new' | 'overwrite'
+
+export interface WorkflowImportPreview {
+  import_id: string
+  filename: string
+  expires_at: string
+  source_workflow_key: string
+  target_workflow_key: string
+  operation: 'create' | 'overwrite'
+  target_revision_no: number
+  can_confirm: boolean
+  workflow: WorkflowDefinition
+  diff: DiffResult | null
+}
+
+export interface WorkflowRestoreResult extends WorkflowDefinition {
+  restored_from_revision: number
+  revision_created: boolean
+}
+
+export interface WorkflowImportResult extends WorkflowDefinition {
+  import_id: string
+  operation: 'create' | 'overwrite'
 }

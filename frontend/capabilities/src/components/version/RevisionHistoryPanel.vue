@@ -10,14 +10,19 @@
  */
 import { computed, ref, watch } from 'vue'
 import { api } from '@/api/client'
-import type { Revision, DiffResult, VersionedEntity } from '@/api/types'
+import type { Revision, DiffResult, VersionedEntity, WorkflowRestoreResult } from '@/api/types'
 import { timeAgo } from '@/lib/time'
+import { confirm } from '@/composables/useConfirm'
 import UnifiedDiff from '@/components/diff/UnifiedDiff.vue'
 import WorkflowStructuredDiff from '@/components/diff/WorkflowStructuredDiff.vue'
 
 const props = defineProps<{
   entityType: VersionedEntity
   entityKey: string
+}>()
+
+const emit = defineEmits<{
+  (event: 'restored', result: WorkflowRestoreResult): void
 }>()
 
 const revisions = ref<Revision[]>([])
@@ -31,10 +36,15 @@ const toNo = ref<number | null>(null)
 const diff = ref<DiffResult | null>(null)
 const diffLoading = ref(false)
 const diffError = ref('')
+const restoringNo = ref<number | null>(null)
 // For workflows: toggle between structured and raw-unified rendering.
 const workflowView = ref<'structured' | 'text'>('structured')
 
 const isWorkflow = computed(() => props.entityType === 'workflow')
+
+function sourceLabel(source: Revision['source']): string {
+  return source === 'import' ? '导入' : source === 'restore' ? '回退' : '编辑'
+}
 
 async function loadRevisions() {
   loading.value = true
@@ -99,6 +109,27 @@ function swap() {
   toNo.value = a
 }
 
+async function restoreWorkflowRevision(revision: Revision) {
+  if (!isWorkflow.value || revision.is_current || restoringNo.value !== null) return
+  const accepted = await confirm({
+    title: `恢复工作流 v${revision.revision_no}`,
+    description: `将以 v${revision.revision_no} 的内容创建一个新的回退版本，已有历史不会被删除。`,
+    confirmText: '恢复此版本',
+  })
+  if (!accepted) return
+  restoringNo.value = revision.revision_no
+  error.value = ''
+  try {
+    const result = await api.restoreWorkflowRevision(props.entityKey, revision.revision_no)
+    await loadRevisions()
+    emit('restored', result)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    restoringNo.value = null
+  }
+}
+
 watch(() => [props.entityType, props.entityKey], loadRevisions, { immediate: true })
 watch([fromNo, toNo], loadDiff)
 
@@ -156,6 +187,7 @@ const hasRevisions = computed(() => revisions.value.length > 0)
             </div>
             <div class="mt-0.5 text-xs text-muted-foreground">
               {{ timeAgo(rev.created_at) }} · {{ rev.created_by }}
+              <span class="ml-1 rounded bg-secondary px-1.5 py-0.5 text-[10px]">{{ sourceLabel(rev.source) }}</span>
             </div>
             <div class="mt-1 flex gap-2">
               <button
@@ -178,6 +210,13 @@ const hasRevisions = computed(() => revisions.value.length > 0)
                 ]"
                 @click.stop="pickTo(rev.revision_no)"
               >新版 (to)</button>
+              <button
+                v-if="isWorkflow && !rev.is_current"
+                type="button"
+                class="rounded bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning-soft-fg hover:bg-warning-soft/80 disabled:opacity-50"
+                :disabled="restoringNo !== null"
+                @click.stop="restoreWorkflowRevision(rev)"
+              >{{ restoringNo === rev.revision_no ? '恢复中…' : '恢复' }}</button>
             </div>
           </li>
         </ul>

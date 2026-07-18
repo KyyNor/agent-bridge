@@ -75,6 +75,10 @@ import type {
   WorkflowTaskListParams,
   WorkflowTaskImportPreview,
   WorkflowTaskImportResult,
+  WorkflowImportPreview,
+  WorkflowImportResult,
+  WorkflowImportTargetMode,
+  WorkflowRestoreResult,
   WorkflowGraph,
   WorkflowValidationIssue,
   WorkflowValidationResult,
@@ -357,6 +361,22 @@ export const api = {
     if (toRevision != null) qs.set('to_revision', String(toRevision))
     return get<DiffResult>(`/workflows/${key}/diff?${qs}`)
   },
+  restoreWorkflowRevision: (key: string, revisionNo: number) =>
+    post<WorkflowRestoreResult>(`/workflows/${key}/revisions/${revisionNo}/restore`),
+  exportWorkflow: (key: string) => getBlob(`/workflows/${key}/export`),
+  previewWorkflowImport: (
+    file: File,
+    targetWorkflowKey?: string,
+    targetMode: WorkflowImportTargetMode = 'auto',
+  ) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (targetWorkflowKey) form.append('target_workflow_key', targetWorkflowKey)
+    form.append('target_mode', targetMode)
+    return postFormData<WorkflowImportPreview>('/workflows/import/preview', form)
+  },
+  confirmWorkflowImport: (importId: string) =>
+    post<WorkflowImportResult>('/workflows/import/confirm', { import_id: importId }),
   listWorkflowRuns: (key: string, limit = 200) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
