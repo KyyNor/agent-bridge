@@ -1,6 +1,7 @@
 """Workflow definition, run log, and artifact endpoints."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
@@ -53,6 +54,12 @@ def create_workflow_routes(service, actor):
     ) -> dict[str, Any]:
         return service.workflows.get_revision(current_actor, workflow_key, revision_no)
 
+    @router.post("/workflows/{workflow_key}/revisions/{revision_no}/restore")
+    def restore_workflow_revision(
+        workflow_key: str, revision_no: int, current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.workflows.restore_revision(current_actor, workflow_key, revision_no)
+
     @router.get("/workflows/{workflow_key}/diff")
     def diff_workflow(
         workflow_key: str,
@@ -62,6 +69,17 @@ def create_workflow_routes(service, actor):
     ) -> dict[str, Any]:
         return service.workflows.diff_revisions(
             current_actor, workflow_key, from_no=from_revision, to_no=to_revision
+        )
+
+    @router.get("/workflows/{workflow_key}/export")
+    def export_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> Response:
+        payload = service.workflows.export_definition(current_actor, workflow_key)
+        return Response(
+            content=json.dumps(payload, ensure_ascii=False, indent=2),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{workflow_key}.workflow.json"'
+            },
         )
 
     @router.get("/workflows/{workflow_key}/runs")

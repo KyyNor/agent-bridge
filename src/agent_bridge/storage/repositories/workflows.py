@@ -153,7 +153,13 @@ class WorkflowsRepository:
     # --- definition revisions --------------------------------------------
 
     def create_definition_revision(
-        self, *, workflow_key: str, content_hash: str, snapshot: dict[str, Any], actor: str
+        self,
+        *,
+        workflow_key: str,
+        content_hash: str,
+        snapshot: dict[str, Any],
+        actor: str,
+        source: str = "edit",
     ) -> dict[str, Any]:
         snapshot_json = _json_dumps(snapshot)
         with self._connect() as conn:
@@ -164,10 +170,12 @@ class WorkflowsRepository:
             next_no = int(row[0]) + 1
             conn.execute(
                 """
-                INSERT INTO workflow_definition_revisions (workflow_key, revision_no, content_hash, snapshot_json, created_by)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO workflow_definition_revisions (
+                  workflow_key, revision_no, content_hash, snapshot_json, created_by, source
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (workflow_key, next_no, content_hash, snapshot_json, actor),
+                (workflow_key, next_no, content_hash, snapshot_json, actor, source),
             )
             conn.execute(
                 "UPDATE workflow_definitions SET current_revision_no = ? WHERE workflow_key = ?",
@@ -176,7 +184,7 @@ class WorkflowsRepository:
             return dict(
                 conn.execute(
                     """
-                    SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, created_at
+                    SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, source, created_at
                     FROM workflow_definition_revisions WHERE workflow_key = ? AND revision_no = ?
                     """,
                     (workflow_key, next_no),
@@ -188,7 +196,7 @@ class WorkflowsRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, created_at
+                SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, source, created_at
                 FROM workflow_definition_revisions
                 WHERE workflow_key = ?
                 ORDER BY revision_no DESC
@@ -203,7 +211,7 @@ class WorkflowsRepository:
             item = row_to_dict(
                 conn.execute(
                     """
-                    SELECT workflow_key AS entity_key, revision_no, content_hash, snapshot_json, created_by, created_at
+                    SELECT workflow_key AS entity_key, revision_no, content_hash, snapshot_json, created_by, source, created_at
                     FROM workflow_definition_revisions
                     WHERE workflow_key = ? AND revision_no = ?
                     """,

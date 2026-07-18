@@ -185,6 +185,11 @@ class SQLiteStore:
             )
             self._ensure_columns(
                 conn,
+                "workflow_definition_revisions",
+                {"source": "TEXT NOT NULL DEFAULT 'edit'"},
+            )
+            self._ensure_columns(
+                conn,
                 "skill_prompts",
                 {"current_revision_no": "INTEGER NOT NULL DEFAULT 0"},
             )

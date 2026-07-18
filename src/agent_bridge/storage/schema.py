@@ -414,6 +414,7 @@ CREATE TABLE IF NOT EXISTS script_revisions (
   content_hash TEXT NOT NULL,
   snapshot_json TEXT NOT NULL,
   created_by TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'edit',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (script_key, revision_no)
 );

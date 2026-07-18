@@ -25,6 +25,8 @@ from agent_bridge.automation.workflows.validator import WorkflowValidator
 
 logger = logging.getLogger(__name__)
 
+WORKFLOW_REVISION_SOURCES = frozenset({"edit", "import", "restore"})
+
 
 def _snippet(content: str, query: str | None, size: int = 220) -> str:
     if not query:
@@ -74,11 +76,14 @@ class WorkflowService:
         workflow_type: str = "operation",
         definition: dict[str, Any] | WorkflowGraph | None = None,
         workflow_js: str = "",
+        revision_source: str = "edit",
     ) -> dict[str, Any]:
         # Kept only for internal callers that still construct historical test
         # fixtures. New API schemas do not expose or execute this field.
         del workflow_js
         require_admin_user(actor, self.admins)
+        if revision_source not in WORKFLOW_REVISION_SOURCES:
+            raise ValidationError(f"unsupported workflow revision source: {revision_source}")
         graph = self.validator.require_valid(
             actor=actor,
             workflow={
@@ -121,6 +126,7 @@ class WorkflowService:
                     content_hash=new_content_hash,
                     snapshot=self._workflow_revision_snapshot(result),
                     actor=actor,
+                    source=revision_source,
                 )
                 revision_no = revision["revision_no"]
         result["content_hash"] = new_content_hash
@@ -145,6 +151,66 @@ class WorkflowService:
         if workflow is None:
             raise NotFound("workflow not found")
         return self._definition_payload(workflow)
+
+    def restore_revision(self, actor: str, workflow_key: str, revision_no: int) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        current = self.store.get_workflow_definition(workflow_key)
+        if current is None:
+            raise NotFound("workflow not found")
+        revision = self.store.workflows.get_definition_revision(workflow_key, revision_no)
+        if revision is None:
+            raise NotFound("workflow revision not found")
+        snapshot = revision.get("snapshot")
+        if not isinstance(snapshot, dict) or snapshot.get("workflow_key") not in (None, workflow_key):
+            raise ValidationError("workflow revision snapshot does not belong to this workflow")
+        definition = snapshot.get("definition")
+        if not isinstance(definition, dict):
+            raise ValidationError("workflow revision snapshot has no valid definition")
+
+        saved = self.upsert_definition(
+            actor=actor,
+            workflow_key=workflow_key,
+            name=str(snapshot.get("name") or current.get("name") or workflow_key),
+            description=str(snapshot.get("description") or ""),
+            profile_key=str(snapshot.get("profile_key") or current.get("profile_key") or ""),
+            status=str(snapshot.get("status") or current.get("status") or WorkflowStatus.active.value),
+            workflow_type=str(snapshot.get("workflow_type") or current.get("workflow_type") or WorkflowType.operation.value),
+            definition=definition,
+            revision_source="restore",
+        )
+        saved["restored_from_revision"] = revision_no
+        saved["revision_created"] = saved.get("revision_no") != current.get("current_revision_no")
+        return saved
+
+    def export_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        workflow = self.store.get_workflow_definition(workflow_key)
+        if workflow is None:
+            raise NotFound("workflow not found")
+        current_revision_no = int(workflow.get("current_revision_no") or 0)
+        if current_revision_no <= 0:
+            raise NotFound("workflow has no revisions")
+        revision = self.store.workflows.get_definition_revision(workflow_key, current_revision_no)
+        if revision is None:
+            raise NotFound("workflow revision not found")
+        public = self._definition_payload(workflow)
+        return {
+            "format": "agent-bridge.workflow",
+            "format_version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "exported_by": actor,
+            "workflow": {
+                key: public[key]
+                for key in (
+                    "workflow_key", "name", "description", "profile_key",
+                    "status", "workflow_type", "definition",
+                )
+            },
+            "revision": {
+                key: revision[key]
+                for key in ("revision_no", "content_hash", "source", "created_by", "created_at")
+            },
+        }
 
     def delete_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
