@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { marked } from 'marked'
+import { marked, type Tokens } from 'marked'
 import { Check, Copy, Eye, Pencil, RotateCcw, Save } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { SkillPrompt } from '../../api/types'
@@ -29,7 +29,25 @@ const pageSize = ref(10)
 
 const hasChanges = computed(() => selected.value ? prompt.value !== (selected.value.prompt || '') : false)
 const sourceLabel = computed(() => selected.value?.source === 'database' ? '已自定义' : '默认提示词')
-const previewHtml = computed(() => marked.parse(prompt.value, { async: false }) as string)
+const previewRenderer = new marked.Renderer()
+previewRenderer.html = ({ text }: Tokens.HTML) => escapeHtml(text)
+previewRenderer.link = function ({ href, title, tokens }: Tokens.Link) {
+  const label = this.parser.parseInline(tokens)
+  const safeHref = safeUrl(href)
+  if (!safeHref) return label
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<a href="${escapeHtml(safeHref)}"${titleAttr}>${label}</a>`
+}
+previewRenderer.image = function ({ href, title, text }: Tokens.Image) {
+  const safeHref = safeUrl(href)
+  if (!safeHref) return escapeHtml(text)
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<img src="${escapeHtml(safeHref)}" alt="${escapeHtml(text)}"${titleAttr}>`
+}
+const previewHtml = computed(() => marked.parse(prompt.value, {
+  async: false,
+  renderer: previewRenderer,
+}) as string)
 const pagedSkills = computed(() => paginate(skills.value, page.value, pageSize.value))
 
 onMounted(async () => {
@@ -120,6 +138,25 @@ async function copyRunPrompt() {
 
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[character] || character))
+}
+
+function safeUrl(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (/^[a-z][a-z\d+.-]*:/i.test(trimmed) && !/^(?:https?|mailto|tel):/i.test(trimmed)) {
+    return null
+  }
+  return trimmed
 }
 </script>
 

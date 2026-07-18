@@ -24,9 +24,9 @@ const empty = computed(() => rows.value.length === 0)
 function lineClass(type: DiffLine['type']): string {
   switch (type) {
     case 'add':
-      return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+      return 'bg-success-soft text-success-soft-fg'
     case 'del':
-      return 'bg-rose-500/10 text-rose-700 dark:text-rose-300'
+      return 'bg-destructive-soft text-destructive-soft-fg'
     case 'hunk':
       return 'bg-secondary text-muted-foreground'
     default:
@@ -55,8 +55,8 @@ function marker(type: DiffLine['type']): string {
       <span v-if="caption" class="truncate font-medium">{{ caption }}</span>
       <span v-else />
       <span v-if="!empty" class="flex shrink-0 items-center gap-3 tabular-nums">
-        <span class="text-emerald-600 dark:text-emerald-400">+{{ stats.added }}</span>
-        <span class="text-rose-600 dark:text-rose-400">−{{ stats.removed }}</span>
+        <span class="text-success-soft-fg">+{{ stats.added }}</span>
+        <span class="text-destructive-soft-fg">−{{ stats.removed }}</span>
       </span>
     </div>
     <div v-if="empty" class="px-3 py-6 text-center text-sm text-muted-foreground">

@@ -110,6 +110,7 @@ const lastSavedSyntax = ref<SyntaxCheckResult | null>(null)
 const liveSyntax = ref<SyntaxCheckResult | null>(null)
 const syntaxChecking = ref(false)
 let syntaxTimer: ReturnType<typeof setTimeout> | null = null
+let syntaxRequestId = 0
 // 编辑中（代码与已保存版本不一致）时优先展示实时校验，否则展示已保存版本的结果
 const syntaxResult = computed<SyntaxCheckResult | null>(() => {
   const savedCode = editingScript.value?.code
@@ -132,19 +133,25 @@ watch(
   () => form.value.code,
   (code) => {
     if (syntaxTimer) clearTimeout(syntaxTimer)
+    const requestId = ++syntaxRequestId
     if (!code || !code.trim()) {
       liveSyntax.value = null
+      syntaxChecking.value = false
       return
     }
     syntaxTimer = setTimeout(async () => {
+      if (requestId !== syntaxRequestId) return
       syntaxChecking.value = true
       try {
-        liveSyntax.value = await api.validateScriptCode(code)
+        const result = await api.validateScriptCode(code)
+        if (requestId === syntaxRequestId && form.value.code === code) {
+          liveSyntax.value = result
+        }
       } catch {
         // 校验失败不阻塞编辑
-        liveSyntax.value = null
+        if (requestId === syntaxRequestId) liveSyntax.value = null
       } finally {
-        syntaxChecking.value = false
+        if (requestId === syntaxRequestId) syntaxChecking.value = false
       }
     }, 400)
   },
@@ -155,6 +162,11 @@ watch(
   () => props.routeKey,
   async (key) => {
     if (!key) return
+    if (syntaxTimer) clearTimeout(syntaxTimer)
+    syntaxRequestId += 1
+    liveSyntax.value = null
+    lastSavedSyntax.value = null
+    syntaxChecking.value = false
     formError.value = ''
     scriptNotFound.value = false
     if (isNew.value) {
@@ -368,6 +380,9 @@ async function saveScript(): Promise<ManagedScript | null> {
   saving.value = true
   try {
     const saved = await api.upsertScript(toScriptUpsertPayload(form.value, outputSchemaEnabled.value))
+    syntaxRequestId += 1
+    liveSyntax.value = null
+    syntaxChecking.value = false
     lastSavedSyntax.value = saved.syntax_check ?? null
     await reloadScripts()
     // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
@@ -905,7 +920,7 @@ def main(envelope):
               <label class="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>代码（Python，main(envelope) -&gt; dict）</span>
                 <span v-if="syntaxChecking" class="text-muted-foreground/70">语法检查中…</span>
-                <span v-else-if="syntaxResult && syntaxResult.ok" class="text-emerald-600 dark:text-emerald-400">语法正确</span>
+                <span v-else-if="syntaxResult && syntaxResult.ok" class="text-success-soft-fg">语法正确</span>
               </label>
               <div
                 v-if="syntaxResult && !syntaxResult.ok"

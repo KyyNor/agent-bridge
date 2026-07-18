@@ -339,6 +339,10 @@ class WorkflowTaskImportConfirmRequest(BaseModel):
     import_id: str
 
 
+class WorkflowImportConfirmRequest(BaseModel):
+    import_id: str
+
+
 class WorkflowRunRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
 

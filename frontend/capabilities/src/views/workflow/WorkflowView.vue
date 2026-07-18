@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles } from 'lucide-vue-next'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -11,6 +11,7 @@ import { Input } from '../../components/ui/input'
 import { confirm, alert } from '../../composables/useConfirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
+import WorkflowImportDialog from '../../components/workflow/WorkflowImportDialog.vue'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
 import WorkflowConfigDrawer from './WorkflowConfigDrawer.vue'
@@ -72,6 +73,7 @@ const artifactTotal = ref(0)
 const artifactPage = ref(1)
 const artifactPageSize = ref(50)
 const error = ref('')
+const workflowDetailError = ref('')
 const artifactError = ref('')
 const saving = ref(false)
 const formError = ref('')
@@ -154,6 +156,15 @@ const taskImportLoading = ref(false)
 const taskImportConfirming = ref(false)
 const taskImportError = ref('')
 let taskImportRequestToken = 0
+const showWorkflowImport = ref(false)
+const workflowImportPreview = ref<WorkflowImportPreview | null>(null)
+const workflowImportLoading = ref(false)
+const workflowImportConfirming = ref(false)
+const workflowImportError = ref('')
+const workflowImportTargetKey = ref('')
+const workflowImportTargetMode = ref<WorkflowImportTargetMode>('auto')
+const workflowImportFile = ref<File | null>(null)
+let workflowImportRequestToken = 0
 let batchToken = 0
 const batchStopRequested = ref(false)
 // Per-task sub-agent event filter (feature 5). Keyed by task id; "" = all.
@@ -460,6 +471,7 @@ watch(
   () => props.routeKey,
   async () => {
     closeTaskImport()
+    closeWorkflowImport()
     batchToken += 1
     batchStopRequested.value = false
     if (batchAction.value) batchAction.value = ''
@@ -473,6 +485,7 @@ onUnmounted(() => {
   batchToken += 1
   batchStopRequested.value = false
   resetBatchRunDetail()
+  closeWorkflowImport()
 })
 
 async function loadAll() {
@@ -1318,6 +1331,125 @@ async function confirmTaskImport() {
   } finally {
     if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportConfirming.value = false
   }
+}
+
+function resetWorkflowImportState() {
+  workflowImportRequestToken += 1
+  workflowImportPreview.value = null
+  workflowImportLoading.value = false
+  workflowImportConfirming.value = false
+  workflowImportError.value = ''
+  workflowImportTargetKey.value = ''
+  workflowImportTargetMode.value = 'auto'
+  workflowImportFile.value = null
+}
+
+function openWorkflowImport(preferredTargetKey = '') {
+  resetWorkflowImportState()
+  workflowImportTargetKey.value = preferredTargetKey
+  workflowImportTargetMode.value = preferredTargetKey ? 'overwrite' : 'auto'
+  showWorkflowImport.value = true
+}
+
+function closeWorkflowImport() {
+  showWorkflowImport.value = false
+  resetWorkflowImportState()
+}
+
+function isCurrentWorkflowImportRequest(token: number) {
+  return token === workflowImportRequestToken && showWorkflowImport.value
+}
+
+function updateWorkflowImportTargetKey(value: string) {
+  workflowImportTargetKey.value = value
+  workflowImportPreview.value = null
+  workflowImportError.value = ''
+}
+
+function updateWorkflowImportTargetMode(value: WorkflowImportTargetMode) {
+  workflowImportTargetMode.value = value
+  workflowImportPreview.value = null
+  workflowImportError.value = ''
+}
+
+function selectWorkflowImportFile(file: File) {
+  workflowImportFile.value = file
+  void previewWorkflowImport(file)
+}
+
+async function previewWorkflowImport(file: File | null = workflowImportFile.value) {
+  if (!file || !showWorkflowImport.value || workflowImportLoading.value || workflowImportConfirming.value) return
+  workflowImportFile.value = file
+  const requestToken = ++workflowImportRequestToken
+  workflowImportPreview.value = null
+  workflowImportError.value = ''
+  workflowImportLoading.value = true
+  try {
+    const preview = await api.previewWorkflowImport(
+      file,
+      workflowImportTargetKey.value.trim() || undefined,
+      workflowImportTargetMode.value,
+    )
+    if (isCurrentWorkflowImportRequest(requestToken)) workflowImportPreview.value = preview
+  } catch (e: unknown) {
+    if (isCurrentWorkflowImportRequest(requestToken)) workflowImportError.value = errorMessage(e)
+  } finally {
+    if (isCurrentWorkflowImportRequest(requestToken)) workflowImportLoading.value = false
+  }
+}
+
+async function downloadWorkflowDefinition() {
+  const workflowKey = selectedWorkflow.value?.workflow_key
+  if (!workflowKey) return
+  workflowDetailError.value = ''
+  let objectUrl = ''
+  let anchor: HTMLAnchorElement | null = null
+  try {
+    const blob = await api.exportWorkflow(workflowKey)
+    objectUrl = URL.createObjectURL(blob)
+    anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = `${workflowKey}.workflow.json`
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+  } catch (e: unknown) {
+    workflowDetailError.value = errorMessage(e)
+  } finally {
+    anchor?.remove()
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function confirmWorkflowImport() {
+  const preview = workflowImportPreview.value
+  if (!preview?.import_id || !preview.can_confirm || workflowImportConfirming.value) return
+  const requestToken = ++workflowImportRequestToken
+  workflowImportConfirming.value = true
+  workflowImportError.value = ''
+  try {
+    const result = await api.confirmWorkflowImport(preview.import_id)
+    if (!isCurrentWorkflowImportRequest(requestToken)) return
+    closeWorkflowImport()
+    await loadAll()
+    if (error.value) {
+      workflowDetailError.value = `导入已完成，但刷新工作流列表失败：${error.value}`
+      error.value = ''
+      return
+    }
+    selectedKey.value = result.workflow_key
+    window.location.hash = `workflow/${result.workflow_key}/detail`
+  } catch (e: unknown) {
+    if (isCurrentWorkflowImportRequest(requestToken)) workflowImportError.value = errorMessage(e)
+  } finally {
+    if (isCurrentWorkflowImportRequest(requestToken)) workflowImportConfirming.value = false
+  }
+}
+
+async function handleWorkflowRestored() {
+  await loadAll()
+  const workflowKey = selectedWorkflow.value?.workflow_key
+  if (workflowKey) await Promise.all([loadRuns(workflowKey), loadTasks(workflowKey), searchArtifacts()])
 }
 
 function onTaskSearchInput() {
@@ -2170,6 +2302,10 @@ async function confirmClearWorkflow() {
         <HelpCircle :size="14" />
         使用指引
       </Button>
+      <Button variant="outline" size="lg" @click="openWorkflowImport()">
+        <Upload :size="14" />
+        导入工作流
+      </Button>
       <Button size="lg" class="shadow-btn" @click="openCreate">
         <Plus :size="14" />
         新建工作流
@@ -2282,6 +2418,9 @@ async function confirmClearWorkflow() {
     </template>
 
     <section v-if="routeMode === 'detail' && !routeError" class="space-y-5">
+      <div v-if="workflowDetailError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
+        {{ workflowDetailError }}
+      </div>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
           <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
@@ -2294,6 +2433,14 @@ async function confirmClearWorkflow() {
           </div>
         </div>
         <div v-if="selectedWorkflow" class="flex flex-wrap gap-2">
+          <Button variant="outline" size="lg" @click="downloadWorkflowDefinition">
+            <Download :size="14" />
+            导出工作流
+          </Button>
+          <Button variant="outline" size="lg" @click="openWorkflowImport(selectedWorkflow.workflow_key)">
+            <Upload :size="14" />
+            导入工作流
+          </Button>
           <details class="relative">
             <summary class="flex h-9 cursor-pointer list-none items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted [&::-webkit-details-marker]:hidden">
               <MoreHorizontal class="h-4 w-4" />
@@ -2500,6 +2647,7 @@ async function confirmClearWorkflow() {
               :key="`wf-${selectedWorkflow.workflow_key}`"
               entity-type="workflow"
               :entity-key="selectedWorkflow.workflow_key"
+              @restored="handleWorkflowRestored"
             />
             <p v-else class="py-8 text-center text-sm text-muted-foreground">未选择工作流</p>
           </section>
@@ -2555,6 +2703,23 @@ async function confirmClearWorkflow() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <WorkflowImportDialog
+      v-model:open="showWorkflowImport"
+      :preview="workflowImportPreview"
+      :loading="workflowImportLoading"
+      :confirming="workflowImportConfirming"
+      :error="workflowImportError || null"
+      :target-workflow-key="workflowImportTargetKey"
+      :target-mode="workflowImportTargetMode"
+      :has-file="workflowImportFile !== null"
+      @update:open="(open: boolean) => { if (!open) closeWorkflowImport() }"
+      @select-file="selectWorkflowImportFile"
+      @update-target-key="updateWorkflowImportTargetKey"
+      @update-target-mode="updateWorkflowImportTargetMode"
+      @preview="previewWorkflowImport()"
+      @confirm="confirmWorkflowImport"
+    />
 
     <WorkflowTaskImportDialog
       v-if="routeMode === 'tasks' || (routeMode === 'detail' && detailTab === 'tasks')"

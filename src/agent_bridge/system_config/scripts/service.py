@@ -140,34 +140,42 @@ class ScriptService:
                 raise ValidationError("cannot change built-in script input_schema")
             if normalized_output_schema != builtin.output_schema:
                 raise ValidationError("cannot change built-in script output_schema")
-        new_content_hash = self._content_hash(normalized_code)
-        previous = self.store.scripts.get_script(normalized_key)
-        is_first_revision = previous is None
-        content_changed = bool(previous is None or previous.get("content_hash") != new_content_hash)
-        script = self.store.scripts.upsert_script(
-            script_key=normalized_key,
-            name=normalized_name,
-            description=builtin.description if builtin is not None else description.strip(),
+        new_content_hash = self._content_hash(
+            normalized_code,
             language=normalized_language,
-            code=normalized_code,
             input_schema=normalized_input_schema,
             output_schema=normalized_output_schema,
-            status=normalized_status,
-            owner_type=normalized_owner_type,
-            owner_key=normalized_owner_key,
-            content_hash=new_content_hash,
-            actor=actor,
         )
-        # Archive a revision whenever content actually changed (or on first save).
-        revision_no = self.store.scripts.get_current_revision_no(normalized_key)
-        if content_changed or is_first_revision:
-            revision = self.store.scripts.create_revision(
+        with self.store.transaction():
+            previous_revisions = self.store.scripts.list_revisions(normalized_key, limit=1)
+            is_first_revision = not previous_revisions
+            previous_hash = previous_revisions[0]["content_hash"] if previous_revisions else None
+            content_changed = is_first_revision or previous_hash != new_content_hash
+            script = self.store.scripts.upsert_script(
                 script_key=normalized_key,
+                name=normalized_name,
+                description=builtin.description if builtin is not None else description.strip(),
+                language=normalized_language,
+                code=normalized_code,
+                input_schema=normalized_input_schema,
+                output_schema=normalized_output_schema,
+                status=normalized_status,
+                owner_type=normalized_owner_type,
+                owner_key=normalized_owner_key,
                 content_hash=new_content_hash,
-                snapshot=self._script_revision_snapshot(script),
                 actor=actor,
             )
-            revision_no = revision["revision_no"]
+            # Archive a revision whenever execution semantics changed (or on
+            # the first save, including an upgraded legacy database).
+            revision_no = self.store.scripts.get_current_revision_no(normalized_key)
+            if content_changed:
+                revision = self.store.scripts.create_revision(
+                    script_key=normalized_key,
+                    content_hash=new_content_hash,
+                    snapshot=self._script_revision_snapshot(script),
+                    actor=actor,
+                )
+                revision_no = revision["revision_no"]
         script["revision_no"] = revision_no
         script["syntax_check"] = check_python_syntax(normalized_code)
         return self._script_payload(script, include_code=True)
@@ -190,7 +198,21 @@ class ScriptService:
         definition = self._builtins.get(normalized_key)
         if definition is None:
             raise NotFound("built-in script not found")
-        return self._script_payload(self._materialize_default_script(definition), include_code=True)
+        default = self._default_script(definition)
+        with self.store.transaction():
+            stored = self._materialize_default_script(definition)
+            revisions = self.store.scripts.list_revisions(normalized_key, limit=1)
+            revision_no = revisions[0]["revision_no"] if revisions else 0
+            if not revisions or revisions[0]["content_hash"] != default["content_hash"]:
+                revision = self.store.scripts.create_revision(
+                    script_key=normalized_key,
+                    content_hash=default["content_hash"],
+                    snapshot=self._script_revision_snapshot(stored),
+                    actor=actor,
+                )
+                revision_no = revision["revision_no"]
+        stored["revision_no"] = revision_no
+        return self._script_payload(stored, include_code=True)
 
     def test_script(
         self,
@@ -331,6 +353,7 @@ class ScriptService:
     def list_revisions(self, actor: str, script_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
+        self._require_script(normalized_key)
         revisions = self.store.scripts.list_revisions(normalized_key, limit=limit)
         current = self.store.scripts.get_current_revision_no(normalized_key)
         for rev in revisions:
@@ -496,7 +519,12 @@ class ScriptService:
             "status": "active",
             "owner_type": "system",
             "owner_key": "",
-            "content_hash": self._content_hash(code.rstrip() + "\n"),
+            "content_hash": self._content_hash(
+                code.rstrip() + "\n",
+                language="python",
+                input_schema=definition.input_schema,
+                output_schema=definition.output_schema,
+            ),
             "input_schema": definition.input_schema,
             "output_schema": definition.output_schema,
             "source": "default",
@@ -549,6 +577,9 @@ class ScriptService:
         payload = dict(script)
         payload.setdefault("source", "database")
         payload["is_builtin"] = str(payload.get("script_key") or "") in self._builtins
+        if "revision_no" not in payload:
+            payload["revision_no"] = int(payload.get("current_revision_no") or 0)
+        payload.pop("current_revision_no", None)
         if not include_code:
             payload.pop("code", None)
             payload["code_preview"] = str(script.get("code") or "")[:160]
@@ -588,8 +619,25 @@ class ScriptService:
                 return default
         return value if value is not None else default
 
-    def _content_hash(self, code: str) -> str:
-        return hashlib.sha256(code.encode("utf-8")).hexdigest()
+    def _content_hash(
+        self,
+        code: str,
+        *,
+        language: str = "python",
+        input_schema: dict[str, Any] | None = None,
+        output_schema: dict[str, Any] | None = None,
+    ) -> str:
+        fingerprint = json.dumps(
+            {
+                "code": code,
+                "language": language,
+                "input_schema": input_schema,
+                "output_schema": output_schema,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
 
     def _validate_schema(
         self, schema_name: str, schema: dict[str, Any], *, require_object_root: bool = False

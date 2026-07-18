@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
+from agent_bridge.core.domain import AccessDenied, ConflictError, NotFound, ValidationError, require_admin_user
 from agent_bridge.core.diff import text_diff, workflow_structured_diff
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import (
@@ -24,6 +24,9 @@ from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.automation.workflows.validator import WorkflowValidator
 
 logger = logging.getLogger(__name__)
+
+WORKFLOW_REVISION_SOURCES = frozenset({"edit", "import", "restore"})
+WORKFLOW_IMPORT_MODES = frozenset({"auto", "new", "overwrite"})
 
 
 def _snippet(content: str, query: str | None, size: int = 220) -> str:
@@ -74,11 +77,14 @@ class WorkflowService:
         workflow_type: str = "operation",
         definition: dict[str, Any] | WorkflowGraph | None = None,
         workflow_js: str = "",
+        revision_source: str = "edit",
     ) -> dict[str, Any]:
         # Kept only for internal callers that still construct historical test
         # fixtures. New API schemas do not expose or execute this field.
         del workflow_js
         require_admin_user(actor, self.admins)
+        if revision_source not in WORKFLOW_REVISION_SOURCES:
+            raise ValidationError(f"unsupported workflow revision source: {revision_source}")
         graph = self.validator.require_valid(
             actor=actor,
             workflow={
@@ -97,37 +103,33 @@ class WorkflowService:
         new_content_hash = self._workflow_content_hash(
             graph_payload, name, description, profile_key, next_status, next_type
         )
-        # Read previous version BEFORE upsert so we can detect a content change.
-        previous = self.store.get_workflow_definition(workflow_key)
-        previous_revision_no = int(previous.get("current_revision_no") or 0) if previous else 0
-        previous_hash = (
-            self.store.workflows.get_definition_revision(workflow_key, previous_revision_no)["content_hash"]
-            if previous and previous_revision_no
-            else None
-        )
-        result = self.store.upsert_workflow_definition(
-            workflow_key=workflow_key,
-            name=name,
-            description=description,
-            profile_key=profile_key,
-            definition=graph_payload,
-            workflow_js="",
-            status=next_status,
-            workflow_type=next_type,
-            created_by=actor,
-        )
-        # Auto-archive a revision when content changes (or on first save).
-        is_first_revision = previous is None
-        content_changed = previous_hash != new_content_hash
-        revision_no = previous_revision_no
-        if content_changed or is_first_revision:
-            revision = self.store.workflows.create_definition_revision(
+        with self.store.transaction():
+            previous_revisions = self.store.workflows.list_definition_revisions(workflow_key, limit=1)
+            previous_hash = previous_revisions[0]["content_hash"] if previous_revisions else None
+            result = self.store.upsert_workflow_definition(
                 workflow_key=workflow_key,
-                content_hash=new_content_hash,
-                snapshot=self._workflow_revision_snapshot(result),
-                actor=actor,
+                name=name,
+                description=description,
+                profile_key=profile_key,
+                definition=graph_payload,
+                workflow_js="",
+                status=next_status,
+                workflow_type=next_type,
+                created_by=actor,
             )
-            revision_no = revision["revision_no"]
+            # Archive a revision whenever execution semantics changed (or on
+            # the first save, including an upgraded legacy database).
+            content_changed = not previous_revisions or previous_hash != new_content_hash
+            revision_no = previous_revisions[0]["revision_no"] if previous_revisions else 0
+            if content_changed:
+                revision = self.store.workflows.create_definition_revision(
+                    workflow_key=workflow_key,
+                    content_hash=new_content_hash,
+                    snapshot=self._workflow_revision_snapshot(result),
+                    actor=actor,
+                    source=revision_source,
+                )
+                revision_no = revision["revision_no"]
         result["content_hash"] = new_content_hash
         result["revision_no"] = revision_no
         logger.info(
@@ -150,6 +152,274 @@ class WorkflowService:
         if workflow is None:
             raise NotFound("workflow not found")
         return self._definition_payload(workflow)
+
+    def restore_revision(self, actor: str, workflow_key: str, revision_no: int) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        with self.store.transaction():
+            current = self.store.get_workflow_definition(workflow_key)
+            if current is None:
+                raise NotFound("workflow not found")
+            revision = self.store.workflows.get_definition_revision(workflow_key, revision_no)
+            if revision is None:
+                raise NotFound("workflow revision not found")
+            snapshot = revision.get("snapshot")
+            if not isinstance(snapshot, dict) or snapshot.get("workflow_key") not in (None, workflow_key):
+                raise ValidationError("workflow revision snapshot does not belong to this workflow")
+            definition = snapshot.get("definition")
+            if not isinstance(definition, dict):
+                raise ValidationError("workflow revision snapshot has no valid definition")
+
+            saved = self.upsert_definition(
+                actor=actor,
+                workflow_key=workflow_key,
+                name=str(snapshot.get("name") or current.get("name") or workflow_key),
+                description=str(snapshot.get("description") or ""),
+                profile_key=str(snapshot.get("profile_key") or current.get("profile_key") or ""),
+                status=str(snapshot.get("status") or current.get("status") or WorkflowStatus.active.value),
+                workflow_type=str(snapshot.get("workflow_type") or current.get("workflow_type") or WorkflowType.operation.value),
+                definition=definition,
+                revision_source="restore",
+            )
+            saved["restored_from_revision"] = revision_no
+            saved["revision_created"] = saved.get("revision_no") != current.get("current_revision_no")
+            saved_revision = self.store.workflows.get_definition_revision(
+                workflow_key, int(saved["revision_no"])
+            )
+            saved["revision_source"] = saved_revision.get("source") if saved_revision else "restore"
+            return saved
+
+    def export_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        with self.store.transaction():
+            workflow = self.store.get_workflow_definition(workflow_key)
+            if workflow is None:
+                raise NotFound("workflow not found")
+            public = self._definition_payload(workflow)
+            if not isinstance(public.get("definition"), dict):
+                raise NotFound("workflow has no exportable definition")
+            current_revision_no = int(workflow.get("current_revision_no") or 0)
+            revision = (
+                self.store.workflows.get_definition_revision(workflow_key, current_revision_no)
+                if current_revision_no > 0
+                else None
+            )
+            if revision is None:
+                content_hash = self._workflow_content_hash(
+                    public["definition"],
+                    str(public.get("name") or workflow_key),
+                    str(public.get("description") or ""),
+                    str(public.get("profile_key") or ""),
+                    str(public.get("status") or WorkflowStatus.active.value),
+                    str(public.get("workflow_type") or WorkflowType.operation.value),
+                )
+                latest = self.store.workflows.list_definition_revisions(workflow_key, limit=1)
+                if latest and latest[0].get("content_hash") == content_hash:
+                    self.store.workflows.set_current_definition_revision_no(
+                        workflow_key, int(latest[0]["revision_no"])
+                    )
+                    revision = self.store.workflows.get_definition_revision(
+                        workflow_key, int(latest[0]["revision_no"])
+                    )
+                else:
+                    revision = self.store.workflows.create_definition_revision(
+                        workflow_key=workflow_key,
+                        content_hash=content_hash,
+                        snapshot=self._workflow_revision_snapshot(public),
+                        actor=actor,
+                        source="edit",
+                    )
+            if revision is None:
+                raise NotFound("workflow revision not found")
+            return {
+                "format": "agent-bridge.workflow",
+                "format_version": 1,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "exported_by": actor,
+                "workflow": {
+                    key: public[key]
+                    for key in (
+                        "workflow_key", "name", "description", "profile_key",
+                        "status", "workflow_type", "definition",
+                    )
+                },
+                "revision": {
+                    key: revision[key]
+                    for key in ("revision_no", "content_hash", "source", "created_by", "created_at")
+                },
+            }
+
+    def preview_definition_import(
+        self,
+        *,
+        actor: str,
+        filename: str,
+        content: bytes,
+        target_workflow_key: str | None = None,
+        target_mode: str = "auto",
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if target_mode not in WORKFLOW_IMPORT_MODES:
+            raise ValidationError("invalid workflow import target mode")
+        try:
+            envelope = json.loads(content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValidationError("workflow import file must be valid UTF-8 JSON") from exc
+        if not isinstance(envelope, dict):
+            raise ValidationError("workflow import payload must be an object")
+        if envelope.get("format") != "agent-bridge.workflow":
+            raise ValidationError("unsupported workflow import format")
+        if envelope.get("format_version") != 1:
+            raise ValidationError("unsupported workflow import format version")
+
+        source = envelope.get("workflow")
+        if not isinstance(source, dict):
+            raise ValidationError("workflow import payload has no workflow object")
+        source_workflow_key = str(source.get("workflow_key") or "").strip()
+        target_key = str(target_workflow_key or source_workflow_key).strip()
+        if not source_workflow_key or not target_key:
+            raise ValidationError("workflow import requires a workflow key")
+        try:
+            status = WorkflowStatus(str(source.get("status") or WorkflowStatus.active.value)).value
+            workflow_type = WorkflowType(
+                str(source.get("workflow_type") or WorkflowType.operation.value)
+            ).value
+        except ValueError as exc:
+            raise ValidationError("workflow import contains an invalid workflow status or type") from exc
+        imported = {
+            "workflow_key": target_key,
+            "name": str(source.get("name") or target_key),
+            "description": str(source.get("description") or ""),
+            "profile_key": str(source.get("profile_key") or ""),
+            "status": status,
+            "workflow_type": workflow_type,
+            "definition": source.get("definition"),
+        }
+        if not imported["profile_key"] or not isinstance(imported["definition"], dict):
+            raise ValidationError("workflow import is missing profile_key or definition")
+        graph = self.validator.require_valid(actor=actor, workflow=imported)
+        imported["definition"] = graph.model_dump(mode="json")
+
+        existing = self.store.get_workflow_definition(target_key)
+        if target_mode in {"auto", "new"} and existing is not None:
+            raise ConflictError(
+                f"workflow key already exists: {target_key}; choose overwrite or another key"
+            )
+        if target_mode == "overwrite" and existing is None:
+            raise ConflictError(f"workflow to overwrite not found: {target_key}")
+        operation = "overwrite" if existing is not None else "create"
+        target_revision_no = int(existing.get("current_revision_no") or 0) if existing else 0
+        diff = None
+        if existing is not None:
+            target_revision = (
+                self.store.workflows.get_definition_revision(target_key, target_revision_no)
+                if target_revision_no > 0
+                else None
+            )
+            before = (
+                target_revision["snapshot"]
+                if target_revision is not None
+                else self._workflow_revision_snapshot(self._definition_payload(existing))
+            )
+            after = self._workflow_revision_snapshot(imported)
+            before_text = json.dumps(before, ensure_ascii=False, indent=2, sort_keys=True)
+            after_text = json.dumps(after, ensure_ascii=False, indent=2, sort_keys=True)
+            diff = {
+                "entity_type": "workflow",
+                "entity_key": target_key,
+                "from_revision": target_revision_no,
+                "to_revision": None,
+                "text": text_diff(
+                    before_text,
+                    after_text,
+                    from_label=f"current v{target_revision_no}",
+                    to_label="imported definition",
+                ),
+                "structured": workflow_structured_diff(before, after),
+            }
+
+        import_id = f"workflow_import_{uuid.uuid4().hex}"
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        self.store.workflows.delete_expired_workflow_definition_imports()
+        self.store.workflows.create_workflow_definition_import(
+            import_id=import_id,
+            actor=actor,
+            filename=filename or "workflow.workflow.json",
+            source_workflow_key=source_workflow_key,
+            target_workflow_key=target_key,
+            operation=operation,
+            workflow=imported,
+            target_revision_no=target_revision_no,
+            expires_at=expires_at,
+        )
+        return {
+            "import_id": import_id,
+            "filename": filename or "workflow.workflow.json",
+            "expires_at": expires_at.isoformat(),
+            "source_workflow_key": source_workflow_key,
+            "target_workflow_key": target_key,
+            "operation": operation,
+            "target_revision_no": target_revision_no,
+            "can_confirm": True,
+            "workflow": imported,
+            "diff": diff,
+        }
+
+    def confirm_definition_import(self, actor: str, import_id: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        now = datetime.now(timezone.utc)
+        with self.store.transaction():
+            snapshot = self.store.workflows.get_workflow_definition_import(import_id)
+            if snapshot is None:
+                raise NotFound("workflow definition import not found")
+            if snapshot.get("actor") != actor:
+                raise AccessDenied("workflow definition import belongs to another actor")
+            if snapshot.get("status") != "previewed":
+                raise ConflictError("workflow definition import is no longer previewable")
+            try:
+                expires_at = datetime.fromisoformat(str(snapshot["expires_at"]).replace("Z", "+00:00"))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValidationError("workflow definition import expiry is invalid") from exc
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at <= now:
+                raise ValidationError("workflow definition import expired")
+
+            target_key = str(snapshot.get("target_workflow_key") or "")
+            imported = snapshot.get("workflow")
+            if not target_key or not isinstance(imported, dict):
+                raise ValidationError("workflow definition import session is invalid")
+            current = self.store.get_workflow_definition(target_key)
+            current_revision_no = int(current.get("current_revision_no") or 0) if current else 0
+            expected_revision_no = int(snapshot.get("target_revision_no") or 0)
+            if current_revision_no != expected_revision_no:
+                raise ConflictError("workflow changed after import preview; preview again")
+            if snapshot.get("operation") == "overwrite" and current is None:
+                raise ConflictError("workflow to overwrite no longer exists")
+            if snapshot.get("operation") == "create" and current is not None:
+                raise ConflictError("workflow key already exists; preview again")
+
+            graph = self.validator.require_valid(actor=actor, workflow=imported)
+            saved = self.upsert_definition(
+                actor=actor,
+                workflow_key=target_key,
+                name=str(imported.get("name") or target_key),
+                description=str(imported.get("description") or ""),
+                profile_key=str(imported.get("profile_key") or ""),
+                status=str(imported.get("status") or WorkflowStatus.active.value),
+                workflow_type=str(imported.get("workflow_type") or WorkflowType.operation.value),
+                definition=graph,
+                revision_source="import",
+            )
+            if not self.store.workflows.confirm_workflow_definition_import(import_id, actor=actor):
+                raise ConflictError("workflow definition import is no longer previewable")
+            saved_revision = self.store.workflows.get_definition_revision(
+                target_key, int(saved["revision_no"])
+            )
+            saved["revision_source"] = saved_revision.get("source") if saved_revision else "import"
+            self.store.workflows.delete_workflow_definition_import(import_id, actor=actor)
+            saved["import_id"] = import_id
+            saved["operation"] = snapshot.get("operation")
+            return saved
 
     def delete_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -431,6 +701,9 @@ class WorkflowService:
         payload = dict(workflow)
         payload.pop("definition_json", None)
         payload.pop("workflow_js", None)
+        if "revision_no" not in payload:
+            payload["revision_no"] = int(payload.get("current_revision_no") or 0)
+        payload.pop("current_revision_no", None)
         return payload
 
     @staticmethod
@@ -442,9 +715,22 @@ class WorkflowService:
         status: str,
         workflow_type: str,
     ) -> str:
+        execution_definition = {
+            "nodes": [
+                {key: value for key, value in node.items() if key != "position"}
+                for node in sorted(
+                    graph_payload.get("nodes") or [],
+                    key=lambda item: str(item.get("id") or ""),
+                )
+            ],
+            "edges": sorted(
+                graph_payload.get("edges") or [],
+                key=lambda item: str(item.get("id") or ""),
+            ),
+        }
         fingerprint = json.dumps(
             {
-                "definition": graph_payload,
+                "definition": execution_definition,
                 "name": name,
                 "description": description,
                 "profile_key": profile_key,

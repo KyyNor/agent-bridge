@@ -75,6 +75,10 @@ import type {
   WorkflowTaskListParams,
   WorkflowTaskImportPreview,
   WorkflowTaskImportResult,
+  WorkflowImportPreview,
+  WorkflowImportResult,
+  WorkflowImportTargetMode,
+  WorkflowRestoreResult,
   WorkflowGraph,
   WorkflowValidationIssue,
   WorkflowValidationResult,
@@ -140,9 +144,28 @@ function headers(): Record<string, string> {
   return { 'X-Agent-Bridge-User': DEFAULT_USER }
 }
 
+function formatHttpError(status: number, raw: string): string {
+  let detail = raw.trim()
+  try {
+    const payload: unknown = raw ? JSON.parse(raw) : null
+    if (payload && typeof payload === 'object' && 'detail' in payload) {
+      const value = (payload as { detail?: unknown }).detail
+      detail = typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value)
+    } else if (payload && typeof payload === 'object' && 'errors' in payload) {
+      const value = (payload as { errors?: unknown }).errors
+      detail = Array.isArray(value)
+        ? value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('; ')
+        : String(value ?? '')
+    }
+  } catch {
+    // Keep plain-text server responses as the fallback detail.
+  }
+  return `${status}: ${detail || '请求失败'}`
+}
+
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(url, { headers: headers() })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -152,7 +175,7 @@ async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string
     headers: { ...headers(), 'Content-Type': 'application/json', ...(extraHeaders || {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -162,7 +185,7 @@ async function put<T>(url: string, body?: unknown): Promise<T> {
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -172,13 +195,13 @@ async function patch<T>(url: string, body?: unknown): Promise<T> {
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
 async function del<T>(url: string): Promise<T> {
   const r = await fetch(url, { method: 'DELETE', headers: headers() })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -188,7 +211,7 @@ async function postFormData<T>(url: string, formData: FormData): Promise<T> {
     headers: headers(),
     body: formData,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -238,7 +261,7 @@ function postFormDataWithProgress<T>(
 
 async function getBlob(url: string): Promise<Blob> {
   const r = await fetch(url, { headers: headers() })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.blob()
 }
 
@@ -357,6 +380,22 @@ export const api = {
     if (toRevision != null) qs.set('to_revision', String(toRevision))
     return get<DiffResult>(`/workflows/${key}/diff?${qs}`)
   },
+  restoreWorkflowRevision: (key: string, revisionNo: number) =>
+    post<WorkflowRestoreResult>(`/workflows/${key}/revisions/${revisionNo}/restore`),
+  exportWorkflow: (key: string) => getBlob(`/workflows/${key}/export`),
+  previewWorkflowImport: (
+    file: File,
+    targetWorkflowKey?: string,
+    targetMode: WorkflowImportTargetMode = 'auto',
+  ) => {
+    const form = new FormData()
+    form.append('file', file)
+    if (targetWorkflowKey) form.append('target_workflow_key', targetWorkflowKey)
+    form.append('target_mode', targetMode)
+    return postFormData<WorkflowImportPreview>('/workflows/import/preview', form)
+  },
+  confirmWorkflowImport: (importId: string) =>
+    post<WorkflowImportResult>('/workflows/import/confirm', { import_id: importId }),
   listWorkflowRuns: (key: string, limit = 200) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)

@@ -660,8 +660,28 @@ CREATE TABLE IF NOT EXISTS workflow_definition_revisions (
   content_hash TEXT NOT NULL,
   snapshot_json TEXT NOT NULL,
   created_by TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'edit',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (workflow_key, revision_no)
 );
 CREATE INDEX IF NOT EXISTS idx_wf_def_revisions_key ON workflow_definition_revisions(workflow_key, revision_no DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_definition_imports (
+  import_id TEXT PRIMARY KEY,
+  actor TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  source_workflow_key TEXT NOT NULL,
+  target_workflow_key TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  workflow_json TEXT NOT NULL,
+  target_revision_no INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'previewed',
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  confirmed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wf_definition_imports_expiry
+  ON workflow_definition_imports(status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_wf_definition_imports_actor
+  ON workflow_definition_imports(actor, created_at DESC);
 """

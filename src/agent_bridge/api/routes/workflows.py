@@ -1,12 +1,14 @@
 """Workflow definition, run log, and artifact endpoints."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 
 from agent_bridge.api.schemas import (
     WorkflowDefinitionRequest,
+    WorkflowImportConfirmRequest,
     WorkflowRunRequest,
     WorkflowTaskImportConfirmRequest,
     WorkflowValidationRequest,
@@ -53,6 +55,12 @@ def create_workflow_routes(service, actor):
     ) -> dict[str, Any]:
         return service.workflows.get_revision(current_actor, workflow_key, revision_no)
 
+    @router.post("/workflows/{workflow_key}/revisions/{revision_no}/restore")
+    def restore_workflow_revision(
+        workflow_key: str, revision_no: int, current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.workflows.restore_revision(current_actor, workflow_key, revision_no)
+
     @router.get("/workflows/{workflow_key}/diff")
     def diff_workflow(
         workflow_key: str,
@@ -63,6 +71,39 @@ def create_workflow_routes(service, actor):
         return service.workflows.diff_revisions(
             current_actor, workflow_key, from_no=from_revision, to_no=to_revision
         )
+
+    @router.get("/workflows/{workflow_key}/export")
+    def export_workflow(workflow_key: str, current_actor: str = Depends(actor)) -> Response:
+        payload = service.workflows.export_definition(current_actor, workflow_key)
+        return Response(
+            content=json.dumps(payload, ensure_ascii=False, indent=2),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{workflow_key}.workflow.json"'
+            },
+        )
+
+    @router.post("/workflows/import/preview")
+    async def preview_workflow_import(
+        file: UploadFile = File(description="workflow export JSON"),
+        target_workflow_key: str | None = Form(None),
+        target_mode: str = Form("auto"),
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.preview_definition_import(
+            actor=current_actor,
+            filename=file.filename or "workflow.workflow.json",
+            content=await file.read(),
+            target_workflow_key=target_workflow_key,
+            target_mode=target_mode,
+        )
+
+    @router.post("/workflows/import/confirm")
+    def confirm_workflow_import(
+        payload: WorkflowImportConfirmRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.confirm_definition_import(current_actor, payload.import_id)
 
     @router.get("/workflows/{workflow_key}/runs")
     def list_workflow_runs(
