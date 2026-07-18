@@ -141,11 +141,28 @@ test('workflow import UI supports new, overwrite, diff, and confirmation', () =>
   const view = readSrc('src/views/workflow/WorkflowView.vue')
   assert.match(dialog, /新工作流/)
   assert.match(dialog, /覆盖现有工作流/)
+  assert.match(dialog, /bg-destructive-soft/)
+  assert.match(dialog, /text-destructive-soft-fg/)
+  assert.match(dialog, /border-destructive\/30/)
   assert.match(dialog, /WorkflowStructuredDiff/)
   assert.match(dialog, /确认导入/)
   assert.match(dialog, /whitespace-pre-line/)
   assert.match(view, /导出工作流/)
   assert.match(view, /导入工作流/)
+})
+
+test('workflow canvas distinguishes node types with base category colors', () => {
+  const canvas = readSrc('src/views/workflow/WorkflowEditorCanvas.vue')
+
+  assert.match(canvas, /get_task: 'blue'/)
+  assert.match(canvas, /agent: 'violet'/)
+  assert.match(canvas, /script: 'teal'/)
+  assert.match(canvas, /output: 'amber'/)
+  assert.match(canvas, /bg-cat-blue-fg/)
+  assert.match(canvas, /bg-cat-violet-fg/)
+  assert.match(canvas, /bg-cat-teal-fg/)
+  assert.match(canvas, /bg-cat-amber-fg/)
+  assert.doesNotMatch(canvas, /(?:bg|text|border)-(?:blue|purple|violet|teal|amber|emerald|rose)-\d+/)
 })
 
 test('workflow import dialog keeps confirmation footer fixed while preview content scrolls', () => {

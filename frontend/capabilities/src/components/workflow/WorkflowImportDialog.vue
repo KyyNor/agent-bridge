@@ -115,7 +115,11 @@ function formatExpiresAt(value: string): string {
         <div v-if="preview" class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>文件：<strong class="font-medium text-foreground">{{ preview.filename }}</strong></span>
           <span>目标：<strong class="font-medium text-foreground">{{ preview.target_workflow_key }}</strong></span>
-          <span>动作：<strong class="font-medium text-foreground">{{ preview.operation === 'overwrite' ? '覆盖现有工作流' : '创建新工作流' }}</strong></span>
+          <span>动作：<strong
+            :class="preview.operation === 'overwrite'
+              ? 'inline-flex items-center gap-1 rounded-sm border border-destructive/30 bg-destructive-soft px-1.5 py-0.5 font-semibold text-destructive-soft-fg'
+              : 'font-medium text-foreground'"
+          ><span v-if="preview.operation === 'overwrite'" aria-hidden="true">⚠</span>{{ preview.operation === 'overwrite' ? '覆盖现有工作流' : '创建新工作流' }}</strong></span>
           <span>预览有效期至：<strong class="font-medium text-foreground">{{ formatExpiresAt(preview.expires_at) }}</strong></span>
         </div>
 
