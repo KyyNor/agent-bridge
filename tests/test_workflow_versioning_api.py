@@ -52,6 +52,7 @@ def test_restore_revision_endpoint_appends_restore_revision(wm_paths):
     assert body["revision_no"] == 3
     assert body["name"] == "v1"
     assert body["restored_from_revision"] == 1
+    assert body["revision_source"] == "restore"
     assert service.workflows.get_revision("root", "wf", 3)["source"] == "restore"
 
 
@@ -105,6 +106,7 @@ def test_import_api_creates_new_workflow_after_preview_and_confirm(wm_paths):
     )
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["workflow_key"] == "imported"
+    assert confirmed.json()["revision_source"] == "import"
     assert service.workflows.get_revision("root", "imported", 1)["source"] == "import"
 
 

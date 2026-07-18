@@ -86,6 +86,7 @@ def test_import_preview_creates_new_workflow_session(wm_paths):
     assert saved["workflow_key"] == "new-wf"
     assert saved["revision_no"] == 1
     assert service.workflows.get_revision("root", "new-wf", 1)["source"] == "import"
+    assert service.store.workflows.get_workflow_definition_import(preview["import_id"]) is None
 
 
 def test_import_preview_existing_returns_diff_and_confirm_appends_revision(wm_paths):
@@ -174,3 +175,17 @@ def test_import_overwrite_can_upgrade_legacy_workflow_without_revision(wm_paths)
 
     assert saved["revision_no"] == 1
     assert service.workflows.get_revision("root", "wf", 1)["source"] == "import"
+
+
+def test_reusing_deleted_workflow_key_starts_fresh_revision_history(wm_paths):
+    service = _make_service(wm_paths)
+    _save(service, name="W")
+    service.workflows.delete_definition("root", "wf")
+
+    preview = _preview(service, _export_payload("wf", name="W"))
+    saved = service.workflows.confirm_definition_import("root", preview["import_id"])
+
+    assert saved["revision_no"] == 1
+    assert saved["revision_source"] == "import"
+    assert [item["revision_no"] for item in service.workflows.list_revisions("root", "wf")] == [1]
+    assert service.workflows.export_definition("root", "wf")["revision"]["revision_no"] == 1

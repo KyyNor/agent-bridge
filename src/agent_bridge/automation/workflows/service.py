@@ -155,63 +155,98 @@ class WorkflowService:
 
     def restore_revision(self, actor: str, workflow_key: str, revision_no: int) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        current = self.store.get_workflow_definition(workflow_key)
-        if current is None:
-            raise NotFound("workflow not found")
-        revision = self.store.workflows.get_definition_revision(workflow_key, revision_no)
-        if revision is None:
-            raise NotFound("workflow revision not found")
-        snapshot = revision.get("snapshot")
-        if not isinstance(snapshot, dict) or snapshot.get("workflow_key") not in (None, workflow_key):
-            raise ValidationError("workflow revision snapshot does not belong to this workflow")
-        definition = snapshot.get("definition")
-        if not isinstance(definition, dict):
-            raise ValidationError("workflow revision snapshot has no valid definition")
+        with self.store.transaction():
+            current = self.store.get_workflow_definition(workflow_key)
+            if current is None:
+                raise NotFound("workflow not found")
+            revision = self.store.workflows.get_definition_revision(workflow_key, revision_no)
+            if revision is None:
+                raise NotFound("workflow revision not found")
+            snapshot = revision.get("snapshot")
+            if not isinstance(snapshot, dict) or snapshot.get("workflow_key") not in (None, workflow_key):
+                raise ValidationError("workflow revision snapshot does not belong to this workflow")
+            definition = snapshot.get("definition")
+            if not isinstance(definition, dict):
+                raise ValidationError("workflow revision snapshot has no valid definition")
 
-        saved = self.upsert_definition(
-            actor=actor,
-            workflow_key=workflow_key,
-            name=str(snapshot.get("name") or current.get("name") or workflow_key),
-            description=str(snapshot.get("description") or ""),
-            profile_key=str(snapshot.get("profile_key") or current.get("profile_key") or ""),
-            status=str(snapshot.get("status") or current.get("status") or WorkflowStatus.active.value),
-            workflow_type=str(snapshot.get("workflow_type") or current.get("workflow_type") or WorkflowType.operation.value),
-            definition=definition,
-            revision_source="restore",
-        )
-        saved["restored_from_revision"] = revision_no
-        saved["revision_created"] = saved.get("revision_no") != current.get("current_revision_no")
-        return saved
+            saved = self.upsert_definition(
+                actor=actor,
+                workflow_key=workflow_key,
+                name=str(snapshot.get("name") or current.get("name") or workflow_key),
+                description=str(snapshot.get("description") or ""),
+                profile_key=str(snapshot.get("profile_key") or current.get("profile_key") or ""),
+                status=str(snapshot.get("status") or current.get("status") or WorkflowStatus.active.value),
+                workflow_type=str(snapshot.get("workflow_type") or current.get("workflow_type") or WorkflowType.operation.value),
+                definition=definition,
+                revision_source="restore",
+            )
+            saved["restored_from_revision"] = revision_no
+            saved["revision_created"] = saved.get("revision_no") != current.get("current_revision_no")
+            saved_revision = self.store.workflows.get_definition_revision(
+                workflow_key, int(saved["revision_no"])
+            )
+            saved["revision_source"] = saved_revision.get("source") if saved_revision else "restore"
+            return saved
 
     def export_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        workflow = self.store.get_workflow_definition(workflow_key)
-        if workflow is None:
-            raise NotFound("workflow not found")
-        current_revision_no = int(workflow.get("current_revision_no") or 0)
-        if current_revision_no <= 0:
-            raise NotFound("workflow has no revisions")
-        revision = self.store.workflows.get_definition_revision(workflow_key, current_revision_no)
-        if revision is None:
-            raise NotFound("workflow revision not found")
-        public = self._definition_payload(workflow)
-        return {
-            "format": "agent-bridge.workflow",
-            "format_version": 1,
-            "exported_at": datetime.now(timezone.utc).isoformat(),
-            "exported_by": actor,
-            "workflow": {
-                key: public[key]
-                for key in (
-                    "workflow_key", "name", "description", "profile_key",
-                    "status", "workflow_type", "definition",
+        with self.store.transaction():
+            workflow = self.store.get_workflow_definition(workflow_key)
+            if workflow is None:
+                raise NotFound("workflow not found")
+            public = self._definition_payload(workflow)
+            if not isinstance(public.get("definition"), dict):
+                raise NotFound("workflow has no exportable definition")
+            current_revision_no = int(workflow.get("current_revision_no") or 0)
+            revision = (
+                self.store.workflows.get_definition_revision(workflow_key, current_revision_no)
+                if current_revision_no > 0
+                else None
+            )
+            if revision is None:
+                content_hash = self._workflow_content_hash(
+                    public["definition"],
+                    str(public.get("name") or workflow_key),
+                    str(public.get("description") or ""),
+                    str(public.get("profile_key") or ""),
+                    str(public.get("status") or WorkflowStatus.active.value),
+                    str(public.get("workflow_type") or WorkflowType.operation.value),
                 )
-            },
-            "revision": {
-                key: revision[key]
-                for key in ("revision_no", "content_hash", "source", "created_by", "created_at")
-            },
-        }
+                latest = self.store.workflows.list_definition_revisions(workflow_key, limit=1)
+                if latest and latest[0].get("content_hash") == content_hash:
+                    self.store.workflows.set_current_definition_revision_no(
+                        workflow_key, int(latest[0]["revision_no"])
+                    )
+                    revision = self.store.workflows.get_definition_revision(
+                        workflow_key, int(latest[0]["revision_no"])
+                    )
+                else:
+                    revision = self.store.workflows.create_definition_revision(
+                        workflow_key=workflow_key,
+                        content_hash=content_hash,
+                        snapshot=self._workflow_revision_snapshot(public),
+                        actor=actor,
+                        source="edit",
+                    )
+            if revision is None:
+                raise NotFound("workflow revision not found")
+            return {
+                "format": "agent-bridge.workflow",
+                "format_version": 1,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "exported_by": actor,
+                "workflow": {
+                    key: public[key]
+                    for key in (
+                        "workflow_key", "name", "description", "profile_key",
+                        "status", "workflow_type", "definition",
+                    )
+                },
+                "revision": {
+                    key: revision[key]
+                    for key in ("revision_no", "content_hash", "source", "created_by", "created_at")
+                },
+            }
 
     def preview_definition_import(
         self,
@@ -377,6 +412,11 @@ class WorkflowService:
             )
             if not self.store.workflows.confirm_workflow_definition_import(import_id, actor=actor):
                 raise ConflictError("workflow definition import is no longer previewable")
+            saved_revision = self.store.workflows.get_definition_revision(
+                target_key, int(saved["revision_no"])
+            )
+            saved["revision_source"] = saved_revision.get("source") if saved_revision else "import"
+            self.store.workflows.delete_workflow_definition_import(import_id, actor=actor)
             saved["import_id"] = import_id
             saved["operation"] = snapshot.get("operation")
             return saved

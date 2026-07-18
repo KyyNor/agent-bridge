@@ -73,6 +73,7 @@ const artifactTotal = ref(0)
 const artifactPage = ref(1)
 const artifactPageSize = ref(50)
 const error = ref('')
+const workflowDetailError = ref('')
 const artifactError = ref('')
 const saving = ref(false)
 const formError = ref('')
@@ -1400,6 +1401,7 @@ async function previewWorkflowImport(file: File | null = workflowImportFile.valu
 async function downloadWorkflowDefinition() {
   const workflowKey = selectedWorkflow.value?.workflow_key
   if (!workflowKey) return
+  workflowDetailError.value = ''
   let objectUrl = ''
   let anchor: HTMLAnchorElement | null = null
   try {
@@ -1412,7 +1414,7 @@ async function downloadWorkflowDefinition() {
     document.body.appendChild(anchor)
     anchor.click()
   } catch (e: unknown) {
-    error.value = errorMessage(e)
+    workflowDetailError.value = errorMessage(e)
   } finally {
     anchor?.remove()
     if (objectUrl) URL.revokeObjectURL(objectUrl)
@@ -1430,6 +1432,11 @@ async function confirmWorkflowImport() {
     if (!isCurrentWorkflowImportRequest(requestToken)) return
     closeWorkflowImport()
     await loadAll()
+    if (error.value) {
+      workflowDetailError.value = `导入已完成，但刷新工作流列表失败：${error.value}`
+      error.value = ''
+      return
+    }
     selectedKey.value = result.workflow_key
     window.location.hash = `workflow/${result.workflow_key}/detail`
   } catch (e: unknown) {
@@ -2411,6 +2418,9 @@ async function confirmClearWorkflow() {
     </template>
 
     <section v-if="routeMode === 'detail' && !routeError" class="space-y-5">
+      <div v-if="workflowDetailError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
+        {{ workflowDetailError }}
+      </div>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
           <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">

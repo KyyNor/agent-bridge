@@ -76,10 +76,16 @@ test('workflow version history exposes source labels and restore action', () => 
 
 test('workflow API client exposes export, restore, and import calls', () => {
   const file = readSrc('src/api/client.ts')
+  const types = readSrc('src/api/types.ts')
+  const view = readSrc('src/views/workflow/WorkflowView.vue')
   assert.match(file, /restoreWorkflowRevision/)
   assert.match(file, /exportWorkflow/)
   assert.match(file, /previewWorkflowImport/)
   assert.match(file, /confirmWorkflowImport/)
+  assert.match(types, /revision_source: WorkflowRevisionSource/)
+  assert.match(file, /formatHttpError/)
+  assert.match(view, /const workflowDetailError = ref\(''\)/)
+  assert.match(view, /v-if="workflowDetailError"/)
 })
 
 test('unifiedDiff parser classifies add / del / hunk rows', () => {

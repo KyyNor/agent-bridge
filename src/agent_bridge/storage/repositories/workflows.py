@@ -246,6 +246,13 @@ class WorkflowsRepository:
             ).fetchone()
             return int(row[0]) if row else 0
 
+    def set_current_definition_revision_no(self, workflow_key: str, revision_no: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE workflow_definitions SET current_revision_no = ? WHERE workflow_key = ?",
+                (revision_no, workflow_key),
+            )
+
     def _workflow_task_action(
         self,
         *,
@@ -579,6 +586,14 @@ class WorkflowsRepository:
                 SET status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP
                 WHERE import_id = ? AND actor = ? AND status = 'previewed'
                 """,
+                (import_id, actor),
+            )
+            return cursor.rowcount == 1
+
+    def delete_workflow_definition_import(self, import_id: str, *, actor: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM workflow_definition_imports WHERE import_id = ? AND actor = ?",
                 (import_id, actor),
             )
             return cursor.rowcount == 1
@@ -1004,6 +1019,17 @@ class WorkflowsRepository:
                 (workflow_key,),
             )
             if cursor.rowcount > 0:
+                # A deleted workflow key starts a new logical entity if it is
+                # later reused. Do not let the old entity's revisions or
+                # pending import confirmations leak into that new history.
+                conn.execute(
+                    "DELETE FROM workflow_definition_revisions WHERE workflow_key = ?",
+                    (workflow_key,),
+                )
+                conn.execute(
+                    "DELETE FROM workflow_definition_imports WHERE target_workflow_key = ?",
+                    (workflow_key,),
+                )
                 conn.execute(
                     "DELETE FROM workflow_run_logs WHERE workflow_key = ?",
                     (workflow_key,),

@@ -1300,9 +1300,11 @@ export interface WorkflowImportPreview {
 export interface WorkflowRestoreResult extends WorkflowDefinition {
   restored_from_revision: number
   revision_created: boolean
+  revision_source: WorkflowRevisionSource
 }
 
 export interface WorkflowImportResult extends WorkflowDefinition {
   import_id: string
   operation: 'create' | 'overwrite'
+  revision_source: WorkflowRevisionSource
 }

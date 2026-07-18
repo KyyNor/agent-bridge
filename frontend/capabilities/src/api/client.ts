@@ -144,9 +144,28 @@ function headers(): Record<string, string> {
   return { 'X-Agent-Bridge-User': DEFAULT_USER }
 }
 
+function formatHttpError(status: number, raw: string): string {
+  let detail = raw.trim()
+  try {
+    const payload: unknown = raw ? JSON.parse(raw) : null
+    if (payload && typeof payload === 'object' && 'detail' in payload) {
+      const value = (payload as { detail?: unknown }).detail
+      detail = typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value)
+    } else if (payload && typeof payload === 'object' && 'errors' in payload) {
+      const value = (payload as { errors?: unknown }).errors
+      detail = Array.isArray(value)
+        ? value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('; ')
+        : String(value ?? '')
+    }
+  } catch {
+    // Keep plain-text server responses as the fallback detail.
+  }
+  return `${status}: ${detail || '请求失败'}`
+}
+
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(url, { headers: headers() })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -156,7 +175,7 @@ async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string
     headers: { ...headers(), 'Content-Type': 'application/json', ...(extraHeaders || {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -166,7 +185,7 @@ async function put<T>(url: string, body?: unknown): Promise<T> {
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -176,13 +195,13 @@ async function patch<T>(url: string, body?: unknown): Promise<T> {
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
 async function del<T>(url: string): Promise<T> {
   const r = await fetch(url, { method: 'DELETE', headers: headers() })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -192,7 +211,7 @@ async function postFormData<T>(url: string, formData: FormData): Promise<T> {
     headers: headers(),
     body: formData,
   })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
@@ -242,7 +261,7 @@ function postFormDataWithProgress<T>(
 
 async function getBlob(url: string): Promise<Blob> {
   const r = await fetch(url, { headers: headers() })
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`)
+  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.blob()
 }
 

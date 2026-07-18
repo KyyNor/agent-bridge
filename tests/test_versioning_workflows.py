@@ -109,6 +109,23 @@ def test_export_contains_current_definition_but_not_execution_data(wm_paths):
     assert "artifacts" not in exported
 
 
+def test_export_lazily_archives_legacy_workflow_without_revision(wm_paths):
+    service = _make_service(wm_paths)
+    _upsert(service)
+    with service.store.connect() as conn:
+        conn.execute("DELETE FROM workflow_definition_revisions WHERE workflow_key = ?", ("wf",))
+        conn.execute(
+            "UPDATE workflow_definitions SET current_revision_no = 0 WHERE workflow_key = ?",
+            ("wf",),
+        )
+
+    exported = service.workflows.export_definition("root", "wf")
+
+    assert exported["revision"]["revision_no"] == 1
+    assert exported["revision"]["source"] == "edit"
+    assert service.workflows.get_definition("root", "wf")["revision_no"] == 1
+
+
 def test_workflow_position_only_change_does_not_create_revision(wm_paths):
     service = _make_service(wm_paths)
     _upsert(service, definition={"nodes": [dict(GET_TASK_NODE)], "edges": []})
