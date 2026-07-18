@@ -9,6 +9,7 @@ from agent_bridge.agent_runtime.adapters.opencode import (
     _events_from_opencode_row,
 )
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
+from agent_bridge.agent_runtime.support import build_opencode_mcp_config
 from agent_bridge.agent_runtime.types import CodingAgentFinal, CodingAgentRequest
 from agent_bridge.core.config import AgentBackendConfig, AgentRuntimeConfig
 
@@ -34,6 +35,31 @@ def test_opencode_build_command_uses_json_dir_model_and_auto() -> None:
         "--auto",
         "hello",
     ]
+
+
+def test_opencode_supports_mcp_and_uses_opencode_config_shape() -> None:
+    agent = OpenCodeCodingAgent()
+
+    assert agent.capabilities.supports_mcp is True
+    assert build_opencode_mcp_config(
+        {
+            "mcpServers": {
+                "agent-bridge": {
+                    "type": "http",
+                    "url": "http://127.0.0.1:8765/mcp",
+                    "headers": {"X-Agent-Bridge-MetaMCP-Profile": "safe"},
+                }
+            }
+        }
+    ) == {
+        "mcp": {
+            "agent-bridge": {
+                "type": "remote",
+                "url": "http://127.0.0.1:8765/mcp",
+                "headers": {"X-Agent-Bridge-MetaMCP-Profile": "safe"},
+            }
+        }
+    }
 
 
 def test_opencode_text_event_maps_to_agent_message() -> None:

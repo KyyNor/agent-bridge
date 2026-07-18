@@ -525,6 +525,48 @@ def test_run_installs_profile_claude_md_and_mcp_config(wm_paths, monkeypatch) ->
     assert mcp["mcpServers"]["agent-bridge"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
 
 
+def test_run_opencode_writes_native_mcp_config(wm_paths) -> None:
+    from agent_bridge.agent_runtime.registry import CodingAgentRegistry
+    from agent_bridge.agent_runtime.types import CodingAgentCapabilities, CodingAgentFinal, CodingAgentUpdate
+
+    captured = {}
+
+    class _FakeRun:
+        async def updates(self):
+            yield CodingAgentUpdate(final=CodingAgentFinal(result="ok"))
+
+        async def abort(self):
+            return None
+
+    class _FakeOpenCode:
+        backend_key = "opencode"
+        display_name = "OpenCode"
+        source = "opencode_cli"
+        capabilities = CodingAgentCapabilities(supports_mcp=True)
+
+        def start(self, request):
+            captured["config"] = json.loads((request.cwd / "opencode.json").read_text(encoding="utf-8"))
+            return _FakeRun()
+
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    bundle.governance.upsert_profile(
+        actor="root", profile_key="safe", name="Safe", description="", status="active"
+    )
+    bundle.agents.coding_agents = CodingAgentRegistry(
+        default_backend="opencode", agents=[_FakeOpenCode()]
+    )
+
+    result = asyncio.run(
+        bundle.agents.run(
+            prompt="use tools", agent_name="opencode-worker", profile="safe", backend_key="opencode"
+        )
+    )
+
+    assert result.ok is True
+    assert captured["config"]["mcp"]["agent-bridge"]["type"] == "remote"
+    assert captured["config"]["mcp"]["agent-bridge"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
+
+
 def test_run_no_profile_skips_mcp_and_claude_md(wm_paths, monkeypatch) -> None:
     captured = {}
 

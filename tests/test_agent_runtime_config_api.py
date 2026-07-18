@@ -32,7 +32,7 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
     assert saved.status_code == 200
     assert {key: saved.json()[key] for key in ("default_backend", "backends")} == payload
     assert [item["slug"] for item in saved.json()["available_backends"]] == ["claude", "opencode"]
-    assert saved.json()["available_backends"][1]["capabilities"]["supports_mcp"] is False
+    assert saved.json()["available_backends"][1]["capabilities"]["supports_mcp"] is True
     service = app.state.agent_bridge_service
     assert service.agents.coding_agents.default_backend == "opencode"
     assert "opencode" in service.agents.coding_agents.keys()

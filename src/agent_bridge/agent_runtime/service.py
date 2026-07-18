@@ -26,7 +26,11 @@ from jsonschema import Draft202012Validator
 from agent_bridge.agent_runtime.control import RunControlRegistry
 from agent_bridge.agent_runtime.events import event_record, write_event
 from agent_bridge.agent_runtime.registry import CodingAgentRegistry, create_coding_agent_registry
-from agent_bridge.agent_runtime.support import build_agent_bridge_server_config, write_run_mcp_json
+from agent_bridge.agent_runtime.support import (
+    build_agent_bridge_server_config,
+    build_opencode_mcp_config,
+    write_run_mcp_json,
+)
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
 from agent_bridge.agent_runtime.types import CodingAgent, CodingAgentFinal, CodingAgentRequest
 from agent_bridge.core.ids import new_run_id
@@ -199,6 +203,7 @@ class AgentService:
             logger.error("Agent run 占位记录创建失败 run_key=%s", run_key, exc_info=True)
 
         try:
+            coding_agent = self.coding_agents.get(effective_backend_key)
             if cwd is not None:
                 work_dir = Path(cwd)
                 effective_setting_sources = setting_sources or []
@@ -221,8 +226,12 @@ class AgentService:
                 effective_mcp_servers = (
                     mcp_servers if mcp_servers is not None else work_dir / ".mcp.json"
                 )
+                if getattr(coding_agent, "source", None) == "opencode_cli":
+                    write_run_mcp_json(
+                        work_dir / "opencode.json",
+                        build_opencode_mcp_config(mcp_config),
+                    )
             self._record_cwd(run_key, work_dir)
-            coding_agent = self.coding_agents.get(effective_backend_key)
 
             request = CodingAgentRequest(
                 prompt=prompt,

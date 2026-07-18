@@ -155,20 +155,15 @@ def test_validator_parse_errors_locate_node_config_fields_without_union_segments
     ]
 
 
-@pytest.mark.parametrize("backend_key", ["codex", "opencode"])
-def test_validator_rejects_mcp_for_backends_without_runtime_support(wm_paths, backend_key):
-    from agent_bridge.agent_runtime.adapters import CodexCodingAgent, OpenCodeCodingAgent
+def test_validator_rejects_mcp_for_backend_without_runtime_support(wm_paths):
+    from agent_bridge.agent_runtime.adapters import CodexCodingAgent
     from agent_bridge.agent_runtime.registry import CodingAgentRegistry
 
     service = AgentBridgeService.create(wm_paths, {"root"})
     service.store.upsert_project_profile(profile_key="default", name="Default", created_by="root")
-    adapters = {
-        "codex": CodexCodingAgent(),
-        "opencode": OpenCodeCodingAgent(),
-    }
     service.agents.coding_agents = CodingAgentRegistry(
-        default_backend=backend_key,
-        agents=[adapters[backend_key]],
+        default_backend="codex",
+        agents=[CodexCodingAgent()],
     )
 
     result = service.workflows.validator.validate(
@@ -180,7 +175,7 @@ def test_validator_rejects_mcp_for_backends_without_runtime_support(wm_paths, ba
                         **_agent("needs-mcp"),
                         "config": {
                             **_agent("needs-mcp")["config"],
-                            "backend_key": backend_key,
+                            "backend_key": "codex",
                             "mcp_enabled": True,
                         },
                     }
@@ -198,9 +193,14 @@ def test_validator_rejects_mcp_for_backends_without_runtime_support(wm_paths, ba
     )
 
 
-def test_validator_accepts_mcp_for_backend_with_runtime_support(wm_paths):
+@pytest.mark.parametrize("backend_key", ["claude", "opencode"])
+def test_validator_accepts_mcp_for_backend_with_runtime_support(wm_paths, backend_key):
+    from agent_bridge.agent_runtime.adapters import OpenCodeCodingAgent
+
     service = AgentBridgeService.create(wm_paths, {"root"})
     service.store.upsert_project_profile(profile_key="default", name="Default", created_by="root")
+    if backend_key == "opencode":
+        service.agents.coding_agents.register(OpenCodeCodingAgent())
 
     result = service.workflows.validator.validate(
         actor="root",
@@ -211,7 +211,7 @@ def test_validator_accepts_mcp_for_backend_with_runtime_support(wm_paths):
                         **_agent("uses-mcp"),
                         "config": {
                             **_agent("uses-mcp")["config"],
-                            "backend_key": "claude",
+                            "backend_key": backend_key,
                             "mcp_enabled": True,
                         },
                     }

@@ -44,6 +44,35 @@ def build_agent_bridge_server_config(
     }
 
 
+def build_opencode_mcp_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Convert Claude-style ``mcpServers`` config to OpenCode's ``mcp`` shape."""
+    if "mcp" in config and "mcpServers" not in config:
+        return config
+
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict):
+        return {"mcp": {}}
+
+    converted: dict[str, Any] = {}
+    for name, raw_server in servers.items():
+        if not isinstance(raw_server, dict):
+            continue
+        server = dict(raw_server)
+        server_type = server.pop("type", None)
+        if server_type in {"http", "sse", "remote"}:
+            server["type"] = "remote"
+        else:
+            server["type"] = "local"
+            command = server.get("command")
+            if isinstance(command, str):
+                args = server.pop("args", [])
+                server["command"] = [command, *(args if isinstance(args, list) else [])]
+            if "env" in server and "environment" not in server:
+                server["environment"] = server.pop("env")
+        converted[str(name)] = server
+    return {"mcp": converted}
+
+
 def write_run_mcp_json(path: Path, config: dict[str, Any]) -> None:
     """Write an MCP server config to ``path`` as JSON (creates parent dirs)."""
     path.parent.mkdir(parents=True, exist_ok=True)

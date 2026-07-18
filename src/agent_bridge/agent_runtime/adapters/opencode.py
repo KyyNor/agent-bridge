@@ -369,7 +369,7 @@ def _first_int(row: dict[str, Any], *keys: str) -> int | None:
 class OpenCodeCodingAgent:
     source = "opencode_cli"
     capabilities = CodingAgentCapabilities(
-        supports_mcp=False,
+        supports_mcp=True,
         supports_native_json_schema=False,
         supports_skills=False,
         supports_subagents=False,
