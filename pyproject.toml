@@ -37,6 +37,9 @@ agent-bridge = "agent_bridge.cli:main"
 agb = "agent_bridge.cli:main"
 
 [tool.pytest.ini_options]
+# Default to the self-contained test suite. External-service, real-CLI, and
+# local-process checks remain available through their explicit pytest markers.
+addopts = "-n auto -m 'not ragflow and not weknora and not codegraph_cli and not process'"
 markers = [
     "e2e: end-to-end flows covering multiple application components",
     "codegraph_cli: tests requiring the real CodeGraph CLI and repository indexing",
