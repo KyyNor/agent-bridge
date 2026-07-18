@@ -49,6 +49,8 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     if "is_current" in item:
         item["is_current"] = bool(item["is_current"])
+    if "reuse_allowed" in item:
+        item["reuse_allowed"] = bool(item["reuse_allowed"])
     for source, target, default in [
         ("payload_json", "payload", {}),
         ("tags_json", "tags", []),
@@ -56,7 +58,9 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         ("definition_snapshot_json", "definition_snapshot", {"nodes": [], "edges": []}),
         ("input_json", "input", {}),
         ("output_json", "output", {}),
+        ("execution_plan_json", "execution_plan", {}),
         ("condition_results_json", "condition_results", []),
+        ("artifact_ids_json", "artifact_ids", []),
     ]:
         if source in item:
             item[target] = _json_loads(item[source], default)
@@ -253,15 +257,83 @@ class WorkflowsRepository:
                 (revision_no, workflow_key),
             )
 
+    def mark_latest_task_stale_if_needed(
+        self,
+        workflow_key: str,
+        revision_no: int,
+        content_hash: str,
+    ) -> int:
+        """Mark only the current completed version of each task stale.
+
+        A task is stale when its most recent successful run was produced for a
+        different definition revision.  Older task versions and tasks that are
+        still pending/running/failed remain untouched.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_tasks AS task
+                SET status = 'stale',
+                    completed_at = NULL,
+                    priority_flag = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE task.workflow_key = ?
+                  AND task.status = 'completed'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM workflow_tasks AS newer
+                    WHERE newer.workflow_key = task.workflow_key
+                      AND newer.task_key = task.task_key
+                      AND (
+                        newer.set_at > task.set_at
+                        OR (newer.set_at = task.set_at AND newer.id > task.id)
+                      )
+                  )
+                  AND EXISTS (
+                    SELECT 1 FROM workflow_runs AS successful
+                    WHERE successful.workflow_key = task.workflow_key
+                      AND successful.task_key = task.task_key
+                      AND successful.task_version = task.task_version
+                      AND successful.status = 'completed'
+                  )
+                  AND (
+                    COALESCE((
+                      SELECT successful.workflow_revision_no
+                      FROM workflow_runs AS successful
+                      WHERE successful.workflow_key = task.workflow_key
+                        AND successful.task_key = task.task_key
+                        AND successful.task_version = task.task_version
+                        AND successful.status = 'completed'
+                      ORDER BY successful.finished_at DESC, successful.id DESC
+                      LIMIT 1
+                    ), -1) != ?
+                    OR COALESCE((
+                      SELECT successful.workflow_content_hash
+                      FROM workflow_runs AS successful
+                      WHERE successful.workflow_key = task.workflow_key
+                        AND successful.task_key = task.task_key
+                        AND successful.task_version = task.task_version
+                        AND successful.status = 'completed'
+                      ORDER BY successful.finished_at DESC, successful.id DESC
+                      LIMIT 1
+                    ), '') != ?
+                  )
+                """,
+                (workflow_key, revision_no, content_hash),
+            )
+            return cursor.rowcount
+
     def _workflow_task_action(
         self,
         *,
         existing: sqlite3.Row | None,
+        is_current: bool,
         now: datetime,
         rerun_cutoff: datetime,
     ) -> str:
         if existing is None:
             return "created"
+        if not is_current:
+            return "skipped_historical"
         if existing["status"] == WorkflowTaskStatus.completed.value:
             set_at = _parse_datetime(existing["set_at"])
             return "reopened_expired" if set_at is not None and set_at < rerun_cutoff else "skipped_completed"
@@ -309,18 +381,29 @@ class WorkflowsRepository:
             payload = task.get("payload") or {}
             existing = conn.execute(
                 """
-                SELECT status, lease_expires_at, set_at
+                SELECT id, status, lease_expires_at, set_at
                 FROM workflow_tasks
                 WHERE workflow_key = ? AND task_key = ? AND task_version = ?
                 """,
                 (workflow_key, task_key, task_version),
             ).fetchone()
+            current = conn.execute(
+                """
+                SELECT id FROM workflow_tasks
+                WHERE workflow_key = ? AND task_key = ?
+                ORDER BY set_at DESC, id DESC
+                LIMIT 1
+                """,
+                (workflow_key, task_key),
+            ).fetchone()
             action = self._workflow_task_action(
                 existing=existing,
+                is_current=existing is None or current is None or existing["id"] == current["id"],
                 now=now,
                 rerun_cutoff=rerun_cutoff,
             )
-            counts[action] += 1
+            if action in counts:
+                counts[action] += 1
             if action == "created":
                 conn.execute(
                     """
@@ -394,18 +477,29 @@ class WorkflowsRepository:
                 payload = task.get("payload") or {}
                 existing = conn.execute(
                     """
-                    SELECT status, lease_expires_at, set_at
+                    SELECT id, status, lease_expires_at, set_at
                     FROM workflow_tasks
                     WHERE workflow_key = ? AND task_key = ? AND task_version = ?
                     """,
                     (workflow_key, task_key, task_version),
                 ).fetchone()
+                current = conn.execute(
+                    """
+                    SELECT id FROM workflow_tasks
+                    WHERE workflow_key = ? AND task_key = ?
+                    ORDER BY set_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (workflow_key, task_key),
+                ).fetchone()
                 action = self._workflow_task_action(
                     existing=existing,
+                    is_current=existing is None or current is None or existing["id"] == current["id"],
                     now=now,
                     rerun_cutoff=rerun_cutoff,
                 )
-                counts[action] += 1
+                if action in counts:
+                    counts[action] += 1
                 rows.append(
                     {
                         "task_key": task_key,
@@ -635,7 +729,7 @@ class WorkflowsRepository:
                     """
                     SELECT * FROM workflow_tasks
                     WHERE workflow_key = ? AND task_key = ?
-                    ORDER BY updated_at DESC, id DESC
+                    ORDER BY set_at DESC, id DESC
                     LIMIT 1
                     """,
                     (workflow_key, task_key),
@@ -658,10 +752,11 @@ class WorkflowsRepository:
                   CASE status
                     WHEN 'running' THEN 0
                     WHEN 'pending' THEN 1
-                    WHEN 'failed' THEN 2
-                    WHEN 'abandoned' THEN 3
-                    WHEN 'completed' THEN 4
-                    ELSE 5
+                    WHEN 'stale' THEN 2
+                    WHEN 'failed' THEN 3
+                    WHEN 'abandoned' THEN 4
+                    WHEN 'completed' THEN 5
+                    ELSE 6
                   END,
                   updated_at DESC,
                   id DESC
@@ -707,13 +802,15 @@ class WorkflowsRepository:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """
-                SELECT * FROM workflow_tasks
+                    SELECT * FROM workflow_tasks
                 WHERE workflow_key = ?
                   AND (
-                    status = 'pending'
+                    status IN ('pending', 'stale')
                     OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
                   )
-                ORDER BY (priority_flag IS NULL), priority_flag ASC, id
+                ORDER BY (priority_flag IS NULL), priority_flag ASC,
+                    CASE status WHEN 'pending' THEN 0 WHEN 'stale' THEN 1 ELSE 2 END,
+                    id
                 LIMIT 1
                 """,
                 (workflow_key, now),
@@ -728,10 +825,16 @@ class WorkflowsRepository:
                     lease_expires_at = ?,
                     attempt_count = attempt_count + 1,
                     priority_flag = NULL,
+                    lease_origin_status = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (run_id, expires_at, row["id"]),
+                (
+                    run_id,
+                    expires_at,
+                    row["status"] if row["status"] in {"pending", "stale"} else "pending",
+                    row["id"],
+                ),
             )
             # Back-fill the run->task link. lease_run_id already points the task
             # at this run; mirror task_key onto workflow_runs (created with
@@ -740,10 +843,10 @@ class WorkflowsRepository:
             conn.execute(
                 """
                 UPDATE workflow_runs
-                SET task_key = ?
+                SET task_key = ?, task_version = ?
                 WHERE run_id = ?
                 """,
-                (row["task_key"], run_id),
+                (row["task_key"], row["task_version"], run_id),
             )
             leased = conn.execute("SELECT * FROM workflow_tasks WHERE id = ?", (row["id"],)).fetchone()
             return _row_payload(leased)
@@ -777,7 +880,12 @@ class WorkflowsRepository:
                     """
                     UPDATE workflow_tasks
                     SET priority_flag = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE workflow_key = ? AND task_key = ?
+                    WHERE id = (
+                        SELECT id FROM workflow_tasks
+                        WHERE workflow_key = ? AND task_key = ?
+                        ORDER BY set_at DESC, id DESC
+                        LIMIT 1
+                    )
                     """,
                     (flag, workflow_key, task_key),
                 )
@@ -807,6 +915,7 @@ class WorkflowsRepository:
                         lease_expires_at = NULL,
                         completed_at = NULL,
                         priority_flag = NULL,
+                        lease_origin_status = NULL,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE workflow_key = ? AND task_key = ? AND task_version = ?
                     """,
@@ -821,8 +930,14 @@ class WorkflowsRepository:
                         lease_expires_at = NULL,
                         completed_at = NULL,
                         priority_flag = NULL,
+                        lease_origin_status = NULL,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE workflow_key = ? AND task_key = ?
+                    WHERE id = (
+                        SELECT id FROM workflow_tasks
+                        WHERE workflow_key = ? AND task_key = ?
+                        ORDER BY set_at DESC, id DESC
+                        LIMIT 1
+                    )
                     """,
                     (workflow_key, task_key),
                 )
@@ -843,6 +958,7 @@ class WorkflowsRepository:
                 SET status = 'completed',
                     completed_at = CURRENT_TIMESTAMP,
                     lease_run_id = ?,
+                    lease_origin_status = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE workflow_key = ?
                   AND task_key = ?
@@ -874,7 +990,7 @@ class WorkflowsRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, attempt_count FROM workflow_tasks
+                SELECT id, attempt_count, lease_origin_status FROM workflow_tasks
                 WHERE workflow_key = ? AND lease_run_id = ? AND status = 'running'
                 """,
                 (workflow_key, run_id),
@@ -884,7 +1000,8 @@ class WorkflowsRepository:
                     conn.execute(
                         """
                         UPDATE workflow_tasks
-                        SET status = 'abandoned', last_error = ?, updated_at = CURRENT_TIMESTAMP
+                        SET status = 'abandoned', last_error = ?, lease_origin_status = NULL,
+                            updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
                         """,
                         (error_message, row["id"]),
@@ -894,7 +1011,7 @@ class WorkflowsRepository:
                     conn.execute(
                         """
                         UPDATE workflow_tasks
-                        SET status = 'pending',
+                        SET status = COALESCE(NULLIF(lease_origin_status, ''), 'pending'),
                             lease_run_id = NULL,
                             lease_expires_at = NULL,
                             last_error = ?,
@@ -921,9 +1038,34 @@ class WorkflowsRepository:
             cursor = conn.execute(
                 """
                 UPDATE workflow_tasks
-                SET status = 'pending',
+                SET status = COALESCE(NULLIF(lease_origin_status, ''), 'pending'),
                     lease_run_id = NULL,
                     lease_expires_at = NULL,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE workflow_key = ?
+                  AND lease_run_id = ?
+                  AND status = 'running'
+                """,
+                (error_message, workflow_key, run_id),
+            )
+            return cursor.rowcount
+
+    def release_tasks_for_revision_mismatch(
+        self,
+        workflow_key: str,
+        run_id: str,
+        error_message: str,
+    ) -> int:
+        """Release a successful old-revision lease as stale for a fresh plan."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET status = 'stale',
+                    lease_run_id = NULL,
+                    lease_expires_at = NULL,
+                    lease_origin_status = NULL,
                     last_error = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE workflow_key = ?
@@ -972,20 +1114,34 @@ class WorkflowsRepository:
         temp_dir: str,
         definition_snapshot: dict[str, Any] | None = None,
         input_data: dict[str, Any] | None = None,
+        workflow_revision_no: int | None = None,
+        workflow_content_hash: str | None = None,
+        task_version: str = "",
+        execution_mode: str = "normal",
+        execution_plan: dict[str, Any] | list[Any] | None = None,
+        source_run_id: str | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO workflow_runs (
                   run_id, workflow_key, profile_key, task_key, status, temp_dir,
-                  definition_snapshot_json, input_json
+                  definition_snapshot_json, input_json, workflow_revision_no,
+                  workflow_content_hash, task_version, execution_mode,
+                  execution_plan_json, source_run_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id, workflow_key, profile_key, task_key, status, temp_dir,
                     _json_dumps(definition_snapshot or {"nodes": [], "edges": []}),
                     _json_dumps(input_data or {}),
+                    workflow_revision_no,
+                    workflow_content_hash,
+                    task_version,
+                    execution_mode,
+                    _json_dumps(execution_plan or {}),
+                    source_run_id,
                 ),
             )
             result = _row_payload(
@@ -1009,6 +1165,30 @@ class WorkflowsRepository:
                 LIMIT ?
                 """,
                 (workflow_key, limit),
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def list_completed_workflow_runs_for_task(
+        self,
+        workflow_key: str,
+        task_key: str,
+        task_version: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        bounded = min(max(limit, 1), 500)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM workflow_runs
+                WHERE workflow_key = ?
+                  AND task_key = ?
+                  AND task_version = ?
+                  AND status = 'completed'
+                ORDER BY finished_at DESC, id DESC
+                LIMIT ?
+                """,
+                (workflow_key, task_key, task_version, bounded),
             ).fetchall()
             return [item for row in rows if (item := _row_payload(row)) is not None]
 
@@ -1094,6 +1274,21 @@ class WorkflowsRepository:
                 """,
                 (status, exit_code, stdout_path, stderr_path, error, duration_ms, _json_dumps(output or {}), run_id, expected_status),
             )
+            if status == "completed":
+                conn.execute(
+                    """
+                    UPDATE workflow_artifacts
+                    SET is_current = 0
+                    WHERE workflow_key = (SELECT workflow_key FROM workflow_runs WHERE run_id = ?)
+                      AND task_key IS (SELECT task_key FROM workflow_runs WHERE run_id = ?)
+                      AND run_id <> ?
+                    """,
+                    (run_id, run_id, run_id),
+                )
+                conn.execute(
+                    "UPDATE workflow_artifacts SET is_current = 1 WHERE run_id = ?",
+                    (run_id,),
+                )
             result = _row_payload(
                 conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
             )
@@ -1105,10 +1300,26 @@ class WorkflowsRepository:
         with self._connect() as conn:
             conn.executemany(
                 """
-                INSERT OR IGNORE INTO workflow_node_runs (run_id, node_id, node_type)
-                VALUES (?, ?, ?)
+                INSERT OR IGNORE INTO workflow_node_runs (
+                  run_id, node_id, node_type, node_fingerprint, action,
+                  reuse_reason, source_run_id, source_node_id, source_node_fingerprint
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                [(run_id, str(node["node_id"]), str(node["node_type"])) for node in nodes],
+                [
+                    (
+                        run_id,
+                        str(node["node_id"]),
+                        str(node["node_type"]),
+                        node.get("node_fingerprint"),
+                        node.get("action"),
+                        node.get("reuse_reason"),
+                        node.get("source_run_id"),
+                        node.get("source_node_id"),
+                        node.get("source_node_fingerprint"),
+                    )
+                    for node in nodes
+                ],
             )
 
     def start_workflow_node_run(
@@ -1144,18 +1355,36 @@ class WorkflowsRepository:
         error: str | None = None,
         agent_run_key: str | None = None,
         script_run_id: str | None = None,
+        artifact_ids: list[str] | None = None,
+        node_fingerprint: str | None = None,
+        action: str | None = None,
+        reuse_reason: str | None = None,
+        source_run_id: str | None = None,
+        source_node_id: str | None = None,
+        source_node_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE workflow_node_runs
                 SET status = ?, condition_results_json = ?, output_json = ?, error = ?,
-                    agent_run_key = ?, script_run_id = ?, finished_at = CURRENT_TIMESTAMP
+                    agent_run_key = ?, script_run_id = ?,
+                    artifact_ids_json = COALESCE(?, artifact_ids_json),
+                    node_fingerprint = COALESCE(?, node_fingerprint),
+                    action = COALESCE(?, action),
+                    reuse_reason = COALESCE(?, reuse_reason),
+                    source_run_id = COALESCE(?, source_run_id),
+                    source_node_id = COALESCE(?, source_node_id),
+                    source_node_fingerprint = COALESCE(?, source_node_fingerprint),
+                    finished_at = CURRENT_TIMESTAMP
                 WHERE run_id = ? AND node_id = ?
                 """,
                 (
                     status, _json_dumps(condition_results or []), _json_dumps(output or {}), error,
-                    agent_run_key, script_run_id, run_id, node_id,
+                    agent_run_key, script_run_id,
+                    _json_dumps(artifact_ids) if artifact_ids is not None else None,
+                    node_fingerprint, action, reuse_reason, source_run_id,
+                    source_node_id, source_node_fingerprint, run_id, node_id,
                 ),
             )
             result = _row_payload(conn.execute(
@@ -1171,6 +1400,56 @@ class WorkflowsRepository:
                 "SELECT * FROM workflow_node_runs WHERE run_id = ? ORDER BY id", (run_id,)
             ).fetchall()
             return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def associate_workflow_run_artifacts(
+        self,
+        run_id: str,
+        node_id: str,
+        artifact_ids: list[str],
+        *,
+        source_run_id: str | None = None,
+        source_node_id: str | None = None,
+    ) -> None:
+        """Append artifact lineage for a current run without mutating the source artifact."""
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO workflow_run_artifacts (
+                  run_id, node_id, artifact_id, source_run_id, source_node_id
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (run_id, node_id, str(artifact_id), source_run_id, source_node_id)
+                    for artifact_id in artifact_ids
+                ],
+            )
+
+    def list_workflow_run_artifacts(
+        self,
+        run_id: str,
+        *,
+        node_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            if node_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM workflow_run_artifacts
+                    WHERE run_id = ?
+                    ORDER BY node_id, artifact_id
+                    """,
+                    (run_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM workflow_run_artifacts
+                    WHERE run_id = ? AND node_id = ?
+                    ORDER BY artifact_id
+                    """,
+                    (run_id, node_id),
+                ).fetchall()
+            return [dict(row) for row in rows]
 
     def fail_workflow_task_for_run(self, workflow_key: str, run_id: str, error_message: str) -> bool:
         with self._connect() as conn:
@@ -1236,19 +1515,28 @@ class WorkflowsRepository:
         content: str,
         metadata: dict[str, Any],
         task_version: str = "",
+        producer_node_id: str | None = None,
+        producer_node_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         content_hash = _content_hash(content)
         with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE workflow_artifacts
-                SET is_current = 0
-                WHERE workflow_key = ?
-                  AND task_key IS ?
-                  AND NOT (task_version = ? AND run_id = ?)
-                """,
-                (workflow_key, task_key, task_version, run_id),
-            )
+            run_row = conn.execute(
+                "SELECT status FROM workflow_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            run_status = str(run_row["status"]) if run_row is not None else "completed"
+            is_current = 1 if run_status == "completed" else 0
+            if is_current:
+                conn.execute(
+                    """
+                    UPDATE workflow_artifacts
+                    SET is_current = 0
+                    WHERE workflow_key = ?
+                      AND task_key IS ?
+                      AND run_id <> ?
+                    """,
+                    (workflow_key, task_key, run_id),
+                )
             existing = conn.execute(
                 """
                 SELECT artifact_id FROM workflow_artifacts
@@ -1261,16 +1549,21 @@ class WorkflowsRepository:
                 """
                 INSERT INTO workflow_artifacts (
                   artifact_id, workflow_key, profile_key, run_id, task_key, task_version,
-                  is_current, title, path,
+                  is_current, reuse_allowed, invalid_reason, producer_node_id,
+                  producer_node_fingerprint, title, path,
                   tags_json, format, summary, content, content_hash, metadata_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key, task_key, task_version, run_id, path) DO UPDATE SET
                   profile_key = excluded.profile_key,
                   run_id = excluded.run_id,
                   task_key = excluded.task_key,
                   task_version = excluded.task_version,
-                  is_current = 1,
+                  is_current = excluded.is_current,
+                  reuse_allowed = excluded.reuse_allowed,
+                  invalid_reason = excluded.invalid_reason,
+                  producer_node_id = excluded.producer_node_id,
+                  producer_node_fingerprint = excluded.producer_node_fingerprint,
                   title = excluded.title,
                   tags_json = excluded.tags_json,
                   format = excluded.format,
@@ -1287,6 +1580,11 @@ class WorkflowsRepository:
                     run_id,
                     task_key,
                     task_version,
+                    is_current,
+                    int(metadata.get("reuse_allowed", True)),
+                    metadata.get("invalid_reason"),
+                    producer_node_id,
+                    producer_node_fingerprint,
                     title,
                     path,
                     _json_dumps(tags),
@@ -1306,6 +1604,79 @@ class WorkflowsRepository:
             if result is None:
                 raise KeyError(f"workflow artifact not found: {artifact_id}")
             return result
+
+    def list_artifacts_for_run(self, run_id: str, *, include_reused: bool = True) -> list[dict[str, Any]]:
+        """Return physical and reused artifacts visible in one run context."""
+        with self._connect() as conn:
+            current = conn.execute(
+                "SELECT workflow_key, profile_key, task_key, task_version FROM workflow_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if current is None:
+                return []
+            rows = conn.execute(
+                """
+                SELECT a.*, NULL AS linked_node_id, NULL AS source_run_id, NULL AS source_node_id,
+                       0 AS reused
+                FROM workflow_artifacts a
+                WHERE a.run_id = ?
+                ORDER BY a.updated_at DESC, a.id DESC
+                """,
+                (run_id,),
+            ).fetchall()
+            if include_reused:
+                rows += conn.execute(
+                    """
+                    SELECT a.*, rra.node_id AS linked_node_id, rra.source_run_id, rra.source_node_id,
+                           1 AS reused
+                    FROM workflow_run_artifacts rra
+                    JOIN workflow_artifacts a ON a.artifact_id = rra.artifact_id
+                    WHERE rra.run_id = ? AND a.run_id <> ?
+                    ORDER BY a.updated_at DESC, a.id DESC
+                    """,
+                    (run_id, run_id),
+                ).fetchall()
+
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            item = _row_payload(row)
+            if item is None or item["artifact_id"] in seen:
+                continue
+            seen.add(item["artifact_id"])
+            item["reused"] = bool(row["reused"])
+            item["source_run_id"] = row["source_run_id"]
+            item["source_node_id"] = row["source_node_id"] or row["linked_node_id"]
+            item["reusable"], item["reuse_validation_reason"] = self._artifact_reuse_validation(
+                item,
+                current_workflow_key=current["workflow_key"],
+                current_profile_key=current["profile_key"],
+                current_task_key=current["task_key"],
+                current_task_version=current["task_version"],
+            )
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _artifact_reuse_validation(
+        artifact: dict[str, Any],
+        *,
+        current_workflow_key: str,
+        current_profile_key: str,
+        current_task_key: str | None,
+        current_task_version: str,
+    ) -> tuple[bool, str | None]:
+        if artifact.get("workflow_key") != current_workflow_key or artifact.get("profile_key") != current_profile_key:
+            return False, "artifact_scope_mismatch"
+        if artifact.get("task_key") != current_task_key or str(artifact.get("task_version") or "") != str(current_task_version or ""):
+            return False, "artifact_scope_mismatch"
+        if artifact.get("reuse_allowed") is False:
+            return False, "reuse_disabled"
+        if artifact.get("invalid_reason"):
+            return False, str(artifact["invalid_reason"])
+        if _content_hash(str(artifact.get("content") or "")) != str(artifact.get("content_hash") or ""):
+            return False, "content_hash_mismatch"
+        return True, None
 
     def get_workflow_artifact(self, artifact_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:

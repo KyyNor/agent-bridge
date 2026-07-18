@@ -127,6 +127,12 @@ class SQLiteStore:
                     "definition_snapshot_json": "TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}'",
                     "input_json": "TEXT NOT NULL DEFAULT '{}'",
                     "output_json": "TEXT NOT NULL DEFAULT '{}'",
+                    "workflow_revision_no": "INTEGER",
+                    "workflow_content_hash": "TEXT",
+                    "task_version": "TEXT NOT NULL DEFAULT ''",
+                    "execution_mode": "TEXT NOT NULL DEFAULT 'normal'",
+                    "execution_plan_json": "TEXT NOT NULL DEFAULT '{}'",
+                    "source_run_id": "TEXT",
                 },
             )
             self._ensure_columns(
@@ -146,6 +152,13 @@ class SQLiteStore:
                   status TEXT NOT NULL DEFAULT 'pending',
                   condition_results_json TEXT NOT NULL DEFAULT '[]',
                   output_json TEXT NOT NULL DEFAULT '{}',
+                  node_fingerprint TEXT,
+                  action TEXT,
+                  reuse_reason TEXT,
+                  source_run_id TEXT,
+                  source_node_id TEXT,
+                  source_node_fingerprint TEXT,
+                  artifact_ids_json TEXT NOT NULL DEFAULT '[]',
                   error TEXT,
                   agent_run_key TEXT,
                   script_run_id TEXT,
@@ -157,10 +170,42 @@ class SQLiteStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id, id)")
             self._ensure_columns(
                 conn,
+                "workflow_node_runs",
+                {
+                    "node_fingerprint": "TEXT",
+                    "action": "TEXT",
+                    "reuse_reason": "TEXT",
+                    "source_run_id": "TEXT",
+                    "source_node_id": "TEXT",
+                    "source_node_fingerprint": "TEXT",
+                    "artifact_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+                },
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workflow_run_artifacts (
+                  run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+                  node_id TEXT NOT NULL,
+                  artifact_id TEXT NOT NULL,
+                  source_run_id TEXT,
+                  source_node_id TEXT,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (run_id, node_id, artifact_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflow_run_artifacts_run_node "
+                "ON workflow_run_artifacts(run_id, node_id)"
+            )
+            self._ensure_columns(
+                conn,
                 "workflow_tasks",
                 {
                     "task_version": "TEXT NOT NULL DEFAULT ''",
                     "type": "TEXT NOT NULL DEFAULT ''",
+                    "priority_flag": "TEXT",
+                    "lease_origin_status": "TEXT",
                 },
             )
             self._ensure_columns(
@@ -169,10 +214,22 @@ class SQLiteStore:
                 {
                     "task_version": "TEXT NOT NULL DEFAULT ''",
                     "is_current": "INTEGER NOT NULL DEFAULT 1",
+                    "reuse_allowed": "INTEGER NOT NULL DEFAULT 1",
+                    "invalid_reason": "TEXT",
+                    "producer_node_id": "TEXT",
+                    "producer_node_fingerprint": "TEXT",
                 },
             )
             self._rebuild_workflow_tasks_if_needed(conn)
             self._rebuild_workflow_artifacts_if_needed(conn)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflow_tasks_latest "
+                "ON workflow_tasks(workflow_key, task_key, set_at DESC, id DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflow_tasks_version_status "
+                "ON workflow_tasks(workflow_key, task_version, status)"
+            )
             self._ensure_columns(
                 conn,
                 "scripts",
@@ -597,6 +654,8 @@ class SQLiteStore:
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               completed_at TEXT,
+              priority_flag TEXT,
+              lease_origin_status TEXT,
               UNIQUE (workflow_key, task_key, task_version)
             )
             """
@@ -607,13 +666,13 @@ class SQLiteStore:
             INSERT INTO workflow_tasks_new (
               id, workflow_key, task_key, task_version, type, payload_json, status,
               lease_run_id, lease_expires_at, attempt_count, last_error, set_at,
-              created_at, updated_at, completed_at
+              created_at, updated_at, completed_at, priority_flag, lease_origin_status
             )
             SELECT
               id, workflow_key, task_key, task_version, type, payload_json, status,
               lease_run_id, lease_expires_at, attempt_count, last_error,
               {set_at_expr},
-              created_at, updated_at, completed_at
+              created_at, updated_at, completed_at, priority_flag, lease_origin_status
             FROM workflow_tasks
             """.format(set_at_expr=set_at_expr)
         )
@@ -641,6 +700,10 @@ class SQLiteStore:
               task_key TEXT,
               task_version TEXT NOT NULL DEFAULT '',
               is_current INTEGER NOT NULL DEFAULT 1,
+              reuse_allowed INTEGER NOT NULL DEFAULT 1,
+              invalid_reason TEXT,
+              producer_node_id TEXT,
+              producer_node_fingerprint TEXT,
               title TEXT NOT NULL,
               path TEXT NOT NULL,
               tags_json TEXT NOT NULL DEFAULT '[]',
@@ -659,13 +722,15 @@ class SQLiteStore:
             """
             INSERT INTO workflow_artifacts_new (
               id, artifact_id, workflow_key, profile_key, run_id, task_key,
-              task_version, is_current, title, path, tags_json, format, summary,
-              content, content_hash, metadata_json, created_at, updated_at
+              task_version, is_current, reuse_allowed, invalid_reason,
+              producer_node_id, producer_node_fingerprint, title, path, tags_json,
+              format, summary, content, content_hash, metadata_json, created_at, updated_at
             )
             SELECT
               id, artifact_id, workflow_key, profile_key, run_id, task_key,
-              task_version, is_current, title, path, tags_json, format, summary,
-              content, content_hash, metadata_json, created_at, updated_at
+              task_version, is_current, reuse_allowed, invalid_reason,
+              producer_node_id, producer_node_fingerprint, title, path, tags_json,
+              format, summary, content, content_hash, metadata_json, created_at, updated_at
             FROM workflow_artifacts
             """
         )
@@ -1115,6 +1180,12 @@ class SQLiteStore:
         temp_dir: str,
         definition_snapshot: dict[str, Any] | None = None,
         input_data: dict[str, Any] | None = None,
+        workflow_revision_no: int | None = None,
+        workflow_content_hash: str | None = None,
+        task_version: str = "",
+        execution_mode: str = "normal",
+        execution_plan: dict[str, Any] | list[Any] | None = None,
+        source_run_id: str | None = None,
     ) -> dict[str, Any]:
         return self.workflows.create_workflow_run(
             run_id=run_id,
@@ -1125,6 +1196,12 @@ class SQLiteStore:
             temp_dir=temp_dir,
             definition_snapshot=definition_snapshot,
             input_data=input_data,
+            workflow_revision_no=workflow_revision_no,
+            workflow_content_hash=workflow_content_hash,
+            task_version=task_version,
+            execution_mode=execution_mode,
+            execution_plan=execution_plan,
+            source_run_id=source_run_id,
         )
 
     def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
@@ -1175,6 +1252,31 @@ class SQLiteStore:
     def list_workflow_node_runs(self, run_id: str) -> list[dict[str, Any]]:
         return self.workflows.list_workflow_node_runs(run_id)
 
+    def associate_workflow_run_artifacts(
+        self,
+        run_id: str,
+        node_id: str,
+        artifact_ids: list[str],
+        *,
+        source_run_id: str | None = None,
+        source_node_id: str | None = None,
+    ) -> None:
+        self.workflows.associate_workflow_run_artifacts(
+            run_id,
+            node_id,
+            artifact_ids,
+            source_run_id=source_run_id,
+            source_node_id=source_node_id,
+        )
+
+    def list_workflow_run_artifacts(
+        self,
+        run_id: str,
+        *,
+        node_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_run_artifacts(run_id, node_id=node_id)
+
     def fail_workflow_task_for_run(self, workflow_key: str, run_id: str, error_message: str) -> bool:
         return self.workflows.fail_workflow_task_for_run(workflow_key, run_id, error_message)
 
@@ -1217,6 +1319,8 @@ class SQLiteStore:
         content: str,
         metadata: dict[str, Any],
         task_version: str = "",
+        producer_node_id: str | None = None,
+        producer_node_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         return self.workflows.upsert_workflow_artifact(
             workflow_key=workflow_key,
@@ -1231,10 +1335,15 @@ class SQLiteStore:
             summary=summary,
             content=content,
             metadata=metadata,
+            producer_node_id=producer_node_id,
+            producer_node_fingerprint=producer_node_fingerprint,
         )
 
     def get_workflow_artifact(self, artifact_id: str) -> dict[str, Any] | None:
         return self.workflows.get_workflow_artifact(artifact_id)
+
+    def list_artifacts_for_run(self, run_id: str, *, include_reused: bool = True) -> list[dict[str, Any]]:
+        return self.workflows.list_artifacts_for_run(run_id, include_reused=include_reused)
 
     def search_workflow_artifacts(
         self,

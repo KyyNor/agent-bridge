@@ -36,6 +36,7 @@ class OutputHandler:
                 task_version=str((context.task or {}).get("task_version") or ""), title=output["title"],
                 path=render_text(node.config.path, context.template_context()), tags=node.config.tags,
                 format=node.config.format, summary=output["summary"], content=output["content"], metadata={"node_id": node.id},
+                producer_node_id=node.id, producer_node_fingerprint=context.node_fingerprint,
             )
             output["artifact_ids"] = [artifact["artifact_id"]]
             return NodeExecutionResult(output=output, agent_run_key=output.pop("_agent_run_key"), artifact_ids=output["artifact_ids"])

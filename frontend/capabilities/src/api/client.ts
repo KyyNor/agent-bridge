@@ -70,6 +70,8 @@ import type {
   WorkflowRun,
   WorkflowRunEvent,
   WorkflowRunLog,
+  WorkflowExecutionMode,
+  WorkflowExecutionPlan,
   WorkflowSubagentDetail,
   WorkflowTasksResult,
   WorkflowTaskListParams,
@@ -433,8 +435,17 @@ export const api = {
     profile_key: string
     definition: WorkflowGraph
   }) => post<WorkflowDefinition>('/workflows', { status: 'active', ...w }),
-  runWorkflow: (key: string, input: Record<string, unknown> = {}) =>
-    post<{ status: string; run_id?: string }>(`/workflows/${key}/run`, { input }),
+  runWorkflow: (
+    key: string,
+    input: Record<string, unknown> = {},
+    options: { task_key?: string; task_version?: string; execution_mode?: WorkflowExecutionMode } = {},
+  ) => post<{ status?: string; run_id?: string; run_status?: string; execution_mode?: string; plan?: WorkflowExecutionPlan }>(
+    `/workflows/${key}/run`, { input, ...options },
+  ),
+  previewWorkflowRun: (
+    key: string,
+    options: { task_key?: string; task_version?: string; execution_mode?: WorkflowExecutionMode } = {},
+  ) => post<WorkflowExecutionPlan>(`/workflows/${key}/run/preview`, options),
   searchWorkflowArtifacts: (params: {
     profile_key?: string
     workflow_key?: string
@@ -485,12 +496,13 @@ export const api = {
     const tail = qs.toString() ? `?${qs}` : ''
     return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`)
   },
-  executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string) => {
+  executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string, executionMode: WorkflowExecutionMode = 'normal') => {
     const qs = new URLSearchParams()
     if (taskVersion) qs.set('task_version', taskVersion)
     const tail = qs.toString() ? `?${qs}` : ''
-    return post<{ workflow_key: string; task_key: string; priority: boolean; run_id?: string; run_status?: string }>(
+    return post<{ workflow_key: string; task_key: string; priority: boolean; run_id?: string; run_status?: string; execution_mode?: string; plan?: WorkflowExecutionPlan }>(
       `/workflows/${workflowKey}/tasks/${encodeURIComponent(taskKey)}/execute${tail}`,
+      { execution_mode: executionMode, task_version: taskVersion },
     )
   },
   resetWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string) => {

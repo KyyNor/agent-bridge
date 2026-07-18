@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import hashlib
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from agent_bridge.automation.workflows.definition import WorkflowGraph, WorkflowNode
 from agent_bridge.automation.workflows.handlers import NodeExecutionContext, NodeExecutionResult
+from agent_bridge.automation.workflows.incremental import IncrementalPlan, NodePlan
 from agent_bridge.automation.workflows.models import WorkflowType
 from agent_bridge.automation.workflows.references import evaluate_condition
 from agent_bridge.automation.workflows.validation import (
@@ -39,7 +42,13 @@ class WorkflowDagExecutor:
         self._validate_structure_on_run = validate_structure_on_run
 
     async def run(
-        self, *, workflow: dict[str, Any], run_id: str, input_data: dict[str, Any], actor: str
+        self,
+        *,
+        workflow: dict[str, Any],
+        run_id: str,
+        input_data: dict[str, Any],
+        actor: str,
+        plan: IncrementalPlan | None = None,
     ) -> WorkflowExecutionResult:
         graph = workflow["definition"]
         if isinstance(graph, dict):
@@ -58,12 +67,14 @@ class WorkflowDagExecutor:
         outputs: dict[str, dict[str, Any]] = {}
         task: dict[str, Any] | None = None
         warnings: list[str] = []
+        node_plans = self._node_plans(nodes, plan)
+        reused_sources: dict[str, dict[str, Any]] = {}
         self.store.create_workflow_node_runs(
             run_id,
             [{"node_id": node.id, "node_type": node.type} for node in graph.nodes],
         )
         pending = set(nodes)
-        running: dict[asyncio.Task, tuple[WorkflowNode, list[dict[str, Any]]]] = {}
+        running: dict[asyncio.Task, tuple[WorkflowNode, list[dict[str, Any]], NodePlan]] = {}
 
         while pending or running:
             ready: list[tuple[WorkflowNode, list[dict[str, Any]]]] = []
@@ -85,16 +96,53 @@ class WorkflowDagExecutor:
             for node, condition_results in skipped:
                 pending.remove(node.id)
                 statuses[node.id] = "skipped"
+                node_plan = node_plans[node.id]
                 self.store.finish_workflow_node_run(
-                    run_id, node.id, status="skipped", condition_results=condition_results
+                    run_id,
+                    node.id,
+                    status="skipped",
+                    condition_results=condition_results,
+                    node_fingerprint=node_plan.node_fingerprint,
+                    action="execute",
+                    reuse_reason="condition_not_matched",
                 )
             if skipped:
                 continue
 
+            reused_progress = False
             for node, condition_results in ready:
                 pending.remove(node.id)
                 statuses[node.id] = "running"
                 self.store.start_workflow_node_run(run_id, node.id, condition_results)
+                node_plan = self._validated_node_plan(node_plans[node.id])
+                node_plans[node.id] = node_plan
+                if node_plan.action == "reuse":
+                    result = NodeExecutionResult(
+                        output=dict(node_plan.output_json or {}),
+                        artifact_ids=list(node_plan.artifact_ids),
+                    )
+                    payload = self._persist_result(
+                        run_id, node, condition_results, result, statuses, outputs, node_plan
+                    )
+                    reused_sources[node.id] = self._source_payload(node_plan)
+                    reused_progress = True
+                    if node.type == "get_task":
+                        task = payload.get("task")
+                        if task is None:
+                            await self._cancel_running(run_id, running, statuses)
+                            for node_id in sorted(pending):
+                                statuses[node_id] = "skipped"
+                                pending_plan = node_plans[node_id]
+                                self.store.finish_workflow_node_run(
+                                    run_id,
+                                    node_id,
+                                    status="skipped",
+                                    node_fingerprint=pending_plan.node_fingerprint,
+                                    action="execute",
+                                    reuse_reason="no_task",
+                                )
+                            return WorkflowExecutionResult("no_task", {}, None, None, warnings, statuses)
+                    continue
                 context = NodeExecutionContext(
                     actor=actor,
                     workflow=workflow,
@@ -103,14 +151,20 @@ class WorkflowDagExecutor:
                     task=task,
                     nodes=outputs,
                     graph=graph,
+                    execution_mode=plan.mode if plan is not None else "normal",
+                    reused_sources=dict(reused_sources) or None,
+                    node_fingerprint=node_plan.node_fingerprint,
                 )
                 running[asyncio.create_task(self.handlers.execute(node, context))] = (
                     node,
                     condition_results,
+                    node_plan,
                 )
 
             if not running:
                 if pending:
+                    if reused_progress:
+                        continue
                     error = "工作流调度停滞：没有可运行节点"
                     for node_id in sorted(pending):
                         statuses[node_id] = "failed"
@@ -131,7 +185,7 @@ class WorkflowDagExecutor:
             batch_error: str | None = None
             no_task = False
             for execution in done:
-                node, condition_results = running.pop(execution)
+                node, condition_results, node_plan = running.pop(execution)
                 try:
                     result = execution.result()
                 except asyncio.CancelledError:
@@ -143,6 +197,9 @@ class WorkflowDagExecutor:
                         status="cancelled",
                         condition_results=condition_results,
                         error=error,
+                        node_fingerprint=node_plan.node_fingerprint,
+                        action="execute",
+                        reuse_reason=node_plan.reason,
                     )
                     batch_error = batch_error or error
                     continue
@@ -155,12 +212,15 @@ class WorkflowDagExecutor:
                         status="failed",
                         condition_results=condition_results,
                         error=error,
+                        node_fingerprint=node_plan.node_fingerprint,
+                        action="execute",
+                        reuse_reason=node_plan.reason,
                     )
                     batch_error = batch_error or error
                     continue
 
                 payload = self._persist_result(
-                    run_id, node, condition_results, result, statuses, outputs
+                    run_id, node, condition_results, result, statuses, outputs, node_plan
                 )
                 if result.status == "warning" and result.error:
                     warnings.append(result.error)
@@ -182,7 +242,15 @@ class WorkflowDagExecutor:
                 await self._cancel_running(run_id, running, statuses)
                 for node_id in sorted(pending):
                     statuses[node_id] = "skipped"
-                    self.store.finish_workflow_node_run(run_id, node_id, status="skipped")
+                    node_plan = node_plans[node_id]
+                    self.store.finish_workflow_node_run(
+                        run_id,
+                        node_id,
+                        status="skipped",
+                        node_fingerprint=node_plan.node_fingerprint,
+                        action="execute",
+                        reuse_reason="no_task",
+                    )
                 return WorkflowExecutionResult("no_task", {}, None, None, warnings, statuses)
 
         return WorkflowExecutionResult(
@@ -202,6 +270,7 @@ class WorkflowDagExecutor:
         result: NodeExecutionResult,
         statuses: dict[str, str],
         outputs: dict[str, dict[str, Any]],
+        node_plan: NodePlan,
     ) -> dict[str, Any]:
         statuses[node.id] = result.status
         payload = dict(result.output)
@@ -222,8 +291,115 @@ class WorkflowDagExecutor:
             error=result.error,
             agent_run_key=result.agent_run_key,
             script_run_id=result.script_run_id,
+            artifact_ids=list(result.artifact_ids),
+            node_fingerprint=node_plan.node_fingerprint,
+            action=node_plan.action,
+            reuse_reason=node_plan.reason,
+            source_run_id=node_plan.source_run_id,
+            source_node_id=node_plan.source_node_id,
+            source_node_fingerprint=node_plan.source_node_fingerprint,
         )
+        if node_plan.action == "reuse" and result.artifact_ids:
+            self.store.associate_workflow_run_artifacts(
+                run_id,
+                node.id,
+                list(result.artifact_ids),
+                source_run_id=node_plan.source_run_id,
+                source_node_id=node_plan.source_node_id,
+            )
         return payload
+
+    def _node_plans(
+        self, nodes: dict[str, WorkflowNode], plan: IncrementalPlan | None
+    ) -> dict[str, NodePlan]:
+        if plan is None:
+            return {
+                node_id: NodePlan(
+                    node_id=node_id,
+                    action="execute",
+                    reason="normal_mode",
+                    node_fingerprint="",
+                )
+                for node_id in nodes
+            }
+        supplied = {node_plan.node_id: node_plan for node_plan in plan.nodes}
+        return {
+            node_id: supplied.get(
+                node_id,
+                NodePlan(
+                    node_id=node_id,
+                    action="execute",
+                    reason="plan_node_missing",
+                    node_fingerprint="",
+                ),
+            )
+            for node_id in nodes
+        }
+
+    def _validated_node_plan(self, node_plan: NodePlan) -> NodePlan:
+        if node_plan.action != "reuse":
+            return node_plan
+        artifact_ids = set(node_plan.artifact_ids)
+        output_artifact_ids = (node_plan.output_json or {}).get("artifact_ids")
+        if not isinstance(output_artifact_ids, (list, tuple)):
+            output_artifact_ids = []
+        artifact_ids.update(str(artifact_id) for artifact_id in output_artifact_ids)
+        node_plan = replace(node_plan, artifact_ids=tuple(sorted(artifact_ids)))
+        reason = self._reuse_artifact_error(node_plan)
+        if reason is None:
+            return node_plan
+        return replace(
+            node_plan,
+            action="execute",
+            reason=reason,
+            source_run_id=None,
+            source_node_id=None,
+            source_node_fingerprint=None,
+            output_json=None,
+            artifact_ids=(),
+        )
+
+    def _reuse_artifact_error(self, node_plan: NodePlan) -> str | None:
+        if not node_plan.artifact_ids:
+            return None
+        get_artifact = getattr(self.store, "get_workflow_artifact", None)
+        if get_artifact is None:
+            return "source_artifact_validation_unavailable"
+        for artifact_id in node_plan.artifact_ids:
+            artifact = get_artifact(artifact_id)
+            if artifact is None:
+                return "source_artifact_missing"
+            if artifact.get("reusable") is False or artifact.get("is_reusable") is False or artifact.get("reuse_allowed") is False:
+                return "source_artifact_not_reusable"
+            if artifact.get("invalid_reason"):
+                return str(artifact["invalid_reason"])
+            if artifact.get("content_hash") and hashlib.sha256(str(artifact.get("content") or "").encode("utf-8")).hexdigest() != str(artifact["content_hash"]):
+                return "source_artifact_hash_mismatch"
+            if artifact.get("status") in {"deleted", "expired", "invalid"}:
+                return "source_artifact_not_reusable"
+            expires_at = artifact.get("expires_at")
+            if expires_at and self._expired(expires_at):
+                return "source_artifact_expired"
+        return None
+
+    @staticmethod
+    def _expired(value: Any) -> bool:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed <= datetime.now(timezone.utc)
+
+    @staticmethod
+    def _source_payload(node_plan: NodePlan) -> dict[str, Any]:
+        return {
+            "source_run_id": node_plan.source_run_id,
+            "source_node_id": node_plan.source_node_id,
+            "source_node_fingerprint": node_plan.source_node_fingerprint,
+            "reason": node_plan.reason,
+        }
 
     @staticmethod
     def _condition_results(edges, input_data, task, outputs) -> list[dict[str, Any]]:
@@ -246,12 +422,12 @@ class WorkflowDagExecutor:
     async def _cancel_running(
         self,
         run_id: str,
-        running: dict[asyncio.Task, tuple[WorkflowNode, list[dict[str, Any]]]],
+        running: dict[asyncio.Task, tuple[WorkflowNode, list[dict[str, Any]], NodePlan]],
         statuses: dict[str, str],
     ) -> None:
         for execution in running:
             execution.cancel()
-        for execution, (node, condition_results) in list(running.items()):
+        for execution, (node, condition_results, node_plan) in list(running.items()):
             try:
                 result = await execution
             except asyncio.CancelledError:
@@ -261,6 +437,9 @@ class WorkflowDagExecutor:
                     node.id,
                     status="cancelled",
                     condition_results=condition_results,
+                    node_fingerprint=node_plan.node_fingerprint,
+                    action="execute",
+                    reuse_reason=node_plan.reason,
                 )
             except Exception as exc:
                 statuses[node.id] = "failed"
@@ -270,6 +449,9 @@ class WorkflowDagExecutor:
                     status="failed",
                     condition_results=condition_results,
                     error=str(exc),
+                    node_fingerprint=node_plan.node_fingerprint,
+                    action="execute",
+                    reuse_reason=node_plan.reason,
                 )
             else:
                 statuses[node.id] = result.status
@@ -282,6 +464,10 @@ class WorkflowDagExecutor:
                     error=result.error,
                     agent_run_key=result.agent_run_key,
                     script_run_id=result.script_run_id,
+                    artifact_ids=list(result.artifact_ids),
+                    node_fingerprint=node_plan.node_fingerprint,
+                    action="execute",
+                    reuse_reason=node_plan.reason,
                 )
         running.clear()
 

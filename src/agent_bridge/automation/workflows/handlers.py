@@ -23,6 +23,9 @@ class NodeExecutionContext:
     task: dict[str, Any] | None
     nodes: dict[str, dict[str, Any]]
     graph: WorkflowGraph
+    execution_mode: Literal["normal", "incremental", "force_full"] = "normal"
+    reused_sources: dict[str, dict[str, Any]] | None = None
+    node_fingerprint: str | None = None
 
     def template_context(self) -> dict[str, Any]:
         return {"input": self.input, "task": self.task, "nodes": self.nodes}

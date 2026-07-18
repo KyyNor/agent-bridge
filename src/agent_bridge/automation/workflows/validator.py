@@ -7,7 +7,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel, ConfigDict, ValidationError as PydanticValidationError
 
-from agent_bridge.automation.workflows.definition import WorkflowGraph, WorkflowNode
+from agent_bridge.automation.workflows.definition import WorkflowGraph, WorkflowNode, execution_fingerprint
 from agent_bridge.automation.workflows.models import WorkflowStatus, WorkflowType
 from agent_bridge.automation.workflows.references import REFERENCE_RE, parse_reference
 from agent_bridge.automation.workflows.validation import (
@@ -67,6 +67,60 @@ class WorkflowValidator:
         if normalized is None:
             raise WorkflowDefinitionValidationError(result.errors)
         return normalized.definition
+
+    def resolve_resource_fingerprints(self, *, actor: str, graph: WorkflowGraph) -> dict[str, str | None]:
+        """Resolve stable execution-resource fingerprints for incremental plans.
+
+        ``None`` deliberately means that the backing resource is live or its
+        version cannot be established.  A planner must then execute the node
+        rather than reuse a result produced against an unknown resource.
+        """
+        return {
+            node.id: self.resolve_resource_fingerprint(actor=actor, node=node)
+            for node in graph.nodes
+        }
+
+    def resolve_resource_fingerprint(self, *, actor: str, node: WorkflowNode) -> str | None:
+        config = node.config
+        if node.type == "get_task":
+            return execution_fingerprint({"resource": "workflow-task-input"})
+        if node.type == "script":
+            script = self._resolve_script(actor=actor, script_key=config.script_key)
+            if not isinstance(script, dict):
+                return None
+            version = script.get("content_hash") or script.get("revision_no") or script.get("updated_at")
+            if version is None and script.get("code") is not None:
+                version = execution_fingerprint({"code": script["code"]})
+            return (
+                execution_fingerprint({"script_key": config.script_key, "version": version})
+                if version is not None
+                else None
+            )
+        if node.type not in {"agent", "output"}:
+            return None
+        if bool(getattr(config, "mcp_enabled", False)):
+            # External MCP data is live unless the caller supplies a dedicated,
+            # versioned runtime fingerprint to the planner.
+            return None
+        backend = None
+        try:
+            if self.agent_service is not None:
+                backend = self.agent_service.coding_agents.get(config.backend_key)
+        except Exception:
+            backend = None
+        if backend is None:
+            return None
+        version = next(
+            (
+                getattr(backend, field, None)
+                for field in ("version", "model_version", "model", "model_name")
+                if getattr(backend, field, None) is not None
+            ),
+            None,
+        )
+        if version is None:
+            return None
+        return execution_fingerprint({"backend_key": config.backend_key, "version": version})
 
     def _validate(
         self,

@@ -58,6 +58,238 @@ def test_workflow_definition_snapshot_and_node_runs_round_trip(wm_paths):
     assert run["definition_snapshot"] == definition
     assert store.list_workflow_node_runs("run_1")[0]["output"] == {"text": "ok"}
 
+
+def test_workflow_incremental_storage_migrates_legacy_tables_idempotently(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    wm_paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(wm_paths.db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE workflow_tasks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workflow_key TEXT NOT NULL,
+              task_key TEXT NOT NULL,
+              task_version TEXT NOT NULL DEFAULT '',
+              type TEXT NOT NULL DEFAULT '',
+              payload_json TEXT NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL DEFAULT 'pending',
+              lease_run_id TEXT,
+              lease_expires_at TEXT,
+              attempt_count INTEGER NOT NULL DEFAULT 0,
+              last_error TEXT,
+              set_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              completed_at TEXT,
+              priority_flag TEXT,
+              UNIQUE (workflow_key, task_key, task_version)
+            );
+            CREATE TABLE workflow_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id TEXT NOT NULL UNIQUE,
+              workflow_key TEXT NOT NULL,
+              profile_key TEXT NOT NULL,
+              task_key TEXT,
+              status TEXT NOT NULL,
+              temp_dir TEXT NOT NULL DEFAULT '',
+              definition_snapshot_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+              input_json TEXT NOT NULL DEFAULT '{}',
+              output_json TEXT NOT NULL DEFAULT '{}',
+              exit_code INTEGER,
+              stdout_path TEXT,
+              stderr_path TEXT,
+              error TEXT,
+              started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              finished_at TEXT,
+              duration_ms INTEGER
+            );
+            CREATE TABLE workflow_node_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id TEXT NOT NULL,
+              node_id TEXT NOT NULL,
+              node_type TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              condition_results_json TEXT NOT NULL DEFAULT '[]',
+              output_json TEXT NOT NULL DEFAULT '{}',
+              error TEXT,
+              agent_run_key TEXT,
+              script_run_id TEXT,
+              started_at TEXT,
+              finished_at TEXT,
+              UNIQUE (run_id, node_id)
+            );
+            """
+        )
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.init_schema()
+
+    with store.connect() as conn:
+        columns = {
+            table: {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for table in ("workflow_tasks", "workflow_runs", "workflow_node_runs")
+        }
+        association_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(workflow_run_artifacts)")
+        }
+    assert "lease_origin_status" in columns["workflow_tasks"]
+    assert {
+        "workflow_revision_no",
+        "workflow_content_hash",
+        "task_version",
+        "execution_mode",
+        "execution_plan_json",
+        "source_run_id",
+    } <= columns["workflow_runs"]
+    assert {
+        "node_fingerprint",
+        "action",
+        "reuse_reason",
+        "source_run_id",
+        "source_node_id",
+        "source_node_fingerprint",
+        "artifact_ids_json",
+    } <= columns["workflow_node_runs"]
+    assert {
+        "run_id",
+        "node_id",
+        "artifact_id",
+        "source_run_id",
+        "source_node_id",
+        "created_at",
+    } <= association_columns
+
+
+def test_workflow_task_status_supports_stale_serialization():
+    from agent_bridge.automation.workflows.models import WorkflowTaskStatus
+
+    assert WorkflowTaskStatus.stale.value == "stale"
+    assert str(WorkflowTaskStatus.stale.value) == "stale"
+
+
+def test_workflow_task_lease_and_priority_only_consider_latest_set_at_version(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed_workflow_with_task(store)
+    store.upsert_workflow_tasks(
+        "w",
+        [
+            {"task_key": "page:a", "task_version": "v1", "payload": {}},
+            {"task_key": "page:a", "task_version": "v2", "payload": {}},
+        ],
+    )
+
+    store.set_priority_for_task("w", "page:a")
+    assert store.get_workflow_task("w", "page:a", task_version="v1")["priority_flag"] is None
+    assert store.get_workflow_task("w", "page:a", task_version="v2")["priority_flag"] is not None
+
+    leased = store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
+    assert leased["task_version"] == "v2"
+    assert store.get_workflow_task("w", "page:a", task_version="v1")["status"] == "pending"
+
+
+def test_stale_lease_restores_origin_status_after_failure_and_clears_it_on_complete(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed_workflow_with_task(store)
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE workflow_tasks SET status = 'stale' WHERE workflow_key = ? AND task_key = ?",
+            ("w", "page:a"),
+        )
+
+    leased = store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
+    assert leased["status"] == "running"
+    assert leased["lease_origin_status"] == "stale"
+    assert store.release_or_abandon_tasks_for_run(
+        "w", "run_1", max_attempts=3, error_message="boom"
+    ) == {"released": 1, "abandoned": 0}
+    assert store.get_workflow_task("w", "page:a")["status"] == "stale"
+
+    store.lease_workflow_task("w", run_id="run_2", lease_seconds=7200)
+    assert store.complete_workflow_task("w", "page:a", run_id="run_2") is True
+    assert store.get_workflow_task("w", "page:a")["lease_origin_status"] is None
+
+
+def test_workflow_incremental_run_node_and_artifact_metadata_round_trip(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed_workflow_with_task(store)
+    run = store.create_workflow_run(
+        run_id="run_2",
+        workflow_key="w",
+        profile_key="report-plane",
+        task_key="page:a",
+        status="running",
+        temp_dir="",
+        workflow_revision_no=4,
+        workflow_content_hash="workflow-hash",
+        task_version="v2",
+        execution_mode="incremental",
+        execution_plan={"nodes": [{"node_id": "a", "action": "reuse"}]},
+        source_run_id="run_1",
+    )
+    store.create_workflow_node_runs(
+        "run_2",
+        [
+            {
+                "node_id": "a",
+                "node_type": "agent",
+                "node_fingerprint": "node-hash",
+                "action": "reuse",
+                "reuse_reason": "fingerprint_match",
+                "source_run_id": "run_1",
+                "source_node_id": "a",
+                "source_node_fingerprint": "source-node-hash",
+            }
+        ],
+    )
+    node = store.finish_workflow_node_run(
+        "run_2",
+        "a",
+        status="completed",
+        output={"text": "reused"},
+        artifact_ids=["artifact_1"],
+    )
+    store.associate_workflow_run_artifacts(
+        "run_2",
+        "a",
+        ["artifact_1"],
+        source_run_id="run_1",
+        source_node_id="a",
+    )
+    store.associate_workflow_run_artifacts(
+        "run_2",
+        "a",
+        ["artifact_1"],
+        source_run_id="run_1",
+        source_node_id="a",
+    )
+
+    assert run["execution_plan"] == {"nodes": [{"node_id": "a", "action": "reuse"}]}
+    assert run["execution_mode"] == "incremental"
+    assert node["artifact_ids"] == ["artifact_1"]
+    assert node["action"] == "reuse"
+    assert node["source_node_fingerprint"] == "source-node-hash"
+    associations = store.list_workflow_run_artifacts("run_2", node_id="a")
+    assert len(associations) == 1
+    assert associations[0].items() >= {
+        "run_id": "run_2",
+        "node_id": "a",
+        "artifact_id": "artifact_1",
+        "source_run_id": "run_1",
+        "source_node_id": "a",
+    }.items()
+    assert associations[0]["created_at"]
+
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -585,7 +817,7 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
     assert result == task_counts(updated=1)
     assert statements[0] == "BEGIN IMMEDIATE"
     assert statements[1].startswith("SELECT WORKFLOW_TASK_RERUN_DAYS")
-    assert statements[2].startswith("SELECT STATUS, LEASE_EXPIRES_AT, SET_AT")
+    assert statements[2].startswith("SELECT ID, STATUS, LEASE_EXPIRES_AT, SET_AT")
 
 
 def _seed_workflow_with_task(store, workflow_key: str = "w", task_key: str = "page:a") -> None:

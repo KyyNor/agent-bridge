@@ -27,6 +27,33 @@ def test_workflow_service_creates_definition_with_existing_profile(wm_paths):
     assert created["profile_key"] == "report-plane"
 
 
+def test_workflow_service_allows_stale_task_to_be_prioritized(wm_paths):
+    svc = _service(wm_paths)
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        definition={"nodes": [], "edges": []},
+        status="active",
+    )
+    svc.store.upsert_workflow_tasks(
+        "page-report", [{"task_key": "page:a", "task_version": "v1", "payload": {}}]
+    )
+    with svc.store.transaction() as conn:
+        conn.execute(
+            "UPDATE workflow_tasks SET status = 'stale' WHERE workflow_key = ? AND task_key = ?",
+            ("page-report", "page:a"),
+        )
+
+    result = svc.workflows.execute_task(
+        actor="root", workflow_key="page-report", task_key="page:a", task_version="v1"
+    )
+
+    assert result["task_version"] == "v1"
+
+
 def test_workflow_service_rejects_missing_profile(wm_paths):
     from agent_bridge.core.domain import ValidationError
 

@@ -266,7 +266,7 @@ workflow_content_hash
 task_version
 execution_mode
 source_run_id
-plan_json
+execution_plan_json
 ~~~
 
 definition_snapshot_json 继续保留，保证运行时使用创建 run 时的不可变 workflow 快照。
@@ -276,15 +276,13 @@ definition_snapshot_json 继续保留，保证运行时使用创建 run 时的�
 新增字段：
 
 ~~~text
-node_semantic_fingerprint
-input_fingerprint
-dependency_fingerprint
-execution_mode
-decision_reason
-reuse_source_run_id
-reuse_source_node_run_id
-reuse_source_revision_no
-output_hash
+node_fingerprint
+action
+reuse_reason
+source_run_id
+source_node_id
+source_node_fingerprint
+artifact_ids_json
 ~~~
 
 节点的数据库 status 继续表示执行结果状态；是否执行或复用由 execution_mode 单独表示，避免把 reused 和 completed 混成一个维度。
@@ -295,10 +293,10 @@ output_hash
 
 ~~~text
 producer_node_id
-source_artifact_id
-reusable
+producer_node_fingerprint
+reuse_allowed
 invalid_reason
-expires_at
+workflow_run_artifacts(run_id, node_id, artifact_id, source_run_id, source_node_id)
 ~~~
 
 is_current 继续用于当前结果展示，但不能作为复用唯一条件；历史 artifact 即使不是 current，只要来源、hash 和有效期校验通过，也可以被复用。
@@ -341,7 +339,7 @@ POST /workflows/{workflow_key}/run/preview
 扩展现有运行接口，支持：
 
 ~~~text
-execution_mode = auto / incremental / force_full
+execution_mode = normal / incremental / force_full
 task_key
 task_version
 ~~~

@@ -113,3 +113,53 @@ def test_search_artifacts_full_default_false_keeps_snippet_behaviour(wm_paths):
     assert len(result["items"]) == 1
     assert "content" not in result["items"][0]
     assert "snippet" in result["items"][0]
+
+
+def test_running_artifacts_do_not_replace_current_until_run_completes(wm_paths):
+    svc = _service(wm_paths)
+    _seed_artifact(svc, run_id="run_1", task_version="v1", title="A v1", content="# full body v1")
+
+    svc.store.create_workflow_run(
+        run_id="run_2",
+        workflow_key="w",
+        profile_key="report-plane",
+        task_key="page:a",
+        status="running",
+        temp_dir="/tmp/run_2",
+        task_version="v2",
+    )
+    saved = svc.workflows.save_artifact(
+        workflow_key="w",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="page:a",
+        task_version="v2",
+        title="A v2",
+        path="pages/page-a.md",
+        tags=[],
+        format="markdown",
+        summary="",
+        content="# full body v2",
+        metadata={},
+        producer_node_id="output",
+        producer_node_fingerprint="fingerprint-v2",
+    )
+
+    previous = svc.store.search_workflow_artifacts(
+        profile_key="report-plane", query=None, tags=[], path="pages/page-a.md",
+        workflow_key="w", task_key="page:a", include_history=False, limit=10,
+    )
+    assert [item["run_id"] for item in previous] == ["run_1"]
+    assert saved["is_current"] is False
+    assert saved["producer_node_id"] == "output"
+    assert saved["producer_node_fingerprint"] == "fingerprint-v2"
+
+    svc.store.finish_workflow_run(
+        "run_2", status="completed", exit_code=0, stdout_path=None, stderr_path=None,
+        error=None, duration_ms=0, output={},
+    )
+    current = svc.store.search_workflow_artifacts(
+        profile_key="report-plane", query=None, tags=[], path="pages/page-a.md",
+        workflow_key="w", task_key="page:a", include_history=False, limit=10,
+    )
+    assert [item["run_id"] for item in current] == ["run_2"]

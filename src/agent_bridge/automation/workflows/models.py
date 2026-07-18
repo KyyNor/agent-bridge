@@ -18,6 +18,7 @@ class WorkflowRunStatus(str, Enum):
 
 class WorkflowTaskStatus(str, Enum):
     pending = "pending"
+    stale = "stale"
     running = "running"
     completed = "completed"
     failed = "failed"

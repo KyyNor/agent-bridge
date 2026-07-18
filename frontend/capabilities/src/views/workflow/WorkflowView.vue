@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles } from 'lucide-vue-next'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -140,6 +140,8 @@ const taskArtifactError = ref('')
 // Execute (priority run) / reset (feature 3 & 4).
 const taskActionLoading = ref<Set<string>>(new Set())
 const taskActionError = ref('')
+const taskPreviews = ref<Record<string, WorkflowExecutionPlan>>({})
+const taskPreviewLoading = ref<Set<string>>(new Set())
 const resetTarget = ref<WorkflowTask | null>(null)
 const resetting = ref(false)
 const selectedTaskIds = ref<Set<string>>(new Set())
@@ -1072,6 +1074,7 @@ function taskBadgeClass(status: string) {
   if (status === 'failed' || status === 'abandoned') return 'bg-destructive-soft text-destructive-soft-fg'
   if (status === 'running') return 'bg-info-soft text-info-soft-fg'
   if (status === 'pending') return 'bg-warning-soft text-warning-soft-fg'
+  if (status === 'stale') return 'bg-warning-soft text-warning-soft-fg'
   return ''
 }
 
@@ -1525,14 +1528,50 @@ async function toggleTaskArtifacts(task: WorkflowTask) {
   }
 }
 
-/** Whether a task can be priority-executed right now (pending, or running
- *  with an expired lease). Mirrors the server-side leasability check. */
+/** Whether the task row has a user-triggerable run action. */
 function canExecuteTask(task: WorkflowTask): boolean {
-  if (task.status === 'pending') return true
+  if (task.status === 'pending' || task.status === 'stale' || task.status === 'completed') return true
   if (task.status === 'running' && task.lease_expires_at) {
     return new Date(task.lease_expires_at).getTime() < Date.now()
   }
   return false
+}
+
+function taskExecutionMode(task: WorkflowTask): WorkflowExecutionMode {
+  // Preview requests use execution_mode: 'incremental' for stale tasks and
+  // execution_mode: 'force_full' for completed tasks with existing output.
+  if (task.status === 'stale') return 'incremental'
+  if (task.status === 'completed') return 'force_full'
+  return 'normal'
+}
+
+function canPreviewTask(task: WorkflowTask): boolean {
+  return task.status === 'stale' || task.status === 'completed' || task.status === 'pending'
+}
+
+function taskPreview(task: WorkflowTask): WorkflowExecutionPlan | undefined {
+  return taskPreviews.value[taskId(task)]
+}
+
+async function previewTask(task: WorkflowTask) {
+  const key = taskId(task)
+  const loading = new Set(taskPreviewLoading.value)
+  loading.add(key)
+  taskPreviewLoading.value = loading
+  try {
+    const plan = await api.previewWorkflowRun(task.workflow_key, {
+      task_key: task.task_key,
+      task_version: task.task_version || undefined,
+      execution_mode: task.status === 'stale' ? 'incremental' : task.status === 'completed' ? 'force_full' : 'normal',
+    })
+    taskPreviews.value = { ...taskPreviews.value, [key]: plan }
+  } catch (e: unknown) {
+    taskActionError.value = errorMessage(e)
+  } finally {
+    const done = new Set(taskPreviewLoading.value)
+    done.delete(key)
+    taskPreviewLoading.value = done
+  }
 }
 
 function canResetTask(task: WorkflowTask): boolean {
@@ -1558,7 +1597,7 @@ async function executeTask(task: WorkflowTask) {
   taskActionLoading.value = loading
   taskActionError.value = ''
   try {
-    const result = await api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined)
+    const result = await api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined, taskExecutionMode(task))
     if (result.run_id) {
       window.location.hash = buildWorkflowTaskProgressHash(task.workflow_key, result.run_id)
       return
@@ -1707,7 +1746,7 @@ async function runSelectedTasks() {
   try {
     const result = await runWorkflowTaskQueue(queue, {
       canExecute: canExecuteTask,
-      execute: task => api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined),
+      execute: task => api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined, taskExecutionMode(task)),
       waitForRun: (runId, onUpdate) => waitForBatchRun(runId, token, onUpdate),
       isCancelled: () => token !== batchToken,
       stopRun: async runId => {
@@ -3008,7 +3047,17 @@ async function confirmClearWorkflow() {
                     :disabled="batchBusy || isTaskActionLoading(task)"
                     @click="executeTask(task)"
                   >
-                    {{ isTaskActionLoading(task) ? '执行中' : '执行' }}
+                    {{ isTaskActionLoading(task) ? '执行中' : task.status === 'completed' ? '全量运行' : task.status === 'stale' ? '增量运行' : '执行' }}
+                  </Button>
+                  <Button
+                    v-if="canPreviewTask(task)"
+                    variant="ghost"
+                    size="sm"
+                    class="h-8 text-xs"
+                    :disabled="taskPreviewLoading.has(taskId(task))"
+                    @click="previewTask(task)"
+                  >
+                    {{ taskPreviewLoading.has(taskId(task)) ? '分析中' : '预览' }}
                   </Button>
                   <Button variant="ghost" size="sm" class="h-8 text-xs" @click="toggleTaskArtifacts(task)">
                     {{ isTaskArtifactExpanded(task) ? '收起产出物' : '产出物' }}
@@ -3027,6 +3076,22 @@ async function confirmClearWorkflow() {
                   >
                     重置
                   </Button>
+                </div>
+              </div>
+              <div v-if="taskPreview(task)" class="border-t bg-background px-3 py-3">
+                <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span class="font-semibold text-foreground">执行预览</span>
+                  <Badge variant="outline">{{ taskPreview(task)?.mode }}</Badge>
+                  <span class="text-muted-foreground">baseline: {{ taskPreview(task)?.baseline_run_id || '无可复用运行' }}</span>
+                </div>
+                <div class="mb-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                  <span>复用节点 {{ taskPreview(task)?.reusable_node_ids.length || 0 }}</span>
+                  <span>重新执行节点 {{ taskPreview(task)?.affected_node_ids.length || 0 }}</span>
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <Badge v-for="node in taskPreview(task)?.nodes || []" :key="node.node_id" variant="outline">
+                    {{ node.node_id }} · {{ node.action === 'reuse' ? '复用' : '执行' }} · {{ node.reason }}
+                  </Badge>
                 </div>
               </div>
               <!-- 产出物（feature 2） -->
