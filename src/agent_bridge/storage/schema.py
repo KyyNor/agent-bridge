@@ -554,10 +554,15 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   completed_at TEXT,
   priority_flag TEXT,
+  lease_origin_status TEXT,
   UNIQUE (workflow_key, task_key, task_version)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_tasks_pick
   ON workflow_tasks(workflow_key, status, lease_expires_at, id);
+CREATE INDEX IF NOT EXISTS idx_workflow_tasks_latest
+  ON workflow_tasks(workflow_key, task_key, set_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_tasks_version_status
+  ON workflow_tasks(workflow_key, task_version, status);
 
 CREATE TABLE IF NOT EXISTS workflow_task_imports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -589,6 +594,12 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   definition_snapshot_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
   input_json TEXT NOT NULL DEFAULT '{}',
   output_json TEXT NOT NULL DEFAULT '{}',
+  workflow_revision_no INTEGER,
+  workflow_content_hash TEXT,
+  task_version TEXT NOT NULL DEFAULT '',
+  execution_mode TEXT NOT NULL DEFAULT 'normal',
+  execution_plan_json TEXT NOT NULL DEFAULT '{}',
+  source_run_id TEXT,
   exit_code INTEGER,
   stdout_path TEXT,
   stderr_path TEXT,
@@ -607,6 +618,13 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
   status TEXT NOT NULL DEFAULT 'pending',
   condition_results_json TEXT NOT NULL DEFAULT '[]',
   output_json TEXT NOT NULL DEFAULT '{}',
+  node_fingerprint TEXT,
+  action TEXT,
+  reuse_reason TEXT,
+  source_run_id TEXT,
+  source_node_id TEXT,
+  source_node_fingerprint TEXT,
+  artifact_ids_json TEXT NOT NULL DEFAULT '[]',
   error TEXT,
   agent_run_key TEXT,
   script_run_id TEXT,
@@ -615,6 +633,18 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
   UNIQUE (run_id, node_id)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id, id);
+
+CREATE TABLE IF NOT EXISTS workflow_run_artifacts (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(run_id) ON DELETE CASCADE,
+  node_id TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  source_run_id TEXT,
+  source_node_id TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (run_id, node_id, artifact_id)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_artifacts_run_node
+  ON workflow_run_artifacts(run_id, node_id);
 
 CREATE TABLE IF NOT EXISTS workflow_run_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
