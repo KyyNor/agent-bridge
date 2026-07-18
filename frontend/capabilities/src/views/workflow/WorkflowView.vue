@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, HelpCircle, Maximize2, Minimize2, Play, Plus, Save, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Check, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, WandSparkles } from 'lucide-vue-next'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -24,6 +24,8 @@ import WorkflowRunDetailPanel from '../../components/WorkflowRunDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
+import SegmentedTabs from '../../components/SegmentedTabs.vue'
+import StatCard from '../../components/StatCard.vue'
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
@@ -85,6 +87,7 @@ const showArtifactHistory = ref(false)
 const fullscreenArtifact = ref<{ title: string; path: string; summary: string; tags: string[]; content: string; format: string } | null>(null)
 const showGuide = ref(false)
 const showClearConfirm = ref(false)
+const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs'>('overview')
 const progressWorkflowKey = ref('')
 const progressRunId = ref('')
 const taskWorkflowKey = ref('')
@@ -291,6 +294,18 @@ const manualInputFields = computed(() => deriveManualInputFields(form.value.defi
 const backendKeys = computed(() => deriveWorkflowBackendKeys(agentRuntimeConfig.value))
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
+const latestRun = computed(() => runs.value[0] || null)
+const latestRunTone = computed<'neutral' | 'ok' | 'err' | 'info'>(() => {
+  if (latestRun.value?.status === 'completed') return 'ok'
+  if (latestRun.value?.status === 'failed' || latestRun.value?.status === 'stopped') return 'err'
+  if (latestRun.value?.status === 'running') return 'info'
+  return 'neutral'
+})
+const latestRunValue = computed(() => {
+  if (!latestRun.value) return '暂无运行'
+  const duration = formatRunDuration(latestRun.value.duration_ms)
+  return duration ? `${runStatusLabel(latestRun.value.status)} · ${duration}` : runStatusLabel(latestRun.value.status)
+})
 const hasAnyRunningRun = computed(() =>
   Object.values(workflowRuns.value).some(items => items.some(run => run.status === 'running')),
 )
@@ -302,6 +317,16 @@ const taskWorkflow = computed(() =>
 )
 const tasks = computed(() => workflowTasks.value[taskWorkflow.value?.workflow_key || ''] || [])
 const taskStats = computed(() => computeTaskStats(tasks.value))
+const pendingTaskCount = computed(() => (taskStats.value.pending || 0) + (taskStats.value.failed || 0) + (taskStats.value.abandoned || 0))
+const workflowNodeCount = computed(() => selectedWorkflow.value?.definition?.nodes.length || 0)
+const humanReadableArtifactCount = computed(() => artifacts.value.filter(item => item.format === 'html').length)
+const recentArtifacts = computed(() => artifacts.value.slice(0, 3))
+const detailTabs = computed(() => [
+  { key: 'overview', label: '概览' },
+  { key: 'tasks', label: '任务队列', count: pendingTaskCount.value || undefined },
+  { key: 'artifacts', label: '工作流产物', count: artifactTotal.value || undefined },
+  { key: 'runs', label: '运行记录', count: runs.value.length || undefined },
+])
 /** Distinct status values present, in the canonical display order. */
 const taskStatuses = computed(() => distinctStatuses(tasks.value))
 /** Distinct, non-empty type values present. */
@@ -336,7 +361,7 @@ const batchPendingCount = computed(() => Math.max(
     - batchProgress.value.completed
     - (batchCurrentTask.value ? 1 : 0),
 ))
-const batchRunDetailVisible = computed(() => routeMode.value === 'tasks'
+const batchRunDetailVisible = computed(() => (routeMode.value === 'tasks' || (routeMode.value === 'detail' && detailTab.value === 'tasks'))
   && !!batchCurrentRunId.value
   && (batchAction.value === 'run' || !!batchSummary.value))
 const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
@@ -890,8 +915,16 @@ async function openDetail(item: WorkflowDefinition) {
 
 async function prepareDetail(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
+  taskWorkflowKey.value = item.workflow_key
+  detailTab.value = 'overview'
   resetArtifactPage()
-  await Promise.all([searchArtifacts(), loadRuns(item.workflow_key)])
+  await Promise.all([searchArtifacts(), loadRuns(item.workflow_key), loadTasks(item.workflow_key)])
+}
+
+async function selectDetailTab(value: string) {
+  if (value !== 'overview' && value !== 'tasks' && value !== 'artifacts' && value !== 'runs') return
+  detailTab.value = value
+  if (value === 'tasks' && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
 }
 
 function goList() {
@@ -999,6 +1032,13 @@ function runStatusLabel(status: string) {
     stopped: '已停止',
   }
   return map[status] || status
+}
+
+function formatRunDuration(durationMs: number | null | undefined) {
+  if (durationMs == null || durationMs < 0) return ''
+  if (durationMs < 1000) return `${durationMs}ms`
+  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`
+  return `${Math.floor(durationMs / 60_000)}m ${Math.round((durationMs % 60_000) / 1000)}s`
 }
 
 function runBadgeClass(status: string) {
@@ -1190,7 +1230,7 @@ function resetTaskImportState() {
 }
 
 function taskImportWorkflowKey() {
-  return routeMode.value === 'tasks' ? routeWorkflowKey.value : ''
+  return taskWorkflow.value?.workflow_key || (routeMode.value === 'tasks' ? routeWorkflowKey.value : '')
 }
 
 function openTaskImport() {
@@ -1243,7 +1283,7 @@ async function downloadTaskImportTemplate() {
     anchor.click()
   } catch (e: unknown) {
     taskImportError.value = errorMessage(e)
-    if (routeMode.value === 'tasks' && routeWorkflowKey.value === workflowKey) showTaskImport.value = true
+    if (taskImportWorkflowKey() === workflowKey) showTaskImport.value = true
   } finally {
     anchor?.remove()
     if (objectUrl) URL.revokeObjectURL(objectUrl)
@@ -1270,9 +1310,7 @@ async function confirmTaskImport() {
     closeTaskImport()
     selectedTaskIds.value = new Set()
     batchSummary.value = `导入完成：新增 ${result.created}，更新 ${result.updated}，跳过（运行中） ${result.skipped_running}，跳过（已完成） ${result.skipped_completed}，重开（已过期） ${result.reopened_expired}`
-    if (routeMode.value === 'tasks' && routeWorkflowKey.value === workflowKey) {
-      await loadTasks(workflowKey)
-    }
+    await loadTasks(workflowKey)
   } catch (e: unknown) {
     if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportError.value = errorMessage(e)
   } finally {
@@ -1872,6 +1910,13 @@ function isTaskLogLoading(task: WorkflowTask) {
 }
 
 async function openTasks(item: WorkflowDefinition) {
+  selectedKey.value = item.workflow_key
+  taskWorkflowKey.value = item.workflow_key
+  detailTab.value = 'tasks'
+  if (routeMode.value === 'detail' && routeWorkflowKey.value === item.workflow_key) {
+    await loadTasks(item.workflow_key)
+    return
+  }
   window.location.hash = `workflow/${item.workflow_key}/tasks`
 }
 
@@ -2112,7 +2157,7 @@ async function confirmClearWorkflow() {
 
 <template>
   <div class="space-y-5">
-    <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-3 text-sm text-destructive">
+    <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
       {{ routeError }}。请<a class="underline" href="#workflow" @click.prevent="goList">返回列表</a>。
     </div>
 
@@ -2129,7 +2174,7 @@ async function confirmClearWorkflow() {
       </Button>
     </Teleport>
 
-    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
       {{ error }}
     </div>
 
@@ -2234,7 +2279,7 @@ async function confirmClearWorkflow() {
     />
     </template>
 
-    <section v-if="routeMode === 'detail' && !routeError" class="space-y-4">
+    <section v-if="routeMode === 'detail' && !routeError" class="space-y-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
           <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
@@ -2242,67 +2287,108 @@ async function confirmClearWorkflow() {
             返回
           </Button>
           <div>
-            <h2 class="text-lg font-semibold text-foreground">{{ selectedWorkflow?.name || '工作流详情' }}</h2>
-            <p class="font-mono text-xs text-muted-foreground">{{ selectedWorkflow?.workflow_key || routeWorkflowKey }}</p>
+            <h2 class="text-xl font-semibold tracking-tight text-foreground">{{ selectedWorkflow?.name || '工作流详情' }}</h2>
+            <p class="mt-0.5 text-xs text-muted-foreground">{{ selectedWorkflow?.workflow_key || routeWorkflowKey }} · {{ selectedProfileName }}</p>
           </div>
         </div>
         <div v-if="selectedWorkflow" class="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" @click="openTasks(selectedWorkflow)">任务进度</Button>
-          <Button variant="outline" size="sm" @click="openEdit(selectedWorkflow)">编辑</Button>
+          <details class="relative">
+            <summary class="flex h-9 cursor-pointer list-none items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted [&::-webkit-details-marker]:hidden">
+              <MoreHorizontal class="h-4 w-4" />
+              更多
+            </summary>
+            <div class="absolute right-0 z-20 mt-1 grid min-w-28 gap-1 rounded-lg border border-border bg-popover p-1 shadow-pop">
+              <button type="button" class="rounded-sm px-2.5 py-2 text-left text-sm text-popover-foreground transition-colors hover:bg-muted" @click="openEdit(selectedWorkflow)">编辑</button>
+              <button type="button" class="rounded-sm px-2.5 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive-soft" @click="requestClearWorkflow(selectedWorkflow)">清空数据</button>
+              <button type="button" class="rounded-sm px-2.5 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive-soft" @click="deleteWorkflow(selectedWorkflow)">删除</button>
+            </div>
+          </details>
           <Button
             v-if="runningRunFor(selectedWorkflow.workflow_key)"
             variant="default"
-            size="sm"
+            size="lg"
             @click="openProgress(selectedWorkflow, runningRunFor(selectedWorkflow.workflow_key)?.run_id)"
           >
             运行中...
           </Button>
           <Button
             v-else
-            size="sm"
+            size="lg"
             :disabled="hasAnyRunningRun"
             @click="runWorkflow(selectedWorkflow)"
           >
             运行
           </Button>
-          <Button variant="ghost" size="sm" class="text-destructive" @click="requestClearWorkflow(selectedWorkflow)">清空</Button>
-          <Button variant="ghost" size="sm" class="text-destructive" @click="deleteWorkflow(selectedWorkflow)">删除</Button>
         </div>
       </div>
       <div v-if="selectedWorkflow" class="space-y-5">
-          <div class="flex flex-wrap items-start gap-3 border-b pb-4">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <Badge>{{ selectedWorkflow.workflow_key }}</Badge>
-                <StatusBadge v-if="selectedWorkflow.status === 'active'" status="enabled" />
-                <StatusBadge v-else status="disabled" />
-                <Badge v-if="selectedWorkflow.workflow_type === 'summary'" variant="outline">总结类</Badge>
+          <div class="flex flex-wrap items-center gap-2 border-b border-border pb-4">
+            <StatusBadge v-if="selectedWorkflow.status === 'active'" status="enabled" />
+            <StatusBadge v-else status="disabled" />
+            <Badge v-if="selectedWorkflow.workflow_type === 'summary'" variant="outline">总结类</Badge>
+            <span class="text-xs text-muted-foreground">{{ workflowTypeLabel(selectedWorkflow.workflow_type) }}</span>
+            <p class="basis-full pt-1 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="最近运行" :value="latestRunValue" :tone="latestRunTone">
+              <template #icon><Play class="h-4 w-4" /></template>
+              <template #sub>{{ latestRun ? `${formatLocalDatetime(latestRun.started_at)} · ${latestRun.run_id}` : '运行后在此查看状态' }}</template>
+            </StatCard>
+            <StatCard label="任务" :value="tasks.length">
+              <template #icon><ListTodo class="h-4 w-4" /></template>
+              <template #sub>{{ pendingTaskCount ? `${pendingTaskCount} 条需要处理` : '当前没有待处理项' }}</template>
+            </StatCard>
+            <StatCard label="当前产物" :value="artifactTotal">
+              <template #icon><FolderOutput class="h-4 w-4" /></template>
+              <template #sub>{{ humanReadableArtifactCount ? `${humanReadableArtifactCount} 个可读报告` : '按需检索产物' }}</template>
+            </StatCard>
+            <StatCard label="依赖节点" :value="workflowNodeCount">
+              <template #icon><GitBranch class="h-4 w-4" /></template>
+              <template #sub>{{ selectedWorkflow.definition?.edges.length || 0 }} 条连线</template>
+            </StatCard>
+          </div>
+
+          <SegmentedTabs v-model="detailTab" :tabs="detailTabs" @update:model-value="selectDetailTab" />
+
+          <div v-if="detailTab === 'overview'" class="space-y-4">
+            <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.7fr)]">
+              <Card v-if="selectedWorkflow.definition" class="shadow-card">
+                <CardContent class="p-4">
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 class="text-sm font-semibold text-foreground">工作流图</h3>
+                      <p class="mt-0.5 text-xs text-muted-foreground">{{ workflowNodeCount }} 个节点 · {{ selectedWorkflow.definition.edges.length }} 条连线</p>
+                    </div>
+                    <Button variant="outline" size="sm" @click="openEdit(selectedWorkflow)">编辑图</Button>
+                  </div>
+                  <WorkflowRunGraph :definition-snapshot="selectedWorkflow.definition" :node-runs="latestRun?.node_runs || []" @open-agent-run="openAgentRun" @open-script-run="openScriptRun" />
+                </CardContent>
+              </Card>
+              <div v-else class="rounded-lg border border-warning/30 bg-warning-soft p-4 text-sm text-warning-soft-fg">该历史工作流需要迁移。进入编辑页并显式保存后才会写入结构化定义。</div>
+              <div class="space-y-4">
+                <Card size="sm" class="shadow-card">
+                  <CardContent class="space-y-3">
+                    <div class="flex items-center justify-between gap-2"><h3 class="text-sm font-semibold">最近运行</h3><StatusBadge v-if="latestRun" :status="latestRun.status === 'completed' ? 'success' : latestRun.status === 'running' ? 'running' : latestRun.status === 'failed' || latestRun.status === 'stopped' ? 'error' : 'blocked'" :label="runStatusLabel(latestRun.status)" /></div>
+                    <template v-if="latestRun"><div class="font-mono text-xs text-muted-foreground">{{ latestRun.run_id }}</div><div class="grid grid-cols-2 gap-x-3 gap-y-2 text-xs"><span class="text-muted-foreground">开始时间</span><span class="text-right tabular-nums">{{ formatLocalDatetime(latestRun.started_at) }}</span><span class="text-muted-foreground">耗时</span><span class="text-right font-medium tabular-nums">{{ formatRunDuration(latestRun.duration_ms) || '—' }}</span></div><Button class="w-full" size="sm" variant="outline" @click="openProgress(selectedWorkflow, latestRun.run_id)">查看运行详情</Button></template>
+                    <p v-else class="py-5 text-center text-sm text-muted-foreground">还没有运行记录</p>
+                  </CardContent>
+                </Card>
+                <Card size="sm" class="shadow-card">
+                  <CardContent class="flex items-start gap-3">
+                    <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-warning-soft text-warning-soft-fg"><ListTodo class="h-4 w-4" /></div>
+                    <div class="min-w-0 flex-1"><h3 class="text-sm font-semibold">下一步</h3><p class="mt-1 text-xs leading-5 text-muted-foreground">{{ pendingTaskCount ? `处理剩余 ${pendingTaskCount} 条任务，或批量运行可执行项。` : '检查工作流图与最新产物，确认下一次运行输入。' }}</p><Button class="mt-3" size="sm" variant="outline" @click="selectDetailTab('tasks')">进入任务队列</Button></div>
+                  </CardContent>
+                </Card>
               </div>
-              <p class="mt-2 text-sm text-muted-foreground">
-                {{ selectedWorkflow.description || '无描述' }}
-                <span v-if="selectedWorkflow.workflow_type === 'summary'" class="ml-1 text-xs">· 固定 Markdown 与 HTML 输出节点</span>
-              </p>
+            </div>
+            <div class="grid gap-4 xl:grid-cols-2">
+              <Card size="sm" class="shadow-card"><CardContent><div class="mb-2 flex items-center justify-between"><div><h3 class="text-sm font-semibold">最新产物</h3><p class="mt-0.5 text-xs text-muted-foreground">最近更新的工作流输出</p></div><Button size="sm" variant="ghost" @click="selectDetailTab('artifacts')">查看全部</Button></div><div v-if="recentArtifacts.length" class="divide-y"><button v-for="item in recentArtifacts" :key="item.artifact_id" type="button" class="list-row-interactive flex w-full items-center justify-between gap-3 px-1 py-2.5 text-left" @click="openArtifact(item)"><div class="min-w-0"><div class="truncate text-sm font-medium">{{ item.title }}</div><div class="mt-0.5 truncate text-xs text-muted-foreground">{{ item.path }} · {{ formatLocalDatetime(item.updated_at) }}</div></div><Badge variant="outline" class="shrink-0">{{ item.format }}</Badge></button></div><p v-else class="py-5 text-center text-sm text-muted-foreground">暂无产物</p></CardContent></Card>
+              <Card size="sm" class="shadow-card"><CardContent><div class="mb-2"><h3 class="text-sm font-semibold">活动</h3><p class="mt-0.5 text-xs text-muted-foreground">最近运行与产物更新</p></div><div v-if="latestRun || recentArtifacts.length" class="divide-y"><button v-if="latestRun" type="button" class="list-row-interactive flex w-full items-start justify-between gap-3 px-1 py-2.5 text-left" @click="openProgress(selectedWorkflow, latestRun.run_id)"><div><div class="text-sm font-medium">工作流{{ runStatusLabel(latestRun.status) }}</div><div class="mt-0.5 font-mono text-xs text-muted-foreground">{{ latestRun.run_id }}</div></div><span class="shrink-0 text-xs text-muted-foreground">{{ formatLocalDatetime(latestRun.started_at) }}</span></button><div v-for="item in recentArtifacts.slice(0, 2)" :key="`activity:${item.artifact_id}`" class="flex items-start justify-between gap-3 px-1 py-2.5"><div><div class="text-sm font-medium">产物已更新</div><div class="mt-0.5 truncate text-xs text-muted-foreground">{{ item.path }}</div></div><span class="shrink-0 text-xs text-muted-foreground">{{ formatLocalDatetime(item.updated_at) }}</span></div></div><p v-else class="py-5 text-center text-sm text-muted-foreground">还没有活动记录</p></CardContent></Card>
             </div>
           </div>
 
-          <div class="grid gap-3 md:grid-cols-2">
-            <div class="rounded-md border px-3 py-2">
-              <div class="text-xs text-muted-foreground">profile</div>
-              <div class="mt-1 truncate text-sm font-medium">{{ selectedProfileName }}</div>
-            </div>
-            <div class="rounded-md border px-3 py-2">
-              <div class="text-xs text-muted-foreground">工作流类型</div>
-              <div class="mt-1 text-sm font-medium">{{ workflowTypeLabel(selectedWorkflow.workflow_type) }}</div>
-            </div>
-          </div>
-
-          <div v-if="selectedWorkflow.definition" class="border p-4">
-            <div class="mb-3 text-sm font-semibold">工作流定义</div>
-            <WorkflowRunGraph :definition-snapshot="selectedWorkflow.definition" :node-runs="[]" @open-agent-run="() => undefined" @open-script-run="() => undefined" />
-          </div>
-          <div v-else class="border border-warning/30 bg-warning-soft p-4 text-sm text-warning-soft-fg">该历史工作流需要迁移。进入编辑页并显式保存后才会写入结构化定义。</div>
-
-          <section class="space-y-4 rounded-md border p-4">
+          <section v-if="detailTab === 'artifacts'" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
             <div class="flex flex-wrap items-end gap-3">
               <div class="min-w-[220px] flex-1">
                 <label class="mb-1 block text-xs text-muted-foreground">检索</label>
@@ -2318,7 +2404,7 @@ async function confirmClearWorkflow() {
               </div>
               <Button :disabled="artifactLoading" @click="resetArtifactPage(); searchArtifacts()">{{ artifactLoading ? '检索中' : '检索产物' }}</Button>
             </div>
-            <div v-if="artifactError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div v-if="artifactError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
               {{ artifactError }}
             </div>
             <div v-if="!artifactRows.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无产物</div>
@@ -2373,7 +2459,7 @@ async function confirmClearWorkflow() {
             />
           </section>
 
-          <section class="space-y-4 rounded-md border p-4">
+          <section v-if="detailTab === 'runs'" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-semibold">运行记录</h3>
               <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRuns(selectedWorkflow.workflow_key)">{{ runsLoading ? '刷新中' : '刷新' }}</Button>
@@ -2456,7 +2542,7 @@ async function confirmClearWorkflow() {
     </Dialog>
 
     <WorkflowTaskImportDialog
-      v-if="routeMode === 'tasks'"
+      v-if="routeMode === 'tasks' || (routeMode === 'detail' && detailTab === 'tasks')"
       v-model:open="showTaskImport"
       :preview="taskImportPreview"
       :loading="taskImportLoading"
@@ -2468,8 +2554,8 @@ async function confirmClearWorkflow() {
       @confirm="confirmTaskImport"
     />
 
-    <section v-if="routeMode === 'tasks' && !routeError" class="space-y-4">
-      <div class="flex flex-wrap items-center justify-between gap-3">
+    <section v-if="(routeMode === 'tasks' || (routeMode === 'detail' && detailTab === 'tasks')) && !routeError" class="space-y-4">
+      <div v-if="routeMode === 'tasks'" class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
           <Button variant="ghost" size="sm" class="h-8 px-2" @click="goDetail">
             <ArrowLeft class="mr-1 h-4 w-4" />
@@ -2607,10 +2693,10 @@ async function confirmClearWorkflow() {
             </div>
           </div>
 
-          <div v-if="taskError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <div v-if="taskError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
             {{ taskError }}
           </div>
-          <div v-if="taskActionError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <div v-if="taskActionError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
             {{ taskActionError }}
           </div>
           <div
@@ -2728,7 +2814,7 @@ async function confirmClearWorkflow() {
                     <span>更新 {{ formatLocalDatetime(task.updated_at) }}</span>
                     <span v-if="task.completed_at">完成 {{ formatLocalDatetime(task.completed_at) }}</span>
                   </div>
-                  <div v-if="task.last_error" class="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                  <div v-if="task.last_error" class="mt-2 rounded-md border border-destructive/30 bg-destructive-soft px-2 py-1 text-xs text-destructive-soft-fg">
                     {{ task.last_error }}
                   </div>
                   </div>
@@ -2765,7 +2851,7 @@ async function confirmClearWorkflow() {
               </div>
               <!-- 产出物（feature 2） -->
               <div v-if="isTaskArtifactExpanded(task)" class="space-y-2 border-t bg-muted/20 px-3 py-3">
-                <div v-if="taskArtifactError" class="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                <div v-if="taskArtifactError" class="rounded-md border border-destructive/30 bg-destructive-soft px-2 py-1 text-xs text-destructive-soft-fg">
                   {{ taskArtifactError }}
                 </div>
                 <div v-if="isTaskArtifactLoading(task)" class="rounded-md border bg-background px-3 py-4 text-sm text-muted-foreground">
@@ -3079,7 +3165,7 @@ async function confirmClearWorkflow() {
             <div><div class="mb-2 text-sm font-semibold">测试输入</div><div v-for="field in manualInputFields" :key="field.path" class="mb-2"><label class="mb-1 block text-xs text-muted-foreground">{{ field.path }}<span v-if="field.required" class="text-destructive"> *</span></label><Input v-model="manualInputValues[field.path]" :placeholder="field.description || field.type" /></div><p v-if="!manualInputFields.length" class="text-xs text-muted-foreground">当前脚本参数没有可推导输入字段。</p></div>
             <div><label class="mb-1 block text-sm font-semibold">高级 JSON</label><textarea v-model="advancedInput" class="min-h-40 w-full rounded-sm border bg-background p-2 font-mono text-xs" /></div>
           </div>
-        <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
           {{ formError }}
         </div>
         </CardContent>
@@ -3127,7 +3213,7 @@ async function confirmClearWorkflow() {
             {{ designing ? (designStopRequested ? '停止中' : '立即停止') : '生成方案' }}
           </Button>
 
-          <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
             {{ designError }}
           </div>
 
