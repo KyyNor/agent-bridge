@@ -109,18 +109,21 @@ def test_import_preview_existing_returns_diff_and_confirm_appends_revision(wm_pa
     assert service.workflows.get_revision("root", "wf", 2)["source"] == "import"
 
 
-def test_import_preview_rejects_existing_key_without_explicit_overwrite(wm_paths):
+def test_import_preview_auto_uses_overwrite_for_existing_key(wm_paths):
     service = _make_service(wm_paths)
-    _save(service)
+    _save(service, name="old")
 
-    with pytest.raises(ConflictError, match="already exists"):
-        _preview(service, _export_payload("wf"))
+    preview = _preview(service, _export_payload("wf", name="incoming"))
+
+    assert preview["operation"] == "overwrite"
+    assert preview["target_workflow_key"] == "wf"
+    assert preview["diff"]["structured"]["identical"] is False
 
 
 def test_import_preview_rejects_invalid_envelope(wm_paths):
     service = _make_service(wm_paths)
 
-    with pytest.raises(ValidationError, match="format"):
+    with pytest.raises(ValidationError, match="请使用系统导出的工作流 JSON 文件"):
         _preview(service, {"format": "wrong", "format_version": 1})
 
 
@@ -135,7 +138,7 @@ def test_import_confirm_rejects_stale_target_without_mutation(wm_paths):
     )
     _save(service, name="changed-after-preview")
 
-    with pytest.raises(ConflictError, match="changed"):
+    with pytest.raises(ConflictError, match="预览后发生了变化"):
         service.workflows.confirm_definition_import("root", preview["import_id"])
     assert service.workflows.get_definition("root", "wf")["name"] == "changed-after-preview"
     assert len(service.workflows.list_revisions("root", "wf")) == 2

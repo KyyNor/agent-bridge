@@ -92,7 +92,7 @@ function formatExpiresAt(value: string): string {
               class="h-9 w-full rounded-sm border border-input bg-background px-2 text-sm"
               @change="onTargetModeChange"
             >
-              <option value="auto">自动判断</option>
+              <option value="auto">自动判断（同 key 时覆盖）</option>
               <option value="new">导入为新工作流</option>
               <option value="overwrite">覆盖现有工作流</option>
             </select>
@@ -107,7 +107,7 @@ function formatExpiresAt(value: string): string {
               @update:model-value="onTargetKeyInput"
             />
             <p class="text-xs text-muted-foreground">
-              新工作流默认使用文件中的 key；如果 key 已存在，请改 key 或明确选择覆盖现有工作流。
+              默认使用文件中的 key；同 key 时会生成覆盖预览，确认前仍可改成新 key。
             </p>
           </div>
         </div>

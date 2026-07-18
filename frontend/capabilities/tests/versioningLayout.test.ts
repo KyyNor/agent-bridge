@@ -84,6 +84,7 @@ test('workflow API client exposes export, restore, and import calls', () => {
   assert.match(file, /confirmWorkflowImport/)
   assert.match(types, /revision_source: WorkflowRevisionSource/)
   assert.match(file, /formatHttpError/)
+  assert.doesNotMatch(file, /return `\$\{status\}:/)
   assert.match(view, /const workflowDetailError = ref\(''\)/)
   assert.match(view, /v-if="workflowDetailError"/)
 })

@@ -45,7 +45,7 @@ test('document upload API exposes typed XHR progress and preserves complete serv
   assert.match(client, /JSON\.parse\(xhr\.responseText\)/)
   assert.match(client, /detail/)
   assert.match(client, /xhr\.responseText/)
-  assert.match(client, /上传失败（HTTP \$\{xhr\.status\}）/)
+  assert.match(client, /上传失败，请稍后重试/)
   assert.match(client, /onProgress\?: UploadProgressCallback/)
   assert.match(client, /postFormDataWithProgress<DocumentDetail \| DocumentUploadSummary>\('\/docs'/)
 })

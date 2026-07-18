@@ -1,4 +1,9 @@
 {
+  "format": "agent-bridge.workflow",
+  "format_version": 1,
+  "exported_at": "2026-07-18T00:00:00+08:00",
+  "exported_by": "root",
+  "workflow": {
   "workflow_key": "fine-report-analysis",
   "name": "帆软报表三维分析",
   "description": "对 data_center 目录下的帆软报表进行访问量、内容、血缘三维分析，产出综合 Markdown 报告。",
@@ -245,5 +250,13 @@
       { "id": "content-analysis-to-report", "source": "content-analysis", "target": "report-output", "condition": null },
       { "id": "lineage-trace-to-report", "source": "lineage-trace", "target": "report-output", "condition": null }
     ]
+  }
+  },
+  "revision": {
+    "revision_no": 1,
+    "content_hash": "",
+    "source": "import",
+    "created_by": "root",
+    "created_at": "2026-07-18T00:00:00+08:00"
   }
 }

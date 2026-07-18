@@ -267,32 +267,32 @@ class WorkflowService:
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if target_mode not in WORKFLOW_IMPORT_MODES:
-            raise ValidationError("invalid workflow import target mode")
+            raise ValidationError("导入方式不正确，请选择自动判断、导入为新工作流或覆盖现有工作流")
         try:
             envelope = json.loads(content.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValidationError("workflow import file must be valid UTF-8 JSON") from exc
+            raise ValidationError("工作流文件不是有效的 UTF-8 JSON，请重新导出或检查文件内容") from exc
         if not isinstance(envelope, dict):
-            raise ValidationError("workflow import payload must be an object")
+            raise ValidationError("工作流文件格式不正确，请使用系统导出的工作流 JSON 文件")
         if envelope.get("format") != "agent-bridge.workflow":
-            raise ValidationError("unsupported workflow import format")
+            raise ValidationError("不支持的工作流文件格式，请使用系统导出的工作流 JSON 文件")
         if envelope.get("format_version") != 1:
-            raise ValidationError("unsupported workflow import format version")
+            raise ValidationError("不支持的工作流文件版本，请重新导出当前版本的工作流")
 
         source = envelope.get("workflow")
         if not isinstance(source, dict):
-            raise ValidationError("workflow import payload has no workflow object")
+            raise ValidationError("工作流文件缺少 workflow 内容，请使用系统导出的工作流 JSON 文件")
         source_workflow_key = str(source.get("workflow_key") or "").strip()
         target_key = str(target_workflow_key or source_workflow_key).strip()
         if not source_workflow_key or not target_key:
-            raise ValidationError("workflow import requires a workflow key")
+            raise ValidationError("工作流文件缺少 workflow key，请补充后重试")
         try:
             status = WorkflowStatus(str(source.get("status") or WorkflowStatus.active.value)).value
             workflow_type = WorkflowType(
                 str(source.get("workflow_type") or WorkflowType.operation.value)
             ).value
         except ValueError as exc:
-            raise ValidationError("workflow import contains an invalid workflow status or type") from exc
+            raise ValidationError("工作流状态或类型不正确，请重新导出当前版本的工作流") from exc
         imported = {
             "workflow_key": target_key,
             "name": str(source.get("name") or target_key),
@@ -303,17 +303,17 @@ class WorkflowService:
             "definition": source.get("definition"),
         }
         if not imported["profile_key"] or not isinstance(imported["definition"], dict):
-            raise ValidationError("workflow import is missing profile_key or definition")
+            raise ValidationError("工作流文件缺少能力平面或 definition 内容，请检查后重试")
         graph = self.validator.require_valid(actor=actor, workflow=imported)
         imported["definition"] = graph.model_dump(mode="json")
 
         existing = self.store.get_workflow_definition(target_key)
-        if target_mode in {"auto", "new"} and existing is not None:
+        if target_mode == "new" and existing is not None:
             raise ConflictError(
-                f"workflow key already exists: {target_key}; choose overwrite or another key"
+                f"目标 workflow key「{target_key}」已经存在，请更换 key 或选择覆盖现有工作流"
             )
         if target_mode == "overwrite" and existing is None:
-            raise ConflictError(f"workflow to overwrite not found: {target_key}")
+            raise ConflictError(f"找不到要覆盖的工作流「{target_key}」，请刷新后重新预览")
         operation = "overwrite" if existing is not None else "create"
         target_revision_no = int(existing.get("current_revision_no") or 0) if existing else 0
         diff = None
@@ -382,7 +382,7 @@ class WorkflowService:
             if snapshot.get("actor") != actor:
                 raise AccessDenied("workflow definition import belongs to another actor")
             if snapshot.get("status") != "previewed":
-                raise ConflictError("workflow definition import is no longer previewable")
+                raise ConflictError("导入预览已失效，请重新选择文件并预览")
             try:
                 expires_at = datetime.fromisoformat(str(snapshot["expires_at"]).replace("Z", "+00:00"))
             except (KeyError, TypeError, ValueError) as exc:
@@ -400,11 +400,11 @@ class WorkflowService:
             current_revision_no = int(current.get("current_revision_no") or 0) if current else 0
             expected_revision_no = int(snapshot.get("target_revision_no") or 0)
             if current_revision_no != expected_revision_no:
-                raise ConflictError("workflow changed after import preview; preview again")
+                raise ConflictError("工作流在预览后发生了变化，请重新预览")
             if snapshot.get("operation") == "overwrite" and current is None:
-                raise ConflictError("workflow to overwrite no longer exists")
+                raise ConflictError("要覆盖的工作流已不存在，请重新预览")
             if snapshot.get("operation") == "create" and current is not None:
-                raise ConflictError("workflow key already exists; preview again")
+                raise ConflictError("目标 workflow key 已被其他操作占用，请重新预览")
 
             graph = self.validator.require_valid(actor=actor, workflow=imported)
             saved = self.upsert_definition(
@@ -419,7 +419,7 @@ class WorkflowService:
                 revision_source="import",
             )
             if not self.store.workflows.confirm_workflow_definition_import(import_id, actor=actor):
-                raise ConflictError("workflow definition import is no longer previewable")
+                raise ConflictError("导入预览已失效，请重新选择文件并预览")
             saved_revision = self.store.workflows.get_definition_revision(
                 target_key, int(saved["revision_no"])
             )

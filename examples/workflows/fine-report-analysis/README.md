@@ -1,6 +1,6 @@
 # 帆软报表三维分析
 
-`workflow.json` 是从 `/Users/kyynor/Downloads/wf.js` 转换后的当前结构化 DAG 工作流。
+`workflow.json` 是从 `/Users/kyynor/Downloads/wf.js` 转换后的当前结构化 DAG 工作流导入包，可直接使用“导入工作流”功能导入。
 
 ## 运行分支
 

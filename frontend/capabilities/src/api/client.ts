@@ -146,7 +146,7 @@ function headers(): Record<string, string> {
   return { 'X-Agent-Bridge-User': DEFAULT_USER }
 }
 
-function formatHttpError(status: number, raw: string): string {
+function formatHttpError(_status: number, raw: string): string {
   let detail = raw.trim()
   try {
     const payload: unknown = raw ? JSON.parse(raw) : null
@@ -162,7 +162,7 @@ function formatHttpError(status: number, raw: string): string {
   } catch {
     // Keep plain-text server responses as the fallback detail.
   }
-  return `${status}: ${detail || '请求失败'}`
+  return detail || '请求失败，请稍后重试'
 }
 
 async function get<T>(url: string): Promise<T> {
@@ -252,7 +252,7 @@ function postFormDataWithProgress<T>(
         return
       }
       const detail = parseUploadErrorDetail(xhr.responseText)
-      const message = detail || xhr.responseText || `上传失败（HTTP ${xhr.status}）`
+      const message = detail || xhr.responseText || '上传失败，请稍后重试'
       reject(new Error(message))
     }
     xhr.onerror = () => reject(new Error('网络错误：上传请求失败'))

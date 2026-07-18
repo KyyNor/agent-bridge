@@ -12,7 +12,10 @@ WORKFLOW_FILE = Path(__file__).parents[1] / "examples/workflows/fine-report-anal
 
 
 def test_fine_report_workflow_uses_the_current_structured_dag_contract():
-    workflow = json.loads(WORKFLOW_FILE.read_text(encoding="utf-8"))
+    envelope = json.loads(WORKFLOW_FILE.read_text(encoding="utf-8"))
+    assert envelope["format"] == "agent-bridge.workflow"
+    assert envelope["format_version"] == 1
+    workflow = envelope["workflow"]
     graph = WorkflowGraph.model_validate(workflow["definition"])
 
     validate_graph(graph, WorkflowType.operation)
