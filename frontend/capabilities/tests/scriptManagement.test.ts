@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  DEFAULT_SCRIPT_CODE,
   canDeleteScript,
   canDisableScript,
   canEditScriptContract,
@@ -30,6 +31,10 @@ const OUTPUT_SCHEMA = {
   required: ['summary'],
   additionalProperties: false,
 } as const
+
+test('new scripts start with the minimal executable main template', () => {
+  assert.equal(DEFAULT_SCRIPT_CODE, 'def main(envelope):\n    return {}\n')
+})
 
 function script(overrides: Partial<ManagedScript> = {}): ManagedScript {
   return {

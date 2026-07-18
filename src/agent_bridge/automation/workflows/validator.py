@@ -143,7 +143,7 @@ class WorkflowValidator:
                     id=None,
                     field="profile_key",
                     code="missing_profile",
-                    message="Profile 不存在",
+                    message=f"Profile 不存在：{parsed.profile_key}",
                 )
             )
         elif profile.get("status") != "active":
@@ -153,7 +153,7 @@ class WorkflowValidator:
                     id=None,
                     field="profile_key",
                     code="inactive_profile",
-                    message="Profile 未启用",
+                    message=f"Profile 未启用：{parsed.profile_key}",
                 )
             )
         issues.extend(self._resource_issues(actor=actor, graph=parsed.definition))

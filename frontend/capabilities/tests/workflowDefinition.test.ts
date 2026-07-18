@@ -79,6 +79,39 @@ test('validateWorkflow posts draft workflow without saving it', async () => {
   }
 })
 
+test('workflow import errors preserve node, field, and validation reason', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    detail: '工作流定义校验失败',
+    errors: [
+      {
+        scope: 'node',
+        id: 'seed-tasks',
+        field: 'config.script_key',
+        code: 'missing_script',
+        message: '脚本不存在或未启用: seed_fine_report_tasks',
+      },
+    ],
+  }), { status: 400, headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+
+  try {
+    const file = Object.assign(new Blob(['{}'], { type: 'application/json' }), { name: 'workflow.json' }) as File
+    await assert.rejects(
+      () => api.previewWorkflowImport(file),
+      (error: unknown) => {
+        assert.ok(error instanceof Error)
+        assert.match(error.message, /工作流定义校验失败/)
+        assert.match(error.message, /seed-tasks/)
+        assert.match(error.message, /config\.script_key/)
+        assert.match(error.message, /seed_fine_report_tasks/)
+        return true
+      },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('workflow type migration preserves ordinary DAG nodes and valid edges', () => {
   const operation: WorkflowGraph = {
     nodes: [

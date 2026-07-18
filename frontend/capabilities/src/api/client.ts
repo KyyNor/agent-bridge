@@ -146,18 +146,46 @@ function headers(): Record<string, string> {
   return { 'X-Agent-Bridge-User': DEFAULT_USER }
 }
 
+function formatValidationIssue(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return String(value ?? '')
+  const issue = value as Record<string, unknown>
+  const message = typeof issue.message === 'string' ? issue.message : ''
+  if (!message) return JSON.stringify(value)
+
+  const scopeLabel = issue.scope === 'node'
+    ? '节点'
+    : issue.scope === 'edge'
+      ? '边'
+      : '工作流'
+  const target = typeof issue.id === 'string' && issue.id
+    ? `${scopeLabel}「${issue.id}」`
+    : scopeLabel
+  const field = typeof issue.field === 'string' && issue.field ? `（${issue.field}）` : ''
+  return `${target}${field}：${message}`
+}
+
 function formatHttpError(_status: number, raw: string): string {
   let detail = raw.trim()
   try {
     const payload: unknown = raw ? JSON.parse(raw) : null
-    if (payload && typeof payload === 'object' && 'detail' in payload) {
-      const value = (payload as { detail?: unknown }).detail
-      detail = typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value)
-    } else if (payload && typeof payload === 'object' && 'errors' in payload) {
-      const value = (payload as { errors?: unknown }).errors
-      detail = Array.isArray(value)
-        ? value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('; ')
-        : String(value ?? '')
+    if (payload && typeof payload === 'object') {
+      const response = payload as Record<string, unknown>
+      const headline = typeof response.detail === 'string' ? response.detail : ''
+      const errors = Array.isArray(response.errors)
+        ? response.errors.map(formatValidationIssue).filter(Boolean)
+        : []
+      if (errors.length) {
+        detail = [headline || '请求失败', ...errors.map(item => `- ${item}`)].join('\n')
+      } else if ('detail' in response) {
+        const value = response.detail
+        detail = typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value)
+      } else if ('errors' in response) {
+        const value = response.errors
+        detail = Array.isArray(value)
+          ? value.map(formatValidationIssue).filter(Boolean).join('\n')
+          : String(value ?? '')
+      }
     }
   } catch {
     // Keep plain-text server responses as the fallback detail.

@@ -1,5 +1,7 @@
 type Schema = Record<string, unknown> | null
 
+export const DEFAULT_SCRIPT_CODE = 'def main(envelope):\n    return {}\n'
+
 export interface ScriptEditableFields {
   script_key: string
   name: string

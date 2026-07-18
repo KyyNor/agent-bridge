@@ -143,6 +143,7 @@ test('workflow import UI supports new, overwrite, diff, and confirmation', () =>
   assert.match(dialog, /覆盖现有工作流/)
   assert.match(dialog, /WorkflowStructuredDiff/)
   assert.match(dialog, /确认导入/)
+  assert.match(dialog, /whitespace-pre-line/)
   assert.match(view, /导出工作流/)
   assert.match(view, /导入工作流/)
 })

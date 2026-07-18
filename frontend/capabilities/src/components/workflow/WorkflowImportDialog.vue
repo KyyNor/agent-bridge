@@ -122,7 +122,7 @@ function formatExpiresAt(value: string): string {
         <div v-if="loading" class="rounded-md border border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
           正在解析、校验并计算变化...
         </div>
-        <div v-else-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
+        <div v-else-if="error" class="whitespace-pre-line rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
           {{ error }}
         </div>
 

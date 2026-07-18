@@ -138,7 +138,7 @@ def test_validate_workflow_endpoint_reports_missing_profile(wm_paths):
     assert any(
         issue["field"] == "profile_key"
         and issue["code"] == "missing_profile"
-        and issue["message"] == "Profile 不存在"
+        and issue["message"] == "Profile 不存在：does-not-exist"
         for issue in response.json()["errors"]
     )
 
