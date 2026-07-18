@@ -61,7 +61,7 @@ function formatExpiresAt(value: string): string {
 
 <template>
   <Dialog :open="open" @update:open="onOpenChange">
-    <DialogContent class="w-[min(1180px,calc(100vw-2rem))] sm:max-w-[1180px] max-h-[calc(100vh-2rem)] overflow-hidden">
+    <DialogContent class="w-[min(1180px,calc(100vw-2rem))] sm:max-w-[1180px] max-h-[calc(100vh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
       <DialogHeader>
         <DialogTitle>导入工作流</DialogTitle>
         <p class="text-xs text-muted-foreground">
@@ -69,7 +69,7 @@ function formatExpiresAt(value: string): string {
         </p>
       </DialogHeader>
 
-      <div class="min-h-0 space-y-4 overflow-y-auto pr-1">
+      <div class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
         <div class="grid gap-3 rounded-md border border-border bg-muted/20 p-3 md:grid-cols-[minmax(0,1fr)_220px]">
           <div class="space-y-1.5">
             <label for="workflow-import-file" class="text-sm font-medium">选择工作流文件</label>
@@ -169,7 +169,7 @@ function formatExpiresAt(value: string): string {
         </div>
       </div>
 
-      <DialogFooter>
+      <DialogFooter class="shrink-0">
         <Button variant="outline" type="button" :disabled="isBusy" @click="onOpenChange(false)">取消</Button>
         <Button type="button" :disabled="!canConfirm" @click="emit('confirm')">
           {{ confirming ? '确认中...' : '确认导入' }}

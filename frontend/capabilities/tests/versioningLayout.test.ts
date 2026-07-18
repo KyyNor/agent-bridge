@@ -147,3 +147,11 @@ test('workflow import UI supports new, overwrite, diff, and confirmation', () =>
   assert.match(view, /导出工作流/)
   assert.match(view, /导入工作流/)
 })
+
+test('workflow import dialog keeps confirmation footer fixed while preview content scrolls', () => {
+  const dialog = readSrc('src/components/workflow/WorkflowImportDialog.vue')
+
+  assert.match(dialog, /grid-rows-\[auto_minmax\(0,1fr\)_auto\]/)
+  assert.match(dialog, /<div class="min-h-0 flex-1 space-y-4 overflow-y-auto/)
+  assert.match(dialog, /<DialogFooter class="shrink-0[^"]*">/)
+})
