@@ -71,3 +71,66 @@ def test_export_endpoint_returns_downloadable_json_envelope(wm_paths):
     assert payload["format"] == "agent-bridge.workflow"
     assert payload["workflow"]["name"] == "v1"
     assert payload["revision"]["source"] == "edit"
+
+
+def test_import_api_creates_new_workflow_after_preview_and_confirm(wm_paths):
+    service, client = _setup(wm_paths)
+    exported = {
+        "format": "agent-bridge.workflow",
+        "format_version": 1,
+        "workflow": {
+            "workflow_key": "imported",
+            "name": "Imported",
+            "description": "",
+            "profile_key": "p1",
+            "status": "active",
+            "workflow_type": "operation",
+            "definition": {"nodes": [dict(GET_TASK_NODE)], "edges": []},
+        },
+    }
+
+    preview = client.post(
+        "/workflows/import/preview",
+        headers={"X-Agent-Bridge-User": "root"},
+        files={"file": ("import.workflow.json", json.dumps(exported).encode(), "application/json")},
+    )
+    assert preview.status_code == 200, preview.text
+    preview_body = preview.json()
+    assert preview_body["operation"] == "create"
+
+    confirmed = client.post(
+        "/workflows/import/confirm",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={"import_id": preview_body["import_id"]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["workflow_key"] == "imported"
+    assert service.workflows.get_revision("root", "imported", 1)["source"] == "import"
+
+
+def test_import_api_overwrite_preview_returns_diff(wm_paths):
+    service, client = _setup(wm_paths)
+    _save(service, "old")
+    exported = {
+        "format": "agent-bridge.workflow",
+        "format_version": 1,
+        "workflow": {
+            "workflow_key": "wf",
+            "name": "incoming",
+            "description": "",
+            "profile_key": "p1",
+            "status": "active",
+            "workflow_type": "operation",
+            "definition": {"nodes": [dict(GET_TASK_NODE)], "edges": []},
+        },
+    }
+
+    preview = client.post(
+        "/workflows/import/preview",
+        headers={"X-Agent-Bridge-User": "root"},
+        data={"target_workflow_key": "wf", "target_mode": "overwrite"},
+        files={"file": ("import.workflow.json", json.dumps(exported).encode(), "application/json")},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["operation"] == "overwrite"
+    assert preview.json()["diff"]["structured"]["identical"] is False

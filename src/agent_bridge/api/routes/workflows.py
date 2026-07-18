@@ -4,10 +4,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 
 from agent_bridge.api.schemas import (
     WorkflowDefinitionRequest,
+    WorkflowImportConfirmRequest,
     WorkflowRunRequest,
     WorkflowTaskImportConfirmRequest,
     WorkflowValidationRequest,
@@ -81,6 +82,28 @@ def create_workflow_routes(service, actor):
                 "Content-Disposition": f'attachment; filename="{workflow_key}.workflow.json"'
             },
         )
+
+    @router.post("/workflows/import/preview")
+    async def preview_workflow_import(
+        file: UploadFile = File(description="workflow export JSON"),
+        target_workflow_key: str | None = Form(None),
+        target_mode: str = Form("auto"),
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.preview_definition_import(
+            actor=current_actor,
+            filename=file.filename or "workflow.workflow.json",
+            content=await file.read(),
+            target_workflow_key=target_workflow_key,
+            target_mode=target_mode,
+        )
+
+    @router.post("/workflows/import/confirm")
+    def confirm_workflow_import(
+        payload: WorkflowImportConfirmRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.confirm_definition_import(current_actor, payload.import_id)
 
     @router.get("/workflows/{workflow_key}/runs")
     def list_workflow_runs(
