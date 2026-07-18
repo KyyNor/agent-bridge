@@ -23,7 +23,9 @@ class Skills:
 
 
 class Workflows:
-    def save_artifact(self, **kwargs): return {"artifact_id": "artifact_markdown"}
+    def save_artifact(self, **kwargs):
+        self.kwargs = kwargs
+        return {"artifact_id": "artifact_markdown"}
 
 
 class FailingWorkflows:
@@ -38,9 +40,12 @@ async def test_markdown_output_injects_ancestors_and_saves_artifact():
     ], "edges": [{"id": "analysis-out", "source": "analysis", "target": "out"}]})
     node = graph.nodes[1]
     agent = Agent()
-    result = await OutputHandler(agent_service=agent, skill_service=Skills(), workflow_service=Workflows()).execute(node, NodeExecutionContext(actor="root", workflow={"workflow_key": "w", "profile_key": "p"}, run_id="r", input={}, task=None, nodes={"analysis": {"output": {"text": "x"}}}, graph=graph))
+    workflows = Workflows()
+    result = await OutputHandler(agent_service=agent, skill_service=Skills(), workflow_service=workflows).execute(node, NodeExecutionContext(actor="root", workflow={"workflow_key": "w", "profile_key": "p"}, run_id="r", input={}, task=None, nodes={"analysis": {"output": {"text": "x"}}}, graph=graph, node_fingerprint="current-fingerprint"))
     assert "[上游节点输出]" in agent.kwargs["prompt"]
     assert result.artifact_ids == ["artifact_markdown"]
+    assert workflows.kwargs["producer_node_id"] == "out"
+    assert workflows.kwargs["producer_node_fingerprint"] == "current-fingerprint"
 
 
 @pytest.mark.asyncio

@@ -914,6 +914,8 @@ class WorkflowService:
         content: str,
         metadata: dict[str, Any],
         task_version: str = "",
+        producer_node_id: str | None = None,
+        producer_node_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         workflow = self.store.get_workflow_definition(workflow_key)
         if workflow is None:
@@ -926,6 +928,11 @@ class WorkflowService:
             raise ValidationError("unsupported artifact format") from exc
         if not path or path.startswith("/") or ".." in path.split("/"):
             raise ValidationError("invalid artifact path")
+        artifact_metadata = dict(metadata)
+        if producer_node_id is not None:
+            artifact_metadata.setdefault("producer_node_id", producer_node_id)
+        if producer_node_fingerprint is not None:
+            artifact_metadata.setdefault("producer_node_fingerprint", producer_node_fingerprint)
         saved = self.store.upsert_workflow_artifact(
             workflow_key=workflow_key,
             profile_key=profile_key,
@@ -938,8 +945,14 @@ class WorkflowService:
             format=artifact_format,
             summary=summary,
             content=content,
-            metadata=metadata,
+            metadata=artifact_metadata,
         )
+        if producer_node_id is not None:
+            self.store.associate_workflow_run_artifacts(
+                run_id,
+                producer_node_id,
+                [saved["artifact_id"]],
+            )
         logger.info(
             "workflow 产物已保存 run_id=%s path=%s workflow=%s task=%s",
             run_id,
