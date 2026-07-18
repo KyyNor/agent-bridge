@@ -1,0 +1,249 @@
+{
+  "workflow_key": "fine-report-analysis",
+  "name": "帆软报表三维分析",
+  "description": "对 data_center 目录下的帆软报表进行访问量、内容、血缘三维分析，产出综合 Markdown 报告。",
+  "profile_key": "report-plane",
+  "workflow_type": "operation",
+  "status": "active",
+  "definition": {
+    "nodes": [
+      {
+        "id": "get-task-initial",
+        "type": "get_task",
+        "name": "首次获取任务",
+        "position": { "x": 0, "y": 160 },
+        "config": { "on_empty": "continue" }
+      },
+      {
+        "id": "seed-tasks",
+        "type": "script",
+        "name": "生成报表任务",
+        "position": { "x": 260, "y": 320 },
+        "config": {
+          "script_key": "seed_fine_report_tasks",
+          "params": {},
+          "timeout_seconds": 120
+        }
+      },
+      {
+        "id": "get-task-retry",
+        "type": "get_task",
+        "name": "重新获取任务",
+        "position": { "x": 520, "y": 320 },
+        "config": { "on_empty": "terminate" }
+      },
+      {
+        "id": "visit-stats",
+        "type": "script",
+        "name": "查询访问量",
+        "position": { "x": 820, "y": 0 },
+        "config": {
+          "script_key": "query_visit_stats",
+          "params": {
+            "cpt_file_path": "{{ task.payload.cpt_file_path }}",
+            "report_id": "{{ task.payload.report_id }}"
+          },
+          "timeout_seconds": 300
+        }
+      },
+      {
+        "id": "content-analysis",
+        "type": "agent",
+        "name": "分析报表内容",
+        "position": { "x": 820, "y": 180 },
+        "config": {
+          "prompt": "读取任务中的 CPT 文件路径和报表标识，查询 metadata_fine_cpt_raw_content 获取原始 XML，解析报表结构，识别报表类型、主要功能、数据集和处理逻辑。必要时使用 fine_search 定位相关定义。输出严格 JSON；不确定的判断保留在 analysis_notes，不要编造字段。",
+          "backend_key": "claude",
+          "mcp_enabled": true,
+          "skill_names": [],
+          "result_mode": "json",
+          "output_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["report_type", "confidence", "features_detected", "processing_logic", "analysis_notes"],
+            "properties": {
+              "report_type": { "type": "string" },
+              "confidence": { "type": "string" },
+              "features_detected": { "type": "array", "items": { "type": "string" } },
+              "processing_logic": { "type": "string" },
+              "analysis_notes": { "type": "string" }
+            }
+          }
+        }
+      },
+      {
+        "id": "lineage-trace",
+        "type": "agent",
+        "name": "追踪数据血缘",
+        "position": { "x": 820, "y": 360 },
+        "config": {
+          "prompt": "从当前报表的 CPT/XML 和 FineRepo 知识库中追踪数据血缘：用 fine_search 定位直接来源表，过滤 whfruser 和 dim_ 开头的表；用 ds_search 在当前工作流内按有限深度 BFS 追踪上游任务，记录 code_path、输入输出、SQL 逻辑，并防止循环。跨工作流依赖只记录边界，不继续展开。输出严格 JSON，无法确认的信息放入 filtered_out 或相应数组。",
+          "backend_key": "claude",
+          "mcp_enabled": true,
+          "skill_names": [],
+          "result_mode": "json",
+          "output_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_tables", "filtered_out", "lineage", "upstream_tasks"],
+            "properties": {
+              "source_tables": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["table", "db", "kind"],
+                  "properties": {
+                    "table": { "type": "string" },
+                    "db": { "type": "string" },
+                    "kind": { "type": "string" }
+                  }
+                }
+              },
+              "filtered_out": { "type": "array", "items": { "type": "string" } },
+              "lineage": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["source_table", "project", "workflow", "tasks"],
+                  "properties": {
+                    "source_table": { "type": "string" },
+                    "project": { "type": "string" },
+                    "workflow": { "type": "string" },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["code_path", "outputs", "inputs_within", "inputs_boundary", "sql_logic"],
+                        "properties": {
+                          "code_path": { "type": "string" },
+                          "outputs": { "type": "array", "items": { "type": "string" } },
+                          "inputs_within": { "type": "array", "items": { "type": "string" } },
+                          "inputs_boundary": { "type": "array", "items": { "type": "string" } },
+                          "sql_logic": { "type": "array", "items": { "type": "string" } }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "upstream_tasks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["code_path", "workflow", "project", "outputs"],
+                  "properties": {
+                    "code_path": { "type": "string" },
+                    "workflow": { "type": "string" },
+                    "project": { "type": "string" },
+                    "outputs": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "report-output",
+        "type": "output",
+        "name": "生成综合报告",
+        "position": { "x": 1180, "y": 180 },
+        "config": {
+          "format": "markdown",
+          "title": "帆软报表综合分析报告",
+          "path": "reports/{{ task.payload.report_id }}.md",
+          "tags": ["fine-report", "analytics", "data_center"],
+          "prompt": "综合全部上游节点输出，生成一份完整 Markdown 报告。必须包含报表标识和任务信息、访问量统计、报表内容分析、数据血缘、发现的问题与不确定项。保留可核验的表名、数据库、项目、工作流和代码路径；缺失信息明确标注，不得猜测。返回 title、summary、content，其中 content 必须是完整 Markdown。",
+          "backend_key": "claude",
+          "mcp_enabled": false,
+          "skill_names": []
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "initial-to-seed",
+        "source": "get-task-initial",
+        "target": "seed-tasks",
+        "condition": {
+          "field": "nodes.get-task-initial.output.task",
+          "operator": "equals",
+          "value": null
+        }
+      },
+      {
+        "id": "initial-to-visit-stats",
+        "source": "get-task-initial",
+        "target": "visit-stats",
+        "condition": {
+          "field": "nodes.get-task-initial.output.task",
+          "operator": "not_equals",
+          "value": null
+        }
+      },
+      {
+        "id": "initial-to-content-analysis",
+        "source": "get-task-initial",
+        "target": "content-analysis",
+        "condition": {
+          "field": "nodes.get-task-initial.output.task",
+          "operator": "not_equals",
+          "value": null
+        }
+      },
+      {
+        "id": "initial-to-lineage-trace",
+        "source": "get-task-initial",
+        "target": "lineage-trace",
+        "condition": {
+          "field": "nodes.get-task-initial.output.task",
+          "operator": "not_equals",
+          "value": null
+        }
+      },
+      {
+        "id": "seed-to-retry",
+        "source": "seed-tasks",
+        "target": "get-task-retry",
+        "condition": null
+      },
+      {
+        "id": "retry-to-visit-stats",
+        "source": "get-task-retry",
+        "target": "visit-stats",
+        "condition": {
+          "field": "nodes.get-task-retry.output.task",
+          "operator": "not_equals",
+          "value": null
+        }
+      },
+      {
+        "id": "retry-to-content-analysis",
+        "source": "get-task-retry",
+        "target": "content-analysis",
+        "condition": {
+          "field": "nodes.get-task-retry.output.task",
+          "operator": "not_equals",
+          "value": null
+        }
+      },
+      {
+        "id": "retry-to-lineage-trace",
+        "source": "get-task-retry",
+        "target": "lineage-trace",
+        "condition": {
+          "field": "nodes.get-task-retry.output.task",
+          "operator": "not_equals",
+          "value": null
+        }
+      },
+      { "id": "visit-stats-to-report", "source": "visit-stats", "target": "report-output", "condition": null },
+      { "id": "content-analysis-to-report", "source": "content-analysis", "target": "report-output", "condition": null },
+      { "id": "lineage-trace-to-report", "source": "lineage-trace", "target": "report-output", "condition": null }
+    ]
+  }
+}

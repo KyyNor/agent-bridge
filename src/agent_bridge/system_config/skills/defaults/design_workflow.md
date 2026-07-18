@@ -48,7 +48,7 @@
 在生成前，先从用户需求和当前对象里明确这些问题：
 
 1. 这是 `operation` 还是 `summary` 工作流。
-2. 是否需要 `get_task` 作为唯一根节点，还是手动输入型工作流。
+2. 是否需要 `get_task` 作为任务入口根节点，还是手动输入型工作流。
 3. 每个节点消费什么，产出什么，后续谁会引用它。
 4. 哪些步骤适合 Agent，哪些适合托管脚本，哪些需要落产物。
 5. 是否存在条件分支；若有，判断字段必须来自来源节点或其祖先。
@@ -69,13 +69,15 @@
 
 ### 1. 获取任务 `get_task`
 
-无业务配置，负责租约一条待处理任务。
+负责从当前工作流队列租约一条待处理任务。默认没有任务时结束本次运行；如果后面需要连接“灌入任务脚本 → 重试获取任务”，将 `config.on_empty` 设置为 `continue`。
 
 约束：
 
-- 一个工作流最多一个 `get_task` 节点。
-- 如果存在，它必须是**唯一的无入边根节点**。
-- 没租到任务时，本次运行以 `no_task` 结束，后续节点不执行。
+- 工作流必须只有一个无入边的 `get_task` 根节点；允许在它的下游再放置一个或多个重试 `get_task` 节点。
+- `on_empty` 可选值为 `terminate` 或 `continue`，默认值为 `terminate`。
+- `terminate`：没租到任务时，本次运行以 `no_task` 结束，后续节点不执行。
+- `continue`：输出 `task: null`，由条件边决定是否进入补任务脚本或其他分支。
+- 条件边可以判断 `nodes.<get_task_node_id>.output.task` 是否等于 `null`，用来表达“有任务正常处理、无任务先补任务再重试”。
 - 输出形如：
 
 ```json
@@ -87,6 +89,15 @@
     "payload": {}
   }
 }
+```
+
+典型的补任务分支：
+
+```text
+get_task(on_empty=continue)
+  ├─ task != null ─→ 业务节点
+  └─ task == null ─→ seed script ─→ get_task(on_empty=terminate)
+                                      └─ task != null ─→ 业务节点
 ```
 
 ### 2. Agent `agent`

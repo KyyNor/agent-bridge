@@ -95,13 +95,14 @@ def collect_graph_issues(graph: WorkflowGraph, workflow_type: WorkflowType) -> l
         issues.append(_issue("workflow", None, None, "cycle_detected", "工作流不能包含环"))
 
     task_nodes = [node for node in graph.nodes if node.type == "get_task"]
-    if len(task_nodes) > 1:
-        issues.append(_issue("workflow", None, None, "too_many_task_roots", "工作流最多只能包含一个获取任务节点"))
-    if task_nodes and incoming[task_nodes[0].id]:
-        issues.append(_issue("node", task_nodes[0].id, None, "invalid_root", "获取任务节点必须是无入边起点"))
+    task_roots = [node for node in task_nodes if not incoming[node.id]]
+    if len(task_roots) > 1:
+        issues.append(_issue("workflow", None, None, "too_many_task_roots", "工作流最多只能包含一个获取任务根节点"))
+    if task_nodes and not task_roots:
+        issues.append(_issue("workflow", None, None, "invalid_root", "获取任务节点必须包含一个无入边起点"))
     roots = [node.id for node in graph.nodes if not incoming[node.id]]
-    if task_nodes and roots != [task_nodes[0].id]:
-        issues.append(_issue("node", task_nodes[0].id, None, "invalid_root", "获取任务节点必须是工作流唯一根节点"))
+    if task_roots and roots != [task_roots[0].id]:
+        issues.append(_issue("node", task_roots[0].id, None, "invalid_root", "获取任务节点必须是工作流唯一根节点"))
 
     for edge in graph.edges:
         condition = edge.condition

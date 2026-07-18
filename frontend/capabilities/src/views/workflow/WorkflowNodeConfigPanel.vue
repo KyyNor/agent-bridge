@@ -73,6 +73,9 @@ function setResultMode(value: string) {
   config({ result_mode: value })
   if (value !== 'json') updateSchemaValidity(true, '')
 }
+function getTaskEmptyMode() {
+  return props.node.type === 'get_task' && props.node.config.on_empty === 'continue' ? 'continue' : 'terminate'
+}
 </script>
 
 <template>
@@ -85,13 +88,26 @@ function setResultMode(value: string) {
       <p v-if="issueFor('name')" :id="issueId('name')" class="mt-1 text-xs text-destructive">{{ issueFor('name')?.message }}</p>
     </div>
 
-    <template v-if="node.type === 'get_task'"><p class="text-sm text-muted-foreground">从当前工作流队列领取一个任务。</p></template>
+    <template v-if="node.type === 'get_task'">
+      <p class="text-sm text-muted-foreground">从当前工作流队列领取一个任务。</p>
+      <div>
+        <label class="mb-1 block text-xs text-muted-foreground">没有任务时</label>
+        <Select :model-value="getTaskEmptyMode()" @update:model-value="config({ on_empty: String($event) })">
+          <SelectTrigger :aria-invalid="Boolean(issueFor('on_empty'))"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="terminate">结束本次运行</SelectItem>
+            <SelectItem value="continue">继续条件分支</SelectItem>
+          </SelectContent>
+        </Select>
+        <p class="mt-1 text-xs text-muted-foreground">选择“继续条件分支”后，可用 task 为 null 的条件边连接到灌入任务脚本或重试获取任务节点。</p>
+      </div>
+    </template>
     <template v-else-if="node.type === 'script'">
       <div><label class="mb-1 block text-xs text-muted-foreground">托管脚本</label><Select :model-value="node.config.script_key" @update:model-value="selectScript(String($event))"><SelectTrigger :aria-invalid="Boolean(issueFor('script_key'))"><SelectValue placeholder="选择启用脚本" /></SelectTrigger><SelectContent><SelectItem v-for="script in activeScripts" :key="script.script_key" :value="script.script_key">{{ script.name }}</SelectItem></SelectContent></Select><p v-if="issueFor('script_key')" class="mt-1 text-xs text-destructive">{{ issueFor('script_key')?.message }}</p></div>
       <div v-for="(schema, key) in scriptProperties" :key="key"><label class="mb-1 block text-xs text-muted-foreground">{{ key }}<span v-if="requiredParams.has(key)" class="text-destructive"> *</span></label><WorkflowTypedValueInput :ref="(el) => setParamInputRef(String(key), el)" :model-value="node.config.params[key]" :value-type="workflowValueType(schema)" :placeholder="typeof schema.description === 'string' ? schema.description : '{{ input.value }}'" :invalid="Boolean(issueFor(`params.${String(key)}`, `config.params.${String(key)}`))" @focusin="activateParamInput(String(key))" @update:model-value="setParam(String(key), $event)" /><p v-if="issueFor(`params.${String(key)}`, `config.params.${String(key)}`)" :id="issueId(`params-${String(key)}`)" class="mt-1 text-xs text-destructive">{{ issueFor(`params.${String(key)}`, `config.params.${String(key)}`)?.message }}</p></div>
       <div><label class="mb-1 block text-xs text-muted-foreground">超时（秒）</label><Input :model-value="node.config.timeout_seconds" type="number" :aria-invalid="Boolean(issueFor('timeout_seconds'))" @update:model-value="config({ timeout_seconds: Number($event) })" /><p v-if="issueFor('timeout_seconds')" class="mt-1 text-xs text-destructive">{{ issueFor('timeout_seconds')?.message }}</p></div>
     </template>
-    <template v-else>
+    <template v-else-if="node.type === 'agent' || node.type === 'output'">
       <div><label class="mb-1 block text-xs text-muted-foreground">提示词</label><Textarea ref="promptInput" :model-value="node.config.prompt" class="min-h-28" :aria-invalid="Boolean(issueFor('prompt'))" @focusin="activeField = promptInput" @update:model-value="config({ prompt: String($event) })" /><p v-if="issueFor('prompt')" class="mt-1 text-xs text-destructive">{{ issueFor('prompt')?.message }}</p></div>
       <div><label class="mb-1 block text-xs text-muted-foreground">后端</label><Select :model-value="node.config.backend_key" @update:model-value="config({ backend_key: String($event) })"><SelectTrigger :aria-invalid="Boolean(issueFor('backend_key'))"><SelectValue /></SelectTrigger><SelectContent><SelectItem v-for="backend in backends" :key="backend" :value="backend">{{ backend }}</SelectItem></SelectContent></Select><p v-if="issueFor('backend_key')" class="mt-1 text-xs text-destructive">{{ issueFor('backend_key')?.message }}</p></div>
       <label class="flex items-center gap-2 text-sm"><input :checked="node.config.mcp_enabled" type="checkbox" @change="config({ mcp_enabled: ($event.target as HTMLInputElement).checked })" /> Profile MCP</label>

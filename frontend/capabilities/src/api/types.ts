@@ -162,7 +162,7 @@ export type ConditionOperator = 'equals' | 'not_equals' | 'exists' | 'not_exists
 export interface WorkflowPosition { x: number; y: number }
 export interface WorkflowCondition { field: string; operator: ConditionOperator; value?: unknown }
 export interface WorkflowEdge { id: string; source: string; target: string; condition: WorkflowCondition | null; system_role?: 'summary_markdown_to_html' | null }
-export interface GetTaskWorkflowNode { id: string; type: 'get_task'; name: string; position: WorkflowPosition; config: Record<string, never> }
+export interface GetTaskWorkflowNode { id: string; type: 'get_task'; name: string; position: WorkflowPosition; config: { on_empty?: 'terminate' | 'continue' } }
 export interface AgentWorkflowNode { id: string; type: 'agent'; name: string; position: WorkflowPosition; config: { prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; result_mode: 'text' | 'json'; output_schema: Record<string, unknown> | null } }
 export interface ScriptWorkflowNode { id: string; type: 'script'; name: string; position: WorkflowPosition; config: { script_key: string; params: Record<string, unknown>; timeout_seconds: number } }
 export interface OutputWorkflowNode { id: string; type: 'output'; name: string; position: WorkflowPosition; config: { format: 'markdown' | 'html'; title: string; path: string; tags: string[]; prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; system_role?: 'summary_markdown' | 'summary_html' | null } }

@@ -37,6 +37,8 @@ class WorkflowEdge(BaseModel):
 class GetTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    on_empty: Literal["terminate", "continue"] = "terminate"
+
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")

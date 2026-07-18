@@ -128,7 +128,7 @@ class WorkflowDagExecutor:
                     reused_progress = True
                     if node.type == "get_task":
                         task = payload.get("task")
-                        if task is None:
+                        if task is None and node.config.on_empty == "terminate":
                             await self._cancel_running(run_id, running, statuses)
                             for node_id in sorted(pending):
                                 statuses[node_id] = "skipped"
@@ -226,7 +226,7 @@ class WorkflowDagExecutor:
                     warnings.append(result.error)
                 if node.type == "get_task":
                     task = payload.get("task")
-                    no_task = task is None
+                    no_task = task is None and node.config.on_empty == "terminate"
 
             if batch_error is not None:
                 await self._cancel_running(run_id, running, statuses)
