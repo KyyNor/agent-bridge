@@ -58,6 +58,9 @@ function statusIcon(status?: string) {
   if (status === 'running') return LoaderCircle
   return Clock3
 }
+function effectiveStatus(run?: WorkflowNodeRun) {
+  return run?.action === 'reuse' ? 'completed' : run?.status || 'pending'
+}
 function openNode(event: NodeMouseEvent) {
   const run = runs.value.get(event.node.id)
   if (run?.agent_run_key) emit('openAgentRun', run.agent_run_key)
@@ -71,16 +74,19 @@ function openNode(event: NodeMouseEvent) {
       <Background pattern-color="var(--border)" :gap="18" />
       <Controls :show-interactive="false" />
       <template #node-workflow-run="slotProps">
-        <div class="h-[92px] w-48 border-2 px-3 py-2" :class="statusClass(slotProps.data.run?.status)">
+        <div class="h-[92px] w-48 border-2 px-3 py-2" :class="statusClass(effectiveStatus(slotProps.data.run))">
           <Handle type="target" :position="Position.Left" :connectable="false" />
           <div class="flex items-center gap-2">
             <component :is="nodeIcon(slotProps.data.node.type)" class="h-4 w-4 shrink-0" />
             <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ slotProps.data.node.name }}</span>
-            <component :is="statusIcon(slotProps.data.run?.status)" class="h-4 w-4 shrink-0" :class="slotProps.data.run?.status === 'running' ? 'animate-spin' : ''" />
+            <component :is="statusIcon(effectiveStatus(slotProps.data.run))" class="h-4 w-4 shrink-0" :class="effectiveStatus(slotProps.data.run) === 'running' ? 'animate-spin' : ''" />
           </div>
           <div class="mt-2 flex items-center justify-between gap-2 font-mono text-[11px]">
             <span class="truncate">{{ slotProps.data.node.type }}</span>
-            <span>{{ slotProps.data.run?.status || 'pending' }}</span>
+            <span>{{ slotProps.data.run?.action === 'reuse' ? '复用' : slotProps.data.run?.status || 'pending' }}</span>
+          </div>
+          <div v-if="slotProps.data.run?.action === 'reuse'" class="mt-1 truncate text-[10px] text-muted-foreground" :title="slotProps.data.run.reuse_reason || ''">
+            来源 {{ slotProps.data.run.source_run_id || '历史运行' }} · {{ slotProps.data.run.reuse_reason || '指纹匹配' }}
           </div>
           <div v-if="slotProps.data.run?.error" class="mt-1 truncate text-[11px]" :title="slotProps.data.run.error">{{ slotProps.data.run.error }}</div>
           <Handle type="source" :position="Position.Right" :connectable="false" />

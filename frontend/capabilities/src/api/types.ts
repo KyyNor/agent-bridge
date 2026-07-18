@@ -229,6 +229,33 @@ export interface WorkflowArtifact {
   content?: string
   created_at: string
   updated_at: string
+  reusable?: boolean
+  reuse_validation_reason?: string | null
+  producer_node_id?: string | null
+  producer_node_fingerprint?: string | null
+  source_run_id?: string | null
+  source_node_id?: string | null
+}
+
+export type WorkflowExecutionMode = 'normal' | 'incremental' | 'force_full'
+export type WorkflowNodeAction = 'execute' | 'reuse'
+
+export interface WorkflowNodePlan {
+  node_id: string
+  action: WorkflowNodeAction
+  reason: string
+  node_fingerprint: string
+  source_run_id: string | null
+  source_node_id: string | null
+}
+
+export interface WorkflowExecutionPlan {
+  mode: WorkflowExecutionMode | string
+  baseline_run_id: string | null
+  affected_node_ids: string[]
+  reusable_node_ids: string[]
+  nodes: WorkflowNodePlan[]
+  warnings: string[]
 }
 
 export interface WorkflowArtifactSearchResult {
@@ -289,6 +316,12 @@ export interface WorkflowRun {
   definition_snapshot: WorkflowGraph
   input: Record<string, unknown>
   output: Record<string, unknown>
+  workflow_revision_no?: number | null
+  workflow_content_hash?: string | null
+  task_version?: string
+  execution_mode?: WorkflowExecutionMode | string
+  execution_plan?: WorkflowExecutionPlan | Record<string, unknown>
+  source_run_id?: string | null
   node_runs?: WorkflowNodeRun[]
 }
 
@@ -303,6 +336,13 @@ export interface WorkflowNodeRun {
   script_run_id: string | null
   started_at: string | null
   finished_at: string | null
+  action?: WorkflowNodeAction | string | null
+  reuse_reason?: string | null
+  node_fingerprint?: string | null
+  source_run_id?: string | null
+  source_node_id?: string | null
+  source_node_fingerprint?: string | null
+  artifact_ids?: string[]
 }
 
 export interface WorkflowRunLog {

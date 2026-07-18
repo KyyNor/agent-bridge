@@ -151,6 +151,21 @@ test('runWorkflowTaskQueue skips unavailable tasks and continues after a task fa
   assert.equal(result.stopped, false)
 })
 
+test('runWorkflowTaskQueue queues stale tasks for incremental execution', async () => {
+  const modes: string[] = []
+  const result = await runWorkflowTaskQueue([task('stale', 'stale')], {
+    canExecute: current => current.status === 'pending' || current.status === 'stale',
+    execute: async current => {
+      modes.push(current.status === 'stale' ? 'incremental' : 'normal')
+      return { run_id: 'run-stale' }
+    },
+    waitForRun: async runId => run(runId, 'completed'),
+  })
+
+  assert.deepEqual(modes, ['incremental'])
+  assert.deepEqual(result.outcomes.map(item => item.status), ['success'])
+})
+
 test('runWorkflowTaskQueue stops after a transport or conflict error', async () => {
   const executed: string[] = []
   const result = await runWorkflowTaskQueue([task('first'), task('second')], {

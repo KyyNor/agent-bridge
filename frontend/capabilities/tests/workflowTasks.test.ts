@@ -9,6 +9,7 @@ import {
   distinctTypes,
   taskStats,
   taskStatusLabel,
+  canExecuteTask,
   matchTaskFilter,
   taskId,
   toggleTaskSelection,
@@ -42,6 +43,8 @@ const sample = [
   makeTask({ task_key: 'page:gamma', type: 'index', status: 'running', set_at: '2026-01-03T00:00:00Z' }),
 ]
 
+const staleTask = makeTask({ task_key: 'page:stale', status: 'stale' })
+
 function filters(overrides: Partial<{ status: string; type: string; search: string; sort: string }> = {}) {
   return {
     status: ALL_STATUS_SENTINEL,
@@ -55,6 +58,23 @@ function filters(overrides: Partial<{ status: string; type: string; search: stri
 test('distinctStatuses returns statuses in canonical display order', () => {
   // sample has completed/running/pending — expect running first, then pending, then completed.
   assert.deepEqual(distinctStatuses(sample), ['running', 'pending', 'completed'])
+})
+
+test('stale tasks have an incremental label, order, stats, and status filter', () => {
+  const tasks = [...sample, staleTask]
+  assert.deepEqual(distinctStatuses(tasks), ['running', 'pending', 'stale', 'completed'])
+  assert.equal(taskStatusLabel('stale'), '待增量执行')
+  assert.deepEqual(taskStats(tasks), { pending: 1, completed: 1, running: 1, stale: 1 })
+  assert.deepEqual(
+    filterAndSortTasks(tasks, filters({ status: 'stale' })).map(task => task.task_key),
+    ['page:stale'],
+  )
+})
+
+test('canExecuteTask permits pending and stale tasks but not completed tasks', () => {
+  assert.equal(canExecuteTask(makeTask({ status: 'pending' })), true)
+  assert.equal(canExecuteTask(makeTask({ status: 'stale' })), true)
+  assert.equal(canExecuteTask(makeTask({ status: 'completed' })), false)
 })
 
 test('distinctTypes returns sorted, non-empty types', () => {
