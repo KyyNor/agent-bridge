@@ -58,8 +58,8 @@ completed → stale（最新任务版本且 workflow revision 变化）</code></
       <p>数据库 artifact 可按 artifact ID 只读引用；历史 run 目录中的文件必须在当前 run 中重新物化。历史 run 和 artifact 不覆盖，当前 run 只写自己的记录。</p>
 
       <h2>5. 数据和接口</h2>
-      <p><code>workflow_runs</code> 增加 workflow revision、task version、execution mode、source run 和 plan 信息；<code>workflow_node_runs</code> 增加指纹、执行/复用模式、判断原因和来源字段；artifact 增加 producer/source/validity 信息。</p>
-      <p>新增运行预览接口，现有运行接口支持 <code>auto</code>、<code>incremental</code>、<code>force_full</code>。页面运行按钮默认按任务状态选择普通执行或增量执行；当前 revision 已完成的任务展示已有结果并提供强制全量选项；artifact 列表通过 lineage 找到同一运行入口。</p>
+      <p><code>workflow_runs</code> 增加 workflow revision、task version、execution mode、source run 和 <code>execution_plan_json</code>；<code>workflow_node_runs</code> 增加指纹、<code>action</code>、判断原因、来源和 artifact ids；artifact 增加 producer/source/validity 信息，并通过 <code>workflow_run_artifacts</code> 建立当前运行关联。</p>
+      <p>新增运行预览接口，现有运行接口支持 <code>normal</code>、<code>incremental</code>、<code>force_full</code>。页面运行按钮默认按任务状态选择普通执行或增量执行；当前 revision 已完成的任务展示已有结果并提供强制全量选项；artifact 列表通过 lineage 找到同一运行入口。</p>
 
       <h2>6. 一致性与验收</h2>
       <ul>
