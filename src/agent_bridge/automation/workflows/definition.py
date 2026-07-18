@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+import json
+from hashlib import sha256
+from typing import Annotated, Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -108,6 +110,67 @@ class WorkflowGraph(BaseModel):
 
     nodes: list[WorkflowNode] = Field(default_factory=list)
     edges: list[WorkflowEdge] = Field(default_factory=list)
+
+
+_PRESENTATION_KEYS = frozenset({"position", "metadata", "display", "ui"})
+
+
+def normalize_execution_value(value: Any) -> Any:
+    """Return a JSON-safe value with graph presentation-only data removed.
+
+    The representation deliberately preserves list order: workflow configuration
+    lists can be semantically ordered, while mappings are made stable by
+    ``stable_json_dumps`` below.
+    """
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json")
+    if isinstance(value, Mapping):
+        return {
+            str(key): normalize_execution_value(item)
+            for key, item in value.items()
+            if str(key) not in _PRESENTATION_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [normalize_execution_value(item) for item in value]
+    return value
+
+
+def stable_json_dumps(value: Any) -> str:
+    """Serialize execution configuration deterministically for fingerprints."""
+    return json.dumps(
+        normalize_execution_value(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def execution_fingerprint(value: Any) -> str:
+    """Return the SHA-256 fingerprint of a normalized execution value."""
+    return sha256(stable_json_dumps(value).encode("utf-8")).hexdigest()
+
+
+def node_execution_payload(node: WorkflowNode | Mapping[str, Any], *, resource_fingerprint: Any = None) -> dict[str, Any]:
+    """Pick the execution-relevant, position-independent node fields."""
+    raw = node.model_dump(mode="json") if isinstance(node, BaseModel) else dict(node)
+    return {
+        "id": raw.get("id"),
+        "type": raw.get("type"),
+        "config": normalize_execution_value(raw.get("config") or {}),
+        "resource_fingerprint": normalize_execution_value(resource_fingerprint),
+    }
+
+
+def edge_execution_payload(edge: WorkflowEdge | Mapping[str, Any]) -> dict[str, Any]:
+    """Pick the edge fields that influence a target's input and conditions."""
+    raw = edge.model_dump(mode="json") if isinstance(edge, BaseModel) else dict(edge)
+    return {
+        "id": raw.get("id"),
+        "source": raw.get("source"),
+        "target": raw.get("target"),
+        "condition": normalize_execution_value(raw.get("condition")),
+    }
 
 
 def default_workflow_graph(workflow_type: WorkflowType, default_backend: str) -> WorkflowGraph:
