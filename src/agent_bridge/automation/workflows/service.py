@@ -643,7 +643,10 @@ class WorkflowService:
         effective_mode = "incremental" if task.get("status") == "stale" and execution_mode == "normal" else execution_mode
         if task.get("status") == "completed":
             if execution_mode != "force_full":
-                raise ConflictError("completed task requires execution_mode=force_full")
+                # Keep the historical validation response for callers that do
+                # not explicitly opt into a full rerun. The UI sends
+                # force_full for completed tasks with existing output.
+                raise ValidationError("completed task requires execution_mode=force_full")
             resolved_task_version = str(task.get("task_version") or "")
             if not self.store.reset_workflow_task(
                 workflow_key, task_key, task_version=resolved_task_version
@@ -1187,6 +1190,8 @@ class WorkflowService:
             summary=summary,
             content=content,
             metadata=artifact_metadata,
+            producer_node_id=producer_node_id,
+            producer_node_fingerprint=producer_node_fingerprint,
         )
         if producer_node_id is not None:
             self.store.associate_workflow_run_artifacts(

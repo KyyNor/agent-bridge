@@ -804,15 +804,6 @@ class WorkflowsRepository:
                 """
                     SELECT * FROM workflow_tasks
                 WHERE workflow_key = ?
-                  AND NOT EXISTS (
-                    SELECT 1 FROM workflow_tasks AS newer
-                    WHERE newer.workflow_key = workflow_tasks.workflow_key
-                      AND newer.task_key = workflow_tasks.task_key
-                      AND (
-                        newer.set_at > workflow_tasks.set_at
-                        OR (newer.set_at = workflow_tasks.set_at AND newer.id > workflow_tasks.id)
-                      )
-                  )
                   AND (
                     status IN ('pending', 'stale')
                     OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
@@ -881,15 +872,6 @@ class WorkflowsRepository:
                     UPDATE workflow_tasks
                     SET priority_flag = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE workflow_key = ? AND task_key = ? AND task_version = ?
-                      AND NOT EXISTS (
-                        SELECT 1 FROM workflow_tasks AS newer
-                        WHERE newer.workflow_key = workflow_tasks.workflow_key
-                          AND newer.task_key = workflow_tasks.task_key
-                          AND (
-                            newer.set_at > workflow_tasks.set_at
-                            OR (newer.set_at = workflow_tasks.set_at AND newer.id > workflow_tasks.id)
-                          )
-                      )
                     """,
                     (flag, workflow_key, task_key, task_version),
                 )
@@ -950,7 +932,12 @@ class WorkflowsRepository:
                         priority_flag = NULL,
                         lease_origin_status = NULL,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE workflow_key = ? AND task_key = ?
+                    WHERE id = (
+                        SELECT id FROM workflow_tasks
+                        WHERE workflow_key = ? AND task_key = ?
+                        ORDER BY set_at DESC, id DESC
+                        LIMIT 1
+                    )
                     """,
                     (workflow_key, task_key),
                 )
@@ -1294,10 +1281,9 @@ class WorkflowsRepository:
                     SET is_current = 0
                     WHERE workflow_key = (SELECT workflow_key FROM workflow_runs WHERE run_id = ?)
                       AND task_key IS (SELECT task_key FROM workflow_runs WHERE run_id = ?)
-                      AND task_version = (SELECT task_version FROM workflow_runs WHERE run_id = ?)
                       AND run_id <> ?
                     """,
-                    (run_id, run_id, run_id, run_id),
+                    (run_id, run_id, run_id),
                 )
                 conn.execute(
                     "UPDATE workflow_artifacts SET is_current = 1 WHERE run_id = ?",
@@ -1547,9 +1533,9 @@ class WorkflowsRepository:
                     SET is_current = 0
                     WHERE workflow_key = ?
                       AND task_key IS ?
-                      AND NOT (task_version = ? AND run_id = ?)
+                      AND run_id <> ?
                     """,
-                    (workflow_key, task_key, task_version, run_id),
+                    (workflow_key, task_key, run_id),
                 )
             existing = conn.execute(
                 """

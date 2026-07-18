@@ -429,6 +429,11 @@ class WorkflowIncrementalPlanner:
             if expires_at is not None and expires_at <= datetime.now(timezone.utc):
                 return self._execute_plan(node_id, node_fingerprint, "artifact_expired")
         conditions = _as_list(source.get("condition_results") if "condition_results" in source else source.get("condition_results_json"))
+        # A successful node without conditional edges has no condition record.
+        # Treat the omitted legacy field as an empty result set; malformed
+        # explicit values remain non-reusable.
+        if conditions is None and not ("condition_results" in source or "condition_results_json" in source):
+            conditions = []
         if conditions is None or not all(isinstance(item, Mapping) for item in conditions):
             return self._execute_plan(node_id, node_fingerprint, "condition_results_invalid")
         return NodePlan(
