@@ -49,6 +49,8 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return None
     if "is_current" in item:
         item["is_current"] = bool(item["is_current"])
+    if "reuse_allowed" in item:
+        item["reuse_allowed"] = bool(item["reuse_allowed"])
     for source, target, default in [
         ("payload_json", "payload", {}),
         ("tags_json", "tags", []),
@@ -1285,6 +1287,22 @@ class WorkflowsRepository:
                 """,
                 (status, exit_code, stdout_path, stderr_path, error, duration_ms, _json_dumps(output or {}), run_id, expected_status),
             )
+            if status == "completed":
+                conn.execute(
+                    """
+                    UPDATE workflow_artifacts
+                    SET is_current = 0
+                    WHERE workflow_key = (SELECT workflow_key FROM workflow_runs WHERE run_id = ?)
+                      AND task_key IS (SELECT task_key FROM workflow_runs WHERE run_id = ?)
+                      AND task_version = (SELECT task_version FROM workflow_runs WHERE run_id = ?)
+                      AND run_id <> ?
+                    """,
+                    (run_id, run_id, run_id, run_id),
+                )
+                conn.execute(
+                    "UPDATE workflow_artifacts SET is_current = 1 WHERE run_id = ?",
+                    (run_id,),
+                )
             result = _row_payload(
                 conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
             )
@@ -1511,19 +1529,28 @@ class WorkflowsRepository:
         content: str,
         metadata: dict[str, Any],
         task_version: str = "",
+        producer_node_id: str | None = None,
+        producer_node_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         content_hash = _content_hash(content)
         with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE workflow_artifacts
-                SET is_current = 0
-                WHERE workflow_key = ?
-                  AND task_key IS ?
-                  AND NOT (task_version = ? AND run_id = ?)
-                """,
-                (workflow_key, task_key, task_version, run_id),
-            )
+            run_row = conn.execute(
+                "SELECT status FROM workflow_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            run_status = str(run_row["status"]) if run_row is not None else "completed"
+            is_current = 1 if run_status == "completed" else 0
+            if is_current:
+                conn.execute(
+                    """
+                    UPDATE workflow_artifacts
+                    SET is_current = 0
+                    WHERE workflow_key = ?
+                      AND task_key IS ?
+                      AND NOT (task_version = ? AND run_id = ?)
+                    """,
+                    (workflow_key, task_key, task_version, run_id),
+                )
             existing = conn.execute(
                 """
                 SELECT artifact_id FROM workflow_artifacts
@@ -1536,16 +1563,21 @@ class WorkflowsRepository:
                 """
                 INSERT INTO workflow_artifacts (
                   artifact_id, workflow_key, profile_key, run_id, task_key, task_version,
-                  is_current, title, path,
+                  is_current, reuse_allowed, invalid_reason, producer_node_id,
+                  producer_node_fingerprint, title, path,
                   tags_json, format, summary, content, content_hash, metadata_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key, task_key, task_version, run_id, path) DO UPDATE SET
                   profile_key = excluded.profile_key,
                   run_id = excluded.run_id,
                   task_key = excluded.task_key,
                   task_version = excluded.task_version,
-                  is_current = 1,
+                  is_current = excluded.is_current,
+                  reuse_allowed = excluded.reuse_allowed,
+                  invalid_reason = excluded.invalid_reason,
+                  producer_node_id = excluded.producer_node_id,
+                  producer_node_fingerprint = excluded.producer_node_fingerprint,
                   title = excluded.title,
                   tags_json = excluded.tags_json,
                   format = excluded.format,
@@ -1562,6 +1594,11 @@ class WorkflowsRepository:
                     run_id,
                     task_key,
                     task_version,
+                    is_current,
+                    int(metadata.get("reuse_allowed", True)),
+                    metadata.get("invalid_reason"),
+                    producer_node_id,
+                    producer_node_fingerprint,
                     title,
                     path,
                     _json_dumps(tags),
@@ -1581,6 +1618,79 @@ class WorkflowsRepository:
             if result is None:
                 raise KeyError(f"workflow artifact not found: {artifact_id}")
             return result
+
+    def list_artifacts_for_run(self, run_id: str, *, include_reused: bool = True) -> list[dict[str, Any]]:
+        """Return physical and reused artifacts visible in one run context."""
+        with self._connect() as conn:
+            current = conn.execute(
+                "SELECT workflow_key, profile_key, task_key, task_version FROM workflow_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if current is None:
+                return []
+            rows = conn.execute(
+                """
+                SELECT a.*, NULL AS linked_node_id, NULL AS source_run_id, NULL AS source_node_id,
+                       0 AS reused
+                FROM workflow_artifacts a
+                WHERE a.run_id = ?
+                ORDER BY a.updated_at DESC, a.id DESC
+                """,
+                (run_id,),
+            ).fetchall()
+            if include_reused:
+                rows += conn.execute(
+                    """
+                    SELECT a.*, rra.node_id AS linked_node_id, rra.source_run_id, rra.source_node_id,
+                           1 AS reused
+                    FROM workflow_run_artifacts rra
+                    JOIN workflow_artifacts a ON a.artifact_id = rra.artifact_id
+                    WHERE rra.run_id = ? AND a.run_id <> ?
+                    ORDER BY a.updated_at DESC, a.id DESC
+                    """,
+                    (run_id, run_id),
+                ).fetchall()
+
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            item = _row_payload(row)
+            if item is None or item["artifact_id"] in seen:
+                continue
+            seen.add(item["artifact_id"])
+            item["reused"] = bool(row["reused"])
+            item["source_run_id"] = row["source_run_id"]
+            item["source_node_id"] = row["source_node_id"] or row["linked_node_id"]
+            item["reusable"], item["reuse_validation_reason"] = self._artifact_reuse_validation(
+                item,
+                current_workflow_key=current["workflow_key"],
+                current_profile_key=current["profile_key"],
+                current_task_key=current["task_key"],
+                current_task_version=current["task_version"],
+            )
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _artifact_reuse_validation(
+        artifact: dict[str, Any],
+        *,
+        current_workflow_key: str,
+        current_profile_key: str,
+        current_task_key: str | None,
+        current_task_version: str,
+    ) -> tuple[bool, str | None]:
+        if artifact.get("workflow_key") != current_workflow_key or artifact.get("profile_key") != current_profile_key:
+            return False, "artifact_scope_mismatch"
+        if artifact.get("task_key") != current_task_key or str(artifact.get("task_version") or "") != str(current_task_version or ""):
+            return False, "artifact_scope_mismatch"
+        if artifact.get("reuse_allowed") is False:
+            return False, "reuse_disabled"
+        if artifact.get("invalid_reason"):
+            return False, str(artifact["invalid_reason"])
+        if _content_hash(str(artifact.get("content") or "")) != str(artifact.get("content_hash") or ""):
+            return False, "content_hash_mismatch"
+        return True, None
 
     def get_workflow_artifact(self, artifact_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:

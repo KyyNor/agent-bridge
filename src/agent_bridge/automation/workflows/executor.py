@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -368,8 +369,12 @@ class WorkflowDagExecutor:
             artifact = get_artifact(artifact_id)
             if artifact is None:
                 return "source_artifact_missing"
-            if artifact.get("reusable") is False or artifact.get("is_reusable") is False:
+            if artifact.get("reusable") is False or artifact.get("is_reusable") is False or artifact.get("reuse_allowed") is False:
                 return "source_artifact_not_reusable"
+            if artifact.get("invalid_reason"):
+                return str(artifact["invalid_reason"])
+            if artifact.get("content_hash") and hashlib.sha256(str(artifact.get("content") or "").encode("utf-8")).hexdigest() != str(artifact["content_hash"]):
+                return "source_artifact_hash_mismatch"
             if artifact.get("status") in {"deleted", "expired", "invalid"}:
                 return "source_artifact_not_reusable"
             expires_at = artifact.get("expires_at")

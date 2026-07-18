@@ -214,6 +214,10 @@ class SQLiteStore:
                 {
                     "task_version": "TEXT NOT NULL DEFAULT ''",
                     "is_current": "INTEGER NOT NULL DEFAULT 1",
+                    "reuse_allowed": "INTEGER NOT NULL DEFAULT 1",
+                    "invalid_reason": "TEXT",
+                    "producer_node_id": "TEXT",
+                    "producer_node_fingerprint": "TEXT",
                 },
             )
             self._rebuild_workflow_tasks_if_needed(conn)
@@ -696,6 +700,10 @@ class SQLiteStore:
               task_key TEXT,
               task_version TEXT NOT NULL DEFAULT '',
               is_current INTEGER NOT NULL DEFAULT 1,
+              reuse_allowed INTEGER NOT NULL DEFAULT 1,
+              invalid_reason TEXT,
+              producer_node_id TEXT,
+              producer_node_fingerprint TEXT,
               title TEXT NOT NULL,
               path TEXT NOT NULL,
               tags_json TEXT NOT NULL DEFAULT '[]',
@@ -714,13 +722,15 @@ class SQLiteStore:
             """
             INSERT INTO workflow_artifacts_new (
               id, artifact_id, workflow_key, profile_key, run_id, task_key,
-              task_version, is_current, title, path, tags_json, format, summary,
-              content, content_hash, metadata_json, created_at, updated_at
+              task_version, is_current, reuse_allowed, invalid_reason,
+              producer_node_id, producer_node_fingerprint, title, path, tags_json,
+              format, summary, content, content_hash, metadata_json, created_at, updated_at
             )
             SELECT
               id, artifact_id, workflow_key, profile_key, run_id, task_key,
-              task_version, is_current, title, path, tags_json, format, summary,
-              content, content_hash, metadata_json, created_at, updated_at
+              task_version, is_current, reuse_allowed, invalid_reason,
+              producer_node_id, producer_node_fingerprint, title, path, tags_json,
+              format, summary, content, content_hash, metadata_json, created_at, updated_at
             FROM workflow_artifacts
             """
         )
@@ -1309,6 +1319,8 @@ class SQLiteStore:
         content: str,
         metadata: dict[str, Any],
         task_version: str = "",
+        producer_node_id: str | None = None,
+        producer_node_fingerprint: str | None = None,
     ) -> dict[str, Any]:
         return self.workflows.upsert_workflow_artifact(
             workflow_key=workflow_key,
@@ -1323,10 +1335,15 @@ class SQLiteStore:
             summary=summary,
             content=content,
             metadata=metadata,
+            producer_node_id=producer_node_id,
+            producer_node_fingerprint=producer_node_fingerprint,
         )
 
     def get_workflow_artifact(self, artifact_id: str) -> dict[str, Any] | None:
         return self.workflows.get_workflow_artifact(artifact_id)
+
+    def list_artifacts_for_run(self, run_id: str, *, include_reused: bool = True) -> list[dict[str, Any]]:
+        return self.workflows.list_artifacts_for_run(run_id, include_reused=include_reused)
 
     def search_workflow_artifacts(
         self,
