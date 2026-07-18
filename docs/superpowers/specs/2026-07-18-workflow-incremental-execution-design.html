@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工作流增量执行与历史产物复用设计</title>
+  <style>
+    :root { color-scheme: light; --ink:#17202a; --muted:#5b6673; --line:#dfe5eb; --paper:#ffffff; --wash:#f5f7fa; --accent:#235b9a; --accent-wash:#eaf2fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--wash); color: var(--ink); font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif; }
+    main { max-width: 980px; margin: 40px auto; padding: 0 24px 64px; }
+    article { background: var(--paper); padding: 48px 60px; border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(23,32,42,.07); }
+    h1 { margin: 0 0 12px; font-size: 34px; line-height: 1.25; letter-spacing: -.02em; }
+    h2 { margin: 42px 0 14px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 23px; }
+    p, li { max-width: 78ch; }
+    .lede { color: var(--muted); font-size: 18px; }
+    .callout { margin: 24px 0; padding: 16px 20px; border-left: 4px solid var(--accent); background: var(--accent-wash); }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { background: #f0f3f6; padding: 2px 5px; border-radius: 4px; }
+    pre { overflow: auto; padding: 16px; background: #17202a; color: #eef3f8; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 24px; }
+    th, td { padding: 10px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #f0f4f8; }
+    .meta { color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <article>
+      <p class="meta">设计文档 · 2026-07-18 · 已通过头脑风暴确认</p>
+      <h1>工作流增量执行与历史产物复用设计</h1>
+      <p class="lede">采用“整体 workflow revision + 自动节点指纹 + stale 任务状态 + 每次 run 独立记录”的增量执行方案。</p>
+
+      <div class="callout"><strong>核心结论：</strong><code>stale</code> 让同一 <code>task_key</code> 下按 <code>set_at</code> 最新的任务版本重新进入队列；planner 决定节点复用或重跑；<code>output_json</code> 作为结构化节点缓存；历史 run 和 artifact 保持只读。</div>
+
+      <h2>1. 版本层次</h2>
+      <table><thead><tr><th>版本</th><th>含义</th><th>作用</th></tr></thead><tbody>
+        <tr><td><code>task_version</code></td><td>任务业务版本</td><td>必须严格一致，不能跨任务版本复用</td></tr>
+        <tr><td><code>workflow_revision_no</code></td><td>工作流整体修订号</td><td>触发增量计划重算</td></tr>
+        <tr><td>节点语义指纹</td><td>节点执行语义及资源版本</td><td>判断节点本身是否变化</td></tr>
+        <tr><td>输入/依赖指纹</td><td>任务、上游输出、入边和条件</td><td>判断节点输入是否变化</td></tr>
+      </tbody></table>
+      <p>节点不维护人工版本号。节点 ID 单独校验；位置和纯展示名称不参与执行语义指纹。</p>
+
+      <h2>2. stale 状态</h2>
+      <p><code>pending</code> 和 <code>stale</code> 都可领取，<code>pending</code> 优先。工作流 revision 变化时，同一 <code>task_key</code> 只选择 <code>set_at</code> 最新的任务版本进入 stale；旧 task version 即使 completed，也保持 completed。</p>
+      <pre><code>pending → running → completed
+stale   → running → completed
+running → failed / abandoned
+completed → stale（最新任务版本且 workflow revision 变化）</code></pre>
+
+      <h2>3. 增量计划</h2>
+      <p>每次执行前生成不可变的 <code>IncrementalPlan</code>。预览和真实执行使用同一个 planner。默认以同一 workflow、profile、task key、task version 下最近成功的 run 作为单一基准；基准整体不可用时才回退到更早成功 run，不在多个 run 之间逐节点拼接。</p>
+      <p>节点只有在节点 ID、类型、语义指纹、输入指纹、依赖指纹、历史成功状态、output hash、artifact 有效性和 runtime 兼容性全部满足时才复用。一个节点重新执行，会向所有下游传播影响。</p>
+
+      <h2>4. 缓存与运行隔离</h2>
+      <p>当前系统已经持久化 <code>workflow_node_runs.output_json</code>、<code>workflow_runs.output_json</code> 和 <code>workflow_artifacts.content</code>，但 executor 目前不会读取历史输出。改造后，复用节点在当前 run 建立自己的 node run，复制完整 output_json，记录来源 run/node/revision，并注入当前执行上下文。</p>
+      <p>数据库 artifact 可按 artifact ID 只读引用；历史 run 目录中的文件必须在当前 run 中重新物化。历史 run 和 artifact 不覆盖，当前 run 只写自己的记录。</p>
+
+      <h2>5. 数据和接口</h2>
+      <p><code>workflow_runs</code> 增加 workflow revision、task version、execution mode、source run 和 plan 信息；<code>workflow_node_runs</code> 增加指纹、执行/复用模式、判断原因和来源字段；artifact 增加 producer/source/validity 信息。</p>
+      <p>新增运行预览接口，现有运行接口支持 <code>auto</code>、<code>incremental</code>、<code>force_full</code>。页面运行按钮默认按任务状态选择普通执行或增量执行；当前 revision 已完成的任务展示已有结果并提供强制全量选项；artifact 列表通过 lineage 找到同一运行入口。</p>
+
+      <h2>6. 一致性与验收</h2>
+      <ul>
+        <li>计划创建前后使用 workflow revision CAS；revision 变化则重新规划。</li>
+        <li>复用前二次校验 source run、output hash、artifact hash、任务版本和 profile。</li>
+        <li>stale 运行失败后保持 stale，超过尝试次数才进入 abandoned。</li>
+        <li>强制全量不读取历史节点输出。</li>
+        <li>覆盖节点修改、边/条件变化、节点新增/删除、历史产物缺失、任务版本变化、多版本按 set_at 选择、并发运行和预览一致性。</li>
+      </ul>
+    </article>
+  </main>
+</body>
+</html>
