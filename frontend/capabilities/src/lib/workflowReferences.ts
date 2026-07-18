@@ -60,6 +60,37 @@ export function deriveAvailableData(
   return dedupeByPath(items)
 }
 
+export function deriveNodeOutputSchema(node: WorkflowNode, script?: ManagedScript): Record<string, unknown> | null {
+  if (node.type === 'get_task') {
+    return {
+      type: 'object',
+      required: ['task'],
+      properties: {
+        task: { type: ['object', 'null'], description: '当前领取的任务；没有任务时为 null' },
+      },
+    }
+  }
+  if (node.type === 'agent') {
+    if (node.config.result_mode === 'json') return node.config.output_schema
+    return {
+      type: 'object',
+      required: ['text'],
+      properties: { text: { type: 'string', description: '文本 Agent 输出' } },
+    }
+  }
+  if (node.type === 'script') return script?.output_schema || null
+  return {
+    type: 'object',
+    required: ['title', 'summary', 'content', 'artifact_ids'],
+    properties: {
+      title: { type: 'string' },
+      summary: { type: 'string' },
+      content: { type: 'string' },
+      artifact_ids: { type: 'array', items: { type: 'string' } },
+    },
+  }
+}
+
 function deriveEdgeSourceLineage(graph: WorkflowGraph, edgeId: string): string[] {
   const edge = graph.edges.find(item => item.id === edgeId)
   if (!edge) return []

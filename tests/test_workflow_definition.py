@@ -1,6 +1,7 @@
-from agent_bridge.automation.workflows.definition import WorkflowGraph, default_workflow_graph
+from agent_bridge.automation.workflows.definition import WorkflowGraph, default_workflow_graph, normalize_summary_graph
 from agent_bridge.automation.workflows.models import WorkflowType
 from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError, validate_graph
+from agent_bridge.core.domain import ValidationError
 
 
 def test_summary_default_graph_contains_locked_output_pair():
@@ -10,6 +11,72 @@ def test_summary_default_graph_contains_locked_output_pair():
     assert [node.config.system_role for node in graph.nodes] == ["summary_markdown", "summary_html"]
     assert graph.edges[0].system_role == "summary_markdown_to_html"
     assert [(edge.source, edge.target) for edge in graph.edges] == [("markdown-output", "html-output")]
+
+
+def test_normalize_summary_graph_converts_single_ordinary_markdown_output_and_adds_html():
+    graph = WorkflowGraph.model_validate({
+        "nodes": [
+            {"id": "task", "type": "get_task", "name": "Task", "position": {"x": 0, "y": 0}},
+            {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 160, "y": 0}, "config": {"prompt": "分析", "backend_key": "claude"}},
+            {"id": "report", "type": "output", "name": "Report", "position": {"x": 320, "y": 0}, "config": {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "总结", "backend_key": "claude"}},
+        ],
+        "edges": [
+            {"id": "task-analysis", "source": "task", "target": "analysis"},
+            {"id": "analysis-report", "source": "analysis", "target": "report"},
+        ],
+    })
+
+    normalized = normalize_summary_graph(graph, "claude")
+
+    assert [node.id for node in normalized.nodes[-2:]] == ["report", "html-output"]
+    assert normalized.nodes[-2].config.system_role == "summary_markdown"
+    assert normalized.nodes[-1].config.system_role == "summary_html"
+    assert [(edge.source, edge.target) for edge in normalized.edges if edge.system_role == "summary_markdown_to_html"] == [("report", "html-output")]
+    assert any(edge.source == "analysis" and edge.target == "report" for edge in normalized.edges)
+
+
+def test_normalize_summary_graph_generates_both_system_outputs_when_missing():
+    graph = WorkflowGraph.model_validate({
+        "nodes": [{"id": "task", "type": "get_task", "name": "Task", "position": {"x": 0, "y": 0}}],
+        "edges": [],
+    })
+
+    normalized = normalize_summary_graph(graph, "codex")
+
+    assert [node.config.system_role for node in normalized.nodes[-2:]] == ["summary_markdown", "summary_html"]
+    assert [(edge.source, edge.target, edge.system_role) for edge in normalized.edges] == [("task", "markdown-output", None), ("markdown-output", "html-output", "summary_markdown_to_html")]
+
+
+def test_normalize_summary_graph_preserves_existing_system_pair():
+    graph = default_workflow_graph(WorkflowType.summary, "claude")
+    normalized = normalize_summary_graph(graph, "codex")
+
+    assert [node.id for node in normalized.nodes] == ["markdown-output", "html-output"]
+    assert [node.config.backend_key for node in normalized.nodes] == ["claude", "claude"]
+
+
+def test_normalize_summary_graph_rejects_extra_ordinary_output_with_system_pair():
+    payload = default_workflow_graph(WorkflowType.summary, "claude").model_dump(mode="json")
+    payload["nodes"].insert(0, {"id": "extra", "type": "output", "name": "Extra", "position": {"x": 0, "y": 0}, "config": {"format": "markdown", "title": "Extra", "path": "extra.md", "prompt": "extra", "backend_key": "claude"}})
+
+    try:
+        normalize_summary_graph(WorkflowGraph.model_validate(payload), "claude")
+    except ValidationError as exc:
+        assert "普通输出节点" in str(exc)
+    else:
+        raise AssertionError("expected extra ordinary output rejection")
+
+
+def test_normalize_summary_graph_avoids_generated_id_collisions():
+    graph = WorkflowGraph.model_validate({
+        "nodes": [{"id": "markdown-output", "type": "agent", "name": "User", "position": {"x": 0, "y": 0}, "config": {"prompt": "x", "backend_key": "claude"}}],
+        "edges": [],
+    })
+
+    normalized = normalize_summary_graph(graph, "claude")
+
+    assert len({node.id for node in normalized.nodes}) == len(normalized.nodes)
+    assert [node.config.system_role for node in normalized.nodes[-2:]] == ["summary_markdown", "summary_html"]
 
 
 def test_summary_validation_uses_markers_without_rejecting_ordinary_output_nodes():

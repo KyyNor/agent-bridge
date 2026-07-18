@@ -22,7 +22,7 @@ def test_fine_report_workflow_uses_the_current_structured_dag_contract():
     workflow = envelope["workflow"]
     graph = WorkflowGraph.model_validate(workflow["definition"])
 
-    validate_graph(graph, WorkflowType.operation)
+    validate_graph(graph, WorkflowType.summary)
 
     nodes = {node.id: node for node in graph.nodes}
     assert set(nodes) == {
@@ -33,6 +33,7 @@ def test_fine_report_workflow_uses_the_current_structured_dag_contract():
         "content-analysis",
         "lineage-trace",
         "report-output",
+        "html-output",
     }
     assert nodes["get-task-initial"].config.on_empty == "continue"
     assert nodes["get-task-retry"].config.on_empty == "terminate"
@@ -41,6 +42,8 @@ def test_fine_report_workflow_uses_the_current_structured_dag_contract():
     assert nodes["content-analysis"].config.result_mode == "json"
     assert nodes["lineage-trace"].config.result_mode == "json"
     assert nodes["report-output"].type == "output"
+    assert nodes["report-output"].config.system_role == "summary_markdown"
+    assert nodes["html-output"].config.system_role == "summary_html"
 
 
 def test_fine_report_workflow_import_reports_missing_script_reasons(wm_paths):

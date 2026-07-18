@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { deriveAvailableData, formatWorkflowReference, referenceValueForTarget } from '../src/lib/workflowReferences.ts'
+import { deriveAvailableData, deriveNodeOutputSchema, formatWorkflowReference, referenceValueForTarget } from '../src/lib/workflowReferences.ts'
 import type { ManagedScript, WorkflowGraph } from '../src/api/types.ts'
 
 const scripts: ManagedScript[] = [
@@ -246,5 +246,34 @@ test('downstream node can reference text agent and output artifact fields', () =
     'nodes.artifact.output.summary',
     'nodes.artifact.output.content',
     'nodes.artifact.output.artifact_ids',
-  ])
+])
+
+test('node output schema adapts existing agent, script, task, and output contracts', () => {
+  const textAgent = graphWithAgentAndScript.nodes.find(node => node.id === 'parallel')!
+  const script = graphWithAgentAndScript.nodes.find(node => node.id === 'collect')!
+  const task = graphWithAgentAndScript.nodes.find(node => node.id === 'task')!
+  const output = graphWithAgentAndScript.nodes.find(node => node.id === 'report')!
+
+  assert.deepEqual(deriveNodeOutputSchema(textAgent, undefined), {
+    type: 'object',
+    required: ['text'],
+    properties: { text: { type: 'string', description: '文本 Agent 输出' } },
+  })
+  assert.deepEqual(deriveNodeOutputSchema(script, scripts[0]), scripts[0].output_schema)
+  assert.deepEqual(deriveNodeOutputSchema(task, undefined), {
+    type: 'object',
+    required: ['task'],
+    properties: { task: { type: ['object', 'null'], description: '当前领取的任务；没有任务时为 null' } },
+  })
+  assert.deepEqual(deriveNodeOutputSchema(output, undefined), {
+    type: 'object',
+    required: ['title', 'summary', 'content', 'artifact_ids'],
+    properties: {
+      title: { type: 'string' },
+      summary: { type: 'string' },
+      content: { type: 'string' },
+      artifact_ids: { type: 'array', items: { type: 'string' } },
+    },
+  })
+})
 })

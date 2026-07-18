@@ -41,7 +41,10 @@ async def test_markdown_output_injects_ancestors_and_saves_artifact():
     node = graph.nodes[1]
     agent = Agent()
     workflows = Workflows()
-    result = await OutputHandler(agent_service=agent, skill_service=Skills(), workflow_service=workflows).execute(node, NodeExecutionContext(actor="root", workflow={"workflow_key": "w", "profile_key": "p"}, run_id="r", input={}, task=None, nodes={"analysis": {"output": {"text": "x"}}}, graph=graph, node_fingerprint="current-fingerprint"))
+    result = await OutputHandler(agent_service=agent, skill_service=Skills(), workflow_service=workflows).execute(node, NodeExecutionContext(actor="root", workflow={"workflow_key": "w", "profile_key": "p"}, run_id="r", input={}, task={"task_key": "task-1", "task_version": "v2", "payload": {"report_id": "report-7", "cpt_file_path": "/reports/demo.cpt"}}, nodes={"analysis": {"output": {"text": "x"}}}, graph=graph, node_fingerprint="current-fingerprint"))
+    assert "[当前任务上下文]" in agent.kwargs["prompt"]
+    assert "report-7" in agent.kwargs["prompt"]
+    assert "/reports/demo.cpt" in agent.kwargs["prompt"]
     assert "[上游节点输出]" in agent.kwargs["prompt"]
     assert result.artifact_ids == ["artifact_markdown"]
     assert workflows.kwargs["producer_node_id"] == "out"

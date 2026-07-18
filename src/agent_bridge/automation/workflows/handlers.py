@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -48,8 +49,22 @@ def build_agent_prompt(
     for skill_name in skill_names:
         skill = skill_service.get_skill(actor, skill_name)
         blocks.append(f"[技能：{skill_name}]\n{skill['prompt']}")
+    task = context.get("task")
+    if isinstance(task, dict):
+        blocks.append(build_task_context_block(task))
     blocks.append(f"[任务指令]\n{render_text(prompt, context)}")
     return "\n\n".join(blocks)
+
+
+def build_task_context_block(task: dict[str, Any]) -> str:
+    """Render a compact, explicit task description for agent-facing prompts."""
+    task_summary = {
+        "task_key": task.get("task_key"),
+        "task_version": task.get("task_version"),
+        "type": task.get("type"),
+        "payload": task.get("payload") or {},
+    }
+    return "[当前任务上下文]\n" + json.dumps(task_summary, ensure_ascii=False, sort_keys=True)
 
 
 class WorkflowNodeHandlers:

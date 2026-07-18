@@ -7,6 +7,7 @@ import pytest
 
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.core.domain import ConflictError, ValidationError
+from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
 
 
 GET_TASK_NODE = {
@@ -62,6 +63,27 @@ def _export_payload(workflow_key="new-wf", *, name="Imported"):
     }
 
 
+def _summary_export_payload(workflow_key="summary-wf"):
+    return {
+        **_export_payload(workflow_key),
+        "workflow": {
+            **_export_payload(workflow_key)["workflow"],
+            "workflow_type": "summary",
+            "definition": {
+                "nodes": [
+                    dict(GET_TASK_NODE),
+                    {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 160, "y": 0}, "config": {"prompt": "分析", "backend_key": "claude"}},
+                    {"id": "report", "type": "output", "name": "Report", "position": {"x": 320, "y": 0}, "config": {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "总结", "backend_key": "claude"}},
+                ],
+                "edges": [
+                    {"id": "task-analysis", "source": "n1", "target": "analysis"},
+                    {"id": "analysis-report", "source": "analysis", "target": "report"},
+                ],
+            },
+        },
+    }
+
+
 def _preview(service, payload, *, target_workflow_key=None, target_mode="auto"):
     return service.workflows.preview_definition_import(
         actor="root",
@@ -87,6 +109,26 @@ def test_import_preview_creates_new_workflow_session(wm_paths):
     assert saved["revision_no"] == 1
     assert service.workflows.get_revision("root", "new-wf", 1)["source"] == "import"
     assert service.store.workflows.get_workflow_definition_import(preview["import_id"]) is None
+
+
+def test_summary_import_preview_normalizes_system_output_pair(wm_paths):
+    service = _make_service(wm_paths)
+
+    preview = _preview(service, _summary_export_payload())
+    graph = preview["workflow"]["definition"]
+
+    assert [node["id"] for node in graph["nodes"][-2:]] == ["report", "html-output"]
+    assert [node["config"]["system_role"] for node in graph["nodes"][-2:]] == ["summary_markdown", "summary_html"]
+    assert [(edge["source"], edge["target"]) for edge in graph["edges"] if edge.get("system_role") == "summary_markdown_to_html"] == [("report", "html-output")]
+
+
+def test_summary_import_malformed_graph_keeps_friendly_validation_error(wm_paths):
+    service = _make_service(wm_paths)
+    payload = _summary_export_payload("broken-summary")
+    payload["workflow"]["definition"]["nodes"][1]["config"] = {"prompt": "缺少后端"}
+
+    with pytest.raises(WorkflowDefinitionValidationError):
+        _preview(service, payload)
 
 
 def test_import_preview_existing_returns_diff_and_confirm_appends_revision(wm_paths):

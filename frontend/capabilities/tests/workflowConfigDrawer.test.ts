@@ -78,6 +78,14 @@ test('agent output schema validity is wired to workflow save guards', async () =
   assert.match(view, /保存前请修正 Schema/)
 })
 
+test('node config panel adapts the existing schema editor for non-agent output contracts', async () => {
+  const panel = await readFile(new URL('../src/views/workflow/WorkflowNodeConfigPanel.vue', import.meta.url), 'utf8')
+
+  assert.match(panel, /deriveNodeOutputSchema/)
+  assert.match(panel, /:disabled="true"/)
+  assert.match(panel, /selectedScript\?\.output_schema/)
+})
+
 test('script save validates both mounted schema editors before the API call', async () => {
   const view = await readFile(new URL('../src/views/system/ScriptsView.vue', import.meta.url), 'utf8')
 

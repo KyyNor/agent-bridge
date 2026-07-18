@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
+
 from agent_bridge.core.domain import AccessDenied, ConflictError, NotFound, ValidationError, require_admin_user
 from agent_bridge.core.diff import text_diff, workflow_structured_diff
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -20,7 +22,7 @@ from agent_bridge.automation.workflows.task_import import (
     build_task_import_template as build_task_import_template_file,
     parse_task_import,
 )
-from agent_bridge.automation.workflows.definition import WorkflowGraph
+from agent_bridge.automation.workflows.definition import WorkflowGraph, normalize_summary_graph
 from agent_bridge.automation.workflows.incremental import (
     IncrementalPlan,
     NodePlan,
@@ -304,6 +306,21 @@ class WorkflowService:
         }
         if not imported["profile_key"] or not isinstance(imported["definition"], dict):
             raise ValidationError("工作流文件缺少能力平面或 definition 内容，请检查后重试")
+        if workflow_type == WorkflowType.summary.value:
+            try:
+                source_graph = WorkflowGraph.model_validate(imported["definition"])
+            except PydanticValidationError:
+                self.validator.require_valid(actor=actor, workflow=imported)
+                raise ValidationError("工作流定义校验失败，请检查节点配置")
+            default_backend = next(
+                (
+                    node.config.backend_key
+                    for node in source_graph.nodes
+                    if node.type in {"agent", "output"} and node.config.backend_key
+                ),
+                "claude",
+            )
+            imported["definition"] = normalize_summary_graph(source_graph, default_backend).model_dump(mode="json")
         graph = self.validator.require_valid(actor=actor, workflow=imported)
         imported["definition"] = graph.model_dump(mode="json")
 
