@@ -152,3 +152,25 @@ def test_import_confirm_rejects_expired_session(wm_paths):
 
     with pytest.raises(ValidationError, match="expired"):
         service.workflows.confirm_definition_import("root", preview["import_id"])
+
+
+def test_import_overwrite_can_upgrade_legacy_workflow_without_revision(wm_paths):
+    service = _make_service(wm_paths)
+    _save(service, name="legacy")
+    with service.store.connect() as conn:
+        conn.execute("DELETE FROM workflow_definition_revisions WHERE workflow_key = ?", ("wf",))
+        conn.execute(
+            "UPDATE workflow_definitions SET current_revision_no = 0 WHERE workflow_key = ?",
+            ("wf",),
+        )
+
+    preview = _preview(
+        service,
+        _export_payload("wf", name="incoming"),
+        target_workflow_key="wf",
+        target_mode="overwrite",
+    )
+    saved = service.workflows.confirm_definition_import("root", preview["import_id"])
+
+    assert saved["revision_no"] == 1
+    assert service.workflows.get_revision("root", "wf", 1)["source"] == "import"

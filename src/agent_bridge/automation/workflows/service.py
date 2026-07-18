@@ -275,12 +275,16 @@ class WorkflowService:
         target_revision_no = int(existing.get("current_revision_no") or 0) if existing else 0
         diff = None
         if existing is not None:
-            target_revision = self.store.workflows.get_definition_revision(
-                target_key, target_revision_no
+            target_revision = (
+                self.store.workflows.get_definition_revision(target_key, target_revision_no)
+                if target_revision_no > 0
+                else None
             )
-            if target_revision is None:
-                raise NotFound("workflow current revision not found")
-            before = target_revision["snapshot"]
+            before = (
+                target_revision["snapshot"]
+                if target_revision is not None
+                else self._workflow_revision_snapshot(self._definition_payload(existing))
+            )
             after = self._workflow_revision_snapshot(imported)
             before_text = json.dumps(before, ensure_ascii=False, indent=2, sort_keys=True)
             after_text = json.dumps(after, ensure_ascii=False, indent=2, sort_keys=True)
