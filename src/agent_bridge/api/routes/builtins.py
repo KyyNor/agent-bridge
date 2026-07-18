@@ -13,6 +13,7 @@ from agent_bridge.api.schemas import (
     KnowledgeSyncConfigRequest,
     ScriptRequest,
     ScriptTestRunRequest,
+    ScriptValidateRequest,
     SkillPromptRequest,
 )
 
@@ -193,7 +194,34 @@ def create_builtin_routes(service, actor):
     def reset_skill(skill_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.skills.reset_skill(current_actor, skill_name)
 
+    @router.get("/skills/{skill_name}/revisions")
+    def list_skill_revisions(
+        skill_name: str, limit: int = 100, current_actor: str = Depends(actor)
+    ) -> list[dict[str, Any]]:
+        return service.skills.list_revisions(current_actor, skill_name, limit=limit)
+
+    @router.get("/skills/{skill_name}/revisions/{revision_no}")
+    def get_skill_revision(
+        skill_name: str, revision_no: int, current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.skills.get_revision(current_actor, skill_name, revision_no)
+
+    @router.get("/skills/{skill_name}/diff")
+    def diff_skill(
+        skill_name: str,
+        current_actor: str = Depends(actor),
+        from_revision: int | None = None,
+        to_revision: int | None = None,
+    ) -> dict[str, Any]:
+        return service.skills.diff_revisions(
+            current_actor, skill_name, from_no=from_revision, to_no=to_revision
+        )
+
     # -- Scripts --
+
+    @router.post("/scripts/validate")
+    def validate_script(payload: ScriptValidateRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.scripts.validate_code(current_actor, payload.code)
 
     @router.get("/scripts")
     def list_scripts(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
@@ -238,6 +266,29 @@ def create_builtin_routes(service, actor):
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         return service.scripts.list_runs(current_actor, script_key, limit=limit)
+
+    @router.get("/scripts/{script_key}/revisions")
+    def list_script_revisions(
+        script_key: str, limit: int = 100, current_actor: str = Depends(actor)
+    ) -> list[dict[str, Any]]:
+        return service.scripts.list_revisions(current_actor, script_key, limit=limit)
+
+    @router.get("/scripts/{script_key}/revisions/{revision_no}")
+    def get_script_revision(
+        script_key: str, revision_no: int, current_actor: str = Depends(actor)
+    ) -> dict[str, Any]:
+        return service.scripts.get_revision(current_actor, script_key, revision_no)
+
+    @router.get("/scripts/{script_key}/diff")
+    def diff_script(
+        script_key: str,
+        current_actor: str = Depends(actor),
+        from_revision: int | None = None,
+        to_revision: int | None = None,
+    ) -> dict[str, Any]:
+        return service.scripts.diff_revisions(
+            current_actor, script_key, from_no=from_revision, to_no=to_revision
+        )
 
     @router.get("/script-runs/{run_id}")
     def get_script_run(run_id: str, current_actor: str = Depends(actor)) -> dict[str, Any]:

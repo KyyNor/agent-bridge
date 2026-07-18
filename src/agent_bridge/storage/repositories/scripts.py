@@ -201,3 +201,80 @@ class ScriptsRepository:
     def get_script_run(self, run_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             return row_to_dict(conn.execute("SELECT * FROM script_runs WHERE run_id = ?", (run_id,)).fetchone())
+
+    # --- revisions -------------------------------------------------------
+
+    def create_revision(
+        self, *, script_key: str, content_hash: str, snapshot: dict[str, Any], actor: str
+    ) -> dict[str, Any]:
+        snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(revision_no), 0) FROM script_revisions WHERE script_key = ?",
+                (script_key,),
+            ).fetchone()
+            next_no = int(row[0]) + 1
+            conn.execute(
+                """
+                INSERT INTO script_revisions (script_key, revision_no, content_hash, snapshot_json, created_by)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (script_key, next_no, content_hash, snapshot_json, actor),
+            )
+            conn.execute(
+                "UPDATE scripts SET current_revision_no = ? WHERE script_key = ?",
+                (next_no, script_key),
+            )
+            revision = row_to_dict(
+                conn.execute(
+                    """
+                    SELECT script_key AS entity_key, revision_no, content_hash, created_by, created_at
+                    FROM script_revisions WHERE script_key = ? AND revision_no = ?
+                    """,
+                    (script_key, next_no),
+                ).fetchone()
+            )
+            return revision
+
+    def list_revisions(self, script_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        bounded = min(max(limit, 1), 500)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT script_key AS entity_key, revision_no, content_hash, created_by, created_at
+                FROM script_revisions
+                WHERE script_key = ?
+                ORDER BY revision_no DESC
+                LIMIT ?
+                """,
+                (script_key, bounded),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_revision(self, script_key: str, revision_no: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = row_to_dict(
+                conn.execute(
+                    """
+                    SELECT script_key AS entity_key, revision_no, content_hash, snapshot_json, created_by, created_at
+                    FROM script_revisions
+                    WHERE script_key = ? AND revision_no = ?
+                    """,
+                    (script_key, revision_no),
+                ).fetchone()
+            )
+            if row is None:
+                return None
+            try:
+                row["snapshot"] = json.loads(row.pop("snapshot_json"))
+            except (json.JSONDecodeError, KeyError):
+                row["snapshot"] = {}
+            return row
+
+    def get_current_revision_no(self, script_key: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT current_revision_no FROM scripts WHERE script_key = ?",
+                (script_key,),
+            ).fetchone()
+            return int(row[0]) if row else 0

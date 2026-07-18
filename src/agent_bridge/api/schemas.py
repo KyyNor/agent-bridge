@@ -364,6 +364,10 @@ class ScriptRequest(BaseModel):
     owner_key: str = ""
 
 
+class ScriptValidateRequest(BaseModel):
+    code: str
+
+
 class ScriptTestRunRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int | None = None

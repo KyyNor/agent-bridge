@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
+from agent_bridge.core.diff import text_diff, workflow_structured_diff
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import (
     WorkflowArtifactFormat,
@@ -90,17 +93,43 @@ class WorkflowService:
         )
         next_status = WorkflowStatus(status).value
         next_type = WorkflowType(workflow_type).value
+        graph_payload = graph.model_dump(mode="json")
+        new_content_hash = self._workflow_content_hash(
+            graph_payload, name, description, profile_key, next_status, next_type
+        )
+        # Read previous version BEFORE upsert so we can detect a content change.
+        previous = self.store.get_workflow_definition(workflow_key)
+        previous_revision_no = int(previous.get("current_revision_no") or 0) if previous else 0
+        previous_hash = (
+            self.store.workflows.get_definition_revision(workflow_key, previous_revision_no)["content_hash"]
+            if previous and previous_revision_no
+            else None
+        )
         result = self.store.upsert_workflow_definition(
             workflow_key=workflow_key,
             name=name,
             description=description,
             profile_key=profile_key,
-            definition=graph.model_dump(mode="json"),
+            definition=graph_payload,
             workflow_js="",
             status=next_status,
             workflow_type=next_type,
             created_by=actor,
         )
+        # Auto-archive a revision when content changes (or on first save).
+        is_first_revision = previous is None
+        content_changed = previous_hash != new_content_hash
+        revision_no = previous_revision_no
+        if content_changed or is_first_revision:
+            revision = self.store.workflows.create_definition_revision(
+                workflow_key=workflow_key,
+                content_hash=new_content_hash,
+                snapshot=self._workflow_revision_snapshot(result),
+                actor=actor,
+            )
+            revision_no = revision["revision_no"]
+        result["content_hash"] = new_content_hash
+        result["revision_no"] = revision_no
         logger.info(
             "Workflow 定义已保存 workflow=%s profile=%s 状态=%s 类型=%s actor=%s",
             workflow_key,
@@ -403,6 +432,100 @@ class WorkflowService:
         payload.pop("definition_json", None)
         payload.pop("workflow_js", None)
         return payload
+
+    @staticmethod
+    def _workflow_content_hash(
+        graph_payload: dict[str, Any],
+        name: str,
+        description: str,
+        profile_key: str,
+        status: str,
+        workflow_type: str,
+    ) -> str:
+        fingerprint = json.dumps(
+            {
+                "definition": graph_payload,
+                "name": name,
+                "description": description,
+                "profile_key": profile_key,
+                "status": status,
+                "workflow_type": workflow_type,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _workflow_revision_snapshot(workflow: dict[str, Any]) -> dict[str, Any]:
+        """Capture the fields needed to reconstruct/diff a workflow version."""
+        return {
+            "workflow_key": workflow.get("workflow_key"),
+            "name": workflow.get("name"),
+            "description": workflow.get("description"),
+            "profile_key": workflow.get("profile_key"),
+            "status": workflow.get("status"),
+            "workflow_type": workflow.get("workflow_type"),
+            "definition": workflow.get("definition"),
+        }
+
+    # --- versioning & diff -----------------------------------------------
+
+    def list_revisions(self, actor: str, workflow_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        revisions = self.store.workflows.list_definition_revisions(workflow_key, limit=limit)
+        current = self.store.workflows.get_current_definition_revision_no(workflow_key)
+        for rev in revisions:
+            rev["is_current"] = rev.get("revision_no") == current
+        return revisions
+
+    def get_revision(self, actor: str, workflow_key: str, revision_no: int) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        revision = self.store.workflows.get_definition_revision(workflow_key, revision_no)
+        if revision is None:
+            raise NotFound("workflow revision not found")
+        current = self.store.workflows.get_current_definition_revision_no(workflow_key)
+        revision["is_current"] = revision.get("revision_no") == current
+        return revision
+
+    def diff_revisions(
+        self, actor: str, workflow_key: str, *, from_no: int | None, to_no: int | None
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        current = self.store.workflows.get_current_definition_revision_no(workflow_key)
+        if current == 0:
+            raise NotFound("workflow has no revisions")
+        to_revision_no = to_no if to_no is not None else current
+        from_revision_no = from_no if from_no is not None else max(to_revision_no - 1, 1)
+        to_rev = self.store.workflows.get_definition_revision(workflow_key, to_revision_no)
+        from_rev = self.store.workflows.get_definition_revision(workflow_key, from_revision_no)
+        if to_rev is None:
+            raise NotFound(f"workflow revision {to_revision_no} not found")
+        if from_rev is None:
+            raise NotFound(f"workflow revision {from_revision_no} not found")
+        from_snapshot = from_rev.get("snapshot") or {}
+        to_snapshot = to_rev.get("snapshot") or {}
+        from_text = json.dumps(from_snapshot, ensure_ascii=False, indent=2, sort_keys=True)
+        to_text = json.dumps(to_snapshot, ensure_ascii=False, indent=2, sort_keys=True)
+        return {
+            "entity_type": "workflow",
+            "entity_key": workflow_key,
+            "from_revision": from_revision_no,
+            "to_revision": to_revision_no,
+            "text": text_diff(
+                from_text,
+                to_text,
+                from_label=f"revision {from_revision_no}",
+                to_label=f"revision {to_revision_no}",
+            ),
+            "structured": workflow_structured_diff(from_snapshot, to_snapshot),
+        }
 
     def append_run_log(
         self,

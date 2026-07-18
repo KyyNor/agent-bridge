@@ -2,11 +2,12 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, WorkflowDefinition } from '../../api/types'
+import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, SyntaxCheckResult, WorkflowDefinition } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import CodeMirror from '../../components/CodeMirror.vue'
+import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import SchemaFieldEditor from '../../components/SchemaFieldEditor.vue'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
@@ -101,6 +102,20 @@ const ownerKeyOptions = computed(() => {
 const editingScript = computed(() =>
   editingKey.value ? scripts.value.find(s => s.script_key === editingKey.value) || null : null,
 )
+
+// 版本历史面板开关
+const showHistory = ref(false)
+// 语法校验：lastSavedSyntax 来自最近一次保存结果；liveSyntax 来自实时校验
+const lastSavedSyntax = ref<SyntaxCheckResult | null>(null)
+const liveSyntax = ref<SyntaxCheckResult | null>(null)
+const syntaxChecking = ref(false)
+let syntaxTimer: ReturnType<typeof setTimeout> | null = null
+// 编辑中（代码与已保存版本不一致）时优先展示实时校验，否则展示已保存版本的结果
+const syntaxResult = computed<SyntaxCheckResult | null>(() => {
+  const savedCode = editingScript.value?.code
+  const dirty = savedCode == null || savedCode !== form.value.code
+  return dirty ? liveSyntax.value : (lastSavedSyntax.value ?? liveSyntax.value)
+})
 const scriptDesignDraft = computed(() => designResponse.value?.result?.script || null)
 const inputSchemaFields = computed(() => schemaToFields(form.value.input_schema))
 const isBuiltInScript = computed(() => editingScript.value ? isBuiltInScriptFamily(editingScript.value) : false)
@@ -111,6 +126,29 @@ const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize
 onMounted(async () => {
   await loadAll()
 })
+
+// 实时语法校验：代码变化时 debounce 调用 /scripts/validate（不保存）。
+watch(
+  () => form.value.code,
+  (code) => {
+    if (syntaxTimer) clearTimeout(syntaxTimer)
+    if (!code || !code.trim()) {
+      liveSyntax.value = null
+      return
+    }
+    syntaxTimer = setTimeout(async () => {
+      syntaxChecking.value = true
+      try {
+        liveSyntax.value = await api.validateScriptCode(code)
+      } catch {
+        // 校验失败不阻塞编辑
+        liveSyntax.value = null
+      } finally {
+        syntaxChecking.value = false
+      }
+    }, 400)
+  },
+)
 
 // 进入/切换编辑页时加载脚本
 watch(
@@ -330,6 +368,7 @@ async function saveScript(): Promise<ManagedScript | null> {
   saving.value = true
   try {
     const saved = await api.upsertScript(toScriptUpsertPayload(form.value, outputSchemaEnabled.value))
+    lastSavedSyntax.value = saved.syntax_check ?? null
     await reloadScripts()
     // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
     if (isNew.value || saved.script_key !== editingKey.value) {
@@ -793,6 +832,10 @@ def main(envelope):
           <Play class="mr-1.5 h-4 w-4" />
           {{ testing ? '运行中' : (isNew ? '保存并运行' : '运行') }}
         </Button>
+        <Button v-if="editingKey" variant="outline" size="sm" @click="showHistory = !showHistory">
+          {{ showHistory ? '收起历史' : '版本历史' }}
+          <span v-if="editingScript?.revision_no" class="ml-1.5 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px]">v{{ editingScript.revision_no }}</span>
+        </Button>
       </div>
     </div>
 
@@ -859,7 +902,23 @@ def main(envelope):
               </div>
             </div>
             <div>
-              <label class="mb-1 block text-xs text-muted-foreground">代码（Python，main(envelope) -&gt; dict）</label>
+              <label class="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+                <span>代码（Python，main(envelope) -&gt; dict）</span>
+                <span v-if="syntaxChecking" class="text-muted-foreground/70">语法检查中…</span>
+                <span v-else-if="syntaxResult && syntaxResult.ok" class="text-emerald-600 dark:text-emerald-400">语法正确</span>
+              </label>
+              <div
+                v-if="syntaxResult && !syntaxResult.ok"
+                class="mb-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning-soft-fg"
+              >
+                <div class="mb-1 font-semibold">检测到 Python 语法错误（可保存，但运行前需修复）</div>
+                <ul class="space-y-0.5 font-mono">
+                  <li v-for="(err, i) in syntaxResult.errors" :key="i">
+                    <span class="text-warning-soft-fg/70">[行 {{ err.line ?? '?' }}{{ err.col != null ? ':' + err.col : '' }}]</span>
+                    {{ err.msg }}
+                  </li>
+                </ul>
+              </div>
               <CodeMirror v-model="form.code" />
               <p class="mt-2 text-xs leading-5 text-muted-foreground">
                 可直接使用 <span class="font-mono text-foreground">from agent_bridge_runtime import execute, workflow_get_task, workflow_set_task, workflow_run_log</span>。
@@ -891,6 +950,16 @@ def main(envelope):
               </div>
             </div>
           </template>
+
+          <!-- Version history -->
+          <div v-if="showHistory && editingKey" class="border-t border-border pt-4">
+            <h3 class="mb-3 text-sm font-semibold">版本历史</h3>
+            <RevisionHistoryPanel
+              :key="`script-${editingKey}`"
+              entity-type="script"
+              :entity-key="editingKey"
+            />
+          </div>
         </CardContent>
       </Card>
 

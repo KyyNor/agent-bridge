@@ -406,6 +406,30 @@ CREATE TABLE IF NOT EXISTS script_runs (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_key, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS script_revisions (
+  revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  script_key TEXT NOT NULL,
+  revision_no INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (script_key, revision_no)
+);
+CREATE INDEX IF NOT EXISTS idx_script_revisions_key ON script_revisions(script_key, revision_no DESC);
+
+CREATE TABLE IF NOT EXISTS skill_prompt_revisions (
+  revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_name TEXT NOT NULL,
+  revision_no INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (skill_name, revision_no)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_prompt_revisions_name ON skill_prompt_revisions(skill_name, revision_no DESC);
 """
 
 CODEGRAPH_SCHEMA = """
@@ -628,4 +652,16 @@ CREATE TABLE IF NOT EXISTS workflow_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_profile ON workflow_artifacts(profile_key);
 CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_path ON workflow_artifacts(path);
+
+CREATE TABLE IF NOT EXISTS workflow_definition_revisions (
+  revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_key TEXT NOT NULL,
+  revision_no INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (workflow_key, revision_no)
+);
+CREATE INDEX IF NOT EXISTS idx_wf_def_revisions_key ON workflow_definition_revisions(workflow_key, revision_no DESC);
 """

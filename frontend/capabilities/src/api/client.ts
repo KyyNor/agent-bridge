@@ -83,6 +83,10 @@ import type {
   ScriptRunListResult,
   RunStopResponse,
   UploadProgressCallback,
+  Revision,
+  RevisionWithSnapshot,
+  DiffResult,
+  SyntaxCheckResult,
 } from './types'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
 
@@ -341,6 +345,18 @@ export const api = {
   deleteWorkflow: (key: string) => post<{ workflow_key: string; deleted: boolean }>(`/workflows/${key}/delete`),
   clearWorkflowExecutionData: (key: string) =>
     post<WorkflowClearResult>(`/workflows/${key}/clear`),
+  listWorkflowRevisions: (key: string, limit = 100) => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    return get<Revision[]>(`/workflows/${key}/revisions?${qs}`)
+  },
+  getWorkflowRevision: (key: string, revisionNo: number) =>
+    get<RevisionWithSnapshot>(`/workflows/${key}/revisions/${revisionNo}`),
+  diffWorkflow: (key: string, fromRevision?: number, toRevision?: number) => {
+    const qs = new URLSearchParams()
+    if (fromRevision != null) qs.set('from_revision', String(fromRevision))
+    if (toRevision != null) qs.set('to_revision', String(toRevision))
+    return get<DiffResult>(`/workflows/${key}/diff?${qs}`)
+  },
   listWorkflowRuns: (key: string, limit = 200) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
@@ -585,6 +601,18 @@ export const api = {
   getSkill: (skillName: string) => get<SkillPrompt>(`/skills/${skillName}`),
   saveSkill: (skillName: string, prompt: string) => post<SkillPrompt>(`/skills/${skillName}`, { prompt }),
   resetSkill: (skillName: string) => post<SkillPrompt>(`/skills/${skillName}/reset`),
+  listSkillRevisions: (skillName: string, limit = 100) => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    return get<Revision[]>(`/skills/${skillName}/revisions?${qs}`)
+  },
+  getSkillRevision: (skillName: string, revisionNo: number) =>
+    get<RevisionWithSnapshot>(`/skills/${skillName}/revisions/${revisionNo}`),
+  diffSkill: (skillName: string, fromRevision?: number, toRevision?: number) => {
+    const qs = new URLSearchParams()
+    if (fromRevision != null) qs.set('from_revision', String(fromRevision))
+    if (toRevision != null) qs.set('to_revision', String(toRevision))
+    return get<DiffResult>(`/skills/${skillName}/diff?${qs}`)
+  },
 
   // Scripts
   listScripts: () => get<ManagedScript[]>('/scripts'),
@@ -618,6 +646,19 @@ export const api = {
     return get<ScriptRunListResult>(`/scripts/${scriptKey}/runs?${qs}`)
   },
   getScriptRun: (runId: string) => get<ScriptRun>(`/script-runs/${runId}`),
+  validateScriptCode: (code: string) => post<SyntaxCheckResult>('/scripts/validate', { code }),
+  listScriptRevisions: (scriptKey: string, limit = 100) => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    return get<Revision[]>(`/scripts/${scriptKey}/revisions?${qs}`)
+  },
+  getScriptRevision: (scriptKey: string, revisionNo: number) =>
+    get<RevisionWithSnapshot>(`/scripts/${scriptKey}/revisions/${revisionNo}`),
+  diffScript: (scriptKey: string, fromRevision?: number, toRevision?: number) => {
+    const qs = new URLSearchParams()
+    if (fromRevision != null) qs.set('from_revision', String(fromRevision))
+    if (toRevision != null) qs.set('to_revision', String(toRevision))
+    return get<DiffResult>(`/scripts/${scriptKey}/diff?${qs}`)
+  },
 
   // Knowledge Bases
   listKbs: () => get<KnowledgeBase[]>('/kbs'),
