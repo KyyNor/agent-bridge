@@ -265,10 +265,14 @@ class ScriptsRepository:
             )
             if row is None:
                 return None
+            snapshot_json = row.pop("snapshot_json", None)
             try:
-                row["snapshot"] = json.loads(row.pop("snapshot_json"))
-            except (json.JSONDecodeError, KeyError):
-                row["snapshot"] = {}
+                snapshot = json.loads(snapshot_json)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("corrupt script revision snapshot") from exc
+            if not isinstance(snapshot, dict):
+                raise ValueError("corrupt script revision snapshot")
+            row["snapshot"] = snapshot
             return row
 
     def get_current_revision_no(self, script_key: str) -> int:

@@ -212,7 +212,14 @@ class WorkflowsRepository:
             )
             if item is None:
                 return None
-            item["snapshot"] = _json_loads(item.pop("snapshot_json", None), {})
+            snapshot_json = item.pop("snapshot_json", None)
+            try:
+                snapshot = json.loads(snapshot_json)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("corrupt workflow revision snapshot") from exc
+            if not isinstance(snapshot, dict):
+                raise ValueError("corrupt workflow revision snapshot")
+            item["snapshot"] = snapshot
             return item
 
     def get_current_definition_revision_no(self, workflow_key: str) -> int:

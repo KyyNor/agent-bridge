@@ -49,6 +49,29 @@ def test_unchanged_save_does_not_create_new_revision(wm_paths):
     assert again["revision_no"] == 1
 
 
+def test_workflow_position_only_change_does_not_create_revision(wm_paths):
+    service = _make_service(wm_paths)
+    _upsert(service, definition={"nodes": [dict(GET_TASK_NODE)], "edges": []})
+    moved = dict(GET_TASK_NODE)
+    moved["position"] = {"x": 480, "y": 160}
+    saved = _upsert(service, definition={"nodes": [moved], "edges": []})
+    assert saved["revision_no"] == 1
+
+
+def test_workflow_save_rolls_back_when_revision_archive_fails(wm_paths, monkeypatch):
+    service = _make_service(wm_paths)
+
+    def fail_revision(**kwargs):
+        raise RuntimeError("revision archive failed")
+
+    monkeypatch.setattr(service.store.workflows, "create_definition_revision", fail_revision)
+    with pytest.raises(RuntimeError, match="revision archive failed"):
+        _upsert(service)
+
+    assert service.store.get_workflow_definition("wf") is None
+    assert service.store.workflows.list_definition_revisions("wf") == []
+
+
 def test_structured_diff_reports_added_node_and_edge(wm_paths):
     service = _make_service(wm_paths)
     # Provide a real script node target so the graph still validates.
@@ -85,6 +108,19 @@ def test_get_revision_404_for_unknown(wm_paths):
     _upsert(service)
     with pytest.raises(NotFound):
         service.workflows.get_revision("root", "wf", 999)
+
+
+def test_corrupt_workflow_revision_snapshot_is_not_silently_empty(wm_paths):
+    service = _make_service(wm_paths)
+    _upsert(service)
+    with service.store.connect() as conn:
+        conn.execute(
+            "UPDATE workflow_definition_revisions SET snapshot_json = ? WHERE workflow_key = ? AND revision_no = ?",
+            ("{not-json", "wf", 1),
+        )
+
+    with pytest.raises(ValueError, match="corrupt workflow revision snapshot"):
+        service.workflows.get_revision("root", "wf", 1)
 
 
 def test_diff_text_present(wm_paths):

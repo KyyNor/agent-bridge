@@ -59,6 +59,34 @@ def test_changed_content_creates_new_revision(wm_paths):
     assert [r["revision_no"] for r in revs] == [2, 1]
 
 
+def test_schema_change_creates_new_revision_even_when_code_is_unchanged(wm_paths):
+    service = _make_service(wm_paths)
+    _upsert(service)
+    _upsert(
+        service,
+        input_schema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "additionalProperties": True,
+        },
+    )
+    assert service.scripts.get_revision("root", "demo", 2)["snapshot"]["input_schema"]["properties"]
+
+
+def test_script_save_rolls_back_when_revision_archive_fails(wm_paths, monkeypatch):
+    service = _make_service(wm_paths)
+
+    def fail_revision(**kwargs):
+        raise RuntimeError("revision archive failed")
+
+    monkeypatch.setattr(service.store.scripts, "create_revision", fail_revision)
+    with pytest.raises(RuntimeError, match="revision archive failed"):
+        _upsert(service)
+
+    assert service.store.scripts.get_script("demo") is None
+    assert service.store.scripts.list_revisions("demo") == []
+
+
 def test_get_revision_returns_snapshot(wm_paths):
     service = _make_service(wm_paths)
     _upsert(service, code="def main(e):\n    return {'a': 1}\n")
@@ -67,6 +95,19 @@ def test_get_revision_returns_snapshot(wm_paths):
     assert rev["snapshot"]["code"] == "def main(e):\n    return {'a': 1}\n"
     with pytest.raises(NotFound):
         service.scripts.get_revision("root", "demo", 999)
+
+
+def test_corrupt_script_revision_snapshot_is_not_silently_empty(wm_paths):
+    service = _make_service(wm_paths)
+    _upsert(service)
+    with service.store.connect() as conn:
+        conn.execute(
+            "UPDATE script_revisions SET snapshot_json = ? WHERE script_key = ? AND revision_no = ?",
+            ("{not-json", "demo", 1),
+        )
+
+    with pytest.raises(ValueError, match="corrupt script revision snapshot"):
+        service.scripts.get_revision("root", "demo", 1)
 
 
 def test_diff_revisions_returns_unified_text(wm_paths):
@@ -131,5 +172,5 @@ def test_validate_code_endpoint_does_not_save(wm_paths):
     result = service.scripts.validate_code("root", "def f(:")
     assert result["ok"] is False
     # No script should exist.
-    revs = service.scripts.list_revisions("root", "demo")
-    assert revs == []
+    with pytest.raises(NotFound):
+        service.scripts.list_revisions("root", "demo")

@@ -64,48 +64,49 @@ class SkillService:
         normalized = prompt.strip()
         if not normalized:
             raise ValidationError("prompt is required")
-        previous_override = self.store.get_skill_prompt_override(definition.skill_name)
-        previous_revision_no = (
-            int(previous_override.get("current_revision_no") or 0) if previous_override else 0
-        )
-        previous_hash = None
-        if previous_override:
-            prev_rev = self.store.get_skill_prompt_revision(definition.skill_name, previous_revision_no)
-            if prev_rev:
-                previous_hash = prev_rev.get("content_hash")
-        override = self.store.upsert_skill_prompt_override(
-            skill_name=definition.skill_name,
-            prompt=normalized,
-            updated_by=actor,
-        )
         new_hash = self._skill_content_hash(normalized)
-        payload = self._payload(definition, override, include_prompt=True)
-        if previous_hash != new_hash:
-            revision = self.store.create_skill_prompt_revision(
+        with self.store.transaction():
+            revisions = self.store.list_skill_prompt_revisions(definition.skill_name, limit=1)
+            previous_hash = revisions[0]["content_hash"] if revisions else None
+            override = self.store.upsert_skill_prompt_override(
                 skill_name=definition.skill_name,
-                content_hash=new_hash,
-                snapshot={"prompt": normalized, "source": "database"},
-                actor=actor,
+                prompt=normalized,
+                updated_by=actor,
             )
-            payload["revision_no"] = revision["revision_no"]
-        else:
-            payload["revision_no"] = previous_revision_no
+            if not revisions or previous_hash != new_hash:
+                revision = self.store.create_skill_prompt_revision(
+                    skill_name=definition.skill_name,
+                    content_hash=new_hash,
+                    snapshot={"prompt": normalized, "source": "database"},
+                    actor=actor,
+                )
+                revision_no = revision["revision_no"]
+            else:
+                revision_no = revisions[0]["revision_no"]
+        payload = self._payload(definition, override, include_prompt=True)
+        payload["revision_no"] = revision_no
         return payload
 
     def reset_skill(self, actor: str, skill_name: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         definition = self._definition(skill_name)
         default_prompt = self._default_prompt(definition)
-        self.store.delete_skill_prompt_override(definition.skill_name)
         new_hash = self._skill_content_hash(default_prompt)
-        revision = self.store.create_skill_prompt_revision(
-            skill_name=definition.skill_name,
-            content_hash=new_hash,
-            snapshot={"prompt": default_prompt, "source": "default"},
-            actor=actor,
-        )
+        with self.store.transaction():
+            revisions = self.store.list_skill_prompt_revisions(definition.skill_name, limit=1)
+            self.store.delete_skill_prompt_override(definition.skill_name)
+            if not revisions or revisions[0]["content_hash"] != new_hash:
+                revision = self.store.create_skill_prompt_revision(
+                    skill_name=definition.skill_name,
+                    content_hash=new_hash,
+                    snapshot={"prompt": default_prompt, "source": "default"},
+                    actor=actor,
+                )
+                revision_no = revision["revision_no"]
+            else:
+                revision_no = revisions[0]["revision_no"]
         payload = self._payload(definition, None, include_prompt=True)
-        payload["revision_no"] = revision["revision_no"]
+        payload["revision_no"] = revision_no
         return payload
 
     # --- versioning & diff -----------------------------------------------
@@ -116,6 +117,8 @@ class SkillService:
         revisions = self.store.list_skill_prompt_revisions(skill_name, limit=limit)
         override = self.store.get_skill_prompt_override(skill_name)
         current = int(override.get("current_revision_no") or 0) if override else 0
+        if current == 0 and revisions:
+            current = revisions[0]["revision_no"]
         for rev in revisions:
             rev["is_current"] = rev.get("revision_no") == current
         return revisions
@@ -128,6 +131,9 @@ class SkillService:
             raise NotFound("skill revision not found")
         override = self.store.get_skill_prompt_override(skill_name)
         current = int(override.get("current_revision_no") or 0) if override else 0
+        if current == 0:
+            latest = self.store.list_skill_prompt_revisions(skill_name, limit=1)
+            current = latest[0]["revision_no"] if latest else 0
         revision["is_current"] = revision.get("revision_no") == current
         return revision
 
@@ -205,6 +211,11 @@ class SkillService:
             "updated_at": override.get("updated_at") if override is not None else None,
             "updated_by": override.get("updated_by") if override is not None else None,
         }
+        current = int(override.get("current_revision_no") or 0) if override is not None else 0
+        if current == 0:
+            revisions = self.store.list_skill_prompt_revisions(definition.skill_name, limit=1)
+            current = revisions[0]["revision_no"] if revisions else 0
+        payload["revision_no"] = current
         if include_prompt:
             payload["prompt"] = prompt
             payload["default_prompt"] = default_prompt

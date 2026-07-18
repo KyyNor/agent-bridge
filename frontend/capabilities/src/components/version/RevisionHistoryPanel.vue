@@ -140,9 +140,9 @@ const hasRevisions = computed(() => revisions.value.length > 0)
             :class="[
               'cursor-pointer rounded-sm border px-2 py-1.5 text-sm transition-colors',
               toNo === rev.revision_no
-                ? 'border-emerald-500/40 bg-emerald-500/5'
+                ? 'border-success/40 bg-success-soft'
                 : fromNo === rev.revision_no
-                  ? 'border-rose-500/40 bg-rose-500/5'
+                  ? 'border-destructive/40 bg-destructive-soft'
                   : 'border-transparent hover:bg-secondary/60',
             ]"
             @click="pickTo(rev.revision_no)"
@@ -163,7 +163,7 @@ const hasRevisions = computed(() => revisions.value.length > 0)
                 :class="[
                   'rounded px-1.5 py-0.5 text-[10px] font-medium',
                   fromNo === rev.revision_no
-                    ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                    ? 'bg-destructive-soft text-destructive-soft-fg'
                     : 'bg-secondary text-muted-foreground hover:text-foreground',
                 ]"
                 @click.stop="pickFrom(rev.revision_no)"
@@ -173,7 +173,7 @@ const hasRevisions = computed(() => revisions.value.length > 0)
                 :class="[
                   'rounded px-1.5 py-0.5 text-[10px] font-medium',
                   toNo === rev.revision_no
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                    ? 'bg-success-soft text-success-soft-fg'
                     : 'bg-secondary text-muted-foreground hover:text-foreground',
                 ]"
                 @click.stop="pickTo(rev.revision_no)"
@@ -191,9 +191,9 @@ const hasRevisions = computed(() => revisions.value.length > 0)
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="text-sm text-muted-foreground">
             对比
-            <span class="font-mono font-medium text-rose-600 dark:text-rose-400">v{{ fromNo }}</span>
+            <span class="font-mono font-medium text-destructive-soft-fg">v{{ fromNo }}</span>
             <span class="mx-1">→</span>
-            <span class="font-mono font-medium text-emerald-700 dark:text-emerald-300">v{{ toNo }}</span>
+            <span class="font-mono font-medium text-success-soft-fg">v{{ toNo }}</span>
           </div>
           <div v-if="isWorkflow && diff?.structured" class="inline-flex h-8 items-center gap-0.5 rounded-md bg-secondary p-1">
             <button

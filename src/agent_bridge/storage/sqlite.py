@@ -82,7 +82,7 @@ class SQLiteStore:
         conn = self._open_connection()
         token = self._active_connection.set(conn)
         try:
-            conn.execute("BEGIN")
+            conn.execute("BEGIN IMMEDIATE")
             yield conn
             conn.commit()
         except Exception:
@@ -198,19 +198,17 @@ class SQLiteStore:
 
     def migrate_phase2(self) -> None:
         with self.connect() as conn:
-            existing = {row[1] for row in conn.execute("PRAGMA table_info(backend_targets)").fetchall()}
-            if "backend_kb_id" not in existing:
-                conn.execute("ALTER TABLE backend_targets ADD COLUMN backend_kb_id TEXT")
-
-            existing = {row[1] for row in conn.execute("PRAGMA table_info(sync_states)").fetchall()}
-            for col, col_type in [
-                ("backend_status", "TEXT"),
-                ("chunk_count", "INTEGER"),
-                ("progress", "REAL"),
-                ("backend_error", "TEXT"),
-            ]:
-                if col not in existing:
-                    conn.execute(f"ALTER TABLE sync_states ADD COLUMN {col} {col_type}")
+            self._ensure_columns(conn, "backend_targets", {"backend_kb_id": "TEXT"})
+            self._ensure_columns(
+                conn,
+                "sync_states",
+                {
+                    "backend_status": "TEXT",
+                    "chunk_count": "INTEGER",
+                    "progress": "REAL",
+                    "backend_error": "TEXT",
+                },
+            )
 
             self._ensure_columns(
                 conn,
@@ -397,9 +395,7 @@ class SQLiteStore:
 
     def _migrate_knowledge_folders(self, conn: sqlite3.Connection) -> None:
         """Create folder storage and backfill legacy document placements atomically."""
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(document_kbs)").fetchall()}
-        if "folder_id" not in columns:
-            conn.execute("ALTER TABLE document_kbs ADD COLUMN folder_id INTEGER")
+        self._ensure_columns(conn, "document_kbs", {"folder_id": "INTEGER"})
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS knowledge_archive_entries (
@@ -418,12 +414,15 @@ class SQLiteStore:
             )
             """
         )
-        if "archive_entry_id" not in columns:
-            conn.execute(
-                """ALTER TABLE document_kbs
-                   ADD COLUMN archive_entry_id INTEGER
-                   REFERENCES knowledge_archive_entries(id) ON DELETE SET NULL"""
-            )
+        self._ensure_columns(
+            conn,
+            "document_kbs",
+            {
+                "archive_entry_id": (
+                    "INTEGER REFERENCES knowledge_archive_entries(id) ON DELETE SET NULL"
+                )
+            },
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS knowledge_folders (
@@ -521,7 +520,13 @@ class SQLiteStore:
         existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         for name, definition in columns.items():
             if name not in existing:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+                except sqlite3.OperationalError as exc:
+                    # Another process may have completed the same idempotent
+                    # migration between PRAGMA table_info and ALTER TABLE.
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
 
     def _drop_column(self, conn: sqlite3.Connection, table: str, column: str) -> None:
         """Drop a column if present. Uses native DROP COLUMN (SQLite >= 3.35);
@@ -763,10 +768,14 @@ class SQLiteStore:
             if row is None:
                 return None
             item = dict(row)
+            snapshot_json = item.pop("snapshot_json", None)
             try:
-                item["snapshot"] = json.loads(item.pop("snapshot_json"))
-            except (json.JSONDecodeError, KeyError):
-                item["snapshot"] = {}
+                snapshot = json.loads(snapshot_json)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise ValueError("corrupt skill revision snapshot") from exc
+            if not isinstance(snapshot, dict):
+                raise ValueError("corrupt skill revision snapshot")
+            item["snapshot"] = snapshot
             return item
 
     def upsert_code_repository(

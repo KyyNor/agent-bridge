@@ -97,37 +97,32 @@ class WorkflowService:
         new_content_hash = self._workflow_content_hash(
             graph_payload, name, description, profile_key, next_status, next_type
         )
-        # Read previous version BEFORE upsert so we can detect a content change.
-        previous = self.store.get_workflow_definition(workflow_key)
-        previous_revision_no = int(previous.get("current_revision_no") or 0) if previous else 0
-        previous_hash = (
-            self.store.workflows.get_definition_revision(workflow_key, previous_revision_no)["content_hash"]
-            if previous and previous_revision_no
-            else None
-        )
-        result = self.store.upsert_workflow_definition(
-            workflow_key=workflow_key,
-            name=name,
-            description=description,
-            profile_key=profile_key,
-            definition=graph_payload,
-            workflow_js="",
-            status=next_status,
-            workflow_type=next_type,
-            created_by=actor,
-        )
-        # Auto-archive a revision when content changes (or on first save).
-        is_first_revision = previous is None
-        content_changed = previous_hash != new_content_hash
-        revision_no = previous_revision_no
-        if content_changed or is_first_revision:
-            revision = self.store.workflows.create_definition_revision(
+        with self.store.transaction():
+            previous_revisions = self.store.workflows.list_definition_revisions(workflow_key, limit=1)
+            previous_hash = previous_revisions[0]["content_hash"] if previous_revisions else None
+            result = self.store.upsert_workflow_definition(
                 workflow_key=workflow_key,
-                content_hash=new_content_hash,
-                snapshot=self._workflow_revision_snapshot(result),
-                actor=actor,
+                name=name,
+                description=description,
+                profile_key=profile_key,
+                definition=graph_payload,
+                workflow_js="",
+                status=next_status,
+                workflow_type=next_type,
+                created_by=actor,
             )
-            revision_no = revision["revision_no"]
+            # Archive a revision whenever execution semantics changed (or on
+            # the first save, including an upgraded legacy database).
+            content_changed = not previous_revisions or previous_hash != new_content_hash
+            revision_no = previous_revisions[0]["revision_no"] if previous_revisions else 0
+            if content_changed:
+                revision = self.store.workflows.create_definition_revision(
+                    workflow_key=workflow_key,
+                    content_hash=new_content_hash,
+                    snapshot=self._workflow_revision_snapshot(result),
+                    actor=actor,
+                )
+                revision_no = revision["revision_no"]
         result["content_hash"] = new_content_hash
         result["revision_no"] = revision_no
         logger.info(
@@ -431,6 +426,9 @@ class WorkflowService:
         payload = dict(workflow)
         payload.pop("definition_json", None)
         payload.pop("workflow_js", None)
+        if "revision_no" not in payload:
+            payload["revision_no"] = int(payload.get("current_revision_no") or 0)
+        payload.pop("current_revision_no", None)
         return payload
 
     @staticmethod
@@ -442,9 +440,22 @@ class WorkflowService:
         status: str,
         workflow_type: str,
     ) -> str:
+        execution_definition = {
+            "nodes": [
+                {key: value for key, value in node.items() if key != "position"}
+                for node in sorted(
+                    graph_payload.get("nodes") or [],
+                    key=lambda item: str(item.get("id") or ""),
+                )
+            ],
+            "edges": sorted(
+                graph_payload.get("edges") or [],
+                key=lambda item: str(item.get("id") or ""),
+            ),
+        }
         fingerprint = json.dumps(
             {
-                "definition": graph_payload,
+                "definition": execution_definition,
                 "name": name,
                 "description": description,
                 "profile_key": profile_key,

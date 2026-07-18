@@ -75,10 +75,16 @@ def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
     """Flatten a nested dict/list into a ``path -> value`` map for comparison."""
     flat: dict[str, Any] = {}
     if isinstance(value, dict):
+        if not value:
+            flat[prefix] = {}
+            return flat
         for k, v in value.items():
             path = f"{prefix}.{k}" if prefix else str(k)
             flat.update(_flatten(v, path))
     elif isinstance(value, list):
+        if not value:
+            flat[prefix] = []
+            return flat
         for i, v in enumerate(value):
             path = f"{prefix}[{i}]"
             flat.update(_flatten(v, path))
@@ -128,10 +134,13 @@ def workflow_structured_diff(
     before_def = before.get("definition") or {}
     after_def = after.get("definition") or {}
 
-    before_nodes = _index_by_id(before_def.get("nodes") or [])
-    after_nodes = _index_by_id(after_def.get("nodes") or [])
-    before_edges = _index_by_id(before_def.get("edges") or [])
-    after_edges = _index_by_id(after_def.get("edges") or [])
+    def without_position(item: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in item.items() if key != "position"}
+
+    before_nodes = _index_by_id([without_position(item) for item in before_def.get("nodes") or []])
+    after_nodes = _index_by_id([without_position(item) for item in after_def.get("nodes") or []])
+    before_edges = _index_by_id([without_position(item) for item in before_def.get("edges") or []])
+    after_edges = _index_by_id([without_position(item) for item in after_def.get("edges") or []])
 
     added_nodes = [
         {"id": nid, **_node_summary(after_nodes[nid])}

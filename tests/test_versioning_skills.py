@@ -46,6 +46,33 @@ def test_reset_creates_revision_back_to_default(wm_paths):
     assert [r["revision_no"] for r in revs] == [2, 1]
 
 
+def test_reset_to_the_same_effective_prompt_is_idempotent(wm_paths):
+    service = _make_service(wm_paths)
+    service.skills.save_skill("root", SKILL, "custom override")
+    first_reset = service.skills.reset_skill("root", SKILL)
+    second_reset = service.skills.reset_skill("root", SKILL)
+
+    assert first_reset["revision_no"] == 2
+    assert second_reset["revision_no"] == 2
+    revisions = service.skills.list_revisions("root", SKILL)
+    assert [item["revision_no"] for item in revisions] == [2, 1]
+    assert revisions[0]["is_current"] is True
+
+
+def test_skill_save_rolls_back_when_revision_archive_fails(wm_paths, monkeypatch):
+    service = _make_service(wm_paths)
+
+    def fail_revision(**kwargs):
+        raise RuntimeError("revision archive failed")
+
+    monkeypatch.setattr(service.store, "create_skill_prompt_revision", fail_revision)
+    with pytest.raises(RuntimeError, match="revision archive failed"):
+        service.skills.save_skill("root", SKILL, "custom override")
+
+    assert service.store.get_skill_prompt_override(SKILL) is None
+    assert service.skills.list_revisions("root", SKILL) == []
+
+
 def test_diff_revisions_returns_text(wm_paths):
     service = _make_service(wm_paths)
     service.skills.save_skill("root", SKILL, "alpha prompt")
@@ -64,3 +91,16 @@ def test_get_revision_snapshot(wm_paths):
     assert rev["snapshot"]["prompt"] == "the prompt body"
     with pytest.raises(NotFound):
         service.skills.get_revision("root", SKILL, 999)
+
+
+def test_corrupt_skill_revision_snapshot_is_not_silently_empty(wm_paths):
+    service = _make_service(wm_paths)
+    service.skills.save_skill("root", SKILL, "the prompt body")
+    with service.store.connect() as conn:
+        conn.execute(
+            "UPDATE skill_prompt_revisions SET snapshot_json = ? WHERE skill_name = ? AND revision_no = ?",
+            ("{not-json", SKILL, 1),
+        )
+
+    with pytest.raises(ValueError, match="corrupt skill revision snapshot"):
+        service.skills.get_revision("root", SKILL, 1)

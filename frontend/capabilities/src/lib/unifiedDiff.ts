@@ -25,14 +25,16 @@ export interface DiffLine {
 export function parseUnifiedDiff(content: string): DiffLine[] {
   const lines = (content || '').split('\n')
   const rows: DiffLine[] = []
+  let headerLines = 0
   for (const raw of lines) {
     if (raw === '') continue
     if (raw.startsWith('@@')) {
       rows.push({ type: 'hunk', text: raw, header: raw })
       continue
     }
-    if (raw.startsWith('+++') || raw.startsWith('---')) {
+    if (headerLines < 2 && (raw.startsWith('+++') || raw.startsWith('---'))) {
       // File header lines — skip, the caller passes explicit labels.
+      headerLines++
       continue
     }
     const marker = raw[0]

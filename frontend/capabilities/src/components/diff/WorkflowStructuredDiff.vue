@@ -70,11 +70,11 @@ function formatValue(value: unknown): string {
               :class="i > 0 ? 'border-t border-border' : ''"
             >
               <td class="w-32 bg-secondary/40 px-3 py-1.5 text-muted-foreground">{{ metaLabel(m.field) }}</td>
-              <td class="px-3 py-1.5 font-mono text-xs text-rose-600 line-through dark:text-rose-400">
+              <td class="px-3 py-1.5 font-mono text-xs text-destructive-soft-fg line-through">
                 {{ formatValue(m.from) }}
               </td>
               <td class="px-2 py-1.5 text-muted-foreground">→</td>
-              <td class="px-3 py-1.5 font-mono text-xs text-emerald-700 dark:text-emerald-300">
+              <td class="px-3 py-1.5 font-mono text-xs text-success-soft-fg">
                 {{ formatValue(m.to) }}
               </td>
             </tr>
@@ -90,36 +90,36 @@ function formatValue(value: unknown): string {
         <div
           v-for="n in diff.nodes.added"
           :key="`a-${n.id}`"
-          class="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm"
+          class="rounded-md border border-success/30 bg-success-soft px-3 py-2 text-sm"
         >
-          <span class="mr-2 font-mono text-xs text-emerald-700 dark:text-emerald-300">+ 新增</span>
+          <span class="mr-2 font-mono text-xs text-success-soft-fg">+ 新增</span>
           <span class="font-medium">{{ n.id }}</span>
           <span class="ml-2 text-xs text-muted-foreground">{{ nodeTag(n.type) }}{{ n.label ? ' · ' + n.label : '' }}</span>
         </div>
         <div
           v-for="n in diff.nodes.removed"
           :key="`r-${n.id}`"
-          class="rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm"
+          class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm"
         >
-          <span class="mr-2 font-mono text-xs text-rose-700 dark:text-rose-300">− 删除</span>
+          <span class="mr-2 font-mono text-xs text-destructive-soft-fg">− 删除</span>
           <span class="font-medium">{{ n.id }}</span>
           <span class="ml-2 text-xs text-muted-foreground">{{ nodeTag(n.type) }}{{ n.label ? ' · ' + n.label : '' }}</span>
         </div>
         <div
           v-for="n in diff.nodes.changed"
           :key="`c-${n.id}`"
-          class="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
+          class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm"
         >
           <div class="mb-1">
-            <span class="mr-2 font-mono text-xs text-amber-700 dark:text-amber-300">~ 修改</span>
+            <span class="mr-2 font-mono text-xs text-warning-soft-fg">~ 修改</span>
             <span class="font-medium">{{ n.id }}</span>
           </div>
           <ul class="space-y-0.5 font-mono text-xs">
             <li v-for="(c, j) in n.changes" :key="j" class="text-muted-foreground">
               <span class="text-foreground">{{ c.field }}</span>:
-              <span class="text-rose-600 line-through dark:text-rose-400">{{ formatValue(c.from) }}</span>
+              <span class="text-destructive-soft-fg line-through">{{ formatValue(c.from) }}</span>
               →
-              <span class="text-emerald-700 dark:text-emerald-300">{{ formatValue(c.to) }}</span>
+              <span class="text-success-soft-fg">{{ formatValue(c.to) }}</span>
             </li>
           </ul>
         </div>
@@ -133,18 +133,36 @@ function formatValue(value: unknown): string {
         <div
           v-for="e in diff.edges.added"
           :key="`ea-${e.id}`"
-          class="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm"
+          class="rounded-md border border-success/30 bg-success-soft px-3 py-2 text-sm"
         >
-          <span class="mr-2 font-mono text-xs text-emerald-700 dark:text-emerald-300">+ 新增</span>
+          <span class="mr-2 font-mono text-xs text-success-soft-fg">+ 新增</span>
           <span class="font-mono text-xs">{{ e.source }} → {{ e.target }}</span>
         </div>
         <div
           v-for="e in diff.edges.removed"
           :key="`er-${e.id}`"
-          class="rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm"
+          class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm"
         >
-          <span class="mr-2 font-mono text-xs text-rose-700 dark:text-rose-300">− 删除</span>
+          <span class="mr-2 font-mono text-xs text-destructive-soft-fg">− 删除</span>
           <span class="font-mono text-xs">{{ e.source }} → {{ e.target }}</span>
+        </div>
+        <div
+          v-for="e in diff.edges.changed"
+          :key="`ec-${e.id}`"
+          class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm"
+        >
+          <div class="mb-1">
+            <span class="mr-2 font-mono text-xs text-warning-soft-fg">~ 修改</span>
+            <span class="font-mono text-xs">{{ e.id }}</span>
+          </div>
+          <ul class="space-y-0.5 font-mono text-xs">
+            <li v-for="(c, j) in e.changes" :key="j" class="text-muted-foreground">
+              <span class="text-foreground">{{ c.field }}</span>:
+              <span class="text-destructive-soft-fg line-through">{{ formatValue(c.from) }}</span>
+              →
+              <span class="text-success-soft-fg">{{ formatValue(c.to) }}</span>
+            </li>
+          </ul>
         </div>
       </div>
     </section>

@@ -22,6 +22,28 @@ def test_text_diff_emits_unified_hunks():
     assert "+B" in result["content"]
 
 
+def test_workflow_diff_ignores_node_position_and_preserves_empty_container_changes():
+    before = _wf([
+        {"id": "n1", "type": "agent", "name": "N1", "position": {"x": 0, "y": 0}, "config": {}},
+    ])
+    moved = _wf([
+        {"id": "n1", "type": "agent", "name": "N1", "position": {"x": 100, "y": 100}, "config": {}},
+    ])
+    assert workflow_structured_diff(before, moved)["identical"] is True
+
+    changed = _wf([
+        {"id": "n1", "type": "agent", "name": "N1", "position": {"x": 0, "y": 0}, "config": []},
+    ])
+    changes = workflow_structured_diff(before, changed)["nodes"]["changed"][0]["changes"]
+    assert any(item["field"] == "config" and item["from"] == {} and item["to"] == [] for item in changes)
+
+
+def test_text_diff_keeps_code_lines_that_start_with_unified_headers():
+    result = text_diff("value\n", "+++ real code\n--- real code\n", from_label="v1", to_label="v2")
+    assert "+ +++ real code" not in result["content"]
+    assert "+++ real code" in result["content"]
+
+
 # --- workflow_structured_diff -----------------------------------------------
 
 

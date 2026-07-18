@@ -50,7 +50,9 @@ test('WorkflowStructuredDiff renders node/edge/metadata changes', () => {
   assert.match(file, /diff\.nodes\.removed/)
   assert.match(file, /diff\.nodes\.changed/)
   assert.match(file, /diff\.edges\.added/)
+  assert.match(file, /diff\.edges\.changed/)
   assert.match(file, /diff\.metadata/)
+  assert.doesNotMatch(file, /(?:bg|text|border)-(?:emerald|rose|amber)-\d+/)
 })
 
 test('RevisionHistoryPanel switches between structured and text views for workflows', () => {
@@ -63,6 +65,7 @@ test('RevisionHistoryPanel switches between structured and text views for workfl
   assert.match(file, /api\.listScriptRevisions/)
   assert.match(file, /api\.listWorkflowRevisions/)
   assert.match(file, /api\.listSkillRevisions/)
+  assert.doesNotMatch(file, /(?:bg|text|border)-(?:emerald|rose|amber)-\d+/)
 })
 
 test('unifiedDiff parser classifies add / del / hunk rows', () => {
@@ -70,6 +73,7 @@ test('unifiedDiff parser classifies add / del / hunk rows', () => {
   assert.match(file, /export type DiffLineType = 'hunk' \| 'add' \| 'del' \| 'ctx'/)
   assert.match(file, /export function parseUnifiedDiff/)
   assert.match(file, /export function diffStats/)
+  assert.match(file, /headerLines/)
 })
 
 // --- entry integration ------------------------------------------------------
@@ -85,6 +89,9 @@ test('script editor surfaces syntax warnings and a version-history panel', () =>
   assert.match(file, /版本历史/)
   assert.match(file, /RevisionHistoryPanel/)
   assert.match(file, /entity-type="script"/)
+  // Debounced validation must ignore stale responses after a newer edit or route change.
+  assert.match(file, /syntaxRequestId/)
+  assert.match(file, /requestId === syntaxRequestId/)
 })
 
 test('skill editor exposes a collapsible version-history section', () => {
@@ -92,6 +99,10 @@ test('skill editor exposes a collapsible version-history section', () => {
   assert.match(file, /RevisionHistoryPanel/)
   assert.match(file, /entity-type="skill"/)
   assert.match(file, /版本历史/)
+  // Skill prompts are editable/admin-controlled input and must not inject raw HTML into v-html.
+  assert.match(file, /function escapeHtml/)
+  assert.match(file, /previewRenderer\.html/)
+  assert.match(file, /renderer: previewRenderer/)
 })
 
 test('workflow detail adds a versions tab wired into the segmented control', () => {
