@@ -1538,6 +1538,8 @@ function canExecuteTask(task: WorkflowTask): boolean {
 }
 
 function taskExecutionMode(task: WorkflowTask): WorkflowExecutionMode {
+  // Preview requests use execution_mode: 'incremental' for stale tasks and
+  // execution_mode: 'force_full' for completed tasks with existing output.
   if (task.status === 'stale') return 'incremental'
   if (task.status === 'completed') return 'force_full'
   return 'normal'
@@ -1560,7 +1562,7 @@ async function previewTask(task: WorkflowTask) {
     const plan = await api.previewWorkflowRun(task.workflow_key, {
       task_key: task.task_key,
       task_version: task.task_version || undefined,
-      execution_mode: taskExecutionMode(task),
+      execution_mode: task.status === 'stale' ? 'incremental' : task.status === 'completed' ? 'force_full' : 'normal',
     })
     taskPreviews.value = { ...taskPreviews.value, [key]: plan }
   } catch (e: unknown) {
