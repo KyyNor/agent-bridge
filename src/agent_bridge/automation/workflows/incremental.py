@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
@@ -202,6 +203,10 @@ class WorkflowIncrementalPlanner:
                     source_run_id=selected_id,
                     source=previous_nodes.get(node_id),
                     artifacts_by_id=artifacts_by_id,
+                    workflow_key=workflow_key,
+                    profile_key=profile_key,
+                    task_key=task_key,
+                    task_version=task_version,
                 )
             plans.append(plan)
             reasons[node_id] = plan.reason
@@ -390,6 +395,10 @@ class WorkflowIncrementalPlanner:
         source_run_id: str,
         source: Mapping[str, Any] | None,
         artifacts_by_id: Mapping[str, Mapping[str, Any]],
+        workflow_key: str,
+        profile_key: str,
+        task_key: str,
+        task_version: str,
     ) -> NodePlan:
         if source is None:
             return self._execute_plan(node_id, node_fingerprint, "baseline_node_missing")
@@ -408,8 +417,14 @@ class WorkflowIncrementalPlanner:
             artifact = artifacts_by_id.get(artifact_id)
             if artifact is None:
                 return self._execute_plan(node_id, node_fingerprint, "artifact_missing")
-            if artifact.get("reusable") is False or artifact.get("is_reusable") is False or artifact.get("status") in {"deleted", "expired", "invalid"}:
+            if artifact.get("workflow_key") != workflow_key or artifact.get("profile_key") != profile_key or artifact.get("task_key") != task_key or str(artifact.get("task_version") or "") != task_version:
+                return self._execute_plan(node_id, node_fingerprint, "artifact_scope_mismatch")
+            if artifact.get("reusable") is False or artifact.get("is_reusable") is False or artifact.get("reuse_allowed") is False or artifact.get("status") in {"deleted", "expired", "invalid"}:
                 return self._execute_plan(node_id, node_fingerprint, "artifact_not_reusable")
+            if artifact.get("invalid_reason"):
+                return self._execute_plan(node_id, node_fingerprint, str(artifact["invalid_reason"]))
+            if artifact.get("content_hash") and hashlib.sha256(str(artifact.get("content") or "").encode("utf-8")).hexdigest() != str(artifact["content_hash"]):
+                return self._execute_plan(node_id, node_fingerprint, "artifact_hash_mismatch")
             expires_at = _parse_timestamp(artifact.get("expires_at"))
             if expires_at is not None and expires_at <= datetime.now(timezone.utc):
                 return self._execute_plan(node_id, node_fingerprint, "artifact_expired")
