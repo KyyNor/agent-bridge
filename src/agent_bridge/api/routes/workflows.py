@@ -4,12 +4,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 
 from agent_bridge.api.schemas import (
     WorkflowDefinitionRequest,
     WorkflowImportConfirmRequest,
     WorkflowRunRequest,
+    WorkflowRunPreviewRequest,
     WorkflowTaskImportConfirmRequest,
     WorkflowValidationRequest,
 )
@@ -220,8 +221,43 @@ def create_workflow_routes(service, actor):
         payload: WorkflowRunRequest | None = None,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.workflow_scheduler.run_workflow_now(
-            workflow_key, input_data=payload.input if payload else {}, actor=current_actor
+        request = payload or WorkflowRunRequest()
+        execution_mode = request.execution_mode
+        if request.task_key is not None:
+            prepared = service.workflows.execute_task(
+                actor=current_actor,
+                workflow_key=workflow_key,
+                task_key=request.task_key,
+                task_version=request.task_version,
+                execution_mode=execution_mode,
+            )
+            execution_mode = prepared["execution_mode"]
+            task_version = prepared["task_version"]
+        else:
+            task_version = request.task_version
+        started = service.workflow_scheduler.run_workflow_now(
+            workflow_key,
+            input_data=request.input,
+            actor=current_actor,
+            task_key=request.task_key,
+            task_version=task_version,
+            execution_mode=execution_mode,
+        )
+        return service.workflows.workflow_run_start_payload(started)
+
+    @router.post("/workflows/{workflow_key}/run/preview")
+    def preview_workflow_run(
+        workflow_key: str,
+        payload: WorkflowRunPreviewRequest | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        request = payload or WorkflowRunPreviewRequest()
+        return service.workflows.preview_incremental_run(
+            actor=current_actor,
+            workflow_key=workflow_key,
+            task_key=request.task_key,
+            task_version=request.task_version,
+            execution_mode=request.execution_mode,
         )
 
     @router.get("/workflows/{workflow_key}/tasks/import/template")
@@ -269,18 +305,33 @@ def create_workflow_routes(service, actor):
         workflow_key: str,
         task_key: str,
         task_version: str | None = None,
+        payload: WorkflowRunRequest | None = None,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         # Stamp the one-shot priority flag, then start a workflow run. The
         # flagged task is leased first by the agent's workflow_get_task call.
+        request = payload or WorkflowRunRequest()
+        if request.task_key is not None and request.task_key != task_key:
+            raise HTTPException(status_code=400, detail="request task_key must match the path task_key")
+        if task_version is not None and request.task_version is not None and task_version != request.task_version:
+            raise HTTPException(status_code=400, detail="request task_version must match the query task_version")
+        resolved_task_version = request.task_version if request.task_version is not None else task_version
         flagged = service.workflows.execute_task(
             actor=current_actor,
             workflow_key=workflow_key,
             task_key=task_key,
-            task_version=task_version,
+            task_version=resolved_task_version,
+            execution_mode=request.execution_mode,
         )
-        started = service.workflow_scheduler.run_workflow_now(workflow_key, actor=current_actor)
-        return {**flagged, "run_id": started.get("run_id"), "run_status": started.get("status")}
+        started = service.workflow_scheduler.run_workflow_now(
+            workflow_key,
+            input_data=request.input,
+            actor=current_actor,
+            task_key=task_key,
+            task_version=flagged["task_version"],
+            execution_mode=flagged["execution_mode"],
+        )
+        return {**flagged, **service.workflows.workflow_run_start_payload(started)}
 
     @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/reset")
     def reset_task(

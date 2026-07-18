@@ -345,6 +345,13 @@ class WorkflowImportConfirmRequest(BaseModel):
 
 class WorkflowRunRequest(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
+    task_key: str | None = None
+    task_version: str | None = None
+    execution_mode: Literal["normal", "incremental", "force_full"] = "normal"
+
+
+class WorkflowRunPreviewRequest(WorkflowRunRequest):
+    """A run-shaped request which only calculates its execution plan."""
 
 
 class WorkflowValidationRequest(BaseModel):

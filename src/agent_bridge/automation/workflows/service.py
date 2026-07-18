@@ -621,21 +621,39 @@ class WorkflowService:
         workflow_key: str,
         task_key: str,
         task_version: str | None = None,
+        execution_mode: str = "normal",
     ) -> dict[str, Any]:
         """Mark a single task for priority execution.
 
         Stamps a one-shot priority flag so the next ``workflow_get_task`` lease
         picks this task ahead of normal id ordering, then (in the route layer)
-        a workflow run is started. Does not itself start the run. The task must
-        be currently leasable (pending or lease-expired); otherwise the caller
-        must reset it first.
+        a workflow run is started. Does not itself start the run. Stale tasks
+        default to incremental execution. A completed task from the current
+        revision is deliberately non-rerunnable unless the caller explicitly
+        chooses ``force_full``.
         """
         require_admin_user(actor, self.admins)
+        if execution_mode not in {"normal", "incremental", "force_full"}:
+            raise ValidationError(f"unsupported workflow execution mode: {execution_mode}")
         if self.store.get_workflow_definition(workflow_key) is None:
             raise NotFound("workflow not found")
         task = self.store.get_workflow_task(workflow_key, task_key, task_version=(task_version or None))
         if task is None:
             raise NotFound("workflow task not found")
+        effective_mode = "incremental" if task.get("status") == "stale" and execution_mode == "normal" else execution_mode
+        if task.get("status") == "completed":
+            if execution_mode != "force_full":
+                raise ConflictError("completed task requires execution_mode=force_full")
+            resolved_task_version = str(task.get("task_version") or "")
+            if not self.store.reset_workflow_task(
+                workflow_key, task_key, task_version=resolved_task_version
+            ):
+                raise NotFound("workflow task not found")
+            task = self.store.get_workflow_task(
+                workflow_key, task_key, task_version=resolved_task_version
+            )
+            if task is None:
+                raise NotFound("workflow task not found")
         if not self._is_leasable(task):
             raise ValidationError("task is not currently executable; reset it first")
         resolved_task_version = str(task.get("task_version") or "")
@@ -652,6 +670,7 @@ class WorkflowService:
             "task_key": task_key,
             "task_version": resolved_task_version,
             "priority": True,
+            "execution_mode": effective_mode,
         }
 
     def reset_task(
@@ -711,16 +730,26 @@ class WorkflowService:
         workflow_key: str,
         task_key: str,
         task_version: str | None = None,
-        execution_mode: str = "incremental",
+        execution_mode: str = "normal",
     ) -> dict[str, Any]:
         """Build the exact reuse plan without leasing a task or creating a run."""
-        return self.incremental_plan_payload(
+        if execution_mode not in {"normal", "incremental", "force_full"}:
+            raise ValidationError(f"unsupported workflow execution mode: {execution_mode}")
+        effective_mode = execution_mode
+        if task_key is not None:
+            task = self.store.get_workflow_task(workflow_key, task_key, task_version=task_version)
+            if task is None:
+                raise NotFound("workflow task not found")
+            task_version = str(task.get("task_version") or "")
+            if task.get("status") == "stale" and execution_mode == "normal":
+                effective_mode = "incremental"
+        return self.incremental_plan_preview_payload(
             self.build_incremental_plan(
                 actor=actor,
                 workflow_key=workflow_key,
                 task_key=task_key,
                 task_version=task_version,
-                execution_mode=execution_mode,
+                execution_mode=effective_mode,
             )
         )
 
@@ -838,6 +867,41 @@ class WorkflowService:
             "reusable_node_ids": list(plan.reusable_node_ids),
             "reasons": dict(plan.reasons),
             "warnings": list(plan.warnings),
+        }
+
+    @staticmethod
+    def incremental_plan_preview_payload(plan: IncrementalPlan) -> dict[str, Any]:
+        """Public, non-artifact-bearing execution-plan representation."""
+        return {
+            "mode": plan.mode,
+            "baseline_run_id": plan.baseline_run_id,
+            "affected_node_ids": list(plan.affected_node_ids),
+            "reusable_node_ids": list(plan.reusable_node_ids),
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "action": node.action,
+                    "reason": node.reason,
+                    "source_run_id": node.source_run_id,
+                    "source_node_id": node.source_node_id,
+                    "node_fingerprint": node.node_fingerprint,
+                }
+                for node in plan.nodes
+            ],
+            "warnings": list(plan.warnings),
+        }
+
+    def workflow_run_start_payload(self, started: dict[str, Any]) -> dict[str, Any]:
+        """Return the stable API response for a synchronously-created run."""
+        run_id = str(started.get("run_id") or "")
+        run = self.store.get_workflow_run(run_id) if run_id else None
+        execution_mode = str((run or {}).get("execution_mode") or "normal")
+        plan = self.incremental_plan_from_payload((run or {}).get("execution_plan") or {})
+        return {
+            "run_id": run_id,
+            "run_status": str(started.get("status") or (run or {}).get("status") or "started"),
+            "execution_mode": execution_mode,
+            "plan": self.incremental_plan_preview_payload(plan),
         }
 
     @staticmethod
