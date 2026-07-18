@@ -20,6 +20,22 @@ from agent_bridge.core.domain import NotFound
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
+def _json_type_name(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
 class _WorkflowValidationRequest(BaseModel):
     # Persisted workflow rows contain storage metadata. Validation requires the
     # complete public workflow contract while ignoring those database fields.
@@ -398,9 +414,28 @@ class WorkflowValidator:
                             id=node_id,
                             field=field,
                             code="missing_script_param",
-                            message="缺少脚本必填参数",
+                            message=f"缺少脚本必填参数：{missing}",
                         )
                     )
+                continue
+            if error.validator == "additionalProperties":
+                instance = error.instance if isinstance(error.instance, dict) else {}
+                error_schema = error.schema if isinstance(error.schema, dict) else {}
+                allowed = error_schema.get("properties")
+                allowed_names = set(allowed) if isinstance(allowed, dict) else set()
+                unexpected = sorted(str(key) for key in instance if str(key) not in allowed_names)
+                prefix = ".".join(path)
+                unexpected_names = [f"{prefix}.{name}" if prefix else name for name in unexpected]
+                supported = ", ".join(sorted(str(name) for name in allowed_names)) or "无"
+                issues.append(
+                    WorkflowValidationIssue(
+                        scope="node",
+                        id=node_id,
+                        field=".".join(["config", "params", *path]),
+                        code="invalid_script_param",
+                        message=f"脚本不接受参数：{', '.join(unexpected_names) or '未知参数'}；支持的参数：{supported}",
+                    )
+                )
                 continue
             if error.validator == "type":
                 if parse_reference(error.instance) is not None:
@@ -413,7 +448,7 @@ class WorkflowValidator:
                         id=node_id,
                         field=".".join(["config", "params", *path]),
                         code="invalid_script_param_type",
-                        message=f"脚本参数类型不匹配，期望 {expected_text}",
+                        message=f"脚本参数类型不匹配，期望 {expected_text}，实际是 {_json_type_name(error.instance)}",
                     )
                 )
                 continue
@@ -425,7 +460,7 @@ class WorkflowValidator:
                     id=node_id,
                     field=".".join(["config", "params", *path]),
                     code="invalid_script_param",
-                    message="脚本参数不符合输入 Schema",
+                    message=f"脚本参数不符合输入 Schema：{error.message}",
                 )
             )
         return issues

@@ -310,10 +310,55 @@ def test_validator_checks_literal_and_nested_script_param_types_but_allows_refer
 
     type_issues = [issue for issue in result.errors if issue.code == "invalid_script_param_type"]
     assert [(issue.field, issue.message) for issue in type_issues] == [
-        ("config.params.count", "脚本参数类型不匹配，期望 integer"),
-        ("config.params.options.enabled", "脚本参数类型不匹配，期望 boolean"),
+        ("config.params.count", "脚本参数类型不匹配，期望 integer，实际是 string"),
+        ("config.params.options.enabled", "脚本参数类型不匹配，期望 boolean，实际是 string"),
     ]
     assert not any(issue.field == "config.params.from_ref" for issue in result.errors)
+
+
+def test_validator_explains_unknown_script_params(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+    service.scripts.upsert_script(
+        actor="root",
+        script_key="visit.stats",
+        name="Visit Stats",
+        description="",
+        language="python",
+        code="def main(envelope):\n    return {}\n",
+        input_schema={
+            "type": "object",
+            "properties": {"report_id": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        status="active",
+        owner_type="system",
+        owner_key="",
+    )
+
+    result = service.workflows.validator.validate(
+        actor="root",
+        workflow=_workflow(
+            {
+                "nodes": [
+                    {
+                        "id": "visit-stats",
+                        "type": "script",
+                        "name": "Visit Stats",
+                        "position": {"x": 0, "y": 0},
+                        "config": {
+                            "script_key": "visit.stats",
+                            "params": {"report_id": "r1", "cpt_file_path": "demo.cpt"},
+                        },
+                    }
+                ],
+                "edges": [],
+            }
+        ),
+    )
+
+    issue = next(issue for issue in result.errors if issue.code == "invalid_script_param")
+    assert issue.field == "config.params"
+    assert issue.message == "脚本不接受参数：cpt_file_path；支持的参数：report_id"
 
 
 def test_validator_still_reports_missing_required_script_param(wm_paths):
@@ -356,7 +401,7 @@ def test_validator_still_reports_missing_required_script_param(wm_paths):
     assert any(
         issue.field == "config.params.count"
         and issue.code == "missing_script_param"
-        and issue.message == "缺少脚本必填参数"
+        and issue.message == "缺少脚本必填参数：count"
         for issue in result.errors
     )
 
