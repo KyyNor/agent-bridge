@@ -1,3 +1,5 @@
+import { toRaw } from 'vue'
+
 export const SCHEMA_FIELD_TYPES = ['string', 'number', 'integer', 'boolean', 'array', 'object'] as const
 
 export type SchemaFieldType = (typeof SCHEMA_FIELD_TYPES)[number]
@@ -10,6 +12,10 @@ export interface SchemaField {
 }
 
 type JsonObject = Record<string, unknown>
+
+export function cloneSchemaValue(value: Record<string, unknown>): Record<string, unknown> {
+  return structuredClone(toRaw(value))
+}
 
 const COMPLEX_KEYWORDS = new Set([
   '$defs',

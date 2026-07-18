@@ -14,6 +14,7 @@ import {
 import { Textarea } from './ui/textarea'
 import {
   SCHEMA_FIELD_TYPES,
+  cloneSchemaValue,
   fieldsToSchema,
   isSimpleObjectSchema,
   parseSchemaObjectText as parseSchemaText,
@@ -75,7 +76,7 @@ function defaultSchema(): Record<string, unknown> {
 }
 
 function normalizeSchema(value: Record<string, unknown> | null): Record<string, unknown> {
-  return value ? structuredClone(value) : defaultSchema()
+  return value ? cloneSchemaValue(value) : defaultSchema()
 }
 
 function prettyJson(value: unknown): string {

@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { reactive } from 'vue'
 
-import { fieldsToSchema, isSimpleObjectSchema, parseSchemaObjectText, schemaToFields, validateSchemaFieldNames } from '../src/lib/schemaFields.ts'
+import { cloneSchemaValue, fieldsToSchema, isSimpleObjectSchema, parseSchemaObjectText, schemaToFields, validateSchemaFieldNames } from '../src/lib/schemaFields.ts'
+
+test('schema cloning unwraps Vue reactive objects before structured cloning', () => {
+  const schema = reactive({
+    type: 'object',
+    properties: { result: { type: 'string' } },
+  })
+
+  assert.deepEqual(cloneSchemaValue(schema), {
+    type: 'object',
+    properties: { result: { type: 'string' } },
+  })
+})
 
 test('simple object schema round trips through field rows', () => {
   const schema = {

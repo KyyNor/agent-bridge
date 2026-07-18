@@ -194,7 +194,7 @@ function formatHttpError(_status: number, raw: string): string {
 }
 
 async function get<T>(url: string): Promise<T> {
-  const r = await fetch(url, { headers: headers() })
+  const r = await fetch(url, { headers: headers(), cache: 'no-store' })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }

@@ -79,6 +79,27 @@ test('validateWorkflow posts draft workflow without saving it', async () => {
   }
 })
 
+test('workflow list reads bypass the browser cache after an import', async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init || {} })
+    return new Response('[]', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  try {
+    await api.listWorkflows()
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].url, '/workflows')
+    assert.equal(calls[0].init.cache, 'no-store')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('workflow import errors preserve node, field, and validation reason', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = (async () => new Response(JSON.stringify({
