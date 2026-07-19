@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent_bridge.agent_runtime.adapters import ClaudeCodingAgent, CodexCodingAgent, OpenCodeCodingAgent
+from agent_bridge.agent_runtime.adapters import ClaudeCodingAgent, CodexCodingAgent, OpenCodeCodingAgent, PiCodingAgent
 from agent_bridge.agent_runtime.types import CodingAgent
 from agent_bridge.core.config import AgentRuntimeConfig
 
@@ -66,6 +66,15 @@ def create_coding_agent_registry(config: AgentRuntimeConfig | None = None) -> Co
                 CodexCodingAgent(
                     backend_key=backend.slug,
                     command=backend.command or "codex",
+                    model=backend.model,
+                )
+            )
+            continue
+        if backend.agent_type == "pi":
+            registry.register(
+                PiCodingAgent(
+                    backend_key=backend.slug,
+                    command=backend.command or "pi",
                     model=backend.model,
                 )
             )

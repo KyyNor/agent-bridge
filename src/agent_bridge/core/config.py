@@ -296,7 +296,7 @@ def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
 
 
 _AGENT_BACKEND_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-_SUPPORTED_AGENT_TYPES = {"claude", "codex", "opencode"}
+_SUPPORTED_AGENT_TYPES = {"claude", "codex", "opencode", "pi"}
 
 
 def save_agent_runtime_config(paths: AgentBridgePaths, config: AgentRuntimeConfig) -> AgentRuntimeConfig:
