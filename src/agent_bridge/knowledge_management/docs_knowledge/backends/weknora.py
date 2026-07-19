@@ -336,9 +336,97 @@ class WeknoraBackend:
         return endpoint, body
 
     def _do_chat(self, endpoint: str, body: dict[str, Any], backend_kb_id: str) -> tuple[str, list[RetrievalResult]]:
-        response = self._request("POST", endpoint, json=body)
-        self._raise(response)
-        return self._parse_sse_response(response.text, backend_kb_id)
+        """Stream the chat SSE response and parse incrementally.
+
+        Weknora keeps the connection open even after emitting a terminal
+        event (error or done), so reading ``response.text`` blocks until the
+        httpx timeout. We stream instead and break on ``response_type=error``
+        (surfacing the real error in ~1s instead of 120s, which unblocks the
+        ask() self-heal path) or on ``response_type=answer`` with ``done=true``
+        (the final answer chunk). Other ``done=true`` events (e.g. the initial
+        ``agent_query`` ack) do NOT terminate the stream.
+        """
+        answer_parts: list[str] = []
+        chunks: list[RetrievalResult] = []
+        buffer = ""
+
+        with self._request_stream("POST", endpoint, json=body) as response:
+            if response.status_code >= 400:
+                raise RuntimeError(f"Weknora API error {response.status_code}")
+            for chunk in response.iter_text():
+                if not chunk:
+                    continue
+                buffer += chunk
+                # SSE events are separated by a blank line.
+                while "\n\n" in buffer:
+                    raw_event, buffer = buffer.split("\n\n", 1)
+                    message, is_terminal, is_error = self._parse_one_sse_event(
+                        raw_event, backend_kb_id, answer_parts, chunks
+                    )
+                    if is_error:
+                        raise RuntimeError(message)
+                    if is_terminal:
+                        return "".join(answer_parts), chunks
+        # Stream ended without a terminal event — parse whatever remains.
+        if buffer.strip():
+            message, is_terminal, is_error = self._parse_one_sse_event(
+                buffer, backend_kb_id, answer_parts, chunks
+            )
+            if is_error:
+                raise RuntimeError(message)
+        return "".join(answer_parts), chunks
+
+    def _request_stream(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Like _request but returns a streaming response (caller uses `with`)."""
+        headers = kwargs.pop("headers", None) or {}
+        headers.update(self._headers())
+        return httpx.stream(
+            method,
+            f"{self.base_url}{path}",
+            headers=headers,
+            timeout=self.timeout,
+            **kwargs,
+        )
+
+    @classmethod
+    def _parse_one_sse_event(
+        cls, raw_event: str, backend_kb_id: str,
+        answer_parts: list[str], chunks: list[RetrievalResult],
+    ) -> tuple[str, bool, bool]:
+        """Parse one SSE event into the accumulator lists.
+
+        Returns ``(error_message_or_empty, is_terminal, is_error)``.
+        ``is_terminal`` is True for error events and for the final answer
+        chunk (``response_type=answer`` with ``done=true``). Other events
+        (references, acks, intermediate answer deltas) do not terminate.
+        """
+        data_lines = [
+            line.removeprefix("data:").strip()
+            for line in raw_event.splitlines()
+            if line.startswith("data:")
+        ]
+        if not data_lines:
+            return "", False, False
+        try:
+            payload = json.loads("\n".join(data_lines))
+        except json.JSONDecodeError:
+            return "", False, False
+
+        response_type = payload.get("response_type")
+        done = bool(payload.get("done"))
+        if response_type == "error":
+            message = payload.get("content") or payload.get("error") or "Weknora SSE error"
+            return str(message), True, True
+        if response_type == "references":
+            for ref in payload.get("knowledge_references") or []:
+                chunks.append(cls._retrieval_result(ref, backend_kb_id, include_similarity_fallback=True))
+            return "", False, False
+        if response_type == "answer":
+            answer_parts.append(str(payload.get("content") or ""))
+            # A terminal answer chunk signals end-of-stream.
+            return "", done, False
+        # agent_query acks and other event types are non-terminal.
+        return "", False, False
 
     @staticmethod
     def _is_missing_model_error(exc: Exception) -> bool:

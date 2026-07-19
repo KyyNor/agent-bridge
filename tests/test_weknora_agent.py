@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,6 +21,25 @@ def _mock_response(status_code=200, json_data=None, text=""):
     resp.text = text or json.dumps(json_data or {})
     resp.json.return_value = json_data or {}
     return resp
+
+
+class _MockStreamResponse:
+    """Mocks an httpx streaming response (context manager + iter_text)."""
+
+    def __init__(self, text: str, status_code: int = 200):
+        self.status_code = status_code
+        self.text = text
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_text(self):
+        # Emit the full SSE payload as one chunk — _do_chat splits on \n\n.
+        if self.text:
+            yield self.text
 
 
 def test_list_agents(backend):
@@ -101,26 +121,28 @@ def test_ensure_hybrid_agent_caches_result(backend):
 
 def test_ask_passes_agent_id(backend):
     session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
-    chat_resp = MagicMock()
-    chat_resp.status_code = 200
-    chat_resp.text = (
+    chat_sse = _MockStreamResponse(
         'event:message\ndata:{"response_type":"answer","content":"hello","done":true}\n\n'
         'event:message\ndata:{"response_type":"references","knowledge_references":[],"done":true}\n\n'
     )
-    chat_resp.json.return_value = {"success": True}
 
     call_args = {}
     call_url = {}
-    def capture_request(method, url, **kwargs):
-        if method == "POST" and "sessions" in url:
-            return session_resp
+    @contextmanager
+    def mock_stream(method, url, **kwargs):
         if method == "POST" and "agent-chat" in url:
             call_args.update(kwargs)
             call_url["url"] = url
-            return chat_resp
+            yield chat_sse
+        else:
+            yield _MockStreamResponse("")
+
+    def mock_request(method, url, **kwargs):
+        if method == "POST" and "sessions" in url:
+            return session_resp
         return _mock_response()
 
-    with patch("httpx.request", side_effect=capture_request):
+    with patch("httpx.request", side_effect=mock_request), patch("httpx.stream", side_effect=mock_stream):
         result, chat_id = backend.ask("kb-123", "test question", agent_id="my-agent")
 
     assert "agent-chat" in call_url.get("url", "")
@@ -293,27 +315,51 @@ def test_ensure_agent_models_leaves_rerank_empty_when_not_configured():
 
 # ---------- ask() self-heal ----------
 
-def _sse_error_response(message: str):
-    """Build a 200 OK SSE response carrying a single error event."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.text = (
+def _sse_error_stream(message: str) -> _MockStreamResponse:
+    """Build a 200 OK SSE stream carrying a single error event."""
+    return _MockStreamResponse(
         'event:message\n'
         f'data:{{"response_type":"error","content":"{message}","done":true}}\n\n'
     )
-    resp.json.return_value = {"success": True}
-    return resp
 
 
-def _sse_answer_response(content: str = "healed answer"):
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.text = (
+def _sse_answer_stream(content: str = "healed answer") -> _MockStreamResponse:
+    return _MockStreamResponse(
         'event:message\n'
         f'data:{{"response_type":"answer","content":"{content}","done":true}}\n\n'
     )
-    resp.json.return_value = {"success": True}
-    return resp
+
+
+def _patch_ask_httpx(chat_responses, agent_get_resp=None, agent_put_resp=None, session_id="sess-1"):
+    """Patch httpx.request + httpx.stream for an ask() self-heal test.
+
+    chat_responses: list of _MockStreamResponse, consumed in order across agent-chat calls.
+    Returns a dict tracking call counts (chat_calls, get_calls, put_calls).
+    """
+    state = {"chat_calls": 0, "get_calls": 0, "put_calls": 0}
+    session_resp = _mock_response(json_data={"data": {"id": session_id}, "success": True})
+
+    def mock_request(method, url, **kwargs):
+        if method == "POST" and "sessions" in url:
+            return session_resp
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            state["get_calls"] += 1
+            return agent_get_resp or _mock_response()
+        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
+            state["put_calls"] += 1
+            return agent_put_resp or _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
+        return _mock_response()
+
+    @contextmanager
+    def mock_stream(method, url, **kwargs):
+        if method == "POST" and "agent-chat" in url:
+            idx = state["chat_calls"]
+            state["chat_calls"] += 1
+            yield chat_responses[min(idx, len(chat_responses) - 1)]
+        else:
+            yield _MockStreamResponse("")
+
+    return state, mock_request, mock_stream
 
 
 def test_ask_self_heals_on_chat_model_not_configured():
@@ -324,33 +370,19 @@ def test_ask_self_heals_on_chat_model_not_configured():
     )
     backend._model_name_to_id = {"chat-uuid": "uuid-chat"}
 
-    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
-    error_resp = _sse_error_response(
-        "chat model is not configured: please set model_id on agent ag-1"
+    state, mock_request, mock_stream = _patch_ask_httpx(
+        chat_responses=[
+            _sse_error_stream("chat model is not configured: please set model_id on agent ag-1"),
+            _sse_answer_stream("healed answer"),
+        ],
+        agent_get_resp=_agent_get_response(model_id="", rerank_model_id=""),
     )
-    answer_resp = _sse_answer_response("healed answer")
-    agent_get_resp = _agent_get_response(model_id="", rerank_model_id="")
-    agent_put_resp = _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
 
-    chat_calls = []
-    def mock_request(method, url, **kwargs):
-        if method == "POST" and "sessions" in url:
-            return session_resp
-        if method == "POST" and "agent-chat" in url:
-            chat_calls.append(url)
-            # First call errors, second succeeds
-            return error_resp if len(chat_calls) == 1 else answer_resp
-        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
-            return agent_get_resp
-        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
-            return agent_put_resp
-        return _mock_response()
-
-    with patch("httpx.request", side_effect=mock_request):
+    with patch("httpx.request", side_effect=mock_request), patch("httpx.stream", side_effect=mock_stream):
         result, _ = backend.ask("kb-1", "q", agent_id="ag-1")
 
     # Retried once after healing
-    assert len(chat_calls) == 2
+    assert state["chat_calls"] == 2
     assert result.answer == "healed answer"
 
 
@@ -368,33 +400,19 @@ def test_ask_friendly_error_when_rerank_cannot_be_healed():
     )
     backend._model_name_to_id = {"chat-uuid": "uuid-chat"}
 
-    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
-    error_resp = _sse_error_response(
-        "rerank model is not configured: please set rerank_model_id on the agent"
+    state, mock_request, mock_stream = _patch_ask_httpx(
+        chat_responses=[_sse_error_stream(
+            "rerank model is not configured: please set rerank_model_id on the agent"
+        )] * 2,  # both attempts fail on rerank
+        agent_get_resp=_agent_get_response(model_id="", rerank_model_id=""),
     )
-    agent_get_resp = _agent_get_response(model_id="", rerank_model_id="")
-    agent_put_resp = _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
 
-    chat_calls = []
-    def mock_request(method, url, **kwargs):
-        if method == "POST" and "sessions" in url:
-            return session_resp
-        if method == "POST" and "agent-chat" in url:
-            chat_calls.append(url)
-            return error_resp
-        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
-            return agent_get_resp
-        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
-            return agent_put_resp
-        return _mock_response()
-
-    with patch("httpx.request", side_effect=mock_request):
+    with patch("httpx.request", side_effect=mock_request), patch("httpx.stream", side_effect=mock_stream):
         with pytest.raises(RuntimeError, match="rerank_model_id") as exc_info:
             backend.ask("kb-1", "q", agent_id="ag-1")
 
     # Healed (model_id filled) → retried once → still failed on rerank → friendly error.
-    assert len(chat_calls) == 2
-    # Friendly message names the field and tells the user what to do
+    assert state["chat_calls"] == 2
     assert "rerank_model_id" in str(exc_info.value)
     assert "系统配置" in str(exc_info.value)
 
@@ -407,50 +425,34 @@ def test_ask_passes_through_non_model_errors():
     )
     backend._model_name_to_id = {"chat-uuid": "uuid-chat"}
 
-    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
-    error_resp = _sse_error_response("something else went wrong")
+    state, mock_request, mock_stream = _patch_ask_httpx(
+        chat_responses=[_sse_error_stream("something else went wrong")],
+    )
 
-    chat_calls = []
-    def mock_request(method, url, **kwargs):
-        if method == "POST" and "sessions" in url:
-            return session_resp
-        if method == "POST" and "agent-chat" in url:
-            chat_calls.append(url)
-            return error_resp
-        return _mock_response()
-
-    with patch("httpx.request", side_effect=mock_request):
+    with patch("httpx.request", side_effect=mock_request), patch("httpx.stream", side_effect=mock_stream):
         with pytest.raises(RuntimeError, match="something else went wrong"):
             backend.ask("kb-1", "q", agent_id="ag-1")
 
     # No heal attempt, no retry
-    assert len(chat_calls) == 1
+    assert state["chat_calls"] == 1
+    assert state["get_calls"] == 0
 
 
 def test_ask_friendly_error_when_chat_model_cannot_be_healed():
     """chat model missing + backend has no summary_model_id → friendly error, no retry."""
     backend = WeknoraBackend(base_url="http://localhost", api_key="k")  # no summary_model_id
-    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
-    error_resp = _sse_error_response(
-        "chat model is not configured: please set model_id on agent ag-1"
+
+    state, mock_request, mock_stream = _patch_ask_httpx(
+        chat_responses=[_sse_error_stream(
+            "chat model is not configured: please set model_id on agent ag-1"
+        )],
+        agent_get_resp=_agent_get_response(model_id="", rerank_model_id=""),
     )
-    agent_get_resp = _agent_get_response(model_id="", rerank_model_id="")
 
-    chat_calls = []
-    def mock_request(method, url, **kwargs):
-        if method == "POST" and "sessions" in url:
-            return session_resp
-        if method == "POST" and "agent-chat" in url:
-            chat_calls.append(url)
-            return error_resp
-        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
-            return agent_get_resp
-        return _mock_response()
-
-    with patch("httpx.request", side_effect=mock_request):
+    with patch("httpx.request", side_effect=mock_request), patch("httpx.stream", side_effect=mock_stream):
         with pytest.raises(RuntimeError, match="summary_model_id") as exc_info:
             backend.ask("kb-1", "q", agent_id="ag-1")
 
     # No heal possible (no summary_model_id) → no retry, friendly error
-    assert len(chat_calls) == 1
+    assert state["chat_calls"] == 1
     assert "summary_model_id" in str(exc_info.value)

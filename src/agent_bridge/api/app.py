@@ -59,6 +59,16 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
         plugin_task = asyncio.create_task(_refresh_managed_plugins())
 
+        # Self-heal missing chat/rerank model_id on weknora agents (background,
+        # non-blocking: the ask() path also self-heals on demand).
+        async def _ensure_weknora_agents() -> None:
+            try:
+                await asyncio.to_thread(service.ensure_weknora_agents)
+            except Exception:
+                logger.warning("启动时 weknora agent 模型自愈失败", exc_info=True)
+
+        asyncio.create_task(_ensure_weknora_agents())
+
         service.codegraph_scheduler.start()
         service.understand_scheduler.start()
         service.plugin_update_scheduler.start()
