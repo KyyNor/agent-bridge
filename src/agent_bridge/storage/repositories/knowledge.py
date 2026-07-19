@@ -1184,12 +1184,13 @@ class KnowledgeRepository:
 
     def upsert_backend(self, *, slug: str, backend_type: str, base_url: str | None = None,
                        api_key: str | None = None, timeout: int = 120,
-                       embedding_model_id: str | None = None, summary_model_id: str | None = None) -> dict[str, Any]:
+                       embedding_model_id: str | None = None, summary_model_id: str | None = None,
+                       rerank_model_id: str | None = None) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO backends (slug, backend_type, base_url, api_key, timeout, embedding_model_id, summary_model_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO backends (slug, backend_type, base_url, api_key, timeout, embedding_model_id, summary_model_id, rerank_model_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(slug) DO UPDATE SET
                   backend_type = excluded.backend_type,
                   base_url = excluded.base_url,
@@ -1197,9 +1198,10 @@ class KnowledgeRepository:
                   timeout = excluded.timeout,
                   embedding_model_id = excluded.embedding_model_id,
                   summary_model_id = excluded.summary_model_id,
+                  rerank_model_id = excluded.rerank_model_id,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (slug, backend_type, base_url, api_key, timeout, embedding_model_id, summary_model_id),
+                (slug, backend_type, base_url, api_key, timeout, embedding_model_id, summary_model_id, rerank_model_id),
             )
             row = conn.execute("SELECT * FROM backends WHERE slug = ?", (slug,)).fetchone()
             return dict(row)

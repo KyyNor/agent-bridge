@@ -37,7 +37,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             current_actor, payload.slug, payload.backend_type,
             base_url=payload.base_url, api_key=payload.api_key,
             timeout=payload.timeout, embedding_model_id=payload.embedding_model_id,
-            summary_model_id=payload.summary_model_id,
+            summary_model_id=payload.summary_model_id, rerank_model_id=payload.rerank_model_id,
         )
 
     @router.put("/backends/{slug}")
@@ -47,7 +47,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             backend_type=payload.backend_type, base_url=payload.base_url,
             api_key=payload.api_key, timeout=payload.timeout,
             embedding_model_id=payload.embedding_model_id,
-            summary_model_id=payload.summary_model_id,
+            summary_model_id=payload.summary_model_id, rerank_model_id=payload.rerank_model_id,
         )
 
     @router.post("/backends/{slug}/delete")

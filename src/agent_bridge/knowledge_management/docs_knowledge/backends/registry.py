@@ -42,6 +42,7 @@ class BackendRegistry:
                 timeout=config.timeout,
                 embedding_model_id=config.embedding_model_id,
                 summary_model_id=config.summary_model_id,
+                rerank_model_id=config.rerank_model_id,
             )
         elif config.backend_type == "pageindex":
             from agent_bridge.knowledge_management.docs_knowledge.backends.pageindex import PageIndexBackend
@@ -101,5 +102,6 @@ def create_registry_from_db(paths: AgentBridgePaths, store: Any) -> BackendRegis
             timeout=row.get("timeout", 120),
             embedding_model_id=row.get("embedding_model_id"),
             summary_model_id=row.get("summary_model_id"),
+            rerank_model_id=row.get("rerank_model_id"),
         )
     return BackendRegistry(config_map, paths.root)

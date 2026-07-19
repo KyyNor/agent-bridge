@@ -572,6 +572,47 @@ def test_migration_is_idempotent(tmp_path: Path) -> None:
     store.migrate_phase2()
 
 
+def test_schema_adds_rerank_model_id_column(tmp_path: Path) -> None:
+    """init_schema must add backends.rerank_model_id (new optional column)."""
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    with store.connect() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(backends)").fetchall()}
+    assert "rerank_model_id" in cols
+
+
+def test_upsert_backend_persists_rerank_model_id(tmp_path: Path) -> None:
+    """rerank_model_id round-trips through upsert_backend / list_backends."""
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    store.upsert_backend(
+        slug="wek", backend_type="weknora",
+        base_url="http://localhost", api_key="k",
+        embedding_model_id="emb-1", summary_model_id="chat-1",
+        rerank_model_id="rerank-1",
+    )
+    row = store.get_backend("wek")
+    assert row["rerank_model_id"] == "rerank-1"
+
+    # Update with a different rerank_model_id
+    store.upsert_backend(
+        slug="wek", backend_type="weknora",
+        base_url="http://localhost", api_key="k",
+        rerank_model_id="rerank-2",
+    )
+    row = store.get_backend("wek")
+    assert row["rerank_model_id"] == "rerank-2"
+
+
+def test_upsert_backend_rerank_optional(tmp_path: Path) -> None:
+    """rerank_model_id unset → column is NULL, not an error."""
+    store = SQLiteStore(tmp_path / "test.db")
+    store.init_schema()
+    store.upsert_backend(slug="wek", backend_type="weknora", api_key="k")
+    row = store.get_backend("wek")
+    assert row["rerank_model_id"] is None
+
+
 def test_list_backend_targets_for_kb(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "test.db")
     store.init_schema()

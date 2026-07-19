@@ -109,6 +109,7 @@ class BackendConfig:
     timeout: int = 120
     embedding_model_id: str | None = None
     summary_model_id: str | None = None
+    rerank_model_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -256,6 +257,7 @@ def load_backend_configs(paths: AgentBridgePaths) -> list[BackendConfig]:
             timeout=int(section.get("timeout", 120)),
             embedding_model_id=section.get("embedding_model_id"),
             summary_model_id=section.get("summary_model_id"),
+            rerank_model_id=section.get("rerank_model_id"),
         ))
     return result
 
@@ -391,4 +393,5 @@ def migrate_toml_backends_to_db(paths: AgentBridgePaths, store: Any) -> None:
                 timeout=cfg.timeout,
                 embedding_model_id=cfg.embedding_model_id,
                 summary_model_id=cfg.summary_model_id,
+                rerank_model_id=cfg.rerank_model_id,
             )

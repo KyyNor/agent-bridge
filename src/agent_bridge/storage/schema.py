@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS backends (
   timeout INTEGER NOT NULL DEFAULT 120,
   embedding_model_id TEXT,
   summary_model_id TEXT,
+  rerank_model_id TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

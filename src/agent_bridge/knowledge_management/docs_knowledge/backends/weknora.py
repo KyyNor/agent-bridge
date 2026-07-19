@@ -49,6 +49,7 @@ class WeknoraBackend:
         timeout: int = 120,
         embedding_model_id: str | None = None,
         summary_model_id: str | None = None,
+        rerank_model_id: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("api_key is required")
@@ -57,6 +58,7 @@ class WeknoraBackend:
         self.timeout = timeout
         self.embedding_model_id = embedding_model_id
         self.summary_model_id = summary_model_id
+        self.rerank_model_id = rerank_model_id
         self._model_name_to_id: dict[str, str] | None = None
         self._hybrid_agent_id: str | None = None
 
@@ -283,6 +285,36 @@ class WeknoraBackend:
         if session_id is None:
             session_id = self._create_session()
 
+        endpoint, body = self._build_chat_request(session_id, backend_kb_id, question, agent_id)
+        try:
+            answer, chunks = self._do_chat(endpoint, body, backend_kb_id)
+        except RuntimeError as exc:
+            if not (agent_id and self._is_missing_model_error(exc)):
+                raise
+            # Self-heal attempt: fill chat/rerank model from backend config, retry once.
+            healed = False
+            try:
+                healed = self.ensure_agent_models(agent_id)
+            except Exception:
+                logger.warning("agent '%s' 模型自愈失败", agent_id, exc_info=True)
+            if healed:
+                # Retry once. If it STILL fails on a missing-model error (e.g. we
+                # filled chat but rerank is still unset in backend config), surface
+                # a friendly, actionable error rather than the raw SSE message.
+                try:
+                    answer, chunks = self._do_chat(endpoint, body, backend_kb_id)
+                except RuntimeError as retry_exc:
+                    if self._is_missing_model_error(retry_exc):
+                        raise self._friendly_missing_model_error(retry_exc) from retry_exc
+                    raise
+            else:
+                # Couldn't heal at all (backend has neither summary nor rerank configured).
+                raise self._friendly_missing_model_error(exc) from exc
+        return AskResult(answer=answer, chunks=chunks, session_id=session_id), (chat_id or "")
+
+    def _build_chat_request(
+        self, session_id: str, backend_kb_id: str, question: str, agent_id: str | None
+    ) -> tuple[str, dict[str, Any]]:
         if agent_id is not None:
             endpoint = f"/api/v1/agent-chat/{session_id}"
             body: dict[str, Any] = {
@@ -301,15 +333,46 @@ class WeknoraBackend:
                 "disable_title": True,
                 "channel": "api",
             }
+        return endpoint, body
 
-        response = self._request(
-            "POST",
-            endpoint,
-            json=body,
-        )
+    def _do_chat(self, endpoint: str, body: dict[str, Any], backend_kb_id: str) -> tuple[str, list[RetrievalResult]]:
+        response = self._request("POST", endpoint, json=body)
         self._raise(response)
-        answer, chunks = self._parse_sse_response(response.text, backend_kb_id)
-        return AskResult(answer=answer, chunks=chunks, session_id=session_id), (chat_id or "")
+        return self._parse_sse_response(response.text, backend_kb_id)
+
+    @staticmethod
+    def _is_missing_model_error(exc: Exception) -> bool:
+        """True when Weknora reports the agent's model fields aren't configured.
+
+        Matches both ``set model_id`` and ``set rerank_model_id`` on the agent.
+        When rerank can't be self-healed (backend has no rerank_model_id configured),
+        :meth:`_friendly_missing_model_error` rewrites this into a clear hint.
+        """
+        message = str(exc).lower()
+        return ("model_id" in message and "not configured" in message) or (
+            "rerank_model_id" in message and "not configured" in message
+        )
+
+    def _friendly_missing_model_error(self, exc: Exception) -> RuntimeError:
+        """Turn Weknora's terse config error into an actionable message.
+
+        - missing chat model    → tell user to set summary_model_id on the backend
+        - missing rerank model  → tell user to set rerank_model_id on the backend
+        """
+        message = str(exc).lower()
+        if "rerank_model_id" in message:
+            hint = (
+                "Weknora agent 报错：未配置 rerank 模型。"
+                "请在系统配置里给该 backend 填上 rerank_model_id 后重试。"
+            )
+        elif "model_id" in message:
+            hint = (
+                "Weknora agent 报错：未配置 chat 模型。"
+                "请在系统配置里给该 backend 填上 summary_model_id（LLM 模型）后重试。"
+            )
+        else:
+            return RuntimeError(str(exc))
+        return RuntimeError(hint)
 
     def list_agents(self) -> list[dict[str, Any]]:
         """List all agents from Weknora."""
@@ -357,6 +420,79 @@ class WeknoraBackend:
         created = self.create_agent("AgentBridge混合智能体", preset)
         self._hybrid_agent_id = created["id"]
         return self._hybrid_agent_id
+
+    def _get_agent(self, agent_id: str) -> dict[str, Any]:
+        """GET a single agent's full payload (including config)."""
+        response = self._request("GET", f"/api/v1/agents/{agent_id}")
+        self._raise(response)
+        return self._data(response) or {}
+
+    def _update_agent(self, agent_id: str, agent_payload: dict[str, Any]) -> dict[str, Any]:
+        """PUT (full overwrite) an agent. Caller must GET first and merge changes.
+
+        Weknora's PUT replaces the entire resource — sending a partial body
+        silently nulls every omitted field (we learned this the hard way).
+        """
+        response = self._request("PUT", f"/api/v1/agents/{agent_id}", json=agent_payload)
+        self._raise(response)
+        return self._data(response) or {}
+
+    def ensure_agent_models(self, agent_id: str) -> bool:
+        """Fill empty model_id / rerank_model_id on an agent from backend config.
+
+        Returns True if the agent was patched, False if nothing changed.
+        Skips silently when the backend has no corresponding model configured
+        (e.g. rerank_model_id unset) — the caller decides how to surface that.
+        """
+        agent = self._get_agent(agent_id)
+        if not agent:
+            return False
+        config: dict[str, Any] = dict(agent.get("config") or {})
+        changed = False
+
+        if not config.get("model_id") and self.summary_model_id:
+            resolved = self._resolve_model_id(self.summary_model_id)
+            if resolved:
+                config["model_id"] = resolved
+                changed = True
+
+        if not config.get("rerank_model_id") and self.rerank_model_id:
+            resolved_rerank = self._resolve_model_id(self.rerank_model_id)
+            if resolved_rerank:
+                config["rerank_model_id"] = resolved_rerank
+                changed = True
+
+        if not changed:
+            return False
+
+        # Preserve every top-level field — PUT is a full overwrite.
+        patched = dict(agent)
+        patched["config"] = config
+        self._update_agent(agent_id, patched)
+        logger.info("agent '%s' 缺失模型已自动补全 (model_id/rerank_model_id)", agent_id)
+        return True
+
+    def ensure_all_agent_models(self) -> int:
+        """Run ensure_agent_models across every agent. Returns patch count.
+
+        Best-effort: a single agent failure does not abort the rest.
+        """
+        try:
+            agents = self.list_agents()
+        except Exception:
+            logger.warning("列出 agent 失败，跳过模型自愈", exc_info=True)
+            return 0
+        patched = 0
+        for agent in agents:
+            agent_id = agent.get("id") if isinstance(agent, dict) else None
+            if not agent_id:
+                continue
+            try:
+                if self.ensure_agent_models(agent_id):
+                    patched += 1
+            except Exception:
+                logger.warning("agent '%s' 模型自愈失败", agent_id, exc_info=True)
+        return patched
 
     def _create_session(self) -> str:
         response = self._request(

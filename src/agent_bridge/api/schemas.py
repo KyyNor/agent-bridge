@@ -420,6 +420,7 @@ class UpsertBackendRequest(BaseModel):
     timeout: int = 120
     embedding_model_id: str | None = None
     summary_model_id: str | None = None
+    rerank_model_id: str | None = None
 
 
 class UpdateBackendRequest(BaseModel):
@@ -429,3 +430,4 @@ class UpdateBackendRequest(BaseModel):
     timeout: int | None = None
     embedding_model_id: str | None = None
     summary_model_id: str | None = None
+    rerank_model_id: str | None = None

@@ -289,6 +289,11 @@ class SQLiteStore:
                 },
             )
             self._migrate_knowledge_folders(conn)
+            self._ensure_columns(
+                conn,
+                "backends",
+                {"rerank_model_id": "TEXT"},
+            )
 
             self.governance._migrate_tool_call_logs_nullable_profile(conn)
             self._ensure_columns(

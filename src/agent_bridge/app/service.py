@@ -214,6 +214,12 @@ class AgentBridgeService:
                     adapter.ensure_hybrid_agent()
                 except Exception:
                     logger.warning("确保后端 '%s' 混合智能体失败", slug, exc_info=True)
+                try:
+                    patched = adapter.ensure_all_agent_models()
+                    if patched:
+                        logger.info("后端 '%s' 自动补全 %d 个 agent 的模型配置", slug, patched)
+                except Exception:
+                    logger.warning("后端 '%s' agent 模型自愈失败", slug, exc_info=True)
 
     def ensure_managed_plugins(self) -> dict[str, Any]:
         """按 sync_config 拉取/更新 understand-anything 与 claude-mem 两个托管插件仓库。"""
@@ -2226,7 +2232,8 @@ class AgentBridgeService:
 
     def add_backend(self, actor: str, slug: str, backend_type: str, base_url: str | None = None,
                     api_key: str | None = None, timeout: int = 120,
-                    embedding_model_id: str | None = None, summary_model_id: str | None = None) -> dict[str, Any]:
+                    embedding_model_id: str | None = None, summary_model_id: str | None = None,
+                    rerank_model_id: str | None = None) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if backend_type not in SUPPORTED_BACKEND_TYPES:
             raise ValidationError(f"unsupported backend type: {backend_type}")
@@ -2234,11 +2241,13 @@ class AgentBridgeService:
             slug=slug, backend_type=backend_type, base_url=base_url,
             api_key=api_key, timeout=timeout,
             embedding_model_id=embedding_model_id, summary_model_id=summary_model_id,
+            rerank_model_id=rerank_model_id,
         )
         config = BackendConfig(
             slug=slug, backend_type=backend_type, base_url=base_url,
             api_key=api_key, timeout=timeout,
             embedding_model_id=embedding_model_id, summary_model_id=summary_model_id,
+            rerank_model_id=rerank_model_id,
         )
         if self.registry:
             self.registry.add_backend(config)
@@ -2251,7 +2260,8 @@ class AgentBridgeService:
     def update_backend(self, actor: str, slug: str, backend_type: str | None = None,
                        base_url: str | None = None, api_key: str | None = None,
                        timeout: int | None = None, embedding_model_id: str | None = None,
-                       summary_model_id: str | None = None) -> dict[str, Any]:
+                       summary_model_id: str | None = None,
+                       rerank_model_id: str | None = None) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         existing = self.store.get_backend(slug)
         if existing is None:
@@ -2266,6 +2276,7 @@ class AgentBridgeService:
             api_key=resolved_key, timeout=timeout if timeout is not None else existing.get("timeout", 120),
             embedding_model_id=embedding_model_id if embedding_model_id is not None else existing.get("embedding_model_id"),
             summary_model_id=summary_model_id if summary_model_id is not None else existing.get("summary_model_id"),
+            rerank_model_id=rerank_model_id if rerank_model_id is not None else existing.get("rerank_model_id"),
         )
         config = BackendConfig(
             slug=slug, backend_type=resolved_type,
@@ -2273,6 +2284,7 @@ class AgentBridgeService:
             timeout=row.get("timeout", 120),
             embedding_model_id=row.get("embedding_model_id"),
             summary_model_id=row.get("summary_model_id"),
+            rerank_model_id=row.get("rerank_model_id"),
         )
         if self.registry:
             self.registry.update_backend(config)

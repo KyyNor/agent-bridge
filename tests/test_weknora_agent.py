@@ -128,3 +128,329 @@ def test_ask_passes_agent_id(backend):
     assert body.get("agent_enabled") is True
     assert body.get("agent_id") == "my-agent"
     assert body.get("web_search_enabled") is False
+
+
+# ---------- ensure_agent_models ----------
+
+def _agent_get_response(agent_id="ag-1", model_id="", rerank_model_id=""):
+    """Build a GET /agents/{id} response with the given config."""
+    return _mock_response(json_data={
+        "success": True,
+        "data": {
+            "id": agent_id,
+            "name": "test-agent",
+            "description": "",
+            "avatar": "",
+            "is_builtin": False,
+            "tenant_id": 10000,
+            "created_by": "",
+            "config": {
+                "agent_mode": "quick-answer",
+                "system_prompt": "preserve me",
+                "model_id": model_id,
+                "rerank_model_id": rerank_model_id,
+                "temperature": 0.7,
+                "max_iterations": 10,
+            },
+        },
+    })
+
+
+def test_ensure_agent_models_fills_empty_model_id():
+    """model_id empty + backend has summary_model_id → PUT with resolved UUID."""
+    backend = WeknoraBackend(
+        base_url="http://localhost", api_key="k",
+        summary_model_id="chat-model-uuid",
+    )
+    # _resolve_model_id hits /api/v1/models; bypass it by pre-populating the cache
+    backend._model_name_to_id = {"chat-model-uuid": "uuid-chat-123"}
+
+    get_resp = _agent_get_response(model_id="", rerank_model_id="")
+    put_resp = _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
+    captured = {}
+
+    def mock_request(method, url, **kwargs):
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return get_resp
+        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
+            captured["body"] = kwargs.get("json")
+            return put_resp
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        patched = backend.ensure_agent_models("ag-1")
+
+    assert patched is True
+    config = captured["body"]["config"]
+    assert config["model_id"] == "uuid-chat-123"
+    # Other fields preserved (PUT is full-overwrite, must not lose them)
+    assert config["system_prompt"] == "preserve me"
+    assert config["agent_mode"] == "quick-answer"
+    assert config["temperature"] == 0.7
+    # Top-level fields preserved
+    assert captured["body"]["name"] == "test-agent"
+    assert captured["body"]["is_builtin"] is False
+
+
+def test_ensure_agent_models_skips_when_already_set():
+    """model_id already configured → no PUT."""
+    backend = WeknoraBackend(
+        base_url="http://localhost", api_key="k",
+        summary_model_id="chat-model-uuid",
+    )
+    get_resp = _agent_get_response(model_id="existing-uuid", rerank_model_id="")
+
+    put_called = []
+    def mock_request(method, url, **kwargs):
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return get_resp
+        if method == "PUT":
+            put_called.append(True)
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        patched = backend.ensure_agent_models("ag-1")
+
+    assert patched is False
+    assert put_called == []
+
+
+def test_ensure_agent_models_skips_when_no_summary_configured():
+    """backend has no summary_model_id → can't heal model_id, skip PUT."""
+    backend = WeknoraBackend(base_url="http://localhost", api_key="k")  # no summary_model_id
+    get_resp = _agent_get_response(model_id="", rerank_model_id="")
+
+    put_called = []
+    def mock_request(method, url, **kwargs):
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return get_resp
+        if method == "PUT":
+            put_called.append(True)
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        patched = backend.ensure_agent_models("ag-1")
+
+    assert patched is False
+    assert put_called == []
+
+
+def test_ensure_agent_models_fills_rerank_when_configured():
+    """rerank_model_id empty + backend has rerank config → fill it too."""
+    backend = WeknoraBackend(
+        base_url="http://localhost", api_key="k",
+        summary_model_id="chat-uuid",
+        rerank_model_id="rerank-uuid",
+    )
+    backend._model_name_to_id = {"chat-uuid": "uuid-chat", "rerank-uuid": "uuid-rerank"}
+    get_resp = _agent_get_response(model_id="", rerank_model_id="")
+
+    captured = {}
+    def mock_request(method, url, **kwargs):
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return get_resp
+        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
+            captured["body"] = kwargs.get("json")
+            return _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        patched = backend.ensure_agent_models("ag-1")
+
+    assert patched is True
+    config = captured["body"]["config"]
+    assert config["model_id"] == "uuid-chat"
+    assert config["rerank_model_id"] == "uuid-rerank"
+
+
+def test_ensure_agent_models_leaves_rerank_empty_when_not_configured():
+    """rerank_model_id empty + backend has no rerank config → rerank stays empty (skipped)."""
+    backend = WeknoraBackend(
+        base_url="http://localhost", api_key="k",
+        summary_model_id="chat-uuid",
+        # no rerank_model_id
+    )
+    backend._model_name_to_id = {"chat-uuid": "uuid-chat"}
+    get_resp = _agent_get_response(model_id="", rerank_model_id="")
+
+    captured = {}
+    def mock_request(method, url, **kwargs):
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return get_resp
+        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
+            captured["body"] = kwargs.get("json")
+            return _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        patched = backend.ensure_agent_models("ag-1")
+
+    # model_id was filled → patched=True
+    assert patched is True
+    # but rerank_model_id is still "" (we didn't have a value to fill)
+    assert captured["body"]["config"]["rerank_model_id"] == ""
+
+
+# ---------- ask() self-heal ----------
+
+def _sse_error_response(message: str):
+    """Build a 200 OK SSE response carrying a single error event."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.text = (
+        'event:message\n'
+        f'data:{{"response_type":"error","content":"{message}","done":true}}\n\n'
+    )
+    resp.json.return_value = {"success": True}
+    return resp
+
+
+def _sse_answer_response(content: str = "healed answer"):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.text = (
+        'event:message\n'
+        f'data:{{"response_type":"answer","content":"{content}","done":true}}\n\n'
+    )
+    resp.json.return_value = {"success": True}
+    return resp
+
+
+def test_ask_self_heals_on_chat_model_not_configured():
+    """First ask hits 'model_id not configured' → ensure fills it → retry succeeds."""
+    backend = WeknoraBackend(
+        base_url="http://localhost", api_key="k",
+        summary_model_id="chat-uuid",
+    )
+    backend._model_name_to_id = {"chat-uuid": "uuid-chat"}
+
+    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
+    error_resp = _sse_error_response(
+        "chat model is not configured: please set model_id on agent ag-1"
+    )
+    answer_resp = _sse_answer_response("healed answer")
+    agent_get_resp = _agent_get_response(model_id="", rerank_model_id="")
+    agent_put_resp = _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
+
+    chat_calls = []
+    def mock_request(method, url, **kwargs):
+        if method == "POST" and "sessions" in url:
+            return session_resp
+        if method == "POST" and "agent-chat" in url:
+            chat_calls.append(url)
+            # First call errors, second succeeds
+            return error_resp if len(chat_calls) == 1 else answer_resp
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return agent_get_resp
+        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
+            return agent_put_resp
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        result, _ = backend.ask("kb-1", "q", agent_id="ag-1")
+
+    # Retried once after healing
+    assert len(chat_calls) == 2
+    assert result.answer == "healed answer"
+
+
+def test_ask_friendly_error_when_rerank_cannot_be_healed():
+    """rerank missing + backend has no rerank_model_id → friendly RuntimeError.
+
+    model_id *can* be healed (backend has summary_model_id), so we heal + retry.
+    The retry still fails on rerank → we surface a friendly, actionable error
+    instead of the raw SSE message.
+    """
+    backend = WeknoraBackend(
+        base_url="http://localhost", api_key="k",
+        summary_model_id="chat-uuid",
+        # no rerank_model_id configured
+    )
+    backend._model_name_to_id = {"chat-uuid": "uuid-chat"}
+
+    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
+    error_resp = _sse_error_response(
+        "rerank model is not configured: please set rerank_model_id on the agent"
+    )
+    agent_get_resp = _agent_get_response(model_id="", rerank_model_id="")
+    agent_put_resp = _mock_response(json_data={"success": True, "data": {"id": "ag-1"}})
+
+    chat_calls = []
+    def mock_request(method, url, **kwargs):
+        if method == "POST" and "sessions" in url:
+            return session_resp
+        if method == "POST" and "agent-chat" in url:
+            chat_calls.append(url)
+            return error_resp
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return agent_get_resp
+        if method == "PUT" and url.endswith("/api/v1/agents/ag-1"):
+            return agent_put_resp
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        with pytest.raises(RuntimeError, match="rerank_model_id") as exc_info:
+            backend.ask("kb-1", "q", agent_id="ag-1")
+
+    # Healed (model_id filled) → retried once → still failed on rerank → friendly error.
+    assert len(chat_calls) == 2
+    # Friendly message names the field and tells the user what to do
+    assert "rerank_model_id" in str(exc_info.value)
+    assert "系统配置" in str(exc_info.value)
+
+
+def test_ask_passes_through_non_model_errors():
+    """A non-model-config error (e.g. network/500) is not self-healed."""
+    backend = WeknoraBackend(
+        base_url="http://localhost", api_key="k",
+        summary_model_id="chat-uuid",
+    )
+    backend._model_name_to_id = {"chat-uuid": "uuid-chat"}
+
+    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
+    error_resp = _sse_error_response("something else went wrong")
+
+    chat_calls = []
+    def mock_request(method, url, **kwargs):
+        if method == "POST" and "sessions" in url:
+            return session_resp
+        if method == "POST" and "agent-chat" in url:
+            chat_calls.append(url)
+            return error_resp
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        with pytest.raises(RuntimeError, match="something else went wrong"):
+            backend.ask("kb-1", "q", agent_id="ag-1")
+
+    # No heal attempt, no retry
+    assert len(chat_calls) == 1
+
+
+def test_ask_friendly_error_when_chat_model_cannot_be_healed():
+    """chat model missing + backend has no summary_model_id → friendly error, no retry."""
+    backend = WeknoraBackend(base_url="http://localhost", api_key="k")  # no summary_model_id
+    session_resp = _mock_response(json_data={"data": {"id": "sess-1"}, "success": True})
+    error_resp = _sse_error_response(
+        "chat model is not configured: please set model_id on agent ag-1"
+    )
+    agent_get_resp = _agent_get_response(model_id="", rerank_model_id="")
+
+    chat_calls = []
+    def mock_request(method, url, **kwargs):
+        if method == "POST" and "sessions" in url:
+            return session_resp
+        if method == "POST" and "agent-chat" in url:
+            chat_calls.append(url)
+            return error_resp
+        if method == "GET" and url.endswith("/api/v1/agents/ag-1"):
+            return agent_get_resp
+        return _mock_response()
+
+    with patch("httpx.request", side_effect=mock_request):
+        with pytest.raises(RuntimeError, match="summary_model_id") as exc_info:
+            backend.ask("kb-1", "q", agent_id="ag-1")
+
+    # No heal possible (no summary_model_id) → no retry, friendly error
+    assert len(chat_calls) == 1
+    assert "summary_model_id" in str(exc_info.value)
