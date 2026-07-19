@@ -29,6 +29,7 @@ import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
+import { workflowNodeToneClass, workflowNodeTypeText } from './workflowNodeVisuals'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
   ALL_STATUS_SENTINEL,
@@ -3383,21 +3384,35 @@ async function confirmClearWorkflow() {
                   @select-node="selectWorkflowNode"
                   @select-edge="selectWorkflowEdge"
                   @add-node="addNode"
+                  @deselect="setConfigDrawerOpen(false)"
                 />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <!-- ============ 右栏：元数据 ↔ 节点/边配置 切换 ============ -->
+        <!-- ============ 右栏：选中节点/边时显示配置，否则显示工作流信息（互斥） ============ -->
         <div class="space-y-4">
-          <!-- 默认态：选中节点/边时显示配置面板（内联在右栏，替代 overlay drawer） -->
+          <!-- 配置态：选中节点/边且 overlay 模式时，整栏只显示配置（元数据隐藏） -->
           <Card v-if="(selectedNode || selectedEdge) && configDrawerOpen && configDrawerMode === 'overlay'" class="shadow-card">
             <CardContent class="space-y-3 p-4">
               <div class="flex items-center justify-between gap-2 border-b pb-2">
                 <div class="min-w-0">
+                  <!-- 节点类型 tag：颜色与画布一致；边则显示「连线」中性 tag -->
+                  <span
+                    v-if="selectedNode"
+                    class="mb-1 inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-[11px] font-medium"
+                    :class="workflowNodeToneClass(selectedNode.type, 'badge')"
+                  >
+                    <span class="h-1.5 w-1.5 rounded-full" :class="workflowNodeToneClass(selectedNode.type, 'rail')" />
+                    {{ workflowNodeTypeText(selectedNode.type) }}
+                  </span>
+                  <span v-else class="mb-1 inline-flex items-center gap-1.5 rounded-sm bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+                    连线
+                  </span>
                   <div class="truncate text-sm font-semibold text-foreground">{{ configDrawerTitle }}</div>
-                  <div class="mt-0.5 text-xs text-muted-foreground">点击画布空白处返回元数据</div>
+                  <div class="mt-0.5 text-xs text-muted-foreground">点击画布空白处或 ✕ 返回工作流信息</div>
                 </div>
                 <div class="flex shrink-0 items-center gap-1">
                   <Button variant="ghost" size="sm" class="h-7 px-2" title="全屏编辑" @click="setConfigDrawerMode('fullscreen')">
@@ -3430,105 +3445,102 @@ async function confirmClearWorkflow() {
             </CardContent>
           </Card>
 
-          <!-- 元数据：未选中节点/边时显示；选中时折叠为标题条（仍可改基础信息） -->
-          <Card class="shadow-card">
-            <CardContent class="space-y-3 p-4">
-              <div class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">基础信息</div>
-              <div>
-                <label class="mb-1 block text-xs text-muted-foreground">workflow_id</label>
-                <Input v-model="form.workflow_key" class="h-9 font-mono text-xs" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-muted-foreground">名称</label>
-                <Input v-model="form.name" class="h-9" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-muted-foreground">关联 profile</label>
-                <Select v-model="form.profile_key">
-                  <SelectTrigger class="h-9">
-                    <SelectValue placeholder="选择 profile" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="profile in profiles" :key="profile.profile_key" :value="profile.profile_key">
-                      {{ profile.name }} / {{ profile.profile_key }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-muted-foreground">描述</label>
-                <Input v-model="form.description" class="h-9" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <!-- 运行配置 -->
-          <Card class="shadow-card">
-            <CardContent class="space-y-3 p-4">
-              <div class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">运行配置</div>
-              <div class="flex items-center justify-between gap-3">
-                <label class="text-xs text-muted-foreground">状态</label>
-                <div class="flex items-center gap-2">
-                  <StatusBadge :status="form.status === 'active' ? 'enabled' : 'disabled'" />
-                  <Select v-model="form.status">
-                    <SelectTrigger class="h-8 w-24 text-xs">
-                      <SelectValue />
+          <!-- 工作流信息态：未选中节点/边时显示（基础信息 + 运行配置合并为一张卡） -->
+          <template v-else>
+            <Card class="shadow-card">
+              <CardContent class="space-y-3 p-4">
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">工作流信息</div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">workflow_id</label>
+                  <Input v-model="form.workflow_key" class="h-9 font-mono text-xs" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">名称</label>
+                  <Input v-model="form.name" class="h-9" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">关联 profile</label>
+                  <Select v-model="form.profile_key">
+                    <SelectTrigger class="h-9">
+                      <SelectValue placeholder="选择 profile" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="active">启用</SelectItem>
-                      <SelectItem value="disabled">停用</SelectItem>
+                      <SelectItem v-for="profile in profiles" :key="profile.profile_key" :value="profile.profile_key">
+                        {{ profile.name }} / {{ profile.profile_key }}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-              <div>
-                <label class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  类型
-                  <span class="group relative inline-flex cursor-help items-center text-muted-foreground/70" tabindex="0">
-                    <HelpCircle class="h-3.5 w-3.5" />
-                    <span
-                      class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-64 -translate-x-1/2 translate-y-1 rounded-md border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
-                    >
-                      总结型工作流会固定 Markdown 与 HTML 输出节点；HTML 失败仅记为 warning，Markdown 主产物仍可保留。
-                    </span>
-                  </span>
-                </label>
-                <Select :model-value="form.workflow_type" @update:model-value="(v) => changeWorkflowType(v as WorkflowType)">
-                  <SelectTrigger class="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="operation">操作</SelectItem>
-                    <SelectItem value="summary">总结</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          <!-- 测试输入：折叠块，仅 !hasTaskNode 显示 -->
-          <details v-if="!hasTaskNode" class="shadow-card rounded-lg bg-card ring-1 ring-foreground/10">
-            <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
-              <span>测试输入</span>
-              <span class="text-xs font-normal text-muted-foreground">{{ manualInputFields.length }} 个字段 · 点击展开</span>
-            </summary>
-            <div class="space-y-3 border-t px-4 py-3">
-              <div>
-                <div class="mb-2 text-xs font-medium text-muted-foreground">逐字段输入</div>
-                <div class="space-y-2">
-                  <div v-for="field in manualInputFields" :key="field.path">
-                    <label class="mb-1 block text-xs text-muted-foreground">{{ field.path }}<span v-if="field.required" class="text-destructive"> *</span></label>
-                    <Input v-model="manualInputValues[field.path]" :placeholder="field.description || field.type" class="h-9" />
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">描述</label>
+                  <Input v-model="form.description" class="h-9" />
+                </div>
+                <div class="border-t pt-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="text-xs text-muted-foreground">状态</label>
+                    <div class="flex items-center gap-2">
+                      <StatusBadge :status="form.status === 'active' ? 'enabled' : 'disabled'" />
+                      <Select v-model="form.status">
+                        <SelectTrigger class="h-8 w-24 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">启用</SelectItem>
+                          <SelectItem value="disabled">停用</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <p v-if="!manualInputFields.length" class="text-xs text-muted-foreground">当前脚本参数没有可推导输入字段。</p>
+                  <div class="mt-3">
+                    <label class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      类型
+                      <span class="group relative inline-flex cursor-help items-center text-muted-foreground/70" tabindex="0">
+                        <HelpCircle class="h-3.5 w-3.5" />
+                        <span
+                          class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-64 -translate-x-1/2 translate-y-1 rounded-md border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
+                        >
+                          总结型工作流会固定 Markdown 与 HTML 输出节点；HTML 失败仅记为 warning，Markdown 主产物仍可保留。
+                        </span>
+                      </span>
+                    </label>
+                    <Select :model-value="form.workflow_type" @update:model-value="(v) => changeWorkflowType(v as WorkflowType)">
+                      <SelectTrigger class="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="operation">操作</SelectItem>
+                        <SelectItem value="summary">总结</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <!-- 测试输入：折叠块，仅 !hasTaskNode 显示 -->
+            <details v-if="!hasTaskNode" class="shadow-card rounded-lg bg-card ring-1 ring-foreground/10">
+              <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+                <span>测试输入</span>
+                <span class="text-xs font-normal text-muted-foreground">{{ manualInputFields.length }} 个字段 · 点击展开</span>
+              </summary>
+              <div class="space-y-3 border-t px-4 py-3">
+                <div>
+                  <div class="mb-2 text-xs font-medium text-muted-foreground">逐字段输入</div>
+                  <div class="space-y-2">
+                    <div v-for="field in manualInputFields" :key="field.path">
+                      <label class="mb-1 block text-xs text-muted-foreground">{{ field.path }}<span v-if="field.required" class="text-destructive"> *</span></label>
+                      <Input v-model="manualInputValues[field.path]" :placeholder="field.description || field.type" class="h-9" />
+                    </div>
+                    <p v-if="!manualInputFields.length" class="text-xs text-muted-foreground">当前脚本参数没有可推导输入字段。</p>
+                  </div>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-muted-foreground">高级 JSON</label>
+                  <textarea v-model="advancedInput" class="min-h-32 w-full rounded-md border bg-background p-2 font-mono text-xs" />
                 </div>
               </div>
-              <div>
-                <label class="mb-1 block text-xs font-medium text-muted-foreground">高级 JSON</label>
-                <textarea v-model="advancedInput" class="min-h-32 w-full rounded-md border bg-background p-2 font-mono text-xs" />
-              </div>
-            </div>
-          </details>
+            </details>
+          </template>
         </div>
 
         <!-- fullscreen drawer：锚定到此 relative grid，inset:0 覆盖画布+右栏 -->
