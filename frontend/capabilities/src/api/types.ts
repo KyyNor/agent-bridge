@@ -980,6 +980,7 @@ export interface BackendInfo {
   timeout: number
   embedding_model_id: string | null
   summary_model_id: string | null
+  rerank_model_id: string | null
   runtime_status: string
 }
 

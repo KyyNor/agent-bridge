@@ -855,9 +855,9 @@ export const api = {
 
   // Backends
   listBackends: () => get<BackendInfo[]>('/backends'),
-  createBackend: (data: { slug: string; backend_type: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null }) =>
+  createBackend: (data: { slug: string; backend_type: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null }) =>
     post<BackendInfo>('/backends', data),
-  updateBackend: (slug: string, data: { backend_type?: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null }) =>
+  updateBackend: (slug: string, data: { backend_type?: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null }) =>
     put<BackendInfo>(`/backends/${slug}`, data),
   deleteBackend: (slug: string) =>
     post<{ slug: string; status: string }>(`/backends/${slug}/delete`),

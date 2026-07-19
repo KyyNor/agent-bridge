@@ -63,7 +63,7 @@ const schedulerStatus = ref<SchedulerStatus | null>(null)
 // Backends
 const backends = ref<BackendInfo[]>([])
 const showBackendDialog = ref(false)
-const backendForm = ref({ slug: '', backend_type: 'ragflow', base_url: '', api_key: '', timeout: 120, embedding_model_id: '', summary_model_id: '' })
+const backendForm = ref({ slug: '', backend_type: 'ragflow', base_url: '', api_key: '', timeout: 120, embedding_model_id: '', summary_model_id: '', rerank_model_id: '' })
 const backendSaving = ref(false)
 const backendError = ref('')
 const editingBackend = ref(false)
@@ -343,7 +343,7 @@ async function deleteCategory(key: string) {
 
 function openAddBackend() {
   editingBackend.value = false
-  backendForm.value = { slug: '', backend_type: 'ragflow', base_url: '', api_key: '', timeout: 120, embedding_model_id: '', summary_model_id: '' }
+  backendForm.value = { slug: '', backend_type: 'ragflow', base_url: '', api_key: '', timeout: 120, embedding_model_id: '', summary_model_id: '', rerank_model_id: '' }
   backendError.value = ''
   showBackendDialog.value = true
 }
@@ -358,6 +358,7 @@ function openEditBackend(b: BackendInfo) {
     timeout: b.timeout,
     embedding_model_id: b.embedding_model_id || '',
     summary_model_id: b.summary_model_id || '',
+    rerank_model_id: b.rerank_model_id || '',
   }
   backendError.value = ''
   showBackendDialog.value = true
@@ -383,6 +384,9 @@ async function saveBackend() {
     if (supportsModelConfig.value) {
       data.embedding_model_id = backendForm.value.embedding_model_id || null
       data.summary_model_id = backendForm.value.summary_model_id || null
+    }
+    if (isWeknora.value) {
+      data.rerank_model_id = backendForm.value.rerank_model_id || null
     }
 
     if (editingBackend.value) {
@@ -900,6 +904,10 @@ async function deleteBackend(slug: string) {
           <div v-if="supportsModelConfig" class="space-y-2">
             <label class="text-sm font-medium">{{ isPageIndex ? 'Retrieve / Ask Model' : 'Summary Model ID' }}</label>
             <Input v-model="backendForm.summary_model_id" :placeholder="isPageIndex ? 'openai/qwen-long' : 'chat-1'" />
+          </div>
+          <div v-if="isWeknora" class="space-y-2">
+            <label class="text-sm font-medium">Rerank Model ID<span class="text-muted-foreground font-normal">（可选，hybrid 类 agent 需要）</span></label>
+            <Input v-model="backendForm.rerank_model_id" placeholder="留空则不自动配置 rerank" />
           </div>
           <div class="space-y-2">
             <label class="text-sm font-medium">超时（秒）</label>
