@@ -36,7 +36,7 @@ test('simple object schema round trips through field rows', () => {
   assert.deepEqual(fieldsToSchema(fields), schema)
 })
 
-test('nested schema stays in advanced mode without dropping data', () => {
+test('nested schema is available in fields mode without dropping data', () => {
   const schema = {
     type: 'object',
     properties: {
@@ -49,7 +49,84 @@ test('nested schema stays in advanced mode without dropping data', () => {
     },
   }
 
-  assert.equal(isSimpleObjectSchema(schema), false)
+  assert.equal(isSimpleObjectSchema(schema), true)
+  assert.deepEqual(fieldsToSchema(schemaToFields(schema), schema), schema)
+})
+
+test('standard constraints and composition keywords stay editable and round trip', () => {
+  const schema = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $defs: {
+      resultId: { type: 'string', format: 'uuid' },
+    },
+    type: 'object',
+    properties: {
+      status: {
+        type: 'string',
+        enum: ['draft', 'published'],
+        default: 'draft',
+        minLength: 1,
+        maxLength: 16,
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string', pattern: '^[a-z]+$' },
+        minItems: 1,
+        uniqueItems: true,
+      },
+      payload: {
+        type: 'object',
+        properties: {
+          id: { $ref: '#/$defs/resultId' },
+        },
+        required: ['id'],
+        additionalProperties: false,
+      },
+      optional: {
+        type: ['string', 'null'],
+      },
+    },
+    required: ['status'],
+    additionalProperties: false,
+  }
+
+  assert.equal(isSimpleObjectSchema(schema), true)
+  const fields = schemaToFields(schema)
+  assert.equal(fields.find(field => field.name === 'status')?.type, 'string')
+  assert.equal(fields.find(field => field.name === 'optional')?.type, 'union')
+  assert.deepEqual(fieldsToSchema(fields, schema), schema)
+})
+
+test('object-like schemas can omit or union the root type without being flattened', () => {
+  const withoutType = {
+    properties: { value: { type: 'string' } },
+    required: ['value'],
+  }
+  const nullableObject = {
+    type: ['object', 'null'],
+    properties: { value: { type: 'string' } },
+    required: [],
+  }
+
+  assert.equal(isSimpleObjectSchema(withoutType), true)
+  assert.equal(isSimpleObjectSchema(nullableObject), true)
+  assert.deepEqual(fieldsToSchema(schemaToFields(withoutType), withoutType), withoutType)
+  assert.deepEqual(fieldsToSchema(schemaToFields(nullableObject), nullableObject), nullableObject)
+})
+
+test('null is a supported compact field type', () => {
+  const schema = {
+    type: 'object',
+    properties: { value: { type: 'null' } },
+    required: [],
+    additionalProperties: true,
+  }
+
+  assert.equal(isSimpleObjectSchema(schema), true)
+  assert.deepEqual(schemaToFields(schema), [
+    { name: 'value', type: 'null', required: false, description: '' },
+  ])
+  assert.deepEqual(fieldsToSchema(schemaToFields(schema), schema), schema)
 })
 
 test('field rows preserve supported top-level schema metadata', () => {

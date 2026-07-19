@@ -16,8 +16,12 @@ import {
   SCHEMA_FIELD_TYPES,
   cloneSchemaValue,
   fieldsToSchema,
+  isEditableFieldSchema,
+  isSchemaFieldType,
   isSimpleObjectSchema,
   parseSchemaObjectText as parseSchemaText,
+  schemaFieldDisplayType,
+  schemaFieldTypeLabel,
   schemaToFields,
   type SchemaField,
   validateSchemaFieldNames,
@@ -39,6 +43,7 @@ const fields = ref<SchemaField[]>([])
 const schemaText = ref('')
 const validationMessage = ref('')
 const baseSchema = ref<Record<string, unknown> | null>(null)
+const fieldSchemaDrafts = ref<Record<number, string>>({})
 
 const fieldModeAvailable = computed(() => {
   const parsed = parseSchemaText(schemaText.value)
@@ -91,6 +96,15 @@ function validateFieldRows(): string {
   return validateSchemaFieldNames(fields.value, props.label)
 }
 
+function validateFieldSchemaDrafts(): string {
+  for (const text of Object.values(fieldSchemaDrafts.value)) {
+    const parsed = parseSchemaText(text)
+    if (!parsed.ok) return `${props.label}字段 Schema：${parsed.message}`
+    if (!isEditableFieldSchema(parsed.value)) return `${props.label}字段包含暂不支持的 Schema 关键字`
+  }
+  return ''
+}
+
 function setValidationMessage(message: string) {
   validationMessage.value = message
   emit('validity-change', !message, message)
@@ -101,6 +115,10 @@ function syncFieldSchema() {
   setValidationMessage(message)
   if (message) return false
 
+  const draftMessage = validateFieldSchemaDrafts()
+  setValidationMessage(draftMessage)
+  if (draftMessage) return false
+
   const normalizedFields = fields.value.map(field => ({
     ...field,
     name: field.name.trim(),
@@ -108,6 +126,7 @@ function syncFieldSchema() {
   }))
   const nextSchema = fieldsToSchema(normalizedFields, baseSchema.value)
   baseSchema.value = structuredClone(nextSchema)
+  fieldSchemaDrafts.value = {}
   emit('update:modelValue', nextSchema)
   return true
 }
@@ -146,7 +165,7 @@ function switchToFields() {
     return
   }
   if (!isSimpleObjectSchema(parsed.value)) {
-    setValidationMessage(`${props.label}包含高级 Schema 结构，请继续使用高级 JSON`)
+    setValidationMessage(`${props.label}包含字段编辑器暂不支持的 Schema 关键字，请继续使用高级 JSON`)
     return
   }
   setValidationMessage('')
@@ -161,6 +180,45 @@ function switchToAdvanced() {
   mode.value = 'advanced'
   setValidationMessage('')
   schemaText.value = prettyJson(normalizeSchema(props.modelValue))
+}
+
+function fieldSchemaValue(field: SchemaField): Record<string, unknown> {
+  if (field.schema) return field.schema
+  return {
+    type: field.type,
+    ...(field.description.trim() ? { description: field.description.trim() } : {}),
+  }
+}
+
+function fieldSchemaText(index: number, field: SchemaField): string {
+  return fieldSchemaDrafts.value[index] ?? prettyJson(fieldSchemaValue(field))
+}
+
+function updateFieldSchema(index: number, value: string | number) {
+  if (props.disabled) return
+  const text = String(value)
+  fieldSchemaDrafts.value = { ...fieldSchemaDrafts.value, [index]: text }
+  const parsed = parseSchemaText(text)
+  if (!parsed.ok) {
+    setValidationMessage(`${props.label}字段 Schema：${parsed.message}`)
+    return
+  }
+  if (!isEditableFieldSchema(parsed.value)) {
+    setValidationMessage(`${props.label}字段包含暂不支持的 Schema 关键字`)
+    return
+  }
+
+  const field = fields.value[index]
+  if (!field) return
+  field.schema = structuredClone(parsed.value)
+  field.type = schemaFieldDisplayType(parsed.value)
+  field.description = typeof parsed.value.description === 'string' ? parsed.value.description : ''
+  setValidationMessage('')
+  syncFieldSchema()
+}
+
+function isCompactType(type: SchemaField['type']): boolean {
+  return isSchemaFieldType(type)
 }
 
 function validate(): boolean {
@@ -189,7 +247,7 @@ defineExpose({
       <div>
         <div class="text-xs font-medium text-foreground">{{ label }}</div>
         <p class="mt-1 text-xs text-muted-foreground">
-          常见顶层 object 字段可直接编辑；复杂结构切到高级 JSON。
+          标准 JSON Schema 关键字会被保留；字段级复杂结构可在每行展开编辑。
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -236,31 +294,52 @@ defineExpose({
         <div
           v-for="(field, index) in fields"
           :key="index"
-          class="grid gap-2 p-3 md:grid-cols-[minmax(120px,1fr)_120px_72px_minmax(160px,1.5fr)_32px] md:items-center"
+          class="space-y-2 p-3"
         >
-          <Input v-model="field.name" placeholder="字段名" :disabled="disabled" @update:model-value="syncFieldSchema" />
-          <Select v-model="field.type" :disabled="disabled" @update:model-value="syncFieldSchema">
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="type in SCHEMA_FIELD_TYPES" :key="type" :value="type">{{ type }}</SelectItem>
-            </SelectContent>
-          </Select>
-          <label class="flex items-center gap-2 text-xs">
-            <input v-model="field.required" type="checkbox" :disabled="disabled" @change="syncFieldSchema" />
-            必填
-          </label>
-          <Input v-model="field.description" placeholder="字段说明" :disabled="disabled" @update:model-value="syncFieldSchema" />
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-8 w-8 p-0"
-            type="button"
-            title="删除字段"
-            :disabled="disabled"
-            @click="removeField(index)"
-          >
-            <Trash2 class="h-4 w-4" />
-          </Button>
+          <div class="grid gap-2 md:grid-cols-[minmax(120px,1fr)_120px_72px_minmax(160px,1.5fr)_32px] md:items-center">
+            <Input v-model="field.name" placeholder="字段名" :disabled="disabled" @update:model-value="syncFieldSchema" />
+            <Select v-if="isCompactType(field.type)" v-model="field.type" :disabled="disabled" @update:model-value="syncFieldSchema">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="type in SCHEMA_FIELD_TYPES" :key="type" :value="type">{{ type }}</SelectItem>
+              </SelectContent>
+            </Select>
+            <div v-else class="flex h-8 items-center rounded-sm border px-2 text-xs text-muted-foreground" :title="field.schema ? prettyJson(field.schema) : undefined">
+              {{ schemaFieldTypeLabel(field.type) }}
+            </div>
+            <label class="flex items-center gap-2 text-xs">
+              <input v-model="field.required" type="checkbox" :disabled="disabled" @change="syncFieldSchema" />
+              必填
+            </label>
+            <Input v-model="field.description" placeholder="字段说明" :disabled="disabled" @update:model-value="syncFieldSchema" />
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-8 w-8 p-0"
+              type="button"
+              title="删除字段"
+              :disabled="disabled"
+              @click="removeField(index)"
+            >
+              <Trash2 class="h-4 w-4" />
+            </Button>
+          </div>
+          <details class="rounded-sm border bg-muted/20 px-3 py-2">
+            <summary class="cursor-pointer text-xs text-muted-foreground">
+              字段 Schema JSON
+              <span v-if="field.schema" class="ml-1 text-primary">（包含高级关键字）</span>
+            </summary>
+            <Textarea
+              :model-value="fieldSchemaText(index, field)"
+              class="mt-2 min-h-[120px] font-mono text-xs"
+              spellcheck="false"
+              :disabled="disabled"
+              @update:model-value="updateFieldSchema(index, $event)"
+            />
+            <p class="mt-1 text-[11px] text-muted-foreground">
+              可在此编辑 enum、default、format、约束、items、嵌套 properties、$ref 等标准 JSON Schema 内容。
+            </p>
+          </details>
         </div>
       </div>
       <div v-else class="rounded-md border px-3 py-5 text-center text-xs text-muted-foreground">

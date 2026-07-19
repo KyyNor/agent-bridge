@@ -1,14 +1,21 @@
 import { toRaw } from 'vue'
 
-export const SCHEMA_FIELD_TYPES = ['string', 'number', 'integer', 'boolean', 'array', 'object'] as const
+export const SCHEMA_FIELD_TYPES = ['string', 'number', 'integer', 'boolean', 'array', 'object', 'null'] as const
 
 export type SchemaFieldType = (typeof SCHEMA_FIELD_TYPES)[number]
+export type SchemaFieldDisplayType = SchemaFieldType | 'any' | 'union' | 'reference'
 
 export interface SchemaField {
   name: string
-  type: SchemaFieldType
+  type: SchemaFieldDisplayType
   required: boolean
   description: string
+  /**
+   * The complete property schema when it contains keywords that the compact
+   * row editor cannot represent directly. Keeping this alongside the display
+   * fields lets the editor rename a property without flattening its schema.
+   */
+  schema?: Record<string, unknown>
 }
 
 type JsonObject = Record<string, unknown>
@@ -17,9 +24,22 @@ export function cloneSchemaValue(value: Record<string, unknown>): Record<string,
   return structuredClone(toRaw(value))
 }
 
-const COMPLEX_KEYWORDS = new Set([
+// JSON Schema 2020-12 keywords, plus the widely used draft-07 aliases. The
+// compact editor is intentionally conservative about unknown/vendor keys, but
+// it should not classify a valid standard schema as "advanced" just because it
+// uses a constraint that is not represented by the first row of controls.
+const JSON_SCHEMA_KEYS = [
+  '$anchor',
+  '$comment',
   '$defs',
+  '$dynamicAnchor',
+  '$dynamicRef',
+  '$id',
   '$ref',
+  '$schema',
+  '$vocabulary',
+  'additionalItems',
+  'additionalProperties',
   'allOf',
   'anyOf',
   'const',
@@ -28,12 +48,19 @@ const COMPLEX_KEYWORDS = new Set([
   'contentMediaType',
   'contentSchema',
   'default',
+  'definitions',
   'dependentRequired',
   'dependentSchemas',
+  'dependencies',
+  'deprecated',
+  'description',
   'else',
   'enum',
   'examples',
+  'exclusiveMaximum',
+  'exclusiveMinimum',
   'format',
+  'id',
   'if',
   'items',
   'maxContains',
@@ -41,38 +68,71 @@ const COMPLEX_KEYWORDS = new Set([
   'maxLength',
   'maxProperties',
   'maximum',
+  'maxUnevaluatedItems',
+  'maxUnevaluatedProperties',
   'minContains',
   'minItems',
   'minLength',
   'minProperties',
   'minimum',
+  'minUnevaluatedItems',
+  'minUnevaluatedProperties',
   'multipleOf',
   'not',
   'oneOf',
   'pattern',
   'patternProperties',
   'prefixItems',
-  'propertyNames',
-  'then',
-  'unevaluatedItems',
-  'unevaluatedProperties',
-])
-
-const SIMPLE_OBJECT_KEYS = [
-  '$comment',
-  '$id',
-  '$schema',
-  'additionalProperties',
-  'deprecated',
-  'description',
-  'examples',
   'properties',
+  'propertyNames',
   'readOnly',
   'required',
+  'then',
   'title',
   'type',
+  'unevaluatedItems',
+  'unevaluatedProperties',
+  'uniqueItems',
   'writeOnly',
-]
+] as const
+
+const JSON_SCHEMA_KEY_SET = new Set<string>(JSON_SCHEMA_KEYS)
+
+const SIMPLE_OBJECT_KEYS = JSON_SCHEMA_KEYS
+
+const FIELD_DISPLAY_TYPE_LABELS: Record<string, string> = {
+  any: 'any',
+  union: 'union',
+  reference: '$ref',
+}
+
+function hasOnlySchemaKeywords(value: JsonObject): boolean {
+  return Object.keys(value).every(key => JSON_SCHEMA_KEY_SET.has(key))
+}
+
+export function isEditableFieldSchema(value: unknown): value is JsonObject {
+  return isObject(value) && hasOnlySchemaKeywords(value)
+}
+
+export function schemaFieldDisplayType(schema: Record<string, unknown>): SchemaFieldDisplayType {
+  if (isSupportedFieldType(schema.type)) return schema.type
+  if (Array.isArray(schema.type)) return 'union'
+  if ('$ref' in schema || '$dynamicRef' in schema) return 'reference'
+  if ('anyOf' in schema || 'oneOf' in schema || 'allOf' in schema) return 'union'
+  return 'any'
+}
+
+function hasRichFieldSchema(schema: JsonObject): boolean {
+  return Object.keys(schema).some(key => key !== 'type' && key !== 'description') || !isSupportedFieldType(schema.type)
+}
+
+const FIELD_DISPLAY_TYPE_TEXT: Record<string, string> = {
+  ...FIELD_DISPLAY_TYPE_LABELS,
+}
+
+export function schemaFieldTypeLabel(type: SchemaFieldDisplayType): string {
+  return FIELD_DISPLAY_TYPE_TEXT[type] || type
+}
 
 function isObject(value: unknown): value is JsonObject {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -103,26 +163,38 @@ function isSupportedFieldType(value: unknown): value is SchemaFieldType {
   return typeof value === 'string' && (SCHEMA_FIELD_TYPES as readonly string[]).includes(value)
 }
 
-function hasOnlyKeys(value: JsonObject, allowed: string[]): boolean {
-  return Object.keys(value).every(key => allowed.includes(key))
+export function isSchemaFieldType(value: unknown): value is SchemaFieldType {
+  return isSupportedFieldType(value)
 }
 
-function isSimpleFieldSchema(value: unknown): value is JsonObject & { type: SchemaFieldType; description?: string } {
-  if (!isObject(value)) return false
-  if (!isSupportedFieldType(value.type)) return false
-  if (!hasOnlyKeys(value, ['type', 'description'])) return false
-  return value.description === undefined || typeof value.description === 'string'
+function hasOnlyKeys(value: JsonObject, allowed: readonly string[]): boolean {
+  return Object.keys(value).every(key => allowed.includes(key))
 }
 
 export function isSimpleObjectSchema(schema: Record<string, unknown> | null | undefined): boolean {
   if (!isObject(schema)) return false
-  if (schema.type !== 'object') return false
-  if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) return false
+  const rootType = schema.type
+  if (
+    rootType !== undefined
+    && rootType !== 'object'
+    && !(
+      Array.isArray(rootType)
+      && rootType.length > 0
+      && rootType.includes('object')
+      && rootType.every(isSupportedFieldType)
+    )
+  ) return false
+  const additionalProperties = schema.additionalProperties
+  if (
+    additionalProperties !== undefined
+    && typeof additionalProperties !== 'boolean'
+    && !isEditableFieldSchema(additionalProperties)
+  ) return false
   if (!hasOnlyKeys(schema, SIMPLE_OBJECT_KEYS)) return false
 
   const properties = schema.properties
   if (properties === undefined || !isObject(properties)) return false
-  if (!Object.values(properties).every(isSimpleFieldSchema)) return false
+  if (!Object.values(properties).every(isEditableFieldSchema)) return false
 
   const required = schema.required
   if (required !== undefined) {
@@ -130,11 +202,6 @@ export function isSimpleObjectSchema(schema: Record<string, unknown> | null | un
     if (!required.every(item => typeof item === 'string')) return false
     const propertyNames = new Set(Object.keys(properties))
     if (!required.every(item => propertyNames.has(item))) return false
-  }
-
-  for (const fieldSchema of Object.values(properties)) {
-    if (!isObject(fieldSchema)) return false
-    if (Object.keys(fieldSchema).some(key => COMPLEX_KEYWORDS.has(key))) return false
   }
 
   return true
@@ -153,10 +220,23 @@ export function schemaToFields(schema: Record<string, unknown> | null | undefine
 
   return Object.entries(properties).map(([name, value]) => ({
     name,
-    type: value.type as SchemaFieldType,
+    type: schemaFieldDisplayType(value),
     required: required.has(name),
     description: typeof value.description === 'string' ? value.description : '',
+    ...(hasRichFieldSchema(value) ? { schema: cloneSchemaValue(value) } : {}),
   }))
+}
+
+function schemaForField(field: SchemaField): JsonObject {
+  const source = field.schema && isObject(field.schema) ? cloneSchemaValue(field.schema) : {}
+  const hasExplicitType = 'type' in source
+
+  if (isSupportedFieldType(field.type) && (!field.schema || hasExplicitType)) {
+    source.type = field.type
+  }
+  if (field.description.trim()) source.description = field.description.trim()
+  else delete source.description
+  return source
 }
 
 export function fieldsToSchema(
@@ -166,10 +246,7 @@ export function fieldsToSchema(
   const properties = Object.fromEntries(
     fields.map(field => [
       field.name,
-      {
-        type: field.type,
-        ...(field.description.trim() ? { description: field.description.trim() } : {}),
-      },
+      schemaForField(field),
     ]),
   )
 
@@ -183,7 +260,9 @@ export function fieldsToSchema(
 
   return {
     ...base,
-    type: 'object',
+    ...(source
+      ? (Object.prototype.hasOwnProperty.call(source, 'type') ? { type: source.type } : {})
+      : { type: 'object' }),
     properties,
     ...(keepRequired ? { required } : {}),
   }
