@@ -17,6 +17,7 @@ fallback. No third-party dependencies.
 from __future__ import annotations
 
 import difflib
+import re
 from typing import Any
 
 _METADATA_FIELDS: tuple[str, ...] = (
@@ -26,6 +27,17 @@ _METADATA_FIELDS: tuple[str, ...] = (
     "workflow_type",
     "profile_key",
 )
+
+#: Minimum string length to attach a token-level ``inline`` diff on a change.
+#: Below this, the ``from -> to`` rendering is already clear enough and inline
+#: diff would only add noise. The threshold is on the longer of the two values.
+_INLINE_MIN_LEN: int = 8
+
+#: Token classes for inline diff. ASCII identifiers/numbers stay intact (so
+#: ``cpt_file_path`` is one token, not split per character); runs of whitespace
+#: are a single token; every other character (notably CJK) is its own token —
+#: the smallest readable unit for mixed zh/en prose.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|\s+|[^\sA-Za-z0-9_]")
 
 
 class _Missing:
@@ -93,6 +105,63 @@ def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
     return flat
 
 
+def _tokenize(text: str) -> list[str]:
+    """Split text into inline-diff tokens (ASCII word / whitespace / other char)."""
+    return _TOKEN_RE.findall(text or "")
+
+
+def _inline_diff(before: str, after: str) -> list[dict[str, str]]:
+    """Token-level diff between two strings, as ``{type, text}`` segments.
+
+    Adjacent segments of the same kind are merged; empty segments are dropped.
+    ``type`` is one of ``"ctx"`` (unchanged), ``"add"`` (only in ``after``) or
+    ``"del"`` (only in ``before``). The concatenation of all segment texts
+    reproduces ``before`` (for ``ctx``+``del``) and ``after`` (for ``ctx``+``add``).
+    """
+    before_tokens = _tokenize(before)
+    after_tokens = _tokenize(after)
+    matcher = difflib.SequenceMatcher(a=before_tokens, b=after_tokens, autojunk=False)
+    segments: list[dict[str, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            kind = "ctx"
+            text = "".join(before_tokens[i1:i2])
+        elif tag in ("insert", "replace"):
+            # ``replace`` emits the removed run as ``del`` then the inserted run
+            # as ``add``; SequenceMatcher never returns empty runs for replace.
+            if i2 > i1:
+                segments.append({"type": "del", "text": "".join(before_tokens[i1:i2])})
+            kind = "add"
+            text = "".join(after_tokens[j1:j2])
+        elif tag == "delete":
+            kind = "del"
+            text = "".join(before_tokens[i1:i2])
+        else:  # pragma: no cover - defensive, unknown opcode
+            continue
+        if text:
+            segments.append({"type": kind, "text": text})
+    # Merge runs of identical type produced by adjacent opcodes.
+    merged: list[dict[str, str]] = []
+    for seg in segments:
+        if merged and merged[-1]["type"] == seg["type"]:
+            merged[-1]["text"] += seg["text"]
+        else:
+            merged.append(dict(seg))
+    return merged
+
+
+def _maybe_inline(old: Any, new: Any) -> list[dict[str, str]] | None:
+    """Return an inline diff when both values are long strings, else ``None``.
+
+    The ``inline`` field is intentionally optional on every change payload so
+    that older frontends can ignore it without breaking.
+    """
+    if isinstance(old, str) and isinstance(new, str):
+        if max(len(old), len(new)) >= _INLINE_MIN_LEN:
+            return _inline_diff(old, new)
+    return None
+
+
 def _diff_fields(
     before: dict[str, Any] | None, after: dict[str, Any] | None
 ) -> list[dict[str, Any]]:
@@ -109,7 +178,11 @@ def _diff_fields(
         elif old is _MISSING and new is not _MISSING:
             changes.append({"field": key, "from": None, "to": after_flat[key]})
         elif old != new:
-            changes.append({"field": key, "from": before_flat[key], "to": after_flat[key]})
+            change: dict[str, Any] = {"field": key, "from": before_flat[key], "to": after_flat[key]}
+            inline = _maybe_inline(before_flat[key], after_flat[key])
+            if inline is not None:
+                change["inline"] = inline
+            changes.append(change)
     return changes
 
 
@@ -185,7 +258,11 @@ def workflow_structured_diff(
         old = before.get(field)
         new = after.get(field)
         if old != new:
-            metadata_changes.append({"field": field, "from": old, "to": new})
+            change: dict[str, Any] = {"field": field, "from": old, "to": new}
+            inline = _maybe_inline(old, new)
+            if inline is not None:
+                change["inline"] = inline
+            metadata_changes.append(change)
 
     return {
         "nodes": {"added": added_nodes, "removed": removed_nodes, "changed": changed_nodes},

@@ -1295,6 +1295,21 @@ export interface DiffText {
   identical: boolean
 }
 
+/** One segment of an optional token-level inline diff attached to a field
+ * change when both values are long strings. Older clients ignore `inline`
+ * and fall back to rendering `from`/`to` verbatim. */
+export interface WorkflowStructuredChangeSegment {
+  type: 'ctx' | 'add' | 'del'
+  text: string
+}
+
+export interface WorkflowStructuredFieldChange {
+  field: string
+  from: unknown
+  to: unknown
+  inline?: WorkflowStructuredChangeSegment[]
+}
+
 export interface WorkflowStructuredNodeChange {
   id: string
   type?: string
@@ -1303,13 +1318,13 @@ export interface WorkflowStructuredNodeChange {
   target?: string
   source_handle?: string | null
   target_handle?: string | null
-  changes?: { field: string; from: unknown; to: unknown }[]
+  changes?: WorkflowStructuredFieldChange[]
 }
 
 export interface WorkflowStructuredDiff {
   nodes: { added: WorkflowStructuredNodeChange[]; removed: WorkflowStructuredNodeChange[]; changed: WorkflowStructuredNodeChange[] }
   edges: { added: WorkflowStructuredNodeChange[]; removed: WorkflowStructuredNodeChange[]; changed: WorkflowStructuredNodeChange[] }
-  metadata: { field: string; from: unknown; to: unknown }[]
+  metadata: WorkflowStructuredFieldChange[]
   identical: boolean
 }
 

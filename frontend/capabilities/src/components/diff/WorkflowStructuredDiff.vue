@@ -3,9 +3,14 @@
  * Semantic diff view for workflow definitions. Renders the `structured` payload
  * from `/workflows/{key}/diff`: node/edge add/remove/change cards plus top-level
  * metadata changes. Falls back to "无变更" when `identical` is true.
+ *
+ * For long-string field changes (e.g. a node's `config.prompt`) the backend
+ * attaches an optional `inline` token-level diff; when present we render the
+ * highlighted segments instead of striking out the whole old value and
+ * colourising the whole new one.
  */
 import { computed } from 'vue'
-import type { WorkflowStructuredDiff } from '@/api/types'
+import type { WorkflowStructuredChangeSegment, WorkflowStructuredDiff } from '@/api/types'
 
 const props = defineProps<{ diff: WorkflowStructuredDiff }>()
 
@@ -47,6 +52,17 @@ function formatValue(value: unknown): string {
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
+
+function segmentClass(type: WorkflowStructuredChangeSegment['type']): string {
+  switch (type) {
+    case 'add':
+      return 'bg-success-soft/60 text-success-soft-fg'
+    case 'del':
+      return 'bg-destructive-soft/60 text-destructive-soft-fg line-through'
+    default:
+      return 'text-muted-foreground'
+  }
+}
 </script>
 
 <template>
@@ -70,13 +86,24 @@ function formatValue(value: unknown): string {
               :class="i > 0 ? 'border-t border-border' : ''"
             >
               <td class="w-32 bg-secondary/40 px-3 py-1.5 text-muted-foreground">{{ metaLabel(m.field) }}</td>
-              <td class="px-3 py-1.5 font-mono text-xs text-destructive-soft-fg line-through">
-                {{ formatValue(m.from) }}
+              <td v-if="m.inline" colspan="3" class="px-3 py-1.5 font-mono text-xs leading-5">
+                <span class="whitespace-pre-wrap break-words">
+                  <span
+                    v-for="(seg, k) in m.inline"
+                    :key="k"
+                    :class="segmentClass(seg.type)"
+                  >{{ seg.text }}</span>
+                </span>
               </td>
-              <td class="px-2 py-1.5 text-muted-foreground">→</td>
-              <td class="px-3 py-1.5 font-mono text-xs text-success-soft-fg">
-                {{ formatValue(m.to) }}
-              </td>
+              <template v-else>
+                <td class="px-3 py-1.5 font-mono text-xs text-destructive-soft-fg line-through">
+                  {{ formatValue(m.from) }}
+                </td>
+                <td class="px-2 py-1.5 text-muted-foreground">→</td>
+                <td class="px-3 py-1.5 font-mono text-xs text-success-soft-fg">
+                  {{ formatValue(m.to) }}
+                </td>
+              </template>
             </tr>
           </tbody>
         </table>
@@ -117,9 +144,18 @@ function formatValue(value: unknown): string {
           <ul class="space-y-0.5 font-mono text-xs">
             <li v-for="(c, j) in n.changes" :key="j" class="text-muted-foreground">
               <span class="text-foreground">{{ c.field }}</span>:
-              <span class="text-destructive-soft-fg line-through">{{ formatValue(c.from) }}</span>
-              →
-              <span class="text-success-soft-fg">{{ formatValue(c.to) }}</span>
+              <span v-if="c.inline" class="ml-1 whitespace-pre-wrap break-words">
+                <span
+                  v-for="(seg, k) in c.inline"
+                  :key="k"
+                  :class="segmentClass(seg.type)"
+                >{{ seg.text }}</span>
+              </span>
+              <template v-else>
+                <span class="text-destructive-soft-fg line-through">{{ formatValue(c.from) }}</span>
+                →
+                <span class="text-success-soft-fg">{{ formatValue(c.to) }}</span>
+              </template>
             </li>
           </ul>
         </div>
@@ -158,9 +194,18 @@ function formatValue(value: unknown): string {
           <ul class="space-y-0.5 font-mono text-xs">
             <li v-for="(c, j) in e.changes" :key="j" class="text-muted-foreground">
               <span class="text-foreground">{{ c.field }}</span>:
-              <span class="text-destructive-soft-fg line-through">{{ formatValue(c.from) }}</span>
-              →
-              <span class="text-success-soft-fg">{{ formatValue(c.to) }}</span>
+              <span v-if="c.inline" class="ml-1 whitespace-pre-wrap break-words">
+                <span
+                  v-for="(seg, k) in c.inline"
+                  :key="k"
+                  :class="segmentClass(seg.type)"
+                >{{ seg.text }}</span>
+              </span>
+              <template v-else>
+                <span class="text-destructive-soft-fg line-through">{{ formatValue(c.from) }}</span>
+                →
+                <span class="text-success-soft-fg">{{ formatValue(c.to) }}</span>
+              </template>
             </li>
           </ul>
         </div>

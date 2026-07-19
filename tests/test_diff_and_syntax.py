@@ -1,7 +1,12 @@
 """Unit tests for the pure diff/syntax primitives in core/diff.py and scripts/syntax.py."""
 from __future__ import annotations
 
-from agent_bridge.core.diff import text_diff, workflow_structured_diff
+from agent_bridge.core.diff import (
+    _inline_diff,
+    _maybe_inline,
+    text_diff,
+    workflow_structured_diff,
+)
 from agent_bridge.system_config.scripts.syntax import check_python_syntax
 
 
@@ -80,6 +85,98 @@ def test_workflow_diff_detects_added_removed_changed_nodes():
     assert [n["id"] for n in diff["nodes"]["added"]] == ["n2"]
     assert [n["id"] for n in diff["nodes"]["changed"]] == ["n1"]
     assert any(m["field"] == "name" and m["from"] == "A" and m["to"] == "A2" for m in diff["metadata"])
+
+
+# --- inline (token-level) diff ----------------------------------------------
+
+
+def test_inline_diff_marks_single_token_insertion():
+    """The user's reported case: insert a single char in a long prompt."""
+    before = "查询 metadata_fine_cpt_raw_content 获取原始 XML"
+    after = "1查询 metadata_fine_cpt_raw_content 获取原始 XML"
+    segments = _inline_diff(before, after)
+    # Exactly one "add" segment carrying the inserted char, rest is context.
+    adds = [s for s in segments if s["type"] == "add"]
+    dels = [s for s in segments if s["type"] == "del"]
+    assert dels == []
+    assert len(adds) == 1
+    assert adds[0]["text"] == "1"
+    # Concatenating ctx + add reconstructs `after`.
+    assert "".join(s["text"] for s in segments if s["type"] in ("ctx", "add")) == after
+    # Concatenating ctx + del reconstructs `before`.
+    assert "".join(s["text"] for s in segments if s["type"] in ("ctx", "del")) == before
+
+
+def test_inline_diff_preserves_ascii_identifiers():
+    """ASCII identifiers stay as one token — renaming is a clean add/del pair."""
+    before = "使用 cpt_file_path 读取"
+    after = "使用 report_id 读取"
+    segments = _inline_diff(before, after)
+    dels = "".join(s["text"] for s in segments if s["type"] == "del")
+    adds = "".join(s["text"] for s in segments if s["type"] == "add")
+    assert "cpt_file_path" in dels
+    assert "report_id" in adds
+    # The identifiers were not split character-by-character.
+    assert "c" not in [s["text"] for s in segments if s["type"] == "del"]
+
+
+def test_inline_diff_merges_adjacent_same_type_segments():
+    """Consecutive del/add segments are merged into single runs."""
+    segments = _inline_diff("abcdef", "abXYef")
+    types = [s["type"] for s in segments]
+    # No two adjacent equal types.
+    for a, b in zip(types, types[1:]):
+        assert a != b
+
+
+def test_inline_diff_is_none_for_short_strings():
+    assert _maybe_inline("abc", "abd") is None
+    assert _maybe_inline("short", "shor") is None
+
+
+def test_inline_diff_is_none_for_non_strings():
+    assert _maybe_inline(1, 2) is None
+    assert _maybe_inline(True, False) is None
+    assert _maybe_inline({"a": 1}, {"a": 2}) is None
+    assert _maybe_inline(None, "long enough string") is None
+
+
+def test_workflow_diff_attaches_inline_on_long_prompt_change():
+    """A long config.prompt change carries an `inline` token-level diff."""
+    prompt_before = (
+        "使用当前任务上下文中的 cpt_file_path 和 report_id，查询 "
+        "metadata_fine_cpt_raw_content 获取原始 XML，解析报表结构。"
+    )
+    prompt_after = "1" + prompt_before  # single-char insertion
+    before = _wf([{"id": "n1", "type": "agent", "config": {"prompt": prompt_before}}])
+    after = _wf([{"id": "n1", "type": "agent", "config": {"prompt": prompt_after}}])
+    changes = workflow_structured_diff(before, after)["nodes"]["changed"][0]["changes"]
+    prompt_change = next(c for c in changes if c["field"] == "config.prompt")
+    assert "inline" in prompt_change
+    adds = [s["text"] for s in prompt_change["inline"] if s["type"] == "add"]
+    assert adds == ["1"]
+
+
+def test_workflow_diff_omits_inline_for_short_field_change():
+    """Short string changes keep the legacy shape (no `inline` key)."""
+    before = _wf([{"id": "n1", "type": "agent", "name": "N1"}])
+    after = _wf([{"id": "n1", "type": "agent", "name": "N2"}])
+    changes = workflow_structured_diff(before, after)["nodes"]["changed"][0]["changes"]
+    name_change = next(c for c in changes if c["field"] == "name")
+    assert "inline" not in name_change
+
+
+def test_workflow_metadata_change_has_inline():
+    """Long metadata values (e.g. description) also get an inline diff."""
+    long_a = "描述一" * 10
+    long_b = "描述二" * 10
+    before = _wf([], name="A")
+    before["description"] = long_a
+    after = _wf([], name="A")
+    after["description"] = long_b
+    metadata = workflow_structured_diff(before, after)["metadata"]
+    desc = next(m for m in metadata if m["field"] == "description")
+    assert "inline" in desc
 
 
 # --- check_python_syntax ----------------------------------------------------
