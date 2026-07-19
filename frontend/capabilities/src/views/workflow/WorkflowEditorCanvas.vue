@@ -6,6 +6,7 @@ import { Handle, Position, VueFlow, type Connection, type Edge, type Node } from
 import { Maximize, Trash2 } from 'lucide-vue-next'
 import type { WorkflowGraph, WorkflowNodeType, WorkflowType, WorkflowValidationError } from '../../api/types'
 import { fromVueFlowElements, isProtectedSummaryEdge, isProtectedSummaryNode, toVueFlowElements } from './workflowDefinition'
+import { workflowNodeToneClass, workflowNodeTypeText } from './workflowNodeVisuals'
 import Button from '../../components/ui/button/Button.vue'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -19,38 +20,6 @@ const flowNodes = shallowRef<Node[]>([])
 const flowEdges = shallowRef<Edge[]>([])
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
-
-type WorkflowNodeTone = 'blue' | 'teal' | 'violet' | 'amber'
-type WorkflowNodeTonePart = 'rail' | 'badge'
-
-const nodeToneByType: Record<WorkflowNodeType, WorkflowNodeTone> = {
-  get_task: 'blue',
-  agent: 'violet',
-  script: 'teal',
-  output: 'amber',
-}
-
-const nodeTypeLabel: Record<WorkflowNodeType, string> = {
-  get_task: '获取任务',
-  agent: 'Agent',
-  script: '托管脚本',
-  output: '输出结果',
-}
-
-const nodeToneClasses: Record<WorkflowNodeTone, Record<WorkflowNodeTonePart, string>> = {
-  blue: { rail: 'bg-cat-blue-fg', badge: 'bg-cat-blue text-cat-blue-fg' },
-  teal: { rail: 'bg-cat-teal-fg', badge: 'bg-cat-teal text-cat-teal-fg' },
-  violet: { rail: 'bg-cat-violet-fg', badge: 'bg-cat-violet text-cat-violet-fg' },
-  amber: { rail: 'bg-cat-amber-fg', badge: 'bg-cat-amber text-cat-amber-fg' },
-}
-
-function nodeToneClass(type: WorkflowNodeType, part: WorkflowNodeTonePart): string {
-  return nodeToneClasses[nodeToneByType[type]][part]
-}
-
-function nodeTypeText(type: unknown): string {
-  return nodeTypeLabel[type as WorkflowNodeType] ?? String(type ?? '')
-}
 
 watch([graph, () => props.errors], () => {
   const elements = toVueFlowElements(graph.value)
@@ -106,12 +75,12 @@ function drop(event: DragEvent) {
       <Controls :show-interactive="false"><template #control-fit-view><Maximize class="h-4 w-4" /></template></Controls>
       <template #node-workflow="slotProps">
         <div class="relative w-44 rounded-sm border border-border bg-background px-3 py-2 pl-4 shadow-sm" :class="issueById.has(slotProps.id) ? 'border-destructive' : ''">
-          <span aria-hidden="true" class="absolute inset-y-0 left-0 w-1 rounded-l-sm" :class="nodeToneClass(slotProps.data.type, 'rail')" />
+          <span aria-hidden="true" class="absolute inset-y-0 left-0 w-1 rounded-l-sm" :class="workflowNodeToneClass(slotProps.data.type, 'rail')" />
           <Handle type="target" :position="Position.Left" />
           <div class="truncate text-sm font-medium">{{ slotProps.data.name }}</div>
           <div class="mt-1 flex min-w-0 items-center gap-1.5">
-            <span class="inline-flex shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-medium" :class="nodeToneClass(slotProps.data.type, 'badge')">
-              {{ nodeTypeText(slotProps.data.type) }}
+            <span class="inline-flex shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-medium" :class="workflowNodeToneClass(slotProps.data.type, 'badge')">
+              {{ workflowNodeTypeText(slotProps.data.type) }}
             </span>
             <span class="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
               {{ slotProps.data.type }}<span v-if="slotProps.data.config.backend_key"> · {{ slotProps.data.config.backend_key }}</span><span v-else-if="slotProps.data.config.script_key"> · {{ slotProps.data.config.script_key }}</span>

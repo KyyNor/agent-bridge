@@ -45,3 +45,19 @@ test('WorkflowRunGraph displays node actions, sources, and reuse reasons instead
   assert.match(graph, /reuse_reason/)
   assert.match(graph, /effectiveStatus/)
 })
+
+test('workflow run graph displays node type colors with semantic category tokens', () => {
+  const graph = source('src/views/workflow/WorkflowRunGraph.vue')
+  const visuals = source('src/views/workflow/workflowNodeVisuals.ts')
+
+  assert.match(graph, /workflowNodeToneClass/)
+  assert.match(graph, /workflowNodeTypeText/)
+  assert.match(visuals, /get_task: 'blue'/)
+  assert.match(visuals, /agent: 'violet'/)
+  assert.match(visuals, /script: 'teal'/)
+  assert.match(visuals, /output: 'amber'/)
+  assert.match(visuals, /bg-cat-blue-fg/)
+  assert.match(visuals, /bg-cat-violet-fg/)
+  assert.match(visuals, /bg-cat-teal-fg/)
+  assert.match(visuals, /bg-cat-amber-fg/)
+})

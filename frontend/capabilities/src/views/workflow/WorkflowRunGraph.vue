@@ -5,6 +5,7 @@ import { Controls } from '@vue-flow/controls'
 import { Handle, Position, VueFlow, type NodeMouseEvent } from '@vue-flow/core'
 import { AlertTriangle, Bot, Check, Clock3, FileOutput, FileTerminal, LoaderCircle, XCircle } from 'lucide-vue-next'
 import type { WorkflowGraph, WorkflowNodeRun } from '../../api/types'
+import { workflowNodeToneClass, workflowNodeTypeText } from './workflowNodeVisuals'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
@@ -74,7 +75,8 @@ function openNode(event: NodeMouseEvent) {
       <Background pattern-color="var(--border)" :gap="18" />
       <Controls :show-interactive="false" />
       <template #node-workflow-run="slotProps">
-        <div class="h-[92px] w-48 border-2 px-3 py-2" :class="statusClass(effectiveStatus(slotProps.data.run))">
+        <div class="relative h-[92px] w-48 border-2 px-3 py-2 pl-4" :class="statusClass(effectiveStatus(slotProps.data.run))">
+          <span aria-hidden="true" class="absolute inset-y-0 left-0 w-1 rounded-l-sm" :class="workflowNodeToneClass(slotProps.data.node.type, 'rail')" />
           <Handle type="target" :position="Position.Left" :connectable="false" />
           <div class="flex items-center gap-2">
             <component :is="nodeIcon(slotProps.data.node.type)" class="h-4 w-4 shrink-0" />
@@ -82,7 +84,9 @@ function openNode(event: NodeMouseEvent) {
             <component :is="statusIcon(effectiveStatus(slotProps.data.run))" class="h-4 w-4 shrink-0" :class="effectiveStatus(slotProps.data.run) === 'running' ? 'animate-spin' : ''" />
           </div>
           <div class="mt-2 flex items-center justify-between gap-2 font-mono text-[11px]">
-            <span class="truncate">{{ slotProps.data.node.type }}</span>
+            <span class="inline-flex shrink-0 rounded-sm px-1.5 py-0.5 font-sans text-[10px] font-medium" :class="workflowNodeToneClass(slotProps.data.node.type, 'badge')">
+              {{ workflowNodeTypeText(slotProps.data.node.type) }}
+            </span>
             <span>{{ slotProps.data.run?.action === 'reuse' ? '复用' : slotProps.data.run?.status || 'pending' }}</span>
           </div>
           <div v-if="slotProps.data.run?.action === 'reuse'" class="mt-1 truncate text-[10px] text-muted-foreground" :title="slotProps.data.run.reuse_reason || ''">

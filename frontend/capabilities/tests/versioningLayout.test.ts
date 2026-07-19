@@ -153,16 +153,19 @@ test('workflow import UI supports new, overwrite, diff, and confirmation', () =>
 
 test('workflow canvas distinguishes node types with base category colors', () => {
   const canvas = readSrc('src/views/workflow/WorkflowEditorCanvas.vue')
+  const visuals = readSrc('src/views/workflow/workflowNodeVisuals.ts')
 
-  assert.match(canvas, /get_task: 'blue'/)
-  assert.match(canvas, /agent: 'violet'/)
-  assert.match(canvas, /script: 'teal'/)
-  assert.match(canvas, /output: 'amber'/)
-  assert.match(canvas, /bg-cat-blue-fg/)
-  assert.match(canvas, /bg-cat-violet-fg/)
-  assert.match(canvas, /bg-cat-teal-fg/)
-  assert.match(canvas, /bg-cat-amber-fg/)
-  assert.doesNotMatch(canvas, /(?:bg|text|border)-(?:blue|purple|violet|teal|amber|emerald|rose)-\d+/)
+  assert.match(canvas, /workflowNodeToneClass/)
+  assert.match(canvas, /workflowNodeTypeText/)
+  assert.match(visuals, /get_task: 'blue'/)
+  assert.match(visuals, /agent: 'violet'/)
+  assert.match(visuals, /script: 'teal'/)
+  assert.match(visuals, /output: 'amber'/)
+  assert.match(visuals, /bg-cat-blue-fg/)
+  assert.match(visuals, /bg-cat-violet-fg/)
+  assert.match(visuals, /bg-cat-teal-fg/)
+  assert.match(visuals, /bg-cat-amber-fg/)
+  assert.doesNotMatch(visuals, /(?:bg|text|border)-(?:blue|purple|violet|teal|amber|emerald|rose)-\d+/)
 })
 
 test('workflow import dialog keeps confirmation footer fixed while preview content scrolls', () => {
