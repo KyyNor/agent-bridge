@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ArrowDown, ArrowUp, Check, Trash2 } from 'lucide-vue-next'
 import type { ManagedScript, SkillPrompt, WorkflowNode, WorkflowValidationError } from '../../api/types'
 import { deriveNodeOutputSchema, type WorkflowReferenceItem } from '../../lib/workflowReferences'
@@ -24,6 +24,7 @@ const emit = defineEmits<{
   'schema-validity': [nodeId: string, valid: boolean, message: string]
 }>()
 const activeField = ref<InsertableField | null>(null)
+const sectionRef = ref<HTMLElement | null>(null)
 const promptInput = ref<InsertableField | null>(null)
 const titleInput = ref<InsertableField | null>(null)
 const pathInput = ref<InsertableField | null>(null)
@@ -62,7 +63,26 @@ function removeSkill(index: number) { config({ skill_names: currentSkills().filt
 function isInsertableField(value: unknown): value is InsertableField { return Boolean(value) && typeof (value as InsertableField).insertText === 'function' }
 function setParamInputRef(key: string, value: unknown) { if (isInsertableField(value)) paramInputs.set(key, value); else paramInputs.delete(key) }
 function activateParamInput(key: string) { activeField.value = paramInputs.get(key) || null }
-function insertReference(value: string, rawPath: string) { if (activeField.value) activeField.value.insertText(value); else void navigator.clipboard?.writeText(rawPath) }
+function insertReference(value: string, rawPath: string) {
+  if (activeField.value) {
+    // 插入会 focus 输入框触发浏览器自动滚动到该框；记录所有可滚动祖先，
+    // 插入后恢复，避免页面跳动。
+    const scrollables = collectScrollables()
+    activeField.value.insertText(value)
+    nextTick(() => { for (const item of scrollables) item.el.scrollTop = item.top })
+  } else {
+    void navigator.clipboard?.writeText(rawPath)
+  }
+}
+function collectScrollables(): Array<{ el: HTMLElement; top: number }> {
+  const captured: Array<{ el: HTMLElement; top: number }> = []
+  let el = sectionRef.value as HTMLElement | null
+  while (el) {
+    if (el.scrollTop > 0) captured.push({ el, top: el.scrollTop })
+    el = el.parentElement
+  }
+  return captured
+}
 /** 双击变量插入后：显示 banner 告知用户已插入哪个变量 */
 function onReferenceInserted(rawPath: string) {
   insertBanner.value = rawPath
@@ -89,7 +109,7 @@ function getTaskEmptyMode() {
 </script>
 
 <template>
-  <section class="space-y-3 p-4">
+  <section ref="sectionRef" class="space-y-3 p-4">
     <!-- 输入参数：默认折叠，双击变量插入后显示 banner 提示 -->
     <details v-if="referenceItems.length">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-2 py-1 text-xs font-semibold text-muted-foreground [&::-webkit-details-marker]:hidden">
