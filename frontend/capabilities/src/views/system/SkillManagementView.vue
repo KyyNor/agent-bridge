@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { marked, type Tokens } from 'marked'
-import { Check, Copy, Eye, Pencil, RotateCcw, Save } from 'lucide-vue-next'
+import { Check, Copy, Eye, Pencil, RotateCcw, Save } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { SkillPrompt } from '../../api/types'
 import { Badge } from '../../components/ui/badge'

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, Loader2, Maximize2, Minimize2 } from 'lucide-vue-next'
+import { ArrowLeft, Loader2, Maximize2, Minimize2 } from '@lucide/vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { marked } from 'marked'
 import { api } from '../../api/client'

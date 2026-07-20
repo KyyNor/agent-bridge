@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, Plus, RotateCw, Save, Search, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, Plus, RotateCw, Save, Search, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, SyntaxCheckResult, WorkflowDefinition } from '../../api/types'
 import { Badge } from '../../components/ui/badge'

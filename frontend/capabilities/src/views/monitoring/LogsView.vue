@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, RotateCw } from 'lucide-vue-next'
+import { Search, RotateCw } from '@lucide/vue'
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { api } from '../../api/client'
 import type { ToolCallLog, ToolCallLogCounts } from '../../api/types'

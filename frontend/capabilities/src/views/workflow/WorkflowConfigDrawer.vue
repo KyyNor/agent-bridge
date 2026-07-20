@@ -24,7 +24,7 @@ export function closeDrawer(state: WorkflowConfigDrawerState): WorkflowConfigDra
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Maximize2, Minimize2, X } from 'lucide-vue-next'
+import { Maximize2, Minimize2, X } from '@lucide/vue'
 import { Button } from '../../components/ui/button'
 
 type DrawerMode = 'overlay' | 'fullscreen'

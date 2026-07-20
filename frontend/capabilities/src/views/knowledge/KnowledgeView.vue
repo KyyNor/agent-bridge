@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, GitBranch, ArrowLeft } from 'lucide-vue-next'
+import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, GitBranch, ArrowLeft } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { KnowledgeBaseSummary, Document, DocumentDetail, DocumentUploadSummary, KnowledgeFolder, SyncJob, SearchResultChunk, ProjectProfile, BackendInfo, BackendAgent, CodeRepository, KbRepoSource, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse } from '../../api/types'

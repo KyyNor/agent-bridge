@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search } from 'lucide-vue-next'
+import { Search } from '@lucide/vue'
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, CapabilityTool } from '../../api/types'

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, Plus, RotateCw, Trash2 } from 'lucide-vue-next'
+import { Search, Plus, RotateCw, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api/client'
 import type { CodeRepoCategory, CodeRepository, ProjectProfile, TestCloneResult } from '../../api/types'
