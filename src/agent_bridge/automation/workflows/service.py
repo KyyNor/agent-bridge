@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 import logging
@@ -1145,6 +1146,12 @@ class WorkflowService:
         tasks: list[dict[str, Any]],
     ) -> dict[str, Any]:
         self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
+        logger.info(
+            "workflow_set_task 收到任务批次 workflow=%s run=%s requested=%d",
+            workflow_key,
+            run_id,
+            len(tasks),
+        )
         normalized = []
         for task in tasks:
             task_key = str(task.get("task_key") or "").strip()
@@ -1158,15 +1165,71 @@ class WorkflowService:
             if not isinstance(payload, dict):
                 raise ValidationError("task payload must be an object")
             normalized.append({"task_key": task_key, "task_version": task_version, "type": task_type, "payload": payload})
-        result = self.store.upsert_workflow_tasks(workflow_key, normalized)
+
+        task_key_counts = Counter(task["task_key"] for task in normalized)
+        task_pair_counts = Counter((task["task_key"], task["task_version"]) for task in normalized)
+        duplicate_task_key_rows = sum(count - 1 for count in task_key_counts.values() if count > 1)
+        duplicate_task_pair_rows = sum(count - 1 for count in task_pair_counts.values() if count > 1)
+        batch_diagnostics = {
+            "unique_task_keys": len(task_key_counts),
+            "unique_task_pairs": len(task_pair_counts),
+            "duplicate_task_key_rows": duplicate_task_key_rows,
+            "duplicate_task_pair_rows": duplicate_task_pair_rows,
+            "empty_task_version_count": sum(not task["task_version"] for task in normalized),
+        }
         logger.info(
-            "workflow_set_task 写入任务批次 workflow=%s run=%s received=%d result=%s",
+            "workflow_set_task 批次归一化 workflow=%s run=%s received=%d unique_keys=%d unique_pairs=%d duplicate_key_rows=%d duplicate_pair_rows=%d empty_versions=%d",
             workflow_key,
             run_id,
             len(normalized),
-            result,
+            batch_diagnostics["unique_task_keys"],
+            batch_diagnostics["unique_task_pairs"],
+            batch_diagnostics["duplicate_task_key_rows"],
+            batch_diagnostics["duplicate_task_pair_rows"],
+            batch_diagnostics["empty_task_version_count"],
         )
-        return {"workflow_key": workflow_key, "run_id": run_id, "received": len(normalized), **result}
+        result = self.store.upsert_workflow_tasks(workflow_key, normalized)
+        action_total = sum(
+            result.get(action, 0)
+            for action in (
+                "created",
+                "updated",
+                "skipped_completed",
+                "skipped_running",
+                "skipped_historical",
+                "reopened_expired",
+            )
+        )
+        if action_total != len(normalized):
+            logger.warning(
+                "workflow_set_task 批次处理数量不一致 workflow=%s run=%s received=%d action_total=%d result=%s",
+                workflow_key,
+                run_id,
+                len(normalized),
+                action_total,
+                result,
+            )
+        logger.info(
+            "workflow_set_task 写入任务批次 workflow=%s run=%s received=%d action_total=%d created=%d updated=%d skipped_completed=%d skipped_running=%d skipped_historical=%d reopened_expired=%d",
+            workflow_key,
+            run_id,
+            len(normalized),
+            action_total,
+            result.get("created", 0),
+            result.get("updated", 0),
+            result.get("skipped_completed", 0),
+            result.get("skipped_running", 0),
+            result.get("skipped_historical", 0),
+            result.get("reopened_expired", 0),
+        )
+        return {
+            "workflow_key": workflow_key,
+            "run_id": run_id,
+            "received": len(normalized),
+            "action_total": action_total,
+            **batch_diagnostics,
+            **result,
+        }
 
     def save_artifact(
         self,

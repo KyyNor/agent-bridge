@@ -134,8 +134,22 @@ def test_runtime_workflow_set_task_keeps_workflows_isolated_and_accepts_large_ba
     second = set_tasks("workflow-b", "run-b")
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["received"] == 200
-    assert second.json()["received"] == 200
+    first_payload = first.json()
+    second_payload = second.json()
+    assert first_payload["received"] == 200
+    assert second_payload["received"] == 200
+    assert first_payload["action_total"] == 200
+    assert second_payload["action_total"] == 200
+    assert first_payload["unique_task_keys"] == 200
+    assert second_payload["unique_task_keys"] == 200
+    assert first_payload["unique_task_pairs"] == 200
+    assert second_payload["unique_task_pairs"] == 200
+    assert first_payload["duplicate_task_key_rows"] == 0
+    assert second_payload["duplicate_task_key_rows"] == 0
+    assert first_payload["duplicate_task_pair_rows"] == 0
+    assert second_payload["duplicate_task_pair_rows"] == 0
+    assert first_payload["empty_task_version_count"] == 200
+    assert second_payload["empty_task_version_count"] == 200
     assert len(svc.store.list_workflow_tasks("workflow-a")) == 200
     assert len(svc.store.list_workflow_tasks("workflow-b")) == 200
     assert svc.store.get_workflow_task("workflow-a", "task-0")["payload"] == {"workflow": "workflow-a"}
