@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, Check, Trash2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Check, ChevronRight, Trash2 } from 'lucide-vue-next'
 import type { ManagedScript, SkillPrompt, WorkflowNode, WorkflowValidationError } from '../../api/types'
 import { deriveNodeOutputSchema, type WorkflowReferenceItem } from '../../lib/workflowReferences'
 import Button from '../../components/ui/button/Button.vue'
@@ -111,9 +111,12 @@ function getTaskEmptyMode() {
 <template>
   <section ref="sectionRef" class="space-y-3 p-4">
     <!-- 输入参数：默认折叠，双击变量插入后显示 banner 提示 -->
-    <details v-if="referenceItems.length">
+    <details v-if="referenceItems.length" class="group/details">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-2 py-1 text-xs font-semibold text-muted-foreground [&::-webkit-details-marker]:hidden">
-        <span>输入参数</span>
+        <span class="flex items-center gap-1">
+          <ChevronRight class="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 group-open/details:rotate-90" />
+          输入参数
+        </span>
         <span class="text-[11px] font-normal text-muted-foreground/70">{{ referenceItems.length }} 个可引用 · 点击展开</span>
       </summary>
       <div class="mt-2 space-y-2">
