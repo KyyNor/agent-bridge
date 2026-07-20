@@ -18,5 +18,6 @@ wheels/
 .zcode/
 frontend/**/node_modules/
 frontend/**/dist/
+frontend/**/*.tsbuildinfo
 
 src/agent_bridge/static/

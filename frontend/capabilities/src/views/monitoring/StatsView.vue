@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RotateCw } from 'lucide-vue-next'
+import { RotateCw } from '@lucide/vue'
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'

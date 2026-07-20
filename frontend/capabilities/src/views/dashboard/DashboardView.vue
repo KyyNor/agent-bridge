@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Server, Wrench, CheckCircle, XCircle, Plus, RotateCw } from 'lucide-vue-next'
+import { Server, Wrench, CheckCircle, XCircle, Plus, RotateCw } from '@lucide/vue'
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../../api/client'
 import type { McpService } from '../../api/types'

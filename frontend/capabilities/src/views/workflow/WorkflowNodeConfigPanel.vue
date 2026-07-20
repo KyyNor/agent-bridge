@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { ArrowDown, ArrowUp, Check, ChevronRight, Trash2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Check, ChevronRight, Trash2 } from '@lucide/vue'
 import type { ManagedScript, SkillPrompt, WorkflowNode, WorkflowValidationError } from '../../api/types'
 import { deriveNodeOutputSchema, type WorkflowReferenceItem } from '../../lib/workflowReferences'
 import Button from '../../components/ui/button/Button.vue'

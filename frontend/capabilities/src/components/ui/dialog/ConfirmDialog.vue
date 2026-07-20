@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './index'
 import { Button } from '@/components/ui/button'
-import { AlertTriangle } from 'lucide-vue-next'
+import { AlertTriangle } from '@lucide/vue'
 import { resolveConfirm, useConfirmState } from '@/composables/useConfirm'
 
 const state = useConfirmState()

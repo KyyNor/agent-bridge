@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
-import { Search, RotateCw, ArrowLeft } from 'lucide-vue-next'
+import { Search, RotateCw, ArrowLeft } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { AgentRun, AgentRunCounts, WorkflowSubagentDetail } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'

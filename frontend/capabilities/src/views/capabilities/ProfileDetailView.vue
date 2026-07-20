@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft } from 'lucide-vue-next'
+import { ArrowLeft } from '@lucide/vue'
 import { computed, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type {

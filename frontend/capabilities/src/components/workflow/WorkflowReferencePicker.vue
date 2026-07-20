@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Search } from 'lucide-vue-next'
+import { Search } from '@lucide/vue'
 import Input from '../ui/input/Input.vue'
 import type { WorkflowReferenceItem } from '../../lib/workflowReferences'
 import { formatWorkflowReference } from '../../lib/workflowReferences'

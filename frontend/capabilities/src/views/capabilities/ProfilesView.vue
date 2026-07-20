@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, Plus, Settings } from 'lucide-vue-next'
+import { Search, Plus, Settings } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { ProjectProfile } from '../../api/types'

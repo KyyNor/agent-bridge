@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Play, RefreshCw, Wrench } from 'lucide-vue-next'
+import { Play, RefreshCw, Wrench } from '@lucide/vue'
 import { api } from '../../api/client'
 import type {
   CapabilityTool,

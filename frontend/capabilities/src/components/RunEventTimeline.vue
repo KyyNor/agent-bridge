@@ -19,7 +19,7 @@
  * load detail (workflow loads the Claude transcript on first expand).
  */
 import { computed, watch } from 'vue'
-import { Bot, ChevronRight } from 'lucide-vue-next'
+import { Bot, ChevronRight } from '@lucide/vue'
 import { Badge } from './ui/badge'
 import { useSubagentCollapse } from '../composables/useSubagentCollapse'
 import { groupEventsByActor, subagentStatus, subagentStatusLabel, subagentUsage } from '../lib/workflowEvents'

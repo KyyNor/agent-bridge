@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Database, Maximize2, Minimize2, Plus, RefreshCw, Search, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, Database, Maximize2, Minimize2, Plus, RefreshCw, Search, Trash2 } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { MemoryBlock, MemoryDashboardStatus, MemorySearchResult, MemoryTimelineResult } from '../../api/types'
 import { Badge } from '../../components/ui/badge'

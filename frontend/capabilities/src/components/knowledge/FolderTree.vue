@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, Files, Folder, FolderOpen, Move, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { ChevronDown, ChevronRight, Files, Folder, FolderOpen, Move, Pencil, Plus, Trash2 } from '@lucide/vue'
 import type { KnowledgeFolder } from '../../api/types'
 
 const props = withDefaults(defineProps<{

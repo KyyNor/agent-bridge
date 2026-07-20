@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bot, ClipboardList, FileOutput, FileTerminal } from 'lucide-vue-next'
+import { Bot, ClipboardList, FileOutput, FileTerminal } from '@lucide/vue'
 import type { WorkflowNodeType } from '../../api/types'
 
 withDefaults(defineProps<{
