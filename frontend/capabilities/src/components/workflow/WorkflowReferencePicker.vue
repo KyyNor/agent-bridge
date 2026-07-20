@@ -10,7 +10,11 @@ const props = defineProps<{
   mode: 'template' | 'condition'
 }>()
 
-const emit = defineEmits<{ insert: [value: string, rawPath: string] }>()
+const emit = defineEmits<{
+  insert: [value: string, rawPath: string]
+  /** 双击插入后触发，携带被插入项的 path，供父组件显示 banner */
+  inserted: [rawPath: string]
+}>()
 const query = ref('')
 const filteredItems = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -24,22 +28,24 @@ const filteredItems = computed(() => {
 
 function insert(item: WorkflowReferenceItem) {
   emit('insert', formatWorkflowReference(item, props.mode), item.path)
+  emit('inserted', item.path)
 }
 </script>
 
 <template>
-  <div class="rounded-sm border bg-muted/20 p-2">
+  <div class="rounded-sm border bg-muted/10 p-2">
     <div class="mb-2 flex items-center gap-2">
       <Search class="h-4 w-4 shrink-0 text-muted-foreground" />
       <Input v-model="query" class="h-7" placeholder="搜索可引用数据" />
     </div>
+    <p class="mb-1 px-1 text-[11px] text-muted-foreground">双击变量插入到当前输入框</p>
     <div class="max-h-48 overflow-auto">
       <button
         v-for="item in filteredItems"
         :key="item.path"
         type="button"
         class="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 border-t px-1 py-2 text-left text-xs first:border-t-0 hover:bg-accent"
-        @click="insert(item)"
+        @dblclick="insert(item)"
       >
         <span class="min-w-0">
           <span class="block truncate font-mono text-foreground">{{ item.path }}</span>

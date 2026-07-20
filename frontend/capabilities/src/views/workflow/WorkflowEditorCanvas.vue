@@ -14,7 +14,7 @@ import '@vue-flow/controls/dist/style.css'
 
 const graph = defineModel<WorkflowGraph>('graph', { required: true })
 const props = defineProps<{ workflowType: WorkflowType; errors: WorkflowValidationError[] }>()
-const emit = defineEmits<{ selectNode: [nodeId: string]; selectEdge: [edgeId: string]; addNode: [type: WorkflowNodeType, position?: { x: number; y: number }] }>()
+const emit = defineEmits<{ selectNode: [nodeId: string]; selectEdge: [edgeId: string]; addNode: [type: WorkflowNodeType, position?: { x: number; y: number }]; deselect: [] }>()
 
 const flowNodes = shallowRef<Node[]>([])
 const flowEdges = shallowRef<Edge[]>([])
@@ -40,6 +40,7 @@ function connect(connection: Connection) {
 }
 function selectNode(event: { node: Node }) { selectedNodeId.value = event.node.id; selectedEdgeId.value = null; emit('selectNode', event.node.id) }
 function selectEdge(event: { edge: Edge }) { selectedEdgeId.value = event.edge.id; selectedNodeId.value = null; emit('selectEdge', event.edge.id) }
+function onPaneClick() { selectedNodeId.value = null; selectedEdgeId.value = null; emit('deselect') }
 function updatePosition(event: { node: Node }) { const node = flowNodes.value.find(item => item.id === event.node.id); if (node) { node.position = event.node.position; sync() } }
 function deleteSelected() {
   if (selectedNodeId.value) {
@@ -70,7 +71,7 @@ function drop(event: DragEvent) {
     <div class="absolute right-3 top-3 z-10 flex gap-2">
       <Button variant="outline" size="sm" class="h-8 w-8 p-0" title="删除所选" @click="deleteSelected"><Trash2 class="h-4 w-4" /></Button>
     </div>
-    <VueFlow v-model:nodes="flowNodes" v-model:edges="flowEdges" :delete-key-code="null" :fit-view-on-init="true" class="bg-background" @connect="connect" @node-click="selectNode" @edge-click="selectEdge" @node-drag-stop="updatePosition">
+    <VueFlow v-model:nodes="flowNodes" v-model:edges="flowEdges" :delete-key-code="null" :fit-view-on-init="true" class="bg-background" @connect="connect" @node-click="selectNode" @edge-click="selectEdge" @node-drag-stop="updatePosition" @pane-click="onPaneClick">
       <Background pattern-color="var(--border)" :gap="18" />
       <Controls :show-interactive="false"><template #control-fit-view><Maximize class="h-4 w-4" /></template></Controls>
       <template #node-workflow="slotProps">

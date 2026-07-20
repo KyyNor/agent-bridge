@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles } from 'lucide-vue-next'
+import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from 'lucide-vue-next'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
 import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -29,6 +29,7 @@ import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
+import { workflowNodeToneClass, workflowNodeTypeText } from './workflowNodeVisuals'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
   ALL_STATUS_SENTINEL,
@@ -3313,7 +3314,8 @@ async function confirmClearWorkflow() {
       </div>
     </section>
 
-    <section v-if="isWorkflowFormPage && !routeError" class="space-y-4">
+    <section v-if="isWorkflowFormPage && !routeError" class="space-y-5">
+      <!-- Header：对齐 detail 页 text-xl font-semibold tracking-tight -->
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
           <Button variant="ghost" size="sm" class="h-8 px-2" @click="backFromForm">
@@ -3321,8 +3323,11 @@ async function confirmClearWorkflow() {
             返回
           </Button>
           <div>
-            <h2 class="text-lg font-semibold text-foreground">{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</h2>
-            <p class="font-mono text-xs text-muted-foreground">{{ form.workflow_key || 'workflow/new' }}</p>
+            <h2 class="text-xl font-semibold tracking-tight text-foreground">{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</h2>
+            <p class="mt-0.5 text-xs text-muted-foreground">
+              <span class="font-mono">{{ form.workflow_key || 'workflow/new' }}</span>
+              <span v-if="form.profile_key"> · {{ profileName(form.profile_key) }}</span>
+            </p>
           </div>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -3340,82 +3345,236 @@ async function confirmClearWorkflow() {
           </Button>
         </div>
       </div>
-      <Card>
-        <CardContent class="space-y-5 p-4">
-          <div class="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr]">
-            <div class="lg:col-span-1">
-              <label class="mb-1 block text-xs text-muted-foreground">workflow_id</label>
-              <Input v-model="form.workflow_key" class="h-9" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">名称</label>
-              <Input v-model="form.name" class="h-9" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">关联 profile</label>
-              <select v-model="form.profile_key" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
-                <option v-for="profile in profiles" :key="profile.profile_key" :value="profile.profile_key">
-                  {{ profile.name }} / {{ profile.profile_key }}
-                </option>
-              </select>
-            </div>
-            <div class="lg:col-span-3">
-              <label class="mb-1 block text-xs text-muted-foreground">描述</label>
-              <Input v-model="form.description" class="h-9" />
-            </div>
-          </div>
 
-          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr]">
-            <div>
-              <label class="mb-1 block text-xs text-muted-foreground">状态</label>
-              <select v-model="form.status" class="h-9 w-full rounded-md border bg-background px-3 text-sm">
-                <option value="active">启用</option>
-                <option value="disabled">停用</option>
-              </select>
+      <!-- 错误条 -->
+      <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
+        {{ formError }}
+      </div>
+
+      <!-- 主体：左大画布 + 右栏(420px)。整个 grid 作为 relative 容器锚定 fullscreen drawer -->
+      <div class="relative grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <!-- ============ 左：画布卡（palette 上移到顶部，画布横向占满） ============ -->
+        <Card class="shadow-card">
+          <CardContent class="space-y-3 p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="text-sm font-semibold text-foreground">工作流图</h3>
+                  <Badge variant="outline">{{ form.definition.nodes.length }} 节点</Badge>
+                  <Badge variant="outline">{{ form.definition.edges.length }} 连线</Badge>
+                </div>
+                <p class="mt-0.5 text-xs text-muted-foreground">拖拽上方节点到画布，点击节点/连线在右侧编辑配置</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <StatusBadge :status="form.status === 'active' ? 'enabled' : 'disabled'" />
+                <Badge v-if="form.workflow_type === 'summary'" variant="outline">总结类</Badge>
+              </div>
             </div>
-            <div>
-              <label class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
-                类型
-                <span class="relative inline-flex cursor-help items-center text-muted-foreground/70 group" tabindex="0">
-                  <HelpCircle class="h-3.5 w-3.5" />
+
+            <div class="workflow-editor-region flex flex-col overflow-hidden rounded-md border bg-muted/10" style="height: clamp(480px, calc(100vh - 240px), 820px);">
+              <!-- 调色板：横排置顶，自然高度 -->
+              <WorkflowNodePalette orientation="horizontal" @add-node="addNode" />
+              <!-- 画布：flex-1 撑满剩余高度，min-h-0 让 VueFlow 正确测量 -->
+              <div class="min-h-0 flex-1">
+                <WorkflowEditorCanvas
+                  v-model:graph="form.definition"
+                  :workflow-type="form.workflow_type"
+                  :errors="graphErrors"
+                  class="h-full border-t !min-h-0"
+                  @select-node="selectWorkflowNode"
+                  @select-edge="selectWorkflowEdge"
+                  @add-node="addNode"
+                  @deselect="setConfigDrawerOpen(false)"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- ============ 右栏：选中节点/边时显示配置，否则显示工作流信息（互斥） ============ -->
+        <div class="space-y-4">
+          <!-- 配置态：选中节点/边且 overlay 模式时，整栏只显示配置（元数据隐藏） -->
+          <Card v-if="(selectedNode || selectedEdge) && configDrawerOpen && configDrawerMode === 'overlay'" class="shadow-card">
+            <CardContent class="space-y-3 p-4">
+              <div class="flex items-center justify-between gap-2 border-b pb-2">
+                <div class="min-w-0">
+                  <!-- 节点类型 tag：颜色与画布一致；边则显示「连线」中性 tag -->
                   <span
-                    class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-64 -translate-x-1/2 translate-y-1 rounded-md border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
+                    v-if="selectedNode"
+                    class="mb-1 inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-[11px] font-medium"
+                    :class="workflowNodeToneClass(selectedNode.type, 'badge')"
                   >
-                    总结型工作流会固定 Markdown 与 HTML 输出节点；HTML 失败仅记为 warning，Markdown 主产物仍可保留。
+                    <span class="h-1.5 w-1.5 rounded-full" :class="workflowNodeToneClass(selectedNode.type, 'rail')" />
+                    {{ workflowNodeTypeText(selectedNode.type) }}
                   </span>
-                </span>
-              </label>
-              <select :value="form.workflow_type" class="h-9 w-full rounded-md border bg-background px-3 text-sm" @change="changeWorkflowType(($event.target as HTMLSelectElement).value as WorkflowType)">
-                <option value="operation">操作</option>
-                <option value="summary">总结</option>
-              </select>
-            </div>
-          </div>
+                  <span v-else class="mb-1 inline-flex items-center gap-1.5 rounded-sm bg-secondary px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                    <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+                    连线
+                  </span>
+                  <div class="truncate text-sm font-semibold text-foreground">{{ configDrawerTitle }}</div>
+                  <div class="mt-0.5 text-xs text-muted-foreground">点击画布空白处或 ✕ 返回工作流信息</div>
+                </div>
+                <div class="flex shrink-0 items-center gap-1">
+                  <Button variant="ghost" size="sm" class="h-7 px-2" title="全屏编辑" @click="setConfigDrawerMode('fullscreen')">
+                    <Maximize2 class="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" class="h-7 px-2" title="关闭配置" @click="setConfigDrawerOpen(false)">
+                    <X class="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              <WorkflowNodeConfigPanel
+                v-if="selectedNode"
+                :node="selectedNode"
+                :scripts="scripts"
+                :skills="skills"
+                :backends="backendKeys"
+                :reference-items="selectedNodeReferenceItems"
+                :issues="selectedNodeIssues"
+                @replace="replaceNode"
+                @schema-validity="setNodeSchemaValidity"
+              />
+              <WorkflowEdgeConfigPanel
+                v-else-if="selectedEdge"
+                :edge="selectedEdge"
+                :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)"
+                :reference-items="selectedEdgeReferenceItems"
+                :issues="selectedEdgeIssues"
+                @replace="replaceEdge"
+              />
+            </CardContent>
+          </Card>
 
-          <div class="workflow-editor-region relative grid min-h-[520px] grid-cols-[132px_minmax(0,1fr)] overflow-hidden">
-            <WorkflowNodePalette @add-node="addNode" />
-            <WorkflowEditorCanvas v-model:graph="form.definition" :workflow-type="form.workflow_type" :errors="graphErrors" @select-node="selectWorkflowNode" @select-edge="selectWorkflowEdge" @add-node="addNode" />
-            <WorkflowConfigDrawer
-              :open="configDrawerOpen && Boolean(selectedNode || selectedEdge)"
-              :mode="configDrawerMode"
-              :title="configDrawerTitle"
-              @update:open="setConfigDrawerOpen"
-              @update:mode="setConfigDrawerMode"
-            >
-              <WorkflowNodeConfigPanel v-if="selectedNode" :node="selectedNode" :scripts="scripts" :skills="skills" :backends="backendKeys" :reference-items="selectedNodeReferenceItems" :issues="selectedNodeIssues" @replace="replaceNode" @schema-validity="setNodeSchemaValidity" />
-              <WorkflowEdgeConfigPanel v-else-if="selectedEdge" :edge="selectedEdge" :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)" :reference-items="selectedEdgeReferenceItems" :issues="selectedEdgeIssues" @replace="replaceEdge" />
-            </WorkflowConfigDrawer>
-          </div>
-          <div v-if="!hasTaskNode" class="grid gap-3 border p-4 lg:grid-cols-2">
-            <div><div class="mb-2 text-sm font-semibold">测试输入</div><div v-for="field in manualInputFields" :key="field.path" class="mb-2"><label class="mb-1 block text-xs text-muted-foreground">{{ field.path }}<span v-if="field.required" class="text-destructive"> *</span></label><Input v-model="manualInputValues[field.path]" :placeholder="field.description || field.type" /></div><p v-if="!manualInputFields.length" class="text-xs text-muted-foreground">当前脚本参数没有可推导输入字段。</p></div>
-            <div><label class="mb-1 block text-sm font-semibold">高级 JSON</label><textarea v-model="advancedInput" class="min-h-40 w-full rounded-sm border bg-background p-2 font-mono text-xs" /></div>
-          </div>
-        <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
-          {{ formError }}
+          <!-- 工作流信息态：未选中节点/边时显示（基础信息 + 运行配置合并为一张卡） -->
+          <template v-else>
+            <Card class="shadow-card">
+              <CardContent class="space-y-3 p-4">
+                <div class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">工作流信息</div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">workflow_id</label>
+                  <Input v-model="form.workflow_key" class="h-9 font-mono text-xs" :disabled="Boolean(selectedWorkflow && form.workflow_key === selectedWorkflow.workflow_key)" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">名称</label>
+                  <Input v-model="form.name" class="h-9" />
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">关联 profile</label>
+                  <Select v-model="form.profile_key">
+                    <SelectTrigger class="h-9">
+                      <SelectValue placeholder="选择 profile" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="profile in profiles" :key="profile.profile_key" :value="profile.profile_key">
+                        {{ profile.name }} / {{ profile.profile_key }}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs text-muted-foreground">描述</label>
+                  <Input v-model="form.description" class="h-9" />
+                </div>
+                <div class="border-t pt-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="text-xs text-muted-foreground">状态</label>
+                    <div class="flex items-center gap-2">
+                      <StatusBadge :status="form.status === 'active' ? 'enabled' : 'disabled'" />
+                      <Select v-model="form.status">
+                        <SelectTrigger class="h-8 w-24 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">启用</SelectItem>
+                          <SelectItem value="disabled">停用</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div class="mt-3">
+                    <label class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      类型
+                      <span class="group relative inline-flex cursor-help items-center text-muted-foreground/70" tabindex="0">
+                        <HelpCircle class="h-3.5 w-3.5" />
+                        <span
+                          class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-64 -translate-x-1/2 translate-y-1 rounded-md border bg-popover px-3 py-2 text-xs leading-relaxed text-popover-foreground opacity-0 shadow-md transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
+                        >
+                          总结型工作流会固定 Markdown 与 HTML 输出节点；HTML 失败仅记为 warning，Markdown 主产物仍可保留。
+                        </span>
+                      </span>
+                    </label>
+                    <Select :model-value="form.workflow_type" @update:model-value="(v) => changeWorkflowType(v as WorkflowType)">
+                      <SelectTrigger class="h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="operation">操作</SelectItem>
+                        <SelectItem value="summary">总结</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <!-- 测试输入：折叠块，仅 !hasTaskNode 显示 -->
+            <details v-if="!hasTaskNode" class="shadow-card rounded-lg bg-card ring-1 ring-foreground/10">
+              <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+                <span>测试输入</span>
+                <span class="text-xs font-normal text-muted-foreground">{{ manualInputFields.length }} 个字段 · 点击展开</span>
+              </summary>
+              <div class="space-y-3 border-t px-4 py-3">
+                <div>
+                  <div class="mb-2 text-xs font-medium text-muted-foreground">逐字段输入</div>
+                  <div class="space-y-2">
+                    <div v-for="field in manualInputFields" :key="field.path">
+                      <label class="mb-1 block text-xs text-muted-foreground">{{ field.path }}<span v-if="field.required" class="text-destructive"> *</span></label>
+                      <Input v-model="manualInputValues[field.path]" :placeholder="field.description || field.type" class="h-9" />
+                    </div>
+                    <p v-if="!manualInputFields.length" class="text-xs text-muted-foreground">当前脚本参数没有可推导输入字段。</p>
+                  </div>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-muted-foreground">高级 JSON</label>
+                  <textarea v-model="advancedInput" class="min-h-32 w-full rounded-md border bg-background p-2 font-mono text-xs" />
+                </div>
+              </div>
+            </details>
+          </template>
         </div>
-        </CardContent>
-      </Card>
 
+        <!-- fullscreen drawer：锚定到此 relative grid，inset:0 覆盖画布+右栏 -->
+        <WorkflowConfigDrawer
+          v-if="configDrawerOpen && (selectedNode || selectedEdge) && configDrawerMode === 'fullscreen'"
+          :open="true"
+          :mode="'fullscreen'"
+          :title="configDrawerTitle"
+          @update:open="setConfigDrawerOpen"
+          @update:mode="setConfigDrawerMode"
+        >
+          <WorkflowNodeConfigPanel
+            v-if="selectedNode"
+            :node="selectedNode"
+            :scripts="scripts"
+            :skills="skills"
+            :backends="backendKeys"
+            :reference-items="selectedNodeReferenceItems"
+            :issues="selectedNodeIssues"
+            @replace="replaceNode"
+            @schema-validity="setNodeSchemaValidity"
+          />
+          <WorkflowEdgeConfigPanel
+            v-else-if="selectedEdge"
+            :edge="selectedEdge"
+            :locked="isProtectedSummaryEdge(selectedEdge, form.workflow_type)"
+            :reference-items="selectedEdgeReferenceItems"
+            :issues="selectedEdgeIssues"
+            @replace="replaceEdge"
+          />
+        </WorkflowConfigDrawer>
+      </div>
+
+      <!-- AI 设计抽屉：fixed 全屏，仅 tab → SegmentedTabs + bg-muted/10 对齐 -->
       <aside
         v-if="showDesigner"
         class="fixed inset-y-0 right-0 z-40 flex w-full max-w-[560px] flex-col border-l bg-background shadow-xl"
@@ -3428,22 +3587,11 @@ async function confirmClearWorkflow() {
           <Button variant="ghost" size="sm" class="h-8 px-2" :disabled="designing" @click="showDesigner = false">关闭</Button>
         </div>
         <div class="flex-1 space-y-4 overflow-auto p-4">
-          <div class="grid grid-cols-2 gap-2 rounded-md border bg-muted/20 p-1">
-            <button
-              class="rounded px-3 py-2 text-sm transition"
-              :class="designMode === 'modify' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'"
-              @click="designMode = 'modify'"
-            >
-              修改
-            </button>
-            <button
-              class="rounded px-3 py-2 text-sm transition"
-              :class="designMode === 'create' ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'"
-              @click="designMode = 'create'"
-            >
-              新建
-            </button>
-          </div>
+          <SegmentedTabs
+            :model-value="designMode"
+            :tabs="[{ key: 'modify', label: '修改' }, { key: 'create', label: '新建' }]"
+            @update:model-value="(v) => designMode = v as 'create' | 'modify'"
+          />
 
           <div>
             <label class="mb-1 block text-xs text-muted-foreground">提示词</label>
@@ -3462,7 +3610,7 @@ async function confirmClearWorkflow() {
             {{ designError }}
           </div>
 
-          <section v-if="designResponse?.result" class="space-y-3 rounded-md border p-3">
+          <section v-if="designResponse?.result" class="space-y-3 rounded-md border bg-muted/10 p-3">
             <div class="flex items-center justify-between gap-2">
               <div class="text-sm font-semibold">生成结果</div>
               <Badge v-if="designResponse.run_key" variant="outline">{{ designResponse.run_key }}</Badge>
@@ -3472,11 +3620,11 @@ async function confirmClearWorkflow() {
               <div v-for="note in designResponse.result.notes" :key="note">· {{ note }}</div>
             </div>
             <div v-if="workflowDesignDraft" class="grid gap-2 text-xs">
-              <div class="rounded-md border bg-muted/20 p-2">
+              <div class="rounded-md border bg-muted/10 p-2">
                 <div class="font-mono font-medium text-foreground">{{ workflowDesignDraft.workflow_key }}</div>
                 <div class="mt-1 text-muted-foreground">{{ workflowDesignDraft.name }}</div>
               </div>
-              <pre class="max-h-96 overflow-auto rounded-md border bg-muted/20 p-3 text-xs">{{ JSON.stringify(workflowDesignDraft.definition, null, 2) }}</pre>
+              <pre class="max-h-96 overflow-auto rounded-md border bg-muted/10 p-3 text-xs">{{ JSON.stringify(workflowDesignDraft.definition, null, 2) }}</pre>
             </div>
           </section>
         </div>
