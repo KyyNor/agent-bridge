@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from '@lucide/vue'
 import { api } from '../../api/client'
-import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, SyntaxCheckResult, WorkflowDefinition } from '../../api/types'
+import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, SyntaxCheckResult, WorkflowDefinition, WorkflowRun } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -76,6 +76,10 @@ const testTimeout = ref<number | undefined>(30)
 const testProfileKey = ref('__default__')
 const testWorkflowKey = ref('__none__')
 const testWorkflowRunId = ref('')
+const workflowRuns = ref<Record<string, WorkflowRun[]>>({})
+const workflowRunsLoading = ref(false)
+const workflowRunError = ref('')
+let workflowRunRequestId = 0
 const runDetail = ref<ScriptRun | null>(null)
 const runDetailLoading = ref(false)
 const showDesigner = ref(false)
@@ -124,6 +128,9 @@ const isBuiltInScript = computed(() => editingScript.value ? isBuiltInScriptFami
 const canEditContract = computed(() => editingScript.value ? canEditScriptContract(editingScript.value) : true)
 const pagedScripts = computed(() => paginate(scripts.value, scriptPage.value, scriptPageSize.value))
 const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
+const workflowRunOptions = computed(() =>
+  testWorkflowKey.value === '__none__' ? [] : workflowRuns.value[testWorkflowKey.value] || [],
+)
 
 onMounted(async () => {
   await loadAll()
@@ -175,6 +182,8 @@ watch(
       outputSchemaEnabled.value = false
       runs.value = []
       runDetail.value = null
+      testWorkflowKey.value = '__none__'
+      testWorkflowRunId.value = ''
       return
     }
     formLoading.value = true
@@ -183,9 +192,11 @@ watch(
       const state = toScriptFormState(detail, defaultInputSchema())
       form.value = state.form
       outputSchemaEnabled.value = state.outputSchemaEnabled
+      syncWorkflowTestContext(detail)
       await loadRuns()
       if (requestedRunId.value) await openRunDetail(requestedRunId.value)
-      else runDetail.value = runs.value[0] || null
+      else if (runs.value[0]) await openRunDetail(runs.value[0].run_id)
+      else runDetail.value = null
     } catch (e: unknown) {
       scriptNotFound.value = true
       form.value = emptyForm()
@@ -209,10 +220,59 @@ async function loadAll() {
     scripts.value = scriptList
     profiles.value = profileList
     workflows.value = workflowList
+    if (editingScript.value) syncWorkflowTestContext(editingScript.value)
   } catch (e: unknown) {
     error.value = errorMessage(e)
   } finally {
     loading.value = false
+  }
+}
+
+watch(testWorkflowKey, async (workflowKey) => {
+  workflowRunError.value = ''
+  if (workflowKey === '__none__') {
+    testWorkflowRunId.value = ''
+    return
+  }
+  const workflow = workflows.value.find(item => item.workflow_key === workflowKey)
+  if (workflow) testProfileKey.value = workflow.profile_key
+  await loadWorkflowTestRuns(workflowKey)
+})
+
+function syncWorkflowTestContext(script: Pick<ManagedScript, 'owner_type' | 'owner_key'> | null | undefined) {
+  if (script?.owner_type !== 'workflow' || !script.owner_key) {
+    testWorkflowKey.value = '__none__'
+    testWorkflowRunId.value = ''
+    return
+  }
+  const workflow = workflows.value.find(item => item.workflow_key === script.owner_key)
+  if (!workflow) return
+  testProfileKey.value = workflow.profile_key
+  if (testWorkflowKey.value === workflow.workflow_key) {
+    void loadWorkflowTestRuns(workflow.workflow_key)
+  } else {
+    testWorkflowKey.value = workflow.workflow_key
+  }
+}
+
+async function loadWorkflowTestRuns(workflowKey: string) {
+  const requestId = ++workflowRunRequestId
+  workflowRunsLoading.value = true
+  workflowRunError.value = ''
+  try {
+    const items = await api.listWorkflowRuns(workflowKey, 50)
+    if (requestId !== workflowRunRequestId || testWorkflowKey.value !== workflowKey) return
+    workflowRuns.value = { ...workflowRuns.value, [workflowKey]: items }
+    if (!items.some(item => item.run_id === testWorkflowRunId.value)) {
+      testWorkflowRunId.value = items.find(item => item.status === 'running')?.run_id || items[0]?.run_id || ''
+    }
+  } catch (e: unknown) {
+    if (requestId !== workflowRunRequestId || testWorkflowKey.value !== workflowKey) return
+    workflowRunError.value = errorMessage(e)
+    workflowRuns.value = { ...workflowRuns.value, [workflowKey]: [] }
+    testWorkflowRunId.value = ''
+  } finally {
+    if (requestId === workflowRunRequestId) workflowRunsLoading.value = false
   }
 }
 
@@ -561,6 +621,11 @@ async function doRun(scriptKey: string) {
     await loadRuns()
     runDetail.value = run
   } catch (e: unknown) {
+    // Failed executions are persisted before the API returns the validation
+    // error. Reload the newest run so stdout/stderr remain available for
+    // debugging instead of showing only the toast-like error text.
+    await loadRuns()
+    if (runs.value[0]) await openRunDetail(runs.value[0].run_id)
     runError.value = errorMessage(e)
   } finally {
     testing.value = false
@@ -848,12 +913,30 @@ def main(envelope):
           <Play class="mr-1.5 h-4 w-4" />
           {{ testing ? '运行中' : (isNew ? '保存并运行' : '运行') }}
         </Button>
-        <Button v-if="editingKey" variant="outline" size="sm" @click="showHistory = !showHistory">
-          {{ showHistory ? '收起历史' : '版本历史' }}
+        <Button v-if="editingKey" variant="outline" size="sm" @click="showHistory = true">
+          版本历史
           <span v-if="editingScript?.revision_no" class="ml-1.5 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px]">v{{ editingScript.revision_no }}</span>
         </Button>
       </div>
     </div>
+
+    <Dialog v-if="editingKey" v-model:open="showHistory">
+      <DialogContent class="w-[96vw] max-w-[1100px] sm:max-w-[1100px]">
+        <DialogHeader>
+          <DialogTitle>脚本版本历史 · {{ editingScript?.name || editingKey }}</DialogTitle>
+        </DialogHeader>
+        <div class="max-h-[78vh] overflow-y-auto pr-1">
+          <RevisionHistoryPanel
+            :key="`script-${editingKey}`"
+            entity-type="script"
+            :entity-key="editingKey"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="showHistory = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <div v-if="scriptNotFound" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
       无法加载该脚本（可能已被删除或不存在）。请<a class="underline" href="#scripts" @click.prevent="goList">返回列表</a>。
@@ -967,20 +1050,11 @@ def main(envelope):
             </div>
           </template>
 
-          <!-- Version history -->
-          <div v-if="showHistory && editingKey" class="border-t border-border pt-4">
-            <h3 class="mb-3 text-sm font-semibold">版本历史</h3>
-            <RevisionHistoryPanel
-              :key="`script-${editingKey}`"
-              entity-type="script"
-              :entity-key="editingKey"
-            />
-          </div>
         </CardContent>
       </Card>
 
       <!-- 右栏：运行 + 结果（sticky） -->
-      <div class="space-y-4 xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pr-1">
+      <div class="space-y-4 xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100vh-2rem)] xl:overflow-y-scroll xl:pr-1">
         <Card>
           <CardContent class="space-y-3 p-4">
             <div class="text-sm font-semibold text-foreground">测试运行</div>
@@ -1040,7 +1114,7 @@ def main(envelope):
               </div>
               <div>
                 <label class="mb-1 block text-xs text-muted-foreground">能力平面</label>
-                <Select v-model="testProfileKey">
+                <Select v-model="testProfileKey" :disabled="testWorkflowKey !== '__none__'">
                   <SelectTrigger class="w-full"><SelectValue placeholder="默认" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__default__">默认</SelectItem>
@@ -1064,12 +1138,24 @@ def main(envelope):
                 </div>
                 <div>
                   <label class="mb-1 block text-xs text-muted-foreground">run_id</label>
-                  <Input v-model="testWorkflowRunId" placeholder="例如 run_1" />
+                  <Select v-model="testWorkflowRunId" :disabled="workflowRunsLoading || !workflowRunOptions.length">
+                    <SelectTrigger class="w-full"><SelectValue placeholder="选择已有运行记录" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="run in workflowRunOptions" :key="run.run_id" :value="run.run_id">
+                        <span class="font-mono text-xs">{{ run.run_id }}</span>
+                        <span class="ml-2 text-xs text-muted-foreground">{{ run.status }} · {{ formatLocalDatetime(run.started_at) }}</span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p v-if="workflowRunsLoading" class="mt-1 text-xs text-muted-foreground">加载工作流运行记录…</p>
+                  <p v-else-if="workflowRunError" class="mt-1 text-xs text-destructive">{{ workflowRunError }}</p>
+                  <p v-else-if="testWorkflowKey !== '__none__' && !workflowRunOptions.length" class="mt-1 text-xs text-warning-soft-fg">暂无可用运行记录，请先运行该工作流。</p>
                 </div>
               </div>
               <p class="mt-2 text-xs leading-5 text-muted-foreground">
-                填写完整后会透传 workflow 运行上下文；仅填写一部分时，页面会先阻止提交。
+                页面只允许选择真实存在且属于该 workflow 的运行记录，避免 workflow run not found。
               </p>
+              <p v-if="testWorkflowKey !== '__none__'" class="mt-1 text-xs text-muted-foreground">已自动使用该 workflow 关联的能力平面。</p>
             </div>
             <div class="flex items-center gap-3">
               <Button size="sm" :disabled="testing || form.status !== 'active'" @click="runScript">
@@ -1085,7 +1171,7 @@ def main(envelope):
         <Card>
           <CardContent class="space-y-3 p-4">
             <div class="flex items-center justify-between gap-2">
-              <div class="text-sm font-semibold text-foreground">运行结果</div>
+                <div class="text-sm font-semibold text-foreground">运行详情 / 调试日志</div>
               <Button v-if="runDetail" variant="ghost" size="sm" class="h-7 px-2 text-xs" @click="runDetail = null">
                 清除
               </Button>
@@ -1104,16 +1190,20 @@ def main(envelope):
                 {{ runDetail.error_message }}
               </div>
               <section class="rounded-md border bg-muted/20 p-3">
+                <div class="mb-2 text-xs font-semibold text-foreground">运行参数 / workflow context</div>
+                <JsonViewer :value="runDetail.params" max-height="160px" />
+              </section>
+              <section class="rounded-md border bg-muted/20 p-3">
                 <div class="mb-2 text-xs font-semibold text-foreground">result</div>
                 <JsonViewer :value="runDetail.result" max-height="192px" />
               </section>
               <section class="rounded-md border bg-muted/20 p-3">
                 <div class="mb-2 text-xs font-semibold text-foreground">stdout</div>
-                <pre class="max-h-48 overflow-auto rounded bg-background p-2 text-xs">{{ runDetail.stdout }}</pre>
+                <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-xs">{{ runDetail.stdout || '（无 stdout 输出）' }}</pre>
               </section>
               <section class="rounded-md border bg-muted/20 p-3">
                 <div class="mb-2 text-xs font-semibold text-foreground">stderr</div>
-                <pre class="max-h-48 overflow-auto rounded bg-background p-2 text-xs">{{ runDetail.stderr }}</pre>
+                <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-2 text-xs">{{ runDetail.stderr || '（无 stderr 输出）' }}</pre>
               </section>
             </div>
           </CardContent>

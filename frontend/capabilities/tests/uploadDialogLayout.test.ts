@@ -120,7 +120,7 @@ test('knowledge browse API contract is typed and builds mutually exclusive conte
 test('knowledge browse renders ZIP and virtual folders with distinct icons and document-only actions', () => {
   const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
   const documentsTab = file.slice(file.indexOf('<!-- Documents Tab -->'))
-  assert.match(file, /import \{[^}]*Archive[^}]*\} from 'lucide-vue-next'/)
+  assert.match(file, /import \{[^}]*Archive[^}]*\} from '@lucide\/vue'/)
   assert.match(documentsTab, /entry\.kind === 'zip'/)
   assert.match(documentsTab, /<Archive/)
   assert.match(documentsTab, /<Folder/)

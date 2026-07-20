@@ -315,7 +315,12 @@ class ScriptService:
                         if validation_error is not None:
                             status = "failed"
                             error_message = validation_error
-        run_params = {"script_params": script_params, "timeout_seconds": timeout, "profile_key": profile_key}
+        run_params = {
+            "script_params": script_params,
+            "timeout_seconds": timeout,
+            "profile_key": profile_key,
+            "workflow": envelope["workflow"],
+        }
         run = self.store.scripts.create_script_run(
             run_id=run_id,
             script_key=script["script_key"],

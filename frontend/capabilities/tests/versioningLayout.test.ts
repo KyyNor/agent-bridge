@@ -110,6 +110,8 @@ test('script editor surfaces syntax warnings and a version-history panel', () =>
   assert.match(file, /版本历史/)
   assert.match(file, /RevisionHistoryPanel/)
   assert.match(file, /entity-type="script"/)
+  assert.match(file, /<Dialog v-if="editingKey" v-model:open="showHistory">/)
+  assert.match(file, /脚本版本历史/)
   // Debounced validation must ignore stale responses after a newer edit or route change.
   assert.match(file, /syntaxRequestId/)
   assert.match(file, /requestId === syntaxRequestId/)

@@ -32,5 +32,6 @@ test('keeps the App content host as the actual viewport scroll container', () =>
 
   assert.match(appShell, /class="flex h-screen min-h-0 overflow-hidden"/)
   assert.match(appShell, /class="ml-\[210px\] flex h-screen min-h-0 min-w-0 flex-1 flex-col"/)
-  assert.match(app, /class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto"/)
+  assert.match(app, /class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll"/)
+  assert.match(app, /scrollbar-gutter: stable/)
 })

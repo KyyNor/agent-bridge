@@ -1158,7 +1158,15 @@ class WorkflowService:
             if not isinstance(payload, dict):
                 raise ValidationError("task payload must be an object")
             normalized.append({"task_key": task_key, "task_version": task_version, "type": task_type, "payload": payload})
-        return self.store.upsert_workflow_tasks(workflow_key, normalized)
+        result = self.store.upsert_workflow_tasks(workflow_key, normalized)
+        logger.info(
+            "workflow_set_task 写入任务批次 workflow=%s run=%s received=%d result=%s",
+            workflow_key,
+            run_id,
+            len(normalized),
+            result,
+        )
+        return {"workflow_key": workflow_key, "run_id": run_id, "received": len(normalized), **result}
 
     def save_artifact(
         self,

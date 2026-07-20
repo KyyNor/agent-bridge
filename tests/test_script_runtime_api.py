@@ -84,6 +84,62 @@ def test_script_test_route_injects_profile_and_workflow_headers(wm_paths):
         "workflow_key": "page-report",
         "run_id": "run_1",
     }
+    assert payload["params"]["workflow"] == {
+        "enabled": True,
+        "workflow_key": "page-report",
+        "run_id": "run_1",
+    }
+
+
+def test_runtime_workflow_set_task_keeps_workflows_isolated_and_accepts_large_batches(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    client = _create_client(wm_paths)
+    svc: AgentBridgeService = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    for workflow_key, run_id in (("workflow-a", "run-a"), ("workflow-b", "run-b")):
+        svc.workflows.upsert_definition(
+            actor="root",
+            workflow_key=workflow_key,
+            name=workflow_key,
+            description="",
+            profile_key="report-plane",
+            workflow_js="",
+            status="active",
+        )
+        svc.store.create_workflow_run(
+            run_id=run_id,
+            workflow_key=workflow_key,
+            profile_key="report-plane",
+            task_key=None,
+            status="running",
+            temp_dir=f"/tmp/{run_id}",
+        )
+
+    def set_tasks(workflow_key: str, run_id: str):
+        return client.post(
+            "/runtime/workflow/set-task",
+            headers={
+                "X-Agent-Bridge-User": "root",
+                "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
+                "X-Agent-Bridge-Workflow": "true",
+                "X-Agent-Bridge-Workflow-Key": workflow_key,
+                "X-Agent-Bridge-Workflow-Run-Id": run_id,
+            },
+            json={"tasks": [{"task_key": f"task-{i}", "payload": {"workflow": workflow_key}} for i in range(200)]},
+        )
+
+    first = set_tasks("workflow-a", "run-a")
+    second = set_tasks("workflow-b", "run-b")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["received"] == 200
+    assert second.json()["received"] == 200
+    assert len(svc.store.list_workflow_tasks("workflow-a")) == 200
+    assert len(svc.store.list_workflow_tasks("workflow-b")) == 200
+    assert svc.store.get_workflow_task("workflow-a", "task-0")["payload"] == {"workflow": "workflow-a"}
+    assert svc.store.get_workflow_task("workflow-b", "task-0")["payload"] == {"workflow": "workflow-b"}
 
 
 def test_runtime_workflow_routes_require_complete_headers(wm_paths):

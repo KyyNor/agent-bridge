@@ -2167,19 +2167,21 @@ async function runWorkflow(item: WorkflowDefinition, input: Record<string, unkno
   testing.value = true
   try {
     const res = await api.runWorkflow(wf.workflow_key, input)
-    if (res.status === 'started' && res.run_id) {
+    // The API normalizes the scheduler response to `run_status`; a run id is
+    // the stable signal that the progress page can load and poll.
+    if (res.run_id) {
       testingRunId.value = res.run_id
       progressWorkflowKey.value = wf.workflow_key
       progressRunId.value = res.run_id
       selectedKey.value = wf.workflow_key
       selectedRunId.value = res.run_id
       progressAgentRunKey.value = ''
+      window.location.hash = `workflow/${wf.workflow_key}/progress/${res.run_id}`
       await loadRuns(wf.workflow_key)
       await loadProgressAgentRuns()
       await loadProgressAgentEvents()
       stopTestPolling()
       testPoll = setInterval(pollTestRun, 1500)
-      window.location.hash = `workflow/${wf.workflow_key}/progress/${res.run_id}`
     } else {
       testing.value = false
     }

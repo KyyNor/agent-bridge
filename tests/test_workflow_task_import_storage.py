@@ -10,6 +10,7 @@ TASK_ACTIONS = {
     "updated": 0,
     "skipped_completed": 0,
     "skipped_running": 0,
+    "skipped_historical": 0,
     "reopened_expired": 0,
 }
 
