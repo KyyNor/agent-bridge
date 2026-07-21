@@ -328,15 +328,12 @@ class AgentBridgeService:
         summaries: list[dict[str, Any]] = []
         for kb in self.list_kbs(actor):
             targets = self.store.list_backend_targets(kb["id"])
-            docs = self.store.list_docs_for_kb(kb["id"])
+            counts = self.store.get_kb_document_counts(kb["id"])
             summaries.append(
                 {
                     **kb,
                     "backend_targets": targets,
-                    "document_count": len(docs),
-                    "sync_failed_count": len(
-                        [doc for doc in docs if doc.get("sync_status") == SyncStateStatus.sync_failed.value]
-                    ),
+                    **counts,
                 }
             )
         return summaries

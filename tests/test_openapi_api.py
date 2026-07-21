@@ -52,6 +52,23 @@ def test_openapi_admin_flow_import_preview_save_and_catalog(wm_paths: AgentBridg
         assert tools.status_code == 200
         assert [item["tool"] for item in tools.json()] == ["list_pets"]
 
+        service_summary = client.get("/capabilities/openapi-services?summary=true", headers=headers)
+        assert service_summary.status_code == 200
+        assert service_summary.json()[0]["tool_count"] == 1
+        assert "spec_content" not in service_summary.json()[0]
+
+        tool_summary = client.get("/capability-tools?source_type=openapi_service", headers=headers)
+        assert tool_summary.status_code == 200
+        assert tool_summary.json()["items"][0]["tool_name"] == "list_pets"
+        assert "input_schema" not in tool_summary.json()["items"][0]
+
+        tool_detail = client.get(
+            "/capabilities/openapi-services/petstore/tools/list_pets",
+            headers=headers,
+        )
+        assert tool_detail.status_code == 200
+        assert "input_schema" in tool_detail.json()
+
         catalog = client.get("/capability-catalog", headers=headers)
         assert catalog.status_code == 200
         assert any(item["source_type"] == "openapi_service" and item["source_key"] == "petstore" for item in catalog.json()["sources"])

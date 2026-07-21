@@ -90,6 +90,29 @@ def _datetime_iso(value: datetime | str) -> str:
     return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
+def _run_summary_from_prefixed_row(row: dict[str, Any], prefix: str) -> dict[str, Any] | None:
+    run_id = row.get(f"{prefix}run_id")
+    if run_id is None:
+        return None
+    return {
+        "run_id": run_id,
+        "workflow_key": row["workflow_key"],
+        "profile_key": row.get(f"{prefix}profile_key"),
+        "task_key": row.get(f"{prefix}task_key"),
+        "status": row.get(f"{prefix}status"),
+        "workflow_revision_no": row.get(f"{prefix}workflow_revision_no"),
+        "workflow_content_hash": row.get(f"{prefix}workflow_content_hash"),
+        "task_version": row.get(f"{prefix}task_version"),
+        "execution_mode": row.get(f"{prefix}execution_mode"),
+        "source_run_id": row.get(f"{prefix}source_run_id"),
+        "exit_code": row.get(f"{prefix}exit_code"),
+        "error": row.get(f"{prefix}error"),
+        "started_at": row.get(f"{prefix}started_at"),
+        "finished_at": row.get(f"{prefix}finished_at"),
+        "duration_ms": row.get(f"{prefix}duration_ms"),
+    }
+
+
 class WorkflowsRepository:
     def __init__(self, db_path, connect):
         self._db_path = db_path
@@ -161,6 +184,19 @@ class WorkflowsRepository:
                 "SELECT * FROM workflow_definitions ORDER BY workflow_key"
             ).fetchall()
             return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def list_workflow_definition_summaries(self) -> list[dict[str, Any]]:
+        """Return only fields needed by workflow lists and selectors."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT workflow_key, name, description, profile_key, status,
+                       workflow_type, created_by, created_at, updated_at
+                FROM workflow_definitions
+                ORDER BY workflow_key
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     # --- definition revisions --------------------------------------------
 
@@ -1169,6 +1205,131 @@ class WorkflowsRepository:
                 (workflow_key, limit),
             ).fetchall()
             return [item for row in rows if (item := _row_payload(row)) is not None]
+
+    def list_workflow_run_summaries(
+        self,
+        workflow_key: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return a paginated run list without snapshots or JSON payloads."""
+        bounded_limit = min(max(limit, 1), 100)
+        bounded_offset = max(offset, 0)
+        columns = """
+            run_id, workflow_key, profile_key, task_key, status,
+            workflow_revision_no, workflow_content_hash, task_version,
+            execution_mode, source_run_id, exit_code, error,
+            started_at, finished_at, duration_ms
+        """
+        with self._connect() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) AS total FROM workflow_runs WHERE workflow_key = ?",
+                (workflow_key,),
+            ).fetchone()["total"]
+            rows = conn.execute(
+                f"""
+                SELECT {columns}
+                FROM workflow_runs
+                WHERE workflow_key = ?
+                ORDER BY started_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (workflow_key, bounded_limit, bounded_offset),
+            ).fetchall()
+        return {
+            "runs": [dict(row) for row in rows],
+            "total": int(total),
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+        }
+
+    def list_workflow_run_overviews(self) -> list[dict[str, Any]]:
+        """Return one latest/running summary per workflow for list pages."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                WITH latest AS (
+                  SELECT
+                    r.run_id, r.workflow_key, r.profile_key, r.task_key, r.status,
+                    r.workflow_revision_no, r.workflow_content_hash, r.task_version,
+                    r.execution_mode, r.source_run_id, r.exit_code, r.error,
+                    r.started_at, r.finished_at, r.duration_ms,
+                    COUNT(*) OVER (PARTITION BY r.workflow_key) AS run_count,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY r.workflow_key
+                      ORDER BY r.started_at DESC, r.id DESC
+                    ) AS row_number
+                  FROM workflow_runs r
+                ), running AS (
+                  SELECT
+                    r.run_id, r.workflow_key, r.profile_key, r.task_key, r.status,
+                    r.workflow_revision_no, r.workflow_content_hash, r.task_version,
+                    r.execution_mode, r.source_run_id, r.exit_code, r.error,
+                    r.started_at, r.finished_at, r.duration_ms,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY r.workflow_key
+                      ORDER BY r.started_at DESC, r.id DESC
+                    ) AS row_number
+                  FROM workflow_runs r
+                  WHERE r.status = 'running'
+                )
+                SELECT
+                  w.workflow_key,
+                  COALESCE(latest.run_count, 0) AS run_count,
+                  latest.run_id AS latest_run_id,
+                  latest.profile_key AS latest_profile_key,
+                  latest.task_key AS latest_task_key,
+                  latest.status AS latest_status,
+                  latest.workflow_revision_no AS latest_workflow_revision_no,
+                  latest.workflow_content_hash AS latest_workflow_content_hash,
+                  latest.task_version AS latest_task_version,
+                  latest.execution_mode AS latest_execution_mode,
+                  latest.source_run_id AS latest_source_run_id,
+                  latest.exit_code AS latest_exit_code,
+                  latest.error AS latest_error,
+                  latest.started_at AS latest_started_at,
+                  latest.finished_at AS latest_finished_at,
+                  latest.duration_ms AS latest_duration_ms,
+                  running.run_id AS running_run_id,
+                  running.profile_key AS running_profile_key,
+                  running.task_key AS running_task_key,
+                  running.status AS running_status,
+                  running.workflow_revision_no AS running_workflow_revision_no,
+                  running.workflow_content_hash AS running_workflow_content_hash,
+                  running.task_version AS running_task_version,
+                  running.execution_mode AS running_execution_mode,
+                  running.source_run_id AS running_source_run_id,
+                  running.exit_code AS running_exit_code,
+                  running.error AS running_error,
+                  running.started_at AS running_started_at,
+                  running.finished_at AS running_finished_at,
+                  running.duration_ms AS running_duration_ms
+                FROM workflow_definitions w
+                LEFT JOIN latest
+                  ON latest.workflow_key = w.workflow_key
+                 AND latest.row_number = 1
+                LEFT JOIN running
+                  ON running.workflow_key = w.workflow_key
+                 AND running.row_number = 1
+                ORDER BY w.workflow_key
+                """
+            ).fetchall()
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            latest_run = _run_summary_from_prefixed_row(item, "latest_")
+            running_run = _run_summary_from_prefixed_row(item, "running_")
+            result.append(
+                {
+                    "workflow_key": item["workflow_key"],
+                    "run_count": int(item["run_count"] or 0),
+                    "latest_run": latest_run,
+                    "running_run": running_run,
+                }
+            )
+        return result
 
     def list_completed_workflow_runs_for_task(
         self,

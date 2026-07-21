@@ -127,16 +127,13 @@ async function loadRunData() {
   const token = ++listRequestToken
   loading.value = true
   const params = baseRunParams()
-  const activeParams = addActiveRunFilter({ ...params })
+  addActiveRunFilter(params)
   try {
-    const [basePage, activePage] = await Promise.all([
-      api.listAgentRunsPage(params),
-      api.listAgentRunsPage(activeParams),
-    ])
+    const pageResult = await api.listAgentRunsPage(params)
     if (token !== listRequestToken) return
-    runCounts.value = basePage.counts
-    runs.value = activePage.items
-    runTotal.value = activePage.total
+    runCounts.value = pageResult.counts
+    runs.value = pageResult.items
+    runTotal.value = pageResult.total
   } catch {
     if (token !== listRequestToken) return
     runCounts.value = { all: 0, success: 0, failed: 0, running: 0, stopped: 0 }

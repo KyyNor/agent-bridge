@@ -96,6 +96,25 @@ class CapabilitiesRepository:
             rows = conn.execute("SELECT * FROM mcp_services ORDER BY service_key").fetchall()
             return [dict(row) for row in rows]
 
+    def list_mcp_service_summaries(self) -> list[dict[str, Any]]:
+        """Return service metadata without credentials or tool payloads."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  s.service_key, s.name, s.endpoint_url, s.description,
+                  s.tags_json, s.status, s.created_by, s.created_at,
+                  s.updated_at, s.last_synced_at, s.last_error,
+                  COUNT(t.id) AS tool_count
+                FROM mcp_services s
+                LEFT JOIN mcp_tools t
+                  ON t.service_key = s.service_key AND t.status = 'active'
+                GROUP BY s.id
+                ORDER BY s.service_key
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def update_mcp_service_status(self, service_key: str, status: McpServiceStatus | str) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -225,6 +244,116 @@ class CapabilitiesRepository:
                     (service_key,),
                 ).fetchall()
             return [dict(row) for row in rows]
+
+    def list_tool_summaries(
+        self,
+        *,
+        source_type: str | None = None,
+        service_key: str | None = None,
+        tool_type: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Page active MCP/OpenAPI tools without schemas, mappings or examples."""
+        bounded_limit = min(max(int(limit), 1), 200)
+        bounded_offset = max(int(offset), 0)
+        union_sql = """
+          SELECT
+            'mcp_service' AS source_type,
+            t.service_key,
+            s.name AS service_name,
+            t.tool_name,
+            t.display_name,
+            t.description,
+            t.tool_type,
+            t.tags_json,
+            NULL AS operation_id,
+            NULL AS method,
+            NULL AS path
+          FROM mcp_tools t
+          JOIN mcp_services s ON s.service_key = t.service_key
+          WHERE t.status = 'active' AND s.status = 'enabled'
+          UNION ALL
+          SELECT
+            'openapi_service' AS source_type,
+            t.service_key,
+            s.name AS service_name,
+            t.tool_name,
+            t.display_name,
+            t.description,
+            t.tool_type,
+            t.tags_json,
+            t.operation_id,
+            t.method,
+            t.path
+          FROM openapi_tools t
+          JOIN openapi_services s ON s.service_key = t.service_key
+          WHERE t.status = 'active' AND s.status = 'enabled'
+        """
+        filters: list[str] = []
+        params: list[Any] = []
+        if source_type:
+            filters.append("source_type = ?")
+            params.append(source_type)
+        if service_key:
+            filters.append("service_key = ?")
+            params.append(service_key)
+        if tool_type:
+            filters.append("tool_type = ?")
+            params.append(tool_type)
+        if query:
+            like = f"%{query.lower()}%"
+            filters.append(
+                "(lower(tool_name) LIKE ? OR lower(display_name) LIKE ? OR lower(COALESCE(description, '')) LIKE ?)"
+            )
+            params.extend([like, like, like])
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        count_filters = [item for item in filters if item != "tool_type = ?"]
+        count_params = []
+        param_index = 0
+        for item in filters:
+            if item == "tool_type = ?":
+                param_index += 1
+                continue
+            if "LIKE ?" in item:
+                count_params.extend(params[param_index:param_index + 3])
+                param_index += 3
+            else:
+                count_params.append(params[param_index])
+                param_index += 1
+        count_where = f"WHERE {' AND '.join(count_filters)}" if count_filters else ""
+        with self._connect() as conn:
+            total = conn.execute(
+                f"WITH tools AS ({union_sql}) SELECT COUNT(*) AS total FROM tools {where_clause}",
+                params,
+            ).fetchone()["total"]
+            count_rows = conn.execute(
+                f"WITH tools AS ({union_sql}) SELECT tool_type, COUNT(*) AS count FROM tools {count_where} GROUP BY tool_type",
+                count_params,
+            ).fetchall()
+            rows = conn.execute(
+                f"""
+                WITH tools AS ({union_sql})
+                SELECT * FROM tools
+                {where_clause}
+                ORDER BY service_key, tool_name
+                LIMIT ? OFFSET ?
+                """,
+                (*params, bounded_limit, bounded_offset),
+            ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["tags"] = json.loads(item.pop("tags_json") or "[]")
+            items.append(item)
+        return {
+            "items": items,
+            "total": int(total),
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+            "counts": {str(row["tool_type"]): int(row["count"]) for row in count_rows},
+        }
 
     def get_mcp_tool(self, service_key: str, tool_name: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -357,6 +486,25 @@ class CapabilitiesRepository:
     def list_openapi_services(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM openapi_services ORDER BY service_key").fetchall()
+            return [dict(row) for row in rows]
+
+    def list_openapi_service_summaries(self) -> list[dict[str, Any]]:
+        """Return OpenAPI service metadata without spec/auth/header blobs."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  s.service_key, s.name, s.base_url, s.spec_url, s.description,
+                  s.tags_json, s.status, s.created_by, s.created_at,
+                  s.updated_at, s.last_imported_at, s.last_error,
+                  COUNT(t.id) AS tool_count
+                FROM openapi_services s
+                LEFT JOIN openapi_tools t
+                  ON t.service_key = s.service_key AND t.status = 'active'
+                GROUP BY s.id
+                ORDER BY s.service_key
+                """
+            ).fetchall()
             return [dict(row) for row in rows]
 
     def update_openapi_service_status(self, service_key: str, status: McpServiceStatus | str) -> None:

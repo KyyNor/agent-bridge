@@ -71,17 +71,13 @@ async function loadLogData() {
   const token = ++listRequestToken
   loading.value = true
   const params = baseParams()
-  const activeParams = { ...params }
-  if (statusFilter.value) activeParams.status = statusFilter.value
+  if (statusFilter.value) params.status = statusFilter.value
   try {
-    const [baseRows, activeRows] = await Promise.all([
-      api.listLogsPage(params),
-      api.listLogsPage(activeParams),
-    ])
+    const pageResult = await api.listLogsPage(params)
     if (token !== listRequestToken) return
-    logCounts.value = baseRows.counts
-    logs.value = activeRows.items
-    logTotal.value = activeRows.total
+    logCounts.value = pageResult.counts
+    logs.value = pageResult.items
+    logTotal.value = pageResult.total
   } catch {
     if (token !== listRequestToken) return
     logs.value = []

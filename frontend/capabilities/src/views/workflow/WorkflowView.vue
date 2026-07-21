@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
+import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -54,7 +54,7 @@ import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
-const WORKFLOW_RUN_LIMIT = 200
+const WORKFLOW_RUN_CACHE_LIMIT = 50
 const ARTIFACT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 const props = defineProps<{ routeKey: string }>()
 
@@ -95,7 +95,8 @@ const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs' | 'versions'>(
 const progressWorkflowKey = ref('')
 const progressRunId = ref('')
 const taskWorkflowKey = ref('')
-const workflowRuns = ref<Record<string, WorkflowRun[]>>({})
+const workflowRuns = ref<Record<string, WorkflowRunSummary[]>>({})
+const workflowRunTotals = ref<Record<string, number>>({})
 const workflowTasks = ref<Record<string, WorkflowTask[]>>({})
 const runsLoading = ref(false)
 const tasksLoading = ref(false)
@@ -340,7 +341,7 @@ const detailTabs = computed(() => [
   { key: 'overview', label: '概览' },
   { key: 'tasks', label: '任务队列', count: pendingTaskCount.value || undefined },
   { key: 'artifacts', label: '工作流产物', count: artifactTotal.value || undefined },
-  { key: 'runs', label: '运行记录', count: runs.value.length || undefined },
+  { key: 'runs', label: '运行记录', count: workflowRunTotals.value[selectedWorkflow.value?.workflow_key || ''] || undefined },
   { key: 'versions', label: '版本历史' },
 ])
 /** Distinct status values present, in the canonical display order. */
@@ -380,7 +381,6 @@ const batchPendingCount = computed(() => Math.max(
 const batchRunDetailVisible = computed(() => (routeMode.value === 'tasks' || (routeMode.value === 'detail' && detailTab.value === 'tasks'))
   && !!batchCurrentRunId.value
   && (batchAction.value === 'run' || !!batchSummary.value))
-const pagedRuns = computed(() => paginate(runs.value, runPage.value, runPageSize.value))
 function resetTaskFilters() {
   taskStatusFilter.value = ALL_STATUS_SENTINEL
   taskTypeFilter.value = ALL_TYPE_SENTINEL
@@ -495,21 +495,15 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [workflowList, profileList, scriptList, skillList, runtimeConfig] = await Promise.all([
+    const [workflowList, profileList, runOverviews] = await Promise.all([
       api.listWorkflows(),
       api.listProfiles(),
-      api.listScripts(),
-      api.listSkills(),
-      api.getAgentRuntimeConfig(),
+      api.listWorkflowRunOverviews(),
     ])
     workflows.value = workflowList
     profiles.value = profileList
-    scripts.value = scriptList
-    skills.value = skillList
-    agentRuntimeConfig.value = runtimeConfig
-    defaultBackend.value = runtimeConfig.default_backend || defaultBackend.value
+    applyRunOverviews(runOverviews)
     selectedKey.value = selectedKey.value || workflowList[0]?.workflow_key || ''
-    await loadRunsForWorkflows(workflowList)
   } catch (e: unknown) {
     error.value = errorMessage(e)
   } finally {
@@ -517,28 +511,91 @@ async function loadAll() {
   }
 }
 
-async function loadRunsForWorkflows(items = workflows.value) {
+function applyRunOverviews(overviews: Array<{
+  workflow_key: string
+  run_count: number
+  latest_run: WorkflowRunSummary | null
+  running_run: WorkflowRunSummary | null
+}>) {
+  const nextRuns: Record<string, WorkflowRunSummary[]> = {}
+  const nextTotals: Record<string, number> = {}
+  for (const overview of overviews) {
+    const items = [overview.latest_run, overview.running_run]
+      .filter((run): run is WorkflowRunSummary => Boolean(run))
+      .filter((run, index, list) => list.findIndex(item => item.run_id === run.run_id) === index)
+    nextRuns[overview.workflow_key] = items
+    nextTotals[overview.workflow_key] = overview.run_count
+  }
+  workflowRuns.value = nextRuns
+  workflowRunTotals.value = nextTotals
+  const runningEntry = overviews.find(item => item.running_run)
+  if (runningEntry?.running_run) {
+    testing.value = true
+    testingRunId.value = runningEntry.running_run.run_id
+    progressWorkflowKey.value = progressWorkflowKey.value || runningEntry.workflow_key
+  } else {
+    testing.value = false
+    testingRunId.value = ''
+    stopTestPolling()
+  }
+}
+
+async function loadRunOverviews() {
   runsLoading.value = true
   try {
-    const entries = await Promise.all(
-      items.map(async item => [item.workflow_key, await api.listWorkflowRuns(item.workflow_key, WORKFLOW_RUN_LIMIT)] as const),
-    )
-    workflowRuns.value = Object.fromEntries(entries)
-    const runningEntry = entries.find(([, runList]) => runList.some(run => run.status === 'running'))
-    const running = runningEntry?.[1].find(run => run.status === 'running')
-    if (running && runningEntry) {
-      testing.value = true
-      testingRunId.value = running.run_id
-      progressWorkflowKey.value = progressWorkflowKey.value || runningEntry[0]
-    } else {
-      testing.value = false
-      testingRunId.value = ''
-      stopTestPolling()
-    }
+    applyRunOverviews(await api.listWorkflowRunOverviews())
   } catch (e: unknown) {
     error.value = errorMessage(e)
   } finally {
     runsLoading.value = false
+  }
+}
+
+let editorResourcesLoaded = false
+async function loadEditorResources() {
+  if (editorResourcesLoaded) return
+  const [scriptList, skillList, runtimeConfig] = await Promise.all([
+    api.listScripts(),
+    api.listSkills(),
+    api.getAgentRuntimeConfig(),
+  ])
+  scripts.value = scriptList
+  skills.value = skillList
+  agentRuntimeConfig.value = runtimeConfig
+  defaultBackend.value = runtimeConfig.default_backend || defaultBackend.value
+  editorResourcesLoaded = true
+}
+
+async function ensureWorkflowDetail(workflow: WorkflowDefinition) {
+  if (workflow.definition) return workflow
+  const detail = await api.getWorkflow(workflow.workflow_key)
+  workflows.value = workflows.value.map(item =>
+    item.workflow_key === detail.workflow_key ? detail : item,
+  )
+  return detail
+}
+
+async function loadRecentArtifacts() {
+  const token = ++artifactRequestToken
+  artifactLoading.value = true
+  artifactError.value = ''
+  try {
+    const result = await api.searchWorkflowArtifacts({
+      profile_key: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
+      workflow_key: selectedWorkflow.value?.workflow_key || undefined,
+      format: 'all',
+      limit: 3,
+      offset: 0,
+    })
+    if (token !== artifactRequestToken) return
+    artifacts.value = result.items
+    artifactTotal.value = result.total ?? result.items.length
+  } catch (e: unknown) {
+    if (token !== artifactRequestToken) return
+    artifactError.value = errorMessage(e)
+    artifactTotal.value = 0
+  } finally {
+    if (token === artifactRequestToken) artifactLoading.value = false
   }
 }
 
@@ -575,6 +632,12 @@ function resetArtifactPage() {
 
 watch([artifactPage, artifactPageSize], () => {
   if (selectedWorkflow.value) searchArtifacts()
+})
+
+watch([runPage, runPageSize], () => {
+  if (detailTab.value === 'runs' && selectedWorkflow.value) {
+    void loadRuns(selectedWorkflow.value.workflow_key)
+  }
 })
 
 function openCreate() {
@@ -713,7 +776,7 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
     selectedKey.value = saved.workflow_key
     graphErrors.value = []
     workflows.value = await api.listWorkflows()
-    await loadRunsForWorkflows()
+    await loadRunOverviews()
     window.location.hash = `workflow/${saved.workflow_key}/detail`
     return saved
   } catch (e: unknown) {
@@ -935,14 +998,17 @@ async function prepareDetail(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
   taskWorkflowKey.value = item.workflow_key
   detailTab.value = 'overview'
+  runPage.value = 1
   resetArtifactPage()
-  await Promise.all([searchArtifacts(), loadRuns(item.workflow_key), loadTasks(item.workflow_key)])
+  await loadRecentArtifacts()
 }
 
 async function selectDetailTab(value: string) {
   if (value !== 'overview' && value !== 'tasks' && value !== 'artifacts' && value !== 'runs' && value !== 'versions') return
   detailTab.value = value
   if (value === 'tasks' && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
+  if (value === 'artifacts') await searchArtifacts()
+  if (value === 'runs' && selectedWorkflow.value) await loadRuns(selectedWorkflow.value.workflow_key)
 }
 
 function goList() {
@@ -993,12 +1059,30 @@ async function applyRoute() {
   routeError.value = ''
   if (!props.routeKey || loading.value) return
   if (routeMode.value === 'new') {
+    try {
+      await loadEditorResources()
+    } catch (e: unknown) {
+      routeError.value = errorMessage(e)
+      return
+    }
     prepareCreateForm()
     return
   }
-  const workflow = pageWorkflow.value
-  if (!workflow) {
+  const summary = pageWorkflow.value
+  if (!summary) {
     routeError.value = '无法加载该工作流（可能已被删除或不存在）'
+    return
+  }
+  let workflow = summary
+  try {
+    if (routeMode.value === 'edit') {
+      await loadEditorResources()
+      workflow = await ensureWorkflowDetail(summary)
+    } else if (routeMode.value === 'detail') {
+      workflow = await ensureWorkflowDetail(summary)
+    }
+  } catch (e: unknown) {
+    routeError.value = errorMessage(e)
     return
   }
   selectedKey.value = workflow.workflow_key
@@ -1201,10 +1285,15 @@ async function loadRuns(workflowKey = selectedWorkflow.value?.workflow_key || ''
   }
   runsLoading.value = true
   try {
-    const nextRuns = await api.listWorkflowRuns(key, WORKFLOW_RUN_LIMIT)
-    workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns }
-    if (key === selectedWorkflow.value?.workflow_key && !nextRuns.some(r => r.run_id === selectedRunId.value)) {
-      selectedRunId.value = nextRuns[0]?.run_id || ''
+    const result = await api.listWorkflowRunSummaries(
+      key,
+      runPageSize.value,
+      (runPage.value - 1) * runPageSize.value,
+    )
+    workflowRuns.value = { ...workflowRuns.value, [key]: result.runs }
+    workflowRunTotals.value = { ...workflowRunTotals.value, [key]: result.total }
+    if (key === selectedWorkflow.value?.workflow_key && !result.runs.some(r => r.run_id === selectedRunId.value)) {
+      selectedRunId.value = result.runs[0]?.run_id || ''
       await loadLogs()
     }
   } catch (e: unknown) {
@@ -1221,7 +1310,11 @@ function mergeWorkflowRun(run: WorkflowRun) {
   const nextRuns = index >= 0
     ? currentRuns.map(item => item.run_id === run.run_id ? run : item)
     : [run, ...currentRuns]
-  workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns.slice(0, WORKFLOW_RUN_LIMIT) }
+  workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns.slice(0, WORKFLOW_RUN_CACHE_LIMIT) }
+  workflowRunTotals.value = {
+    ...workflowRunTotals.value,
+    [key]: Math.max(workflowRunTotals.value[key] || 0, nextRuns.length),
+  }
 }
 
 async function loadTasks(workflowKey = selectedWorkflow.value?.workflow_key || '') {
@@ -2014,10 +2107,10 @@ async function loadProgressArtifacts() {
     const result = await api.searchWorkflowArtifacts({
       workflow_key: workflowKey,
       run_id: runId,
-      include_history: true,
-      full: true,
+      include_history: false,
+      full: false,
       format: 'all',
-      limit: 50,
+      limit: 20,
     })
     progressRunArtifacts.value = { ...progressRunArtifacts.value, [runId]: result.items }
   } catch (e: unknown) {
@@ -2028,14 +2121,26 @@ async function loadProgressArtifacts() {
   }
 }
 
+async function openProgressArtifactDetail(artifact: WorkflowArtifact) {
+  try {
+    const detail = await api.getWorkflowArtifact(
+      artifact.artifact_id,
+      selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
+    )
+    openArtifactFullscreen(detail)
+  } catch (e: unknown) {
+    artifactError.value = errorMessage(e)
+  }
+}
+
 async function openProgressArtifact() {
   await loadProgressArtifacts()
   const artifact = progressArtifacts.value.find(item => item.format === 'markdown') || progressArtifacts.value[0]
   if (!artifact) {
-    await alert({ title: '暂无产物', description: '本次运行没有可查看的 Markdown 产物。' })
+    await alert({ title: '暂无产物', description: '本次运行没有可查看的报告产物。' })
     return
   }
-  openArtifactFullscreen(artifact)
+  await openProgressArtifactDetail(artifact)
 }
 
 async function openProgressHtmlReport() {
@@ -2045,7 +2150,7 @@ async function openProgressHtmlReport() {
     await alert({ title: '暂无 HTML 报告', description: '本次运行没有生成 HTML 报告，或报告仍在生成中。' })
     return
   }
-  openArtifactFullscreen(artifact)
+  await openProgressArtifactDetail(artifact)
 }
 
 function taskRunLogKey(task: WorkflowTask) {
@@ -2315,7 +2420,7 @@ async function confirmClearWorkflow() {
     resetTarget.value = null
     taskActorFilter.value = {}
     await Promise.all([
-      loadRunsForWorkflows(),
+      loadRunOverviews(),
       loadTasks(wf.workflow_key),
     ])
     if (routeMode.value === 'detail' && selectedWorkflow.value?.workflow_key === wf.workflow_key) {
@@ -2421,7 +2526,7 @@ async function confirmClearWorkflow() {
             <div class="text-sm font-medium text-foreground">工作流</div>
             <div class="text-xs text-muted-foreground">{{ workflows.length }} 个定义</div>
           </div>
-          <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRunsForWorkflows()">{{ runsLoading ? '刷新中' : '刷新运行状态' }}</Button>
+          <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRunOverviews()">{{ runsLoading ? '刷新中' : '刷新运行状态' }}</Button>
         </div>
         <div v-if="loading" class="px-4 py-8 text-sm text-muted-foreground">加载中</div>
         <div v-else-if="!workflows.length" class="px-4 py-8 text-sm text-muted-foreground">暂无工作流</div>
@@ -2439,7 +2544,7 @@ async function confirmClearWorkflow() {
             </div>
             <div class="text-xs text-muted-foreground">
               <div class="truncate">{{ profileName(item.profile_key) }}</div>
-              <div class="mt-1">{{ (workflowRuns[item.workflow_key] || []).length }} 次运行记录</div>
+              <div class="mt-1">{{ workflowRunTotals[item.workflow_key] || 0 }} 次运行记录</div>
             </div>
             <div class="flex flex-wrap justify-start gap-2 lg:justify-end">
               <Button variant="outline" size="sm" class="h-8 text-xs" @click="openDetail(item)">详情</Button>
@@ -2553,7 +2658,7 @@ async function confirmClearWorkflow() {
                     </div>
                     <Button variant="outline" size="sm" @click="openEdit(selectedWorkflow)">编辑图</Button>
                   </div>
-                  <WorkflowRunGraph :definition-snapshot="selectedWorkflow.definition" :node-runs="latestRun?.node_runs || []" @open-agent-run="openAgentRun" @open-script-run="openScriptRun" />
+                  <WorkflowRunGraph :definition-snapshot="selectedWorkflow.definition" :node-runs="[]" @open-agent-run="openAgentRun" @open-script-run="openScriptRun" />
                 </CardContent>
               </Card>
               <div v-else class="rounded-lg border border-warning/30 bg-warning-soft p-4 text-sm text-warning-soft-fg">该历史工作流需要迁移。进入编辑页并显式保存后才会写入结构化定义。</div>
@@ -2659,7 +2764,7 @@ async function confirmClearWorkflow() {
             <div v-else-if="!runs.length" class="rounded-md border px-4 py-6 text-sm text-muted-foreground">暂无运行记录</div>
             <div v-else class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               <button
-                v-for="run in pagedRuns"
+                v-for="run in runs"
                 :key="run.run_id"
                 class="list-row-interactive rounded-md border px-3 py-2 text-left"
                 @click="openProgress(selectedWorkflow, run.run_id)"
@@ -2675,7 +2780,7 @@ async function confirmClearWorkflow() {
               v-if="runs.length"
               v-model:page="runPage"
               v-model:page-size="runPageSize"
-              :total="runs.length"
+              :total="workflowRunTotals[selectedWorkflow.workflow_key] || 0"
               :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
               />
           </section>

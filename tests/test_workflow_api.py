@@ -216,6 +216,11 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
     assert listed.status_code == 200
     assert [item["workflow_key"] for item in listed.json()] == ["page-report"]
     assert "manifest" not in listed.json()[0]
+    assert listed.json()[0]["definition"] is None
+
+    detail = client.get("/workflows/page-report", headers={"X-Agent-Bridge-User": "root"})
+    assert detail.status_code == 200
+    assert detail.json()["definition"] == {"nodes": [], "edges": []}
 
 
 def test_workflow_api_can_list_more_than_default_twenty_runs(wm_paths):
@@ -836,6 +841,23 @@ def test_workflow_api_lists_runs_for_workflow(wm_paths):
     assert [r["run_id"] for r in runs] == ["run_2", "run_1"]  # newest first
     assert runs[0]["status"] == "failed"
     assert runs[1]["status"] == "completed"
+
+    summary_page = client.get(
+        "/workflows/page-report/runs/summary?limit=1&offset=0",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert summary_page.status_code == 200, summary_page.text
+    assert summary_page.json()["total"] == 2
+    assert [r["run_id"] for r in summary_page.json()["runs"]] == ["run_2"]
+    assert "definition_snapshot" not in summary_page.json()["runs"][0]
+
+    overviews = client.get(
+        "/workflows/run-summaries",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert overviews.status_code == 200, overviews.text
+    assert overviews.json()[0]["workflow_key"] == "page-report"
+    assert overviews.json()[0]["run_count"] == 2
 
 
 def test_workflow_api_lists_all_tasks_for_workflow_without_leasing(wm_paths):

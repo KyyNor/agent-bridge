@@ -70,6 +70,14 @@ def test_mcp_service_registration_api(wm_paths) -> None:
     assert listed.json()[0]["tags"] == ["database"]
     assert listed.json()[0]["headers"] == {"Authorization": "***"}
 
+    summary = client.get(
+        "/capabilities/mcp-services?summary=true",
+        headers={"X-Agent-Bridge-User": "alice"},
+    )
+    assert summary.status_code == 200
+    assert summary.json()[0]["tool_count"] == 0
+    assert "headers" not in summary.json()[0]
+
 
 def test_mcp_service_registration_requires_admin(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
@@ -687,10 +695,18 @@ def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     log_id = structured["log_id"]
 
     listed = client.get("/tool-call-logs", headers={"X-Agent-Bridge-User": "root"})
+    page = client.get(
+        "/tool-call-logs?paginated=true&limit=10",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
     detail = client.get(f"/tool-call-logs/{log_id}", headers={"X-Agent-Bridge-User": "root"})
 
     assert listed.status_code == 200
     assert listed.json()[0]["log_id"] == log_id
+    assert page.status_code == 200
+    assert page.json()["items"][0]["log_id"] == log_id
+    assert "request_json" not in page.json()["items"][0]
+    assert "response_json" not in page.json()["items"][0]
     assert detail.status_code == 200
     assert '"query": "mysql"' in detail.json()["request_json"]
     assert detail.json()["response_json"]

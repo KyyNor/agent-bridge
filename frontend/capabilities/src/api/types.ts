@@ -11,6 +11,8 @@ export interface McpService {
   updated_at: string
   last_synced_at: string | null
   last_error: string | null
+  tool_count?: number
+  source_type?: 'mcp_service'
 }
 
 export interface McpTool {
@@ -31,7 +33,7 @@ export interface OpenApiService {
   name: string
   base_url: string
   spec_url: string
-  spec_content: string
+  spec_content?: string
   auth_config?: Record<string, unknown>
   headers?: Record<string, unknown>
   description: string
@@ -42,6 +44,7 @@ export interface OpenApiService {
   updated_at: string
   last_imported_at: string | null
   last_error: string | null
+  tool_count?: number
 }
 
 export interface OpenApiTool extends McpTool {
@@ -58,6 +61,29 @@ export type CapabilityServiceSource =
   | (OpenApiService & { source_type: 'openapi_service' })
 
 export type CapabilityTool = McpTool | OpenApiTool
+
+export interface CapabilityToolSummary {
+  source_type: 'mcp_service' | 'openapi_service'
+  service_key: string
+  service_name: string
+  tool_name: string
+  display_name: string
+  description: string
+  tool_type: string
+  tags: string[]
+  status?: string
+  operation_id?: string | null
+  method?: string | null
+  path?: string | null
+}
+
+export interface CapabilityToolPage {
+  items: CapabilityToolSummary[]
+  total: number
+  limit: number
+  offset: number
+  counts: Record<string, number>
+}
 
 export interface ExecuteCapabilityPayload {
   service: string
@@ -323,6 +349,38 @@ export interface WorkflowRun {
   execution_plan?: WorkflowExecutionPlan | Record<string, unknown>
   source_run_id?: string | null
   node_runs?: WorkflowNodeRun[]
+}
+
+export interface WorkflowRunSummary {
+  run_id: string
+  workflow_key: string
+  profile_key: string
+  task_key: string | null
+  status: 'running' | 'completed' | 'no_task' | 'failed' | 'stopped' | string
+  exit_code: number | null
+  error: string | null
+  started_at: string
+  finished_at: string | null
+  duration_ms: number | null
+  workflow_revision_no?: number | null
+  workflow_content_hash?: string | null
+  task_version?: string
+  execution_mode?: WorkflowExecutionMode | string
+  source_run_id?: string | null
+}
+
+export interface WorkflowRunSummaryPage {
+  runs: WorkflowRunSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface WorkflowRunOverview {
+  workflow_key: string
+  run_count: number
+  latest_run: WorkflowRunSummary | null
+  running_run: WorkflowRunSummary | null
 }
 
 export interface WorkflowNodeRun {
