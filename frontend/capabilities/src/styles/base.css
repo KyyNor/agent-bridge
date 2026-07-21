@@ -40,6 +40,9 @@
   --ring-rgb: 2 111 215;
   --overlay: rgb(0 0 0 / .10);
   --overlay-strong: rgb(0 0 0 / .80);
+  /* RGB 三元组供 cssColor 的 bg-overlay/N modifier 使用，未带 alpha 时直接写 0 0 0。 */
+  --overlay-rgb: 0 0 0;
+  --overlay-strong-rgb: 0 0 0;
 
   --success: #048149;
   --success-rgb: 4 129 73;
@@ -130,8 +133,12 @@
   --destructive: #d6342c; --destructive-rgb: 214 52 44;
   --destructive-foreground: #ffffff;
   --border: rgb(255 255 255 / .12); --border-rgb: 255 255 255;
+  /* Chrome 90 兼容：v4 的 `border-border/N` 会把 token 自身 alpha(0.12) 再乘 N。
+     v3 没有叠乘，这里把实际用到的几个值预计算好（0.12 × N），
+     交给 tailwind.config.cjs 的 cssColor 读取。新增 modifier 必须同步补这里。 */
   --border-opacity-40: .048; --border-opacity-60: .072; --border-opacity-70: .084;
   --input: rgb(255 255 255 / .15); --input-rgb: 255 255 255;
+  /* 同上：--input 自身 alpha 0.15 × N 的预计算值。 */
   --input-opacity-30: .045; --input-opacity-50: .075; --input-opacity-80: .12;
   --ring: #3665e4; --ring-rgb: 54 101 228;
 
