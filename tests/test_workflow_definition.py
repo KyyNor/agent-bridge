@@ -9,6 +9,7 @@ def test_summary_default_graph_contains_locked_output_pair():
     assert [node.type for node in graph.nodes] == ["output", "output"]
     assert [node.config.format for node in graph.nodes] == ["markdown", "html"]
     assert [node.config.system_role for node in graph.nodes] == ["summary_markdown", "summary_html"]
+    assert graph.nodes[1].config.skill_names == ["design_html_report"]
     assert graph.edges[0].system_role == "summary_markdown_to_html"
     assert [(edge.source, edge.target) for edge in graph.edges] == [("markdown-output", "html-output")]
 

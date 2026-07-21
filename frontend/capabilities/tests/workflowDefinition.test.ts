@@ -10,6 +10,7 @@ test('summary graph creates protected markdown and html pair', () => {
   assert.equal(isProtectedSummaryNode(graph.nodes[0], 'summary'), true)
   assert.equal(isProtectedSummaryEdge(graph.edges[0], 'summary'), true)
   assert.deepEqual(graph.nodes.map(node => node.config.backend_key), ['codex', 'codex'])
+  assert.deepEqual(graph.nodes[1].config.skill_names, ['design_html_report'])
 })
 
 test('manual input fields are derived from selected script schemas', () => {

@@ -207,6 +207,7 @@ def default_workflow_graph(workflow_type: WorkflowType, default_backend: str) ->
                         "path": "reports/index.html",
                         "prompt": "只根据 Markdown 主产物生成完整 HTML 文档；返回 title、summary、content，content 必须包含 html 或 body 标签、内联 CSS、无外链脚本。",
                         "backend_key": default_backend,
+                        "skill_names": ["design_html_report"],
                         "system_role": "summary_html",
                     },
                 },
