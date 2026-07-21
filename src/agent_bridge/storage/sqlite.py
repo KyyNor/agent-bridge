@@ -1212,8 +1212,27 @@ class SQLiteStore:
     def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
         return self.workflows.get_workflow_run(run_id)
 
+    def list_workflow_definition_summaries(self) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_definition_summaries()
+
     def list_workflow_runs(self, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
         return self.workflows.list_workflow_runs(workflow_key, limit=limit)
+
+    def list_workflow_run_summaries(
+        self,
+        workflow_key: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return self.workflows.list_workflow_run_summaries(
+            workflow_key,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_workflow_run_overviews(self) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_run_overviews()
 
     def clear_workflow_execution_data(self, workflow_key: str) -> dict[str, int]:
         return self.workflows.clear_workflow_execution_data(workflow_key)
@@ -1410,6 +1429,9 @@ class SQLiteStore:
     def list_mcp_services(self) -> list[dict[str, Any]]:
         return self.capabilities.list_mcp_services()
 
+    def list_mcp_service_summaries(self) -> list[dict[str, Any]]:
+        return self.capabilities.list_mcp_service_summaries()
+
     def update_mcp_service_status(self, service_key: str, status: McpServiceStatus | str) -> None:
         return self.capabilities.update_mcp_service_status(service_key=service_key, status=status)
 
@@ -1440,6 +1462,25 @@ class SQLiteStore:
 
     def list_mcp_tools(self, service_key: str | None = None) -> list[dict[str, Any]]:
         return self.capabilities.list_mcp_tools(service_key=service_key)
+
+    def list_tool_summaries(
+        self,
+        *,
+        source_type: str | None = None,
+        service_key: str | None = None,
+        tool_type: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return self.capabilities.list_tool_summaries(
+            source_type=source_type,
+            service_key=service_key,
+            tool_type=tool_type,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
 
     def get_mcp_tool(self, service_key: str, tool_name: str) -> dict[str, Any] | None:
         return self.capabilities.get_mcp_tool(service_key=service_key, tool_name=tool_name)
@@ -1504,6 +1545,9 @@ class SQLiteStore:
 
     def list_openapi_services(self) -> list[dict[str, Any]]:
         return self.capabilities.list_openapi_services()
+
+    def list_openapi_service_summaries(self) -> list[dict[str, Any]]:
+        return self.capabilities.list_openapi_service_summaries()
 
     def update_openapi_service_status(self, service_key: str, status: McpServiceStatus | str) -> None:
         return self.capabilities.update_openapi_service_status(service_key=service_key, status=status)
@@ -2095,6 +2139,9 @@ class SQLiteStore:
             folder_id=folder_id,
             backend_slug=backend_slug,
         )
+
+    def get_kb_document_counts(self, kb_id: int) -> dict[str, int]:
+        return self.knowledge.get_kb_document_counts(kb_id=kb_id)
 
     def list_jobs_for_user(self, linux_user: str, backend_slug: str | None = None) -> list[dict[str, Any]]:
         return self.knowledge.list_jobs_for_user(linux_user=linux_user, backend_slug=backend_slug)

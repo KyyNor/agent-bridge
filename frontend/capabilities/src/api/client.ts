@@ -27,6 +27,7 @@ import type {
   OpenApiTool,
   McpService,
   McpTool,
+  CapabilityToolPage,
   ProjectProfile,
   ProfileDocRender,
   ProfilePinPreview,
@@ -68,6 +69,8 @@ import type {
   WorkflowDefinition,
   WorkflowDraft,
   WorkflowRun,
+  WorkflowRunOverview,
+  WorkflowRunSummaryPage,
   WorkflowRunEvent,
   WorkflowRunLog,
   WorkflowExecutionMode,
@@ -297,14 +300,16 @@ async function getBlob(url: string): Promise<Blob> {
 
 export const api = {
   // MCP Services
-  listServices: () => get<McpService[]>('/capabilities/mcp-services'),
+  listServices: (summary = false) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`),
+  getService: (key: string) => get<McpService>(`/capabilities/mcp-services/${key}`),
   registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string }) =>
     post<McpService>('/capabilities/mcp-services', s),
   updateServiceStatus: (key: string, status: string) =>
     post(`/capabilities/mcp-services/${key}/status`, { status }),
   syncServiceTools: (key: string) =>
     post(`/capabilities/mcp-services/${key}/sync`),
-  listTools: (key: string) => get<McpTool[]>(`/capabilities/mcp-services/${key}/tools`),
+  listTools: (key: string, summary = false) => get<McpTool[]>(`/capabilities/mcp-services/${key}/tools${summary ? '?summary=true' : ''}`),
+  getTool: (serviceKey: string, toolName: string) => get<McpTool>(`/capabilities/mcp-services/${serviceKey}/tools/${toolName}`),
   updateToolType: (serviceKey: string, toolName: string, toolType: string) =>
     put(`/capabilities/mcp-services/${serviceKey}/tools/${toolName}/type`, { tool_type: toolType }),
   deleteMcpService: (key: string) => post<{ ok: boolean }>(`/capabilities/mcp-services/${key}/delete`),
@@ -323,14 +328,16 @@ export const api = {
     ),
 
   // OpenAPI Services
-  listOpenApiServices: () => get<OpenApiService[]>('/capabilities/openapi-services'),
+  listOpenApiServices: (summary = false) => get<OpenApiService[]>(`/capabilities/openapi-services${summary ? '?summary=true' : ''}`),
+  getOpenApiService: (key: string) => get<OpenApiService>(`/capabilities/openapi-services/${key}`),
   registerOpenApiService: (s: Partial<OpenApiService> & { service_key: string; name: string; base_url: string }) =>
     post<OpenApiService>('/capabilities/openapi-services', s),
   updateOpenApiServiceStatus: (key: string, status: string) =>
     post(`/capabilities/openapi-services/${key}/status`, { status }),
   importOpenApiOperations: (key: string, specContent?: string) =>
     post<OpenApiImportResult>(`/capabilities/openapi-services/${key}/import`, specContent ? { spec_content: specContent } : {}),
-  listOpenApiTools: (key: string) => get<OpenApiTool[]>(`/capabilities/openapi-services/${key}/tools`),
+  listOpenApiTools: (key: string, summary = false) => get<OpenApiTool[]>(`/capabilities/openapi-services/${key}/tools${summary ? '?summary=true' : ''}`),
+  getOpenApiTool: (serviceKey: string, toolName: string) => get<OpenApiTool>(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}`),
   upsertOpenApiTool: (serviceKey: string, toolName: string, tool: Partial<OpenApiTool> & { tool_name: string }) =>
     put<OpenApiTool>(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}`, tool),
   updateOpenApiToolType: (serviceKey: string, toolName: string, toolType: string) =>
@@ -338,6 +345,20 @@ export const api = {
   deleteOpenApiTool: (serviceKey: string, toolName: string) =>
     del<{ ok: boolean }>(`/capabilities/openapi-services/${serviceKey}/tools/${toolName}`),
   deleteOpenApiService: (key: string) => post<{ ok: boolean }>(`/capabilities/openapi-services/${key}/delete`),
+  listCapabilityTools: (params: {
+    source_type?: string
+    service_key?: string
+    tool_type?: string
+    query?: string
+    limit?: number
+    offset?: number
+  } = {}) => {
+    const qs = new URLSearchParams()
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') qs.set(key, String(value))
+    })
+    return get<CapabilityToolPage>(`/capability-tools?${qs}`)
+  },
 
   // Profiles
   listProfiles: () => get<ProjectProfile[]>('/capability-profiles'),
@@ -429,6 +450,11 @@ export const api = {
   listWorkflowRuns: (key: string, limit = 200) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
+  },
+  listWorkflowRunOverviews: () => get<WorkflowRunOverview[]>('/workflows/run-summaries'),
+  listWorkflowRunSummaries: (key: string, limit = 10, offset = 0) => {
+    const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    return get<WorkflowRunSummaryPage>(`/workflows/${key}/runs/summary?${qs}`)
   },
   listWorkflowTasks: (key: string, params: WorkflowTaskListParams = {}) => {
     const qs = new URLSearchParams()

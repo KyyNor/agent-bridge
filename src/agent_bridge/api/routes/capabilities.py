@@ -25,8 +25,16 @@ def create_capability_routes(service, actor, catalog_sources):
         return service.capabilities.register_service(current_actor, payload.service_key, payload.name, payload.endpoint_url, payload.headers, payload.description, payload.tags)
 
     @router.get("/capabilities/mcp-services")
-    def list_mcp_services(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return service.capabilities.list_services(current_actor)
+    def list_mcp_services(summary: bool = False, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return (
+            service.capabilities.list_service_summaries(current_actor)
+            if summary
+            else service.capabilities.list_services(current_actor)
+        )
+
+    @router.get("/capabilities/mcp-services/{service_key}")
+    def get_mcp_service(service_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.capabilities.get_service(current_actor, service_key)
 
     @router.post("/capabilities/mcp-services/{service_key}/status")
     def update_mcp_service_status(service_key: str, payload: UpdateMcpServiceStatusRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -37,8 +45,17 @@ def create_capability_routes(service, actor, catalog_sources):
         return await service.capabilities.sync_tools(current_actor, service_key)
 
     @router.get("/capabilities/mcp-services/{service_key}/tools")
-    def list_mcp_service_tools(service_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+    def list_mcp_service_tools(service_key: str, summary: bool = False, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        if summary:
+            result = service.capabilities.list_tool_summaries(
+                current_actor, source_type="mcp_service", service_key=service_key, limit=200
+            )
+            return result["items"]
         return service.capabilities.list_tools(current_actor, service_key)
+
+    @router.get("/capabilities/mcp-services/{service_key}/tools/{tool_name}")
+    def get_mcp_service_tool(service_key: str, tool_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.capabilities.get_tool(current_actor, service_key, tool_name)
 
     @router.put("/capabilities/mcp-services/{service_key}/tools/{tool_name}/type")
     def update_mcp_tool_type(service_key: str, tool_name: str, payload: UpdateMcpToolTypeRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -65,8 +82,16 @@ def create_capability_routes(service, actor, catalog_sources):
         )
 
     @router.get("/capabilities/openapi-services")
-    def list_openapi_services(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
-        return service.capabilities.list_openapi_services(current_actor)
+    def list_openapi_services(summary: bool = False, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return (
+            service.capabilities.list_openapi_service_summaries(current_actor)
+            if summary
+            else service.capabilities.list_openapi_services(current_actor)
+        )
+
+    @router.get("/capabilities/openapi-services/{service_key}")
+    def get_openapi_service(service_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.capabilities.get_openapi_service(current_actor, service_key)
 
     @router.post("/capabilities/openapi-services/{service_key}/status")
     def update_openapi_service_status(service_key: str, payload: UpdateMcpServiceStatusRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -77,8 +102,17 @@ def create_capability_routes(service, actor, catalog_sources):
         return service.capabilities.import_openapi_operations(current_actor, service_key, spec_content=payload.spec_content)
 
     @router.get("/capabilities/openapi-services/{service_key}/tools")
-    def list_openapi_service_tools(service_key: str, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+    def list_openapi_service_tools(service_key: str, summary: bool = False, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        if summary:
+            result = service.capabilities.list_tool_summaries(
+                current_actor, source_type="openapi_service", service_key=service_key, limit=200
+            )
+            return result["items"]
         return service.capabilities.list_openapi_tools(current_actor, service_key)
+
+    @router.get("/capabilities/openapi-services/{service_key}/tools/{tool_name}")
+    def get_openapi_service_tool(service_key: str, tool_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.capabilities.get_openapi_tool(current_actor, service_key, tool_name)
 
     @router.put("/capabilities/openapi-services/{service_key}/tools/{tool_name}")
     def upsert_openapi_tool(service_key: str, tool_name: str, payload: UpsertOpenApiToolRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -118,6 +152,26 @@ def create_capability_routes(service, actor, catalog_sources):
             workflow_context=workflow_context_from_headers(request),
         )
 
+    @router.get("/capability-tools")
+    def list_capability_tools(
+        source_type: str | None = None,
+        service_key: str | None = None,
+        tool_type: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.capabilities.list_tool_summaries(
+            current_actor,
+            source_type=source_type,
+            service_key=service_key,
+            tool_type=tool_type,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+
     @router.get("/capability-catalog")
     def capability_catalog(profile_key: str | None = None, query: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return {"sources": catalog_sources(current_actor, profile_key, query)}
@@ -137,19 +191,13 @@ def create_capability_routes(service, actor, catalog_sources):
     @router.get("/capability-catalog/sources/{source_type}/{source_key}/tools/{tool_name}")
     def capability_tool_detail(source_type: str, source_key: str, tool_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
         if source_type == "openapi_service":
-            tools = service.capabilities.list_openapi_tools(current_actor, source_key)
-            for tool in tools:
-                if tool["tool"] == tool_name:
-                    logs = service.governance.list_logs(actor=current_actor, source_type=source_type, source_key=source_key, tool_name=tool_name, limit=10)
-                    return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
-            raise HTTPException(status_code=404, detail="tool not found")
+            tool = service.capabilities.get_openapi_tool(current_actor, source_key, tool_name)
+            logs = service.governance.list_logs(actor=current_actor, source_type=source_type, source_key=source_key, tool_name=tool_name, limit=10)
+            return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
         if source_type != "mcp_service":
             raise HTTPException(status_code=404, detail="tool not found")
-        tools = service.capabilities.list_tools(current_actor, source_key)
-        for tool in tools:
-            if tool["tool"] == tool_name:
-                logs = service.governance.list_logs(actor=current_actor, source_type=source_type, source_key=source_key, tool_name=tool_name, limit=10)
-                return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
-        raise HTTPException(status_code=404, detail="tool not found")
+        tool = service.capabilities.get_tool(current_actor, source_key, tool_name)
+        logs = service.governance.list_logs(actor=current_actor, source_type=source_type, source_key=source_key, tool_name=tool_name, limit=10)
+        return {"source_type": source_type, "source_key": source_key, "tool": tool, "logs": logs}
 
     return router

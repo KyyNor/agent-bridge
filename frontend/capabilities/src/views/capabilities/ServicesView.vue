@@ -115,35 +115,24 @@ function lastSyncAt(service: CapabilityServiceSource) {
 
 async function loadServices() {
   try {
-    const [mcp, openapi] = await Promise.all([api.listServices(), api.listOpenApiServices()])
+    const [mcp, openapi] = await Promise.all([api.listServices(true), api.listOpenApiServices(true)])
     mcpServices.value = mcp
     openApiServices.value = openapi
-    const counts: Record<string, number> = {}
-    await Promise.all([
-      ...mcp
-        .filter(s => s.status === 'enabled')
-        .map(async s => {
-          try { counts[`mcp_service:${s.service_key}`] = (await api.listTools(s.service_key)).length } catch { counts[`mcp_service:${s.service_key}`] = 0 }
-        }),
-      ...openapi
-        .filter(s => s.status === 'enabled')
-        .map(async s => {
-          try { counts[`openapi_service:${s.service_key}`] = (await api.listOpenApiTools(s.service_key)).length } catch { counts[`openapi_service:${s.service_key}`] = 0 }
-        }),
-    ])
-    toolCounts.value = counts
+    toolCounts.value = Object.fromEntries(
+      services.value.map(service => [serviceCountKey(service), service.tool_count ?? 0]),
+    )
   } catch { /* empty */ }
 }
 
 onMounted(async () => {
   await loadServices()
-  applyRoute()
+  await applyRoute()
   loading.value = false
 })
 
 watch(
   () => props.routeKey,
-  () => applyRoute(),
+  () => { void applyRoute() },
 )
 
 const filtered = computed(() => {
@@ -190,7 +179,7 @@ function openEdit(service: CapabilityServiceSource) {
   void navigateTo(`services/edit/${service.source_type}/${service.service_key}`)
 }
 
-function applyRoute() {
+async function applyRoute() {
   formError.value = ''
   serviceNotFound.value = false
   if (!props.routeKey) return
@@ -203,9 +192,20 @@ function applyRoute() {
     serviceNotFound.value = true
     return
   }
-  const service = editingService.value
-  if (!service) {
+  const summary = editingService.value
+  if (!summary) {
     serviceNotFound.value = true
+    return
+  }
+  let service = summary
+  try {
+    const detail = service.source_type === 'openapi_service'
+      ? await api.getOpenApiService(service.service_key)
+      : await api.getService(service.service_key)
+    service = { ...detail, source_type: summary.source_type } as CapabilityServiceSource
+  } catch (e: any) {
+    serviceNotFound.value = true
+    formError.value = e.message || '加载服务详情失败'
     return
   }
   formMode.value = 'edit'

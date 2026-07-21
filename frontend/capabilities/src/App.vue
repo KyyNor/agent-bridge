@@ -118,10 +118,32 @@ async function handlePopState() {
   }
 }
 
+async function handleHashChange() {
+  const nextHash = currentHash()
+  if (nextHash === committedHash || transitionInFlight) return
+
+  transitionInFlight = true
+  try {
+    if (await canNavigate(nextHash, committedHash)) {
+      commitRoute(nextHash)
+      return
+    }
+
+    // A direct fragment navigation has already created a history entry.  Go
+    // back to the committed route when its leave guard rejects the change.
+    restoringCanceledPop = true
+    window.history.back()
+  } finally {
+    transitionInFlight = false
+  }
+}
+
 window.addEventListener('popstate', handlePopState)
+window.addEventListener('hashchange', handleHashChange)
 onUnmounted(() => {
   removeNavigationController()
   window.removeEventListener('popstate', handlePopState)
+  window.removeEventListener('hashchange', handleHashChange)
 })
 
 // 复合 hash 支持（如 #scripts/<key>）：取首个段为顶级 nav key，剩余为子路由参数

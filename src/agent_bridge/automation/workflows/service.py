@@ -155,7 +155,10 @@ class WorkflowService:
 
     def list_definitions(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        return [self._definition_payload(item) for item in self.store.list_workflow_definitions()]
+        return [
+            self._definition_summary_payload(item)
+            for item in self.store.list_workflow_definition_summaries()
+        ]
 
     def get_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -466,6 +469,25 @@ class WorkflowService:
         require_admin_user(actor, self.admins)
         bounded = min(max(limit, 1), 200)
         return self.store.list_workflow_runs(workflow_key, limit=bounded)
+
+    def list_run_summaries(
+        self,
+        actor: str,
+        workflow_key: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return self.store.list_workflow_run_summaries(
+            workflow_key,
+            limit=limit,
+            offset=offset,
+        )
+
+    def list_run_overviews(self, actor: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        return self.store.list_workflow_run_overviews()
 
     def list_tasks(
         self,
@@ -966,6 +988,12 @@ class WorkflowService:
         if "revision_no" not in payload:
             payload["revision_no"] = int(payload.get("current_revision_no") or 0)
         payload.pop("current_revision_no", None)
+        return payload
+
+    @classmethod
+    def _definition_summary_payload(cls, workflow: dict[str, Any]) -> dict[str, Any]:
+        payload = cls._definition_payload(workflow)
+        payload["definition"] = None
         return payload
 
     @staticmethod

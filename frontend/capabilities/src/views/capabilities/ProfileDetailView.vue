@@ -215,8 +215,6 @@ async function loadProfile(profileKey: string) {
   await loadProfileMemory(profileKey)
   captureInitialDraft()
   configLoading.value = false
-  void loadProfilePins(profileKey)
-  void loadProfileDoc(profileKey)
 }
 
 watch(() => props.profileKey, profileKey => { void loadProfile(profileKey) }, { immediate: true })
@@ -279,6 +277,14 @@ async function loadProfileDoc(profileKey: string) {
   } finally {
     if (configProfile.value?.profile_key === profileKey) docSaving.value = false
   }
+}
+
+function onAdvancedToggle(event: Event) {
+  const details = event.currentTarget as HTMLDetailsElement | null
+  const profileKey = configProfile.value?.profile_key
+  if (!details?.open || !profileKey) return
+  if (!pinsLoaded.value && !pinSaving.value) void loadProfilePins(profileKey)
+  if (!profileMarkdown.value && !docSaving.value) void loadProfileDoc(profileKey)
 }
 
 function applyPinPreview(pins: ProfilePinPreview) {
@@ -618,7 +624,7 @@ async function refreshProfileDoc(raiseError = false) {
         </div>
 
         <!-- Advanced Options -->
-        <details class="rounded-lg border border-border">
+        <details class="rounded-lg border border-border" @toggle="onAdvancedToggle">
           <summary class="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground">高级选项</summary>
           <div class="space-y-4 border-t border-border p-4">
             <!-- Pin Configuration -->

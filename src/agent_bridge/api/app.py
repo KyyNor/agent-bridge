@@ -160,14 +160,15 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         return Path((file.filename or "upload").replace("\\", "/")).name or "upload"
 
     def catalog_sources(current_actor: str, profile_key: str | None, query: str | None) -> list[dict[str, Any]]:
-        source_keys = [item["service_key"] for item in service.store.list_mcp_services()]
+        mcp_items = service.capabilities.list_service_summaries(current_actor)
+        source_keys = [item["service_key"] for item in mcp_items]
         allowed_keys = set(
             service.governance.filter_source_keys(
                 actor=current_actor, profile_key=profile_key, source_type="mcp_service", source_keys=source_keys,
             )
         )
         sources = []
-        for item in service.capabilities.list_services(current_actor):
+        for item in mcp_items:
             if item["service_key"] not in allowed_keys:
                 continue
             tags = item.get("tags", [])
@@ -175,7 +176,8 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             if query and query.lower() not in text:
                 continue
             sources.append({"source_type": "mcp_service", "source_key": item["service_key"], "name": item["name"], "description": item["description"], "status": item["status"], "tags": tags})
-        openapi_source_keys = [item["service_key"] for item in service.store.list_openapi_services()]
+        openapi_items = service.capabilities.list_openapi_service_summaries(current_actor)
+        openapi_source_keys = [item["service_key"] for item in openapi_items]
         allowed_openapi_keys = set(
             service.governance.filter_source_keys(
                 actor=current_actor,
@@ -184,7 +186,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
                 source_keys=openapi_source_keys,
             )
         )
-        for item in service.capabilities.list_openapi_services(current_actor):
+        for item in openapi_items:
             if item["service_key"] not in allowed_openapi_keys:
                 continue
             tags = item.get("tags", [])

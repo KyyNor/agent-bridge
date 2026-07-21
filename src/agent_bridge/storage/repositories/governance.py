@@ -9,6 +9,13 @@ from agent_bridge.capability_hub.models import CallLogStatus
 from agent_bridge.storage.types import enum_value, json_bytes, json_summary, row_to_dict
 
 
+_TOOL_CALL_LOG_SUMMARY_COLUMNS = """
+  id, log_id, actor, profile_key, entrypoint, source_type, source_key,
+  tool_name, status, error_message, failure_stage, failure_owner,
+  error_type, resource_type, resource_key, duration_ms, created_at
+"""
+
+
 class GovernanceRepository:
     def __init__(self, db_path, connect):
         self._db_path = db_path
@@ -633,7 +640,7 @@ class GovernanceRepository:
             ).fetchone()
             rows = conn.execute(
                 f"""
-                SELECT *
+                SELECT {_TOOL_CALL_LOG_SUMMARY_COLUMNS}
                 FROM tool_call_logs
                 {where_clause}
                 ORDER BY created_at DESC, id DESC

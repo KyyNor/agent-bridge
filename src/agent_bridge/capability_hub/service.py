@@ -367,6 +367,12 @@ class CapabilityService:
             for service in self.store.list_openapi_services()
         ]
 
+    def list_openapi_service_summaries(self, actor: str) -> list[dict[str, Any]]:
+        return [
+            self._openapi_service_summary_payload(service)
+            for service in self.store.list_openapi_service_summaries()
+        ]
+
     def get_openapi_service(self, actor: str, service_key: str) -> dict[str, Any]:
         service = self.store.get_openapi_service(service_key)
         if service is None:
@@ -440,6 +446,13 @@ class CapabilityService:
         self._require_enabled_openapi_service(service_key)
         return [self._openapi_tool_payload(tool) for tool in self._active_openapi_tools(service_key)]
 
+    def get_openapi_tool(self, actor: str, service_key: str, tool_name: str) -> dict[str, Any]:
+        self._require_enabled_openapi_service(service_key)
+        tool = self.store.get_openapi_tool(service_key, tool_name)
+        if tool is None or tool.get("status") != "active":
+            raise NotFound("tool not found")
+        return self._openapi_tool_payload(tool)
+
     def set_openapi_tool_type(self, actor: str, service_key: str, tool_name: str, tool_type: ToolType | str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         next_tool_type = self._validate_tool_type(tool_type)
@@ -485,6 +498,9 @@ class CapabilityService:
 
     def list_services(self, actor: str) -> list[dict[str, Any]]:
         return [self._service_payload(service, redact_headers=True) for service in self.store.list_mcp_services()]
+
+    def list_service_summaries(self, actor: str) -> list[dict[str, Any]]:
+        return [self._service_summary_payload(service) for service in self.store.list_mcp_service_summaries()]
 
     def get_service(self, actor: str, service_key: str) -> dict[str, Any]:
         service = self.store.get_mcp_service(service_key)
@@ -556,6 +572,34 @@ class CapabilityService:
     def list_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
         self._require_enabled_service(service_key)
         return [self._tool_payload(tool) for tool in self._active_tools(service_key)]
+
+    def get_tool(self, actor: str, service_key: str, tool_name: str) -> dict[str, Any]:
+        self._require_enabled_service(service_key)
+        tool = self.store.get_mcp_tool(service_key, tool_name)
+        if tool is None or tool.get("status") != "active":
+            raise NotFound("tool not found")
+        return self._tool_payload(tool)
+
+    def list_tool_summaries(
+        self,
+        actor: str,
+        *,
+        source_type: str | None = None,
+        service_key: str | None = None,
+        tool_type: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        result = self.store.list_tool_summaries(
+            source_type=source_type,
+            service_key=service_key,
+            tool_type=tool_type,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+        return result
 
     def pinned_tool_specs(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
         if profile_key is None:
@@ -1215,6 +1259,13 @@ class CapabilityService:
         payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
         return payload
 
+    def _service_summary_payload(self, service: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(service)
+        payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
+        payload["source_type"] = SourceType.mcp_service.value
+        payload["tool_count"] = int(payload.get("tool_count") or 0)
+        return payload
+
     def _tool_payload(self, tool: dict[str, Any]) -> dict[str, Any]:
         input_schema = _json_loads(tool.get("input_schema_json"), {})
         examples = _json_loads(tool.get("examples_json"), [])
@@ -1249,6 +1300,13 @@ class CapabilityService:
         payload["auth_config"] = auth_config
         payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
         payload["source_type"] = SourceType.openapi_service.value
+        return payload
+
+    def _openapi_service_summary_payload(self, service: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(service)
+        payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
+        payload["source_type"] = SourceType.openapi_service.value
+        payload["tool_count"] = int(payload.get("tool_count") or 0)
         return payload
 
     def _openapi_tool_payload(self, tool: dict[str, Any]) -> dict[str, Any]:

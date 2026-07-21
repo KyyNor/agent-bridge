@@ -1095,6 +1095,47 @@ class KnowledgeRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def get_kb_document_counts(self, kb_id: int) -> dict[str, int]:
+        """Count KB documents and failures without materializing every document row."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS document_count,
+                  SUM(CASE WHEN COALESCE(s.status, ?) = ? THEN 1 ELSE 0 END) AS sync_failed_count
+                FROM document_kbs dk
+                JOIN documents d ON d.id = dk.doc_id
+                JOIN knowledge_bases kb ON kb.id = dk.kb_id
+                LEFT JOIN sync_states s
+                  ON s.doc_id = d.id
+                 AND s.kb_id = dk.kb_id
+                 AND s.backend_slug = COALESCE(
+                   NULLIF(kb.default_backend_slug, ''),
+                   (
+                     SELECT target.slug
+                     FROM backend_targets target
+                     WHERE target.kb_id = dk.kb_id
+                       AND target.status = 'active'
+                     ORDER BY target.slug
+                     LIMIT 1
+                   )
+                 )
+                WHERE dk.kb_id = ?
+                  AND dk.status = 'active'
+                  AND d.status != ?
+                """,
+                (
+                    SyncStateStatus.not_synced.value,
+                    SyncStateStatus.sync_failed.value,
+                    kb_id,
+                    DocumentStatus.deleted.value,
+                ),
+            ).fetchone()
+        return {
+            "document_count": int(row["document_count"] or 0),
+            "sync_failed_count": int(row["sync_failed_count"] or 0),
+        }
+
     def ensure_backend_target(self, kb_id: int, slug: str, backend_type: str) -> None:
         with self._connect() as conn:
             conn.execute(

@@ -24,6 +24,10 @@ def create_workflow_routes(service, actor):
     def list_workflows(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.workflows.list_definitions(current_actor)
 
+    @router.get("/workflows/run-summaries")
+    def list_workflow_run_overviews(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return service.workflows.list_run_overviews(current_actor)
+
     @router.post("/workflows")
     def upsert_workflow(payload: WorkflowDefinitionRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflows.upsert_definition(actor=current_actor, **payload.model_dump())
@@ -113,6 +117,20 @@ def create_workflow_routes(service, actor):
         current_actor: str = Depends(actor),
     ) -> list[dict[str, Any]]:
         return service.workflows.list_runs(current_actor, workflow_key, limit=limit)
+
+    @router.get("/workflows/{workflow_key}/runs/summary")
+    def list_workflow_run_summaries(
+        workflow_key: str,
+        limit: int = 20,
+        offset: int = 0,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.list_run_summaries(
+            current_actor,
+            workflow_key,
+            limit=limit,
+            offset=offset,
+        )
 
     @router.get("/workflows/{workflow_key}/tasks")
     def list_workflow_tasks(

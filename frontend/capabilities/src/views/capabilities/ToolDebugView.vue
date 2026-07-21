@@ -4,6 +4,7 @@ import { Play, RefreshCw, Wrench } from '@lucide/vue'
 import { api } from '../../api/client'
 import type {
   CapabilityTool,
+  CapabilityToolSummary,
   CatalogSource,
   ExecuteCapabilityResult,
   OpenApiTool,
@@ -30,6 +31,7 @@ type ToolDebugTool = CapabilityTool & {
 const profiles = ref<ProjectProfile[]>([])
 const services = ref<ToolDebugService[]>([])
 const tools = ref<ToolDebugTool[]>([])
+const toolOptions = ref<(CapabilityToolSummary & { source_type: ToolDebugSourceType; service_name: string })[]>([])
 
 const loading = ref(true)
 const serviceLoading = ref(false)
@@ -79,10 +81,9 @@ watch(selectedServiceId, async (serviceIdValue, previous) => {
 
 watch(selectedToolName, (toolName, previous) => {
   if (!toolName || toolName === previous) return
-  const tool = selectedTool.value
-  paramsText.value = buildParamsTemplate(tool?.input_schema || {})
   executionError.value = ''
   result.value = null
+  void loadToolDetail(toolName)
 })
 
 async function loadProfiles() {
@@ -95,6 +96,7 @@ async function loadProfiles() {
     if (!selectedProfileKey.value) {
       services.value = []
       tools.value = []
+      toolOptions.value = []
     }
   } catch (e: unknown) {
     error.value = errorMessage(e)
@@ -109,6 +111,7 @@ async function loadServices(profileKey: string) {
   executionError.value = ''
   result.value = null
   tools.value = []
+  toolOptions.value = []
   selectedToolName.value = ''
   try {
     const catalog = await api.catalog(profileKey)
@@ -132,6 +135,7 @@ async function loadTools(serviceIdValue: string) {
   const service = services.value.find(item => serviceId(item) === serviceIdValue)
   if (!service) {
     tools.value = []
+    toolOptions.value = []
     selectedToolName.value = ''
     return
   }
@@ -140,24 +144,45 @@ async function loadTools(serviceIdValue: string) {
   result.value = null
   try {
     const list = service.source_type === 'openapi_service'
-      ? await api.listOpenApiTools(service.source_key)
-      : await api.listTools(service.source_key)
-    tools.value = list.map(tool => ({
+      ? await api.listOpenApiTools(service.source_key, true)
+      : await api.listTools(service.source_key, true)
+    toolOptions.value = (list as unknown as CapabilityToolSummary[]).map(tool => ({
       ...tool,
       source_type: service.source_type,
       service_name: service.name,
     }))
-    const nextToolName = tools.value[0]?.tool_name || ''
+    tools.value = []
+    const nextToolName = toolOptions.value[0]?.tool_name || ''
     if (nextToolName !== selectedToolName.value) {
       selectedToolName.value = nextToolName
-    } else if (nextToolName) {
-      paramsText.value = buildParamsTemplate(selectedTool.value?.input_schema || {})
     } else {
       paramsText.value = '{\n  \n}'
     }
   } catch (e: unknown) {
     tools.value = []
     selectedToolName.value = ''
+    executionError.value = errorMessage(e)
+  } finally {
+    toolLoading.value = false
+  }
+}
+
+async function loadToolDetail(toolName: string) {
+  const service = selectedService.value
+  if (!service || !toolName) return
+  toolLoading.value = true
+  try {
+    const detail = service.source_type === 'openapi_service'
+      ? await api.getOpenApiTool(service.source_key, toolName)
+      : await api.getTool(service.source_key, toolName)
+    tools.value = [{
+      ...detail,
+      source_type: service.source_type,
+      service_name: service.name,
+    }]
+    paramsText.value = buildParamsTemplate(detail.input_schema || {})
+  } catch (e: unknown) {
+    tools.value = []
     executionError.value = errorMessage(e)
   } finally {
     toolLoading.value = false
@@ -306,7 +331,7 @@ function errorMessage(e: unknown) {
               <SelectValue :placeholder="toolLoading ? '加载工具中...' : '选择工具'" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="tool in tools" :key="tool.tool_name" :value="tool.tool_name">
+              <SelectItem v-for="tool in toolOptions" :key="tool.tool_name" :value="tool.tool_name">
                 {{ tool.tool_name }}
               </SelectItem>
             </SelectContent>
