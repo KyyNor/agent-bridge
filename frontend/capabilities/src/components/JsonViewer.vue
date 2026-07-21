@@ -40,10 +40,10 @@ const tokens = computed(() => tokenizeJson(formatted.value))
   color: var(--foreground);
 }
 
-.json-key { color: oklch(0.48 0.16 255); }
-.json-string { color: oklch(0.43 0.13 155); }
-.json-number { color: oklch(0.49 0.15 28); }
-.json-boolean { color: oklch(0.48 0.17 300); }
+.json-key { color: var(--json-key); }
+.json-string { color: var(--json-string); }
+.json-number { color: var(--json-number); }
+.json-boolean { color: var(--json-boolean); }
 .json-null { color: var(--muted-foreground); }
-.json-punctuation { color: oklch(0.52 0.12 54); font-weight: 600; }
+.json-punctuation { color: var(--json-punctuation); font-weight: 600; }
 </style>

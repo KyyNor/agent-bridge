@@ -32,13 +32,16 @@ test('workflow detail implements the approved layered workbench without replacin
   assert.match(file, /import StatCard from ['"]\.\.\/\.\.\/components\/StatCard\.vue['"]/)
   assert.match(file, /const detailTab = ref<'overview' \| 'tasks' \| 'artifacts' \| 'runs' \| 'versions'>\('overview'\)/)
   assert.match(file, /const detailTabs = computed\(/)
-  assert.match(file, /await Promise\.all\(\[searchArtifacts\(\), loadRuns\(item\.workflow_key\), loadTasks\(item\.workflow_key\)\]\)/)
+  assert.match(file, /async function prepareDetail\(item: WorkflowDefinition\)[\s\S]*await loadRecentArtifacts\(\)/)
+  assert.match(file, /if \(value === 'tasks'[\s\S]*await loadTasks\(/)
+  assert.match(file, /if \(value === 'artifacts'\) await searchArtifacts\(\)/)
+  assert.match(file, /if \(value === 'runs'[\s\S]*await loadRuns\(/)
   assert.match(file, /<SegmentedTabs v-model="detailTab" :tabs="detailTabs"/)
   assert.match(file, /detailTab === 'overview'/)
   assert.match(file, /detailTab === 'artifacts'/)
   assert.match(file, /detailTab === 'runs'/)
   assert.match(file, /routeMode === 'tasks' \|\| \(routeMode === 'detail' && detailTab === 'tasks'\)/)
-  assert.match(file, /window\.location\.hash = `workflow\/\$\{item\.workflow_key\}\/progress\/\$\{run\.run_id\}`/)
+  assert.match(file, /navigateTo\(`workflow\/\$\{item\.workflow_key\}\/progress\/\$\{run\.run_id\}`\)/)
 })
 
 test('workflow detail header uses the shared large control size for its primary action', () => {

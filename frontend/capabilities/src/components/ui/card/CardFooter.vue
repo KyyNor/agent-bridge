@@ -10,7 +10,7 @@ const props = defineProps<{
 <template>
   <div
     data-slot="card-footer"
-    :class="cn('bg-muted/50 rounded-b-lg border-t p-4 group-data-[size=sm]/card:p-3 flex items-center', props.class)"
+    :class="cn('bg-muted/50 -mb-4 rounded-b-lg border-t p-4 group-data-[size=sm]/card:-mb-3 group-data-[size=sm]/card:p-3 flex items-center', props.class)"
   >
     <slot />
   </div>

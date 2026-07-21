@@ -14,15 +14,16 @@ function sourceFiles(dir: string): string[] {
 
 test('base.css exposes one four-level radius scale', () => {
   const css = read('src/styles/base.css')
+  const config = read('tailwind.config.cjs')
 
   assert.match(css, /--radius-compact:\s*4px/)
   assert.match(css, /--radius-control:\s*6px/)
   assert.match(css, /--radius-card:\s*10px/)
   assert.match(css, /--radius-overlay:\s*14px/)
-  assert.match(css, /--radius-sm:\s*var\(--radius-compact\)/)
-  assert.match(css, /--radius-md:\s*var\(--radius-control\)/)
-  assert.match(css, /--radius-lg:\s*var\(--radius-card\)/)
-  assert.match(css, /--radius-xl:\s*var\(--radius-overlay\)/)
+  assert.match(config, /sm:\s*'var\(--radius-compact\)'/)
+  assert.match(config, /md:\s*'var\(--radius-control\)'/)
+  assert.match(config, /lg:\s*'var\(--radius-card\)'/)
+  assert.match(config, /xl:\s*'var\(--radius-overlay\)'/)
 })
 
 test('shared primitives use the radius level matching their role', () => {
@@ -39,7 +40,7 @@ test('list rows share the muted hover and primary leading accent', () => {
   const css = read('src/styles/base.css')
 
   assert.match(css, /\.list-row-interactive,?[\s\S]*tbody\s*>\s*tr\s*\{[\s\S]*transition:[\s\S]*background-color/)
-  assert.match(css, /\.list-row-interactive:hover,[\s\S]*tbody\s*>\s*tr:hover\s*\{[\s\S]*background-color:\s*color-mix\(in srgb, var\(--muted\) 70%/)
+  assert.match(css, /\.list-row-interactive:hover,[\s\S]*tbody\s*>\s*tr:hover\s*\{[\s\S]*background-color:\s*rgb\(var\(--muted-rgb\) \/ \.70\)/)
   assert.match(css, /box-shadow:\s*inset 2px 0 0 var\(--primary\)/)
   assert.match(css, /tbody\s*>\s*tr\s*\{[\s\S]*transition:/)
   assert.match(css, /#ph-actions\s*>\s*\[data-slot='button'\][\s\S]*height:\s*2\.25rem/)
@@ -54,7 +55,7 @@ test('runtime components do not retain raw palette status colors', () => {
     assert.doesNotMatch(source, rawPalette, file)
     if (file !== 'src/styles/base.css') {
       assert.doesNotMatch(source, /#[0-9a-f]{3,8}/i, `${file}: direct hex`)
-      assert.doesNotMatch(source, /\brgb\(/i, `${file}: direct rgb`)
+      assert.doesNotMatch(source, /\brgb\(\s*\d/i, `${file}: direct rgb`)
     }
   }
 })

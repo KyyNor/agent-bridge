@@ -206,7 +206,7 @@ const view = computed(() => activeNavKey.value)
 
 <template>
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
-    <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll" style="scrollbar-gutter: stable">
+    <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll">
       <!-- Page Header（标题取自导航配置；操作/筛选由各视图 Teleport 进 #ph-actions / #ph-filters） -->
       <PageHeader
         v-if="showPageHeader"

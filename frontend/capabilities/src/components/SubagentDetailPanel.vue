@@ -103,7 +103,7 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
     <div v-if="props.error" class="tl-mini-event k-error">
       <div class="tl-mavatar" />
       <div class="tl-mini-head"><span class="tl-mini-kind">错误</span></div>
-      <div class="tl-mini-content tl-dump" style="background:color-mix(in oklch,var(--destructive) 8%,var(--muted))">{{ props.error }}</div>
+      <div class="tl-mini-content tl-dump" style="background:var(--destructive-muted-surface)">{{ props.error }}</div>
     </div>
 
     <template v-if="props.detail">
