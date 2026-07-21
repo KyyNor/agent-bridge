@@ -23,6 +23,7 @@ import {
 import { countAgentRunTabs } from '../../lib/filterTabs'
 import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
 import type { WorkflowRunEvent } from '../../api/types'
+import { buildAgentRunHash, navigateTo, parseSubRoute, routeReturnTo } from '../../lib/navigation'
 
 const props = defineProps<{ routeKey?: string }>()
 
@@ -89,7 +90,8 @@ function subagentDetailErrorFor(taskId: string) {
 }
 
 /** The run key extracted from the sub-route (e.g. "agent-runs/<runKey>"). */
-const activeRunKey = computed(() => props.routeKey || '')
+const activeRunKey = computed(() => parseSubRoute(props.routeKey || '').segments[0] || '')
+const returnToRoute = computed(() => routeReturnTo(props.routeKey || ''))
 
 function formatDate(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -179,7 +181,7 @@ onUnmounted(() => {
 function openDetail(run: AgentRun) {
   detailRun.value = run
   detailError.value = ''
-  window.location.hash = `agent-runs/${run.run_key}`
+  void navigateTo(buildAgentRunHash(run.run_key, returnToRoute.value))
 }
 
 function backToList() {
@@ -187,7 +189,7 @@ function backToList() {
   detailError.value = ''
   detailEvents.value = []
   stopDetailEventsPolling()
-  window.location.hash = 'agent-runs'
+  void navigateTo(returnToRoute.value || 'agent-runs', { replace: true })
 }
 
 async function loadDetail(runKey: string) {

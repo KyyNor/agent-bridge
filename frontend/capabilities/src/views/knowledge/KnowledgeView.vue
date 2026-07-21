@@ -14,6 +14,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import FolderTree from '../../components/knowledge/FolderTree.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { navigateTo } from '../../lib/navigation'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -341,11 +342,11 @@ async function createKb() {
 }
 
 function goList() {
-  window.location.hash = 'knowledge'
+  void navigateTo('knowledge', { replace: true })
 }
 
 async function openDetail(kb: KnowledgeBaseSummary) {
-  window.location.hash = 'knowledge/' + kb.slug
+  void navigateTo('knowledge/' + kb.slug)
 }
 
 async function loadFolderTree(preferredFolderId?: number | null) {

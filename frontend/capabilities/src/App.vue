@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { defineAsyncComponent, ref, computed } from 'vue'
+import { defineAsyncComponent, ref, computed, onUnmounted } from 'vue'
 import AppShell from './components/AppShell.vue'
 import type { NavGroup } from './components/AppShell.vue'
 import PageHeader from './components/PageHeader.vue'
 import ConfirmDialog from './components/ui/dialog/ConfirmDialog.vue'
-import { shouldShowPageHeader } from './lib/navigation'
+import {
+  canNavigate,
+  currentHash,
+  installNavigationController,
+  normalizeHash,
+  shouldShowPageHeader,
+} from './lib/navigation'
 
 const DashboardView = defineAsyncComponent(() => import('./views/dashboard/DashboardView.vue'))
 const ServicesView = defineAsyncComponent(() => import('./views/capabilities/ServicesView.vue'))
@@ -22,9 +28,100 @@ const LogsView = defineAsyncComponent(() => import('./views/monitoring/LogsView.
 const StatsView = defineAsyncComponent(() => import('./views/monitoring/StatsView.vue'))
 const AgentRunsView = defineAsyncComponent(() => import('./views/monitoring/AgentRunsView.vue'))
 
-const hash = ref(window.location.hash.slice(1) || 'dashboard')
-window.addEventListener('hashchange', () => {
-  hash.value = window.location.hash.slice(1) || 'dashboard'
+const routeIndexKey = '__agent_bridge_route_index'
+const initialHash = currentHash()
+const initialIndex = typeof window.history.state?.[routeIndexKey] === 'number'
+  ? window.history.state[routeIndexKey] as number
+  : 0
+const hash = ref(initialHash)
+let committedHash = initialHash
+let currentHistoryIndex = initialIndex
+let transitionInFlight = false
+let restoringCanceledPop = false
+
+if (window.history.state?.[routeIndexKey] !== initialIndex) {
+  window.history.replaceState(
+    { ...(window.history.state || {}), [routeIndexKey]: initialIndex },
+    '',
+    `#${initialHash}`,
+  )
+}
+
+function commitRoute(target: string, historyIndex?: number) {
+  committedHash = normalizeHash(target)
+  if (historyIndex !== undefined) currentHistoryIndex = historyIndex
+  hash.value = committedHash
+}
+
+const removeNavigationController = installNavigationController(async (target, options = {}) => {
+  const nextHash = normalizeHash(target)
+  if (nextHash === committedHash || transitionInFlight) return nextHash === committedHash
+
+  transitionInFlight = true
+  try {
+    if (!await canNavigate(nextHash, committedHash)) return false
+
+    if (options.replace) {
+      window.history.replaceState(
+        { ...(window.history.state || {}), [routeIndexKey]: currentHistoryIndex },
+        '',
+        `#${nextHash}`,
+      )
+      commitRoute(nextHash, currentHistoryIndex)
+    } else {
+      const nextIndex = currentHistoryIndex + 1
+      window.history.pushState(
+        { ...(window.history.state || {}), [routeIndexKey]: nextIndex },
+        '',
+        `#${nextHash}`,
+      )
+      commitRoute(nextHash, nextIndex)
+    }
+    return true
+  } finally {
+    transitionInFlight = false
+  }
+})
+
+async function handlePopState() {
+  const nextHash = currentHash()
+  const nextIndex = typeof window.history.state?.[routeIndexKey] === 'number'
+    ? window.history.state[routeIndexKey] as number
+    : undefined
+
+  if (restoringCanceledPop) {
+    restoringCanceledPop = false
+    commitRoute(nextHash, nextIndex)
+    return
+  }
+  if (nextHash === committedHash) {
+    if (nextIndex !== undefined) currentHistoryIndex = nextIndex
+    return
+  }
+  if (transitionInFlight) return
+
+  transitionInFlight = true
+  try {
+    if (await canNavigate(nextHash, committedHash)) {
+      commitRoute(nextHash, nextIndex)
+      return
+    }
+
+    restoringCanceledPop = true
+    if (nextIndex !== undefined) {
+      window.history.go(currentHistoryIndex - nextIndex)
+    } else {
+      window.history.forward()
+    }
+  } finally {
+    transitionInFlight = false
+  }
+}
+
+window.addEventListener('popstate', handlePopState)
+onUnmounted(() => {
+  removeNavigationController()
+  window.removeEventListener('popstate', handlePopState)
 })
 
 // 复合 hash 支持（如 #scripts/<key>）：取首个段为顶级 nav key，剩余为子路由参数

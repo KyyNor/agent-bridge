@@ -6,6 +6,7 @@ import type { McpService } from '../../api/types'
 import { timeAgo } from '../../lib/time'
 import StatCard from '../../components/StatCard.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
+import { navigateTo } from '../../lib/navigation'
 
 const services = ref<McpService[]>([])
 const loading = ref(true)
@@ -14,7 +15,7 @@ const errorCount = computed(() => services.value.filter(s => s.status === 'error
 const toolCount = ref<number | null>(null)
 
 function goto(hash: string) {
-  window.location.hash = hash
+  void navigateTo(hash)
 }
 
 onMounted(async () => {

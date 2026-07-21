@@ -14,6 +14,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { confirm, alert } from '../../composables/useConfirm'
 import CodeRepoDetailView from './CodeRepoDetailView.vue'
+import { navigateTo } from '../../lib/navigation'
 
 const props = defineProps<{ routeKey: string }>()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
@@ -174,11 +175,11 @@ async function deleteRepo(r: CodeRepository) {
 }
 
 function openDetail(r: CodeRepository) {
-  window.location.hash = `code-repos/${r.repo_key}`
+  void navigateTo(`code-repos/${r.repo_key}`)
 }
 
 function backToList() {
-  window.location.hash = 'code-repos'
+  void navigateTo('code-repos', { replace: true })
 }
 
 const filteredRepos = computed(() => {
