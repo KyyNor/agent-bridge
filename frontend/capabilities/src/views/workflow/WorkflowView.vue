@@ -215,6 +215,10 @@ const artifactHtml = computed(() =>
 )
 
 function openArtifactFullscreen(artifact: WorkflowArtifact | WorkflowArtifactDetail) {
+  // The fullscreen surface is teleported outside DialogContent. Close the
+  // underlying dialog first so clicks on Markdown content are not interpreted
+  // by the dialog as an outside click.
+  showArtifact.value = false
   fullscreenArtifact.value = {
     title: artifact.title,
     path: artifact.path,
@@ -3768,7 +3772,7 @@ async function confirmClearWorkflow() {
         <DialogHeader>
           <DialogTitle>{{ artifactDetail?.title || '产物详情' }}</DialogTitle>
         </DialogHeader>
-        <div class="max-h-[74vh] space-y-3 overflow-auto pr-1">
+        <div class="max-h-[74vh] space-y-3 overflow-x-hidden overflow-y-auto pr-1">
           <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
           <template v-else-if="artifactDetail">
             <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -3783,7 +3787,7 @@ async function confirmClearWorkflow() {
               class="min-h-[60vh] w-full rounded-lg border bg-card"
               :title="artifactDetail.title || 'HTML 报告'"
             />
-            <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="artifactHtml"></div>
+            <div v-else class="prose prose-sm max-w-none overflow-x-auto rounded-md border bg-background p-4" v-html="artifactHtml"></div>
           </template>
           <div v-else class="py-8 text-center text-sm text-muted-foreground">无内容</div>
         </div>
@@ -3814,8 +3818,8 @@ async function confirmClearWorkflow() {
             <Minimize2 :size="16" />
           </Button>
         </div>
-        <div class="flex-1 overflow-auto px-6 py-4">
-          <div v-if="fullscreenArtifact.format === 'html'" class="mx-auto h-full max-w-5xl">
+        <div class="flex-1 overflow-x-hidden overflow-y-auto px-6 py-4" @click="closeArtifactFullscreen">
+          <div v-if="fullscreenArtifact.format === 'html'" class="mx-auto h-full w-full max-w-[1360px]" @click.stop>
             <iframe
               :srcdoc="fullscreenArtifact.content"
               sandbox="allow-same-origin"
@@ -3823,9 +3827,9 @@ async function confirmClearWorkflow() {
               :title="fullscreenArtifact.title || 'HTML 报告'"
             />
           </div>
-          <div v-else class="mx-auto max-w-4xl space-y-4">
+          <div v-else class="mx-auto w-full max-w-[1360px] space-y-4" @click.stop>
             <div v-if="fullscreenArtifact.summary" class="text-sm text-muted-foreground">{{ fullscreenArtifact.summary }}</div>
-            <div class="prose prose-sm max-w-none" v-html="fullscreenArtifactHtml"></div>
+            <div class="prose prose-sm max-w-none overflow-x-auto" v-html="fullscreenArtifactHtml"></div>
           </div>
         </div>
       </div>

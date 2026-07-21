@@ -71,6 +71,7 @@ def test_list_skills_includes_design_script(wm_paths):
     html_skill = svc.skills.get_skill("root", "design_html_report")
     assert html_skill["source"] == "default"
     assert "<!doctype html>" in html_skill["prompt"]
+    assert "max-width: 1280px" in html_skill["prompt"]
 
 
 def test_skill_management_only_allows_known_skills(wm_paths):

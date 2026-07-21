@@ -19,7 +19,7 @@ HTML 报告是**派生产物**，给人读，不是给机器检索。
 - ✅ 浅色画布：主背景 `#f7f8fa`，内容纸面 `#ffffff`。
 - ✅ 正文近黑 `#1f2937`，次要文字 `#667085`，分隔线 `#e6e8ec`。
 - ✅ 只用一个强调色 `#2f6fed`（用于标题装饰、链接、关键数字、序号圆点）。语义色仅在必要时用：成功 `#16845f`、告警 `#b56a09`、危险 `#c63b3b`。
-- ✅ 正文宽度 `max-width: 960px`，居中，左右留白；行高 `1.6 ~ 1.72`。
+- ✅ 正文宽度 `max-width: 1280px`，居中，左右留白；行高 `1.6 ~ 1.72`。
 - ✅ 字体用系统栈：`-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif`；代码用 `ui-monospace, "SF Mono", Menlo, Consolas, monospace`。
 - ✅ 表格用 hairline（1px 边框）分隔，不要深阴影；表头浅灰底 `#f2f4f7`。
 - ✅ 信息分层：标题 → 一句话摘要 → 关键结论 → 证据/过程 → 风险与后续建议。
@@ -58,6 +58,8 @@ HTML 报告是**派生产物**，给人读，不是给机器检索。
       --red: #c63b3b;
       --code: #f3f5f8;
     }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { max-width: 100%; overflow-x: hidden; }
     body {
       margin: 0;
       background: var(--bg);
@@ -65,7 +67,7 @@ HTML 报告是**派生产物**，给人读，不是给机器检索。
       font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
       line-height: 1.72;
     }
-    main { max-width: 960px; margin: 0 auto; padding: 42px 24px 72px; }
+    main { width: 100%; max-width: 1280px; box-sizing: border-box; margin: 0 auto; padding: 42px 24px 72px; }
     header { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px; }
     h1 { font-size: 28px; line-height: 1.25; margin: 0 0 8px; }
     h2 { font-size: 19px; margin: 30px 0 12px; }
@@ -73,11 +75,12 @@ HTML 报告是**派生产物**，给人读，不是给机器检索。
     p { margin: 8px 0; }
     .muted { color: var(--muted); }
     a { color: var(--blue); }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; background: var(--paper); border: 1px solid var(--line); }
-    th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; font-size: 14px; }
+    table { width: 100%; max-width: 100%; border-collapse: collapse; margin: 12px 0 18px; background: var(--paper); border: 1px solid var(--line); table-layout: fixed; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; font-size: 14px; overflow-wrap: anywhere; }
     th { background: #f2f4f7; font-weight: 600; }
     tr:last-child td { border-bottom: 0; }
     code { background: var(--code); border-radius: 4px; padding: 1px 5px; font-size: 0.92em; }
+    pre { max-width: 100%; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
     details { border: 1px solid var(--line); border-radius: 6px; background: var(--paper); padding: 10px 12px; margin: 10px 0; }
     summary { cursor: pointer; color: var(--muted); }
   </style>
@@ -110,7 +113,7 @@ HTML 报告是**派生产物**，给人读，不是给机器检索。
 - [ ] 所有样式内联在 `<style>` 里，无外链 CSS。
 - [ ] 无任何 `<script>`、无外链脚本、无 `<iframe>`、无图片。
 - [ ] 颜色只用了规定的变量（一个强调色 + 灰阶），没有彩虹配色。
-- [ ] 正文宽度受 `max-width: 960px` 约束，行高在 `1.6~1.72`。
+- [ ] 正文宽度受 `max-width: 1280px` 约束，行高在 `1.6~1.72`。
 - [ ] 表格用 hairline 分隔，没有深阴影。
 - [ ] 标题无 emoji、无“破折号标题”套话。
 - [ ] 长篇日志/原始 transcript 已摘要化或用 `<details>` 折叠。
