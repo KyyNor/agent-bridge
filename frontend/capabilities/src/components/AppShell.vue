@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import NavIcon from './NavIcon.vue'
+import { navigateTo } from '../lib/navigation'
 
 export interface NavItem {
   key: string
@@ -21,7 +22,7 @@ defineProps<{
 }>()
 
 function navigate(key: string) {
-  window.location.hash = key
+  void navigateTo(key)
 }
 </script>
 

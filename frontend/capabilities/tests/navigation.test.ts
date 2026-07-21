@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildWorkflowTaskProgressHash, shouldShowPageHeader } from '../src/lib/navigation.ts'
+import {
+  buildAgentRunHash,
+  buildScriptRunHash,
+  buildWorkflowTaskProgressHash,
+  parseSubRoute,
+  routeReturnTo,
+  shouldShowPageHeader,
+} from '../src/lib/navigation.ts'
 
 test('shouldShowPageHeader keeps the page title on the scripts list route', () => {
   assert.equal(shouldShowPageHeader('scripts', ''), true)
@@ -39,4 +46,17 @@ test('buildWorkflowTaskProgressHash returns the progress route when a task execu
     buildWorkflowTaskProgressHash('github-repo', 'github-repo_019f20752fa774fba90c58cd90832ab0'),
     'workflow/github-repo/progress/github-repo_019f20752fa774fba90c58cd90832ab0',
   )
+})
+
+test('run detail routes preserve and decode their workflow return context', () => {
+  const workflowProgress = 'workflow/sales_report/progress/run-1'
+  const agentRoute = buildAgentRunHash('agent-run-1', workflowProgress)
+  const scriptRoute = buildScriptRunHash('report-script', 'script-run-1', workflowProgress)
+
+  assert.equal(agentRoute, 'agent-runs/agent-run-1?returnTo=workflow%2Fsales_report%2Fprogress%2Frun-1')
+  assert.equal(scriptRoute, 'scripts/report-script/run/script-run-1?returnTo=workflow%2Fsales_report%2Fprogress%2Frun-1')
+  assert.deepEqual(parseSubRoute(agentRoute).segments, ['agent-runs', 'agent-run-1'])
+  assert.equal(routeReturnTo(agentRoute), workflowProgress)
+  assert.deepEqual(parseSubRoute(scriptRoute).segments, ['scripts', 'report-script', 'run', 'script-run-1'])
+  assert.equal(routeReturnTo(scriptRoute), workflowProgress)
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Search, Plus, Settings } from '@lucide/vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../../api/client'
 import type { ProjectProfile } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
@@ -13,6 +13,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import ProfileDetailView from './ProfileDetailView.vue'
 import { confirm } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { navigateTo, registerNavigationGuard } from '../../lib/navigation'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -30,7 +31,12 @@ const formError = ref('')
 
 const copied = ref('')
 const detailRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
-const allowRouteLeave = ref(false)
+
+const removeNavigationGuard = registerNavigationGuard(async () => {
+  if (!props.routeKey || !detailRef.value?.hasUnsavedChanges) return true
+  return confirmDiscardChanges()
+})
+onUnmounted(removeNavigationGuard)
 
 const filtered = computed(() => {
   let list = profiles.value
@@ -113,7 +119,7 @@ async function copyCommand(profile: ProjectProfile) {
 }
 
 function openDetail(profile: ProjectProfile) {
-  window.location.hash = `profiles/${profile.profile_key}`
+  void navigateTo(`profiles/${profile.profile_key}`)
 }
 
 async function confirmDiscardChanges() {
@@ -125,35 +131,12 @@ async function confirmDiscardChanges() {
 }
 
 async function requestListNavigation() {
-  if (detailRef.value?.hasUnsavedChanges && !await confirmDiscardChanges()) return
-  allowRouteLeave.value = true
-  window.location.hash = 'profiles'
+  void navigateTo('profiles', { replace: true })
 }
-
-async function handleBrowserBack(previousKey: string) {
-  window.location.hash = `profiles/${previousKey}`
-  if (!detailRef.value?.hasUnsavedChanges) {
-    allowRouteLeave.value = true
-    window.location.hash = 'profiles'
-    return
-  }
-  if (!await confirmDiscardChanges()) return
-  allowRouteLeave.value = true
-  window.location.hash = 'profiles'
-}
-
-watch(() => props.routeKey, (nextKey, previousKey) => {
-  if (previousKey && !nextKey && !allowRouteLeave.value) {
-    void handleBrowserBack(previousKey)
-    return
-  }
-  allowRouteLeave.value = false
-}, { flush: 'sync' })
 
 async function handleDetailSaved() {
   profiles.value = await api.listProfiles()
-  allowRouteLeave.value = true
-  window.location.hash = 'profiles'
+  void navigateTo('profiles', { replace: true })
 }
 </script>
 

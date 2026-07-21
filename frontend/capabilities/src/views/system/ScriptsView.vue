@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, SyntaxCheckResult, WorkflowDefinition, WorkflowRun } from '../../api/types'
@@ -38,6 +38,7 @@ import { formatLocalDatetime } from '../../lib/time'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { navigateTo, parseSubRoute, registerNavigationGuard, routeReturnTo } from '../../lib/navigation'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -60,6 +61,7 @@ const formError = ref('')
 const formLoading = ref(false)
 const saving = ref(false)
 const scriptNotFound = ref(false)
+const formBaseline = ref('')
 
 // 运行状态
 const runs = ref<ScriptRun[]>([])
@@ -91,11 +93,30 @@ const designResponse = ref<DesignAgentResponse<ScriptDesignResult> | null>(null)
 const designRunKey = ref('')
 const designStopRequested = ref(false)
 
-const routeParts = computed(() => props.routeKey.split('/').filter(Boolean))
+const routeParts = computed(() => parseSubRoute(props.routeKey).segments)
 const mode = computed<'list' | 'edit'>(() => (props.routeKey ? 'edit' : 'list'))
 const isNew = computed(() => routeParts.value[0] === 'new')
 const editingKey = computed(() => (isNew.value ? '' : routeParts.value[0] || ''))
 const requestedRunId = computed(() => routeParts.value[1] === 'run' ? routeParts.value[2] || '' : '')
+const returnToRoute = computed(() => routeReturnTo(props.routeKey))
+
+function snapshotForm() {
+  return JSON.stringify({ form: form.value, outputSchemaEnabled: outputSchemaEnabled.value })
+}
+
+const formDirty = computed(() =>
+  mode.value === 'edit' && !formLoading.value && Boolean(formBaseline.value) && snapshotForm() !== formBaseline.value,
+)
+
+const removeNavigationGuard = registerNavigationGuard(() => {
+  if (!formDirty.value) return true
+  return confirm({
+    title: '放弃未保存修改',
+    description: '当前脚本有未保存修改，确定离开吗？',
+    confirmText: '放弃并返回',
+  })
+})
+onUnmounted(removeNavigationGuard)
 
 const ownerKeyOptions = computed(() => {
   if (form.value.owner_type === 'profile') return profiles.value.map(p => ({ value: p.profile_key, label: p.name }))
@@ -180,6 +201,7 @@ watch(
     if (isNew.value) {
       form.value = emptyForm()
       outputSchemaEnabled.value = false
+      formBaseline.value = snapshotForm()
       runs.value = []
       runDetail.value = null
       testWorkflowKey.value = '__none__'
@@ -192,6 +214,7 @@ watch(
       const state = toScriptFormState(detail, defaultInputSchema())
       form.value = state.form
       outputSchemaEnabled.value = state.outputSchemaEnabled
+      formBaseline.value = snapshotForm()
       syncWorkflowTestContext(detail)
       await loadRuns()
       if (requestedRunId.value) await openRunDetail(requestedRunId.value)
@@ -200,6 +223,7 @@ watch(
     } catch (e: unknown) {
       scriptNotFound.value = true
       form.value = emptyForm()
+      formBaseline.value = snapshotForm()
       formError.value = errorMessage(e)
     } finally {
       formLoading.value = false
@@ -407,15 +431,15 @@ function toggleOutputSchema(enabled: boolean) {
 }
 
 function goList() {
-  window.location.hash = 'scripts'
+  void navigateTo(returnToRoute.value || 'scripts', { replace: true })
 }
 
 function openCreate() {
-  window.location.hash = 'scripts/new'
+  void navigateTo('scripts/new')
 }
 
 function openEdit(item: ManagedScript) {
-  window.location.hash = 'scripts/' + item.script_key
+  void navigateTo('scripts/' + item.script_key)
 }
 
 async function deleteScript(item: ManagedScript) {
@@ -446,9 +470,10 @@ async function saveScript(): Promise<ManagedScript | null> {
     syntaxChecking.value = false
     lastSavedSyntax.value = saved.syntax_check ?? null
     await reloadScripts()
+    formBaseline.value = snapshotForm()
     // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
     if (isNew.value || saved.script_key !== editingKey.value) {
-      window.location.hash = 'scripts/' + saved.script_key
+      void navigateTo('scripts/' + saved.script_key, { replace: true })
     }
     return saved
   } catch (e: unknown) {
@@ -565,6 +590,7 @@ async function resetBuiltInScript() {
     const state = toScriptFormState(detail, defaultInputSchema())
     form.value = state.form
     outputSchemaEnabled.value = state.outputSchemaEnabled
+    formBaseline.value = snapshotForm()
     await reloadScripts()
   } catch (e: unknown) {
     formError.value = errorMessage(e)

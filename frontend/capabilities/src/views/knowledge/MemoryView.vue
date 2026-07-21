@@ -14,6 +14,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { navigateTo } from '../../lib/navigation'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -242,11 +243,11 @@ async function loadTimeline(cursor?: string | null) {
 }
 
 function goList() {
-  window.location.hash = 'memory'
+  void navigateTo('memory', { replace: true })
 }
 
 function openDetail(block: MemoryBlock) {
-  window.location.hash = 'memory/' + block.block_key
+  void navigateTo('memory/' + block.block_key)
 }
 
 // 记忆区块 status → StatusBadge 语义状态（active 统一为「启用」语义，与其它实体一致）

@@ -50,7 +50,15 @@ import {
   filterEventsByActor,
 } from '../../lib/workflowEvents'
 import { renderMarkdown } from '../../lib/markdown'
-import { buildWorkflowTaskProgressHash } from '../../lib/navigation'
+import {
+  buildAgentRunHash,
+  buildScriptRunHash,
+  buildWorkflowTaskProgressHash,
+  currentHash,
+  navigateTo,
+  parseSubRoute,
+  registerNavigationGuard,
+} from '../../lib/navigation'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
@@ -279,7 +287,7 @@ function resetForm(next: typeof form.value) {
     suppressDirty = false
   })
 }
-const routeParts = computed(() => props.routeKey.split('/').filter(Boolean))
+const routeParts = computed(() => parseSubRoute(props.routeKey).segments)
 const routeWorkflowKey = computed(() => routeParts.value[0] || '')
 const routeMode = computed<'list' | 'new' | 'edit' | 'detail' | 'tasks' | 'progress'>(() => {
   if (!props.routeKey) return 'list'
@@ -289,6 +297,18 @@ const routeMode = computed<'list' | 'new' | 'edit' | 'detail' | 'tasks' | 'progr
   return 'detail'
 })
 const isWorkflowFormPage = computed(() => routeMode.value === 'new' || routeMode.value === 'edit')
+const removeNavigationGuard = registerNavigationGuard(() => {
+  if (!isWorkflowFormPage.value || !formDirty.value) return true
+  return confirm({
+    title: routeMode.value === 'new' ? '放弃新建' : '放弃修改',
+    description: routeMode.value === 'new'
+      ? '当前表单有未保存内容，确认离开？'
+      : '当前工作流有未保存的改动，确认离开？',
+    destructive: true,
+    confirmText: '离开',
+  })
+})
+onUnmounted(removeNavigationGuard)
 const pageWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === routeWorkflowKey.value) || null
 )
@@ -578,7 +598,7 @@ watch([artifactPage, artifactPageSize], () => {
 })
 
 function openCreate() {
-  window.location.hash = 'workflow/new'
+  void navigateTo('workflow/new')
 }
 
 function prepareCreateForm() {
@@ -599,7 +619,7 @@ function prepareCreateForm() {
 }
 
 function openEdit(item: WorkflowDefinition) {
-  window.location.hash = `workflow/${item.workflow_key}/edit`
+  void navigateTo(`workflow/${item.workflow_key}/edit`)
 }
 
 function prepareEditForm(item: WorkflowDefinition) {
@@ -712,9 +732,10 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
     })
     selectedKey.value = saved.workflow_key
     graphErrors.value = []
+    formDirty.value = false
     workflows.value = await api.listWorkflows()
     await loadRunsForWorkflows()
-    window.location.hash = `workflow/${saved.workflow_key}/detail`
+    void navigateTo(`workflow/${saved.workflow_key}/detail`, { replace: true })
     return saved
   } catch (e: unknown) {
     formError.value = errorMessage(e)
@@ -928,7 +949,7 @@ async function acceptWorkflowDesign() {
 }
 
 async function openDetail(item: WorkflowDefinition) {
-  window.location.hash = `workflow/${item.workflow_key}/detail`
+  void navigateTo(`workflow/${item.workflow_key}/detail`)
 }
 
 async function prepareDetail(item: WorkflowDefinition) {
@@ -946,7 +967,7 @@ async function selectDetailTab(value: string) {
 }
 
 function goList() {
-  window.location.hash = 'workflow'
+  void navigateTo('workflow', { replace: true })
 }
 
 /** Navigate back to the detail page of the current workflow, the hub for
@@ -958,33 +979,14 @@ function goDetail() {
     goList()
     return
   }
-  window.location.hash = `workflow/${key}/detail`
+  void navigateTo(`workflow/${key}/detail`, { replace: true })
 }
 
-/** Return from the edit/new page: confirm if there are unsaved edits. */
-async function backFromForm() {
-  // 'new' has no parent detail → list. 'edit' returns to detail.
+/** Return from the edit/new page; the shared navigation guard handles dirty forms. */
+function backFromForm() {
   if (routeMode.value === 'new') {
-    if (formDirty.value) {
-      const ok = await confirm({
-        title: '放弃新建',
-        description: '当前表单有未保存内容，确认离开？',
-        destructive: true,
-        confirmText: '离开',
-      })
-      if (!ok) return
-    }
     goList()
     return
-  }
-  if (formDirty.value) {
-    const ok = await confirm({
-      title: '放弃修改',
-      description: '当前工作流有未保存的改动，确认离开？',
-      destructive: true,
-      confirmText: '离开',
-    })
-    if (!ok) return
   }
   goDetail()
 }
@@ -1442,7 +1444,7 @@ async function confirmWorkflowImport() {
       return
     }
     selectedKey.value = result.workflow_key
-    window.location.hash = `workflow/${result.workflow_key}/detail`
+    void navigateTo(`workflow/${result.workflow_key}/detail`)
   } catch (e: unknown) {
     if (isCurrentWorkflowImportRequest(requestToken)) workflowImportError.value = errorMessage(e)
   } finally {
@@ -1600,7 +1602,7 @@ async function executeTask(task: WorkflowTask) {
   try {
     const result = await api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined, taskExecutionMode(task))
     if (result.run_id) {
-      window.location.hash = buildWorkflowTaskProgressHash(task.workflow_key, result.run_id)
+      void navigateTo(buildWorkflowTaskProgressHash(task.workflow_key, result.run_id))
       return
     }
     await loadTasks(task.workflow_key)
@@ -2091,7 +2093,7 @@ async function openTasks(item: WorkflowDefinition) {
     await loadTasks(item.workflow_key)
     return
   }
-  window.location.hash = `workflow/${item.workflow_key}/tasks`
+  void navigateTo(`workflow/${item.workflow_key}/tasks`)
 }
 
 async function prepareTasks(item: WorkflowDefinition) {
@@ -2176,7 +2178,7 @@ async function runWorkflow(item: WorkflowDefinition, input: Record<string, unkno
       selectedKey.value = wf.workflow_key
       selectedRunId.value = res.run_id
       progressAgentRunKey.value = ''
-      window.location.hash = `workflow/${wf.workflow_key}/progress/${res.run_id}`
+      void navigateTo(`workflow/${wf.workflow_key}/progress/${res.run_id}`)
       await loadRuns(wf.workflow_key)
       await loadProgressAgentRuns()
       await loadProgressAgentEvents()
@@ -2194,7 +2196,7 @@ async function runWorkflow(item: WorkflowDefinition, input: Record<string, unkno
 async function openProgress(item: WorkflowDefinition, runId?: string) {
   const run = runId ? (workflowRuns.value[item.workflow_key] || []).find(r => r.run_id === runId) : runningRunFor(item.workflow_key)
   if (!run) return
-  window.location.hash = `workflow/${item.workflow_key}/progress/${run.run_id}`
+  void navigateTo(`workflow/${item.workflow_key}/progress/${run.run_id}`)
 }
 
 async function prepareProgress(item: WorkflowDefinition, runId?: string) {
@@ -2226,16 +2228,17 @@ async function refreshProgress() {
 }
 
 async function openScriptRun(runId: string) {
+  const returnTo = currentHash()
   try {
     const scriptRun = await api.getScriptRun(runId)
-    window.location.hash = `scripts/${scriptRun.script_key}/run/${runId}`
+    void navigateTo(buildScriptRunHash(scriptRun.script_key, runId, returnTo))
   } catch (e: unknown) {
     testError.value = errorMessage(e)
   }
 }
 
 function openAgentRun(runKey: string) {
-  window.location.hash = `agent-runs/${runKey}`
+  void navigateTo(buildAgentRunHash(runKey, currentHash()))
 }
 
 async function pollTestRun() {

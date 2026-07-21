@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, Plus, RotateCw, Save, Search, Trash2 } from '@lucide/vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
@@ -16,6 +16,7 @@ import CategoryBadge from '../../components/CategoryBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { navigateTo, registerNavigationGuard } from '../../lib/navigation'
 import {
   buildOpenApiServicePayload,
   buildServicePayload,
@@ -53,6 +54,7 @@ const openApiForm = ref(defaultOpenApiServiceForm())
 const saving = ref(false)
 const formError = ref('')
 const serviceNotFound = ref(false)
+const formBaseline = ref('')
 
 const showImport = ref(false)
 const importService = ref<OpenApiService | null>(null)
@@ -76,6 +78,28 @@ const editingServiceKey = computed(() => routeParts.value[0] === 'edit' ? routeP
 const editingService = computed(() =>
   services.value.find(service => service.source_type === editingSourceType.value && service.service_key === editingServiceKey.value) || null
 )
+
+function snapshotForm() {
+  return JSON.stringify({
+    sourceType: sourceType.value,
+    mcp: mcpForm.value,
+    openApi: openApiForm.value,
+  })
+}
+
+const formDirty = computed(() =>
+  isFormPage.value && !saving.value && Boolean(formBaseline.value) && snapshotForm() !== formBaseline.value,
+)
+
+const removeNavigationGuard = registerNavigationGuard(() => {
+  if (!formDirty.value) return true
+  return confirm({
+    title: '放弃未保存修改',
+    description: '当前服务配置有未保存修改，确定离开吗？',
+    confirmText: '放弃并返回',
+  })
+})
+onUnmounted(removeNavigationGuard)
 
 function serviceCountKey(service: CapabilityServiceSource) {
   return `${service.source_type}:${service.service_key}`
@@ -155,15 +179,15 @@ const dialogTitle = computed(() => {
 const primaryActionLabel = computed(() => saving.value ? '保存中...' : '保存')
 
 function goList() {
-  window.location.hash = 'services'
+  void navigateTo('services', { replace: true })
 }
 
 function openCreate() {
-  window.location.hash = 'services/new'
+  void navigateTo('services/new')
 }
 
 function openEdit(service: CapabilityServiceSource) {
-  window.location.hash = `services/edit/${service.source_type}/${service.service_key}`
+  void navigateTo(`services/edit/${service.source_type}/${service.service_key}`)
 }
 
 function applyRoute() {
@@ -172,6 +196,7 @@ function applyRoute() {
   if (!props.routeKey) return
   if (props.routeKey === 'new') {
     resetCreateForm()
+    formBaseline.value = snapshotForm()
     return
   }
   if (routeParts.value[0] !== 'edit' || !editingSourceType.value || !editingServiceKey.value) {
@@ -187,6 +212,7 @@ function applyRoute() {
   sourceType.value = service.source_type
   if (service.source_type === 'openapi_service') openApiForm.value = openApiServiceToForm(service)
   else mcpForm.value = serviceToForm(service)
+  formBaseline.value = snapshotForm()
 }
 
 function resetCreateForm(type: ServiceSourceType = 'mcp_service') {
@@ -207,6 +233,7 @@ async function saveService() {
       await api.registerService(buildServicePayload(mcpForm.value, formMode.value))
     }
     await loadServices()
+    formBaseline.value = snapshotForm()
     goList()
   } catch (e: any) {
     formError.value = e.message || '保存失败'
