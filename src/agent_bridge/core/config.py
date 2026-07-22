@@ -263,11 +263,10 @@ def load_backend_configs(paths: AgentBridgePaths) -> list[BackendConfig]:
 
 
 def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
-    """Read the general coding-agent runtime configuration.
+    """读取通用 Coding Agent 运行时配置。
 
-    ``[agents]`` controls general AgentService runs only. Claude-only runtimes
-    such as the current workflow runner may still pin ``backend_key="claude"``
-    while the broader agent abstraction evolves.
+    ``[agents]`` 只控制通用 AgentService 运行。当前工作流等仅支持 Claude
+    的运行时仍可固定使用 ``backend_key="claude"``。
     """
     if not paths.server_config_path.exists():
         return AgentRuntimeConfig()
@@ -276,16 +275,16 @@ def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
     if not agents_raw:
         return AgentRuntimeConfig()
     if not isinstance(agents_raw, dict):
-        raise ValueError("[agents] must be a TOML table")
+        raise ValueError("[agents] 必须是 TOML 表")
     default_backend = str(agents_raw.get("default", "claude"))
     configs: list[AgentBackendConfig] = []
     for slug, section in agents_raw.items():
         if slug == "default":
             continue
         if not isinstance(section, dict):
-            raise ValueError(f"agent backend '{slug}' must be a TOML table")
+            raise ValueError(f"Agent 后端 '{slug}' 必须是 TOML 表")
         if "type" not in section:
-            raise ValueError(f"agent backend '{slug}' missing required field: type")
+            raise ValueError(f"Agent 后端 '{slug}' 缺少必填字段 type")
         configs.append(
             AgentBackendConfig(
                 slug=str(slug),
@@ -294,7 +293,9 @@ def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
                 command=section.get("command"),
             )
         )
-    return AgentRuntimeConfig(default_backend=default_backend, backends=tuple(configs))
+    return normalize_agent_runtime_config(
+        AgentRuntimeConfig(default_backend=default_backend, backends=tuple(configs))
+    )
 
 
 _AGENT_BACKEND_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -302,9 +303,9 @@ _SUPPORTED_AGENT_TYPES = {"claude", "codex", "opencode", "pi"}
 
 
 def save_agent_runtime_config(paths: AgentBridgePaths, config: AgentRuntimeConfig) -> AgentRuntimeConfig:
-    """Persist ``[agents]`` into server.toml while preserving unrelated sections."""
+    """将 ``[agents]`` 写入 server.toml，同时保留其他配置段。"""
     ensure_directories(paths)
-    normalized = _normalize_agent_runtime_config(config)
+    normalized = normalize_agent_runtime_config(config)
     existing = paths.server_config_path.read_text(encoding="utf-8") if paths.server_config_path.exists() else ""
     kept = _strip_agents_toml_section(existing)
     rendered = _render_agent_runtime_config(normalized)
@@ -316,21 +317,26 @@ def save_agent_runtime_config(paths: AgentBridgePaths, config: AgentRuntimeConfi
     return normalized
 
 
-def _normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeConfig:
+def normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeConfig:
+    """归一化 Agent 后端配置并执行所有入口共享的契约校验。"""
     default_backend = str(config.default_backend or "claude").strip() or "claude"
     if not _AGENT_BACKEND_SLUG_RE.fullmatch(default_backend):
-        raise ValueError(f"invalid default agent backend: {default_backend!r}")
+        raise ValueError(f"默认 Agent 后端名称不合法：{default_backend!r}")
     backends: list[AgentBackendConfig] = []
     seen: set[str] = set()
     for backend in config.backends:
         slug = str(backend.slug or "").strip()
         agent_type = str(backend.agent_type or "").strip()
         if not _AGENT_BACKEND_SLUG_RE.fullmatch(slug):
-            raise ValueError(f"invalid agent backend slug: {slug!r}")
+            raise ValueError(f"Agent 后端 slug 不合法：{slug!r}")
         if agent_type not in _SUPPORTED_AGENT_TYPES:
-            raise ValueError(f"unsupported agent backend type: {agent_type!r}")
+            raise ValueError(f"不支持的 Agent 后端 type：{agent_type!r}")
+        if slug != agent_type:
+            raise ValueError(
+                f"Agent 后端 slug 必须与 type 完全一致：slug={slug!r}，type={agent_type!r}"
+            )
         if slug in seen:
-            raise ValueError(f"duplicate agent backend slug: {slug}")
+            raise ValueError(f"Agent 后端 slug 重复：{slug}")
         seen.add(slug)
         backends.append(
             AgentBackendConfig(
@@ -341,7 +347,7 @@ def _normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeC
             )
         )
     if default_backend != "claude" and default_backend not in seen:
-        raise ValueError(f"default agent backend '{default_backend}' is not configured")
+        raise ValueError(f"默认 Agent 后端 '{default_backend}' 尚未配置")
     return AgentRuntimeConfig(default_backend=default_backend, backends=tuple(backends))
 
 

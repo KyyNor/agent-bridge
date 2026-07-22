@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import subprocess
@@ -10,6 +9,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agent_bridge.agent_runtime.adapters.jsonl_cli import (
+    JsonlCliProcess,
+    effective_prompt as _effective_prompt,
+    extract_json_object as _extract_json,
+    first_int as _first_int,
+    first_number as _first_number,
+    first_string as _first_string,
+    joined_text as _joined_text,
+    row_is_error as _is_error,
+    walk_values as _walk_values,
+)
 from agent_bridge.agent_runtime.events import event_record
 from agent_bridge.agent_runtime.types import (
     CodingAgentCapabilities,
@@ -26,7 +36,7 @@ class _CodexRun:
     command: str
     model: str | None = None
     bypass_approvals_and_sandbox: bool = True
-    _process: asyncio.subprocess.Process | None = field(default=None, init=False)
+    _cli: JsonlCliProcess | None = field(default=None, init=False)
 
     async def updates(self) -> AsyncIterator[CodingAgentUpdate]:
         schema_path = _write_schema_file(self.request.output_schema)
@@ -38,39 +48,30 @@ class _CodexRun:
             schema_path=schema_path,
             bypass_approvals_and_sandbox=self.bypass_approvals_and_sandbox,
         )
-        process = await asyncio.create_subprocess_exec(
-            *args,
+        cli = JsonlCliProcess(
+            request=self.request,
+            args=args,
             stdin=subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            forward_native_messages=True,
         )
-        self._process = process
-        stderr_chunks: list[str] = []
-        stderr_task = asyncio.create_task(_drain_stderr(process, self.request, stderr_chunks))
+        self._cli = cli
+        await cli.start()
         final_text_parts: list[str] = []
         final: CodingAgentFinal | None = None
         try:
-            assert process.stdout is not None
-            async for raw_line in process.stdout:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                raw = _decode_json_line(line)
-                if self.request.on_native_message is not None:
-                    self.request.on_native_message(raw)
+            async for raw in cli.rows():
                 events, maybe_text, maybe_final = _events_from_codex_row(raw)
                 if maybe_text:
                     final_text_parts.append(maybe_text)
                 if maybe_final is not None:
                     final = maybe_final
                 yield CodingAgentUpdate(raw=raw, events=events, final=maybe_final)
-            return_code = await process.wait()
-            await stderr_task
+            return_code = await cli.wait()
             if return_code != 0:
                 message = (
                     final.result
                     if final is not None and final.is_error and final.result
-                    else _stderr_summary(stderr_chunks) or f"codex exited with status {return_code}"
+                    else cli.stderr_summary() or f"codex exited with status {return_code}"
                 )
                 yield CodingAgentUpdate(
                     events=[_codex_event("error", status="failed", message=message)],
@@ -79,10 +80,10 @@ class _CodexRun:
                 return
             if final is None:
                 yield CodingAgentUpdate(
-                    final=CodingAgentFinal(result="\n".join(final_text_parts).strip())
+                    final=CodingAgentFinal(result=_joined_text(final_text_parts))
                 )
             elif self.request.output_schema and _extract_json(final.result or "") is None:
-                text = "\n".join(part.strip() for part in final_text_parts if part.strip()).strip()
+                text = _joined_text(final_text_parts)
                 if _extract_json(text) is not None:
                     yield CodingAgentUpdate(
                         final=CodingAgentFinal(
@@ -96,8 +97,7 @@ class _CodexRun:
                         )
                     )
         finally:
-            if not stderr_task.done():
-                stderr_task.cancel()
+            await cli.close()
             if schema_path:
                 try:
                     Path(schema_path).unlink(missing_ok=True)
@@ -105,20 +105,8 @@ class _CodexRun:
                     pass
 
     async def abort(self) -> None:
-        if self._process is None or self._process.returncode is not None:
-            return
-        self._process.terminate()
-        try:
-            await asyncio.wait_for(self._process.wait(), timeout=5)
-        except TimeoutError:
-            self._process.kill()
-            await self._process.wait()
-
-
-def _effective_prompt(request: CodingAgentRequest) -> str:
-    if not request.system_prompt_append:
-        return request.prompt
-    return f"{request.system_prompt_append}\n\n{request.prompt}"
+        if self._cli is not None:
+            await self._cli.abort()
 
 
 def _write_schema_file(schema: dict[str, Any] | None) -> str | None:
@@ -178,48 +166,6 @@ def _build_command(
         args.extend(["--output-schema", schema_path])
     args.append(prompt)
     return args
-
-
-async def _drain_stderr(
-    process: asyncio.subprocess.Process,
-    request: CodingAgentRequest,
-    chunks: list[str],
-) -> None:
-    if process.stderr is None:
-        return
-    async for raw_line in process.stderr:
-        text = raw_line.decode("utf-8", errors="replace")
-        chunks.append(text)
-        if request.stderr is not None:
-            request.stderr(text)
-
-
-def _stderr_summary(chunks: list[str], *, limit: int = 2000) -> str:
-    text = "".join(chunks).strip()
-    if len(text) <= limit:
-        return text
-    return text[-limit:]
-
-
-def _extract_json(text: str) -> Any | None:
-    if not text:
-        return None
-    start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
-        return None
-    try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-
-
-def _decode_json_line(line: str) -> dict[str, Any]:
-    try:
-        value = json.loads(line)
-    except json.JSONDecodeError:
-        return {"type": "stdout", "message": line}
-    return value if isinstance(value, dict) else {"type": "stdout", "value": value}
 
 
 def _events_from_codex_row(
@@ -309,17 +255,6 @@ def _text_from_row(row: dict[str, Any]) -> str:
     return ""
 
 
-def _walk_values(value: Any) -> list[Any]:
-    values = [value]
-    if isinstance(value, dict):
-        for item in value.values():
-            values.extend(_walk_values(item))
-    elif isinstance(value, list):
-        for item in value:
-            values.extend(_walk_values(item))
-    return values
-
-
 def _tool_name(row: dict[str, Any]) -> str:
     for key in ("tool", "tool_name", "toolName", "name", "command"):
         value = row.get(key)
@@ -332,47 +267,6 @@ def _tool_name(row: dict[str, Any]) -> str:
                 if isinstance(item, str) and item:
                     return item
     return "unknown"
-
-
-def _is_error(row: dict[str, Any]) -> bool:
-    for key in ("is_error", "isError", "error"):
-        value = row.get(key)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str) and value:
-            return True
-    status = str(row.get("status") or row.get("state") or "").lower()
-    return status in {"error", "failed", "failure"}
-
-
-def _first_string(row: dict[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = row.get(key)
-        if isinstance(value, str) and value:
-            return value
-    for value in _walk_values(row):
-        if isinstance(value, dict):
-            for key in keys:
-                item = value.get(key)
-                if isinstance(item, str) and item:
-                    return item
-    return None
-
-
-def _first_number(row: dict[str, Any], *keys: str) -> float | None:
-    for key in keys:
-        value = row.get(key)
-        if isinstance(value, int | float):
-            return float(value)
-    return None
-
-
-def _first_int(row: dict[str, Any], *keys: str) -> int | None:
-    for key in keys:
-        value = row.get(key)
-        if isinstance(value, int):
-            return value
-    return None
 
 
 class CodexCodingAgent:

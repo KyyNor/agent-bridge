@@ -4,6 +4,8 @@ import asyncio
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from agent_bridge.agent_runtime.adapters.codex import (
     CodexCodingAgent,
     _build_command,
@@ -147,3 +149,14 @@ def test_registry_can_create_codex_backend() -> None:
     assert isinstance(agent, CodexCodingAgent)
     assert agent.command == "/opt/homebrew/bin/codex"
     assert agent.model == "gpt-5"
+
+
+def test_registry_rejects_backend_that_borrows_another_type_slug() -> None:
+    with pytest.raises(ValueError, match="slug 必须与 type 完全一致"):
+        create_coding_agent_registry(
+            AgentRuntimeConfig(
+                backends=(
+                    AgentBackendConfig(slug="claude", agent_type="codex"),
+                ),
+            )
+        )

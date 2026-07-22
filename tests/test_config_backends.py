@@ -164,22 +164,38 @@ def test_load_agent_runtime_config_reads_agents_section(tmp_path: Path):
         (
             'host = "127.0.0.1"\nport = 8765\nadmins = ["root"]\n\n'
             '[agents]\n'
-            'default = "claude-sonnet"\n\n'
-            '[agents.claude-sonnet]\n'
-            'type = "claude"\n'
-            'model = "claude-sonnet-test"\n'
-            'command = "ignored-for-claude"\n'
+            'default = "opencode"\n\n'
+            '[agents.opencode]\n'
+            'type = "opencode"\n'
+            'model = "anthropic/claude-sonnet-test"\n'
+            'command = "/usr/local/bin/opencode"\n'
         ),
     )
 
     config = load_agent_runtime_config(paths)
 
-    assert config.default_backend == "claude-sonnet"
+    assert config.default_backend == "opencode"
     assert len(config.backends) == 1
-    assert config.backends[0].slug == "claude-sonnet"
-    assert config.backends[0].agent_type == "claude"
-    assert config.backends[0].model == "claude-sonnet-test"
-    assert config.backends[0].command == "ignored-for-claude"
+    assert config.backends[0].slug == "opencode"
+    assert config.backends[0].agent_type == "opencode"
+    assert config.backends[0].model == "anthropic/claude-sonnet-test"
+    assert config.backends[0].command == "/usr/local/bin/opencode"
+
+
+def test_load_agent_runtime_config_rejects_slug_type_mismatch(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+    _write_config(
+        paths.config_dir,
+        (
+            '[agents]\n'
+            'default = "claude"\n\n'
+            '[agents.claude]\n'
+            'type = "codex"\n'
+        ),
+    )
+
+    with pytest.raises(ValueError, match="slug 必须与 type 完全一致"):
+        load_agent_runtime_config(paths)
 
 
 def test_load_agent_runtime_config_requires_backend_type(tmp_path: Path):
@@ -238,10 +254,22 @@ def test_save_agent_runtime_config_replaces_only_agents_section(tmp_path: Path):
 def test_save_agent_runtime_config_requires_default_backend_to_exist(tmp_path: Path):
     paths = AgentBridgePaths.from_root(tmp_path)
 
-    with pytest.raises(ValueError, match="not configured"):
+    with pytest.raises(ValueError, match="尚未配置"):
         save_agent_runtime_config(
             paths,
             AgentRuntimeConfig(default_backend="opencode", backends=()),
+        )
+
+
+def test_save_agent_runtime_config_rejects_slug_type_mismatch(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+
+    with pytest.raises(ValueError, match="slug 必须与 type 完全一致"):
+        save_agent_runtime_config(
+            paths,
+            AgentRuntimeConfig(
+                backends=(AgentBackendConfig(slug="claude", agent_type="codex"),),
+            ),
         )
 
 

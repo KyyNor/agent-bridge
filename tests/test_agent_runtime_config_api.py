@@ -53,6 +53,25 @@ def test_agent_runtime_config_api_rejects_missing_default_backend(wm_paths) -> N
     assert response.status_code == 400
 
 
+def test_agent_runtime_config_api_rejects_slug_type_mismatch(wm_paths) -> None:
+    from agent_bridge.api.app import create_app
+
+    app = create_app(wm_paths, {"root"})
+    client = TestClient(app)
+
+    response = client.post(
+        "/agent-runtime/config",
+        json={
+            "default_backend": "claude",
+            "backends": [{"slug": "claude", "type": "codex"}],
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 400
+    assert "slug 必须与 type 完全一致" in str(response.json())
+
+
 def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -> None:
     from agent_bridge.api.app import create_app
 

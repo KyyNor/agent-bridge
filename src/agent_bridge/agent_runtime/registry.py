@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from agent_bridge.agent_runtime.adapters import ClaudeCodingAgent, CodexCodingAgent, OpenCodeCodingAgent, PiCodingAgent
 from agent_bridge.agent_runtime.types import CodingAgent
-from agent_bridge.core.config import AgentRuntimeConfig
+from agent_bridge.core.config import AgentRuntimeConfig, normalize_agent_runtime_config
 
 
 class UnknownCodingAgentError(ValueError):
@@ -36,7 +36,7 @@ class CodingAgentRegistry:
 
 
 def create_coding_agent_registry(config: AgentRuntimeConfig | None = None) -> CodingAgentRegistry:
-    runtime_config = config or AgentRuntimeConfig()
+    runtime_config = normalize_agent_runtime_config(config or AgentRuntimeConfig())
     registry = CodingAgentRegistry(default_backend=runtime_config.default_backend)
 
     # Claude is always registered because some existing runtimes are explicitly

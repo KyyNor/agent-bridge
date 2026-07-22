@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_bridge.agent_runtime.adapters.jsonl_cli import (
+    JsonlCliProcess,
+    effective_prompt as _effective_prompt,
+    extract_json_object as _extract_json,
+    first_string as _first_string,
+    is_generic_final_result as _is_generic_final_result,
+    joined_text as _joined_text,
+    row_is_error as _is_error,
+    walk_values as _walk_values,
+)
 from agent_bridge.agent_runtime.events import event_record
 from agent_bridge.agent_runtime.types import (
     CodingAgentCapabilities,
@@ -23,7 +31,7 @@ class _PiRun:
     model: str | None = None
     provider: str | None = None
     thinking: str | None = None
-    _process: asyncio.subprocess.Process | None = field(default=None, init=False)
+    _cli: JsonlCliProcess | None = field(default=None, init=False)
 
     async def updates(self) -> AsyncIterator[CodingAgentUpdate]:
         prompt = _effective_prompt(self.request)
@@ -34,34 +42,26 @@ class _PiRun:
             provider=self.provider,
             thinking=self.thinking,
         )
-        process = await asyncio.create_subprocess_exec(
-            *args,
+        cli = JsonlCliProcess(
+            request=self.request,
+            args=args,
             cwd=str(self.request.cwd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        self._process = process
-        stderr_chunks: list[str] = []
-        stderr_task = asyncio.create_task(_drain_stderr(process, self.request, stderr_chunks))
+        self._cli = cli
+        await cli.start()
         final_text_parts: list[str] = []
         final: CodingAgentFinal | None = None
         try:
-            assert process.stdout is not None
-            async for raw_line in process.stdout:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                raw = _decode_json_line(line)
+            async for raw in cli.rows():
                 events, maybe_text, maybe_final = _events_from_pi_row(raw)
                 if maybe_text:
                     final_text_parts.append(maybe_text)
                 if maybe_final is not None:
                     final = maybe_final
                 yield CodingAgentUpdate(raw=raw, events=events, final=maybe_final)
-            return_code = await process.wait()
-            await stderr_task
+            return_code = await cli.wait()
             if return_code != 0:
-                message = _stderr_summary(stderr_chunks) or f"pi exited with status {return_code}"
+                message = cli.stderr_summary() or f"pi exited with status {return_code}"
                 yield CodingAgentUpdate(
                     events=[_pi_event("error", status="failed", message=message)],
                     final=CodingAgentFinal(is_error=True, result=message),
@@ -69,31 +69,18 @@ class _PiRun:
                 return
             if final is None:
                 yield CodingAgentUpdate(
-                    final=CodingAgentFinal(result="\n".join(final_text_parts).strip())
+                    final=CodingAgentFinal(result=_joined_text(final_text_parts))
                 )
             else:
                 completed_final = _completed_final_from_text(final, final_text_parts, self.request)
                 if completed_final is not final:
                     yield CodingAgentUpdate(final=completed_final)
         finally:
-            if not stderr_task.done():
-                stderr_task.cancel()
+            await cli.close()
 
     async def abort(self) -> None:
-        if self._process is None or self._process.returncode is not None:
-            return
-        self._process.terminate()
-        try:
-            await asyncio.wait_for(self._process.wait(), timeout=5)
-        except TimeoutError:
-            self._process.kill()
-            await self._process.wait()
-
-
-def _effective_prompt(request: CodingAgentRequest) -> str:
-    if not request.system_prompt_append:
-        return request.prompt
-    return f"{request.system_prompt_append}\n\n{request.prompt}"
+        if self._cli is not None:
+            await self._cli.abort()
 
 
 def _build_command(
@@ -133,27 +120,6 @@ def _resolve_model(provider: str | None, model: str | None) -> tuple[str | None,
     return provider, model
 
 
-async def _drain_stderr(
-    process: asyncio.subprocess.Process,
-    request: CodingAgentRequest,
-    chunks: list[str],
-) -> None:
-    if process.stderr is None:
-        return
-    async for raw_line in process.stderr:
-        text = raw_line.decode("utf-8", errors="replace")
-        chunks.append(text)
-        if request.stderr is not None:
-            request.stderr(text)
-
-
-def _stderr_summary(chunks: list[str], *, limit: int = 2000) -> str:
-    text = "".join(chunks).strip()
-    if len(text) <= limit:
-        return text
-    return text[-limit:]
-
-
 def _completed_final_from_text(
     final: CodingAgentFinal,
     final_text_parts: list[str],
@@ -167,7 +133,7 @@ def _completed_final_from_text(
     final result does not parse, fall back to the accumulated streamed text
     (mirrors the opencode/codex adapters).
     """
-    text = "\n".join(part.strip() for part in final_text_parts if part.strip()).strip()
+    text = _joined_text(final_text_parts)
     if not text or final.is_error:
         return final
     final_result = str(final.result or "").strip()
@@ -189,31 +155,6 @@ def _replace_result(final: CodingAgentFinal, text: str) -> CodingAgentFinal:
         num_turns=final.num_turns,
         model=final.model,
     )
-
-
-def _is_generic_final_result(text: str) -> bool:
-    return text.lower() in {"", "done", "success", "succeeded", "complete", "completed", "ok"}
-
-
-def _extract_json(text: str) -> Any | None:
-    if not text:
-        return None
-    start = text.find("{")
-    end = text.rfind("}")
-    if start < 0 or end <= start:
-        return None
-    try:
-        return json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-
-
-def _decode_json_line(line: str) -> dict[str, Any]:
-    try:
-        value = json.loads(line)
-    except json.JSONDecodeError:
-        return {"type": "stdout", "message": line}
-    return value if isinstance(value, dict) else {"type": "stdout", "value": value}
 
 
 # pi json-mode event taxonomy (observed against zai/glm-5.1, see docs/json.md):
@@ -461,42 +402,6 @@ def _text_from_row(row: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
-
-
-def _walk_values(value: Any) -> list[Any]:
-    values = [value]
-    if isinstance(value, dict):
-        for item in value.values():
-            values.extend(_walk_values(item))
-    elif isinstance(value, list):
-        for item in value:
-            values.extend(_walk_values(item))
-    return values
-
-
-def _is_error(row: dict[str, Any]) -> bool:
-    for key in ("is_error", "isError", "error"):
-        value = row.get(key)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str) and value:
-            return True
-    status = str(row.get("status") or row.get("state") or "").lower()
-    return status in {"error", "failed", "failure"}
-
-
-def _first_string(row: dict[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = row.get(key)
-        if isinstance(value, str) and value:
-            return value
-    for value in _walk_values(row):
-        if isinstance(value, dict):
-            for key in keys:
-                item = value.get(key)
-                if isinstance(item, str) and item:
-                    return item
-    return None
 
 
 class PiCodingAgent:
