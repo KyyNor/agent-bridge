@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import CronExpressionParser from 'cron-parser'
+import { CronExpressionParser } from 'cron-parser'
 import { api } from '../../api/client'
 import type { AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
