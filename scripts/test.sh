@@ -21,6 +21,10 @@ run_frontend() {
     )
 }
 
+run_lint() {
+    "$PYTHON" -m ruff check "$ROOT_DIR/src" "$ROOT_DIR/tests"
+}
+
 case "$MODE" in
     fast)
         "$PYTHON" -m pytest "$ROOT_DIR/tests" \
@@ -29,7 +33,15 @@ case "$MODE" in
         run_frontend test
         ;;
     full)
-        "$PYTHON" -m pytest "$ROOT_DIR/tests" "$@"
+        run_lint
+        "$PYTHON" -m pytest "$ROOT_DIR/tests" \
+            -m "not codegraph_cli and not process and not ragflow and not weknora" \
+            -n auto "$@"
+        run_frontend check
+        ;;
+    all)
+        run_lint
+        "$PYTHON" -m pytest -o addopts="" -n auto "$ROOT_DIR/tests" "$@"
         run_frontend check
         ;;
     integration)
@@ -39,7 +51,7 @@ case "$MODE" in
             -m "ragflow or weknora" "$@"
         ;;
     *)
-        echo "Usage: $0 {fast|full|integration} [pytest arguments...]" >&2
+        echo "Usage: $0 {fast|full|all|integration} [pytest arguments...]" >&2
         exit 2
         ;;
 esac

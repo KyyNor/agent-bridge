@@ -1,128 +1,152 @@
 # Agent Bridge
 
-`Agent Bridge` is a Python 3.11 service for registering HTTP MCP services,
-syncing their tool definitions, and exposing a stable MetaMCP gateway for agents.
-It also includes built-in knowledge management (wiki document sync) and
-CodeGraph code repository indexing capabilities.
+Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。它把 MCP、OpenAPI、内置知识能力、Coding Agent、工作流、脚本和记忆统一到一个 FastAPI 服务，并提供 Vue 3 管理后台。
 
-Features:
+## 主要能力
 
-- HTTP MCP service registration and tool synchronization
-- Capability governance (project profiles with allow/deny rules)
-- Tool call logging and statistics
-- MetaMCP `search` for registry browsing with `path` and `query`
-- MetaMCP `execute` for governed tool execution
-- Built-in Wiki knowledge base management
-- Built-in CodeGraph repository indexing
-- Vue 3 capability console at `/admin/capabilities`
+- 注册 MCP 与 OpenAPI 服务，同步工具定义并统一检索、执行和审计。
+- 通过 Profile 管理来源级与资源级访问策略，并将常用工具提升为 pinned tools。
+- 管理文档知识库、CodeGraph 代码知识和 claude-mem 记忆。
+- 支持 Claude、Codex、OpenCode、Pi 等 Coding Agent 后端。
+- 通过结构化 DAG 编排 Agent、脚本、任务领取和 Markdown/HTML 产物。
+- 管理服务端 Python 脚本、Skill、同步调度和插件更新。
+- 在 `/admin/capabilities` 提供管理后台，在 `/mcp` 提供 MetaMCP 入口。
 
-## Setup
+## 环境要求
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/)
+- Node.js 与 npm（构建管理后台时需要）
+
+安装后端与前端依赖：
 
 ```bash
 uv sync
+cd frontend/capabilities
+npm ci
 ```
 
-## Run Tests
-
-```bash
-uv run pytest -v
-```
-
-## Local Usage
+## 启动
 
 ```bash
 uv run agent-bridge server start
 uv run agent-bridge server init
-open http://127.0.0.1:8765/admin/capabilities
-uv run agb wiki kb create frontend-docs --name "Frontend Docs"
-uv run agb wiki kb grant frontend-docs alice contributor
-uv run agb wiki add ./Guide.pdf --kb frontend-docs --later
-uv run agb wiki sync
-uv run agb wiki docs --kb frontend-docs
-uv run agb wiki status
+uv run agent-bridge server status
 ```
 
-The short command `agb` is equivalent to `agent-bridge`.
+然后访问：
 
-By default the service stores configuration, data, logs, and pid files under `/root/agent-bridge`.
-The user running `agent-bridge server start` must be able to create and write `/root/agent-bridge/config`,
-`/root/agent-bridge/data`, `/root/agent-bridge/logs`, and `/root/agent-bridge/run`;
-in the target deployment this is usually started by `root`.
-The first phase trusts the Linux username sent by the CLI in `X-Agent-Bridge-User` and is intended for an internal trusted VM.
+- 管理后台：<http://127.0.0.1:8765/admin/capabilities>
+- 健康检查：<http://127.0.0.1:8765/health>
+- MetaMCP：<http://127.0.0.1:8765/mcp>
 
-## MetaMCP Usage
+停止服务：
 
 ```bash
-uv run agent-bridge server start
-uv run agent-bridge server init
-open http://127.0.0.1:8765/admin/capabilities
+uv run agent-bridge server stop
 ```
 
-MetaMCP `search` examples:
+短命令 `agb` 与 `agent-bridge` 等价。当前 CLI 根命令只有 `server`、`profile`、`memory`；知识库、工作流、Agent 和系统配置通过管理后台或 HTTP API 管理。
 
-```json
-{}
-```
+## Profile 接入 Claude Code
 
-```json
-{"query": "mysql"}
-```
-
-```json
-{"path": "mysql"}
-```
-
-```json
-{"path": "mysql", "query": "sql"}
-```
-
-MetaMCP `execute` example:
-
-```json
-{
-  "service": "mysql",
-  "tool_name": "query_sql",
-  "params": {
-    "db": "whjcbb",
-    "sql": "select abc from aaa",
-    "limit": 10
-  }
-}
-```
-
-## Governance Usage
+先在管理后台或 API 创建 Profile，再执行：
 
 ```bash
-uv run agent-bridge profile create safe-readonly --name "safe-readonly"
-uv run agent-bridge profile rules safe-readonly --allow mysql --deny hive
-uv run agent-bridge profile use safe-readonly --scope project --url http://127.0.0.1:8765/mcp
+uv run agent-bridge profile use safe-readonly \
+  --scope project \
+  --url http://127.0.0.1:8765/mcp
+```
+
+`profile use` 会写入或更新：
+
+- 项目级 `.mcp.json`（`scope=project`）或用户级 `~/.mcp.json`；
+- Claude Code hooks 配置；
+- 项目 `CLAUDE.md` 或用户 `~/.claude/CLAUDE.md` 中由 Agent Bridge 管理的 profile 指针块。
+
+它不会把完整 profile 正文复制进 CLAUDE.md。动态 profile 与 memory 上下文由服务端维护，并在会话 hook 中刷新。
+
+常用 Profile 命令：
+
+```bash
+uv run agent-bridge profile list
+uv run agent-bridge profile show safe-readonly
 uv run agent-bridge profile config --scope project
+uv run agent-bridge profile pins refresh safe-readonly
 ```
 
-## Memory Integration
+## 测试与质量检查
 
-Agent Bridge can expose claude-mem memory through the same MetaMCP endpoint used
-by capability profiles. Install the project integration once:
+推荐从仓库根目录执行：
 
 ```bash
-uv run agent-bridge profile use safe-readonly --scope project --url http://127.0.0.1:8765/mcp
+./scripts/test.sh fast -q
+./scripts/test.sh full -q
+# 需要真实外部服务/CLI/本地进程时再运行：
+./scripts/test.sh all -q
 ```
 
-`profile use` installs stable Claude Code hooks compatible with claude-mem's
-original hook events. SessionStart uses a single Agent Bridge hook to inject the
-latest profile guidance and memory context from the server. Other hook events
-only send the Claude Code payload to Agent Bridge; the server resolves the
-profile's current memory block and calls claude-mem with that block's
-server-side data directory. If the service is unavailable, the SessionStart hook
-injects a short warning instead of using stale cached context.
+- `fast`：不运行 e2e、真实 CLI、进程和外部知识后端测试；前端运行单元测试。
+- `full`：运行完整的自包含后端测试；前端运行测试、类型检查和生产构建。
+- `all`：清除默认 marker 排除，运行包括真实 CLI、进程和外部后端在内的全部测试。
+- `integration`：运行需要真实 RagFlow/Weknora 的集成测试。
 
-## Frontend Development
+`full` 和 `all` 都会先运行 Ruff 基础静态检查。CI 在全新 checkout 中执行 `full`，随后构建 wheel、安装到隔离环境并验证管理后台静态文件已经打包。
+
+前端单独开发：
 
 ```bash
 cd frontend/capabilities
-npm install
-npm run dev       # start dev server with API proxy
-npm run build     # typecheck + production build
+npm run dev
+npm test
+npm run typecheck
+npm run build
+npm run check
 ```
 
-The Vue 3 frontend builds to `src/agent_bridge/static/capabilities/`.
+Vite 产物写入 `src/agent_bridge/static/capabilities/`。该目录不提交到 Git；发布 wheel 前必须先执行 `npm ci && npm run build`。
+
+## 数据与配置
+
+默认数据根目录是 `/root/agent-bridge`，可通过 `AGENT_BRIDGE_ROOT` 覆盖：
+
+```text
+/root/agent-bridge/
+├── config/
+├── data/
+├── logs/
+├── repos/
+└── run/
+```
+
+服务配置位于 `config/server.toml`，数据库和运行数据位于 `data/`。日志默认写入 `logs/agent-bridge.log`。
+
+当前部署模型是内部可信 VM：请求身份来自 `X-Agent-Bridge-User`，不提供互联网级认证。部署方必须限制监听地址、网络访问和反向代理边界。
+
+## 目录概览
+
+```text
+src/agent_bridge/
+├── api/                       # FastAPI 路由与页面入口
+├── app/                       # 应用装配与兼容门面
+├── capability_hub/            # 能力来源、治理、MetaMCP
+├── knowledge_management/      # 文档、代码与记忆知识
+├── agent_runtime/             # Coding Agent 抽象与执行
+├── automation/workflows/      # 结构化 DAG 工作流
+├── system_config/             # 脚本、Skill、插件调度
+├── server_runtime/            # uvicorn 服务进程管理
+└── storage/                   # SQLite schema 与 repositories
+
+frontend/capabilities/         # Vue 3 管理后台
+examples/workflows/            # 当前格式的工作流导入示例
+tests/                         # 后端测试
+```
+
+开发约定与架构不变量见 [AGENTS.md](AGENTS.md) 和 [CLAUDE.md](CLAUDE.md)。
+
+## 工作流示例
+
+- `examples/workflows/fine-report-analysis/workflow.json`
+- `examples/workflows/hellogithub-summary/workflow.json`
+
+示例均使用 `agent-bridge.workflow` / `format_version=1` 导入信封，并由测试校验结构化 DAG。

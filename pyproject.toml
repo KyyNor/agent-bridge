@@ -30,6 +30,7 @@ dev = [
     "pytest-xdist>=3.8.0",
     "pytest-asyncio>=1.0.0",
     "respx>=0.23.1",
+    "ruff>=0.12.0",
 ]
 
 [project.scripts]
@@ -50,6 +51,16 @@ markers = [
 
 [tool.uv]
 prerelease = "allow"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = ["src/agent_bridge/static"]
+
+[tool.ruff.lint]
+# 先阻断语法与无效控制流，避免一次性把历史风格债务变成发布阻塞；
+# 未使用导入、导入顺序和延迟求值类型名在后续批次逐步治理。
+select = ["E9", "F63", "F7"]
 
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12.0"]

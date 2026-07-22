@@ -1,188 +1,145 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## 项目概述
-
-Agent Bridge 是一个 Python 3.11 服务，作用是**给 Agent 提供受管控的能力与知识访问**。它把异构的能力来源（外部 MCP 服务、OpenAPI/REST 服务、平台内置能力）统一到一个 MetaMCP 网关后面，配合基于 Profile 的访问治理、全量工具调用审计，并内置文档知识库（Wiki）同步与代码仓库索引（CodeGraph / Understand-Anything）两套知识子系统，外加一个定时工作流（workflow）引擎。
-
-最终面向 Agent 的入口只有两个工具：`search`（浏览能力）和 `execute`（在治理下执行）。
+本文件记录 Agent Bridge 当前架构与修改不变量。使用方式见 `README.md`，跨 Agent 通用开发规则见 `AGENTS.md`。三份文档必须随代码同步更新，不引用易漂移的源码行号。
 
 ## 常用命令
 
 ```bash
-uv sync                              # 安装依赖
-uv run pytest -v                     # 跑全部测试
-uv run pytest tests/test_capability_service.py::TestName   # 跑单个测试
-uv run pytest -m "not ragflow and not weknora"  # 跳过需要真实后端的集成测试
+uv sync
+./scripts/test.sh fast -q
+./scripts/test.sh full -q
 
-# 服务（默认监听 127.0.0.1:8765）
-uv run agent-bridge server start     # 等价短命令：uv run agb
-uv run agent-bridge server stop
+cd frontend/capabilities
+npm ci
+npm run dev
+npm run check
+```
+
+服务管理：
+
+```bash
+uv run agent-bridge server start
+uv run agent-bridge server init
 uv run agent-bridge server status
-uv run agent-bridge server init      # 初始化 SQLite 表结构
-
-# Profile 接入 Claude Code（写本地 .mcp.json + 稳定 hooks；动态上下文由 SessionStart 注入）
-uv run agent-bridge profile use <profile> --scope project --url http://127.0.0.1:8765/mcp
+uv run agent-bridge server stop
 ```
 
-前端（Vue 3，构建产物会写到 `src/agent_bridge/static/capabilities/`，该目录被 gitignore）：
+CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加未经 `agent-bridge --help` 验证的命令。
 
-```bash
-cd frontend/capabilities
-npm install
-npm run dev       # 开发服务器，带 API 代理
-npm run build     # vue-tsc 类型检查 + 生产构建
-npm run typecheck
-```
+## 部署与信任模型
 
-注意事项：
-- 项目**没有配置任何 linter / formatter / type checker**（pyproject 里无 ruff/mypy/black），Python 端唯一的校验是测试。
-- 服务进程通过 `uvicorn agent_bridge.api.app:create_app --factory` 启动（见 `runtime/server_process.py`），用 PID 文件管理，5 秒健康检查。
-- `ragflow` / `weknora` 标记的测试需要真实的 RagFlow / Weknora 服务，本地通常用 `-m` 过滤掉。
+- 默认数据根目录为 `/root/agent-bridge`，环境变量 `AGENT_BRIDGE_ROOT` 可覆盖。
+- 当前按内部可信 VM 设计。身份来自 `X-Agent-Bridge-User`，`server.toml` 的 `admins` 决定管理员。
+- 本阶段不增加互联网级认证；部署方负责监听地址、内网访问和反向代理边界。
+- `server_runtime/` 只负责 uvicorn 服务进程；`agent_runtime/` 负责 Coding Agent 执行，不要混用。
 
-## 管理后台前端设计约定（`frontend/capabilities`）
+## 应用与存储
 
-管理后台最近完成了一轮设计系统收敛。后续新增或改造页面应沿用以下约定；本轮设计改动只影响展示层，**不得改变路由、API 调用契约或数据结构**。
+`AgentBridgeService` 是装配根和兼容门面。FastAPI 路由调用应用/领域 service，领域 service 使用 repositories 或 adapter。不要继续把具体知识后端、工作流或脚本业务堆入门面。
 
-### 设计令牌
+`SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
-全局样式唯一入口是 `src/styles/base.css`。状态色、类别色和阴影必须先在 `:root` 与 `.dark` 中定义，再在 `@theme inline` 中注册 Tailwind 别名：
+领域失败抛 `AgentBridgeError` 子类，由 API 全局异常处理器转换为 HTTP 响应。重新分类错误时使用明确类型并 `raise ... from exc`，不要修改任意异常对象。
 
-- 软状态色：`success-soft`、`warning-soft`、`destructive-soft`、`info-soft`、`neutral-soft`，以及对应的 `*-fg` 深色文字。
-- 类别色：`cat-blue`、`cat-teal`、`cat-violet`、`cat-amber`，以及对应的 `*-fg`。
-- 阴影：`shadow-card`、`shadow-pop`、`shadow-btn`。
-- 遮罩：`overlay`、`overlay-strong`；弹窗遮罩不得在组件中直接写 `bg-black/*`。
-- 圆角只保留四级：`rounded-sm` = 4px（compact，徽标/小标签）、`rounded-md` = 6px（control，按钮/输入/选择器/分段）、`rounded-lg` = 10px（card，卡片/区块）、`rounded-xl` = 14px（overlay，弹窗/大浮层）。`rounded-full` 只用于圆形点、头像和进度条，不作为第五级圆角；不要新增 `rounded-2xl` 及以上尺寸。
+## 能力中心
 
-视图和共享组件在本次设计迁移范围内禁止裸用 Tailwind 调色盘色（例如 `bg-red-50`、`text-gray-400`、`border-blue-300`）或直接写颜色 hex。应使用语义类，例如 `bg-destructive-soft text-destructive-soft-fg`、`bg-success-soft`、`text-placeholder`、`bg-cat-blue text-cat-blue-fg`、`border-primary/30`。新增颜色必须同时考虑暗色模式。
+能力来源通过 `CapabilitySourceAdapter` 和 `CapabilitySourceRegistry` 分发。当前实现包括 Builtin、MCP、OpenAPI：
 
-通用尺度：组件应按上述四级圆角映射使用；辅助信息使用 `text-xs text-muted-foreground`，表格正文使用 `text-sm`，工具名、时间、耗时和 key 使用 `font-mono`。`base.css` 会让所有 `tbody > tr` 自动获得统一列表 hover；非表格列表项才使用共享类 `list-row-interactive`，统一获得 muted 70% 背景、200ms 缓动和 2px primary 左侧内阴影高亮条。不要在页面里重复写同一套 transition/hover 规则。
+- adapter 负责来源匹配、根目录投影、工具检索、执行和工具名枚举；
+- `CapabilityService` 只编排统一审计、查询过滤和响应信封；
+- 新增来源应新增 adapter 并注册，不在 `CapabilityService` 增加中心 `if/elif`；
+- 外部来源执行前由 adapter 完成 Profile 来源级校验；Builtin provider 负责自身资源级校验。
 
-### 共享组件
+能力失败使用 `capability_hub/errors.py` 的不可变 `CapabilityFailure` 与类型化领域错误。审计字段包括 status、stage、owner、error_type、resource 和 log_id。禁止恢复 `_tool_call_*` 动态属性或原地改写异常 `message/args`。
 
-组件位于 `src/components/`，映射逻辑只允许存在于组件内部，不要在页面中重新定义同类颜色映射：
+`log_tool_call` 是统一审计出口。MetaMCP 的 search、execute、pinned tools、工作流辅助工具和脚本调用都必须可关联 log_id。
 
-- `StatusBadge.vue`：`status` 支持 `success | error | blocked | running | enabled | disabled`，可用 `label` 覆盖文案；状态徽标使用软底/深字，并带语义圆点。
-- `CategoryBadge.vue`：`kind` 支持 `toolType | source | taskType`。`taskType` 用于任务导入动作（新增、更新、跳过、重开、错误）。
-- `SegmentedTabs.vue`：通过 `v-model` 管理当前 key，`tabs` 为 `{ key, label, count? }[]`；用于统一筛选分段控件。
-- `StatCard.vue`：提供 `label`、`value`、`sub` 和 icon slot；`tone` 支持 `neutral | ok | err | info`。默认及信息型卡片保持 `bg-card` 中性卡身，状态型 tone 只改变图标底和数值颜色，不给整张卡染色。
+MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped 工具集，底层 transport 使用 stateless 模式。不要缓存包含动态工具注册的 server 实例，避免跨请求上下文泄漏。
 
-### 统一页头与列表页
+## 文档知识后端
 
-`src/components/PageHeader.vue` 由 `App.vue` 统一渲染：标题在左，主操作在右，搜索/筛选单独位于第二行。页面通过延迟 Teleport 投放内容：
+所有文档知识后端实现 `BackendAdapter`。应用层通过 `DocsKnowledgeService` 与 adapter 交互，不感知 Weknora、RagFlow、PageIndex 等具体类型。
 
-- 主操作投放到 `#ph-actions`：`<Teleport to="#ph-actions" defer>`。
-- 搜索、筛选、排序投放到 `#ph-filters`：`<Teleport to="#ph-filters" defer>`。
-- 页头按钮使用 `size="lg"`，搜索 `Input` 使用 `h-9`，`SelectTrigger` 使用 `size="lg"`，保证页头控件统一为 36px。
-- 页头 actions 与 filters 统一使用 `gap-2`（8px）；分段控件整体 `h-9`，内部选项 `h-7`，不要在页面里重新定义另一套高度或间距。
-- `PageHeader` 基础层会兜底将 Teleport 进来的按钮、输入和选择器设为 36px；页面应优先使用 `Button` 的 `size="lg"`、`Input` 的 `h-9`、`SelectTrigger` 的 `size="lg"` 表达语义，禁止另起 `h-7`/`h-8` 的页头控件样式。
-- 页面副标题不再渲染；导航配置中的 `description` 只保留作潜在复用数据。
-- 详情/编辑/运行等子路由由 `shouldShowPageHeader()` 隐藏全局页头；对应视图的 Teleport 也必须用当前列表模式/路由状态做条件渲染，避免投放到不存在的目标。
+可选能力使用独立、可运行时检查的 Protocol：
 
-当前已迁移到统一列表页头的 11 个页面是：
+- `AgentManagementBackend`：列出/创建后端 Agent 和类型预设；
+- `ManagedResourcesBackend`：初始化或修复后端托管资源；
+- 基础 `BackendCapabilities` 只声明能力，不替代 Protocol 的真实实现检查。
 
-`services`、`tools`、`profiles`、`knowledge`、`code-repos`、`memory`、`workflow`、`logs`、`agent-runs`、`stats`、`scripts`。
+后端专属 HTTP、鉴权、错误解释和自愈逻辑放在对应 adapter。未知或缺失 adapter 必须明确报错；Mock 只在显式 `type="mock"` 时使用，不能兜底配置错误。
 
-`dashboard` 保留标题型页头但没有列表筛选；工具调试、系统配置、Skill 编辑和各详情页按自身上下文保留页面内操作，不要为了统一而把详情操作强行搬到全局页头。
+## 代码知识与记忆
 
-### 前端验收
+`CodeGraphService` 管理仓库镜像、代码索引、查询和 Understand-Anything。当前 CLI/SQLite 双实现的产品定位尚未决定，暂不重构这一层；修改前先讨论为什么需要两个实现、各自的降级语义和保留期限。
 
-修改管理后台后至少执行：
+Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。claude-mem worker 是按需进程池；插件更新由独立多 job 的 `PluginUpdateScheduler` 管理。它与单 cron 的 `BaseCronScheduler` 语义不同，不要为了继承而继承。
 
-```bash
-cd frontend/capabilities
-npm run typecheck
-npm run build
-```
+## Coding Agent
 
-设计迁移还应检查：
+`CodingAgent` / `CodingAgentRun` 是统一契约，Claude、Codex、OpenCode、Pi 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
 
-- 四个共享组件各只有一份映射/样式实现。
-- 11 个列表页的页头操作/筛选没有回退为独立双层 toolbar。
-- 表格行不重复添加页面级 hover 实现；非表格列表项才通过 `list-row-interactive` 接入统一效果。
-- 新增的视图代码没有裸用 Tailwind 调色盘色；颜色来自 `base.css` 语义令牌。
-- 窄屏表格使用 `overflow-x-auto` 或合理的截断策略。
-- 设计改动的 diff 不包含 `src/api`、路由定义或 API 类型结构变化。
+Codex/OpenCode/Pi 的 JSONL 子进程生命周期统一由 `adapters/jsonl_cli.py` 管理，包括：
 
-## 部署与信任模型（务必先理解）
+- 启动与 stdout JSONL 解码；
+- stderr 收集和摘要；
+- native message 可选转发；
+- abort 的 terminate、等待、kill 升级。
 
-- **数据根目录**默认 `/root/agent-bridge`，用环境变量 `AGENT_BRIDGE_ROOT` 覆盖；其下分 `config/ data/ logs/ run/ repos/`。`AgentBridgePaths`（`core/config.py`）是这些路径的单一来源。
-- 当前阶段**信任内部可信 VM**：调用方的身份完全来自 HTTP 头 `X-Agent-Bridge-User`（即 Linux 用户名），不做强认证。`default_user()` 默认 `root`，可用 `AGENT_BRIDGE_USER` 覆盖。
-- `server.toml`（`config/server.toml`）里的 `admins` 集合决定谁是管理员；几乎所有写操作都以 `require_admin_user(actor, self.admins)` 开头。未显式传 `admins` 时，API 层每次请求会重新加载该文件（支持热更新 admin 列表）。
-- 启动服务的那一类部署账户必须能创建并写入根目录下的各子目录。
+各 adapter 只保留命令参数、协议事件映射和终态语义，不复制公共进程骨架。
 
-## 架构总览
+Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没有实例级差异配置，不能提供真实价值；未来引入实例化配置后再扩展一对多模型。
 
-整个系统是分层 + 中心化服务装配的结构。**所有子系统的根都在 `app/service.py` 的 `AgentBridgeService.__init__`**，它一次性装配出 governance、capabilities、agents、codegraph、四个 scheduler、workflows、skills、scripts，并注册三个内置能力提供者（platform / wiki / codegraph）。FastAPI app 在 `api/app.py:create_app` 里创建，持有这个 service。
+## 工作流
 
-请求处理链：FastAPI 路由（`api/routes/*`）→ `AgentBridgeService` / 各子 service → `SQLiteStore`（仓库模式）。`AgentBridgeError`（`AccessDenied`/`NotFound`/`ValidationError`，定义于 `core/domain.py`）被一个全局异常处理器统一转成 JSON 响应，所以业务层一律抛领域异常而非手写 HTTP 状态码。
+工作流是受 Pydantic 校验的结构化 DAG，不再执行 `workflow.js`：
 
-### 存储层（`storage/`）
+- 节点类型：`get_task`、`agent`、`script`、`output`；
+- 边可携带基于祖先节点输出的条件；
+- 总结型工作流末尾必须是 Markdown 主报告和 HTML 派生报告；
+- `WorkflowDagExecutor` 负责拓扑执行、条件、增量缓存和节点输出；
+- `WorkflowScheduler` 负责运行时间窗、并发和任务租约，不继承单 cron 基类。
 
-- `SQLiteStore`（`storage/sqlite.py`）是单一门面，按领域拆成 7 个 **repository**（`storage/repositories/*`：knowledge / capabilities / governance / codegraph / workflows / scripts / agent_runs）。每个 repo 持有 `db_path` 和一个共享的 `connect` 上下文管理器。
-- 表结构在 `storage/schema.py`（约 35 张表，`CREATE TABLE IF NOT EXISTS`，`init_schema()` 幂等建表）。Wiki 后端曾用 TOML 配置，`migrate_toml_backends_to_db` 做过一次性迁移到 DB。
+导入/导出格式为 `agent-bridge.workflow`、`format_version=1`。`examples/workflows/*/workflow.json` 必须通过示例契约测试。不要恢复 `manifest.json + workflow.js` 双运行时。
 
-### 能力中心（`capability_hub/`）—— 核心子系统
+Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEventTimeline`、`SubagentDetailPanel` 和 `useSubagentDetails` 复用运行详情；不得在 Workflow 与 AgentRuns 页面分别维护另一套加载状态。
 
-这是最值得读多文件才能理解的部分。
+## 时间处理规范
 
-**能力来源是三类，分发走 if/elif 探测，不是注册表**（已确认，且 `sources/*/​__init__.py` 全是空文件）。固定优先级：`builtin > openapi > mcp`。具体逻辑在 `CapabilityService.execute`（`capability_hub/service.py:571`）和 `_search_without_log`：先看 `service` key 是否在 `builtin_providers` 字典里，再看是否是已注册的 openapi 服务，否则按 MCP 处理。
+- 禁止使用 `datetime.utcnow()` 和 naive UTC。
+- 当前时间使用 `core/timeutil.py:utc_now()`。
+- 持久化 ISO 时间使用 `utc_iso()`；解析数据库或历史 `Z/+00:00/naive` 值使用 `parse_utc()`。
+- 不在调用点重复定义 `now_iso`，也不手写 `.replace("+00:00", "Z")`。
+- 过期、租约、缓存使用 aware UTC；耗时统计使用 monotonic/perf_counter。
 
-- `sources/builtin/`：实现 `BuiltinCapabilityProvider` Protocol（`base.py`）。三个提供者都在 `app/service.py:86-88` **命令式注册**：`PlatformBuiltinProvider`（`load_skill` / `run_script`）、`WikiBuiltinProvider`（wiki 检索）、`CodeGraphBuiltinProvider`（`codegraph_explore`）。内置提供者**自己做资源级**（wiki KB / code repo）的策略校验。
-- `sources/mcp/`：`McpHttpClient` 基于官方 MCP SDK 的 streamable HTTP，每次调用新开连接，无连接池。
-- `sources/openapi/`：`parser.py` 把 OpenAPI 文档转成工具（推断 tool_type，GET/`{var}` → detail，其余 GET → search），`http_client.py` 执行时通过 `httpx` 发请求。注意执行走 `asyncio.to_thread` 包了同步 httpx。
+## 日志
 
-**MetaMCP 网关（`gateway/metamcp.py`）**：在 `/mcp` 路由暴露一个 FastMCP server。**每个请求都新建一个临时的 FastMCP 实例**（无状态），用模块级 `ContextVar`（`_request_profile` / `_request_workflow_context`）携带 per-request 上下文。Profile 通过 `X-Agent-Bridge-MetaMCP-Profile` 头传入；工作流上下文通过 `X-Agent-Bridge-Workflow[-Key|-Run-Id]` 头传入，存在完整工作流上下文时才会额外注册 `workflow_get_task` / `workflow_set_task` / `workflow_run_log` 三个辅助工具。除 `search`/`execute` 外，还会把 wiki/codegraph 直连工具和 profile 的 pinned 工具提升为顶层 MCP 工具。
+- 使用标准库 `logging.getLogger(__name__)`，由 `core/logging.py` 统一转发到 loguru。
+- 日志消息使用中文和 `%s` 惰性格式化。
+- INFO 记录关键生命周期开始/完成；WARNING 记录可恢复失败、拒绝和降级；ERROR 记录最终失败并在活动异常块中使用 `exc_info=True`。
+- 核心异常不得静默吞掉。容错继续执行时也必须记录实体 key、阶段、状态、原因和耗时。
+- 高频循环使用 DEBUG 或聚合日志，不逐条输出 INFO。
 
-**治理（`governance.py`）**：`CapabilityGovernanceService` 管四件事——Profile CRUD、策略校验、工具调用日志、Pin 管理。关键规则：
-- **来源级默认拒绝 + allow 后减 deny**：`filter_source_keys` 里若无 allow 规则则结果为空，deny 再从 allow 里扣。`profile_key is None` 时放行全部。
-- **资源级是纯 allow-list**（无 deny），按 `ProfileResourceType`（`wiki_kb` / `code_repo`）。
-- `log_tool_call` 是**唯一审计出口**：每次 `execute`/`search`/`artifacts_search`（含被拒绝的）都写一行，带 `entrypoint`、`source_type`、`status`、`failure_stage`、`failure_owner`、`error_type`、`duration_ms`，失败时把 `log_id` 缝进异常信息便于关联。`invoke_logged_tool`（`service.py:144`）让工作流辅助工具/脚本运行也走同一套审计。
+## 管理后台
 
-**Profile 文档与 Pin（`profiles/`）**：`docs.py` 仍提供 profile Markdown 渲染和 `install_profile_to_cwd` helper，主要供服务端托管 agent run 写隔离工作目录使用；`agb profile use` 不再写本地 profile md，也不再改用户/项目的 `CLAUDE.md`/`AGENTS.md`。Claude Code 交互会通过 `SessionStart` hook 从服务端实时注入 profile 指导。`pins.py` 里只有 `{overview, search, detail}` 类型工具可被 pin，pin 粒度是 `(service, tool_type)` 组而非单个工具，可按 ratio/count 自动选（基于 30 天用量，结果缓存 24h）。
+前端位于 `frontend/capabilities`，使用 Vue 3、TypeScript、Vite、Tailwind v3，并保持 Chrome 90 兼容。
 
-### 知识管理（`knowledge_management/`）
+- 语义颜色统一定义在 `src/styles/base.css`，页面不直接使用 Tailwind 调色盘色或 hex。
+- 页面共享判断进入 `src/lib`；共享状态进入 `src/composables`；可视区域进入 `src/components`。
+- `WorkflowView` 等大视图只负责页面编排，新增功能先提取组件，不继续增加内联业务区块。
+- 工作流任务执行规则统一使用 `canRunNormally`、`canForceRun`、`canRunTask`。
+- 工作流定义/节点视觉 helper 位于 `src/lib`，不放在 `views/`。
+- 设计原型不得放入 `public/`；测试验证真实组件、源码或行为。
 
-**文档知识（`docs_knowledge/`，Wiki）**：上传 → `ArchiveStorage`（sha256 内容寻址归档）→ 建同步任务 → 由调度器扇出到一个或多个**检索后端**。所有后端实现 `BackendAdapter` Protocol（`core/domain.py`）：`mock` / `ragflow` / `weknora` / `pageindex`，由 `backends/registry.py` 按 DB 配置懒加载。**`PageIndexBackend` 比较特殊**——它自带 litellm 做检索增强问答、用 MarkItDown 把 office/csv 转 markdown 再索引，检索是 token 重叠打分而非向量搜索。
+修改前端后执行 `npm run check`。生产构建输出到 `src/agent_bridge/static/capabilities/`，该目录被忽略；发布流程必须先构建前端再构建 wheel。
 
-**代码知识（`code_knowledge/`，CodeGraph）**：镜像 git 仓库 → 索引成符号/文件图（`codegraph` CLI 可用时走 CLI，否则降级为内置文本索引器写进 SQLite）→ 可选地用 Understand-Anything 做知识图谱分析。**所有查询接口都有「优先 CLI/MCP、否则 SQLite 降级」的双模式**。`UnderstandAnythingClient.analyze` 不跑 CLI，而是把整个 agent 循环委托给 `AgentService.run(skills=["understand"])`，期望 agent 写出 `.understand-anything/knowledge-graph.json`。`DashboardPool` 是一个 LRU+空闲超时的 Vite dev-server 进程池，用来托管 UA dashboard。
+## 文档同步检查
 
-**记忆（`memory/`，Memory）**：与文档/代码知识平级的第三类知识来源，但写入与生命周期不同——观察在会话中由 Claude Code hook（`hooks.py`，走 `SessionStart` 等）实时写入，而非 cron 批量同步。`MemoryService` 负责 memory block CRUD、profile↔block 绑定与检索（search/timeline/get）；实际读写委托给 `claude_mem/worker.py` 托管的 claude-mem worker（**LRU+空闲超时的进程池**，自带 dashboard）。block 元数据与绑定在 SQLite，观察数据在 claude-mem 侧。注意 memory **不继承 `BaseCronScheduler`**——它的插件更新 cron（`claude_mem_plugin_update_cron`）走独立的 `PluginUpdateScheduler`（`system_config/`），worker 启停是按需拉起的进程池生命周期，不是 cron 类调度。
+以下变化必须在同一提交更新 README、CLAUDE、AGENTS 或示例：
 
-### 工作流（`automation/workflows/`）
+- CLI 命令、配置副作用或部署步骤；
+- 新增/删除能力来源、知识后端、Agent backend；
+- 工作流格式、节点、导入信封；
+- 目录重命名、公共时间/日志/error 规范；
+- 测试命令和发布构建链。
 
-定时任务队列驱动：每个 workflow run 启动一个 Claude agent 执行一份 **JS manifest（`workflow.js`）**，agent 通过 MCP 辅助工具（`workflow_get_task` 等，全部经 `invoke_logged_tool` 审计）领任务、回写进度，最终产出受版本管理的 markdown 产物（artifact）。
-
-- **`AgentService.run`（`agent_runtime/service.py:78`）是通用执行原语**——工作流 run 和 Understand-Anything 分析都走这同一个入口，靠 `agent_name`/`skills`/`prompt` 区分。它有两种模式：托管（自动建隔离工作目录、装 profile 指导和受控 `.mcp.json`）和就地（caller 自管目录，MCP 默认不接入）。
-- **服务端强制工作流契约**（不在 manifest 里）：`result_parser.py` 校验 `result.json` 状态/task_key，`save_artifact` 强制路径不出 run 目录、格式仅限 markdown、profile 匹配。manifest 的头部注释即记录这些约束。
-- **`WorkflowScheduler` 是自定义的**（不继承 `BaseCronScheduler`）：有每日执行时间窗（默认 22:00–07:00，可跨午夜）、并发上限、轮询 tick（60s）。最近的 `839ac44` 修复了「只在活动窗口内调度 tick」。`run_workflow_now` 可绕过窗口做即时测试运行，但仍共享内存中的 `_running` 防并发。
-- **统一「Agent 运行结果查看」**：`agent_runs` 表是所有 agent 执行（工作流 run、understand 分析、design agent 等）的统一基准，**完全收口**了事件流、子 Agent transcript、生命周期状态——与是否 workflow 无关。`AgentService.run()` 在开始时即建 `status="running"` 的占位记录（拿到 `run_key`），结束时回填终态（completed/failed）；同时把每条 raw SDK 消息落盘到 `{cwd}/messages.jsonl`，子 Agent transcript 发现靠它定位 Claude 写的 transcript 目录。`ClaudeWorkflowRunner` 透传 `workflow_key`/`run_id`，使 workflow run 能通过 `GET /agent-runs?workflow_run_id={run_id}` 反查。统一接口：`GET /agent-runs/{run_key}`（含事件）+ `GET /agent-runs/{run_key}/subagent-detail`（任意 agent run 的子 Agent transcript，实现在 `agent_runtime/subagent_details.py`）。workflow 侧的 events/subagent-detail 接口已删除（logs 保留为调度独有）。前端公共组件 `<RunEventTimeline>`（`components/RunEventTimeline.vue`）+ `<SubagentDetailPanel>`（`components/SubagentDetailPanel.vue`）渲染事件流与子 Agent 面板，workflow 和 agent-runs 视图均复用；helpers 在 `lib/runEventRender.ts`、`lib/markdown.ts`，折叠状态在 `composables/useSubagentCollapse.ts`。
-
-### 调度器（`knowledge_management/scheduler_base.py`）
-
-`BaseCronScheduler` 是三个**cron 类**知识调度器（DocSync、CodeGraph、Understand）的公共骨架，约定子类设三个类属性（`_cron_config_key`/`_default_cron`/`_scheduler_name`），从同一个 `sync_config` 表读 cron，`refresh()` 在管理员改 cron 时被调用。注意工作流调度器**不用**这个基类。所有 cron 表达式都解析成 APScheduler 的 `CronTrigger`，解析失败即安全降级为无 job。
-
-### 系统配置（`system_config/`）
-
-- `scripts/`：受控的 Python 脚本（可被 `run_script` 内置工具或工作流调用）。执行时把代码 + 一个 envelope 写进隔离 run 目录，用 `subprocess` 跑 `script_runner.py`，agent-bridge 通过环境变量（`AGENT_BRIDGE_API_BASE` 等）和 envelope 把上下文喂给脚本，脚本 `main(envelope)` 返回 JSON。`runtime_support.py` 用模板渲染 runner 和 runtime helper。
-- `skills/`：管理两个内置 skill prompt（`design_script` / `design_workflow`，默认值在 `system_config/skills/defaults/`），DB 可覆盖。`load_skill` 内置工具即读这里。
-
-### API 与 CLI
-
-- `api/routes/*` 按 domain 分模块（health / knowledge / capabilities / governance / agent_runs / builtins / workflows / script_runtime），均以工厂函数 `create_*_routes(service, actor, ...)` 形式注册到 `api/app.py`。`actor` 来自 `X-Agent-Bridge-User` 头。
-- CLI（`cli/`，Typer）只是个 HTTP 客户端薄壳，通过 `AgentBridgeClient`（`client.py`）调服务端；`server` 子命令直接管进程。`profile use` 只写稳定本地通道（`.mcp.json` + Claude Code hooks），不再写 profile md 或修改 `CLAUDE.md`/`AGENTS.md`；动态 profile/memory 上下文由服务端在 `SessionStart` hook 中实时注入。
-
-## 系统级配置项
-
-`save_sync_config`（`app/service.py`）集中管理一组同步/调度参数，写入 `knowledge_sync_config` 表，并触发所有 scheduler `refresh()`：`code_sync_cron`、`understand_cron`、`doc_sync_cron`、`workflow_start_time/stop_time`、`workflow_max_runs/max_runtime_minutes/task_rerun_days`、`mcp_timeout_seconds`（默认 150，见 `core/defaults.py`，最近 `a65223a` 才可配）、`understand_timeout_minutes`。改这些参数后必须让对应 scheduler 刷新。
-
-日志参数不走 `save_sync_config`，而是 `server.toml` 的 `[logging]` 段（见 `core/config.py:LoggingConfig` / `load_logging_config`，在 `create_app` 顶部读一次并传入 `core/logging.py:setup_logging`）：`level`、`console`、`rotation_size_mb`、`retention_days`、`retention_max_bytes`（支持 `KB/MB/GB/KiB/MiB/GiB` 字符串）、`compression`。改后需重启服务生效（日志 sink 不做热重载）。
-
-## 给改动者的关键约定
-
-1. **新增一类能力来源 ≠ 加个文件**：来源类型分发是 `service.py` 里的 if/elif，要新增来源类型得改 `execute`/`_search_without_log` 的探测分支（参考既有 memory 笔记：这是「if/elif 探测分发非注册表」）。但**新增内置提供者**很简单：实现 Protocol + 在 `app/service.py` 调 `register_builtin_provider`。
-2. 写新的 service 方法时：开头 `require_admin_user`，业务失败抛 `AgentBridgeError` 子类，不要自己返回 HTTP 码。涉及工具执行就考虑是否要经 `log_tool_call` / `invoke_logged_tool` 审计。
-3. Profile 策略：来源级记得「无 allow 即全拒」，资源级是纯 allow-list；改动治理逻辑后注意 `search` 的可见性过滤（root 列表 + path 探测两处）和 `execute` 的两个分支（openapi `service.py:598`、mcp `service.py:615`）都要覆盖。
-4. 任何经 MCP gateway 暴露给 agent 的执行，profile / workflow 上下文都从请求头读，靠 `ContextVar` 传递——不要在 gateway 里假设有进程级单例状态。
-5. **日志**：一律用 `logging.getLogger(__name__)`（文件里没有就新增这两行），**不要** `from loguru import logger`——所有日志经 `core/logging.py` 的 `InterceptHandler` 统一转发进 loguru（写 `logs/agent-bridge.log`，并保留真实调用方的 模块/函数/行号）。风格：中文消息 + `%s` 惰性格式化（不用 f-string）；`INFO`=生命周期边界（开始/完成）、`WARNING`=可恢复异常/被拒绝/降级、`ERROR`=失败（带 `exc_info=True`）；热路径循环用 `DEBUG` 或聚合，不逐条打 `INFO`（governance 的 `log_tool_call` 是高频审计，故意不打 INFO）。日志参数（级别 / `rotation_size_mb` / `retention_days` / `retention_max_bytes` / `compression` / `console` / `access_log` / `httpx_log_level`）在 `server.toml` 的 `[logging]` 段配置（见 `core/config.py` 的 `LoggingConfig` / `load_logging_config`），启动期读一次、改后重启生效。注意：`httpx`（默认 `WARNING`，屏蔽 dashboard 代理等「纯转发 200」噪音，保留超时告警）与 `uvicorn.access`（默认 `errors_only`，仅打 4xx5xx）都是第三方库日志，经 `InterceptHandler` 路由进 loguru，但**不是我们打的**——要全开就设 `httpx_log_level="INFO"` / `access_log="all"`。
+注释、docstring 和用户可见错误优先中文；标识符、协议字段和外部产品名保留英文。

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/capabilities/package-lock.json
+
+      - name: 安装 Python 依赖
+        run: uv sync --locked
+
+      - name: 安装前端依赖
+        working-directory: frontend/capabilities
+        run: npm ci
+
+      - name: 运行完整自包含检查
+        run: ./scripts/test.sh full -q
+
+      - name: 构建 wheel
+        run: uv build
+
+      - name: 验证 wheel 可安装且包含管理后台
+        run: |
+          uv venv .wheel-smoke
+          uv pip install --python .wheel-smoke/bin/python dist/*.whl
+          .wheel-smoke/bin/python - <<'PY'
+          from pathlib import Path
+          import agent_bridge
+
+          package = Path(agent_bridge.__file__).resolve().parent
+          assert (package / "static" / "capabilities" / "index.html").is_file()
+          PY
