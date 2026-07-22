@@ -95,6 +95,8 @@ def test_opencode_tool_event_maps_to_call_and_result() -> None:
             "tool": "bash",
             "toolUseID": "tool_1",
             "status": "completed",
+            "input": {"command": "pwd"},
+            "output": {"stdout": "/tmp"},
         }
     )
 
@@ -102,7 +104,9 @@ def test_opencode_tool_event_maps_to_call_and_result() -> None:
     assert final is None
     assert [event["kind"] for event in events] == ["tool_call", "tool_result"]
     assert events[0]["tool_name"] == "bash"
+    assert events[0]["input"] == {"command": "pwd"}
     assert events[1]["status"] == "success"
+    assert events[1]["output"] == {"stdout": "/tmp"}
 
 
 def test_opencode_result_event_maps_to_final() -> None:

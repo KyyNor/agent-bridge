@@ -11,6 +11,7 @@ from agent_bridge.agent_runtime.adapters.jsonl_cli import (
     first_int as _first_int,
     first_number as _first_number,
     first_string as _first_string,
+    first_value as _first_value,
     is_generic_final_result as _is_generic_final_result,
     joined_text as _joined_text,
     row_is_error as _is_error,
@@ -144,6 +145,8 @@ def _events_from_opencode_row(
         tool_name = _tool_name(row)
         tool_use_id = _first_string(row, "id", "toolUseID", "tool_use_id", "callID")
         failed = _is_error(row)
+        input_value = _first_value(row, "input", "arguments", "args", "params")
+        output_value = _first_value(row, "output", "result", "content", "response")
         events = [
             _opencode_event(
                 "tool_call",
@@ -151,6 +154,7 @@ def _events_from_opencode_row(
                 status="started",
                 tool_name=tool_name,
                 tool_use_id=tool_use_id,
+                **({"input": input_value} if input_value is not None else {}),
                 message=f"调用工具 {tool_name}",
                 session_id=session_id,
             )
@@ -164,6 +168,7 @@ def _events_from_opencode_row(
                     status=result_status,
                     tool_name=tool_name,
                     tool_use_id=tool_use_id,
+                    **({"output": output_value} if output_value is not None else {}),
                     message=f"工具 {tool_name} 调用{'失败' if result_status == 'failed' else '成功'}",
                     session_id=session_id,
                 )

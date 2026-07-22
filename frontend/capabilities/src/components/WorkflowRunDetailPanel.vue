@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
+import { api } from '../api/client'
 import type { AgentRun, WorkflowRunEvent, WorkflowSubagentDetail } from '../api/types'
 import AgentRunTabs from './AgentRunTabs.vue'
 import RunEventTimeline from './RunEventTimeline.vue'
@@ -29,6 +31,27 @@ const emit = defineEmits<{
   (event: 'refresh'): void
   (event: 'expand-subagent', taskId: string): void
 }>()
+
+const payloads = ref<Record<string, string>>({})
+const payloadErrors = ref<Record<string, string>>({})
+
+watch(() => props.selectedAgentRunKey, () => {
+  payloads.value = {}
+  payloadErrors.value = {}
+}, { immediate: true })
+
+async function loadPayload(refKey: string) {
+  if (!props.selectedAgentRunKey || payloads.value[refKey]) return
+  try {
+    const blob = await api.getAgentRunPayload(props.selectedAgentRunKey, refKey)
+    payloads.value = { ...payloads.value, [refKey]: await blob.text() }
+  } catch (error: unknown) {
+    payloadErrors.value = {
+      ...payloadErrors.value,
+      [refKey]: error instanceof Error ? error.message : '完整内容加载失败',
+    }
+  }
+}
 
 function selectAgentRun(runKey: string) {
   emit('select-agent-run', runKey)
@@ -63,8 +86,11 @@ function expandSubagent(taskId: string) {
       <RunEventTimeline
         :events="props.events"
         :context-key="props.contextKey"
+        :payloads="payloads"
+        :payload-errors="payloadErrors"
         show-agent-name
         @expand="expandSubagent"
+        @load-payload="loadPayload"
       >
         <template #subagent-body="{ taskId }">
           <SubagentDetailPanel

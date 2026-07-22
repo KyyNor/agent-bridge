@@ -125,6 +125,8 @@ const clearTarget = ref<WorkflowDefinition | null>(null)
 const expandedTaskIds = ref<Set<string>>(new Set())
 const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
 const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
+const taskRunPayloads = ref<Record<string, Record<string, string>>>({})
+const taskRunPayloadErrors = ref<Record<string, Record<string, string>>>({})
 const taskLogLoading = ref<Set<string>>(new Set())
 const taskPage = ref(1)
 const taskPageSize = ref(10)
@@ -2091,6 +2093,34 @@ function taskEvents(task: WorkflowTask) {
   return task.lease_run_id ? taskRunEvents.value[task.lease_run_id] || [] : []
 }
 
+async function loadTaskPayload(runId: string | null | undefined, refKey: string) {
+  if (!runId) return
+  let runKey = runIdToAgentRunKey.value[runId]
+  try {
+    if (!runKey) {
+      const agentRun = await api.getAgentRunForWorkflowRun(runId)
+      if (!agentRun) throw new Error('未找到该运行对应的 Agent 记录')
+      runKey = agentRun.run_key
+      runIdToAgentRunKey.value = { ...runIdToAgentRunKey.value, [runId]: runKey }
+    }
+    if (taskRunPayloads.value[runId]?.[refKey]) return
+    const blob = await api.getAgentRunPayload(runKey, refKey)
+    const content = await blob.text()
+    taskRunPayloads.value = {
+      ...taskRunPayloads.value,
+      [runId]: { ...(taskRunPayloads.value[runId] || {}), [refKey]: content },
+    }
+  } catch (error: unknown) {
+    taskRunPayloadErrors.value = {
+      ...taskRunPayloadErrors.value,
+      [runId]: {
+        ...(taskRunPayloadErrors.value[runId] || {}),
+        [refKey]: error instanceof Error ? error.message : '完整内容加载失败',
+      },
+    }
+  }
+}
+
 /** Sub-agent actors present in a task's event stream (feature 5). */
 function taskActors(task: WorkflowTask) {
   return distinctActors(taskEvents(task))
@@ -2342,6 +2372,8 @@ async function confirmClearWorkflow() {
     expandedTaskIds.value = new Set()
     taskRunLogs.value = {}
     taskRunEvents.value = {}
+    taskRunPayloads.value = {}
+    taskRunPayloadErrors.value = {}
     resetTaskFilters()
     expandedArtifactIds.value = new Set()
     taskArtifacts.value = {}
@@ -3220,7 +3252,10 @@ async function confirmClearWorkflow() {
                     <RunEventTimeline
                       :events="taskFilteredEvents(task)"
                       :context-key="'task:' + taskRunLogKey(task)"
+                      :payloads="task.lease_run_id ? (taskRunPayloads[task.lease_run_id] || {}) : {}"
+                      :payload-errors="task.lease_run_id ? (taskRunPayloadErrors[task.lease_run_id] || {}) : {}"
                       @expand="(taskId: string) => ensureSubagentDetail(task.lease_run_id, taskId)"
+                      @load-payload="(refKey: string) => loadTaskPayload(task.lease_run_id, refKey)"
                     >
                       <template #subagent-body="{ taskId }">
                         <SubagentDetailPanel

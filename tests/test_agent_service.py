@@ -235,7 +235,14 @@ def test_run_delegates_to_injected_coding_agent(wm_paths) -> None:
     assert captured["request"].prompt == "x"
     assert "FakeMessage" in (Path(res.run_dir) / "messages.jsonl").read_text(encoding="utf-8")
     detail = service.store.agent_runs.get(res.run_key)
-    assert detail["events"][0]["message"] == "adapter says hi"
+    message_event = next(event for event in detail["events"] if event["kind"] == "agent_message")
+    assert message_event["message"] == "adapter says hi"
+    assert {event["stage_name"] for event in detail["events"] if event["kind"] == "stage"} >= {
+        "run.prepare",
+        "backend.run",
+        "run.finalize",
+        "run.total",
+    }
 
 
 def test_run_can_select_registered_backend_by_key(wm_paths) -> None:

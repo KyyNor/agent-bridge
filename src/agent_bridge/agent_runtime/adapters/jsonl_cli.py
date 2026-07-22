@@ -156,6 +156,21 @@ def first_string(row: dict[str, Any], *keys: str) -> str | None:
     return None
 
 
+def first_value(row: dict[str, Any], *keys: str) -> Any | None:
+    """Find the first non-null value for a key at any JSON object depth."""
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            return value
+    for value in walk_values(row):
+        if isinstance(value, dict):
+            for key in keys:
+                item = value.get(key)
+                if item is not None:
+                    return item
+    return None
+
+
 def first_number(row: dict[str, Any], *keys: str) -> float | None:
     for key in keys:
         value = row.get(key)

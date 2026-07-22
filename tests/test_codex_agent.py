@@ -68,6 +68,29 @@ def test_codex_result_event_maps_to_final() -> None:
     assert events[0]["kind"] == "result"
 
 
+def test_codex_tool_event_keeps_input_or_output_payload() -> None:
+    call_events, _, _ = _events_from_codex_row(
+        {
+            "type": "tool_call",
+            "tool": "shell",
+            "tool_use_id": "call_1",
+            "input": {"command": "pwd"},
+        }
+    )
+    result_events, _, _ = _events_from_codex_row(
+        {
+            "type": "tool_result",
+            "tool": "shell",
+            "tool_use_id": "call_1",
+            "output": {"stdout": "/tmp"},
+            "status": "completed",
+        }
+    )
+
+    assert call_events[0]["input"] == {"command": "pwd"}
+    assert result_events[0]["output"] == {"stdout": "/tmp"}
+
+
 def test_codex_schema_requires_all_declared_object_properties() -> None:
     schema = {
         "type": "object",

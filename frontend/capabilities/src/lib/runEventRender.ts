@@ -14,7 +14,11 @@ export function eventKindLabel(event: WorkflowRunEvent): string {
     return event.agent_role === 'subagent' ? '子 Agent' : (event.agent_name || 'agent')
   }
   if (event.kind === 'tool_call') return '工具调用'
-  if (event.kind === 'tool_result') return event.status === 'failed' ? '工具失败' : '工具完成'
+  if (event.kind === 'tool_result') {
+    if (event.status === 'failed') return '工具失败'
+    if (event.status === 'unknown') return '工具未完成'
+    return '工具完成'
+  }
   if (event.kind === 'result') return event.status === 'failed' ? '运行失败' : '运行结果'
   if (event.kind === 'error') return '异常'
   if (event.kind === 'status') return '状态'
@@ -22,6 +26,7 @@ export function eventKindLabel(event: WorkflowRunEvent): string {
   if (event.kind === 'subagent_progress') return '子 Agent 进度'
   if (event.kind === 'subagent_end') return event.status === 'failed' ? '子 Agent 失败' : '子 Agent 完成'
   if (event.kind === 'subagent_updated') return '子 Agent 更新'
+  if (event.kind === 'stage') return event.stage_name ? `阶段 · ${event.stage_name}` : '阶段'
   return event.kind
 }
 
@@ -31,7 +36,8 @@ export function eventMessage(event: WorkflowRunEvent): string {
   if (event.message) return event.message
   if (event.tool_name && event.kind === 'tool_call') return `调用工具 ${event.tool_name}`
   if (event.tool_name && event.kind === 'tool_result') {
-    return `工具 ${event.tool_name} 调用${event.status === 'failed' ? '失败' : '成功'}`
+    const outcome = event.status === 'failed' ? '失败' : event.status === 'unknown' ? '未完成' : '成功'
+    return `工具 ${event.tool_name} 调用${outcome}`
   }
   if (event.kind === 'subagent_progress') {
     const parts: string[] = []
@@ -43,6 +49,11 @@ export function eventMessage(event: WorkflowRunEvent): string {
       if (usageParts.length) parts.push(usageParts.join(' · '))
     }
     if (parts.length) return parts.join(' · ')
+  }
+  if (event.kind === 'stage' && event.stage_name) {
+    return event.duration_ms != null
+      ? `${event.stage_name} · ${event.duration_ms}ms`
+      : event.stage_name
   }
   return event.status || ''
 }
@@ -74,9 +85,12 @@ export type TimelineKind = 'message' | 'think' | 'tool' | 'result' | 'error' | '
 export function timelineKind(event: WorkflowRunEvent): TimelineKind {
   if (event.kind === 'error' || event.status === 'failed') return 'error'
   if (event.kind === 'tool_call') return 'tool'
-  if (event.kind === 'tool_result') return event.status === 'failed' ? 'error' : 'result'
+  if (event.kind === 'tool_result') {
+    return event.status === 'failed' || event.status === 'unknown' ? 'error' : 'result'
+  }
   if (event.kind === 'result') return event.status === 'failed' ? 'error' : 'result'
   if (event.kind === 'status') return 'status'
+  if (event.kind === 'stage') return 'status'
   return 'message'
 }
 

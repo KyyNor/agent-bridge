@@ -80,6 +80,8 @@ Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。cl
 
 `CodingAgent` / `CodingAgentRun` 是统一契约，Claude、Codex、OpenCode、Pi 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
 
+Agent 运行观测也走统一规范化事件流：工具事件包含 `input`/`output`（短内容内联，超过阈值落到运行目录 `payloads/` 并返回安全相对引用），工具结果包含 `started_at`、`finished_at` 和 `duration_ms`；运行准备、后端执行、收尾和总耗时以 `stage` 事件记录。SQLite 保存可查询的摘要和完整事件列表，JSONL 负责运行中的实时追加和原始消息留档。
+
 Codex/OpenCode/Pi 的 JSONL 子进程生命周期统一由 `adapters/jsonl_cli.py` 管理，包括：
 
 - 启动与 stdout JSONL 解码；

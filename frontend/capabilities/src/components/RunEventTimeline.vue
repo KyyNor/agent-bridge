@@ -41,11 +41,18 @@ const props = withDefaults(
     showAgentName?: boolean
     /** Stable key namespacing the internal collapse state. Defaults to "tl". */
     contextKey?: string
+    /** Loaded large payloads, keyed by the relative payload ref. */
+    payloads?: Record<string, string>
+    /** Payload loading errors, keyed by the relative payload ref. */
+    payloadErrors?: Record<string, string>
   }>(),
   { showAgentName: false, contextKey: 'tl' },
 )
 
-const emit = defineEmits<{ (e: 'expand', taskId: string): void }>()
+const emit = defineEmits<{
+  (e: 'expand', taskId: string): void
+  (e: 'load-payload', ref: string): void
+}>()
 
 const { isCollapsed, toggle, initCollapsed } = useSubagentCollapse()
 
@@ -65,6 +72,40 @@ function onToggle(taskId: string) {
   toggle(props.contextKey, taskId)
   if (wasCollapsed) emit('expand', taskId)
 }
+
+function payloadRef(event: WorkflowRunEvent, side: 'input' | 'output'): string {
+  const value = event[`${side}_payload_ref`]
+  return typeof value === 'string' ? value : ''
+}
+
+function payloadPreview(event: WorkflowRunEvent, side: 'input' | 'output'): string {
+  const preview = event[`${side}_preview`]
+  if (typeof preview === 'string') return preview
+  const value = event[side]
+  if (typeof value === 'string') return value
+  if (value == null) return ''
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function payloadSize(event: WorkflowRunEvent, side: 'input' | 'output'): string {
+  const value = event[`${side}_bytes`]
+  if (typeof value !== 'number') return ''
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function loadedPayload(ref: string): string {
+  return props.payloads?.[ref] || ''
+}
+
+function payloadError(ref: string): string {
+  return props.payloadErrors?.[ref] || ''
+}
 </script>
 
 <template>
@@ -78,11 +119,47 @@ function onToggle(taskId: string) {
             <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
             <span v-if="showAgentName && entry.event.agent_name" class="tl-target">{{ entry.event.agent_name }}</span>
             <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
+            <span v-if="entry.event.duration_ms != null" class="tl-duration">{{ entry.event.duration_ms }}ms</span>
             <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
           </div>
           <div v-if="renderEventMessage(entry.event)" class="tl-content">
             <div v-if="entry.event.message" class="tl-md" v-html="renderMd(entry.event.message)" />
             <p v-else>{{ renderEventMessage(entry.event) }}</p>
+          </div>
+          <div
+            v-if="entry.event.kind === 'tool_call' || entry.event.kind === 'tool_result'"
+            class="tl-tool-details"
+          >
+            <div v-if="entry.event.kind === 'tool_call' && payloadPreview(entry.event, 'input')" class="tl-tool-payload">
+              <div class="tl-tool-payload-head">
+                <span>输入<span v-if="payloadSize(entry.event, 'input')"> · {{ payloadSize(entry.event, 'input') }}</span></span>
+                <button
+                  v-if="payloadRef(entry.event, 'input') && !loadedPayload(payloadRef(entry.event, 'input'))"
+                  type="button"
+                  class="tl-payload-button"
+                  @click.stop="emit('load-payload', payloadRef(entry.event, 'input'))"
+                >
+                  查看完整内容
+                </button>
+              </div>
+              <pre>{{ loadedPayload(payloadRef(entry.event, 'input')) || payloadPreview(entry.event, 'input') }}</pre>
+              <div v-if="payloadError(payloadRef(entry.event, 'input'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'input')) }}</div>
+            </div>
+            <div v-if="entry.event.kind === 'tool_result' && payloadPreview(entry.event, 'output')" class="tl-tool-payload">
+              <div class="tl-tool-payload-head">
+                <span>输出<span v-if="payloadSize(entry.event, 'output')"> · {{ payloadSize(entry.event, 'output') }}</span></span>
+                <button
+                  v-if="payloadRef(entry.event, 'output') && !loadedPayload(payloadRef(entry.event, 'output'))"
+                  type="button"
+                  class="tl-payload-button"
+                  @click.stop="emit('load-payload', payloadRef(entry.event, 'output'))"
+                >
+                  查看完整内容
+                </button>
+              </div>
+              <pre>{{ loadedPayload(payloadRef(entry.event, 'output')) || payloadPreview(entry.event, 'output') }}</pre>
+              <div v-if="payloadError(payloadRef(entry.event, 'output'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'output')) }}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -177,6 +254,7 @@ function onToggle(taskId: string) {
 .tl-target{font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
 .tl-target b{color:var(--foreground);font-weight:600}
 .tl-time{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);flex-shrink:0;opacity:.85}
+.tl-duration{font-family:var(--font-mono);font-size:11px;color:var(--foreground);font-weight:600}
 .tl-content{min-width:0;max-width:100%;padding:11px 14px;font-size:13.5px;color:var(--foreground);line-height:1.6;overflow-wrap:anywhere;word-break:break-word}
 .tl-content p{margin:0 0 6px}
 .tl-content p:last-child{margin-bottom:0}
@@ -208,6 +286,15 @@ function onToggle(taskId: string) {
 .tl-md table{width:100%;border-collapse:collapse;margin:8px 0;font-size:.95em}
 .tl-md th,.tl-md td{border:1px solid var(--border);padding:5px 8px;text-align:left}
 .tl-md th{background:var(--muted);font-weight:600}
+
+/* ===== Tool payload details ===== */
+.tl-tool-details{display:flex;flex-direction:column;gap:8px;padding:0 14px 11px}
+.tl-tool-payload{min-width:0;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--muted);overflow:hidden}
+.tl-tool-payload-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 9px;color:var(--muted-foreground);font-size:11px;font-weight:600}
+.tl-tool-payload pre{margin:0;padding:7px 9px;max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--foreground)}
+.tl-payload-button{border:1px solid var(--border);border-radius:var(--radius-compact);padding:2px 7px;color:var(--primary);background:var(--card);font-size:10px;cursor:pointer}
+.tl-payload-button:hover{background:var(--accent)}
+.tl-payload-error{padding:4px 9px;color:var(--destructive);font-size:11px}
 
 /* ===== Subagent thread card ===== */
 .tl-sub{position:relative;min-width:0;max-width:100%;background:var(--subagent-surface);border:1px solid var(--subagent-border);border-radius:var(--radius-card);overflow:hidden;transition:border-color .12s ease}

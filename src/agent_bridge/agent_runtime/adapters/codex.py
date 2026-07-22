@@ -16,6 +16,7 @@ from agent_bridge.agent_runtime.adapters.jsonl_cli import (
     first_int as _first_int,
     first_number as _first_number,
     first_string as _first_string,
+    first_value as _first_value,
     joined_text as _joined_text,
     row_is_error as _is_error,
     walk_values as _walk_values,
@@ -188,6 +189,12 @@ def _events_from_codex_row(
         tool_use_id = _first_string(row, "tool_use_id", "toolUseID", "call_id", "id")
         failed = _is_error(row)
         event_kind = "tool_result" if row_type == "tool_result" or status in {"completed", "success", "error", "failed"} else "tool_call"
+        payload = (
+            _first_value(row, "output", "result", "content", "response")
+            if event_kind == "tool_result"
+            else _first_value(row, "input", "arguments", "args", "params", "command")
+        )
+        payload_field = "output" if event_kind == "tool_result" else "input"
         return [
             _codex_event(
                 event_kind,
@@ -195,6 +202,7 @@ def _events_from_codex_row(
                 status="failed" if failed else ("success" if event_kind == "tool_result" else "started"),
                 tool_name=tool_name,
                 tool_use_id=tool_use_id,
+                **({payload_field: payload} if payload is not None else {}),
                 message=f"工具 {tool_name} 调用{'失败' if failed else ('成功' if event_kind == 'tool_result' else '')}".strip(),
                 session_id=session_id,
             )

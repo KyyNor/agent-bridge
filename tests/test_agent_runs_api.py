@@ -542,6 +542,51 @@ def test_agent_run_events_includes_terminal_db_events_when_live_jsonl_is_stale(w
     assert events[-1]["message"] == "RuntimeError: sdk failed"
 
 
+def test_agent_run_payload_api_reads_large_payload_and_rejects_traversal(wm_paths, tmp_path) -> None:
+    from agent_bridge.agent_runtime.trace import externalize_event_payloads
+    from agent_bridge.app.service import AgentBridgeService
+
+    run_dir = tmp_path / "payload_run"
+    run_dir.mkdir()
+    event = externalize_event_payloads(
+        {
+            "kind": "tool_result",
+            "call_id": "call_1",
+            "output": {"stdout": "x" * 10000},
+        },
+        run_dir,
+    )
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="payload_run",
+        agent_name="codex",
+        cwd=str(run_dir),
+        status="completed",
+        ok=True,
+        prompt="",
+        events=[event],
+    )
+    client = _client(wm_paths)
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    payload = client.get(
+        "/agent-runs/payload_run/payload",
+        params={"ref": event["output_payload_ref"]},
+        headers=headers,
+    )
+    assert payload.status_code == 200
+    assert payload.json()["stdout"] == "x" * 10000
+
+    traversal = client.get(
+        "/agent-runs/payload_run/payload",
+        params={"ref": "../outside.json"},
+        headers=headers,
+    )
+    assert traversal.status_code == 404
+
+
 def test_agent_run_finish_preserves_existing_model_when_not_replaced(wm_paths) -> None:
     from agent_bridge.app.service import AgentBridgeService
 

@@ -605,6 +605,8 @@ export const api = {
   /** Live event stream for an agent run (reads events.jsonl in real time,
    *  falls back to persisted DB events for historical runs). */
   getAgentRunEvents: (runKey: string) => get<WorkflowRunEvent[]>(`/agent-runs/${runKey}/events`),
+  getAgentRunPayload: (runKey: string, ref: string) =>
+    getBlob(`/agent-runs/${encodeURIComponent(runKey)}/payload?ref=${encodeURIComponent(ref)}`),
   getAgentRunSubagentDetail: (runKey: string, taskId: string) => {
     const qs = new URLSearchParams({ task_id: taskId })
     return get<WorkflowSubagentDetail>(`/agent-runs/${runKey}/subagent-detail?${qs}`)

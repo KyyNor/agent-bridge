@@ -503,6 +503,24 @@ export interface WorkflowRunEvent {
   message?: string
   tool_name?: string
   tool_use_id?: string
+  call_id?: string
+  input?: unknown
+  output?: unknown
+  input_preview?: string
+  output_preview?: string
+  input_payload_ref?: string
+  output_payload_ref?: string
+  input_bytes?: number
+  output_bytes?: number
+  input_truncated?: boolean
+  output_truncated?: boolean
+  input_storage_status?: string
+  output_storage_status?: string
+  started_at?: string
+  finished_at?: string
+  duration_ms?: number
+  duration_status?: string
+  stage_name?: string
   session_id?: string
   total_cost_usd?: number
   num_turns?: number

@@ -9,6 +9,7 @@ from agent_bridge.agent_runtime.adapters.jsonl_cli import (
     effective_prompt as _effective_prompt,
     extract_json_object as _extract_json,
     first_string as _first_string,
+    first_value as _first_value,
     is_generic_final_result as _is_generic_final_result,
     joined_text as _joined_text,
     row_is_error as _is_error,
@@ -200,6 +201,7 @@ def _events_from_pi_row(
         tool_name = _first_string(row, "toolName", "tool_name", "toolName") or "unknown"
         tool_use_id = _first_string(row, "toolCallId", "tool_call_id", "toolUseID", "id")
         if row_type == "tool_execution_start":
+            input_value = _first_value(row, "args", "input", "arguments", "params")
             return [
                 _pi_event(
                     "tool_call",
@@ -207,12 +209,14 @@ def _events_from_pi_row(
                     status="started",
                     tool_name=tool_name,
                     tool_use_id=tool_use_id,
+                    **({"input": input_value} if input_value is not None else {}),
                     message=f"调用工具 {tool_name}",
                     session_id=session_id,
                 )
             ], None, None
         if row_type == "tool_execution_end":
             is_error = bool(row.get("isError"))
+            output_value = _first_value(row, "result", "output", "content", "response")
             return [
                 _pi_event(
                     "tool_result",
@@ -220,6 +224,7 @@ def _events_from_pi_row(
                     status="failed" if is_error else "success",
                     tool_name=tool_name,
                     tool_use_id=tool_use_id,
+                    **({"output": output_value} if output_value is not None else {}),
                     message=f"工具 {tool_name} 调用{'失败' if is_error else '成功'}",
                     session_id=session_id,
                 )

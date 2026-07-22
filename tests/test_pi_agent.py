@@ -156,6 +156,7 @@ def test_pi_events_tool_execution_end_emits_only_result() -> None:
     assert events[0]["tool_name"] == "bash"
     assert events[0]["tool_use_id"] == "call_abc"
     assert events[0]["status"] == "success"
+    assert events[0]["output"] == {"content": [{"type": "text", "text": "total 0"}]}
 
 
 def test_pi_events_tool_execution_end_marks_failure() -> None:
@@ -185,6 +186,7 @@ def test_pi_events_tool_execution_start_only_emits_call() -> None:
 
     assert [event["kind"] for event in events] == ["tool_call"]
     assert events[0]["status"] == "started"
+    assert events[0]["input"] == {"path": "src/main.py"}
 
 
 def test_pi_events_tool_execution_update_is_suppressed() -> None:

@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response
 
 from agent_bridge.api.schemas import DesignAgentRequest
+from agent_bridge.agent_runtime.trace import read_payload
 from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.core.domain import ConflictError, NotFound, require_admin_user
 
@@ -250,6 +251,25 @@ def create_agent_runs_routes(service, actor):
                     return persisted
                 return events
         return row.get("events") or []
+
+    @router.get("/agent-runs/{run_key}/payload")
+    def get_agent_run_payload(
+        run_key: str,
+        ref: str,
+        current_actor: str = Depends(actor),
+    ) -> Response:
+        """Read a large tool input/output stored below the run directory."""
+        row = service.store.agent_runs.get(run_key)
+        if row is None:
+            raise NotFound("agent run not found")
+        cwd = row.get("cwd")
+        if not cwd:
+            raise NotFound("agent run payload not found")
+        try:
+            content, media_type = read_payload(Path(str(cwd)), ref)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            raise NotFound("agent run payload not found") from exc
+        return Response(content=content, media_type=media_type)
 
     @router.post("/agent-runs/{run_key}/stop")
     def stop_agent_run(

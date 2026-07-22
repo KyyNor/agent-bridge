@@ -44,6 +44,8 @@ const detailRun = ref<AgentRun | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
 const detailEvents = ref<WorkflowRunEvent[]>([])
+const payloads = ref<Record<string, string>>({})
+const payloadErrors = ref<Record<string, string>>({})
 let detailEventsPoll: ReturnType<typeof setInterval> | null = null
 let listRequestToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
@@ -163,6 +165,8 @@ function backToList() {
   detailRun.value = null
   detailError.value = ''
   detailEvents.value = []
+  payloads.value = {}
+  payloadErrors.value = {}
   stopDetailEventsPolling()
   void navigateTo(returnToRoute.value || 'agent-runs', { replace: true })
 }
@@ -170,6 +174,8 @@ function backToList() {
 async function loadDetail(runKey: string) {
   detailLoading.value = true
   detailError.value = ''
+  payloads.value = {}
+  payloadErrors.value = {}
   stopDetailEventsPolling()
   try {
     detailRun.value = await api.getAgentRun(runKey)
@@ -183,6 +189,19 @@ async function loadDetail(runKey: string) {
     detailError.value = e instanceof Error ? e.message : '加载失败'
   }
   detailLoading.value = false
+}
+
+async function loadPayload(ref: string) {
+  if (!ref || payloads.value[ref] !== undefined) return
+  try {
+    const blob = await api.getAgentRunPayload(activeRunKey.value, ref)
+    payloads.value = { ...payloads.value, [ref]: await blob.text() }
+  } catch (e: unknown) {
+    payloadErrors.value = {
+      ...payloadErrors.value,
+      [ref]: e instanceof Error ? e.message : '详情加载失败',
+    }
+  }
 }
 
 async function loadDetailEvents(runKey: string, options: { quiet?: boolean } = {}) {
@@ -351,7 +370,10 @@ function backendBadgeClass(backend: string | null | undefined): string {
         <RunEventTimeline
           :events="detailEvents"
           :context-key="detailRun.run_key"
+          :payloads="payloads"
+          :payload-errors="payloadErrors"
           @expand="(taskId: string) => ensureSubagentDetail(taskId)"
+          @load-payload="loadPayload"
         >
           <template #subagent-body="{ taskId }">
             <SubagentDetailPanel
