@@ -1,0 +1,118 @@
+{
+  "format": "agent-bridge.workflow",
+  "format_version": 1,
+  "exported_at": "2026-07-22T00:00:00+08:00",
+  "exported_by": "root",
+  "workflow": {
+    "workflow_key": "hellogithub-summary",
+    "name": "HelloGitHub 仓库速览",
+    "description": "领取预先导入的 GitHub 仓库任务，核验仓库事实并生成 Markdown 与 HTML 速览报告。",
+    "profile_key": "github-research",
+    "workflow_type": "summary",
+    "status": "active",
+    "definition": {
+      "nodes": [
+        {
+          "id": "get-task",
+          "type": "get_task",
+          "name": "领取仓库任务",
+          "position": {"x": 0, "y": 180},
+          "config": {"on_empty": "terminate"}
+        },
+        {
+          "id": "repository-facts",
+          "type": "agent",
+          "name": "核验仓库事实",
+          "position": {"x": 300, "y": 80},
+          "config": {
+            "prompt": "根据当前任务 payload 中的 full_name、url、title、hot_value 和 source，访问仓库主页与 README，核验仓库用途、主要语言、许可证、活跃度和核心能力。只记录可核验事实；访问失败或字段缺失时明确标注。返回严格 JSON。",
+            "backend_key": "claude",
+            "mcp_enabled": true,
+            "skill_names": [],
+            "result_mode": "json",
+            "output_schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["full_name", "purpose", "primary_language", "license", "activity", "capabilities", "evidence_notes"],
+              "properties": {
+                "full_name": {"type": "string"},
+                "purpose": {"type": "string"},
+                "primary_language": {"type": "string"},
+                "license": {"type": "string"},
+                "activity": {"type": "string"},
+                "capabilities": {"type": "array", "items": {"type": "string"}},
+                "evidence_notes": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        },
+        {
+          "id": "ecosystem-research",
+          "type": "agent",
+          "name": "调研生态与局限",
+          "position": {"x": 620, "y": 280},
+          "config": {
+            "prompt": "结合上游仓库事实和当前任务上下文，调研该项目的典型使用场景、主要替代方案、已知限制与采用风险。优先使用官方仓库、官方文档和项目发布记录；无法核验的内容不要推断。返回严格 JSON。",
+            "backend_key": "claude",
+            "mcp_enabled": true,
+            "skill_names": [],
+            "result_mode": "json",
+            "output_schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["use_cases", "alternatives", "limitations", "adoption_notes", "sources"],
+              "properties": {
+                "use_cases": {"type": "array", "items": {"type": "string"}},
+                "alternatives": {"type": "array", "items": {"type": "string"}},
+                "limitations": {"type": "array", "items": {"type": "string"}},
+                "adoption_notes": {"type": "string"},
+                "sources": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        },
+        {
+          "id": "markdown-output",
+          "type": "output",
+          "name": "生成 Markdown 速览",
+          "position": {"x": 960, "y": 160},
+          "config": {
+            "format": "markdown",
+            "title": "HelloGitHub 仓库速览",
+            "path": "reports/{{ task.payload.repo_slug }}.md",
+            "tags": ["hellogithub", "github", "repo-summary"],
+            "prompt": "根据全部上游输出生成中文 Markdown 仓库速览。包含热榜任务信息、仓库用途、核心能力、技术与许可证、典型场景、替代方案、局限、采用建议和证据说明。区分事实与评价，缺失信息明确标注。返回 title、summary、content。",
+            "backend_key": "claude",
+            "mcp_enabled": false,
+            "skill_names": [],
+            "system_role": "summary_markdown"
+          }
+        },
+        {
+          "id": "html-output",
+          "type": "output",
+          "name": "生成 HTML 速览",
+          "position": {"x": 1300, "y": 160},
+          "config": {
+            "format": "html",
+            "title": "HelloGitHub 仓库速览 HTML",
+            "path": "reports/{{ task.payload.repo_slug }}.html",
+            "tags": ["hellogithub", "github", "repo-summary"],
+            "prompt": "只根据 Markdown 主产物生成结构清晰、适合阅读的完整中文 HTML 文档。保留事实与评价的区分；使用内联 CSS，不使用外链脚本。返回 title、summary、content。",
+            "backend_key": "claude",
+            "mcp_enabled": false,
+            "skill_names": ["design_html_report"],
+            "system_role": "summary_html"
+          }
+        }
+      ],
+      "edges": [
+        {"id": "task-to-facts", "source": "get-task", "target": "repository-facts", "condition": null, "system_role": null},
+        {"id": "facts-to-research", "source": "repository-facts", "target": "ecosystem-research", "condition": null, "system_role": null},
+        {"id": "facts-to-markdown", "source": "repository-facts", "target": "markdown-output", "condition": null, "system_role": null},
+        {"id": "research-to-markdown", "source": "ecosystem-research", "target": "markdown-output", "condition": null, "system_role": null},
+        {"id": "markdown-to-html", "source": "markdown-output", "target": "html-output", "condition": null, "system_role": "summary_markdown_to_html"}
+      ]
+    }
+  }
+}

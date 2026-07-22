@@ -10,7 +10,7 @@ import pytest
 
 from agent_bridge.core.domain import ValidationError
 from agent_bridge.app.service import AgentBridgeService
-from agent_bridge.runtime.server_process import start_server, stop_server
+from agent_bridge.server_runtime.server_process import start_server, stop_server
 from agent_bridge.system_config.scripts.service import DEFAULT_SCRIPT_ACTOR
 
 

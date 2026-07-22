@@ -10,7 +10,7 @@ import httpx
 import typer
 
 from agent_bridge.client import AgentBridgeClient
-from agent_bridge.runtime.server_process import server_status, start_server, stop_server
+from agent_bridge.server_runtime.server_process import server_status, start_server, stop_server
 
 app = typer.Typer(
     help="Agent Bridge: 能力与知识管理平台",

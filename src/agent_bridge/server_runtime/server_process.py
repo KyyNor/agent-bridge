@@ -1,3 +1,5 @@
+"""管理 uvicorn 服务器子进程；与 ``agent_runtime`` 的 Agent 执行职责无关。"""
+
 from __future__ import annotations
 
 import logging

@@ -5,7 +5,7 @@ from typing import Annotated, Callable, TypeVar
 
 import typer
 
-from agent_bridge.runtime.server_process import server_status, start_server, stop_server
+from agent_bridge.server_runtime.server_process import server_status, start_server, stop_server
 
 server_app = typer.Typer(help="管理 Agent Bridge 服务", no_args_is_help=True)
 
