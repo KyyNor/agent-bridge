@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from difflib import SequenceMatcher
 import json
 import logging
@@ -19,6 +18,7 @@ from agent_bridge.capability_hub.sources.builtin.base import (
     BuiltinTool,
     mark_builtin_failure,
 )
+from agent_bridge.capability_hub.errors import capability_failure, failure_metadata, with_log_id
 from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService, monotonic_ms
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
@@ -26,6 +26,12 @@ from agent_bridge.core.json_util import json_loads as _json_loads
 from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
 from agent_bridge.capability_hub.sources.openapi.http_client import OpenApiHttpClient
 from agent_bridge.capability_hub.sources.openapi.parser import parse_openapi_operations
+from agent_bridge.capability_hub.sources.adapters import (
+    BuiltinSourceAdapter,
+    CapabilitySourceRegistry,
+    McpSourceAdapter,
+    OpenApiSourceAdapter,
+)
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -142,32 +148,28 @@ def _friendly_not_found_message(
     return f"{message}。请使用 {search_command} 查看{detail}的详细说明。"
 
 
-def _attach_log_id(exc: Exception, log_id: str) -> None:
-    message = f"{getattr(exc, 'message', str(exc))} (log_id: {log_id})"
-    if hasattr(exc, "message"):
-        exc.message = message
-    exc.args = (message,)
+def _attach_log_id(exc: Exception, log_id: str) -> Exception:
+    return with_log_id(exc, log_id)
 
 
 def _mark_call_log_status(exc: Exception, status: str) -> Exception:
-    setattr(exc, "_tool_call_log_status", status)
-    return exc
+    return capability_failure(exc, status=status)
 
 
 def _call_log_status(exc: Exception) -> str:
-    return str(getattr(exc, "_tool_call_log_status", CallLogStatus.error.value))
+    return failure_metadata(exc).status
 
 
 def _failure_stage(exc: Exception) -> str:
-    return str(getattr(exc, "_tool_call_failure_stage", FailureStage.internal.value))
+    return failure_metadata(exc).stage
 
 
 def _failure_owner(exc: Exception) -> str:
-    return str(getattr(exc, "_tool_call_failure_owner", FailureOwner.platform.value))
+    return failure_metadata(exc).owner
 
 
 def _error_type(exc: Exception) -> str:
-    return str(getattr(exc, "_tool_call_error_type", "internal_error"))
+    return failure_metadata(exc).error_type
 
 
 class CapabilityService:
@@ -186,6 +188,13 @@ class CapabilityService:
         self.openapi_client = openapi_client or OpenApiHttpClient()
         self.governance = governance or CapabilityGovernanceService(store=store, admins=admins)
         self.builtin_providers: dict[str, BuiltinCapabilityProvider] = {}
+        builtin_source = BuiltinSourceAdapter(self)
+        mcp_source = McpSourceAdapter(self)
+        openapi_source = OpenApiSourceAdapter(self)
+        self.source_registry = CapabilitySourceRegistry(
+            [builtin_source, mcp_source, openapi_source],
+            fallback=mcp_source,
+        )
 
     def _mcp_timeout_seconds(self) -> float:
         config = self.store.get_sync_config()
@@ -259,7 +268,7 @@ class CapabilityService:
                 error_type=_error_type(exc),
                 duration_ms=monotonic_ms() - started,
             )
-            _attach_log_id(exc, log["log_id"])
+            enriched = _attach_log_id(exc, log["log_id"])
             logger.warning(
                 "invoke_logged_tool 失败 source=%s tool=%s 耗时=%dms log_id=%s 原因=%s",
                 source_key,
@@ -268,7 +277,7 @@ class CapabilityService:
                 log["log_id"],
                 exc,
             )
-            raise
+            raise enriched from exc
 
     def register_service(
         self,
@@ -668,8 +677,7 @@ class CapabilityService:
                 error_type=_error_type(exc),
                 duration_ms=monotonic_ms() - started,
             )
-            _attach_log_id(exc, log["log_id"])
-            raise
+            raise _attach_log_id(exc, log["log_id"]) from exc
 
     def _search_without_log(
         self,
@@ -681,46 +689,17 @@ class CapabilityService:
     ) -> dict[str, Any]:
         """实际的搜索逻辑（不带审计写库，由 ``search`` 包一层再写 log）。
 
-        根据 path 探测来源类型：builtin > openapi > mcp（固定优先级，非注册表）。
-        探测到 openapi/mcp 时会先做来源级策略校验，未 allow 直接返回空 items；
-        builtin 来源自带资源级校验，这里只列工具不查资源。
+        来源解析、策略校验和工具投影委托给 ``CapabilitySourceRegistry``；应用层
+        不感知 Builtin、MCP、OpenAPI 的具体分支。
         """
         normalized_path = (path or "").strip("/")
         if normalized_path == "":
             items = self._root_search_items(actor=actor, profile_key=profile_key)
             response_path = "/"
         else:
-            if normalized_path in self.builtin_providers:
-                provider = self.builtin_providers[normalized_path]
-                items = [
-                    self._builtin_tool_search_item(provider.source_key, tool)
-                    for tool in provider.list_tools(actor, profile_key)
-                ]
-                response_path = normalized_path
-            elif self.store.get_openapi_service(normalized_path) is not None:
-                if not self.governance.is_source_allowed(
-                    actor,
-                    profile_key,
-                    SourceType.openapi_service.value,
-                    normalized_path,
-                ):
-                    logger.debug("搜索 openapi 来源被拒绝 path=%s", normalized_path)
-                    return {"path": normalized_path, "items": []}
-                self._require_enabled_openapi_service(normalized_path)
-                items = [self._openapi_tool_search_item(tool) for tool in self._active_openapi_tools(normalized_path)]
-                response_path = normalized_path
-            else:
-                if not self.governance.is_source_allowed(
-                    actor,
-                    profile_key,
-                    SourceType.mcp_service.value,
-                    normalized_path,
-                ):
-                    logger.debug("搜索 mcp 来源被拒绝 path=%s", normalized_path)
-                    return {"path": normalized_path, "items": []}
-                self._require_enabled_service(normalized_path)
-                items = [self._tool_search_item(tool) for tool in self._active_tools(normalized_path)]
-                response_path = normalized_path
+            source = self.source_registry.resolve(normalized_path)
+            items = source.search_items(actor, normalized_path, profile_key)
+            response_path = normalized_path
 
         if query:
             needle = query.lower()
@@ -739,77 +718,25 @@ class CapabilityService:
     ) -> dict[str, Any]:
         """能力执行的统一入口（经 MetaMCP gateway ``execute`` 工具暴露给 agent）。
 
-        按 if/elif 探测来源类型（固定优先级 builtin > openapi > mcp，非注册表），
-        再走对应分支：builtin 自带资源级校验、openapi/mcp 先做来源级策略校验。
-        无论成功失败都经 ``log_tool_call`` 写一行审计，失败时把 log_id 缝进异常。
+        来源解析与执行委托给注册表中的 adapter；本方法只统一编排审计记录。
         """
         started = monotonic_ms()
         request = {"service": service, "tool_name": tool_name, "params": params, "profile_key": profile_key}
-        is_openapi_service = self.store.get_openapi_service(service) is not None
-        source_type = (
-            SourceType.builtin.value
-            if service in self.builtin_providers
-            else SourceType.openapi_service.value
-            if is_openapi_service
-            else SourceType.mcp_service.value
-        )
+        source = self.source_registry.resolve(service)
+        source_type = source.source_type
         resource_type = None
         resource_key = None
         try:
-            if service in self.builtin_providers:
-                # 分支 1：内置能力（wiki/codegraph/memory/platform），自带资源级策略校验
-                resource = self.builtin_providers[service].resource_from_arguments(tool_name, params)
-                resource_type, resource_key = self._builtin_resource_tuple(resource)
-                logger.debug("能力分发 builtin service=%s tool=%s resource=%s", service, tool_name, resource_key)
-                result = await self._execute_builtin(actor, service, tool_name, params, profile_key, workflow_context)
-            elif is_openapi_service:
-                # 分支 2：OpenAPI 能力，先做来源级策略校验
-                if not self.governance.is_source_allowed(actor, profile_key, SourceType.openapi_service.value, service):
-                    logger.warning(
-                        "能力执行被拒绝 actor=%s service=%s 原因=%s",
-                        actor,
-                        service,
-                        "openapi 来源被 profile 策略拦截",
-                    )
-                    raise mark_builtin_failure(
-                        _mark_call_log_status(
-                            ValidationError("source is blocked by profile policy"),
-                            CallLogStatus.blocked.value,
-                        ),
-                        stage=FailureStage.profile_policy.value,
-                        owner=FailureOwner.policy.value,
-                        error_type="profile_policy_blocked",
-                    )
-                logger.debug("能力分发 openapi service=%s tool=%s", service, tool_name)
-                result = await asyncio.to_thread(
-                    self._execute_openapi_without_log,
-                    actor,
-                    service,
-                    tool_name,
-                    params,
-                    profile_key,
-                )
-            elif not self.governance.is_source_allowed(actor, profile_key, SourceType.mcp_service.value, service):
-                # 分支 3a：MCP 能力，来源级策略校验未通过
-                logger.warning(
-                    "能力执行被拒绝 actor=%s service=%s 原因=%s",
-                    actor,
-                    service,
-                    "mcp 来源被 profile 策略拦截",
-                )
-                raise mark_builtin_failure(
-                    _mark_call_log_status(
-                        ValidationError("source is blocked by profile policy"),
-                        CallLogStatus.blocked.value,
-                    ),
-                    stage=FailureStage.profile_policy.value,
-                    owner=FailureOwner.policy.value,
-                    error_type="profile_policy_blocked",
-                )
-            else:
-                # 分支 3b：MCP 能力正常执行
-                logger.debug("能力分发 mcp service=%s tool=%s", service, tool_name)
-                result = await self._execute_without_log(actor, service, tool_name, params, profile_key)
+            execution = await source.execute(
+                actor,
+                service,
+                tool_name,
+                params,
+                profile_key,
+                workflow_context,
+            )
+            result = execution.result
+            resource_type, resource_key = self._builtin_resource_tuple(execution.resource)
             log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
@@ -827,9 +754,9 @@ class CapabilityService:
             )
             return {**result, "log_id": log["log_id"]}
         except Exception as exc:
-            if source_type == SourceType.builtin.value:
-                resource_type = str(getattr(exc, "_tool_call_resource_type", resource_type or "")) or None
-                resource_key = str(getattr(exc, "_tool_call_resource_key", resource_key or "")) or None
+            failure = failure_metadata(exc)
+            resource_type = failure.resource_type or resource_type
+            resource_key = failure.resource_key or resource_key
             log = self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
@@ -848,7 +775,7 @@ class CapabilityService:
                 resource_key=resource_key,
                 duration_ms=monotonic_ms() - started,
             )
-            _attach_log_id(exc, log["log_id"])
+            enriched = _attach_log_id(exc, log["log_id"])
             logger.warning(
                 "能力执行失败 actor=%s service=%s tool=%s 耗时=%dms log_id=%s 原因=%s",
                 actor,
@@ -858,39 +785,7 @@ class CapabilityService:
                 log["log_id"],
                 exc,
             )
-            raise
-
-    async def _execute_builtin(
-        self,
-        actor: str,
-        service: str,
-        tool_name: str,
-        params: dict[str, Any],
-        profile_key: str | None,
-        workflow_context: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        provider = self.builtin_providers[service]
-        try:
-            result = await provider.execute(actor, tool_name, params, profile_key, workflow_context)
-        except ValidationError as exc:
-            if str(exc) == "resource is blocked by profile policy":
-                resource = provider.resource_from_arguments(tool_name, params)
-                raise mark_builtin_failure(
-                    _mark_call_log_status(exc, CallLogStatus.blocked.value),
-                    stage=FailureStage.profile_policy.value,
-                    owner=FailureOwner.policy.value,
-                    error_type="profile_policy_blocked",
-                    resource_type=resource.resource_type if resource is not None else None,
-                    resource_key=resource.resource_key if resource is not None else None,
-                ) from exc
-            raise
-        return {
-            "service": service,
-            "tool": tool_name,
-            "tool_name": tool_name,
-            "success": True,
-            "result": result,
-        }
+            raise enriched from exc
 
     def _builtin_resource_tuple(self, resource: BuiltinResourceRef | None) -> tuple[str | None, str | None]:
         if resource is None:
@@ -1117,116 +1012,15 @@ class CapabilityService:
         )
 
     def _root_search_items(self, *, actor: str, profile_key: str | None = None) -> list[dict[str, Any]]:
-        enabled_services = [
-            service
-            for service in self.store.list_mcp_services()
-            if service["status"] == McpServiceStatus.enabled.value
-            and service["service_key"] not in self.builtin_providers
-        ]
-        visible_keys = set(
-            self.governance.filter_source_keys(
-                actor=actor,
-                profile_key=profile_key,
-                source_type=SourceType.mcp_service.value,
-                source_keys=[service["service_key"] for service in enabled_services],
-            )
-        )
-        enabled_services = [service for service in enabled_services if service["service_key"] in visible_keys]
-        tools_by_service: dict[str, int] = {}
-        for tool in self.store.list_mcp_tools():
-            if tool.get("status") == "active":
-                tools_by_service[tool["service_key"]] = tools_by_service.get(tool["service_key"], 0) + 1
-        builtin_items = []
-        for provider in self.builtin_providers.values():
-            provider_tools = provider.list_tools(actor, profile_key)
-            if not provider_tools:
-                continue
-            builtin_items.append(
-                {
-                    "kind": "builtin",
-                    "service": provider.source_key,
-                    "name": provider.name,
-                    "description": provider.description,
-                    "tags": provider.tags,
-                    "tool_count": len(provider_tools),
-                    "status": "enabled",
-                    "resources": provider.list_resources(actor, profile_key),
-                }
-            )
-        external_items = [
-            {
-                "kind": "service",
-                "service": service["service_key"],
-                "name": service["name"],
-                "description": service["description"],
-                "tags": _json_loads(service.get("tags_json"), []),
-                "tool_count": tools_by_service.get(service["service_key"], 0),
-                "status": service["status"],
-            }
-            for service in enabled_services
-        ]
-        openapi_services = [
-            service
-            for service in self.store.list_openapi_services()
-            if service["status"] == McpServiceStatus.enabled.value
-        ]
-        visible_openapi_keys = set(
-            self.governance.filter_source_keys(
-                actor=actor,
-                profile_key=profile_key,
-                source_type=SourceType.openapi_service.value,
-                source_keys=[service["service_key"] for service in openapi_services],
-            )
-        )
-        openapi_tools_by_service: dict[str, int] = {}
-        for tool in self.store.list_openapi_tools():
-            if tool.get("status") == "active":
-                openapi_tools_by_service[tool["service_key"]] = openapi_tools_by_service.get(tool["service_key"], 0) + 1
-        openapi_items = [
-            {
-                "kind": "service",
-                "source_type": SourceType.openapi_service.value,
-                "service": service["service_key"],
-                "name": service["name"],
-                "description": service["description"],
-                "tags": _json_loads(service.get("tags_json"), []),
-                "tool_count": openapi_tools_by_service.get(service["service_key"], 0),
-                "status": service["status"],
-            }
-            for service in openapi_services
-            if service["service_key"] in visible_openapi_keys
-        ]
-        return builtin_items + external_items + openapi_items
+        return self.source_registry.root_items(actor, profile_key)
 
     def _similar_service_names(self, actor: str, service_key: str, profile_key: str | None) -> list[str]:
-        builtin_names = [
-            provider.source_key
-            for provider in self.builtin_providers.values()
-            if provider.list_tools(actor, profile_key)
+        visible_names = [
+            str(item["service"])
+            for item in self.source_registry.root_items(actor, profile_key)
+            if item.get("service")
         ]
-        enabled_mcp_names = [
-            service["service_key"]
-            for service in self.store.list_mcp_services()
-            if service["status"] == McpServiceStatus.enabled.value and service["service_key"] not in self.builtin_providers
-        ]
-        enabled_openapi_names = [
-            service["service_key"]
-            for service in self.store.list_openapi_services()
-            if service["status"] == McpServiceStatus.enabled.value
-        ]
-        visible_mcp_names = self.governance.filter_source_keys(
-            actor=actor,
-            profile_key=profile_key,
-            source_type=SourceType.mcp_service.value,
-            source_keys=enabled_mcp_names,
-        )
-        visible_openapi_names = self.governance.filter_source_keys(
-            actor=actor,
-            profile_key=profile_key,
-            source_type=SourceType.openapi_service.value,
-            source_keys=enabled_openapi_names,
-        )
-        return _top_similar_names(service_key, builtin_names + visible_mcp_names + visible_openapi_names)
+        return _top_similar_names(service_key, visible_names)
 
     def _similar_tool_names(
         self,
@@ -1236,12 +1030,8 @@ class CapabilityService:
         profile_key: str | None,
         source_type: str,
     ) -> list[str]:
-        if source_type == SourceType.openapi_service.value:
-            candidates = [tool["tool_name"] for tool in self._active_openapi_tools(service_key)]
-        elif source_type == SourceType.builtin.value and service_key in self.builtin_providers:
-            candidates = [tool.tool for tool in self.builtin_providers[service_key].list_tools(actor, profile_key)]
-        else:
-            candidates = [tool["tool_name"] for tool in self._active_tools(service_key)]
+        source = self.source_registry.resolve(service_key)
+        candidates = source.tool_names(actor, service_key, profile_key)
         return _top_similar_names(tool_name, candidates)
 
     def _active_tools(self, service_key: str) -> list[dict[str, Any]]:

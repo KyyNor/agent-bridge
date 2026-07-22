@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from agent_bridge.capability_hub.errors import capability_failure
+
 
 @dataclass(frozen=True)
 class BuiltinTool:
@@ -28,14 +30,16 @@ def mark_builtin_failure(
     resource_type: str | None = None,
     resource_key: str | None = None,
 ) -> Exception:
-    setattr(exc, "_tool_call_failure_stage", stage)
-    setattr(exc, "_tool_call_failure_owner", owner)
-    setattr(exc, "_tool_call_error_type", error_type)
-    if resource_type is not None:
-        setattr(exc, "_tool_call_resource_type", resource_type)
-    if resource_key is not None:
-        setattr(exc, "_tool_call_resource_key", resource_key)
-    return exc
+    """兼容旧调用点的类型化错误构造器；不会修改传入异常。"""
+
+    return capability_failure(
+        exc,
+        stage=stage,
+        owner=owner,
+        error_type=error_type,
+        resource_type=resource_type,
+        resource_key=resource_key,
+    )
 
 
 class BuiltinCapabilityProvider(Protocol):

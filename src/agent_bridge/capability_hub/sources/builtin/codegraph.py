@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from agent_bridge.capability_hub.errors import capability_failure
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
-from agent_bridge.capability_hub.models import FailureOwner, FailureStage, ProfileResourceType, ToolType
+from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, ProfileResourceType, ToolType
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
 from agent_bridge.knowledge_management.code_knowledge.service import CodeGraphService
 from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
@@ -98,7 +99,15 @@ class CodeGraphBuiltinProvider:
                 repo_key,
                 "不在 allow 列表",
             )
-            raise ValidationError("resource is blocked by profile policy")
+            raise capability_failure(
+                ValidationError("resource is blocked by profile policy"),
+                status=CallLogStatus.blocked.value,
+                stage=FailureStage.profile_policy.value,
+                owner=FailureOwner.policy.value,
+                error_type="profile_policy_blocked",
+                resource_type=ProfileResourceType.code_repo.value,
+                resource_key=repo_key,
+            )
 
         try:
             query = str(arguments.get("query") or "").strip()

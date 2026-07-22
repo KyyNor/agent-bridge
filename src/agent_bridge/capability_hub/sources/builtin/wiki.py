@@ -4,8 +4,9 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
+from agent_bridge.capability_hub.errors import capability_failure
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool, mark_builtin_failure
-from agent_bridge.capability_hub.models import FailureOwner, FailureStage, ProfileResourceType, ToolType
+from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, ProfileResourceType, ToolType
 from agent_bridge.core.domain import NotFound, ValidationError, AgentBridgeError
 
 if TYPE_CHECKING:
@@ -188,7 +189,15 @@ class WikiBuiltinProvider:
                 kb_slug,
                 "不在 allow 列表",
             )
-            raise ValidationError("resource is blocked by profile policy")
+            raise capability_failure(
+                ValidationError("resource is blocked by profile policy"),
+                status=CallLogStatus.blocked.value,
+                stage=FailureStage.profile_policy.value,
+                owner=FailureOwner.policy.value,
+                error_type="profile_policy_blocked",
+                resource_type=ProfileResourceType.wiki_kb.value,
+                resource_key=kb_slug,
+            )
         if tool == "search":
             question = str(arguments.get("question") or arguments.get("query") or "").strip()
             if not question:
