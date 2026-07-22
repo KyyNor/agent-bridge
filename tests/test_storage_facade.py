@@ -29,9 +29,54 @@ def test_init_schema_creates_all_tables(store: SQLiteStore) -> None:
         "mcp_services", "mcp_tools",
         "project_profiles", "profile_source_rules", "profile_resource_rules",
         "tool_call_logs",
-        "code_repositories", "codegraph_sync_runs", "codegraph_index_items",
+        "code_repositories", "codegraph_sync_runs",
     }
     assert expected <= tables
+    assert "codegraph_index_items" not in tables
+
+
+def test_init_schema_removes_legacy_codegraph_text_index(tmp_path: Path) -> None:
+    paths = AgentBridgePaths.from_root(tmp_path / "legacy")
+    paths.data_dir.mkdir(parents=True)
+    store = SQLiteStore(paths.db_path)
+    store.init_schema()
+    store.upsert_code_repository(
+        repo_key="repo1", name="Repo 1", git_url="https://example.test/repo.git",
+        branch="main", auth_ref="", description="", tags=[], category_key="",
+        sync_interval_minutes=60, auto_understand=False, status="active",
+    )
+    with store.connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE codegraph_index_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              repo_key TEXT NOT NULL,
+              item_type TEXT NOT NULL,
+              path TEXT NOT NULL,
+              content TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO codegraph_index_items (repo_key, item_type, path, content) VALUES (?, ?, ?, ?)",
+            ("repo1", "file", "app.py", "print('legacy')"),
+        )
+        conn.execute(
+            "UPDATE code_repositories SET last_commit = 'abc', last_synced_at = CURRENT_TIMESTAMP WHERE repo_key = 'repo1'"
+        )
+
+    store.init_schema()
+
+    with store.connect() as conn:
+        legacy_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'codegraph_index_items'"
+        ).fetchone()
+    repo = store.get_code_repository("repo1")
+    assert legacy_table is None
+    assert repo is not None
+    assert repo["last_commit"] is None
+    assert repo["last_synced_at"] is None
+    assert repo["last_error"] == "CodeGraph 索引后端已统一，请重新同步仓库"
 
 
 def test_migrate_phase2_creates_profile_doc_cache_for_existing_db(store: SQLiteStore) -> None:

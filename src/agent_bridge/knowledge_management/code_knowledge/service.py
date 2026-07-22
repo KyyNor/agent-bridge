@@ -9,25 +9,28 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
-from agent_bridge.knowledge_management.code_knowledge.client import CodeGraphClient
+from agent_bridge.knowledge_management.code_knowledge.backend import CliCodeGraphBackend, CodeGraphBackend
 from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import external_dashboard_url
-from agent_bridge.knowledge_management.code_knowledge.mcp_client import CodeGraphMcpClient
 from agent_bridge.knowledge_management.code_knowledge.ua_client import UnderstandAnythingClient
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
-from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.domain import (
+    AgentBridgeError,
+    BackendUnavailable,
+    NotFound,
+    ValidationError,
+    require_admin_user,
+)
 from agent_bridge.plugin_runtime import GitPluginRuntime
 from agent_bridge.storage.sqlite import SQLiteStore
 
 logger = logging.getLogger(__name__)
 
 
-MAX_INDEX_CHARS = 20_000
-MAX_FILE_BYTES = 2_000_000
-SYMBOL_PATTERN = re.compile(r"^\s*(def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
+T = TypeVar("T")
 
 
 class CodeGraphService:
@@ -36,16 +39,14 @@ class CodeGraphService:
         paths: AgentBridgePaths,
         store: SQLiteStore,
         admins: set[str],
-        codegraph_client: CodeGraphClient | None = None,
-        mcp_client: CodeGraphMcpClient | None = None,
+        backend: CodeGraphBackend | None = None,
         ua_client: UnderstandAnythingClient | None = None,
         agent_service: Any = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
-        self.client = codegraph_client or CodeGraphClient()
-        self.mcp_client = mcp_client or CodeGraphMcpClient()
+        self.backend = backend or CliCodeGraphBackend()
         self.ua_client = ua_client or UnderstandAnythingClient(root=paths.root, agent_service=agent_service)
         self.plugin_runtime = GitPluginRuntime(paths)
 
@@ -141,7 +142,7 @@ class CodeGraphService:
 
     def get_status(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        available = self.client.is_available()
+        available = self.backend.is_available()
         return {
             "codegraph_installed": available,
             "message": None if available else "codegraph CLI 未安装，请运行 npm i -g @colbymchenry/codegraph",
@@ -153,13 +154,13 @@ class CodeGraphService:
         )
 
     def stop_active_processes(self) -> None:
-        self.client.terminate_active_processes()
+        self.backend.terminate_active_processes()
 
     def sync_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
         """同步代码仓库：镜像 git → 建索引。
 
-        索引在 ``codegraph`` CLI 可用时走 CLI，否则降级为内置文本索引器写进 SQLite。
-        全程记录 sync run 状态；任一阶段失败都标记 run 并抛 ``ValidationError``。
+        CodeGraph CLI 是唯一索引后端；后端缺失或索引失败时明确标记失败。
+        全程记录 sync run 状态；任一阶段失败都标记 run 并抛明确领域错误。
         """
         require_admin_user(actor, self.admins)
         repo = self._require_repository(repo_key)
@@ -170,19 +171,15 @@ class CodeGraphService:
         logger.info("仓库镜像开始 repo=%s 本地=%s", repo_key, local_path)
 
         try:
+            self._require_backend_available("同步代码索引")
             self._sync_git(repo, local_path)
             logger.info("仓库镜像完成 repo=%s", repo_key)
             self.store.update_codegraph_sync_run(int(run["id"]), stage="indexing")
-            if self.client.is_available():
-                logger.info("代码索引开始 repo=%s 模式=CLI", repo_key)
-                self.client.init(local_path)
-                self.client.index(local_path)
-                indexed_count = len(self.client.files(local_path))
-            else:
-                logger.info("代码索引开始 repo=%s 模式=SQLite降级", repo_key)
-                items = self._index_files(repo_key, local_path)
-                self.store.replace_codegraph_index(repo_key, items)
-                indexed_count = len(items)
+            logger.info("代码索引开始 repo=%s 后端=CodeGraph", repo_key)
+            indexed_count = self._backend_call(
+                "构建索引",
+                lambda: self.backend.build_index(local_path),
+            )
             logger.info("代码索引完成 repo=%s 索引项=%d", repo_key, indexed_count)
             last_commit = self._git_output(local_path, ["rev-parse", "HEAD"])
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -223,146 +220,108 @@ class CodeGraphService:
                 error=message,
                 duration_ms=duration_ms,
             )
-            raise ValidationError(f"codegraph sync failed: {message}") from exc
+            if isinstance(exc, AgentBridgeError):
+                raise
+            raise ValidationError(f"CodeGraph 同步失败：{message}") from exc
 
     def search_code(self, actor: str, repo_key: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        """代码搜索：CLI 可用走 codegraph 查询，否则降级到 SQLite 文本索引。"""
+        """使用正式 CodeGraph 后端搜索代码图。"""
         require_admin_user(actor, self.admins)
-        self._require_repository(repo_key)
-        if self.client.is_available():
-            logger.debug("代码索引模式=CLI repo=%s query=%s", repo_key, query)
-            local_path = self._local_path(repo_key)
-            nodes = self.client.query(local_path, query, limit=limit)
-            return [self._codegraph_node_payload(n) for n in nodes]
-        logger.debug("代码索引模式=SQLite降级 repo=%s query=%s", repo_key, query)
-        return [
-            self._index_payload(item)
-            for item in self.store.search_codegraph_index(repo_key, query=query, item_type="file", limit=limit)
-        ]
+        local_path = self._require_indexed_repository(repo_key, "查询")
+        logger.debug("代码查询后端=CodeGraph repo=%s query=%s", repo_key, query)
+        nodes = self._backend_call(
+            "查询",
+            lambda: self.backend.query(local_path, query, limit=limit),
+        )
+        return [self._codegraph_node_payload(n) for n in nodes]
 
     def get_file(self, actor: str, repo_key: str, path: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
-        if self.client.is_available():
-            local_path = self._local_path(repo_key).resolve()
-            file_path = (local_path / path).resolve()
-            try:
-                file_path.relative_to(local_path)
-            except ValueError:
-                raise NotFound("file not found") from None
-            if not file_path.is_file():
-                raise NotFound("file not found")
-            try:
-                content = file_path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                raise NotFound("file not found") from None
-            return {
-                "repo_key": repo_key,
-                "path": path,
-                "language": self._language_for_path(file_path),
-                "content": content,
-            }
-        item = self.store.get_codegraph_file(repo_key, path)
-        if item is None:
+        local_path = self._require_local_repository(repo_key).resolve()
+        file_path = (local_path / path).resolve()
+        try:
+            file_path.relative_to(local_path)
+        except ValueError:
             raise NotFound("file not found")
+        if not file_path.is_file():
+            raise NotFound("file not found")
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            raise NotFound("file not found") from None
         return {
             "repo_key": repo_key,
-            "path": item["path"],
-            "language": item["language"],
-            "content": item["content"],
+            "path": path,
+            "language": self._language_for_path(file_path),
+            "content": content,
         }
 
     def find_symbol(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        self._require_repository(repo_key)
-        if self.client.is_available():
-            local_path = self._local_path(repo_key)
-            nodes = self.client.query(local_path, symbol, limit=limit)
-            return [self._codegraph_node_payload(n) for n in nodes]
-        return [
-            self._index_payload(item)
-            for item in self.store.search_codegraph_index(repo_key, query=symbol, item_type="symbol", limit=limit)
-        ]
+        local_path = self._require_indexed_repository(repo_key, "查找符号")
+        nodes = self._backend_call(
+            "查找符号",
+            lambda: self.backend.query(local_path, symbol, limit=limit),
+        )
+        return [self._codegraph_node_payload(n) for n in nodes]
 
     def repository_overview(self, actor: str, repo_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         repo = self._require_repository(repo_key)
-        if self.client.is_available():
-            local_path = self._local_path(repo_key)
-            try:
-                stats = self.client.status(local_path)
-            except RuntimeError:
-                stats = {}
-            file_count = stats.get("files")
-            if file_count is None:
-                file_count = len(self.client.files(local_path))
-            return {
-                **self._repository_payload(repo),
-                "file_count": file_count,
-                "symbol_count": stats.get("nodes", stats.get("symbols", 0)),
-                "last_synced_at": repo.get("last_synced_at"),
-            }
+        local_path = self._require_indexed_repository(repo_key, "读取索引状态")
+        stats = self._backend_call("读取索引状态", lambda: self.backend.status(local_path))
+        file_count = stats.get("files")
+        if file_count is None:
+            file_count = len(self._backend_call("列出索引文件", lambda: self.backend.files(local_path)))
         return {
             **self._repository_payload(repo),
-            "file_count": self.store.count_codegraph_index_items(repo_key, "file"),
-            "symbol_count": self.store.count_codegraph_index_items(repo_key, "symbol"),
+            "file_count": file_count,
+            "symbol_count": stats.get("nodes", stats.get("symbols", 0)),
             "last_synced_at": repo.get("last_synced_at"),
         }
 
     def callers(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        self._require_repository(repo_key)
-        if not self.client.is_available():
-            return []
-        local_path = self._local_path(repo_key)
-        nodes = self.client.callers(local_path, symbol)
+        local_path = self._require_indexed_repository(repo_key, "查询调用者")
+        nodes = self._backend_call("查询调用者", lambda: self.backend.callers(local_path, symbol))
         return [self._codegraph_node_payload(n) for n in nodes[:limit]]
 
     def callees(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        self._require_repository(repo_key)
-        if not self.client.is_available():
-            return []
-        local_path = self._local_path(repo_key)
-        nodes = self.client.callees(local_path, symbol)
+        local_path = self._require_indexed_repository(repo_key, "查询被调用者")
+        nodes = self._backend_call("查询被调用者", lambda: self.backend.callees(local_path, symbol))
         return [self._codegraph_node_payload(n) for n in nodes[:limit]]
 
     def impact(self, actor: str, repo_key: str, symbol: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        self._require_repository(repo_key)
-        if not self.client.is_available():
-            return []
-        local_path = self._local_path(repo_key)
-        nodes = self.client.impact(local_path, symbol)
+        local_path = self._require_indexed_repository(repo_key, "分析影响范围")
+        nodes = self._backend_call("分析影响范围", lambda: self.backend.impact(local_path, symbol))
         return [self._codegraph_node_payload(n) for n in nodes]
 
     def list_files(self, actor: str, repo_key: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         self._require_repository(repo_key)
-        if not self.client.is_available():
-            return []
-        local_path = self._local_path(repo_key)
-        return self.client.files(local_path)
+        local_path = self._require_local_repository(repo_key)
+        return self._tracked_files(local_path)
 
     async def explore(self, actor: str, repo_key: str, query: str) -> dict[str, Any]:
         """通过 codegraph MCP 直连执行代码图查询（``codegraph_explore`` 工具）。"""
         require_admin_user(actor, self.admins)
-        self._require_repository(repo_key)
-        local_path = self._local_path(repo_key)
-        if not local_path.is_dir():
-            raise NotFound("repository local path not found")
-        logger.info("代码查询开始 repo=%s 模式=MCP query=%s", repo_key, query)
+        local_path = self._require_indexed_repository(repo_key, "探索代码图")
+        logger.info("代码探索开始 repo=%s 后端=CodeGraph query=%s", repo_key, query)
         try:
-            mcp_result = await self.mcp_client.call_tool(
+            mcp_result = await self.backend.explore(
                 local_path,
-                "codegraph_explore",
-                {"query": query, "projectPath": str(local_path)},
+                query,
                 timeout=self._mcp_timeout_seconds(),
             )
-        except Exception:
-            logger.error("代码查询失败 repo=%s 模式=MCP query=%s", repo_key, query, exc_info=True)
-            raise
-        logger.info("代码查询完成 repo=%s 模式=MCP query=%s", repo_key, query)
+        except Exception as exc:
+            logger.error("代码探索失败 repo=%s 后端=CodeGraph query=%s", repo_key, query, exc_info=True)
+            raise BackendUnavailable(
+                f"CodeGraph 探索失败，仓库索引可能未就绪，请重新同步：{exc}"
+            ) from exc
+        logger.info("代码探索完成 repo=%s 后端=CodeGraph query=%s", repo_key, query)
         return {
             "repo": repo_key,
             "query": query,
@@ -377,6 +336,48 @@ class CodeGraphService:
 
     def _local_path(self, repo_key: str) -> Path:
         return self.paths.repos_dir / repo_key
+
+    def _require_local_repository(self, repo_key: str) -> Path:
+        local_path = self._local_path(repo_key)
+        if not local_path.is_dir() or not (local_path / ".git").is_dir():
+            raise NotFound("代码仓库尚未同步，请先同步仓库")
+        return local_path
+
+    def _require_indexed_repository(self, repo_key: str, operation: str) -> Path:
+        repo = self._require_repository(repo_key)
+        local_path = self._require_local_repository(repo_key)
+        self._require_backend_available(operation)
+        indexed_commit = str(repo.get("last_commit") or "").strip()
+        if not indexed_commit:
+            raise BackendUnavailable(
+                f"CodeGraph 索引未就绪，无法{operation}；请先同步仓库"
+            )
+        try:
+            current_commit = self._git_output(local_path, ["rev-parse", "HEAD"])
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise BackendUnavailable(f"无法确认仓库索引状态：{exc}") from exc
+        if current_commit != indexed_commit:
+            raise BackendUnavailable(
+                f"CodeGraph 索引已过期，无法{operation}；请重新同步仓库"
+            )
+        return local_path
+
+    def _require_backend_available(self, operation: str) -> None:
+        if self.backend.is_available():
+            return
+        raise BackendUnavailable(
+            f"CodeGraph CLI 不可用，无法{operation}；请先安装并确认 codegraph --version 可执行"
+        )
+
+    def _backend_call(self, operation: str, call: Callable[[], T]) -> T:
+        self._require_backend_available(operation)
+        try:
+            return call()
+        except (RuntimeError, json.JSONDecodeError, subprocess.SubprocessError, OSError) as exc:
+            logger.error("CodeGraph 后端调用失败 操作=%s 原因=%s", operation, exc, exc_info=True)
+            raise BackendUnavailable(
+                f"CodeGraph {operation}失败，仓库索引可能未就绪，请重新同步：{exc}"
+            ) from exc
 
     # -- Understand Anything --
 
@@ -594,66 +595,23 @@ class CodeGraphService:
                 f"git branch advance failed for branch '{branch}': {self._git_result_message(result)}"
             )
 
-    def _index_files(self, repo_key: str, local_path: Path) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
-        for path in sorted(local_path.rglob("*")):
-            if path.is_symlink() or not path.is_file() or ".git" in path.relative_to(local_path).parts:
-                continue
-            content = self._read_text_for_index(path)
-            if content is None:
-                continue
-            rel_path = path.relative_to(local_path).as_posix()
-            language = self._language_for_path(path)
-            line_count = len(content.splitlines())
-            items.append(
-                {
-                    "repo_key": repo_key,
-                    "item_type": "file",
-                    "path": rel_path,
-                    "symbol": None,
-                    "language": language,
-                    "line_start": 1 if content else None,
-                    "line_end": line_count if content else None,
-                    "content": content[:MAX_INDEX_CHARS],
-                }
+    def _tracked_files(self, local_path: Path) -> list[dict[str, Any]]:
+        try:
+            result = subprocess.run(
+                ["git", "ls-files", "-z"],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
             )
-            if language == "python":
-                for match in SYMBOL_PATTERN.finditer(content):
-                    symbol = match.group(2)
-                    line_start = content.count("\n", 0, match.start()) + 1
-                    line_end_index = content.find("\n", match.start())
-                    if line_end_index < 0:
-                        line_end_index = len(content)
-                    line = content[match.start():line_end_index]
-                    items.append(
-                        {
-                            "repo_key": repo_key,
-                            "item_type": "symbol",
-                            "path": rel_path,
-                            "symbol": symbol,
-                            "language": language,
-                            "line_start": line_start,
-                            "line_end": line_start,
-                            "content": line[:MAX_INDEX_CHARS],
-                        }
-                    )
-        return items
-
-    def _read_text_for_index(self, path: Path) -> str | None:
-        try:
-            if path.is_symlink():
-                return None
-            if path.stat().st_size > MAX_FILE_BYTES:
-                return None
-            data = path.read_bytes()
-        except OSError:
-            return None
-        if b"\x00" in data[:4096]:
-            return None
-        try:
-            return data.decode("utf-8")[:MAX_INDEX_CHARS]
-        except UnicodeDecodeError:
-            return None
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise BackendUnavailable(f"读取 Git 仓库文件列表失败：{exc}") from exc
+        files: list[dict[str, Any]] = []
+        for raw_path in result.stdout.split(b"\0"):
+            if not raw_path:
+                continue
+            path = raw_path.decode("utf-8", errors="surrogateescape")
+            files.append({"path": path, "language": self._language_for_path(Path(path))})
+        return files
 
     def _run_git(self, cwd: Path, args: list[str]) -> None:
         cwd.mkdir(parents=True, exist_ok=True)
@@ -732,9 +690,6 @@ class CodeGraphService:
         payload["has_auth_ref"] = bool(payload.get("auth_ref", ""))
         payload.pop("auth_ref", None)
         return payload
-
-    def _index_payload(self, item: dict[str, Any]) -> dict[str, Any]:
-        return dict(item)
 
     def _language_for_path(self, path: Path) -> str | None:
         return {

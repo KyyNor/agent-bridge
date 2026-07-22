@@ -41,12 +41,14 @@ const detailOverview = ref<RepoOverview | null>(null)
 const detailStatus = ref<CodeGraphStatus | null>(null)
 const detailQuery = ref('')
 const detailResults = ref<CodeGraphNode[]>([])
+const detailQueryError = ref('')
 const detailExploreQuery = ref('')
 const detailExploreResult = ref<CodeGraphExploreResult | null>(null)
 const detailExploreError = ref('')
 const detailTab = ref<'overview' | 'query' | 'explore' | 'understand'>('overview')
 const detailSearching = ref(false)
 const detailExploring = ref(false)
+const codeGraphAvailable = computed(() => detailStatus.value?.codegraph_installed !== false)
 
 // UA (Understand Anything) state
 const uaStatus = ref<UAStatus | null>(null)
@@ -89,6 +91,7 @@ function resetDetailState() {
   detailStatus.value = null
   detailQuery.value = ''
   detailResults.value = []
+  detailQueryError.value = ''
   detailExploreQuery.value = ''
   detailExploreResult.value = null
   detailExploreError.value = ''
@@ -139,20 +142,22 @@ async function loadDetail() {
 
 async function searchInRepo() {
   const term = detailQuery.value.trim()
-  if (!term || !detailRepo.value) return
+  if (!term || !detailRepo.value || !codeGraphAvailable.value) return
   detailSearching.value = true
+  detailQueryError.value = ''
   try {
     const result = await api.queryRepo(detailRepo.value.repo_key, term)
     detailResults.value = result.matches
-  } catch {
+  } catch (e: any) {
     detailResults.value = []
+    detailQueryError.value = e.message || 'CodeGraph 查询失败，请确认后端可用并重新同步仓库'
   }
   detailSearching.value = false
 }
 
 async function exploreRepo() {
   const term = detailExploreQuery.value.trim()
-  if (!term || !detailRepo.value) return
+  if (!term || !detailRepo.value || !codeGraphAvailable.value) return
   detailExploring.value = true
   detailExploreError.value = ''
   detailExploreResult.value = null
@@ -377,7 +382,10 @@ onBeforeUnmount(() => {
         <div v-if="detailTab === 'query'" class="space-y-3">
           <div class="flex gap-2">
             <Input v-model="detailQuery" placeholder="输入符号名或搜索词" class="flex-1" @keydown.enter="searchInRepo()" />
-            <Button @click="searchInRepo()" :disabled="detailSearching || !detailQuery.trim()" size="sm">搜索</Button>
+            <Button @click="searchInRepo()" :disabled="detailSearching || !detailQuery.trim() || !codeGraphAvailable" size="sm">搜索</Button>
+          </div>
+          <div v-if="detailQueryError" class="rounded-lg border border-destructive/30 bg-destructive-soft p-3 text-sm text-destructive">
+            {{ detailQueryError }}
           </div>
           <div v-if="detailSearching" class="py-4 text-center text-sm text-muted-foreground">查询中...</div>
           <div v-else-if="detailResults.length > 0" class="max-h-[300px] overflow-y-auto rounded-lg border border-border">
@@ -402,7 +410,7 @@ onBeforeUnmount(() => {
         <div v-if="detailTab === 'explore'" class="space-y-3">
           <div class="flex gap-2">
             <Input v-model="detailExploreQuery" placeholder="输入要交给 CodeGraph Explore 的问题" class="flex-1" @keydown.enter="exploreRepo()" />
-            <Button @click="exploreRepo()" :disabled="detailExploring || !detailExploreQuery.trim()" size="sm">
+            <Button @click="exploreRepo()" :disabled="detailExploring || !detailExploreQuery.trim() || !codeGraphAvailable" size="sm">
               {{ detailExploring ? '执行中...' : '执行' }}
             </Button>
           </div>

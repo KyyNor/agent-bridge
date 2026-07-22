@@ -29,3 +29,6 @@ def test_agent_documents_describe_current_workflow_and_time_contracts() -> None:
     assert "result_parser.py" not in claude
     assert "ClaudeWorkflowRunner" not in claude
     assert "CapabilitySourceRegistry" in claude
+    assert "codegraph_index_items" in claude
+    assert "不得返回空数组冒充" in claude
+    assert "SQLite 隐式文本索引降级" in agents

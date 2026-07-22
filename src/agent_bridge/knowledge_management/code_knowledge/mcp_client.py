@@ -1,7 +1,7 @@
 """codegraph CLI 的 MCP(stdio) 直连客户端。
 
 每次 ``call_tool`` 临时拉起一个 ``codegraph serve --mcp`` 子进程并经 stdio
-与它建立 MCP 会话；这是 explore 查询相对 SQLite 降级更精确但更重的路径。
+与它建立 MCP 会话；这是正式 CodeGraph 后端的 Explore 调用通道。
 """
 from __future__ import annotations
 

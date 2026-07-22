@@ -17,6 +17,7 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
 - Node.js 与 npm（构建管理后台时需要）
+- CodeGraph CLI（启用代码图索引、查询和 Explore 时必须安装）
 
 安装后端与前端依赖：
 
@@ -105,6 +106,8 @@ npm run check
 ```
 
 Vite 产物写入 `src/agent_bridge/static/capabilities/`。该目录不提交到 Git；发布 wheel 前必须先执行 `npm ci && npm run build`。
+
+CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或查询失败时，API 会明确返回后端不可用；安装 CLI 后需要重新同步受影响仓库。
 
 ## 数据与配置
 

@@ -30,6 +30,12 @@ class ConflictError(AgentBridgeError):
     status_code = 409
 
 
+class BackendUnavailable(AgentBridgeError):
+    """外部正式后端缺失、未就绪或暂时无法完成请求。"""
+
+    status_code = 503
+
+
 class KbRole(str, Enum):
     viewer = "viewer"
     contributor = "contributor"

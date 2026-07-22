@@ -17,7 +17,9 @@
 - 能力来源实现 `CapabilitySourceAdapter` 并注册到来源 registry。
 - Coding Agent 的配置暂时要求 `slug == type`。在支持实例级差异配置之前，不创建同一 type 的多个无差异 slug。
 - Mock 后端只能由显式 `type = "mock"` 使用，不得作为未知或缺失配置的静默回退。
-- CodeGraph CLI/SQLite 双实现暂不重构；修改前先讨论两种实现的产品定位和保留理由。
+- CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。
+- 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。
+- 仓库文件读取和文件列表基于 Git 镜像，不应依赖 CodeGraph 后端。
 
 ## 时间处理规范
 

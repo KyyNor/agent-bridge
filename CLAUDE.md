@@ -70,7 +70,9 @@ MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped �
 
 ## 代码知识与记忆
 
-`CodeGraphService` 管理仓库镜像、代码索引、查询和 Understand-Anything。当前 CLI/SQLite 双实现的产品定位尚未决定，暂不重构这一层；修改前先讨论为什么需要两个实现、各自的降级语义和保留期限。
+`CodeGraphService` 管理仓库镜像、代码图查询和 Understand-Anything。正式索引后端统一为 `CodeGraphBackend`：CLI 负责 init/index/query/callers/callees/impact，MCP stdio 负责 Explore；两者使用同一个 CodeGraph 引擎。CLI 缺失、索引未就绪或调用失败时抛 `BackendUnavailable`，不得返回空数组冒充“无结果”。
+
+旧 `codegraph_index_items` SQLite 文本索引已移除。启动迁移会删除这类可重建派生数据，并要求受影响仓库重新同步。仓库文件列表和文件内容直接读取 Git 镜像，不依赖 CodeGraph。
 
 Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。claude-mem worker 是按需进程池；插件更新由独立多 job 的 `PluginUpdateScheduler` 管理。它与单 cron 的 `BaseCronScheduler` 语义不同，不要为了继承而继承。
 

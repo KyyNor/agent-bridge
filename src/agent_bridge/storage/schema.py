@@ -464,20 +464,6 @@ CREATE TABLE IF NOT EXISTS codegraph_sync_runs (
   started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   finished_at TEXT
 );
-CREATE TABLE IF NOT EXISTS codegraph_index_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  repo_key TEXT NOT NULL REFERENCES code_repositories(repo_key) ON DELETE CASCADE,
-  item_type TEXT NOT NULL,
-  path TEXT NOT NULL,
-  symbol TEXT,
-  language TEXT,
-  line_start INTEGER,
-  line_end INTEGER,
-  content TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_codegraph_index_repo_path ON codegraph_index_items(repo_key, path);
-CREATE INDEX IF NOT EXISTS idx_codegraph_index_symbol ON codegraph_index_items(repo_key, symbol);
 CREATE TABLE IF NOT EXISTS code_repo_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   category_key TEXT NOT NULL UNIQUE,

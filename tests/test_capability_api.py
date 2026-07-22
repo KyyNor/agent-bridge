@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from agent_bridge.capability_hub.models import FailureOwner, FailureStage, SourceType, ToolType
 from agent_bridge.api.app import create_app
+from agent_bridge.knowledge_management.code_knowledge.backend import CliCodeGraphBackend
+from agent_bridge.knowledge_management.code_knowledge.client import CodeGraphClient
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -1001,6 +1003,38 @@ def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) 
     assert "matches" in callers.json()
 
 
+def test_codegraph_query_api_returns_503_when_backend_is_unavailable(tmp_path: Path, wm_paths) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    created = client.post(
+        "/code-repo/repositories",
+        json={
+            "repo_key": "web-app",
+            "name": "Web App",
+            "git_url": str(repo),
+            "branch": "master",
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert created.status_code == 200
+    local_repo = wm_paths.repos_dir / "web-app"
+    local_repo.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "clone", str(repo), str(local_repo)], check=True, capture_output=True)
+    backend_client = CodeGraphClient()
+    backend_client._available = False
+    app.state.agent_bridge_service.codegraph.backend = CliCodeGraphBackend(client=backend_client)
+
+    response = client.post(
+        "/code-repo/repositories/web-app/query",
+        json={"query": "hello", "limit": 5},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 503
+    assert "CodeGraph CLI 不可用" in response.json()["detail"]
+
+
 def test_understand_summary_returns_empty_payload_when_graph_missing(tmp_path: Path, wm_paths) -> None:
     repo = _git_repo(tmp_path / "repo")
     app = create_app(paths=wm_paths, admins={"root"})
@@ -1064,7 +1098,7 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
     client.post("/sync-config", json={"code_sync_cron": "0 * * * *", "mcp_timeout_seconds": 150}, headers={"X-Agent-Bridge-User": "root"})
     client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
     fake_mcp = FakeMcpClient()
-    app.state.agent_bridge_service.codegraph.mcp_client = fake_mcp
+    app.state.agent_bridge_service.codegraph.backend.mcp_client = fake_mcp
 
     response = client.post(
         "/code-repo/repositories/web-app/explore",

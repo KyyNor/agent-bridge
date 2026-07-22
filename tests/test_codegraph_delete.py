@@ -1,7 +1,7 @@
 """TDD tests for code repository deletion.
 
 Contract (per the approved plan):
-- admin can delete a code repo -> repo row + sync runs + index items gone (FK CASCADE)
+- admin can delete a code repo -> repo row + sync runs gone (FK CASCADE)
 - local clone directory is removed
 - governance resource rules referencing the repo are purged
 - non-admin denied; missing repo raises NotFound
@@ -60,7 +60,7 @@ def test_delete_repository_missing_raises_not_found(wm_paths: AgentBridgePaths) 
 def test_delete_repository_removes_repo_rows_and_local_clone(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
     _upsert_repo(service)
-    # simulate a local clone + an index/sync run
+    # simulate a local clone + a sync run
     local_clone = wm_paths.repos_dir / "web-app"
     local_clone.mkdir(parents=True, exist_ok=True)
     (local_clone / "app.py").write_text("x = 1", encoding="utf-8")
@@ -74,11 +74,7 @@ def test_delete_repository_removes_repo_rows_and_local_clone(wm_paths: AgentBrid
         runs = conn.execute(
             "SELECT COUNT(*) AS c FROM codegraph_sync_runs WHERE repo_key = ?", ("web-app",)
         ).fetchone()["c"]
-        items = conn.execute(
-            "SELECT COUNT(*) AS c FROM codegraph_index_items WHERE repo_key = ?", ("web-app",)
-        ).fetchone()["c"]
     assert runs == 0
-    assert items == 0
 
 
 def test_delete_repository_cleans_governance_resource_rules(wm_paths: AgentBridgePaths) -> None:

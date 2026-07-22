@@ -98,6 +98,7 @@ class SQLiteStore:
             conn.executescript(SCHEMA)
             conn.executescript(CODEGRAPH_SCHEMA)
             conn.executescript(WORKFLOW_SCHEMA)
+            self._remove_legacy_codegraph_text_index(conn)
             self._ensure_columns(
                 conn,
                 "agent_runs",
@@ -605,6 +606,38 @@ class SQLiteStore:
         if sqlite3.sqlite_version_info >= (3, 35, 0):
             conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
 
+    def _remove_legacy_codegraph_text_index(self, conn: sqlite3.Connection) -> None:
+        """删除旧 SQLite 文本索引，并要求受影响仓库用 CodeGraph 重新同步。
+
+        旧表只保存可重新生成的派生数据。发现其中存在数据时，保守地清除对应
+        仓库的成功同步标记，避免服务切换到正式后端后误用旧状态。
+        """
+        table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'codegraph_index_items'"
+        ).fetchone()
+        if table is None:
+            return
+        affected = [
+            str(row["repo_key"])
+            for row in conn.execute(
+                "SELECT DISTINCT repo_key FROM codegraph_index_items ORDER BY repo_key"
+            ).fetchall()
+        ]
+        if affected:
+            placeholders = ", ".join("?" for _ in affected)
+            conn.execute(
+                f"""
+                UPDATE code_repositories
+                SET last_commit = NULL,
+                    last_synced_at = NULL,
+                    last_error = 'CodeGraph 索引后端已统一，请重新同步仓库',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE repo_key IN ({placeholders})
+                """,
+                affected,
+            )
+        conn.execute("DROP TABLE codegraph_index_items")
+
     def _backfill_agent_run_backend_keys(self, conn: sqlite3.Connection) -> None:
         """Infer backend_key for historical agent runs that predate the column."""
         for backend_key, marker in [
@@ -888,9 +921,6 @@ class SQLiteStore:
     ) -> None:
         return self.codegraph.mark_code_repository_sync(repo_key=repo_key, local_path=local_path, last_commit=last_commit, success=success, error=error)
 
-    def replace_codegraph_index(self, repo_key: str, items: list[dict[str, Any]]) -> None:
-        return self.codegraph.replace_codegraph_index(repo_key=repo_key, items=items)
-
     def create_codegraph_sync_run(self, repo_key: str, *, status: str, stage: str) -> dict[str, Any]:
         return self.codegraph.create_codegraph_sync_run(repo_key=repo_key, status=status, stage=stage)
 
@@ -910,25 +940,6 @@ class SQLiteStore:
 
     def interrupt_running_codegraph_sync_runs(self, *, error: str) -> int:
         return self.codegraph.interrupt_running_codegraph_sync_runs(error=error)
-
-    def search_codegraph_index(
-        self,
-        repo_key: str,
-        *,
-        query: str,
-        item_type: str | None = None,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        return self.codegraph.search_codegraph_index(repo_key=repo_key, query=query, item_type=item_type, limit=limit)
-
-    def get_codegraph_file(self, repo_key: str, path: str) -> dict[str, Any] | None:
-        return self.codegraph.get_codegraph_file(repo_key=repo_key, path=path)
-
-    def count_codegraph_index_items(self, repo_key: str, item_type: str) -> int:
-        return self.codegraph.count_codegraph_index_items(repo_key=repo_key, item_type=item_type)
-
-    def _add_codegraph_snippet(self, row: dict[str, Any], query: str) -> dict[str, Any]:
-        return self.codegraph._add_codegraph_snippet(row=row, query=query)
 
     # -- Categories --
 

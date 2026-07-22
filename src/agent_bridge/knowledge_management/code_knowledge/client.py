@@ -34,7 +34,7 @@ class CodeGraphClient:
         """Check if codegraph CLI is installed and reachable.
 
         结果会缓存（首次探测后不再重复执行 ``--version``）。
-        不可用时调用方据此降级到 SQLite 文本索引模式。
+        不可用时调用方必须明确报告正式后端不可用。
         """
         if self._available is not None:
             return self._available
@@ -78,14 +78,11 @@ class CodeGraphClient:
 
     def files(self, project_dir: Path) -> list[dict[str, Any]]:
         """List tracked files."""
-        try:
-            result = self._run(project_dir, ["files", "--json"])
-            data = json.loads(result.stdout)
-            if isinstance(data, dict):
-                return data.get("files", [])
-            return data if isinstance(data, list) else []
-        except (RuntimeError, json.JSONDecodeError):
-            return []
+        result = self._run(project_dir, ["files", "--json"])
+        data = json.loads(result.stdout)
+        if isinstance(data, dict):
+            return data.get("files", [])
+        return data if isinstance(data, list) else []
 
     def callers(self, project_dir: Path, symbol: str) -> list[dict[str, Any]]:
         result = self._run(project_dir, ["callers", "--json", symbol])

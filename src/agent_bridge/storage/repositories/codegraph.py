@@ -124,36 +124,6 @@ class CodeGraphRepository:
                     (local_path, error, repo_key),
                 )
 
-    def replace_codegraph_index(self, repo_key: str, items: list[dict[str, Any]]) -> None:
-        with self._connect() as conn:
-            conn.execute("DELETE FROM codegraph_index_items WHERE repo_key = ?", (repo_key,))
-            for item in items:
-                conn.execute(
-                    """
-                    INSERT INTO codegraph_index_items (
-                      repo_key,
-                      item_type,
-                      path,
-                      symbol,
-                      language,
-                      line_start,
-                      line_end,
-                      content
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        repo_key,
-                        item["item_type"],
-                        item["path"],
-                        item.get("symbol"),
-                        item.get("language"),
-                        item.get("line_start"),
-                        item.get("line_end"),
-                        item.get("content", ""),
-                    ),
-                )
-
     def create_codegraph_sync_run(self, repo_key: str, *, status: str, stage: str) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
@@ -220,81 +190,6 @@ class CodeGraphRepository:
             )
             return cursor.rowcount
 
-    def search_codegraph_index(
-        self,
-        repo_key: str,
-        *,
-        query: str,
-        item_type: str | None = None,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        filters = ["repo_key = ?"]
-        params: list[Any] = [repo_key]
-        if item_type is not None:
-            filters.append("item_type = ?")
-            params.append(item_type)
-        if query:
-            like = f"%{query.lower()}%"
-            filters.append("(LOWER(path) LIKE ? OR LOWER(COALESCE(symbol, '')) LIKE ? OR LOWER(content) LIKE ?)")
-            params.extend([like, like, like])
-        params.append(limit)
-        where_clause = " AND ".join(filters)
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT *
-                FROM codegraph_index_items
-                WHERE {where_clause}
-                ORDER BY path, item_type, COALESCE(line_start, 0), id
-                LIMIT ?
-                """,
-                params,
-            ).fetchall()
-            return [self._add_codegraph_snippet(dict(row), query) for row in rows]
-
-    def get_codegraph_file(self, repo_key: str, path: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT *
-                FROM codegraph_index_items
-                WHERE repo_key = ?
-                  AND path = ?
-                  AND item_type = 'file'
-                ORDER BY id
-                LIMIT 1
-                """,
-                (repo_key, path),
-            ).fetchone()
-            return row_to_dict(row)
-
-    def count_codegraph_index_items(self, repo_key: str, item_type: str) -> int:
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM codegraph_index_items
-                WHERE repo_key = ?
-                  AND item_type = ?
-                """,
-                (repo_key, item_type),
-            ).fetchone()
-            return int(row["count"])
-
-    def _add_codegraph_snippet(self, row: dict[str, Any], query: str) -> dict[str, Any]:
-        content = row.get("content") or ""
-        if not content:
-            row["snippet"] = ""
-            return row
-        query_index = content.lower().find(query.lower()) if query else -1
-        if query_index < 0:
-            row["snippet"] = content[:240]
-            return row
-        start = max(0, query_index - 80)
-        end = min(len(content), query_index + len(query) + 160)
-        row["snippet"] = content[start:end]
-        return row
-
     # -- Categories --
 
     def upsert_category(
@@ -335,7 +230,7 @@ class CodeGraphRepository:
     def delete_repository(self, repo_key: str) -> None:
         """硬删除一个代码仓库。
 
-        依赖外键 ON DELETE CASCADE 清除 codegraph_sync_runs / codegraph_index_items。
+        依赖外键 ON DELETE CASCADE 清除 codegraph_sync_runs。
         删除前应由 service 层清理本地镜像目录、停止 Understand Anything 进程，
         并清理能力平面里引用该仓库的 resource 规则（无外键，需手动删）。
         """
