@@ -2,17 +2,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class BaseCronScheduler:

@@ -4,7 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any, TYPE_CHECKING
 
-from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler, now_iso
+from agent_bridge.core.timeutil import utc_iso
+from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler
 
 if TYPE_CHECKING:
     from agent_bridge.app.service import AgentBridgeService
@@ -53,7 +54,7 @@ class DocSyncScheduler(BaseCronScheduler):
         logger.info("DocSync 定时同步开始 actor=%s", admin)
         self._current_run = {
             "status": "running",
-            "started_at": now_iso(),
+            "started_at": utc_iso(),
             "finished_at": None,
             "total": 0,
             "processed": 0,
@@ -68,7 +69,7 @@ class DocSyncScheduler(BaseCronScheduler):
             if self._current_run is not None:
                 self._current_run.update({
                     "status": "succeeded",
-                    "finished_at": now_iso(),
+                    "finished_at": utc_iso(),
                     "processed": result.get("processed", self._current_run.get("processed", 0)),
                     "succeeded": result.get("succeeded", self._current_run.get("succeeded", 0)),
                     "failed": result.get("failed", self._current_run.get("failed", 0)),
@@ -84,7 +85,7 @@ class DocSyncScheduler(BaseCronScheduler):
             if self._current_run is not None:
                 self._current_run.update({
                     "status": "failed",
-                    "finished_at": now_iso(),
+                    "finished_at": utc_iso(),
                     "error": str(exc),
                 })
                 self._last_run = dict(self._current_run)

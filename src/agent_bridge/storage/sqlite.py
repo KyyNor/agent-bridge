@@ -7,11 +7,12 @@ import sqlite3
 import time
 from contextvars import ContextVar
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
 from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEMA
+from agent_bridge.core.timeutil import utc_now
 
 
 class SQLiteStore:
@@ -1788,7 +1789,7 @@ class SQLiteStore:
     def prune_runtime_logs(self, force: bool = False) -> dict[str, int]:
         if self._runtime_log_retention_days <= 0:
             return {"tool_call_logs": 0, "agent_runs": 0}
-        cutoff = (datetime.now(UTC) - timedelta(days=self._runtime_log_retention_days)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff = (utc_now() - timedelta(days=self._runtime_log_retention_days)).strftime("%Y-%m-%d %H:%M:%S")
         deleted = {
             "tool_call_logs": self.governance.purge_tool_call_logs_before(cutoff),
             "agent_runs": self.agent_runs.purge_created_before(cutoff),

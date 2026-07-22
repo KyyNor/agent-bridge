@@ -4,7 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler, now_iso
+from agent_bridge.core.timeutil import utc_iso
+from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class CodeGraphScheduler(BaseCronScheduler):
         logger.info("CodeGraph tick 同步开始 repo=%s", repo_key)
         self._runs[repo_key] = {
             "status": "running",
-            "started_at": now_iso(),
+            "started_at": utc_iso(),
             "finished_at": None,
             "message": "正在同步代码仓库",
             "error": None,
@@ -73,7 +74,7 @@ class CodeGraphScheduler(BaseCronScheduler):
             result = self._service.sync_repository(admin, repo_key)
             self._runs[repo_key].update({
                 "status": "succeeded",
-                "finished_at": now_iso(),
+                "finished_at": utc_iso(),
                 "message": f"同步完成，索引 {result.get('indexed', 0)} 项",
                 "error": None,
             })
@@ -81,7 +82,7 @@ class CodeGraphScheduler(BaseCronScheduler):
         except Exception as exc:
             self._runs[repo_key].update({
                 "status": "failed",
-                "finished_at": now_iso(),
+                "finished_at": utc_iso(),
                 "message": "同步失败",
                 "error": str(exc),
             })

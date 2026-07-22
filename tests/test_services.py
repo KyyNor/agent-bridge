@@ -1204,6 +1204,26 @@ def test_sync_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) 
     assert sync_state["status"] == SyncStateStatus.sync_failed.value
 
 
+def test_sync_missing_adapter_fails_instead_of_falling_back_to_mock(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    source = tmp_path / "Guide.pdf"
+    source.write_bytes(b"one")
+    doc = service.add_document("root", source, ["frontend-docs"], later=True)
+    job = service.store.list_runnable_jobs(actor=None)[0]
+
+    service.registry.remove_backend("mock")
+    assert service._run_job(job) is False
+
+    stored_job = service.store.list_all_jobs()[0]
+    sync_state = service.store.get_sync_state(doc["id"], kb["id"], "mock")
+    assert stored_job["status"] == "failed"
+    assert "not configured or unavailable" in stored_job["error"]
+    assert sync_state["status"] == SyncStateStatus.sync_failed.value
+
+
 def test_delete_failure_updates_sync_state(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb("root", "frontend-docs", "Frontend Docs", "")

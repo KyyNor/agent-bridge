@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 class AgentBridgeError(Exception):
@@ -99,6 +99,8 @@ class BackendDocStatus:
 @dataclass(frozen=True)
 class BackendCapabilities:
     supports_folders: bool
+    supports_agents: bool = False
+    supports_managed_resources: bool = False
 
 
 @dataclass(frozen=True)
@@ -155,3 +157,22 @@ class BackendAdapter(Protocol):
     def get_status(self, backend_kb_id: str, backend_doc_id: str) -> BackendDocStatus: ...
     def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6) -> list[RetrievalResult]: ...
     def ask(self, backend_kb_id: str, question: str, chat_id: str | None = None, session_id: str | None = None, agent_id: str | None = None) -> tuple[AskResult, str]: ...
+
+
+@runtime_checkable
+class AgentManagementBackend(Protocol):
+    """可选的后端 Agent 管理能力。
+
+    应用层仅面向该协议，不感知 Weknora 等具体后端类型。
+    """
+
+    def list_agents(self) -> list[dict[str, Any]]: ...
+    def get_type_presets(self) -> list[dict[str, Any]]: ...
+    def create_agent(self, name: str, preset_config: dict[str, Any]) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class ManagedResourcesBackend(Protocol):
+    """可选的后端托管资源初始化与自愈能力。"""
+
+    def ensure_managed_resources(self) -> dict[str, Any]: ...

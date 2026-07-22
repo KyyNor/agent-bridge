@@ -4,7 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler, now_iso
+from agent_bridge.core.timeutil import utc_iso
+from agent_bridge.knowledge_management.scheduler_base import BaseCronScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class UnderstandingScheduler(BaseCronScheduler):
         logger.info("Understand tick 分析开始 repo=%s", repo_key)
         self._current_run = self._runs[repo_key] = {
             "status": "running",
-            "started_at": now_iso(),
+            "started_at": utc_iso(),
             "finished_at": None,
             "message": "正在执行代码理解",
             "error": None,
@@ -71,7 +72,7 @@ class UnderstandingScheduler(BaseCronScheduler):
             run_status = "succeeded" if result.get("success") else "failed"
             self._runs[repo_key].update({
                 "status": run_status,
-                "finished_at": now_iso(),
+                "finished_at": utc_iso(),
                 "message": (
                     f"理解完成，节点 {result.get('node_count', 0)}，边 {result.get('edge_count', 0)}"
                     if run_status == "succeeded"
@@ -92,7 +93,7 @@ class UnderstandingScheduler(BaseCronScheduler):
         except Exception as exc:
             self._runs[repo_key].update({
                 "status": "failed",
-                "finished_at": now_iso(),
+                "finished_at": utc_iso(),
                 "message": "代码理解失败",
                 "error": str(exc),
             })

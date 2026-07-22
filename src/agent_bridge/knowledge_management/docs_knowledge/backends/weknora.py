@@ -162,7 +162,30 @@ class WeknoraBackend:
         self._raise(response)
 
     def capabilities(self) -> BackendCapabilities:
-        return BackendCapabilities(supports_folders=True)
+        return BackendCapabilities(
+            supports_folders=True,
+            supports_agents=True,
+            supports_managed_resources=True,
+        )
+
+    def ensure_managed_resources(self) -> dict[str, Any]:
+        """确保 Weknora 托管 Agent 存在且模型配置完整。"""
+        result: dict[str, Any] = {"hybrid_agent_id": None, "patched_agents": 0}
+        try:
+            result["hybrid_agent_id"] = self.ensure_hybrid_agent()
+        except Exception as exc:
+            result["hybrid_error"] = str(exc)
+            logger.warning(
+                "Weknora 混合 Agent 自愈失败 原因=%s", exc, exc_info=True
+            )
+        try:
+            result["patched_agents"] = self.ensure_all_agent_models()
+        except Exception as exc:
+            result["models_error"] = str(exc)
+            logger.warning(
+                "Weknora Agent 模型配置自愈失败 原因=%s", exc, exc_info=True
+            )
+        return result
 
     @staticmethod
     def _normalise_remote_path(path: str | None) -> str:

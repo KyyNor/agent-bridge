@@ -31,7 +31,6 @@ from agent_bridge.core.config import (
     AgentBackendConfig,
     AgentBridgePaths,
     AgentRuntimeConfig,
-    BackendConfig,
     ensure_directories,
     load_agent_runtime_config,
     migrate_toml_backends_to_db,
@@ -50,9 +49,8 @@ from agent_bridge.core.domain import (
     ValidationError,
     require_admin_user,
 )
-from agent_bridge.knowledge_management.docs_knowledge.backends.mock import MockBackend
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry, create_registry_from_db
-from agent_bridge.knowledge_management.docs_knowledge.backends.weknora import WeknoraBackend
+from agent_bridge.knowledge_management.docs_knowledge.service import DocsKnowledgeService
 from agent_bridge.knowledge_management.memory.service import MemoryService
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
@@ -72,7 +70,6 @@ ALLOWED_EXTENSIONS = {
     ".txt", ".md", ".markdown", ".csv", ".json",
 }
 UPLOAD_EXTENSIONS = ALLOWED_EXTENSIONS | {".zip"}
-SUPPORTED_BACKEND_TYPES = {"mock", "ragflow", "weknora", "pageindex"}
 _UNSET = object()
 
 
@@ -108,16 +105,19 @@ class AgentBridgeService:
         paths: AgentBridgePaths,
         store: SQLiteStore,
         archive: ArchiveStorage,
-        mock_backend: MockBackend,
         admins: set[str],
     ) -> None:
         self.paths = paths
         self.store = store
         self.archive = archive
-        self.mock_backend = mock_backend
         self.admins = admins
         self._document_ingest_lock = RLock()
         self.registry: BackendRegistry | None = None
+        self.docs_knowledge = DocsKnowledgeService(
+            store=store,
+            admins=admins,
+            registry_provider=lambda: self.registry,
+        )
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         agent_runtime_config = load_agent_runtime_config(paths)
@@ -178,13 +178,15 @@ class AgentBridgeService:
             paths=paths,
             store=SQLiteStore(paths.db_path),
             archive=ArchiveStorage(paths.archive_dir),
-            mock_backend=MockBackend(paths.mock_backend_dir),
             admins=admins,
         )
         service.store.init_schema()
         recovered = service.codegraph.recover_interrupted_sync_runs()
         if recovered:
-            logger.warning("Recovered %s stale CodeGraph sync run(s) left running by a prior process", recovered)
+            logger.warning(
+                "已恢复上一进程遗留的 CodeGraph 中断同步任务 count=%d",
+                recovered,
+            )
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
         logger.info(
@@ -204,22 +206,13 @@ class AgentBridgeService:
         warnings = [asdict(issue) for issue in result.warnings]
         return {"valid": not errors, "errors": errors, "warnings": warnings}
 
+    def ensure_backend_resources(self) -> None:
+        """对所有声明托管资源能力的后端执行自愈。"""
+        self.docs_knowledge.ensure_managed_resources()
+
     def ensure_weknora_agents(self) -> None:
-        if not self.registry:
-            return
-        for slug in self.registry.list_slugs():
-            adapter = self.registry.get(slug)
-            if isinstance(adapter, WeknoraBackend):
-                try:
-                    adapter.ensure_hybrid_agent()
-                except Exception:
-                    logger.warning("确保后端 '%s' 混合智能体失败", slug, exc_info=True)
-                try:
-                    patched = adapter.ensure_all_agent_models()
-                    if patched:
-                        logger.info("后端 '%s' 自动补全 %d 个 agent 的模型配置", slug, patched)
-                except Exception:
-                    logger.warning("后端 '%s' agent 模型自愈失败", slug, exc_info=True)
+        """兼容旧调用名，新代码应使用 :meth:`ensure_backend_resources`。"""
+        self.ensure_backend_resources()
 
     def ensure_managed_plugins(self) -> dict[str, Any]:
         """按 sync_config 拉取/更新 understand-anything 与 claude-mem 两个托管插件仓库。"""
@@ -258,16 +251,7 @@ class AgentBridgeService:
     def create_kb(self, actor: str, slug: str, name: str, description: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         kb = self.store.create_kb(slug=slug, name=name, description=description, created_by=actor)
-        if self.registry:
-            for backend_slug in self.registry.list_slugs():
-                adapter = self.registry.get(backend_slug)
-                if adapter is not None:
-                    try:
-                        backend_kb_id = adapter.create_kb(slug, name)
-                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
-                        self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
-                    except Exception:
-                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
+        self.docs_knowledge.provision_kb(kb)
         return kb
 
     def delete_kb(self, actor: str, kb_slug: str) -> dict[str, Any]:
@@ -291,22 +275,7 @@ class AgentBridgeService:
                 f"请先删除该知识库下的所有文档（仍有 {len(active_docs)} 篇）"
             )
 
-        # 远端检索后端清理：逐个通知后端删除其上镜像的 KB（容错，失败不阻断删除）
-        if self.registry:
-            for target in self.store.list_backend_targets(kb_id):
-                backend_kb_id = target.get("backend_kb_id")
-                if not backend_kb_id:
-                    continue
-                adapter = self.registry.get(target["slug"])
-                if adapter is None:
-                    continue
-                try:
-                    adapter.delete_kb(backend_kb_id)
-                except Exception:
-                    logger.warning(
-                        "删除知识库 %s 时清理远端后端 %s 失败，已忽略", kb_slug, target["slug"],
-                        exc_info=True,
-                    )
+        self.docs_knowledge.delete_remote_kbs(kb)
 
         # 治理软关联清理（无外键）：移除能力平面里引用该 KB 的 resource 规则
         self.store.delete_resource_rules_by_key(
@@ -1828,22 +1797,11 @@ class AgentBridgeService:
         raise NotFound(f"no retrieval backend available for knowledge base '{kb['slug']}'")
 
     def _get_adapter(self, slug: str):
-        if self.registry:
-            adapter = self.registry.get(slug)
-            if adapter is not None:
-                return adapter
-        return self.mock_backend
+        return self.docs_knowledge.get_adapter(slug)
 
     @staticmethod
     def _backend_supports_folders(adapter: Any) -> bool:
-        capability_attr = getattr(adapter, "capabilities", None)
-        if capability_attr is None:
-            return False
-        try:
-            capabilities = capability_attr() if callable(capability_attr) else capability_attr
-        except Exception:
-            return False
-        return bool(getattr(capabilities, "supports_folders", False))
+        return bool(adapter.capabilities().supports_folders)
 
     def _archive_files(self) -> set[Path]:
         if not self.archive.archive_dir.exists():
@@ -1868,65 +1826,18 @@ class AgentBridgeService:
             except OSError:
                 pass
 
-    # -- Backend agents (Weknora) --
+    # -- 后端 Agent 能力（兼容门面） --
 
     def list_backend_agents(self, actor: str, slug: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        adapter = self._get_adapter(slug)
-        if not isinstance(adapter, WeknoraBackend):
-            return []
-        try:
-            agents = adapter.list_agents()
-        except Exception:
-            logger.warning("列出后端 '%s' 的 agent 失败", slug, exc_info=True)
-            return []
-        return [self._normalize_agent(a) for a in agents if isinstance(a, dict) and a.get("id")]
+        return self.docs_knowledge.list_backend_agents(actor, slug)
 
     def list_backend_agent_types(self, actor: str, slug: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        adapter = self._get_adapter(slug)
-        if not isinstance(adapter, WeknoraBackend):
-            return []
-        try:
-            presets = adapter.get_type_presets()
-        except Exception:
-            logger.warning("列出后端 '%s' 的 agent 类型预设失败", slug, exc_info=True)
-            return []
-        return [self._normalize_agent_preset(p) for p in presets if isinstance(p, dict) and p.get("id")]
+        return self.docs_knowledge.list_backend_agent_types(actor, slug)
 
     def create_backend_agent(self, actor: str, slug: str, name: str, preset_id: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        adapter = self._get_adapter(slug)
-        if not isinstance(adapter, WeknoraBackend):
-            raise ValidationError(f"backend '{slug}' does not support agents")
-        presets = adapter.get_type_presets()
-        preset = next((p for p in presets if isinstance(p, dict) and p.get("id") == preset_id), None)
-        if preset is None:
-            raise NotFound(f"agent type preset '{preset_id}' not found in backend '{slug}'")
-        created = adapter.create_agent(name, preset)
-        return self._normalize_agent(created) if isinstance(created, dict) else {"agent_id": None, "name": name, "agent_type": preset_id, "is_builtin": False}
-
-    @staticmethod
-    def _normalize_agent(agent: dict[str, Any]) -> dict[str, Any]:
-        """Project Weknora's raw agent payload into a stable contract for the frontend."""
-        config = agent.get("config") or {}
-        return {
-            "agent_id": agent.get("id"),
-            "name": agent.get("name") or agent.get("id") or "",
-            "agent_type": config.get("agent_type") or config.get("system_prompt_id"),
-            "is_builtin": bool(agent.get("is_builtin", False)),
-        }
-
-    @staticmethod
-    def _normalize_agent_preset(preset: dict[str, Any]) -> dict[str, Any]:
-        i18n = preset.get("i18n") or {}
-        zh_cn = i18n.get("zh-CN") if isinstance(i18n, dict) else {}
-        description = zh_cn.get("description") if isinstance(zh_cn, dict) else None
-        return {
-            "preset_id": preset.get("id"),
-            "description": description or preset.get("id") or "",
-            "config": preset.get("config") or {},
-        }
+        return self.docs_knowledge.create_backend_agent(
+            actor, slug, name, preset_id
+        )
 
     @staticmethod
     def _is_kb_gone(exc: Exception) -> bool:
@@ -1950,15 +1861,15 @@ class AgentBridgeService:
         op = job.get("operation", "?")
         logger.info("文档同步任务 #%d: %s '%s' -> %s", job["id"], op, doc_title, backend)
         self.store.update_job_status(job["id"], SyncJobStatus.running)
-        adapter = self.registry.get(job["backend_slug"]) if self.registry else None
-        if adapter is None:
-            adapter = self.mock_backend
-        supports_folders = self._backend_supports_folders(adapter)
+        adapter = None
+        supports_folders = False
         placement: dict[str, Any] | None = None
         previous_sync_state = self.store.get_sync_state(
             job["doc_id"], job["kb_id"], job["backend_slug"]
         )
         try:
+            adapter = self._get_adapter(job["backend_slug"])
+            supports_folders = self._backend_supports_folders(adapter)
             recovery_key = (job["kb_id"], job["backend_slug"])
             backend_kb_id = (
                 recovery_backend_kbs.get(recovery_key)
@@ -2064,7 +1975,13 @@ class AgentBridgeService:
             logger.info("文档同步任务 #%d: 成功", job["id"])
             return True
         except Exception as exc:
-            if op != Operation.move.value and self._is_kb_gone(exc) and job.get("kb_name") and job.get("kb_slug"):
+            if (
+                adapter is not None
+                and op != Operation.move.value
+                and self._is_kb_gone(exc)
+                and job.get("kb_name")
+                and job.get("kb_slug")
+            ):
                 logger.warning("文档同步任务 #%d: 后端 KB 已丢失，正在重建...", job["id"])
                 try:
                     recovery_key = (job["kb_id"], job["backend_slug"])
@@ -2140,169 +2057,46 @@ class AgentBridgeService:
         return {"slug": doc_slug, "status": "purged"}
 
     def align_backends(self) -> None:
-        if not self.registry:
-            return
-        configured_slugs = set(self.registry.list_slugs())
-        kbs = self.store.list_kbs()
-        for kb in kbs:
-            existing_targets = self.store.list_backend_targets(kb["id"])
-
-            # Mark removed backends as inactive
-            for target in existing_targets:
-                if (
-                    target["slug"] not in configured_slugs
-                    and target["slug"] != "mock"
-                    and target["status"] == "active"
-                ):
-                    self.store.set_backend_target_status(kb["id"], target["slug"], "inactive")
-
-            # Add new backends, repair targets whose remote ID was lost, and
-            # create pending sync jobs for existing docs.
-            for backend_slug in configured_slugs:
-                adapter = self.registry.get(backend_slug)
-                target = next(
-                    (target for target in existing_targets if target["slug"] == backend_slug),
-                    None,
-                )
-                if target is None:
-                    try:
-                        backend_kb_id = adapter.create_kb(kb["slug"], kb["name"]) if adapter else None
-                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
-                        if backend_kb_id:
-                            self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
-                    except Exception:
-                        self.store.ensure_backend_target(kb["id"], slug=backend_slug, backend_type=backend_slug)
-                else:
-                    if adapter and not target.get("backend_kb_id"):
-                        try:
-                            backend_kb_id = adapter.create_kb(kb["slug"], kb["name"])
-                            self.store.update_backend_target_kb_id(
-                                kb["id"], backend_slug, backend_kb_id
-                            )
-                        except Exception:
-                            pass
-                    if target["status"] == "inactive":
-                        self.store.set_backend_target_status(kb["id"], backend_slug, "active")
-                self._backfill_missing_backend_jobs(kb, backend_slug)
-
-    def _backfill_missing_backend_jobs(self, kb: dict[str, Any], backend_slug: str) -> None:
-        runnable_statuses = {
-            SyncJobStatus.pending.value,
-            SyncJobStatus.running.value,
-            SyncJobStatus.failed.value,
-        }
-        runnable_doc_ids = {
-            job["doc_id"]
-            for job in self.store.list_all_jobs(backend_slug=backend_slug)
-            if job["kb_id"] == kb["id"]
-            and job["operation"] == Operation.create.value
-            and job["status"] in runnable_statuses
-        }
-        for doc_id in self.store.list_synced_doc_ids(kb["id"]):
-            sync_state = self.store.get_sync_state(doc_id, kb["id"], backend_slug)
-            if sync_state and sync_state["status"] == SyncStateStatus.synced.value:
-                continue
-            if doc_id in runnable_doc_ids:
-                continue
-            versions = self.store.list_versions(doc_id)
-            version_id = versions[-1]["id"] if versions else None
-            self.store.create_sync_job(
-                doc_id,
-                kb["id"],
-                Operation.create,
-                version_id,
-                backend_slug=backend_slug,
-            )
+        self.docs_knowledge.align_backends()
 
     def list_backends(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        rows = self.store.list_backends()
-        for row in rows:
-            row["api_key_set"] = bool(row.get("api_key"))
-            row.pop("api_key", None)
-            # Determine runtime status
-            if self.registry and row["slug"] in self.registry.backends:
-                row["runtime_status"] = "active"
-            else:
-                row["runtime_status"] = "inactive"
-        return rows
+        return self.docs_knowledge.list_backends(actor)
 
     def add_backend(self, actor: str, slug: str, backend_type: str, base_url: str | None = None,
                     api_key: str | None = None, timeout: int = 120,
                     embedding_model_id: str | None = None, summary_model_id: str | None = None,
                     rerank_model_id: str | None = None) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if backend_type not in SUPPORTED_BACKEND_TYPES:
-            raise ValidationError(f"unsupported backend type: {backend_type}")
-        row = self.store.upsert_backend(
-            slug=slug, backend_type=backend_type, base_url=base_url,
-            api_key=api_key, timeout=timeout,
-            embedding_model_id=embedding_model_id, summary_model_id=summary_model_id,
-            rerank_model_id=rerank_model_id,
+        return self.docs_knowledge.add_backend(
+            actor,
+            slug,
+            backend_type,
+            base_url,
+            api_key,
+            timeout,
+            embedding_model_id,
+            summary_model_id,
+            rerank_model_id,
         )
-        config = BackendConfig(
-            slug=slug, backend_type=backend_type, base_url=base_url,
-            api_key=api_key, timeout=timeout,
-            embedding_model_id=embedding_model_id, summary_model_id=summary_model_id,
-            rerank_model_id=rerank_model_id,
-        )
-        if self.registry:
-            self.registry.add_backend(config)
-            self.align_backends()
-        row["api_key_set"] = bool(api_key)
-        row.pop("api_key", None)
-        row["runtime_status"] = "active"
-        return row
 
     def update_backend(self, actor: str, slug: str, backend_type: str | None = None,
                        base_url: str | None = None, api_key: str | None = None,
                        timeout: int | None = None, embedding_model_id: str | None = None,
                        summary_model_id: str | None = None,
                        rerank_model_id: str | None = None) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        existing = self.store.get_backend(slug)
-        if existing is None:
-            raise NotFound(f"backend '{slug}' not found")
-        resolved_type = backend_type or existing["backend_type"]
-        if resolved_type not in SUPPORTED_BACKEND_TYPES:
-            raise ValidationError(f"unsupported backend type: {resolved_type}")
-        # Keep existing api_key if not provided (empty string means clear, None means keep)
-        resolved_key = existing.get("api_key") if api_key is None else (api_key or None)
-        row = self.store.upsert_backend(
-            slug=slug, backend_type=resolved_type, base_url=base_url if base_url is not None else existing.get("base_url"),
-            api_key=resolved_key, timeout=timeout if timeout is not None else existing.get("timeout", 120),
-            embedding_model_id=embedding_model_id if embedding_model_id is not None else existing.get("embedding_model_id"),
-            summary_model_id=summary_model_id if summary_model_id is not None else existing.get("summary_model_id"),
-            rerank_model_id=rerank_model_id if rerank_model_id is not None else existing.get("rerank_model_id"),
+        return self.docs_knowledge.update_backend(
+            actor,
+            slug,
+            backend_type,
+            base_url,
+            api_key,
+            timeout,
+            embedding_model_id,
+            summary_model_id,
+            rerank_model_id,
         )
-        config = BackendConfig(
-            slug=slug, backend_type=resolved_type,
-            base_url=row.get("base_url"), api_key=resolved_key,
-            timeout=row.get("timeout", 120),
-            embedding_model_id=row.get("embedding_model_id"),
-            summary_model_id=row.get("summary_model_id"),
-            rerank_model_id=row.get("rerank_model_id"),
-        )
-        if self.registry:
-            self.registry.update_backend(config)
-            self.align_backends()
-        row["api_key_set"] = bool(resolved_key)
-        row.pop("api_key", None)
-        row["runtime_status"] = "active"
-        return row
 
     def remove_backend(self, actor: str, slug: str) -> dict[str, str]:
-        require_admin_user(actor, self.admins)
-        existing = self.store.get_backend(slug)
-        if existing is None:
-            raise NotFound(f"backend '{slug}' not found")
-        self.store.delete_backend(slug)
-        if self.registry:
-            self.registry.remove_backend(slug)
-            # Mark all backend_targets for this slug as inactive
-            for kb in self.store.list_kbs():
-                self.store.set_backend_target_status(kb["id"], slug, "inactive")
-        return {"slug": slug, "status": "removed"}
+        return self.docs_knowledge.remove_backend(actor, slug)
 
     def _require_kb_admin_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)

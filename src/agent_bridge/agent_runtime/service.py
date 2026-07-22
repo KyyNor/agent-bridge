@@ -17,7 +17,6 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,6 +31,7 @@ from agent_bridge.agent_runtime.support import (
     write_run_mcp_json,
 )
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
+from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.agent_runtime.types import CodingAgent, CodingAgentFinal, CodingAgentRequest
 from agent_bridge.core.ids import new_run_id
 from agent_bridge.core.domain import ConflictError
@@ -151,7 +151,7 @@ class AgentService:
         """
         timeout_seconds = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
         started = time.monotonic()
-        started_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        started_iso = utc_iso()
         work_dir: Path | None = None
         events: list[dict[str, Any]] = []
         result_msg: CodingAgentFinal | None = None
@@ -473,7 +473,7 @@ class AgentService:
         Logging failures never break the run. Status maps from the result:
         success -> completed, stopped -> stopped, failure -> failed."""
         status = "stopped" if result.stopped else ("completed" if result.ok else "failed")
-        finished_iso = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        finished_iso = utc_iso()
         try:
             self.store.agent_runs.finish_run(
                 run_key,

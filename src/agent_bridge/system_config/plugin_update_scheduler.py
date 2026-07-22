@@ -7,7 +7,7 @@ from typing import Any
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from agent_bridge.knowledge_management.scheduler_base import now_iso
+from agent_bridge.core.timeutil import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class PluginUpdateScheduler:
         logger.info("插件更新开始 plugin=%s actor=%s", plugin_key, admin)
         self._current_run = self._runs[plugin_key] = {
             "status": "running",
-            "started_at": now_iso(),
+            "started_at": utc_iso(),
             "finished_at": None,
             "message": f"正在更新 {plugin_key}",
             "error": None,
@@ -120,7 +120,7 @@ class PluginUpdateScheduler:
             status = "succeeded" if result.get("status") not in {"failed", "missing"} else "failed"
             self._runs[plugin_key].update({
                 "status": status,
-                "finished_at": now_iso(),
+                "finished_at": utc_iso(),
                 "message": result.get("message") or f"{plugin_key} 更新完成",
                 "error": None if status == "succeeded" else result.get("message"),
             })
@@ -133,7 +133,7 @@ class PluginUpdateScheduler:
         except Exception as exc:
             self._runs[plugin_key].update({
                 "status": "failed",
-                "finished_at": now_iso(),
+                "finished_at": utc_iso(),
                 "message": f"{plugin_key} 更新失败",
                 "error": str(exc),
             })

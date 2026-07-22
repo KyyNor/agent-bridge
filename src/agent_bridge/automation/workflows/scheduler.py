@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import threading
+import time as monotonic_time
 from dataclasses import asdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from agent_bridge.core.domain import ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
+from agent_bridge.core.timeutil import local_now
 from agent_bridge.agent_runtime.service import STOPPED_ERROR
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
@@ -107,7 +109,7 @@ class WorkflowScheduler:
             "running": self._scheduler is not None and self._scheduler.running,
             "start_time": self._start_time_str,
             "stop_time": self._stop_time_str,
-            "in_window": self._window_anchor(datetime.now()) is not None,
+            "in_window": self._window_anchor(local_now()) is not None,
             "jobs": [
                 {
                     "repo_key": job.id,
@@ -144,7 +146,7 @@ class WorkflowScheduler:
             self._ensure_tick_job()
             return
         self._schedule_window_boundary_jobs()
-        if self._window_anchor(datetime.now()) is not None:
+        if self._window_anchor(local_now()) is not None:
             self._ensure_tick_job()
             self.tick()
 
@@ -207,7 +209,8 @@ class WorkflowScheduler:
         (finished_today / in-flight slots) exactly once when a new window opens,
         including overnight windows that span midnight.
         """
-        current = now.time()
+        # 调度窗口是本地墙上时间，比较时显式剔除 time 对象上的时区。
+        current = now.timetz().replace(tzinfo=None)
         start = self._start_time
         stop = self._stop_time
         if start is None and stop is None:
@@ -227,7 +230,7 @@ class WorkflowScheduler:
 
     def tick(self) -> None:
         with self._lock:
-            now = datetime.now()
+            now = local_now()
             anchor = self._window_anchor(now)
             if anchor is not None and anchor != self._window_marker:
                 # A new window just opened: clear per-window finished state so
@@ -506,13 +509,18 @@ class WorkflowScheduler:
         )
         if self._executor is None:
             raise RuntimeError("workflow DAG executor is not configured")
+        started_at = monotonic_time.monotonic()
         try:
             run = run or self._store.get_workflow_run(run_id)
             if run is None:
                 raise RuntimeError("workflow run not found after creation")
             plan = plan or self._plan_from_run(run)
             if self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id)
+                return self._finish_stopped(
+                    workflow_key,
+                    run_id,
+                    duration_ms=int((monotonic_time.monotonic() - started_at) * 1000),
+                )
             execution_workflow = {
                 **workflow,
                 "definition": run["definition_snapshot"],
@@ -525,7 +533,11 @@ class WorkflowScheduler:
                 plan=plan,
             ))
             if self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id)
+                return self._finish_stopped(
+                    workflow_key,
+                    run_id,
+                    duration_ms=int((monotonic_time.monotonic() - started_at) * 1000),
+                )
             if execution.status == "no_task":
                 self.finished_today.add(workflow_key)
             if execution.status == "completed" and not any(
@@ -548,11 +560,12 @@ class WorkflowScheduler:
                         raise RuntimeError("workflow task completion failed")
                 else:
                     self._release_revision_mismatch_task(workflow_key, run_id)
+            duration_ms = int((monotonic_time.monotonic() - started_at) * 1000)
             finished = self._store.finish_workflow_run(
                 run_id,
                 expected_status="running",
                 status=execution.status, exit_code=0 if execution.status != "failed" else 1,
-                stdout_path=None, stderr_path=None, error=execution.error, duration_ms=None, output=execution.output,
+                stdout_path=None, stderr_path=None, error=execution.error, duration_ms=duration_ms, output=execution.output,
             )
             if execution.status == "failed":
                 self._release_leased_tasks(workflow_key, run_id, execution.error or "workflow failed")
@@ -561,7 +574,7 @@ class WorkflowScheduler:
                 workflow_key,
                 run_id,
                 execution.status,
-                0,
+                duration_ms,
             )
             return {
                 "status": self._finished_status(finished, execution.status),
@@ -569,9 +582,19 @@ class WorkflowScheduler:
                 "warnings": execution.warnings,
             }
         except Exception as exc:
-            logger.exception("Workflow 执行失败 workflow=%s run=%s", workflow_key, run_id)
+            duration_ms = int((monotonic_time.monotonic() - started_at) * 1000)
+            logger.exception(
+                "Workflow 执行失败 workflow=%s run=%s 耗时=%dms",
+                workflow_key,
+                run_id,
+                duration_ms,
+            )
             if self._is_parent_stop_requested(run_id):
-                return self._finish_stopped(workflow_key, run_id)
+                return self._finish_stopped(
+                    workflow_key,
+                    run_id,
+                    duration_ms=duration_ms,
+                )
             finished = self._store.finish_workflow_run(
                 run_id,
                 expected_status="running",
@@ -580,7 +603,7 @@ class WorkflowScheduler:
                 stdout_path=None,
                 stderr_path=None,
                 error=str(exc),
-                duration_ms=None,
+                duration_ms=duration_ms,
             )
             status = self._finished_status(finished, "failed")
             if status == "failed":
@@ -698,7 +721,9 @@ class WorkflowScheduler:
                 self._run_locks[run_id] = lock
             return lock
 
-    def _finish_stopped(self, workflow_key: str, run_id: str) -> dict[str, Any]:
+    def _finish_stopped(
+        self, workflow_key: str, run_id: str, *, duration_ms: int
+    ) -> dict[str, Any]:
         with self._workflow_run_lock(run_id):
             result = self._store.finish_workflow_run(
                 run_id,
@@ -708,7 +733,7 @@ class WorkflowScheduler:
                 stdout_path=None,
                 stderr_path=None,
                 error=STOPPED_ERROR,
-                duration_ms=None,
+                duration_ms=duration_ms,
             )
             status = self._finished_status(result, "stopped")
             if status == "stopped":

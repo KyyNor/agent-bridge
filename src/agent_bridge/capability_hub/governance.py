@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ from agent_bridge.capability_hub.profiles.docs import (
     stable_hash,
 )
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.timeutil import parse_utc, utc_now
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -38,7 +39,7 @@ VALID_PROFILE_PIN_AUTO_MODES = {"disabled", "ratio", "count"}
 
 
 def make_log_id() -> str:
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = utc_now().strftime("%Y%m%d_%H%M%S")
     return f"call_{stamp}_{uuid.uuid4().hex[:8]}"
 
 
@@ -360,7 +361,7 @@ class CapabilityGovernanceService:
             if target > len(groups):
                 cached_groups = self._get_valid_pin_auto_cache(settings)
                 if cached_groups is None:
-                    now = datetime.utcnow()
+                    now = utc_now()
                     created_from = (now - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
                     cached_groups = [
                         {
@@ -437,8 +438,8 @@ class CapabilityGovernanceService:
         if not cache_json or not computed_at:
             return None
         try:
-            computed = datetime.strptime(str(computed_at), "%Y-%m-%d %H:%M:%S")
-            if datetime.utcnow() - computed >= timedelta(hours=24):
+            computed = parse_utc(computed_at)
+            if computed is None or utc_now() - computed >= timedelta(hours=24):
                 return None
             cache = json.loads(cache_json) if isinstance(cache_json, str) else cache_json
             groups = cache.get("groups") if isinstance(cache, dict) else None

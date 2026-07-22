@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Iterable, Literal, Mapping, Sequence
 
@@ -14,6 +14,7 @@ from agent_bridge.automation.workflows.definition import (
     execution_fingerprint,
     node_execution_payload,
 )
+from agent_bridge.core.timeutil import parse_utc, utc_now
 
 ExecutionMode = Literal["normal", "incremental", "force_full"]
 NodeAction = Literal["execute", "reuse"]
@@ -89,16 +90,7 @@ def _run_sort_key(run: Mapping[str, Any]) -> tuple[str, int, str]:
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        try:
-            parsed = datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return None
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return parse_utc(value)
 
 
 class WorkflowIncrementalPlanner:
@@ -426,7 +418,7 @@ class WorkflowIncrementalPlanner:
             if artifact.get("content_hash") and hashlib.sha256(str(artifact.get("content") or "").encode("utf-8")).hexdigest() != str(artifact["content_hash"]):
                 return self._execute_plan(node_id, node_fingerprint, "artifact_hash_mismatch")
             expires_at = _parse_timestamp(artifact.get("expires_at"))
-            if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+            if expires_at is not None and expires_at <= utc_now():
                 return self._execute_plan(node_id, node_fingerprint, "artifact_expired")
         conditions = _as_list(source.get("condition_results") if "condition_results" in source else source.get("condition_results_json"))
         # A successful node without conditional edges has no condition record.

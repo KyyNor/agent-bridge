@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from typing import Any, Literal
 
 from agent_bridge.automation.workflows.definition import WorkflowGraph, WorkflowNode
@@ -15,6 +14,7 @@ from agent_bridge.automation.workflows.validation import (
     WorkflowDefinitionValidationError,
     collect_graph_issues,
 )
+from agent_bridge.core.timeutil import parse_utc, utc_now
 
 TERMINAL_NODE_STATUSES = {"completed", "skipped", "failed", "cancelled", "warning"}
 
@@ -384,13 +384,8 @@ class WorkflowDagExecutor:
 
     @staticmethod
     def _expired(value: Any) -> bool:
-        try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except ValueError:
-            return True
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed <= datetime.now(timezone.utc)
+        parsed = parse_utc(value)
+        return parsed is None or parsed <= utc_now()
 
     @staticmethod
     def _source_payload(node_plan: NodePlan) -> dict[str, Any]:

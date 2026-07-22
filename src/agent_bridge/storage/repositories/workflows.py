@@ -4,35 +4,21 @@ import hashlib
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from agent_bridge.storage.types import row_to_dict
 from agent_bridge.automation.workflows.models import WorkflowTaskStatus
 from agent_bridge.core.json_util import json_loads as _json_loads
+from agent_bridge.core.timeutil import parse_utc, utc_iso, utc_now
 
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _parse_datetime(value: Any) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        try:
-            parsed = datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return parse_utc(value)
 
 
 def _artifact_id() -> str:
@@ -87,7 +73,7 @@ def _workflow_definition_import_payload(row: sqlite3.Row | None) -> dict[str, An
 
 
 def _datetime_iso(value: datetime | str) -> str:
-    return value.isoformat() if isinstance(value, datetime) else str(value)
+    return utc_iso(value) if isinstance(value, datetime) else str(value)
 
 
 def _run_summary_from_prefixed_row(row: dict[str, Any], prefix: str) -> dict[str, Any] | None:
@@ -401,7 +387,7 @@ class WorkflowsRepository:
         *,
         now: datetime,
     ) -> dict[str, int]:
-        now_iso = now.isoformat()
+        now_iso = utc_iso(now)
         rerun_cutoff = self._workflow_task_rerun_cutoff(conn, now)
         counts = {
             "created": 0,
@@ -486,7 +472,7 @@ class WorkflowsRepository:
         return counts
 
     def upsert_workflow_tasks(self, workflow_key: str, tasks: list[dict[str, Any]]) -> dict[str, int]:
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             return self._apply_workflow_tasks(conn, workflow_key, tasks, now=now)
@@ -496,7 +482,7 @@ class WorkflowsRepository:
         workflow_key: str,
         tasks: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         with self._connect() as conn:
             rerun_cutoff = self._workflow_task_rerun_cutoff(conn, now)
             counts = {
@@ -607,7 +593,7 @@ class WorkflowsRepository:
         import_id: str,
         actor: str,
     ) -> dict[str, Any]:
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             snapshot = conn.execute(
@@ -635,7 +621,7 @@ class WorkflowsRepository:
                 SET status = 'confirmed', confirmed_at = ?
                 WHERE import_id = ? AND status = 'previewed'
                 """,
-                (now.isoformat(), import_id),
+                (utc_iso(now), import_id),
             )
             if updated.rowcount != 1:
                 raise ValueError("workflow task import is no longer previewed")
@@ -646,7 +632,7 @@ class WorkflowsRepository:
         *,
         now: datetime | str | None = None,
     ) -> int:
-        expires_before = _datetime_iso(now) if now is not None else _now_iso()
+        expires_before = _datetime_iso(now) if now is not None else utc_iso()
         with self._connect() as conn:
             return conn.execute(
                 """
@@ -735,7 +721,7 @@ class WorkflowsRepository:
         *,
         now: datetime | str | None = None,
     ) -> int:
-        expires_before = _datetime_iso(now) if now is not None else _now_iso()
+        expires_before = _datetime_iso(now) if now is not None else utc_iso()
         with self._connect() as conn:
             return conn.execute(
                 """
@@ -834,8 +820,9 @@ class WorkflowsRepository:
             return [item for row in rows if (item := _row_payload(row)) is not None]
 
     def lease_workflow_task(self, workflow_key: str, *, run_id: str, lease_seconds: int) -> dict[str, Any] | None:
-        now = _now_iso()
-        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+        current = utc_now()
+        now = utc_iso(current)
+        expires_at = utc_iso(current + timedelta(seconds=lease_seconds))
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -902,7 +889,7 @@ class WorkflowsRepository:
         the timestamp lets multiple flags be ordered chronologically. Returns
         whether a row was updated.
         """
-        flag = flagged_at or _now_iso()
+        flag = flagged_at or utc_iso()
         with self._connect() as conn:
             if task_version is not None:
                 cursor = conn.execute(

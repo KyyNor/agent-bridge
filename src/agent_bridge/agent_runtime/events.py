@@ -7,10 +7,11 @@ records identical event semantics regardless of caller.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, TextIO
 
 import json
+
+from agent_bridge.core.timeutil import utc_iso
 
 # SDK message type names that carry Task-lifecycle (sub-agent) metadata. We key
 # off the type name (not isinstance) so the extraction works even when the SDK
@@ -58,7 +59,7 @@ def event_record(
     **values: Any,
 ) -> dict[str, Any]:
     return {
-        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "created_at": utc_iso(),
         "agent_name": agent_name,
         "source": source,
         "kind": kind,

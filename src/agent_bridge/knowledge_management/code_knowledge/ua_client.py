@@ -390,7 +390,7 @@ class UnderstandAnythingClient:
                 error = f"分析超时（{timeout}s）"
             logger.error(
                 "UA 解析错误 repo=%s 原因=%s 耗时=%dms",
-                repo_dir_name, error, duration_ms, exc_info=True,
+                repo_dir_name, error, duration_ms,
             )
             return UAAnalyzeResult(success=False, error=error, output=output, duration_ms=duration_ms)
 

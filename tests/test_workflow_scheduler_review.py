@@ -54,6 +54,8 @@ def test_scheduler_executes_run_snapshot_and_completes_leased_task(tmp_path):
     assert executor.kwargs["input_data"] == {"topic": "snapshot-input"}
     assert store.completed_task == ("workflow-1", "task-1", "v2", "run-1")
     assert store.finished_run[1]["output"] == {"final": {"text": "ok"}}
+    assert isinstance(store.finished_run[1]["duration_ms"], int)
+    assert store.finished_run[1]["duration_ms"] >= 0
 
 
 def test_scheduler_does_not_complete_task_when_run_revision_is_no_longer_current(tmp_path):

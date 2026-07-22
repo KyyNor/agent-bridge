@@ -5,13 +5,14 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 from pydantic import ValidationError as PydanticValidationError
 
 from agent_bridge.core.domain import AccessDenied, ConflictError, NotFound, ValidationError, require_admin_user
 from agent_bridge.core.diff import text_diff, workflow_structured_diff
+from agent_bridge.core.timeutil import parse_utc, utc_iso, utc_now
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import (
     WorkflowArtifactFormat,
@@ -247,7 +248,7 @@ class WorkflowService:
             return {
                 "format": "agent-bridge.workflow",
                 "format_version": 1,
-                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "exported_at": utc_iso(),
                 "exported_by": actor,
                 "workflow": {
                     key: public[key]
@@ -367,7 +368,7 @@ class WorkflowService:
             }
 
         import_id = f"workflow_import_{uuid.uuid4().hex}"
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expires_at = utc_now() + timedelta(minutes=15)
         self.store.workflows.delete_expired_workflow_definition_imports()
         self.store.workflows.create_workflow_definition_import(
             import_id=import_id,
@@ -383,7 +384,7 @@ class WorkflowService:
         return {
             "import_id": import_id,
             "filename": filename or "workflow.workflow.json",
-            "expires_at": expires_at.isoformat(),
+            "expires_at": utc_iso(expires_at),
             "source_workflow_key": source_workflow_key,
             "target_workflow_key": target_key,
             "operation": operation,
@@ -395,7 +396,7 @@ class WorkflowService:
 
     def confirm_definition_import(self, actor: str, import_id: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         with self.store.transaction():
             snapshot = self.store.workflows.get_workflow_definition_import(import_id)
             if snapshot is None:
@@ -405,11 +406,11 @@ class WorkflowService:
             if snapshot.get("status") != "previewed":
                 raise ConflictError("导入预览已失效，请重新选择文件并预览")
             try:
-                expires_at = datetime.fromisoformat(str(snapshot["expires_at"]).replace("Z", "+00:00"))
+                expires_at = parse_utc(snapshot["expires_at"])
+                if expires_at is None:
+                    raise ValidationError("导入预览过期时间格式无效")
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValidationError("workflow definition import expiry is invalid") from exc
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
             if expires_at <= now:
                 raise ValidationError("workflow definition import expired")
 
@@ -579,12 +580,12 @@ class WorkflowService:
             **actions["summary"],
         }
         import_id = f"task_import_{uuid.uuid4().hex}"
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+        expires_at = utc_now() + timedelta(minutes=30)
         report = {
             "import_id": import_id,
             "filename": parsed.filename,
             "sheet_name": parsed.sheet_name,
-            "expires_at": expires_at.isoformat(),
+            "expires_at": utc_iso(expires_at),
             "can_confirm": can_confirm,
             "summary": summary,
             "rows": rows,
@@ -648,10 +649,8 @@ class WorkflowService:
         if status == "running":
             expires_at = task.get("lease_expires_at")
             if expires_at:
-                try:
-                    return datetime.fromisoformat(expires_at) < datetime.now(timezone.utc)
-                except ValueError:
-                    return False
+                parsed_expires_at = parse_utc(expires_at)
+                return parsed_expires_at is not None and parsed_expires_at < utc_now()
         return False
 
     def execute_task(
