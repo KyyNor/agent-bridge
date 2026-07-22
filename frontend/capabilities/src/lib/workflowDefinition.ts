@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@vue-flow/core'
-import type { AgentRuntimeConfig, ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../../api/types'
+import type { AgentRuntimeConfig, ManagedScript, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowType } from '../api/types'
 
 export interface ManualInputField { path: string; type: string; required: boolean; description: string }
 

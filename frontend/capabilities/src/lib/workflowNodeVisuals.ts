@@ -1,4 +1,4 @@
-import type { WorkflowNodeType } from '../../api/types'
+import type { WorkflowNodeType } from '../api/types'
 
 type WorkflowNodeTone = 'blue' | 'teal' | 'violet' | 'amber'
 export type WorkflowNodeTonePart = 'rail' | 'badge'

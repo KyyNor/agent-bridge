@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationIssuesFor } from '../src/api/client.ts'
-import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, isProtectedSummaryNode, migrateWorkflowGraph } from '../src/views/workflow/workflowDefinition.ts'
+import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, isProtectedSummaryNode, migrateWorkflowGraph } from '../src/lib/workflowDefinition.ts'
 import type { AgentRuntimeConfig, ManagedScript, WorkflowGraph, WorkflowValidationResult } from '../src/api/types.ts'
 
 test('summary graph creates protected markdown and html pair', () => {

@@ -30,11 +30,13 @@ test('execution plan retains reuse and execute nodes with reasons and sources fo
 
 test('WorkflowView previews stale increments and gives completed tasks a force-full entry', () => {
   const view = source('src/views/workflow/WorkflowView.vue')
+  const previewPanel = source('src/components/workflow/WorkflowTaskExecutionPreview.vue')
   assert.match(view, /api\.previewWorkflowRun/)
   assert.match(view, /execution_mode: 'incremental'/)
   assert.match(view, /execution_mode: 'force_full'/)
-  assert.match(view, /复用节点/)
-  assert.match(view, /重新执行节点/)
+  assert.match(view, /<WorkflowTaskExecutionPreview :plan="taskPreview\(task\)"/)
+  assert.match(previewPanel, /复用节点/)
+  assert.match(previewPanel, /重新执行节点/)
   assert.match(view, /全量运行/)
 })
 
@@ -48,7 +50,7 @@ test('WorkflowRunGraph displays node actions, sources, and reuse reasons instead
 
 test('workflow run graph displays node type colors with semantic category tokens', () => {
   const graph = source('src/views/workflow/WorkflowRunGraph.vue')
-  const visuals = source('src/views/workflow/workflowNodeVisuals.ts')
+  const visuals = source('src/lib/workflowNodeVisuals.ts')
 
   assert.match(graph, /workflowNodeToneClass/)
   assert.match(graph, /workflowNodeTypeText/)

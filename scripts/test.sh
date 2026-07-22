@@ -17,7 +17,7 @@ fi
 run_frontend() {
     (
         cd "$ROOT_DIR/frontend/capabilities"
-        npx tsx --test tests/*.test.ts
+        npm run "$1"
     )
 }
 
@@ -26,11 +26,11 @@ case "$MODE" in
         "$PYTHON" -m pytest "$ROOT_DIR/tests" \
             -m "not e2e and not codegraph_cli and not process and not ragflow and not weknora" \
             -n auto "$@"
-        run_frontend
+        run_frontend test
         ;;
     full)
         "$PYTHON" -m pytest "$ROOT_DIR/tests" "$@"
-        run_frontend
+        run_frontend check
         ;;
     integration)
         "$PYTHON" -m pytest \

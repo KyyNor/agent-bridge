@@ -155,7 +155,7 @@ test('workflow import UI supports new, overwrite, diff, and confirmation', () =>
 
 test('workflow canvas distinguishes node types with base category colors', () => {
   const canvas = readSrc('src/views/workflow/WorkflowEditorCanvas.vue')
-  const visuals = readSrc('src/views/workflow/workflowNodeVisuals.ts')
+  const visuals = readSrc('src/lib/workflowNodeVisuals.ts')
 
   assert.match(canvas, /workflowNodeToneClass/)
   assert.match(canvas, /workflowNodeTypeText/)

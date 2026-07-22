@@ -9,9 +9,11 @@ import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { confirm, alert } from '../../composables/useConfirm'
+import { useSubagentDetails } from '../../composables/useSubagentDetails'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
 import WorkflowImportDialog from '../../components/workflow/WorkflowImportDialog.vue'
+import WorkflowTaskExecutionPreview from '../../components/workflow/WorkflowTaskExecutionPreview.vue'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
 import WorkflowConfigDrawer from './WorkflowConfigDrawer.vue'
@@ -28,8 +30,8 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
-import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from './workflowDefinition'
-import { workflowNodeToneClass, workflowNodeTypeText } from './workflowNodeVisuals'
+import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from '../../lib/workflowDefinition'
+import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
   ALL_STATUS_SENTINEL,
@@ -44,6 +46,9 @@ import {
   togglePageTaskSelection,
   runWorkflowTaskQueue,
   runWorkflowTaskResetQueue,
+  canRunNormally,
+  canForceRun,
+  canRunTask,
 } from '../../lib/workflowTasks'
 import {
   distinctActors,
@@ -114,9 +119,6 @@ const runLogs = ref<WorkflowRunLog[]>([])
 const logsLoading = ref(false)
 const progressRunArtifacts = ref<Record<string, WorkflowArtifact[]>>({})
 const progressArtifactsLoading = ref(false)
-const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
-const subagentDetailLoading = ref<Set<string>>(new Set())
-const subagentDetailErrors = ref<Record<string, string>>({})
 const taskError = ref('')
 const clearing = ref(false)
 const clearTarget = ref<WorkflowDefinition | null>(null)
@@ -136,6 +138,19 @@ const progressDetailError = ref('')
 /** Maps a workflow_run_id to its agent_runs.run_key, so subagent-detail (which is
  *  keyed by run_key under /agent-runs) can be resolved from the workflow view. */
 const runIdToAgentRunKey = ref<Record<string, string>>({})
+const taskSubagentDetailState = useSubagentDetails(async (runId, taskIdStr) => {
+  let runKey = runIdToAgentRunKey.value[runId]
+  if (!runKey) {
+    const agentRun = await api.getAgentRunForWorkflowRun(runId)
+    if (!agentRun) throw new Error('未找到该运行对应的 Agent 记录')
+    runKey = agentRun.run_key
+    runIdToAgentRunKey.value = { ...runIdToAgentRunKey.value, [runId]: runKey }
+  }
+  return api.getAgentRunSubagentDetail(runKey, taskIdStr)
+})
+const progressSubagentDetailState = useSubagentDetails(
+  (runKey, taskIdStr) => api.getAgentRunSubagentDetail(runKey, taskIdStr),
+)
 // Task progress page: client-side filter / search / sort (feature 1).
 const taskStatusFilter = ref(ALL_STATUS_SENTINEL)
 const taskTypeFilter = ref('__all__')
@@ -1182,51 +1197,20 @@ function hasDetailContent(detail: WorkflowSubagentDetail | null) {
   return !!detail && (detail.agents.length > 0 || !!detail.task_output)
 }
 
-function subagentDetailKey(runId: string, taskIdStr: string) {
-  return `${runId}:${taskIdStr}`
-}
-
 async function ensureSubagentDetail(runId: string | null | undefined, taskIdStr: string) {
-  if (!runId) return
-  const key = subagentDetailKey(runId, taskIdStr)
-  if (subagentDetails.value[key] || subagentDetailLoading.value.has(key)) return
-  const loading = new Set(subagentDetailLoading.value)
-  loading.add(key)
-  subagentDetailLoading.value = loading
-  const nextErrors = { ...subagentDetailErrors.value }
-  delete nextErrors[key]
-  subagentDetailErrors.value = nextErrors
-  try {
-    // Subagent detail is unified under /agent-runs/{run_key}; resolve the
-    // workflow_run_id to its agent run_key first (cached when events loaded).
-    let runKey = runIdToAgentRunKey.value[runId]
-    if (!runKey) {
-      const agentRun = await api.getAgentRunForWorkflowRun(runId)
-      if (!agentRun) throw new Error('未找到该运行对应的 agent 记录')
-      runKey = agentRun.run_key
-      runIdToAgentRunKey.value = { ...runIdToAgentRunKey.value, [runId]: runKey }
-    }
-    const detail = await api.getAgentRunSubagentDetail(runKey, taskIdStr)
-    subagentDetails.value = { ...subagentDetails.value, [key]: detail }
-  } catch (e: unknown) {
-    subagentDetailErrors.value = { ...subagentDetailErrors.value, [key]: errorMessage(e) }
-  } finally {
-    const done = new Set(subagentDetailLoading.value)
-    done.delete(key)
-    subagentDetailLoading.value = done
-  }
+  await taskSubagentDetailState.ensure(runId, taskIdStr)
 }
 
 function subagentDetail(runId: string | null | undefined, taskIdStr: string) {
-  return runId ? subagentDetails.value[subagentDetailKey(runId, taskIdStr)] || null : null
+  return taskSubagentDetailState.detailFor(runId, taskIdStr)
 }
 
 function subagentDetailLoadingFor(runId: string | null | undefined, taskIdStr: string) {
-  return runId ? subagentDetailLoading.value.has(subagentDetailKey(runId, taskIdStr)) : false
+  return taskSubagentDetailState.isLoading(runId, taskIdStr)
 }
 
 function subagentDetailErrorFor(runId: string | null | undefined, taskIdStr: string) {
-  return runId ? subagentDetailErrors.value[subagentDetailKey(runId, taskIdStr)] || '' : ''
+  return taskSubagentDetailState.errorFor(runId, taskIdStr)
 }
 
 function errorMessage(e: unknown) {
@@ -1638,20 +1622,11 @@ async function toggleTaskArtifacts(task: WorkflowTask) {
   }
 }
 
-/** Whether the task row has a user-triggerable run action. */
-function canExecuteTask(task: WorkflowTask): boolean {
-  if (task.status === 'pending' || task.status === 'stale' || task.status === 'completed') return true
-  if (task.status === 'running' && task.lease_expires_at) {
-    return new Date(task.lease_expires_at).getTime() < Date.now()
-  }
-  return false
-}
-
 function taskExecutionMode(task: WorkflowTask): WorkflowExecutionMode {
   // Preview requests use execution_mode: 'incremental' for stale tasks and
   // execution_mode: 'force_full' for completed tasks with existing output.
   if (task.status === 'stale') return 'incremental'
-  if (task.status === 'completed') return 'force_full'
+  if (canForceRun(task)) return 'force_full'
   return 'normal'
 }
 
@@ -1688,7 +1663,7 @@ function canResetTask(task: WorkflowTask): boolean {
   return task.status === 'completed'
     || task.status === 'failed'
     || task.status === 'abandoned'
-    || (task.status === 'running' && canExecuteTask(task))
+    || (task.status === 'running' && canRunNormally(task))
 }
 
 function taskActionKey(task: WorkflowTask) {
@@ -1855,7 +1830,7 @@ async function runSelectedTasks() {
   taskActionError.value = ''
   try {
     const result = await runWorkflowTaskQueue(queue, {
-      canExecute: canExecuteTask,
+      canExecute: canRunTask,
       execute: task => api.executeWorkflowTask(task.workflow_key, task.task_key, task.task_version || undefined, taskExecutionMode(task)),
       waitForRun: (runId, onUpdate) => waitForBatchRun(runId, token, onUpdate),
       isCancelled: () => token !== batchToken,
@@ -1963,35 +1938,10 @@ async function loadLogs(options: { quiet?: boolean } = {}) {
 }
 
 async function refreshLoadedSubagentDetailsForRun(runId: string) {
-  if (!runId) return
-  const runKey = runIdToAgentRunKey.value[runId]
-  if (!runKey) return
-  const taskIds = Object.keys(subagentDetails.value)
-    .filter(key => key.startsWith(`${runId}:`))
-    .map(key => key.slice(runId.length + 1))
-  if (!taskIds.length) return
-  const entries = await Promise.all(
-    taskIds.map(async taskIdStr => {
-      try {
-        return [subagentDetailKey(runId, taskIdStr), await api.getAgentRunSubagentDetail(runKey, taskIdStr)] as const
-      } catch {
-        return null
-      }
-    }),
-  )
-  const next = { ...subagentDetails.value }
-  for (const entry of entries) {
-    if (entry) next[entry[0]] = entry[1]
-  }
-  subagentDetails.value = next
+  await taskSubagentDetailState.refreshLoaded(runId)
 }
 
 // ===== Progress page: multi agent-run support =====
-
-/** Key used to index subagent details by agent run_key (progress page only). */
-function progressSubagentDetailKey(agentRunKey: string, taskIdStr: string) {
-  return `progress:${agentRunKey}:${taskIdStr}`
-}
 
 /** Load all agent runs associated with the current progress workflow run. */
 async function loadProgressAgentRuns() {
@@ -2045,26 +1995,7 @@ async function loadProgressAgentEvents(options: { quiet?: boolean } = {}) {
 }
 
 async function refreshProgressSubagentDetails(agentRunKey: string) {
-  if (!agentRunKey) return
-  const prefix = progressSubagentDetailKey(agentRunKey, '')
-  const taskIds = Object.keys(subagentDetails.value)
-    .filter(key => key.startsWith(prefix))
-    .map(key => key.slice(prefix.length))
-  if (!taskIds.length) return
-  const entries = await Promise.all(
-    taskIds.map(async taskIdStr => {
-      try {
-        return [progressSubagentDetailKey(agentRunKey, taskIdStr), await api.getAgentRunSubagentDetail(agentRunKey, taskIdStr)] as const
-      } catch {
-        return null
-      }
-    }),
-  )
-  const next = { ...subagentDetails.value }
-  for (const entry of entries) {
-    if (entry) next[entry[0]] = entry[1]
-  }
-  subagentDetails.value = next
+  await progressSubagentDetailState.refreshLoaded(agentRunKey)
 }
 
 /** Switch to a different agent run in the progress page. */
@@ -2076,41 +2007,19 @@ async function selectProgressAgentRun(agentRunKey: string) {
 
 /** Subagent detail for the currently selected progress agent run. */
 function progressSubagentDetail(taskIdStr: string) {
-  const key = progressAgentRunKey.value ? progressSubagentDetailKey(progressAgentRunKey.value, taskIdStr) : ''
-  return key ? subagentDetails.value[key] || null : null
+  return progressSubagentDetailState.detailFor(progressAgentRunKey.value, taskIdStr)
 }
 
 function progressSubagentDetailLoading(taskIdStr: string) {
-  const key = progressAgentRunKey.value ? progressSubagentDetailKey(progressAgentRunKey.value, taskIdStr) : ''
-  return key ? subagentDetailLoading.value.has(key) : false
+  return progressSubagentDetailState.isLoading(progressAgentRunKey.value, taskIdStr)
 }
 
 function progressSubagentDetailError(taskIdStr: string) {
-  const key = progressAgentRunKey.value ? progressSubagentDetailKey(progressAgentRunKey.value, taskIdStr) : ''
-  return key ? subagentDetailErrors.value[key] || '' : ''
+  return progressSubagentDetailState.errorFor(progressAgentRunKey.value, taskIdStr)
 }
 
 async function ensureProgressSubagentDetail(taskIdStr: string) {
-  const agentRunKey = progressAgentRunKey.value
-  if (!agentRunKey) return
-  const key = progressSubagentDetailKey(agentRunKey, taskIdStr)
-  if (subagentDetails.value[key] || subagentDetailLoading.value.has(key)) return
-  const loading = new Set(subagentDetailLoading.value)
-  loading.add(key)
-  subagentDetailLoading.value = loading
-  const nextErrors = { ...subagentDetailErrors.value }
-  delete nextErrors[key]
-  subagentDetailErrors.value = nextErrors
-  try {
-    const detail = await api.getAgentRunSubagentDetail(agentRunKey, taskIdStr)
-    subagentDetails.value = { ...subagentDetails.value, [key]: detail }
-  } catch (e: unknown) {
-    subagentDetailErrors.value = { ...subagentDetailErrors.value, [key]: errorMessage(e) }
-  } finally {
-    const done = new Set(subagentDetailLoading.value)
-    done.delete(key)
-    subagentDetailLoading.value = done
-  }
+  await progressSubagentDetailState.ensure(progressAgentRunKey.value, taskIdStr)
 }
 
 async function loadProgressArtifacts() {
@@ -3170,7 +3079,7 @@ async function confirmClearWorkflow() {
                 </div>
                 <div class="flex items-center gap-1">
                   <Button
-                    v-if="canExecuteTask(task)"
+                    v-if="canRunTask(task)"
                     variant="ghost"
                     size="sm"
                     class="h-8 text-xs text-primary"
@@ -3208,22 +3117,7 @@ async function confirmClearWorkflow() {
                   </Button>
                 </div>
               </div>
-              <div v-if="taskPreview(task)" class="border-t bg-background px-3 py-3">
-                <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span class="font-semibold text-foreground">执行预览</span>
-                  <Badge variant="outline">{{ taskPreview(task)?.mode }}</Badge>
-                  <span class="text-muted-foreground">baseline: {{ taskPreview(task)?.baseline_run_id || '无可复用运行' }}</span>
-                </div>
-                <div class="mb-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                  <span>复用节点 {{ taskPreview(task)?.reusable_node_ids.length || 0 }}</span>
-                  <span>重新执行节点 {{ taskPreview(task)?.affected_node_ids.length || 0 }}</span>
-                </div>
-                <div class="flex flex-wrap gap-1.5">
-                  <Badge v-for="node in taskPreview(task)?.nodes || []" :key="node.node_id" variant="outline">
-                    {{ node.node_id }} · {{ node.action === 'reuse' ? '复用' : '执行' }} · {{ node.reason }}
-                  </Badge>
-                </div>
-              </div>
+              <WorkflowTaskExecutionPreview :plan="taskPreview(task)" />
               <!-- 产出物（feature 2） -->
               <div v-if="isTaskArtifactExpanded(task)" class="space-y-2 border-t bg-muted/20 px-3 py-3">
                 <div v-if="taskArtifactError" class="rounded-md border border-destructive/30 bg-destructive-soft px-2 py-1 text-xs text-destructive-soft-fg">

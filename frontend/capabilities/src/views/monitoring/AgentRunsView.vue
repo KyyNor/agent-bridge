@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { Search, RotateCw, ArrowLeft } from '@lucide/vue'
 import { api } from '../../api/client'
-import type { AgentRun, AgentRunCounts, WorkflowSubagentDetail } from '../../api/types'
+import type { AgentRun, AgentRunCounts } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -24,6 +24,7 @@ import { countAgentRunTabs } from '../../lib/filterTabs'
 import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
 import type { WorkflowRunEvent } from '../../api/types'
 import { buildAgentRunHash, navigateTo, parseSubRoute, routeReturnTo } from '../../lib/navigation'
+import { useSubagentDetails } from '../../composables/useSubagentDetails'
 
 const props = defineProps<{ routeKey?: string }>()
 
@@ -47,46 +48,23 @@ let detailEventsPoll: ReturnType<typeof setInterval> | null = null
 let listRequestToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
-// Sub-agent transcript detail (lazy-loaded when a sub-agent is expanded).
-const subagentDetails = ref<Record<string, WorkflowSubagentDetail>>({})
-const subagentDetailLoading = ref<Set<string>>(new Set())
-const subagentDetailErrors = ref<Record<string, string>>({})
-
-function subagentDetailKey(taskId: string) {
-  return `${activeRunKey.value}:${taskId}`
-}
+// 子 Agent 详情仅在展开时加载；状态管理与 Workflow 页面共用。
+const subagentDetailState = useSubagentDetails(
+  (runKey, taskId) => api.getAgentRunSubagentDetail(runKey, taskId),
+)
 
 async function ensureSubagentDetail(taskId: string) {
-  const runKey = activeRunKey.value
-  if (!runKey) return
-  const key = subagentDetailKey(taskId)
-  if (subagentDetails.value[key] || subagentDetailLoading.value.has(key)) return
-  const loading = new Set(subagentDetailLoading.value)
-  loading.add(key)
-  subagentDetailLoading.value = loading
-  const nextErrors = { ...subagentDetailErrors.value }
-  delete nextErrors[key]
-  subagentDetailErrors.value = nextErrors
-  try {
-    const detail = await api.getAgentRunSubagentDetail(runKey, taskId)
-    subagentDetails.value = { ...subagentDetails.value, [key]: detail }
-  } catch (e: unknown) {
-    subagentDetailErrors.value = { ...subagentDetailErrors.value, [key]: e instanceof Error ? e.message : '加载失败' }
-  } finally {
-    const done = new Set(subagentDetailLoading.value)
-    done.delete(key)
-    subagentDetailLoading.value = done
-  }
+  await subagentDetailState.ensure(activeRunKey.value, taskId)
 }
 
 function subagentDetail(taskId: string) {
-  return subagentDetails.value[subagentDetailKey(taskId)] || null
+  return subagentDetailState.detailFor(activeRunKey.value, taskId)
 }
 function subagentDetailLoadingFor(taskId: string) {
-  return subagentDetailLoading.value.has(subagentDetailKey(taskId))
+  return subagentDetailState.isLoading(activeRunKey.value, taskId)
 }
 function subagentDetailErrorFor(taskId: string) {
-  return subagentDetailErrors.value[subagentDetailKey(taskId)] || ''
+  return subagentDetailState.errorFor(activeRunKey.value, taskId)
 }
 
 /** The run key extracted from the sub-route (e.g. "agent-runs/<runKey>"). */
@@ -210,7 +188,7 @@ async function loadDetail(runKey: string) {
 async function loadDetailEvents(runKey: string, options: { quiet?: boolean } = {}) {
   try {
     detailEvents.value = await api.getAgentRunEvents(runKey)
-    if (options.quiet) await refreshLoadedSubagentDetails(runKey)
+    if (options.quiet) await subagentDetailState.refreshLoaded(runKey)
     if (detailRun.value?.run_key === runKey && detailRun.value.status === 'running') {
       const refreshed = await api.getAgentRun(runKey)
       detailRun.value = refreshed
@@ -222,27 +200,6 @@ async function loadDetailEvents(runKey: string, options: { quiet?: boolean } = {
       detailError.value = e instanceof Error ? e.message : '事件流加载失败'
     }
   }
-}
-
-async function refreshLoadedSubagentDetails(runKey: string) {
-  const taskIds = Object.keys(subagentDetails.value)
-    .filter(key => key.startsWith(`${runKey}:`))
-    .map(key => key.slice(runKey.length + 1))
-  if (!taskIds.length) return
-  const entries = await Promise.all(
-    taskIds.map(async taskId => {
-      try {
-        return [subagentDetailKey(taskId), await api.getAgentRunSubagentDetail(runKey, taskId)] as const
-      } catch {
-        return null
-      }
-    }),
-  )
-  const next = { ...subagentDetails.value }
-  for (const entry of entries) {
-    if (entry) next[entry[0]] = entry[1]
-  }
-  subagentDetails.value = next
 }
 
 function stopDetailEventsPolling() {

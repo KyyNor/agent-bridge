@@ -9,7 +9,9 @@ import {
   distinctTypes,
   taskStats,
   taskStatusLabel,
-  canExecuteTask,
+  canForceRun,
+  canRunNormally,
+  canRunTask,
   matchTaskFilter,
   taskId,
   toggleTaskSelection,
@@ -71,10 +73,23 @@ test('stale tasks have an incremental label, order, stats, and status filter', (
   )
 })
 
-test('canExecuteTask permits pending and stale tasks but not completed tasks', () => {
-  assert.equal(canExecuteTask(makeTask({ status: 'pending' })), true)
-  assert.equal(canExecuteTask(makeTask({ status: 'stale' })), true)
-  assert.equal(canExecuteTask(makeTask({ status: 'completed' })), false)
+test('任务执行规则区分普通执行与强制全量执行', () => {
+  const now = Date.parse('2026-07-22T08:00:00Z')
+  const pending = makeTask({ status: 'pending' })
+  const stale = makeTask({ status: 'stale' })
+  const completed = makeTask({ status: 'completed' })
+  const expired = makeTask({ status: 'running', lease_expires_at: '2026-07-22T07:59:59Z' })
+  const active = makeTask({ status: 'running', lease_expires_at: '2026-07-22T08:00:01Z' })
+
+  assert.equal(canRunNormally(pending, now), true)
+  assert.equal(canRunNormally(stale, now), true)
+  assert.equal(canRunNormally(expired, now), true)
+  assert.equal(canRunNormally(active, now), false)
+  assert.equal(canRunNormally(completed, now), false)
+  assert.equal(canForceRun(completed), true)
+  assert.equal(canForceRun(pending), false)
+  assert.equal(canRunTask(completed, now), true)
+  assert.equal(canRunTask(active, now), false)
 })
 
 test('distinctTypes returns sorted, non-empty types', () => {

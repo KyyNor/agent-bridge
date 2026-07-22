@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "npm run test && npm run typecheck && npm run build",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit"
@@ -46,6 +48,7 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "terser": "^5.49.0",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.3",
     "vite": "^8.1.5",
     "vue-tsc": "^3.3.7"

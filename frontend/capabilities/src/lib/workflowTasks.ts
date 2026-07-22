@@ -35,12 +35,23 @@ export function taskStatusLabel(status: string): string {
   return TASK_STATUS_LABELS[status] || status
 }
 
-export function canExecuteTask(task: WorkflowTask): boolean {
+/** 普通执行：仅允许尚未完成的任务，或租约已经过期的运行中任务。 */
+export function canRunNormally(task: WorkflowTask, nowMs = Date.now()): boolean {
   if (task.status === 'pending' || task.status === 'stale') return true
   if (task.status === 'running' && task.lease_expires_at) {
-    return new Date(task.lease_expires_at).getTime() < Date.now()
+    return new Date(task.lease_expires_at).getTime() < nowMs
   }
   return false
+}
+
+/** 强制全量执行：只用于已有产物的已完成任务。 */
+export function canForceRun(task: WorkflowTask): boolean {
+  return task.status === 'completed'
+}
+
+/** 任务行是否应展示任一种可执行操作。 */
+export function canRunTask(task: WorkflowTask, nowMs = Date.now()): boolean {
+  return canRunNormally(task, nowMs) || canForceRun(task)
 }
 
 export function distinctStatuses(tasks: WorkflowTask[]): string[] {

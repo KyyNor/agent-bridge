@@ -13,6 +13,21 @@ from agent_bridge.api.app import create_app
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _capability_page_source_fixture() -> None:
+    """用前端入口源码提供页面测试夹具，不依赖工作区残留的 Vite 构建产物。
+
+    夹具写入的目录本就被 gitignore 排除。这里不在 teardown 删除文件，避免
+    pytest-xdist 的不同 worker 相互删除仍在使用的共享夹具。
+    """
+    package_dir = Path(__file__).parents[1] / "src" / "agent_bridge"
+    target = package_dir / "static" / "capabilities" / "index.html"
+    source = Path(__file__).parents[1] / "frontend" / "capabilities" / "index.html"
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
 def _git_repo(path: Path) -> Path:
     path.mkdir()
     subprocess.run(["git", "init", "--initial-branch=master"], cwd=path, check=True, capture_output=True)
@@ -174,7 +189,7 @@ def test_capability_static_assets_use_chinese_labels(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
     html = capability_admin_page("root")
-    assert "capabilit" in html
+    assert "智能中枢" in html
 
 def test_capability_admin_page_uses_modal_service_form_and_no_refresh_buttons(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
