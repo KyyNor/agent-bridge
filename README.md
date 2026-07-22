@@ -8,6 +8,7 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 通过 Profile 管理来源级与资源级访问策略，并将常用工具提升为 pinned tools。
 - 管理文档知识库、CodeGraph 代码知识和 claude-mem 记忆。
 - 支持 Claude、Codex、OpenCode、Pi 等 Coding Agent 后端。
+- OpenCode 由 Agent Bridge 按 run 启动并回收本机 server，通过 HTTP API 执行会话。
 - 通过结构化 DAG 编排 Agent、脚本、任务领取和 Markdown/HTML 产物。
 - 管理服务端 Python 脚本、Skill、同步调度和插件更新。
 - 在 `/admin/capabilities` 提供管理后台，在 `/mcp` 提供 MetaMCP 入口。

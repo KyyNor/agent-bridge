@@ -1,21 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any
 
-from agent_bridge.agent_runtime.adapters.jsonl_cli import (
-    JsonlCliProcess,
-    effective_prompt as _effective_prompt,
-    extract_json_object as _extract_json,
-    first_int as _first_int,
-    first_number as _first_number,
-    first_string as _first_string,
-    first_value as _first_value,
-    is_generic_final_result as _is_generic_final_result,
-    joined_text as _joined_text,
-    row_is_error as _is_error,
-    walk_values as _walk_values,
+from agent_bridge.agent_runtime.adapters.jsonl_cli import effective_prompt as _effective_prompt
+from agent_bridge.agent_runtime.adapters.opencode_server import (
+    OpenCodeServerError,
+    OpenCodeServerProcess,
 )
 from agent_bridge.agent_runtime.events import event_record
 from agent_bridge.agent_runtime.types import (
@@ -33,242 +27,251 @@ class _OpenCodeRun:
     command: str
     model: str | None = None
     auto_approve: bool = True
-    _cli: JsonlCliProcess | None = field(default=None, init=False)
+    _server: OpenCodeServerProcess | None = field(default=None, init=False)
 
     async def updates(self) -> AsyncIterator[CodingAgentUpdate]:
-        prompt = _effective_prompt(self.request)
-        args = _build_command(
-            command=self.command,
-            prompt=prompt,
-            cwd=str(self.request.cwd),
-            model=self.request.model or self.model,
-            auto_approve=self.auto_approve,
-        )
-        cli = JsonlCliProcess(request=self.request, args=args)
-        self._cli = cli
-        await cli.start()
-        final_text_parts: list[str] = []
-        final: CodingAgentFinal | None = None
+        directory = str(self.request.cwd.resolve())
+        server = OpenCodeServerProcess(command=self.command)
+        self._server = server
         try:
-            async for raw in cli.rows():
-                events, maybe_text, maybe_final = _events_from_opencode_row(raw)
-                if maybe_text:
-                    final_text_parts.append(maybe_text)
-                if maybe_final is not None:
-                    final = maybe_final
-                yield CodingAgentUpdate(raw=raw, events=events, final=maybe_final)
-            return_code = await cli.wait()
-            if return_code != 0:
-                message = cli.stderr_summary() or f"opencode exited with status {return_code}"
-                yield CodingAgentUpdate(
-                    events=[_opencode_event("error", status="failed", message=message)],
-                    final=CodingAgentFinal(is_error=True, result=message),
-                )
-                return
-            if final is None:
-                yield CodingAgentUpdate(
-                    final=CodingAgentFinal(result=_joined_text(final_text_parts))
-                )
-            else:
-                completed_final = _completed_final_from_text(final, final_text_parts, self.request)
-                if completed_final is not final:
-                    yield CodingAgentUpdate(final=completed_final)
+            await server.start(cwd=self.request.cwd)
+            session_response = await server.request_json(
+                "POST",
+                "/session",
+                params={"directory": directory},
+                payload={},
+            )
+            session_id = _session_id(session_response)
+            if not session_id:
+                raise OpenCodeServerError("OpenCode server 创建会话未返回 session id")
+
+            response = await server.request_json(
+                "POST",
+                f"/session/{session_id}/message",
+                params={"directory": directory},
+                payload=_message_payload(self.request, self.model),
+            )
+            if self.request.on_native_message is not None:
+                self.request.on_native_message(response)
+            events, final = _events_from_opencode_response(response, session_id=session_id)
+            yield CodingAgentUpdate(raw=response, events=events, final=final)
+        except asyncio.CancelledError:
+            raise
+        except OpenCodeServerError as exc:
+            yield CodingAgentUpdate(
+                events=[_opencode_event("error", status="failed", message=str(exc))],
+                final=CodingAgentFinal(is_error=True, result=str(exc)),
+            )
         finally:
-            await cli.close()
+            await server.close()
+            self._server = None
 
     async def abort(self) -> None:
-        if self._cli is not None:
-            await self._cli.abort()
+        if self._server is not None:
+            await self._server.abort()
 
 
-def _build_command(
+def _message_payload(request: CodingAgentRequest, configured_model: str | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "parts": [{"type": "text", "text": _effective_prompt(request)}],
+    }
+    model = _model_payload(request.model or configured_model)
+    if model is not None:
+        payload["model"] = model
+    if request.output_schema:
+        payload["format"] = {
+            "type": "json_schema",
+            "schema": request.output_schema,
+            "retryCount": 2,
+        }
+    return payload
+
+
+def _model_payload(value: str | None) -> dict[str, str] | None:
+    if not value:
+        return None
+    provider_id, separator, model_id = value.partition("/")
+    if not separator or not provider_id or not model_id:
+        return None
+    return {"providerID": provider_id, "modelID": model_id}
+
+
+def _events_from_opencode_response(
+    response: Any,
     *,
-    command: str,
-    prompt: str,
-    cwd: str,
-    model: str | None,
-    auto_approve: bool,
-) -> list[str]:
-    args = [command, "run", "--format", "json", "--dir", cwd]
-    if model:
-        args.extend(["--model", model])
-    if auto_approve:
-        args.append("--auto")
-    args.append(prompt)
-    return args
-
-
-def _completed_final_from_text(
-    final: CodingAgentFinal,
-    final_text_parts: list[str],
-    request: CodingAgentRequest,
-) -> CodingAgentFinal:
-    """Prefer the assistant's final text over OpenCode's generic status final.
-
-    ``opencode run --format json`` may emit a terminal row such as
-    ``{"type":"result","result":"done"}`` after the actual assistant answer has
-    already streamed as a text event. For schema-based runs that loses the JSON
-    object the UI needs, so normalize the final value once the process ends.
-    """
-    text = _joined_text(final_text_parts)
-    if not text or final.is_error:
-        return final
-    final_result = str(final.result or "").strip()
-    if _is_generic_final_result(final_result):
-        return replace(final, result=text)
-    if request.output_schema and _extract_json(final_result) is None and _extract_json(text) is not None:
-        return replace(final, result=text)
-    return final
-
-
-def _events_from_opencode_row(
-    row: dict[str, Any],
-) -> tuple[list[dict[str, Any]], str | None, CodingAgentFinal | None]:
-    row_type = str(row.get("type") or row.get("event") or row.get("kind") or "").lower()
-    session_id = _first_string(row, "sessionID", "session_id", "sessionId", "id")
-    status = _opencode_status(row)
-
-    if row_type in {"text", "message", "message.part.updated", "content"}:
-        text = _text_from_row(row)
-        if not text:
-            return [], None, None
-        return [
-            _opencode_event(
-                "agent_message",
-                agent_role="main",
-                message=text,
-                session_id=session_id,
-            )
-        ], text, None
-
-    if row_type in {"tool", "tool_use", "tool.call", "tool_call", "tool_result", "tool.result"}:
-        tool_name = _tool_name(row)
-        # OpenCode's JSONL tool row stores the call id and lifecycle state under
-        # ``part`` / ``part.state``. Prefer the provider call id over the
-        # nested part id: the latter identifies the message part, not the
-        # executable tool call and cannot correlate call/result events.
-        tool_use_id = _first_string(
-            row,
-            "callID",
-            "callId",
-            "call_id",
-            "toolUseID",
-            "tool_use_id",
-            "toolCallId",
-            "tool_call_id",
-            "id",
-        )
-        failed = _is_error(row) or status in {"error", "failed", "failure"}
-        input_value = _first_value(row, "input", "arguments", "args", "params")
-        output_value = _first_value(row, "output", "result", "content", "response")
-        duration_ms = _opencode_tool_duration_ms(row)
-        events = [
-            _opencode_event(
-                "tool_call",
-                agent_role="main",
-                status="started",
-                tool_name=tool_name,
-                tool_use_id=tool_use_id,
-                **({"input": input_value} if input_value is not None else {}),
-                message=f"调用工具 {tool_name}",
-                session_id=session_id,
-            )
-        ]
-        if row_type in {"tool_result", "tool.result"} or status in {"completed", "success", "error", "failed"}:
-            result_status = "failed" if failed else "success"
-            events.append(
-                _opencode_event(
-                    "tool_result",
-                    agent_role="main",
-                    status=result_status,
-                    tool_name=tool_name,
-                    tool_use_id=tool_use_id,
-                    **({"output": output_value} if output_value is not None else {}),
-                    **(
-                        {"duration_ms": duration_ms, "duration_status": "provider"}
-                        if duration_ms is not None
-                        else {}
-                    ),
-                    message=f"工具 {tool_name} 调用{'失败' if result_status == 'failed' else '成功'}",
-                    session_id=session_id,
-                )
-            )
-        return events, None, None
-
-    if row_type in {"step_start", "step.started", "status"} or status:
-        message = status or row_type
-        return [
-            _opencode_event(
-                "status",
-                agent_role="main",
-                status=message,
-                message=message,
-                session_id=session_id,
-            )
-        ], None, None
-
-    if row_type in {"step_finish", "step.finished", "result", "done"}:
-        message = _text_from_row(row) or str(row.get("reason") or "done")
-        failed = _is_error(row)
-        final = CodingAgentFinal(
-            is_error=failed,
+    session_id: str,
+) -> tuple[list[dict[str, Any]], CodingAgentFinal]:
+    """把 ``POST /session/{id}/message`` 的同步响应投影为统一事件。"""
+    if not isinstance(response, dict):
+        message = "OpenCode server 返回的消息不是 JSON object"
+        return [_opencode_event("error", status="failed", message=message)], CodingAgentFinal(
+            is_error=True,
             result=message,
             session_id=session_id,
-            cost_usd=_first_number(row, "cost", "cost_usd", "total_cost_usd"),
-            num_turns=_first_int(row, "turns", "num_turns"),
         )
-        return [
+
+    info = response.get("info") if isinstance(response.get("info"), dict) else {}
+    parts = response.get("parts") if isinstance(response.get("parts"), list) else []
+    events: list[dict[str, Any]] = []
+    text_parts: list[str] = []
+    structured_found = False
+    structured_output: Any | None = None
+    total_cost = _number(info, "cost", "cost_usd", "total_cost_usd")
+    num_turns = _integer(info, "turns", "num_turns")
+    if num_turns is None:
+        num_turns = 0
+    model = _model_name(info)
+    error_message = _opencode_error_message(info.get("error"))
+
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        part_type = str(part.get("type") or "").lower()
+        if part_type == "text":
+            text = _string(part.get("text"))
+            if text:
+                text_parts.append(text)
+                events.append(
+                    _opencode_event(
+                        "agent_message",
+                        agent_role="main",
+                        message=text,
+                        session_id=session_id,
+                    )
+                )
+        elif part_type == "tool":
+            tool_events, structured = _tool_events_from_part(part, session_id=session_id)
+            events.extend(tool_events)
+            if structured is not None:
+                structured_found = True
+                structured_output = structured
+        elif part_type == "step-finish":
+            tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+            cost = _number(part, "cost", "cost_usd", "total_cost_usd")
+            if cost is not None:
+                total_cost = cost
+            num_turns += 1
+            events.append(
+                _opencode_event(
+                    "status",
+                    agent_role="main",
+                    status=str(part.get("reason") or "step-finished"),
+                    message=str(part.get("reason") or "step-finished"),
+                    session_id=session_id,
+                    usage={
+                        key: value
+                        for key, value in {
+                            "input_tokens": _integer(tokens, "input"),
+                            "output_tokens": _integer(tokens, "output"),
+                            "reasoning_tokens": _integer(tokens, "reasoning"),
+                        }.items()
+                        if value is not None
+                    },
+                    total_cost_usd=cost,
+                )
+            )
+
+    if num_turns == 0:
+        num_turns = None
+    if error_message:
+        final = CodingAgentFinal(
+            is_error=True,
+            result=error_message,
+            session_id=session_id,
+            cost_usd=total_cost,
+            num_turns=num_turns,
+            model=model,
+        )
+        events.append(
             _opencode_event(
-                "result",
+                "error",
+                status="failed",
+                message=error_message,
+                session_id=session_id,
+            )
+        )
+        return events, final
+
+    result = (
+        json.dumps(structured_output, ensure_ascii=False)
+        if structured_found
+        else "\n".join(text_parts).strip()
+    )
+    return events, CodingAgentFinal(
+        result=result,
+        structured_output=structured_output if structured_found else None,
+        session_id=session_id,
+        cost_usd=total_cost,
+        num_turns=num_turns,
+        model=model,
+    )
+
+
+def _tool_events_from_part(
+    part: dict[str, Any],
+    *,
+    session_id: str,
+) -> tuple[list[dict[str, Any]], Any | None]:
+    tool_name = _string(part.get("tool")) or "unknown"
+    tool_use_id = _string(part.get("callID")) or _string(part.get("callId")) or _string(part.get("id"))
+    state = _mapping(part.get("state"))
+    status = (_string(state.get("status")) or "").lower()
+    input_value = state.get("input")
+    if input_value is None:
+        input_value = part.get("input")
+    output_value = state.get("output")
+    if output_value is None:
+        output_value = state.get("error")
+    failed = status in {"error", "failed", "failure"} or state.get("error") is not None
+    events = [
+        _opencode_event(
+            "tool_call",
+            agent_role="main",
+            status="started",
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            **({"input": input_value} if input_value is not None else {}),
+            message=f"调用工具 {tool_name}",
+            session_id=session_id,
+        )
+    ]
+    if status in {"completed", "success", "error", "failed", "failure"}:
+        duration_ms = _tool_duration_ms(state)
+        events.append(
+            _opencode_event(
+                "tool_result",
                 agent_role="main",
                 status="failed" if failed else "success",
-                message=message,
-                session_id=session_id,
-                total_cost_usd=final.cost_usd,
-                num_turns=final.num_turns,
-            )
-        ], None, final
-
-    if row_type in {"error", "failed"} or _is_error(row):
-        message = _text_from_row(row) or str(row.get("error") or row.get("message") or row_type)
-        return [
-            _opencode_event("error", status="failed", message=message, session_id=session_id)
-        ], None, CodingAgentFinal(is_error=True, result=message, session_id=session_id)
-
-    text = _text_from_row(row)
-    if text:
-        return [
-            _opencode_event(
-                "agent_message",
-                agent_role="main",
-                message=text,
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                **({"output": output_value} if output_value is not None else {}),
+                **(
+                    {"duration_ms": duration_ms, "duration_status": "provider"}
+                    if duration_ms is not None
+                    else {}
+                ),
+                message=f"工具 {tool_name} 调用{'失败' if failed else '成功'}",
                 session_id=session_id,
             )
-        ], text, None
-    return [], None, None
+        )
+
+    structured = input_value if tool_name.lower() == "structuredoutput" and not failed else None
+    return events, structured
 
 
-def _opencode_status(row: dict[str, Any]) -> str:
-    """Return the normalized lifecycle status from an OpenCode JSON row.
+def _mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
 
-    Tool rows emitted by ``opencode --format json`` use
-    ``part.state.status`` rather than a top-level ``status`` field. The shared
-    recursive value helper also keeps compatibility with flatter event shapes.
-    """
-    value = _first_value(row, "status")
-    if value is None:
-        value = row.get("state")
-    return str(value or "").lower()
 
-
-def _opencode_tool_duration_ms(row: dict[str, Any]) -> int | None:
-    """Read the provider-measured duration from a completed tool row."""
-    part = row.get("part")
-    if not isinstance(part, dict):
-        return None
-    state = part.get("state")
-    if not isinstance(state, dict):
-        return None
+def _tool_duration_ms(state: dict[str, Any]) -> int | None:
     timing = state.get("time")
     if not isinstance(timing, dict):
         return None
@@ -281,46 +284,70 @@ def _opencode_tool_duration_ms(row: dict[str, Any]) -> int | None:
     return max(0, int(finished - started))
 
 
+def _session_id(response: Any) -> str | None:
+    if not isinstance(response, dict):
+        return None
+    return _string(response.get("id")) or _string(response.get("sessionID"))
+
+
+def _model_name(info: dict[str, Any]) -> str | None:
+    provider = _string(info.get("providerID"))
+    model = _string(info.get("modelID"))
+    if provider and model:
+        return f"{provider}/{model}"
+    return model or provider
+
+
+def _opencode_error_message(error: Any) -> str | None:
+    if not error:
+        return None
+    if isinstance(error, dict):
+        data = error.get("data") if isinstance(error.get("data"), dict) else {}
+        message = _string(data.get("message")) or _string(error.get("message"))
+        if message:
+            return message
+    return _string(error) or "OpenCode message failed"
+
+
+def _number(value: Any, *keys: str) -> float | None:
+    if not isinstance(value, dict):
+        return None
+    for key in keys:
+        candidate = value.get(key)
+        if isinstance(candidate, int | float) and not isinstance(candidate, bool):
+            return float(candidate)
+    return None
+
+
+def _integer(value: Any, *keys: str) -> int | None:
+    if not isinstance(value, dict):
+        return None
+    for key in keys:
+        candidate = value.get(key)
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            return candidate
+    return None
+
+
+def _string(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
 def _opencode_event(kind: str, **values: Any) -> dict[str, Any]:
-    return event_record(kind, agent_name="opencode", source="opencode_cli", **values)
-
-
-def _text_from_row(row: dict[str, Any]) -> str:
-    for value in _walk_values(row):
-        if isinstance(value, dict):
-            value_type = value.get("type")
-            if value_type in {"text", "message", "content"} and isinstance(value.get("text"), str):
-                return value["text"].strip()
-    for key in ("text", "message", "content", "result", "output"):
-        value = _first_string(row, key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-def _tool_name(row: dict[str, Any]) -> str:
-    for key in ("tool", "tool_name", "toolName", "name"):
-        value = row.get(key)
-        if isinstance(value, str) and value:
-            return value
-    for value in _walk_values(row):
-        if isinstance(value, dict):
-            for key in ("tool", "tool_name", "toolName", "name"):
-                item = value.get(key)
-                if isinstance(item, str) and item:
-                    return item
-    return "unknown"
+    return event_record(kind, agent_name="opencode", source="opencode_server", **values)
 
 
 class OpenCodeCodingAgent:
-    source = "opencode_cli"
+    source = "opencode_server"
     capabilities = CodingAgentCapabilities(
         supports_mcp=True,
-        supports_native_json_schema=False,
+        supports_native_json_schema=True,
         supports_skills=False,
         supports_subagents=False,
         supports_cost=True,
-        supports_turn_count=False,
+        supports_turn_count=True,
         supports_abort=True,
         supports_partial_messages=False,
     )

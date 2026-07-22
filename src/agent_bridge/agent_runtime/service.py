@@ -240,7 +240,7 @@ class AgentService:
                 effective_mcp_servers = (
                     mcp_servers if mcp_servers is not None else work_dir / ".mcp.json"
                 )
-                if getattr(coding_agent, "source", None) == "opencode_cli":
+                if getattr(coding_agent, "source", None) in {"opencode_cli", "opencode_server"}:
                     write_run_mcp_json(
                         work_dir / "opencode.json",
                         build_opencode_mcp_config(mcp_config),

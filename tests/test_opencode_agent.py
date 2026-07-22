@@ -1,46 +1,47 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
 
 from agent_bridge.agent_runtime.adapters.opencode import (
     OpenCodeCodingAgent,
-    _build_command,
-    _completed_final_from_text,
-    _events_from_opencode_row,
+    _events_from_opencode_response,
+    _message_payload,
+    _model_payload,
 )
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
 from agent_bridge.agent_runtime.support import build_opencode_mcp_config
-from agent_bridge.agent_runtime.types import CodingAgentFinal, CodingAgentRequest
+from agent_bridge.agent_runtime.types import CodingAgentRequest
 from agent_bridge.core.config import AgentBackendConfig, AgentRuntimeConfig
 
 
-def test_opencode_build_command_uses_json_dir_model_and_auto() -> None:
-    args = _build_command(
-        command="opencode",
-        prompt="hello",
-        cwd="/tmp/project",
-        model="anthropic/claude-sonnet-4",
-        auto_approve=True,
+def test_opencode_message_payload_uses_server_api_and_native_schema(tmp_path) -> None:
+    request = CodingAgentRequest(
+        prompt="make json",
+        cwd=tmp_path,
+        mcp_servers={},
+        setting_sources=[],
+        output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
+        system_prompt_append="follow the project rules",
     )
 
-    assert args == [
-        "opencode",
-        "run",
-        "--format",
-        "json",
-        "--dir",
-        "/tmp/project",
-        "--model",
-        "anthropic/claude-sonnet-4",
-        "--auto",
-        "hello",
-    ]
+    assert _message_payload(request, "anthropic/claude-sonnet-4") == {
+        "model": {"providerID": "anthropic", "modelID": "claude-sonnet-4"},
+        "parts": [{"type": "text", "text": "follow the project rules\n\nmake json"}],
+        "format": {
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"answer": {"type": "string"}}},
+            "retryCount": 2,
+        },
+    }
+    assert _model_payload("invalid-model") is None
 
 
-def test_opencode_supports_mcp_and_uses_opencode_config_shape() -> None:
+def test_opencode_supports_mcp_and_native_json_schema() -> None:
     agent = OpenCodeCodingAgent()
 
     assert agent.capabilities.supports_mcp is True
+    assert agent.capabilities.supports_native_json_schema is True
+    assert agent.capabilities.supports_cost is True
     assert build_opencode_mcp_config(
         {
             "mcpServers": {
@@ -62,132 +63,81 @@ def test_opencode_supports_mcp_and_uses_opencode_config_shape() -> None:
     }
 
 
-def test_opencode_text_event_maps_to_agent_message() -> None:
-    events, text, final = _events_from_opencode_row(
-        {"type": "message.part.updated", "sessionID": "s1", "part": {"type": "text", "text": "hello"}}
-    )
-
-    assert text == "hello"
-    assert final is None
-    assert len(events) == 1
-    assert events[0]["agent_name"] == "opencode"
-    assert events[0]["source"] == "opencode_cli"
-    assert events[0]["kind"] == "agent_message"
-    assert events[0]["message"] == "hello"
-    assert events[0]["session_id"] == "s1"
-
-
-def test_opencode_text_event_accepts_nested_text_without_part_type() -> None:
-    events, text, final = _events_from_opencode_row(
-        {"type": "message.part.updated", "sessionID": "s1", "part": {"text": "nested"}}
-    )
-
-    assert text == "nested"
-    assert final is None
-    assert events[0]["message"] == "nested"
-
-
-def test_opencode_tool_event_maps_to_call_and_result() -> None:
-    events, text, final = _events_from_opencode_row(
+def test_opencode_server_response_maps_text_tools_and_structured_output() -> None:
+    events, final = _events_from_opencode_response(
         {
-            "type": "tool_result",
-            "sessionID": "s1",
-            "tool": "bash",
-            "toolUseID": "tool_1",
-            "status": "completed",
-            "input": {"command": "pwd"},
-            "output": {"stdout": "/tmp"},
-        }
-    )
-
-    assert text is None
-    assert final is None
-    assert [event["kind"] for event in events] == ["tool_call", "tool_result"]
-    assert events[0]["tool_name"] == "bash"
-    assert events[0]["input"] == {"command": "pwd"}
-    assert events[1]["status"] == "success"
-    assert events[1]["output"] == {"stdout": "/tmp"}
-
-
-def test_opencode_nested_completed_tool_use_maps_to_call_and_result() -> None:
-    events, text, final = _events_from_opencode_row(
-        {
-            "type": "tool_use",
-            "sessionID": "s1",
-            "part": {
-                "type": "tool",
-                "tool": "bash",
-                "callID": "call_123",
-                "id": "prt_123",
-                "state": {
-                    "status": "completed",
-                    "input": {"command": "pwd"},
-                    "output": {"stdout": "/tmp"},
-                    "time": {"start": 1000, "end": 1123},
-                },
+            "info": {
+                "providerID": "anthropic",
+                "modelID": "claude-sonnet-4",
+                "cost": 0.12,
             },
-        }
+            "parts": [
+                {"type": "text", "text": "先检查项目。"},
+                {
+                    "type": "tool",
+                    "tool": "bash",
+                    "callID": "call_123",
+                    "id": "prt_123",
+                    "state": {
+                        "status": "completed",
+                        "input": {"command": "pwd"},
+                        "output": {"stdout": "/tmp"},
+                        "time": {"start": 1000, "end": 1123},
+                    },
+                },
+                {
+                    "type": "tool",
+                    "tool": "StructuredOutput",
+                    "callID": "call_structured",
+                    "state": json_state(
+                        {
+                            "status": "completed",
+                            "input": {"answer": "ok"},
+                            "output": "Structured output captured successfully.",
+                            "metadata": {"valid": True},
+                        }
+                    ),
+                },
+                {
+                    "type": "step-finish",
+                    "reason": "stop",
+                    "tokens": {"input": 10, "output": 20, "reasoning": 3},
+                    "cost": 0.12,
+                },
+            ],
+        },
+        session_id="ses_123",
     )
 
-    assert text is None
-    assert final is None
-    assert [event["kind"] for event in events] == ["tool_call", "tool_result"]
-    assert events[0]["tool_use_id"] == "call_123"
-    assert events[0]["input"] == {"command": "pwd"}
+    assert [event["kind"] for event in events] == [
+        "agent_message",
+        "tool_call",
+        "tool_result",
+        "tool_call",
+        "tool_result",
+        "status",
+    ]
     assert events[1]["tool_use_id"] == "call_123"
-    assert events[1]["status"] == "success"
-    assert events[1]["output"] == {"stdout": "/tmp"}
-    assert events[1]["duration_ms"] == 123
-    assert events[1]["duration_status"] == "provider"
+    assert events[1]["input"] == {"command": "pwd"}
+    assert events[2]["output"] == {"stdout": "/tmp"}
+    assert events[2]["duration_ms"] == 123
+    assert final.structured_output == {"answer": "ok"}
+    assert final.result == '{"answer": "ok"}'
+    assert final.session_id == "ses_123"
+    assert final.cost_usd == 0.12
+    assert final.num_turns == 1
+    assert final.model == "anthropic/claude-sonnet-4"
 
 
-def test_opencode_result_event_maps_to_final() -> None:
-    events, text, final = _events_from_opencode_row(
-        {"type": "step_finish", "sessionID": "s1", "result": "done", "cost": 0.01}
+def test_opencode_server_response_accepts_error_info() -> None:
+    events, final = _events_from_opencode_response(
+        {"info": {"error": {"data": {"message": "provider unavailable"}}}, "parts": []},
+        session_id="ses_123",
     )
 
-    assert text is None
-    assert final is not None
-    assert final.result == "done"
-    assert final.session_id == "s1"
-    assert final.cost_usd == 0.01
-    assert events[0]["kind"] == "result"
-
-
-def test_opencode_completed_final_prefers_text_over_generic_done_for_schema() -> None:
-    request = CodingAgentRequest(
-        prompt="make json",
-        cwd=Path("/tmp/project"),
-        mcp_servers={},
-        setting_sources=[],
-        output_schema={"type": "object"},
-    )
-    final = CodingAgentFinal(result="done", session_id="s1")
-
-    completed = _completed_final_from_text(
-        final,
-        ['```json\n{"summary": "ok", "script": {"code": "def main(envelope):\\n    return {}\\n"}}\n```'],
-        request,
-    )
-
-    assert completed.result != "done"
-    assert '"summary": "ok"' in str(completed.result)
-    assert completed.session_id == "s1"
-
-
-def test_opencode_completed_final_preserves_specific_result() -> None:
-    request = CodingAgentRequest(
-        prompt="say hi",
-        cwd=Path("/tmp/project"),
-        mcp_servers={},
-        setting_sources=[],
-    )
-    final = CodingAgentFinal(result="specific final", session_id="s1")
-
-    completed = _completed_final_from_text(final, ["streamed text"], request)
-
-    assert completed is final
-    assert completed.result == "specific final"
+    assert events[-1]["kind"] == "error"
+    assert final.is_error is True
+    assert final.result == "provider unavailable"
 
 
 def test_registry_can_create_opencode_backend() -> None:
@@ -210,3 +160,7 @@ def test_registry_can_create_opencode_backend() -> None:
     assert isinstance(agent, OpenCodeCodingAgent)
     assert agent.command == "/usr/local/bin/opencode"
     assert agent.model == "anthropic/claude-sonnet-4"
+
+
+def json_state(value: dict[str, object]) -> str:
+    return json.dumps(value)

@@ -82,7 +82,7 @@ Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。cl
 
 Agent 运行观测也走统一规范化事件流：工具事件包含 `input`/`output`（短内容内联，超过阈值落到运行目录 `payloads/` 并返回安全相对引用），工具结果包含 `started_at`、`finished_at` 和 `duration_ms`；运行准备、后端执行、收尾和总耗时以 `stage` 事件记录。SQLite 保存可查询的摘要和完整事件列表，JSONL 负责运行中的实时追加和原始消息留档。
 
-Codex/OpenCode/Pi 的 JSONL 子进程生命周期统一由 `adapters/jsonl_cli.py` 管理，包括：
+Codex/Pi 的 JSONL 子进程生命周期统一由 `adapters/jsonl_cli.py` 管理，包括：
 
 - 启动与 stdout JSONL 解码；
 - stderr 收集和摘要；
@@ -90,6 +90,13 @@ Codex/OpenCode/Pi 的 JSONL 子进程生命周期统一由 `adapters/jsonl_cli.p
 - abort 的 terminate、等待、kill 升级。
 
 各 adapter 只保留命令参数、协议事件映射和终态语义，不复制公共进程骨架。
+
+OpenCode 使用 `opencode serve --port 0 --hostname 127.0.0.1` 的 server HTTP 模式。每次
+Agent run 由 `adapters/opencode_server.py` 启动一个独立 server，等待监听地址和 HTTP 就绪后，
+通过 `POST /session?directory=...` 创建会话，再调用
+`POST /session/{id}/message?directory=...`。server 在 run 完成、失败、停止或超时后统一回收；
+结构化输出使用 OpenCode 的 `format.type=json_schema`，从 `StructuredOutput` tool part 的
+`state.input` 提取，工具事件从 response 的 `parts` 统一归一化。
 
 Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没有实例级差异配置，不能提供真实价值；未来引入实例化配置后再扩展一对多模型。
 

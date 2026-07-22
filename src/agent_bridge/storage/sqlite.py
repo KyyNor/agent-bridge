@@ -642,6 +642,7 @@ class SQLiteStore:
         """Infer backend_key for historical agent runs that predate the column."""
         for backend_key, marker in [
             ("opencode", "opencode_cli"),
+            ("opencode", "opencode_server"),
             ("codex", "codex_cli"),
             ("claude", "claude_agent_sdk"),
         ]:
