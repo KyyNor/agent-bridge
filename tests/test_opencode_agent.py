@@ -109,6 +109,38 @@ def test_opencode_tool_event_maps_to_call_and_result() -> None:
     assert events[1]["output"] == {"stdout": "/tmp"}
 
 
+def test_opencode_nested_completed_tool_use_maps_to_call_and_result() -> None:
+    events, text, final = _events_from_opencode_row(
+        {
+            "type": "tool_use",
+            "sessionID": "s1",
+            "part": {
+                "type": "tool",
+                "tool": "bash",
+                "callID": "call_123",
+                "id": "prt_123",
+                "state": {
+                    "status": "completed",
+                    "input": {"command": "pwd"},
+                    "output": {"stdout": "/tmp"},
+                    "time": {"start": 1000, "end": 1123},
+                },
+            },
+        }
+    )
+
+    assert text is None
+    assert final is None
+    assert [event["kind"] for event in events] == ["tool_call", "tool_result"]
+    assert events[0]["tool_use_id"] == "call_123"
+    assert events[0]["input"] == {"command": "pwd"}
+    assert events[1]["tool_use_id"] == "call_123"
+    assert events[1]["status"] == "success"
+    assert events[1]["output"] == {"stdout": "/tmp"}
+    assert events[1]["duration_ms"] == 123
+    assert events[1]["duration_status"] == "provider"
+
+
 def test_opencode_result_event_maps_to_final() -> None:
     events, text, final = _events_from_opencode_row(
         {"type": "step_finish", "sessionID": "s1", "result": "done", "cost": 0.01}

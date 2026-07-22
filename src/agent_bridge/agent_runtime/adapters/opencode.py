@@ -124,9 +124,9 @@ def _completed_final_from_text(
 def _events_from_opencode_row(
     row: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], str | None, CodingAgentFinal | None]:
-    row_type = str(row.get("type") or row.get("event") or row.get("kind") or "")
+    row_type = str(row.get("type") or row.get("event") or row.get("kind") or "").lower()
     session_id = _first_string(row, "sessionID", "session_id", "sessionId", "id")
-    status = str(row.get("status") or row.get("state") or "")
+    status = _opencode_status(row)
 
     if row_type in {"text", "message", "message.part.updated", "content"}:
         text = _text_from_row(row)
@@ -143,10 +143,25 @@ def _events_from_opencode_row(
 
     if row_type in {"tool", "tool_use", "tool.call", "tool_call", "tool_result", "tool.result"}:
         tool_name = _tool_name(row)
-        tool_use_id = _first_string(row, "id", "toolUseID", "tool_use_id", "callID")
-        failed = _is_error(row)
+        # OpenCode's JSONL tool row stores the call id and lifecycle state under
+        # ``part`` / ``part.state``. Prefer the provider call id over the
+        # nested part id: the latter identifies the message part, not the
+        # executable tool call and cannot correlate call/result events.
+        tool_use_id = _first_string(
+            row,
+            "callID",
+            "callId",
+            "call_id",
+            "toolUseID",
+            "tool_use_id",
+            "toolCallId",
+            "tool_call_id",
+            "id",
+        )
+        failed = _is_error(row) or status in {"error", "failed", "failure"}
         input_value = _first_value(row, "input", "arguments", "args", "params")
         output_value = _first_value(row, "output", "result", "content", "response")
+        duration_ms = _opencode_tool_duration_ms(row)
         events = [
             _opencode_event(
                 "tool_call",
@@ -169,6 +184,11 @@ def _events_from_opencode_row(
                     tool_name=tool_name,
                     tool_use_id=tool_use_id,
                     **({"output": output_value} if output_value is not None else {}),
+                    **(
+                        {"duration_ms": duration_ms, "duration_status": "provider"}
+                        if duration_ms is not None
+                        else {}
+                    ),
                     message=f"工具 {tool_name} 调用{'失败' if result_status == 'failed' else '成功'}",
                     session_id=session_id,
                 )
@@ -226,6 +246,39 @@ def _events_from_opencode_row(
             )
         ], text, None
     return [], None, None
+
+
+def _opencode_status(row: dict[str, Any]) -> str:
+    """Return the normalized lifecycle status from an OpenCode JSON row.
+
+    Tool rows emitted by ``opencode --format json`` use
+    ``part.state.status`` rather than a top-level ``status`` field. The shared
+    recursive value helper also keeps compatibility with flatter event shapes.
+    """
+    value = _first_value(row, "status")
+    if value is None:
+        value = row.get("state")
+    return str(value or "").lower()
+
+
+def _opencode_tool_duration_ms(row: dict[str, Any]) -> int | None:
+    """Read the provider-measured duration from a completed tool row."""
+    part = row.get("part")
+    if not isinstance(part, dict):
+        return None
+    state = part.get("state")
+    if not isinstance(state, dict):
+        return None
+    timing = state.get("time")
+    if not isinstance(timing, dict):
+        return None
+    started = timing.get("start")
+    finished = timing.get("end")
+    if not isinstance(started, int | float) or isinstance(started, bool):
+        return None
+    if not isinstance(finished, int | float) or isinstance(finished, bool):
+        return None
+    return max(0, int(finished - started))
 
 
 def _opencode_event(kind: str, **values: Any) -> dict[str, Any]:

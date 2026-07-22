@@ -64,6 +64,26 @@ def test_tool_timing_tracker_correlates_call_and_result() -> None:
     assert result["duration_ms"] >= 0
 
 
+def test_tool_timing_tracker_preserves_provider_duration() -> None:
+    tracker = ToolTimingTracker()
+    normalized = tracker.apply(
+        [
+            {"kind": "tool_call", "status": "started", "tool_use_id": "call_1"},
+            {
+                "kind": "tool_result",
+                "status": "success",
+                "tool_use_id": "call_1",
+                "duration_ms": 123,
+                "duration_status": "provider",
+            },
+        ]
+    )
+
+    assert normalized[1]["duration_ms"] == 123
+    assert normalized[1]["duration_status"] == "provider"
+    assert tracker.close_open() == []
+
+
 def test_stage_timer_emits_elapsed_stage_record() -> None:
     event = StageTimer("backend.run", agent_name="codex").finish()
 

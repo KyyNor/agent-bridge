@@ -149,18 +149,21 @@ class ToolTimingTracker:
             if kind in {"tool_call", "tool_result"} and tool_id:
                 event["call_id"] = tool_id
             if kind == "tool_call" and event.get("status") == "started" and tool_id:
-                started_at = str(event.get("created_at") or utc_iso())
+                started_at = str(event.get("started_at") or event.get("created_at") or utc_iso())
                 self._open[tool_id] = _OpenToolCall(started_at, time.monotonic())
                 event["started_at"] = started_at
             elif kind == "tool_result" and tool_id:
-                finished_at = str(event.get("created_at") or utc_iso())
+                finished_at = str(event.get("finished_at") or event.get("created_at") or utc_iso())
                 event["finished_at"] = finished_at
                 opened = self._open.pop(tool_id, None)
                 if opened is not None:
                     event["started_at"] = opened.started_at
-                    event["duration_ms"] = max(
-                        0, int((time.monotonic() - opened.started_monotonic) * 1000)
-                    )
+                    if not isinstance(event.get("duration_ms"), int | float) or isinstance(
+                        event.get("duration_ms"), bool
+                    ):
+                        event["duration_ms"] = max(
+                            0, int((time.monotonic() - opened.started_monotonic) * 1000)
+                        )
                 else:
                     event["duration_status"] = "unavailable"
             normalized.append(event)
