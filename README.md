@@ -10,7 +10,8 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 支持 Claude、Codex、OpenCode、Pi 等 Coding Agent 后端。
 - OpenCode 由 Agent Bridge 按 run 启动并回收本机 server，通过 HTTP API 执行会话；当前使用
   `prompt_async` + `/event` SSE 实时接收文本、阶段和工具事件，OpenCode V1 事件映射与 server
-  生命周期分开，便于未来替换 V2 client。
+  生命周期分开，便于未来替换 V2 client；运行时间轴会合并工具调用/结果和文本增量，同时保留
+  原始事件用于诊断。
 - 通过结构化 DAG 编排 Agent、脚本、任务领取和 Markdown/HTML 产物。
 - 管理服务端 Python 脚本、Skill、同步调度和插件更新。
 - 在 `/admin/capabilities` 提供管理后台，在 `/mcp` 提供 MetaMCP 入口。

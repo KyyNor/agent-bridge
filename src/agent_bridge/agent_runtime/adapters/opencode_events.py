@@ -31,6 +31,7 @@ class _OpenCodeEventMapper:
     _tool_started_at: dict[str, int | float] = field(default_factory=dict)
     _step_started_at: dict[str, int | float] = field(default_factory=dict)
     _reasoning_started_at: dict[str, int | float] = field(default_factory=dict)
+    _reasoning_texts: dict[str, str] = field(default_factory=dict)
     _structured_candidates: dict[str, Any] = field(default_factory=dict)
     _structured_found: bool = False
     _structured_output: Any | None = None
@@ -185,6 +186,7 @@ class _OpenCodeEventMapper:
 
         if event_type == "session.next.reasoning.ended":
             reasoning_id = _string(properties.get("reasoningID")) or "reasoning"
+            reasoning_text = _string(properties.get("text")) or self._reasoning_texts.get(reasoning_id)
             duration = _duration_from(
                 self._reasoning_started_at.pop(reasoning_id, None),
                 _event_timestamp(properties),
@@ -197,11 +199,10 @@ class _OpenCodeEventMapper:
                 "reasoning_id": reasoning_id,
                 "session_id": self.session_id,
             }
+            if reasoning_text:
+                values["detail"] = reasoning_text
             if duration is not None:
                 values.update(duration_ms=duration, duration_status="provider")
-            # Do not copy reasoning text into the canonical user-visible event
-            # stream. The raw native event remains in messages.jsonl for
-            # diagnostics, while the timeline exposes the phase and duration.
             return [_opencode_event("status", **values)], None
 
         if event_type == "session.next.tool.input.started":
@@ -397,6 +398,9 @@ class _OpenCodeEventMapper:
         if part_type == "reasoning":
             part_id = _string(part.get("id")) or "reasoning"
             self._reasoning_part_ids.add(part_id)
+            text = _string(part.get("text"))
+            if text:
+                self._reasoning_texts[part_id] = text
             duration = _duration_from(_part_time(part, "start"), _part_time(part, "end"))
             values: dict[str, Any] = {
                 "agent_role": "main",
@@ -406,6 +410,8 @@ class _OpenCodeEventMapper:
                 "reasoning_id": part_id,
                 "session_id": self.session_id,
             }
+            if self._reasoning_texts.get(part_id):
+                values["detail"] = self._reasoning_texts[part_id]
             if duration is not None:
                 values.update(duration_ms=duration, duration_status="provider")
             return [_opencode_event("status", **values)], None
@@ -498,6 +504,7 @@ class _OpenCodeEventMapper:
             return [], None
         field_name = _string(properties.get("field")) or ""
         if part_id in self._reasoning_part_ids or "reasoning" in field_name.lower():
+            self._reasoning_texts[part_id] = self._reasoning_texts.get(part_id, "") + delta
             return [], None
         if field_name not in {"text", "content"}:
             return [], None

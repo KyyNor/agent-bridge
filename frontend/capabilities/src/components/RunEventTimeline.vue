@@ -73,12 +73,12 @@ function onToggle(taskId: string) {
   if (wasCollapsed) emit('expand', taskId)
 }
 
-function payloadRef(event: WorkflowRunEvent, side: 'input' | 'output'): string {
+function payloadRef(event: WorkflowRunEvent, side: 'input' | 'output' | 'detail'): string {
   const value = event[`${side}_payload_ref`]
   return typeof value === 'string' ? value : ''
 }
 
-function payloadPreview(event: WorkflowRunEvent, side: 'input' | 'output'): string {
+function payloadPreview(event: WorkflowRunEvent, side: 'input' | 'output' | 'detail'): string {
   const preview = event[`${side}_preview`]
   if (typeof preview === 'string') return preview
   const value = event[side]
@@ -91,7 +91,7 @@ function payloadPreview(event: WorkflowRunEvent, side: 'input' | 'output'): stri
   }
 }
 
-function payloadSize(event: WorkflowRunEvent, side: 'input' | 'output'): string {
+function payloadSize(event: WorkflowRunEvent, side: 'input' | 'output' | 'detail'): string {
   const value = event[`${side}_bytes`]
   if (typeof value !== 'number') return ''
   if (value < 1024) return `${value} B`
@@ -145,7 +145,7 @@ function payloadError(ref: string): string {
               <pre>{{ loadedPayload(payloadRef(entry.event, 'input')) || payloadPreview(entry.event, 'input') }}</pre>
               <div v-if="payloadError(payloadRef(entry.event, 'input'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'input')) }}</div>
             </div>
-            <div v-if="entry.event.kind === 'tool_result' && payloadPreview(entry.event, 'output')" class="tl-tool-payload">
+            <div v-if="(entry.event.kind === 'tool_result' || entry.event.kind === 'tool_call') && payloadPreview(entry.event, 'output')" class="tl-tool-payload">
               <div class="tl-tool-payload-head">
                 <span>输出<span v-if="payloadSize(entry.event, 'output')"> · {{ payloadSize(entry.event, 'output') }}</span></span>
                 <button
@@ -160,6 +160,21 @@ function payloadError(ref: string): string {
               <pre>{{ loadedPayload(payloadRef(entry.event, 'output')) || payloadPreview(entry.event, 'output') }}</pre>
               <div v-if="payloadError(payloadRef(entry.event, 'output'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'output')) }}</div>
             </div>
+          </div>
+          <div v-if="payloadPreview(entry.event, 'detail')" class="tl-event-detail">
+            <div class="tl-tool-payload-head">
+              <span>详细信息<span v-if="payloadSize(entry.event, 'detail')"> · {{ payloadSize(entry.event, 'detail') }}</span></span>
+              <button
+                v-if="payloadRef(entry.event, 'detail') && !loadedPayload(payloadRef(entry.event, 'detail'))"
+                type="button"
+                class="tl-payload-button"
+                @click.stop="emit('load-payload', payloadRef(entry.event, 'detail'))"
+              >
+                查看完整内容
+              </button>
+            </div>
+            <pre>{{ loadedPayload(payloadRef(entry.event, 'detail')) || payloadPreview(entry.event, 'detail') }}</pre>
+            <div v-if="payloadError(payloadRef(entry.event, 'detail'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'detail')) }}</div>
           </div>
         </div>
       </div>
@@ -292,6 +307,8 @@ function payloadError(ref: string): string {
 .tl-tool-payload{min-width:0;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--muted);overflow:hidden}
 .tl-tool-payload-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 9px;color:var(--muted-foreground);font-size:11px;font-weight:600}
 .tl-tool-payload pre{margin:0;padding:7px 9px;max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--foreground)}
+.tl-event-detail{padding:0 14px 11px}
+.tl-event-detail pre{margin:0;padding:9px 10px;max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--muted);border-radius:var(--radius-control);font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--foreground)}
 .tl-payload-button{border:1px solid var(--border);border-radius:var(--radius-compact);padding:2px 7px;color:var(--primary);background:var(--card);font-size:10px;cursor:pointer}
 .tl-payload-button:hover{background:var(--accent)}
 .tl-payload-error{padding:4px 9px;color:var(--destructive);font-size:11px}

@@ -31,6 +31,26 @@ def test_large_tool_payload_is_written_and_read_by_relative_ref(tmp_path) -> Non
     assert json.loads(payload) == value
 
 
+def test_large_event_detail_is_written_and_read_by_relative_ref(tmp_path) -> None:
+    value = "reasoning " + "x" * (INLINE_PAYLOAD_BYTES + 1)
+    event = externalize_event_payloads(
+        {
+            "kind": "status",
+            "status": "reasoning-ended",
+            "detail": value,
+        },
+        tmp_path,
+    )
+
+    assert "detail" not in event
+    assert event["detail_truncated"] is True
+    assert event["detail_storage_status"] == "run_file"
+    assert event["detail_payload_ref"].startswith("payloads/")
+    payload, media_type = read_payload(tmp_path, event["detail_payload_ref"])
+    assert media_type.startswith("text/plain")
+    assert payload.decode("utf-8") == value
+
+
 def test_payload_ref_cannot_escape_run_directory(tmp_path) -> None:
     try:
         read_payload(tmp_path, "../outside.json")

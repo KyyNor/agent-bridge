@@ -501,6 +501,7 @@ export interface WorkflowRunEvent {
   kind: string
   status?: string
   message?: string
+  detail?: string
   tool_name?: string
   tool_use_id?: string
   call_id?: string
@@ -508,14 +509,19 @@ export interface WorkflowRunEvent {
   output?: unknown
   input_preview?: string
   output_preview?: string
+  detail_preview?: string
   input_payload_ref?: string
   output_payload_ref?: string
+  detail_payload_ref?: string
   input_bytes?: number
   output_bytes?: number
+  detail_bytes?: number
   input_truncated?: boolean
   output_truncated?: boolean
+  detail_truncated?: boolean
   input_storage_status?: string
   output_storage_status?: string
+  detail_storage_status?: string
   started_at?: string
   finished_at?: string
   duration_ms?: number

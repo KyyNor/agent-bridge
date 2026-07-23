@@ -97,8 +97,12 @@ Agent run 由 `adapters/opencode_server.py` 启动一个独立 server，等待�
 `GET /event?directory=...` 的 SSE，再调用
 `POST /session/{id}/prompt_async?directory=...`。server 在 run 完成、失败、停止或超时后统一
 回收；SSE framing 与 V1 事件映射分开，文本、工具、阶段、token 和 provider 耗时逐事件进入
-统一事件流。结构化输出使用 OpenCode 的 `format.type=json_schema`，从
+统一事件流；reasoning part 的 provider 文本进入阶段事件 `detail`，由运行目录 payload 规则
+负责长内容外置。结构化输出使用 OpenCode 的 `format.type=json_schema`，从
 `StructuredOutput` tool part 的 `state.input` 提取。
+
+运行时间轴保留原始事件流的可追踪性，但展示层会将同一 `tool_use_id` 的工具调用与结果合并为
+一个工具卡片，并将同一 `stream_id` 的文本增量拼接后展示，避免 SSE token 粒度造成大量碎片节点。
 
 Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没有实例级差异配置，不能提供真实价值；未来引入实例化配置后再扩展一对多模型。
 

@@ -13,7 +13,12 @@ export function eventKindLabel(event: WorkflowRunEvent): string {
   if (event.kind === 'agent_message') {
     return event.agent_role === 'subagent' ? '子 Agent' : (event.agent_name || 'agent')
   }
-  if (event.kind === 'tool_call') return '工具调用'
+  if (event.kind === 'tool_call') {
+    if (event.status === 'failed') return '工具调用失败'
+    if (event.status === 'success') return '工具调用完成'
+    if (event.status === 'unknown') return '工具调用未完成'
+    return '工具调用'
+  }
   if (event.kind === 'tool_result') {
     if (event.status === 'failed') return '工具失败'
     if (event.status === 'unknown') return '工具未完成'
@@ -109,6 +114,90 @@ export interface TimelineEntry {
   event: WorkflowRunEvent
 }
 
+/**
+ * 把高频增量消息和工具完成事件合并成时间轴可读的单个节点。
+ *
+ * 原始事件流仍然保留逐条记录，便于调试和重放；这里仅改变展示形态：
+ * 同一 stream_id 的文本 delta 拼接，同一 tool_use_id 的调用和结果合并。
+ */
+function coalesceMainEvents(
+  entries: { actor: TimelineEntry['actor']; event: WorkflowRunEvent }[],
+): { actor: TimelineEntry['actor']; event: WorkflowRunEvent }[] {
+  const result: { actor: TimelineEntry['actor']; event: WorkflowRunEvent }[] = []
+  const partialMessages = new Map<string, number>()
+  const toolCalls = new Map<string, number>()
+
+  for (const entry of entries) {
+    const { event, actor } = entry
+    if (actor.role !== 'main') {
+      result.push(entry)
+      continue
+    }
+
+    if (event.kind === 'agent_message' && typeof event.message === 'string') {
+      const streamId = typeof event.stream_id === 'string' ? event.stream_id : ''
+      if (streamId && event.partial === true) {
+        const existingIndex = partialMessages.get(streamId)
+        if (existingIndex != null) {
+          const existing = result[existingIndex]
+          existing.event = {
+            ...existing.event,
+            message: `${existing.event.message || ''}${event.message}`,
+            finished_at: event.created_at || existing.event.finished_at,
+          }
+        } else {
+          partialMessages.set(streamId, result.length)
+          result.push(entry)
+        }
+        continue
+      }
+      if (streamId) {
+        const existingIndex = partialMessages.get(streamId)
+        if (existingIndex != null) {
+          const existing = result[existingIndex]
+          existing.event = {
+            ...existing.event,
+            ...event,
+            kind: 'agent_message',
+            message: event.message,
+            created_at: existing.event.created_at,
+            partial: false,
+          }
+          continue
+        }
+      }
+    }
+
+    if (event.kind === 'tool_call' && typeof event.tool_use_id === 'string') {
+      toolCalls.set(event.tool_use_id, result.length)
+      result.push(entry)
+      continue
+    }
+
+    if (event.kind === 'tool_result' && typeof event.tool_use_id === 'string') {
+      const callIndex = toolCalls.get(event.tool_use_id)
+      if (callIndex != null) {
+        const call = result[callIndex]
+        call.event = {
+          ...call.event,
+          ...event,
+          kind: 'tool_call',
+          created_at: call.event.created_at,
+          started_at: call.event.started_at || event.started_at,
+          input: call.event.input ?? event.input,
+          tool_name: call.event.tool_name || event.tool_name,
+          message: event.message || call.event.message,
+        }
+        toolCalls.delete(event.tool_use_id)
+        continue
+      }
+    }
+
+    result.push(entry)
+  }
+  return result
+}
+
 /** Interleave main-agent and subagent events into a single reading order.
  *  - Main events stay as individual timeline nodes (in order).
  *  - For each subagent, only the FIRST lifecycle event (usually subagent_start)
@@ -133,7 +222,7 @@ export function buildTimeline(
     if (!Number.isNaN(ta) && !Number.isNaN(tb)) return ta - tb
     return 0 // keep original order when timestamps missing
   })
-  for (const { actor, event } of all) {
+  for (const { actor, event } of coalesceMainEvents(all)) {
     if (actor.role === 'subagent') {
       if (subFirstSeen.has(actor.id)) continue
       subFirstSeen.add(actor.id)

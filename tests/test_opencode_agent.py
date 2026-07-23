@@ -384,6 +384,45 @@ def test_opencode_message_parts_wait_for_real_tool_input() -> None:
     assert result_events[0]["duration_ms"] == 8
 
 
+def test_opencode_reasoning_part_exposes_provider_text_as_detail() -> None:
+    mapper = _OpenCodeEventMapper(session_id="ses_123")
+    mapper.consume(
+        {
+            "type": "message.part.updated",
+            "properties": {
+                "sessionID": "ses_123",
+                "part": {"id": "prt_step", "messageID": "msg_assistant", "type": "step-start"},
+            },
+        }
+    )
+    reasoning_events, _ = mapper.consume(
+        {
+            "type": "message.part.updated",
+            "properties": {
+                "sessionID": "ses_123",
+                "part": {
+                    "id": "prt_reasoning",
+                    "messageID": "msg_assistant",
+                    "type": "reasoning",
+                    "text": "先读取仓库信息，再整理最终答案。",
+                    "time": {"start": 100, "end": 140},
+                },
+            },
+        }
+    )
+
+    mapper.consume(
+        {
+            "type": "session.idle",
+            "properties": {"sessionID": "ses_123"},
+        }
+    )
+
+    reasoning_event = next(event for event in reasoning_events if event.get("status") == "reasoning-ended")
+    assert reasoning_event["detail"] == "先读取仓库信息，再整理最终答案。"
+    assert reasoning_event["duration_ms"] == 40
+
+
 def test_registry_can_create_opencode_backend() -> None:
     registry = create_coding_agent_registry(
         AgentRuntimeConfig(

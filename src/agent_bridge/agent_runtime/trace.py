@@ -60,7 +60,7 @@ def externalize_event_payloads(
     contains only preview, size and payload reference fields.
     """
     normalized = dict(event)
-    for side in ("input", "output"):
+    for side in ("input", "output", "detail"):
         if side not in normalized:
             continue
         value = normalized[side]
