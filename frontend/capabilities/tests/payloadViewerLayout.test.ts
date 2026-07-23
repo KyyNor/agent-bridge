@@ -16,6 +16,7 @@ test('long payloads keep a preview and open in a typed modal', async () => {
   assert.match(source, /<Dialog :open="payloadModal !== null"/)
   assert.match(source, /v-html="renderMd\(payloadModal\.content\)"/)
   assert.match(source, /<PayloadCodeViewer/)
+  assert.match(source, /content: language === 'json' \? formatJsonValue\(content\) : content/)
 })
 
 test('payload code viewer provides readonly syntax-highlighted editors', async () => {

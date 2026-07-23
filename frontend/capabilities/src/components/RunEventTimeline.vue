@@ -33,6 +33,7 @@ import {
   timelineKind,
 } from '../lib/runEventRender'
 import { renderMarkdown as renderMd } from '../lib/markdown'
+import { formatJsonValue } from '../lib/jsonDisplay'
 import { formatLocalDatetime } from '../lib/time'
 import type { WorkflowRunEvent } from '../api/types'
 
@@ -173,6 +174,15 @@ function payloadLanguageLabel(language: PayloadLanguage): string {
   }[language]
 }
 
+function buildPayloadModal(target: PayloadTarget, content: string): PayloadModal {
+  const language = payloadLanguage(target.event, target.side, content)
+  return {
+    ...target,
+    content: language === 'json' ? formatJsonValue(content) : content,
+    language,
+  }
+}
+
 function openPayload(event: WorkflowRunEvent, side: PayloadSide) {
   const ref = payloadRef(event, side)
   const target = { event, side, ref }
@@ -183,11 +193,7 @@ function openPayload(event: WorkflowRunEvent, side: PayloadSide) {
     emit('load-payload', ref)
     return
   }
-  payloadModal.value = {
-    ...target,
-    content,
-    language: payloadLanguage(event, side, content),
-  }
+  payloadModal.value = buildPayloadModal(target, content)
 }
 
 watch(
@@ -198,11 +204,7 @@ watch(
     const content = loadedPayload(pending.ref)
     if (!content) return
     pendingPayloadModal.value = null
-    payloadModal.value = {
-      ...pending,
-      content,
-      language: payloadLanguage(pending.event, pending.side, content),
-    }
+    payloadModal.value = buildPayloadModal(pending, content)
   },
 )
 
