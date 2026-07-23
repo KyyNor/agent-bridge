@@ -16,7 +16,7 @@
 - 文档知识后端实现 `BackendAdapter`；可选能力通过独立 runtime-checkable Protocol 表达。
 - 能力来源实现 `CapabilitySourceAdapter` 并注册到来源 registry。
 - Coding Agent 的配置暂时要求 `slug == type`。在支持实例级差异配置之前，不创建同一 type 的多个无差异 slug。
-- OpenCode 使用由 Agent Bridge 按 run 管理的 server HTTP 模式；server 启动、就绪探测、请求和回收集中在 `opencode_server.py`，adapter 只负责 OpenCode API 与统一事件模型的映射。
+- OpenCode 使用由 Agent Bridge 按 run 管理的 server HTTP 模式；server 启动、就绪探测、SSE framing、请求和回收集中在 `opencode_server.py`，adapter 只负责 OpenCode V1 API 事件与统一事件模型的映射，便于未来替换 V2 client。
 - Mock 后端只能由显式 `type = "mock"` 使用，不得作为未知或缺失配置的静默回退。
 - CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。
 - 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。

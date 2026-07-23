@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -116,6 +118,81 @@ class OpenCodeServerProcess:
                 f"OpenCode server 返回非 JSON: {method.upper()} {path}"
             ) from exc
 
+    async def request_no_content(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """发送不需要 JSON 响应体的请求，例如 ``prompt_async``。"""
+        if self._client is None:
+            raise RuntimeError("OpenCode server 尚未启动")
+        try:
+            response = await self._client.request(method, path, params=params, json=payload)
+        except httpx.HTTPError as exc:
+            raise OpenCodeServerError(f"OpenCode server 请求失败: {exc}") from exc
+        if response.is_error:
+            detail = response.text.strip()
+            if len(detail) > 2000:
+                detail = detail[-2000:]
+            raise OpenCodeServerError(
+                f"OpenCode server HTTP {response.status_code} {method.upper()} {path}: {detail}"
+            )
+
+    async def stream_json_events(
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> AsyncIterator[Any]:
+        """读取 OpenCode SSE，并逐条解码 ``data:`` 中的 JSON。
+
+        这里只处理通用 SSE framing，不解释 OpenCode 的事件类型。事件协议
+        映射留在 coding-agent adapter，未来替换 v2 client 时不会影响进程
+        生命周期和网络流管理。
+        """
+        if self._client is None:
+            raise RuntimeError("OpenCode server 尚未启动")
+        try:
+            async with self._client.stream(
+                "GET",
+                path,
+                params=params,
+                headers={"Accept": "text/event-stream"},
+            ) as response:
+                if response.is_error:
+                    await response.aread()
+                    detail = response.text.strip()
+                    if len(detail) > 2000:
+                        detail = detail[-2000:]
+                    raise OpenCodeServerError(
+                        f"OpenCode server HTTP {response.status_code} GET {path}: {detail}"
+                    )
+
+                data_lines: list[str] = []
+                async for line in response.aiter_lines():
+                    if line == "":
+                        payload = _decode_sse_data(data_lines, path=path)
+                        data_lines = []
+                        if payload is not None:
+                            yield payload
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                    # OpenCode currently only needs data. Ignore standard SSE
+                    # event/id/retry fields so the parser remains tolerant of
+                    # future server metadata.
+
+                payload = _decode_sse_data(data_lines, path=path)
+                if payload is not None:
+                    yield payload
+        except httpx.HTTPError as exc:
+            raise OpenCodeServerError(f"OpenCode server SSE 请求失败: {exc}") from exc
+
     async def close(self) -> None:
         """关闭 HTTP client，并终止本次 run 创建的 server 进程。"""
         client = self._client
@@ -193,3 +270,13 @@ class OpenCodeServerProcess:
         async for raw_line in process.stderr:
             self._stderr_lines.append(raw_line.decode("utf-8", errors="replace"))
             self._stderr_lines = self._stderr_lines[-50:]
+
+
+def _decode_sse_data(data_lines: list[str], *, path: str) -> Any | None:
+    if not data_lines:
+        return None
+    raw = "\n".join(data_lines)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise OpenCodeServerError(f"OpenCode server SSE 返回非 JSON: GET {path}") from exc

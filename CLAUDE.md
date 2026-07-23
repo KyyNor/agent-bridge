@@ -93,10 +93,12 @@ Codex/Pi 的 JSONL 子进程生命周期统一由 `adapters/jsonl_cli.py` 管理
 
 OpenCode 使用 `opencode serve --port 0 --hostname 127.0.0.1` 的 server HTTP 模式。每次
 Agent run 由 `adapters/opencode_server.py` 启动一个独立 server，等待监听地址和 HTTP 就绪后，
-通过 `POST /session?directory=...` 创建会话，再调用
-`POST /session/{id}/message?directory=...`。server 在 run 完成、失败、停止或超时后统一回收；
-结构化输出使用 OpenCode 的 `format.type=json_schema`，从 `StructuredOutput` tool part 的
-`state.input` 提取，工具事件从 response 的 `parts` 统一归一化。
+通过 `POST /session?directory=...` 创建会话，订阅
+`GET /event?directory=...` 的 SSE，再调用
+`POST /session/{id}/prompt_async?directory=...`。server 在 run 完成、失败、停止或超时后统一
+回收；SSE framing 与 V1 事件映射分开，文本、工具、阶段、token 和 provider 耗时逐事件进入
+统一事件流。结构化输出使用 OpenCode 的 `format.type=json_schema`，从
+`StructuredOutput` tool part 的 `state.input` 提取。
 
 Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没有实例级差异配置，不能提供真实价值；未来引入实例化配置后再扩展一对多模型。
 
