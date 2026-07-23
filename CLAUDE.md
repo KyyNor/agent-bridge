@@ -82,6 +82,8 @@ Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。cl
 
 Agent 运行观测也走统一规范化事件流：工具事件包含 `input`/`output`（短内容内联，超过阈值落到运行目录 `payloads/` 并返回安全相对引用），工具结果包含 `started_at`、`finished_at` 和 `duration_ms`；运行准备、后端执行、收尾和总耗时以 `stage` 事件记录。SQLite 保存可查询的摘要和完整事件列表，JSONL 负责运行中的实时追加和原始消息留档。
 
+前端时间轴对长 payload 只展示预览，点击“查看”后在弹窗中按 Markdown 渲染，或使用只读 CodeMirror 对 JSON、HTML、Python、JavaScript 做语法高亮；工具输入、输出和模型详情即使是短内容也提供查看入口，完整内容加载后仍不直接塞回时间轴，避免大文本撑开页面。
+
 Codex/Pi 的 JSONL 子进程生命周期统一由 `adapters/jsonl_cli.py` 管理，包括：
 
 - 启动与 stdout JSONL 解码；

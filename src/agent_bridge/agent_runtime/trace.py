@@ -22,7 +22,8 @@ from typing import Any
 from agent_bridge.agent_runtime.events import event_record, json_safe
 from agent_bridge.core.timeutil import utc_iso
 
-INLINE_PAYLOAD_BYTES = 8 * 1024
+# 预览和完整内容按钮使用同一阈值，避免“已经显示省略提示但没有引用可加载”的不一致。
+INLINE_PAYLOAD_BYTES = 2 * 1024
 PREVIEW_CHARS = 2 * 1024
 PAYLOAD_DIRNAME = "payloads"
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -39,7 +40,7 @@ def _payload_text(value: Any) -> tuple[bytes, str, str]:
 
 
 def _preview(text: str) -> str:
-    if len(text) <= PREVIEW_CHARS:
+    if len(text.encode("utf-8")) <= INLINE_PAYLOAD_BYTES:
         return text
     return text[:PREVIEW_CHARS] + "\n…（内容较长，点击查看完整内容）"
 

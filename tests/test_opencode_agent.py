@@ -232,6 +232,7 @@ def test_opencode_sse_events_map_tools_phases_and_final_output() -> None:
         "tool_result",
         "status",
         "status",
+        "result",
     ]
     assert events[2]["duration_ms"] == 100
     assert events[3]["input"] == {"answer": "ok"}
@@ -242,6 +243,7 @@ def test_opencode_sse_events_map_tools_phases_and_final_output() -> None:
         "output_tokens": 20,
         "reasoning_tokens": 3,
     }
+    assert events[7]["message"] == '{"answer": "ok"}'
     assert final is not None
     assert final.structured_output == {"answer": "ok"}
     assert final.result == '{"answer": "ok"}'

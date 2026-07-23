@@ -4,11 +4,24 @@ import json
 
 from agent_bridge.agent_runtime.trace import (
     INLINE_PAYLOAD_BYTES,
+    PREVIEW_CHARS,
     StageTimer,
     ToolTimingTracker,
     externalize_event_payloads,
     read_payload,
 )
+
+
+def test_payload_preview_threshold_also_creates_a_loadable_ref(tmp_path) -> None:
+    value = "x" * (PREVIEW_CHARS + 100)
+    event = externalize_event_payloads(
+        {"kind": "tool_result", "output": value},
+        tmp_path,
+    )
+
+    assert event["output_preview"].endswith("…（内容较长，点击查看完整内容）")
+    assert "output" not in event
+    assert event["output_payload_ref"].startswith("payloads/")
 
 
 def test_large_tool_payload_is_written_and_read_by_relative_ref(tmp_path) -> None:

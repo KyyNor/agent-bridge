@@ -516,6 +516,9 @@ export interface WorkflowRunEvent {
   input_bytes?: number
   output_bytes?: number
   detail_bytes?: number
+  input_content_type?: string
+  output_content_type?: string
+  detail_content_type?: string
   input_truncated?: boolean
   output_truncated?: boolean
   detail_truncated?: boolean

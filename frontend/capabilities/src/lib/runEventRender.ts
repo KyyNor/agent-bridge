@@ -166,6 +166,43 @@ function coalesceMainEvents(
           continue
         }
       }
+
+      // Pi's JSON mode may emit assistant deltas without stream metadata.
+      // Merge only adjacent unkeyed messages so separate turns/tools remain
+      // distinct. A later long snapshot replaces the accumulated fragments;
+      // Pi emits that snapshot after the token-level deltas.
+      if (!streamId && event.partial !== false) {
+        const previous = result[result.length - 1]
+        if (
+          previous?.actor.role === 'main'
+          && previous.event.kind === 'agent_message'
+          && typeof previous.event.message === 'string'
+          && !previous.event.stream_id
+          && previous.event.partial !== false
+        ) {
+          previous.event = {
+            ...previous.event,
+            message: mergeAdjacentMessageText(previous.event.message, event.message),
+            finished_at: event.created_at || previous.event.finished_at,
+          }
+          continue
+        }
+      }
+    }
+
+    // Pi's final result repeats the streamed assistant message. Keep the
+    // canonical result node and avoid displaying the same large output twice.
+    if (event.kind === 'result' && typeof event.message === 'string') {
+      const previous = result[result.length - 1]
+      if (
+        previous?.actor.role === 'main'
+        && previous.event.kind === 'agent_message'
+        && typeof previous.event.message === 'string'
+        && sameRenderedMessage(previous.event.message, event.message)
+      ) {
+        result[result.length - 1] = { actor, event }
+        continue
+      }
     }
 
     if (event.kind === 'tool_call' && typeof event.tool_use_id === 'string') {
@@ -196,6 +233,31 @@ function coalesceMainEvents(
     result.push(entry)
   }
   return result
+}
+
+function mergeAdjacentMessageText(existing: string, incoming: string): string {
+  if (!existing) return incoming
+  if (!incoming) return existing
+  if (existing === incoming) return existing
+
+  // A Pi message_end snapshot can differ from the streamed text only by a
+  // short framing prefix (for example a duplicated Markdown fence).
+  if (
+    incoming.length >= 256
+    && incoming.length >= existing.length * 0.8
+    && existing.indexOf(incoming) >= 0
+    && existing.indexOf(incoming) <= 32
+  ) {
+    return incoming
+  }
+  return existing + incoming
+}
+
+function sameRenderedMessage(left: string, right: string): boolean {
+  if (left === right) return true
+  const longer = left.length >= right.length ? left : right
+  const shorter = left.length >= right.length ? right : left
+  return shorter.length >= 256 && longer.includes(shorter) && longer.length - shorter.length <= 64
 }
 
 /** Interleave main-agent and subagent events into a single reading order.

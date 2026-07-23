@@ -41,6 +41,7 @@ class _OpenCodeEventMapper:
     _model: str | None = None
     _tokens: dict[str, Any] = field(default_factory=dict)
     _completion_event_emitted: bool = False
+    _result_event_emitted: bool = False
 
     def consume(
         self,
@@ -312,20 +313,20 @@ class _OpenCodeEventMapper:
             }
             if status == "idle":
                 self.done = True
-                return [_opencode_event("status", **values)], self._final()
+                final = self._final()
+                return self._finish_with_result(values, final), final
             return [_opencode_event("status", **values)], None
 
         if event_type == "session.idle":
             self.done = True
-            return [
-                _opencode_event(
-                    "status",
-                    agent_role="main",
-                    status="idle",
-                    message="OpenCode 会话完成",
-                    session_id=self.session_id,
-                )
-            ], self._final()
+            values = {
+                "agent_role": "main",
+                "status": "idle",
+                "message": "OpenCode 会话完成",
+                "session_id": self.session_id,
+            }
+            final = self._final()
+            return self._finish_with_result(values, final), final
 
         if event_type == "session.error":
             message = _opencode_error_message(properties.get("error")) or "OpenCode 会话失败"
@@ -585,6 +586,28 @@ class _OpenCodeEventMapper:
             return
         self._structured_found = True
         self._structured_output = decoded
+
+    def _finish_with_result(
+        self,
+        status_values: dict[str, Any],
+        final: CodingAgentFinal,
+    ) -> list[dict[str, Any]]:
+        events = [_opencode_event("status", **status_values)]
+        if self._result_event_emitted:
+            return events
+        self._result_event_emitted = True
+        events.append(
+            _opencode_event(
+                "result",
+                agent_role="main",
+                status="failed" if final.is_error else "success",
+                message=final.result or ("OpenCode 运行失败" if final.is_error else "done"),
+                session_id=self.session_id,
+                total_cost_usd=final.cost_usd,
+                num_turns=final.num_turns,
+            )
+        )
+        return events
 
     def _final(self) -> CodingAgentFinal:
         if self._error_message:

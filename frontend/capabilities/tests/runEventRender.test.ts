@@ -24,6 +24,23 @@ test('buildTimeline joins text deltas into one visible message', () => {
   assert.equal(timeline[0].event.message, '我已掌握足够的数据。')
 })
 
+test('buildTimeline joins unkeyed Pi fragments and keeps the final result node', () => {
+  const full = 'x'.repeat(320)
+  const timeline = buildTimeline([{
+    actor: main,
+    events: [
+      ev('agent_message', '2026-07-23T10:00:00.001Z', { message: full.slice(0, 100), source: 'pi_cli' }),
+      ev('agent_message', '2026-07-23T10:00:00.002Z', { message: full.slice(100, 220), source: 'pi_cli' }),
+      ev('agent_message', '2026-07-23T10:00:00.003Z', { message: full.slice(220), source: 'pi_cli' }),
+      ev('result', '2026-07-23T10:00:00.004Z', { status: 'success', message: full, source: 'pi_cli' }),
+    ],
+  }])
+
+  assert.equal(timeline.length, 1)
+  assert.equal(timeline[0].event.kind, 'result')
+  assert.equal(timeline[0].event.message, full)
+})
+
 test('buildTimeline merges a tool call and result into one card', () => {
   const timeline = buildTimeline([{
     actor: main,

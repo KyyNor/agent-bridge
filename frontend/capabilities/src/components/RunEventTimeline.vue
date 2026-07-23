@@ -18,9 +18,11 @@
  * Emits `expand(taskId)` when a sub-agent is expanded, so the parent can lazily
  * load detail (workflow loads the Claude transcript on first expand).
  */
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Bot, ChevronRight } from '@lucide/vue'
 import { Badge } from './ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
+import PayloadCodeViewer from './PayloadCodeViewer.vue'
 import { useSubagentCollapse } from '../composables/useSubagentCollapse'
 import { groupEventsByActor, subagentStatus, subagentStatusLabel, subagentUsage } from '../lib/workflowEvents'
 import {
@@ -56,6 +58,16 @@ const emit = defineEmits<{
 
 const { isCollapsed, toggle, initCollapsed } = useSubagentCollapse()
 
+type PayloadSide = 'input' | 'output' | 'detail'
+type PayloadLanguage = 'markdown' | 'json' | 'html' | 'python' | 'javascript' | 'text'
+type PayloadTarget = { event: WorkflowRunEvent; side: PayloadSide; ref: string }
+type PayloadModal = PayloadTarget & { content: string; language: PayloadLanguage }
+
+const LONG_PAYLOAD_MARKER = '…（内容较长，点击查看完整内容）'
+
+const payloadModal = ref<PayloadModal | null>(null)
+const pendingPayloadModal = ref<PayloadTarget | null>(null)
+
 // (Re)initialise collapse state whenever the event stream changes so freshly
 // loaded runs start with all sub-agents collapsed.
 watch(
@@ -73,12 +85,12 @@ function onToggle(taskId: string) {
   if (wasCollapsed) emit('expand', taskId)
 }
 
-function payloadRef(event: WorkflowRunEvent, side: 'input' | 'output' | 'detail'): string {
+function payloadRef(event: WorkflowRunEvent, side: PayloadSide): string {
   const value = event[`${side}_payload_ref`]
   return typeof value === 'string' ? value : ''
 }
 
-function payloadPreview(event: WorkflowRunEvent, side: 'input' | 'output' | 'detail'): string {
+function payloadPreview(event: WorkflowRunEvent, side: PayloadSide): string {
   const preview = event[`${side}_preview`]
   if (typeof preview === 'string') return preview
   const value = event[side]
@@ -91,7 +103,33 @@ function payloadPreview(event: WorkflowRunEvent, side: 'input' | 'output' | 'det
   }
 }
 
-function payloadSize(event: WorkflowRunEvent, side: 'input' | 'output' | 'detail'): string {
+function payloadValueText(event: WorkflowRunEvent, side: PayloadSide): string {
+  const value = event[side]
+  if (typeof value === 'string') return value
+  if (value == null) return ''
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+/** Support old events that retained the full value but only stored a preview marker. */
+function inlinePayload(event: WorkflowRunEvent, side: PayloadSide): string {
+  const full = payloadValueText(event, side)
+  if (!full) return ''
+  const preview = event[`${side}_preview`]
+  if (typeof preview === 'string' && preview.includes(LONG_PAYLOAD_MARKER)) {
+    return preview === full ? '' : full
+  }
+  return full
+}
+
+function canOpenPayload(event: WorkflowRunEvent, side: PayloadSide): boolean {
+  return Boolean(payloadRef(event, side) || inlinePayload(event, side))
+}
+
+function payloadSize(event: WorkflowRunEvent, side: PayloadSide): string {
   const value = event[`${side}_bytes`]
   if (typeof value !== 'number') return ''
   if (value < 1024) return `${value} B`
@@ -105,6 +143,72 @@ function loadedPayload(ref: string): string {
 
 function payloadError(ref: string): string {
   return props.payloadErrors?.[ref] || ''
+}
+
+function payloadLanguage(event: WorkflowRunEvent, side: PayloadSide, content: string): PayloadLanguage {
+  const contentType = String(event[`${side}_content_type`] || '').toLowerCase()
+  const ref = payloadRef(event, side).toLowerCase()
+  const text = content.trim()
+  if (contentType.includes('markdown') || /\.(md|markdown)$/.test(ref)) return 'markdown'
+  if (contentType.includes('json') || /\.json$/.test(ref)) return 'json'
+  if (contentType.includes('html') || /\.(html?|xhtml)$/.test(ref) || /^<!doctype\s+html|^<html\b/i.test(text)) return 'html'
+  try {
+    JSON.parse(text)
+    if (text.startsWith('{') || text.startsWith('[')) return 'json'
+  } catch { /* plain text or source code */ }
+  if (/^\s*(#|>|[-*]\s|\d+\.\s|```)/m.test(text) || /\[[^\]]+\]\([^)]+\)/.test(text)) return 'markdown'
+  if (/\b(def|class|from|import)\s+[A-Za-z_]|__name__|print\(/.test(text)) return 'python'
+  if (/\b(const|let|var|function|import|export)\b|=>/.test(text)) return 'javascript'
+  return 'text'
+}
+
+function payloadLanguageLabel(language: PayloadLanguage): string {
+  return {
+    markdown: 'Markdown',
+    json: 'JSON',
+    html: 'HTML',
+    python: 'Python',
+    javascript: 'JavaScript',
+    text: '纯文本',
+  }[language]
+}
+
+function openPayload(event: WorkflowRunEvent, side: PayloadSide) {
+  const ref = payloadRef(event, side)
+  const target = { event, side, ref }
+  const content = ref ? loadedPayload(ref) : inlinePayload(event, side)
+  if (!content) {
+    if (!ref) return
+    pendingPayloadModal.value = target
+    emit('load-payload', ref)
+    return
+  }
+  payloadModal.value = {
+    ...target,
+    content,
+    language: payloadLanguage(event, side, content),
+  }
+}
+
+watch(
+  () => props.payloads,
+  () => {
+    const pending = pendingPayloadModal.value
+    if (!pending) return
+    const content = loadedPayload(pending.ref)
+    if (!content) return
+    pendingPayloadModal.value = null
+    payloadModal.value = {
+      ...pending,
+      content,
+      language: payloadLanguage(pending.event, pending.side, content),
+    }
+  },
+)
+
+function closePayload() {
+  payloadModal.value = null
+  pendingPayloadModal.value = null
 }
 </script>
 
@@ -134,30 +238,30 @@ function payloadError(ref: string): string {
               <div class="tl-tool-payload-head">
                 <span>输入<span v-if="payloadSize(entry.event, 'input')"> · {{ payloadSize(entry.event, 'input') }}</span></span>
                 <button
-                  v-if="payloadRef(entry.event, 'input') && !loadedPayload(payloadRef(entry.event, 'input'))"
+                  v-if="canOpenPayload(entry.event, 'input')"
                   type="button"
                   class="tl-payload-button"
-                  @click.stop="emit('load-payload', payloadRef(entry.event, 'input'))"
+                  @click.stop="openPayload(entry.event, 'input')"
                 >
-                  查看完整内容
+                  查看
                 </button>
               </div>
-              <pre>{{ loadedPayload(payloadRef(entry.event, 'input')) || payloadPreview(entry.event, 'input') }}</pre>
+              <pre>{{ payloadPreview(entry.event, 'input') }}</pre>
               <div v-if="payloadError(payloadRef(entry.event, 'input'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'input')) }}</div>
             </div>
             <div v-if="(entry.event.kind === 'tool_result' || entry.event.kind === 'tool_call') && payloadPreview(entry.event, 'output')" class="tl-tool-payload">
               <div class="tl-tool-payload-head">
                 <span>输出<span v-if="payloadSize(entry.event, 'output')"> · {{ payloadSize(entry.event, 'output') }}</span></span>
                 <button
-                  v-if="payloadRef(entry.event, 'output') && !loadedPayload(payloadRef(entry.event, 'output'))"
+                  v-if="canOpenPayload(entry.event, 'output')"
                   type="button"
                   class="tl-payload-button"
-                  @click.stop="emit('load-payload', payloadRef(entry.event, 'output'))"
+                  @click.stop="openPayload(entry.event, 'output')"
                 >
-                  查看完整内容
+                  查看
                 </button>
               </div>
-              <pre>{{ loadedPayload(payloadRef(entry.event, 'output')) || payloadPreview(entry.event, 'output') }}</pre>
+              <pre>{{ payloadPreview(entry.event, 'output') }}</pre>
               <div v-if="payloadError(payloadRef(entry.event, 'output'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'output')) }}</div>
             </div>
           </div>
@@ -165,15 +269,15 @@ function payloadError(ref: string): string {
             <div class="tl-tool-payload-head">
               <span>详细信息<span v-if="payloadSize(entry.event, 'detail')"> · {{ payloadSize(entry.event, 'detail') }}</span></span>
               <button
-                v-if="payloadRef(entry.event, 'detail') && !loadedPayload(payloadRef(entry.event, 'detail'))"
+                v-if="canOpenPayload(entry.event, 'detail')"
                 type="button"
                 class="tl-payload-button"
-                @click.stop="emit('load-payload', payloadRef(entry.event, 'detail'))"
+                @click.stop="openPayload(entry.event, 'detail')"
               >
-                查看完整内容
+                查看
               </button>
             </div>
-            <pre>{{ loadedPayload(payloadRef(entry.event, 'detail')) || payloadPreview(entry.event, 'detail') }}</pre>
+            <pre>{{ payloadPreview(entry.event, 'detail') }}</pre>
             <div v-if="payloadError(payloadRef(entry.event, 'detail'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'detail')) }}</div>
           </div>
         </div>
@@ -232,6 +336,32 @@ function payloadError(ref: string): string {
       </div>
     </template>
   </div>
+
+  <Dialog :open="payloadModal !== null" @update:open="(open: boolean) => { if (!open) closePayload() }">
+    <DialogContent class="w-[min(1280px,calc(100vw-2rem))] !max-w-[1280px] sm:!max-w-[1280px] max-h-[calc(100vh-2rem)] overflow-hidden">
+      <DialogHeader>
+        <DialogTitle>
+          查看<span v-if="payloadModal"> · {{ payloadLanguageLabel(payloadModal.language) }}</span>
+        </DialogTitle>
+        <div v-if="payloadModal" class="text-xs text-muted-foreground">
+          {{ payloadModal.side === 'input' ? '输入' : payloadModal.side === 'output' ? '输出' : '详细信息' }}
+          <span v-if="payloadSize(payloadModal.event, payloadModal.side)"> · {{ payloadSize(payloadModal.event, payloadModal.side) }}</span>
+        </div>
+      </DialogHeader>
+      <div v-if="payloadModal" class="min-h-0 overflow-auto">
+        <div
+          v-if="payloadModal.language === 'markdown'"
+          class="payload-markdown rounded-md border bg-background p-4"
+          v-html="renderMd(payloadModal.content)"
+        />
+        <PayloadCodeViewer
+          v-else
+          :content="payloadModal.content"
+          :language="payloadModal.language"
+        />
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <style>
@@ -312,6 +442,16 @@ function payloadError(ref: string): string {
 .tl-payload-button{border:1px solid var(--border);border-radius:var(--radius-compact);padding:2px 7px;color:var(--primary);background:var(--card);font-size:10px;cursor:pointer}
 .tl-payload-button:hover{background:var(--accent)}
 .tl-payload-error{padding:4px 9px;color:var(--destructive);font-size:11px}
+.payload-markdown{max-height:min(68vh,720px);overflow:auto;line-height:1.65;color:var(--foreground)}
+.payload-markdown h1,.payload-markdown h2,.payload-markdown h3,.payload-markdown h4{font-weight:600;line-height:1.3;margin:14px 0 6px}
+.payload-markdown h1{font-size:1.35em}.payload-markdown h2{font-size:1.2em}.payload-markdown h3{font-size:1.08em}.payload-markdown h4{font-size:1em}
+.payload-markdown>:first-child{margin-top:0}.payload-markdown>:last-child{margin-bottom:0}
+.payload-markdown p{margin:0 0 8px}.payload-markdown ul,.payload-markdown ol{margin:4px 0 8px;padding-left:22px}
+.payload-markdown blockquote{margin:8px 0;padding:4px 12px;border-left:3px solid var(--border);color:var(--muted-foreground)}
+.payload-markdown pre{overflow:auto;margin:8px 0;padding:10px 12px;background:var(--muted);border-radius:var(--radius-control);font-family:var(--font-mono);font-size:12px}
+.payload-markdown code{font-family:var(--font-mono);font-size:.9em;background:var(--muted);padding:1px 5px;border-radius:var(--radius-compact)}
+.payload-markdown pre code{background:transparent;padding:0}
+.payload-markdown table{width:100%;border-collapse:collapse;margin:8px 0}.payload-markdown th,.payload-markdown td{border:1px solid var(--border);padding:5px 8px;text-align:left}.payload-markdown th{background:var(--muted)}
 
 /* ===== Subagent thread card ===== */
 .tl-sub{position:relative;min-width:0;max-width:100%;background:var(--subagent-surface);border:1px solid var(--subagent-border);border-radius:var(--radius-card);overflow:hidden;transition:border-color .12s ease}
