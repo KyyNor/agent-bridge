@@ -5,6 +5,7 @@ import { Controls } from '@vue-flow/controls'
 import { Handle, Position, VueFlow, type NodeMouseEvent } from '@vue-flow/core'
 import { AlertTriangle, Bot, Check, Clock3, FileOutput, FileTerminal, LoaderCircle, XCircle } from '@lucide/vue'
 import type { WorkflowGraph, WorkflowNodeRun } from '../../api/types'
+import { workflowReuseReasonText } from '../../lib/workflowExecutionPlan'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -90,7 +91,7 @@ function openNode(event: NodeMouseEvent) {
             <span>{{ slotProps.data.run?.action === 'reuse' ? '复用' : slotProps.data.run?.status || 'pending' }}</span>
           </div>
           <div v-if="slotProps.data.run?.action === 'reuse'" class="mt-1 truncate text-[10px] text-muted-foreground" :title="slotProps.data.run.reuse_reason || ''">
-            来源 {{ slotProps.data.run.source_run_id || '历史运行' }} · {{ slotProps.data.run.reuse_reason || '指纹匹配' }}
+            来源 {{ slotProps.data.run.source_run_id || '历史运行' }} · {{ workflowReuseReasonText(slotProps.data.run.reuse_reason) }}
           </div>
           <div v-if="slotProps.data.run?.error" class="mt-1 truncate text-[11px]" :title="slotProps.data.run.error">{{ slotProps.data.run.error }}</div>
           <Handle type="source" :position="Position.Right" :connectable="false" />

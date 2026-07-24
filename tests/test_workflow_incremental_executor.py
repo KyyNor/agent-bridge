@@ -164,3 +164,84 @@ async def test_force_full_plan_calls_every_handler():
     )
 
     assert calls == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_conditional_skipped_branch_does_not_invalidate_reused_merge_node():
+    graph = WorkflowGraph.model_validate({
+        "nodes": [
+            {"id": "a", "type": "script", "name": "a", "position": {"x": 0, "y": 0}, "config": {"script_key": "a"}},
+            {"id": "b", "type": "script", "name": "b", "position": {"x": 1, "y": 0}, "config": {"script_key": "b"}},
+            {"id": "x", "type": "script", "name": "x", "position": {"x": 1, "y": 1}, "config": {"script_key": "x"}},
+            {"id": "merge", "type": "script", "name": "merge", "position": {"x": 2, "y": 0}, "config": {"script_key": "merge"}},
+        ],
+        "edges": [
+            {"id": "a-b", "source": "a", "target": "b", "condition": {"field": "nodes.a.output.route", "operator": "equals", "value": "primary"}},
+            {"id": "a-x", "source": "a", "target": "x", "condition": {"field": "nodes.a.output.route", "operator": "equals", "value": "secondary"}},
+            {"id": "b-merge", "source": "b", "target": "merge"},
+            {"id": "x-merge", "source": "x", "target": "merge"},
+        ],
+    })
+    calls = []
+
+    class Handlers:
+        async def execute(self, node, context):
+            calls.append(node.id)
+            return NodeExecutionResult(output={"route": "primary"})
+
+    store = Store()
+    result = await WorkflowDagExecutor(store=store, handlers=Handlers()).run(
+        workflow={"workflow_key": "wf", "profile_key": "p", "definition": graph}, run_id="new-run",
+        input_data={}, actor="root", plan=_plan(
+            NodePlan("a", "execute", "task_lease_must_refresh", "a", invalidates_downstream=False),
+            _node("b", "reuse", output={"value": "historic-b"}),
+            NodePlan("x", "execute", "baseline_node_not_completed", "x", runtime_deferred=True, invalidates_downstream=True),
+            NodePlan("merge", "reuse", "fingerprint_match", "merge", source_run_id="old-run", source_node_id="merge", output_json={"value": "historic-merge"}, runtime_deferred=True),
+        ),
+    )
+
+    assert result.status == "completed"
+    assert calls == ["a"]
+    assert store.node_runs["x"]["reuse_reason"] == "condition_not_matched"
+    assert store.node_runs["b"]["action"] == "reuse"
+    assert store.node_runs["merge"]["action"] == "reuse"
+
+
+@pytest.mark.asyncio
+async def test_conditional_active_branch_invalidates_reused_merge_node_at_runtime():
+    graph = WorkflowGraph.model_validate({
+        "nodes": [
+            {"id": "a", "type": "script", "name": "a", "position": {"x": 0, "y": 0}, "config": {"script_key": "a"}},
+            {"id": "b", "type": "script", "name": "b", "position": {"x": 1, "y": 0}, "config": {"script_key": "b"}},
+            {"id": "x", "type": "script", "name": "x", "position": {"x": 1, "y": 1}, "config": {"script_key": "x"}},
+            {"id": "merge", "type": "script", "name": "merge", "position": {"x": 2, "y": 0}, "config": {"script_key": "merge"}},
+        ],
+        "edges": [
+            {"id": "a-b", "source": "a", "target": "b", "condition": {"field": "nodes.a.output.route", "operator": "equals", "value": "primary"}},
+            {"id": "a-x", "source": "a", "target": "x", "condition": {"field": "nodes.a.output.route", "operator": "equals", "value": "secondary"}},
+            {"id": "b-merge", "source": "b", "target": "merge"},
+            {"id": "x-merge", "source": "x", "target": "merge"},
+        ],
+    })
+    calls = []
+
+    class Handlers:
+        async def execute(self, node, context):
+            calls.append(node.id)
+            return NodeExecutionResult(output={"route": "secondary"} if node.id == "a" else {"value": node.id})
+
+    store = Store()
+    await WorkflowDagExecutor(store=store, handlers=Handlers()).run(
+        workflow={"workflow_key": "wf", "profile_key": "p", "definition": graph}, run_id="new-run",
+        input_data={}, actor="root", plan=_plan(
+            NodePlan("a", "execute", "task_lease_must_refresh", "a", invalidates_downstream=False),
+            _node("b", "reuse", output={"value": "historic-b"}),
+            NodePlan("x", "execute", "baseline_node_not_completed", "x", runtime_deferred=True, invalidates_downstream=True),
+            NodePlan("merge", "reuse", "fingerprint_match", "merge", source_run_id="old-run", source_node_id="merge", output_json={"value": "historic-merge"}, runtime_deferred=True),
+        ),
+    )
+
+    assert calls == ["a", "x", "merge"]
+    assert store.node_runs["b"]["reuse_reason"] == "condition_not_matched"
+    assert store.node_runs["merge"]["action"] == "execute"
+    assert store.node_runs["merge"]["reuse_reason"] == "upstream_execute"

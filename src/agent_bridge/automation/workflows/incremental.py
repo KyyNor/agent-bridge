@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Iterable, Literal, Mapping, Sequence
@@ -40,6 +40,11 @@ class NodePlan:
     output_json: Mapping[str, Any] | None = None
     artifact_ids: tuple[str, ...] = ()
     condition_results: tuple[Mapping[str, Any], ...] = ()
+    # 条件边是否命中只能在运行时确定；预览据此提示用户结果尚待确定。
+    runtime_deferred: bool = False
+    # 仅在节点实际执行且该值为真时，执行器才会使已激活的下游放弃复用。
+    # get_task 的租约刷新在业务输入未变时不应使下游失效。
+    invalidates_downstream: bool = False
 
 
 @dataclass(frozen=True)
@@ -180,8 +185,18 @@ class WorkflowIncrementalPlanner:
             baseline_node_runs=selected_node_runs,
             resource_info=resources,
         )
-        affected = self._downstream_closure(set(affected_reasons), edges)
         parents = self._parents(edges)
+        conditional_targets = {
+            str(edge.get("target"))
+            for edge in edges
+            if edge.get("target") is not None and edge.get("condition") is not None
+        }
+        # 条件节点及其下游的最终复用资格依赖本次实际激活的分支。初始计划
+        # 仍提供可复用候选，但不让未命中分支的历史 skipped 结果污染汇合节点。
+        runtime_deferred_ids = self._downstream_closure(conditional_targets, edges)
+        affected = self._downstream_closure(
+            set(affected_reasons).difference(runtime_deferred_ids), edges
+        )
         previous_nodes = {str(row.get("node_id")): row for row in selected_node_runs if row.get("node_id")}
         artifacts_by_id = self._artifacts_by_id(selected_artifacts)
 
@@ -214,7 +229,8 @@ class WorkflowIncrementalPlanner:
                         or source.get("status") != "completed"
                         or self._task_input_changed(task, source)
                     )
-                    if task_changed:
+                    plan = replace(plan, invalidates_downstream=task_changed)
+                    if task_changed and node_id not in runtime_deferred_ids:
                         affected.update(self._downstream_closure({node_id}, edges))
                 elif direct_reason or node_id in affected:
                     plan = self._execute_plan(
@@ -222,6 +238,7 @@ class WorkflowIncrementalPlanner:
                         node_fingerprint,
                         direct_reason or "upstream_execute",
                     )
+                    plan = replace(plan, invalidates_downstream=True)
                 else:
                     plan = self._reuse_or_execute(
                         node_id=node_id,
@@ -235,10 +252,16 @@ class WorkflowIncrementalPlanner:
                         task_key=task_key,
                         task_version=task_version,
                     )
+                    if plan.action == "execute":
+                        plan = replace(plan, invalidates_downstream=True)
                 plans_by_id[node_id] = plan
                 pending_ids.remove(node_id)
                 progress = True
-                if plan.action == "execute" and node_type != "get_task":
+                if (
+                    plan.action == "execute"
+                    and node_type != "get_task"
+                    and node_id not in runtime_deferred_ids
+                ):
                     affected.update(self._downstream_closure({node_id}, edges))
 
             if progress:
@@ -253,7 +276,13 @@ class WorkflowIncrementalPlanner:
                 )
             pending_ids.clear()
 
-        plans = [plans_by_id[str(node["id"])] for node in nodes]
+        plans = [
+            replace(
+                plans_by_id[str(node["id"])],
+                runtime_deferred=str(node["id"]) in runtime_deferred_ids,
+            )
+            for node in nodes
+        ]
         reasons = {plan.node_id: plan.reason for plan in plans}
 
         return IncrementalPlan(
@@ -264,7 +293,7 @@ class WorkflowIncrementalPlanner:
             mode=mode,
             baseline_run_id=selected_id,
             nodes=tuple(plans),
-            affected_node_ids=tuple(node.node_id for node in plans if node.node_id in affected),
+            affected_node_ids=tuple(node.node_id for node in plans if node.action == "execute"),
             reusable_node_ids=tuple(node.node_id for node in plans if node.action == "reuse"),
             reasons=MappingProxyType(reasons),
             warnings=(),
@@ -583,6 +612,8 @@ def incremental_plan_payload(plan: IncrementalPlan) -> dict[str, Any]:
                 "output_json": dict(node.output_json or {}),
                 "artifact_ids": list(node.artifact_ids),
                 "condition_results": [dict(item) for item in node.condition_results],
+                "runtime_deferred": node.runtime_deferred,
+                "invalidates_downstream": node.invalidates_downstream,
             }
             for node in plan.nodes
         ],
@@ -608,6 +639,7 @@ def incremental_plan_preview_payload(plan: IncrementalPlan) -> dict[str, Any]:
                 "source_run_id": node.source_run_id,
                 "source_node_id": node.source_node_id,
                 "node_fingerprint": node.node_fingerprint,
+                "runtime_deferred": node.runtime_deferred,
             }
             for node in plan.nodes
         ],
@@ -637,6 +669,8 @@ def incremental_plan_from_payload(payload: dict[str, Any]) -> IncrementalPlan:
                 condition_results=tuple(
                     item for item in node.get("condition_results") or [] if isinstance(item, dict)
                 ),
+                runtime_deferred=bool(node.get("runtime_deferred")),
+                invalidates_downstream=bool(node.get("invalidates_downstream")),
             )
             for node in payload.get("nodes") or []
             if isinstance(node, dict)

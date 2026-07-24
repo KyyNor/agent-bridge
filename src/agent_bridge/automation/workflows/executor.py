@@ -115,6 +115,16 @@ class WorkflowDagExecutor:
                 statuses[node.id] = "running"
                 self.store.start_workflow_node_run(run_id, node.id, condition_results)
                 node_plan = self._validated_node_plan(node_plans[node.id])
+                active_parent_ids = {
+                    edge.source
+                    for item, edge in zip(condition_results, incoming[node.id])
+                    if item["matched"] and statuses[edge.source] in {"completed", "warning"}
+                }
+                if self._has_invalidating_active_parent(
+                    active_parent_ids=active_parent_ids,
+                    node_plans=node_plans,
+                ):
+                    node_plan = self._execute_after_upstream_change(node_plan)
                 node_plans[node.id] = node_plan
                 if node_plan.action == "reuse":
                     result = NodeExecutionResult(
@@ -336,6 +346,41 @@ class WorkflowDagExecutor:
             for node_id in nodes
         }
 
+    @staticmethod
+    def _has_invalidating_active_parent(
+        *,
+        active_parent_ids: set[str],
+        node_plans: dict[str, NodePlan],
+    ) -> bool:
+        """Return whether this ready node must discard a historic result.
+
+        Conditions have already been evaluated by the executor, so an executed
+        node in an inactive branch never reaches this check.  This is the
+        runtime counterpart to the planner's conservative static candidates.
+        """
+        return any(
+            node_plans[parent_id].action == "execute"
+            and node_plans[parent_id].invalidates_downstream
+            for parent_id in active_parent_ids
+        )
+
+    @staticmethod
+    def _execute_after_upstream_change(node_plan: NodePlan) -> NodePlan:
+        if node_plan.action == "execute":
+            return node_plan
+        return replace(
+            node_plan,
+            action="execute",
+            reason="upstream_execute",
+            source_run_id=None,
+            source_node_id=None,
+            source_node_fingerprint=None,
+            output_json=None,
+            artifact_ids=(),
+            condition_results=(),
+            invalidates_downstream=True,
+        )
+
     def _validated_node_plan(self, node_plan: NodePlan) -> NodePlan:
         if node_plan.action != "reuse":
             return node_plan
@@ -357,6 +402,7 @@ class WorkflowDagExecutor:
             source_node_fingerprint=None,
             output_json=None,
             artifact_ids=(),
+            invalidates_downstream=True,
         )
 
     def _reuse_artifact_error(self, node_plan: NodePlan) -> str | None:

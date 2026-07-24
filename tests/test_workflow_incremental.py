@@ -125,8 +125,33 @@ def test_type_edge_condition_added_and_removed_nodes_are_affected():
 
     plan = _plan(planner, changed, baseline_run, baseline_nodes, runtime={"a": "r1", "b": "r1", "d": "r1"})
 
+    # d 是新增节点，仍须执行；但因位于条件分支下，执行时是否真正到达由运行时决定。
     assert set(plan.affected_node_ids) == {"b", "d"}
     assert {node.node_id for node in plan.nodes if node.action == "execute"} == {"b", "d"}
+    assert next(node for node in plan.nodes if node.node_id == "d").runtime_deferred is True
+
+
+def test_skipped_conditional_branch_defers_merge_reuse_until_runtime():
+    planner = WorkflowIncrementalPlanner()
+    workflow = _workflow(
+        [_node(node_id) for node_id in ("a", "b", "x", "merge")],
+        [
+            _edge("a", "b", condition={"field": "nodes.a.output.route", "operator": "equals", "value": "primary"}),
+            _edge("a", "x", condition={"field": "nodes.a.output.route", "operator": "equals", "value": "secondary"}),
+            _edge("b", "merge"),
+            _edge("x", "merge"),
+        ],
+    )
+    baseline_run, baseline_nodes = _baseline(planner, workflow)
+    next(node for node in baseline_nodes if node["node_id"] == "x")["status"] = "skipped"
+
+    plan = _plan(planner, workflow, baseline_run, baseline_nodes)
+    by_id = {node.node_id: node for node in plan.nodes}
+
+    assert by_id["x"].action == "execute"
+    assert by_id["x"].runtime_deferred is True
+    assert by_id["merge"].action == "reuse"
+    assert by_id["merge"].runtime_deferred is True
 
 
 def test_position_and_display_metadata_changes_do_not_change_reuse():

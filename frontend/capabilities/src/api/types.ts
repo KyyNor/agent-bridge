@@ -273,6 +273,7 @@ export interface WorkflowNodePlan {
   node_fingerprint: string
   source_run_id: string | null
   source_node_id: string | null
+  runtime_deferred?: boolean
 }
 
 export interface WorkflowExecutionPlan {
