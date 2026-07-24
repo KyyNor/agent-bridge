@@ -15,7 +15,6 @@ from agent_bridge.core.diff import text_diff, workflow_structured_diff
 from agent_bridge.core.timeutil import parse_utc, utc_iso, utc_now
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import (
-    WorkflowArtifactFormat,
     WorkflowStatus,
     WorkflowType,
 )
@@ -30,6 +29,7 @@ from agent_bridge.automation.workflows.incremental import (
     NodePlan,
     WorkflowIncrementalPlanner,
 )
+from agent_bridge.automation.workflows.artifact_service import ArtifactService
 from agent_bridge.automation.workflows.report_renderer import render_run_html_report
 from agent_bridge.automation.workflows.validator import WorkflowValidator
 
@@ -37,17 +37,6 @@ logger = logging.getLogger(__name__)
 
 WORKFLOW_REVISION_SOURCES = frozenset({"edit", "import", "restore"})
 WORKFLOW_IMPORT_MODES = frozenset({"auto", "new", "overwrite"})
-
-
-def _snippet(content: str, query: str | None, size: int = 220) -> str:
-    if not query:
-        return content[:size]
-    index = content.lower().find(query.lower())
-    if index < 0:
-        return content[:size]
-    start = max(0, index - 60)
-    end = min(len(content), index + size - 60)
-    return content[start:end]
 
 
 class WorkflowService:
@@ -74,6 +63,7 @@ class WorkflowService:
             skills=skills,
             scripts=scripts,
         )
+        self._artifacts = ArtifactService(store=store, admins=admins, workflow_service=self)
 
     def upsert_definition(
         self,
@@ -1307,52 +1297,22 @@ class WorkflowService:
         producer_node_id: str | None = None,
         producer_node_fingerprint: str | None = None,
     ) -> dict[str, Any]:
-        workflow = self.store.get_workflow_definition(workflow_key)
-        if workflow is None:
-            raise NotFound("workflow not found")
-        if workflow["profile_key"] != profile_key:
-            raise ValidationError("workflow profile mismatch")
-        try:
-            artifact_format = WorkflowArtifactFormat(format).value
-        except ValueError as exc:
-            raise ValidationError("unsupported artifact format") from exc
-        if not path or path.startswith("/") or ".." in path.split("/"):
-            raise ValidationError("invalid artifact path")
-        artifact_metadata = dict(metadata)
-        if producer_node_id is not None:
-            artifact_metadata.setdefault("producer_node_id", producer_node_id)
-        if producer_node_fingerprint is not None:
-            artifact_metadata.setdefault("producer_node_fingerprint", producer_node_fingerprint)
-        saved = self.store.upsert_workflow_artifact(
+        return self._artifacts.save_artifact(
             workflow_key=workflow_key,
             profile_key=profile_key,
             run_id=run_id,
             task_key=task_key,
-            task_version=task_version,
             title=title,
             path=path,
             tags=tags,
-            format=artifact_format,
+            format=format,
             summary=summary,
             content=content,
-            metadata=artifact_metadata,
+            metadata=metadata,
+            task_version=task_version,
             producer_node_id=producer_node_id,
             producer_node_fingerprint=producer_node_fingerprint,
         )
-        if producer_node_id is not None:
-            self.store.associate_workflow_run_artifacts(
-                run_id,
-                producer_node_id,
-                [saved["artifact_id"]],
-            )
-        logger.info(
-            "workflow 产物已保存 run_id=%s path=%s workflow=%s task=%s",
-            run_id,
-            path,
-            workflow_key,
-            task_key,
-        )
-        return saved
 
     def ingest_parsed_result(
         self,
@@ -1362,37 +1322,12 @@ class WorkflowService:
         run_id: str,
         parsed: ParsedWorkflowResult,
     ) -> dict[str, Any]:
-        self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
-        if parsed.status == "no_executable_task":
-            return {"status": "no_task", "artifact_count": 0}
-        if parsed.status != "completed" or not parsed.task_key:
-            raise ValidationError("parsed workflow result is not ingestible")
-        saved = [
-            self.save_artifact(
-                workflow_key=workflow_key,
-                profile_key=profile_key,
-                run_id=run_id,
-                task_key=parsed.task_key,
-                task_version=parsed.task_version,
-                title=artifact.title,
-                path=artifact.path,
-                tags=artifact.tags,
-                format=artifact.format,
-                summary=artifact.summary,
-                content=artifact.content,
-                metadata=artifact.metadata,
-            )
-            for artifact in parsed.artifacts
-        ]
-        completed = self.store.complete_workflow_task(
-            workflow_key,
-            parsed.task_key,
-            task_version=parsed.task_version,
+        return self._artifacts.ingest_parsed_result(
+            workflow_key=workflow_key,
+            profile_key=profile_key,
             run_id=run_id,
+            parsed=parsed,
         )
-        if not completed:
-            raise ValidationError("workflow task lease mismatch")
-        return {"status": "completed", "artifact_count": len(saved), "artifacts": saved}
 
     def generate_html_report_for_run(
         self,
@@ -1428,34 +1363,12 @@ class WorkflowService:
         profile_key: str | None = None,
         trusted_profile_context: bool = False,
     ) -> dict[str, Any]:
-        item = self.store.get_workflow_artifact(artifact_id)
-        if item is None:
-            raise NotFound("workflow artifact not found")
-        if actor not in self.admins:
-            if not profile_key:
-                raise AccessDenied("capability profile is required")
-            if not trusted_profile_context:
-                raise AccessDenied("profile context is not trusted")
-            if item["profile_key"] != profile_key:
-                raise NotFound("workflow artifact not found")
-        return {
-            "artifact_id": item["artifact_id"],
-            "workflow_key": item["workflow_key"],
-            "profile_key": item["profile_key"],
-            "run_id": item["run_id"],
-            "task_key": item["task_key"],
-            "task_version": item["task_version"],
-            "is_current": item["is_current"],
-            "title": item["title"],
-            "path": item["path"],
-            "tags": item["tags"],
-            "format": item["format"],
-            "summary": item["summary"],
-            "content": item["content"],
-            "metadata": item["metadata"],
-            "created_at": item["created_at"],
-            "updated_at": item["updated_at"],
-        }
+        return self._artifacts.get_artifact(
+            actor=actor,
+            artifact_id=artifact_id,
+            profile_key=profile_key,
+            trusted_profile_context=trusted_profile_context,
+        )
 
     def search_artifacts(
         self,
@@ -1477,85 +1390,24 @@ class WorkflowService:
         format: str | None = None,
         paginated: bool = False,
     ) -> dict[str, Any]:
-        if actor not in self.admins and not profile_key:
-            raise AccessDenied("capability profile is required")
-        if actor not in self.admins and profile_key and not trusted_profile_context:
-            raise AccessDenied("profile context is not trusted")
-        if profile_key:
-            profile = self.store.get_project_profile(profile_key)
-            if profile is None:
-                raise NotFound("profile not found")
-            if profile.get("status") != "active":
-                raise ValidationError("profile is disabled")
-        if limit < 1:
-            raise ValidationError("limit must be positive")
-        bounded_limit = min(limit, 50)
-        bounded_offset = max(offset, 0)
-        if paginated:
-            page = self.store.workflows.search_workflow_artifacts_page(
-                profile_key=profile_key,
-                query=query,
-                tags=tags,
-                path=path,
-                workflow_key=workflow_key,
-                task_key=task_key,
-                task_version=task_version,
-                run_id=run_id,
-                include_history=include_history,
-                limit=bounded_limit,
-                offset=bounded_offset,
-                format=format,
-            )
-            items = page["items"]
-        else:
-            items = self.store.search_workflow_artifacts(
-                profile_key=profile_key,
-                query=query,
-                tags=tags,
-                path=path,
-                workflow_key=workflow_key,
-                task_key=task_key,
-                task_version=task_version,
-                run_id=run_id,
-                include_history=include_history,
-                limit=bounded_limit,
-                format=format,
-            )
-        def _entry(item: dict[str, Any]) -> dict[str, Any]:
-            entry = {
-                "artifact_id": item["artifact_id"],
-                "workflow_key": item["workflow_key"],
-                "profile_key": item["profile_key"],
-                "run_id": item["run_id"],
-                "task_key": item["task_key"],
-                "task_version": item["task_version"],
-                "is_current": item["is_current"],
-                "title": item["title"],
-                "path": item["path"],
-                "tags": item["tags"],
-                "format": item["format"],
-                "summary": item["summary"],
-                "snippet": _snippet(item["content"], query),
-                "created_at": item["created_at"],
-                "updated_at": item["updated_at"],
-            }
-            # Return the full body when explicitly requested (feature: view a
-            # task's outputs from the progress page) or on an exact-path lookup
-            # ("fetch this one"). Prefix matches keep snippet-only otherwise.
-            if full or (path and item["path"] == path):
-                entry["content"] = item["content"]
-            return entry
-
-        result = {"items": [_entry(item) for item in items]}
-        if paginated:
-            result.update(
-                {
-                    "total": page["total"],
-                    "limit": page["limit"],
-                    "offset": page["offset"],
-                }
-            )
-        return result
+        return self._artifacts.search_artifacts(
+            actor=actor,
+            profile_key=profile_key,
+            query=query,
+            tags=tags,
+            path=path,
+            workflow_key=workflow_key,
+            limit=limit,
+            offset=offset,
+            task_key=task_key,
+            task_version=task_version,
+            run_id=run_id,
+            include_history=include_history,
+            trusted_profile_context=trusted_profile_context,
+            full=full,
+            format=format,
+            paginated=paginated,
+        )
 
     def list_artifact_history(
         self,
@@ -1567,63 +1419,11 @@ class WorkflowService:
         limit: int,
         trusted_profile_context: bool = False,
     ) -> dict[str, Any]:
-        if actor not in self.admins and not profile_key:
-            raise AccessDenied("capability profile is required")
-        if actor not in self.admins and profile_key and not trusted_profile_context:
-            raise AccessDenied("profile context is not trusted")
-        if not workflow_key:
-            raise ValidationError("workflow_key is required")
-        if not task_key:
-            raise ValidationError("task_key is required")
-        if limit < 1:
-            raise ValidationError("limit must be positive")
-        bounded_limit = min(limit, 50)
-        items = self.store.search_workflow_artifacts(
+        return self._artifacts.list_artifact_history(
+            actor=actor,
             profile_key=profile_key,
-            query=None,
-            tags=[],
-            path=None,
             workflow_key=workflow_key,
             task_key=task_key,
-            task_version=None,
-            include_history=True,
-            limit=200,
+            limit=limit,
+            trusted_profile_context=trusted_profile_context,
         )
-
-        versions: list[dict[str, Any]] = []
-        by_version: dict[str, dict[str, Any]] = {}
-        for item in items:
-            version = item["task_version"]
-            entry = by_version.get(version)
-            if entry is None:
-                entry = {
-                    "workflow_key": item["workflow_key"],
-                    "task_key": item["task_key"],
-                    "task_version": version,
-                    "is_current": item["is_current"],
-                    "run_id": item["run_id"],
-                    "updated_at": item["updated_at"],
-                    "artifacts": [],
-                }
-                by_version[version] = entry
-                versions.append(entry)
-            entry["is_current"] = bool(entry["is_current"] or item["is_current"])
-            if item["updated_at"] > entry["updated_at"]:
-                entry["updated_at"] = item["updated_at"]
-                entry["run_id"] = item["run_id"]
-            entry["artifacts"].append(
-                {
-                    "artifact_id": item["artifact_id"],
-                    "run_id": item["run_id"],
-                    "title": item["title"],
-                    "path": item["path"],
-                    "tags": item["tags"],
-                    "format": item["format"],
-                    "summary": item["summary"],
-                    "content": item["content"],
-                    "created_at": item["created_at"],
-                    "updated_at": item["updated_at"],
-                }
-            )
-
-        return {"versions": versions[:bounded_limit]}
