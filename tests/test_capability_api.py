@@ -689,11 +689,14 @@ def test_kb_repo_source_api_saves_config_and_syncs_filtered_files(wm_paths, tmp_
 
 def test_frontend_knowledge_view_exposes_git_repo_source_controls() -> None:
     source = Path("frontend/capabilities/src/views/knowledge/KnowledgeView.vue").read_text(encoding="utf-8")
+    # Git 数据源控件在 9e1aea7 拆分到 KnowledgeRepoSourcesPanel 子组件，视图通过
+    # 该面板加载和维护仓库同步状态，suffix 过滤与删除按钮的实现落在子组件文件里。
+    panel = Path("frontend/capabilities/src/components/knowledge/KnowledgeRepoSourcesPanel.vue").read_text(encoding="utf-8")
     client = Path("frontend/capabilities/src/api/client.ts").read_text(encoding="utf-8")
 
     assert "Git 数据源" in source
-    assert "include_suffixes" in source
-    assert "deleteRepoSource" in source
+    assert "include_suffixes" in panel
+    assert "deleteRepoSource" in panel
     assert "listKbRepoSources" in client
     assert "syncKbRepoSource" in client
     assert "deleteKbRepoSource" in client
