@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import sqlite3
 
+from agent_bridge.storage.repositories.workflow_artifact_search import (
+    upsert_workflow_artifact_search_content,
+)
 
-WORKFLOW_ARTIFACTS_FTS_VERSION = "1"
+WORKFLOW_ARTIFACTS_FTS_VERSION = "3"
 
 
 def has_unique_index(conn: sqlite3.Connection, table: str, columns: list[str]) -> bool:
@@ -137,11 +140,7 @@ def rebuild_workflow_artifacts_if_needed(conn: sqlite3.Connection) -> bool:
 
 
 def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bool = False) -> None:
-    """创建并维护工作流产物的 trigram FTS5 索引。
-
-    FTS5 使用 external-content 表，正文仍以 ``workflow_artifacts`` 为唯一事实来源。
-    trigger 负责增删改同步，迁移版本变化或底层产物表重建时执行一次全量 rebuild。
-    """
+    """创建并维护工作流产物的 jieba + FTS5 索引。"""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workflow_artifacts_fts_meta (
@@ -150,10 +149,54 @@ def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bo
         )
         """
     )
-    fts_exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workflow_artifacts_fts'"
+
+    version = conn.execute(
+        "SELECT value FROM workflow_artifacts_fts_meta WHERE key = 'index_version'"
+    ).fetchone()
+    fts_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workflow_artifacts_fts'"
+    ).fetchone()
+    search_content_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workflow_artifacts_search_content'"
     ).fetchone() is not None
-    if not fts_exists:
+    expected_shape = (
+        fts_row is not None
+        and "workflow_artifacts_search_content" in str(fts_row[0])
+        and "unicode61" in str(fts_row[0])
+    )
+    recreate = (
+        version is None
+        or version[0] != WORKFLOW_ARTIFACTS_FTS_VERSION
+        or not search_content_exists
+        or not expected_shape
+    )
+
+    if recreate:
+        for trigger in (
+            "workflow_artifacts_fts_ai",
+            "workflow_artifacts_fts_ad",
+            "workflow_artifacts_fts_au",
+            "workflow_artifacts_search_content_ai",
+            "workflow_artifacts_search_content_ad",
+            "workflow_artifacts_search_content_au",
+            "workflow_artifacts_search_content_base_ad",
+            "workflow_artifacts_search_content_base_au",
+        ):
+            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        conn.execute("DROP TABLE IF EXISTS workflow_artifacts_fts")
+        conn.execute("DROP TABLE IF EXISTS workflow_artifacts_search_content")
+
+        conn.execute(
+            """
+            CREATE TABLE workflow_artifacts_search_content (
+              id INTEGER PRIMARY KEY REFERENCES workflow_artifacts(id) ON DELETE CASCADE,
+              title TEXT NOT NULL DEFAULT '',
+              summary TEXT NOT NULL DEFAULT '',
+              path TEXT NOT NULL DEFAULT '',
+              content TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
         try:
             conn.execute(
                 """
@@ -162,9 +205,9 @@ def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bo
                   summary,
                   path,
                   content,
-                  content='workflow_artifacts',
+                  content='workflow_artifacts_search_content',
                   content_rowid='id',
-                  tokenize='trigram'
+                  tokenize = "unicode61 tokenchars '_'"
                 )
                 """
             )
@@ -173,8 +216,8 @@ def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bo
 
     conn.execute(
         """
-        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_fts_ai
-        AFTER INSERT ON workflow_artifacts
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_search_content_ai
+        AFTER INSERT ON workflow_artifacts_search_content
         BEGIN
           INSERT INTO workflow_artifacts_fts(rowid, title, summary, path, content)
           VALUES (new.id, new.title, new.summary, new.path, new.content);
@@ -183,35 +226,74 @@ def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bo
     )
     conn.execute(
         """
-        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_fts_ad
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_search_content_ad
+        AFTER DELETE ON workflow_artifacts_search_content
+        BEGIN
+          INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts, rowid, title, summary, path, content)
+          VALUES ('delete', old.id, old.title, old.summary, old.path, old.content);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_search_content_au
+        AFTER UPDATE ON workflow_artifacts_search_content
+        BEGIN
+          INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts, rowid, title, summary, path, content)
+          VALUES ('delete', old.id, old.title, old.summary, old.path, old.content);
+          INSERT INTO workflow_artifacts_fts(rowid, title, summary, path, content)
+          VALUES (new.id, new.title, new.summary, new.path, new.content);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_search_content_base_ad
         AFTER DELETE ON workflow_artifacts
         BEGIN
-          INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts, rowid, title, summary, path, content)
-          VALUES ('delete', old.id, old.title, old.summary, old.path, old.content);
+          DELETE FROM workflow_artifacts_search_content WHERE id = old.id;
         END
         """
     )
     conn.execute(
         """
-        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_fts_au
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_search_content_base_au
         AFTER UPDATE OF title, summary, path, content ON workflow_artifacts
         BEGIN
-          INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts, rowid, title, summary, path, content)
-          VALUES ('delete', old.id, old.title, old.summary, old.path, old.content);
-          INSERT INTO workflow_artifacts_fts(rowid, title, summary, path, content)
-          VALUES (new.id, new.title, new.summary, new.path, new.content);
+          DELETE FROM workflow_artifacts_search_content WHERE id = old.id;
         END
         """
     )
 
-    version = conn.execute(
-        "SELECT value FROM workflow_artifacts_fts_meta WHERE key = 'index_version'"
-    ).fetchone()
-    if force_rebuild or version is None or version[0] != WORKFLOW_ARTIFACTS_FTS_VERSION:
-        try:
-            conn.execute("INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts) VALUES ('rebuild')")
-        except sqlite3.OperationalError as exc:
-            raise RuntimeError("工作流产物 FTS5 索引重建失败") from exc
+    content_count = conn.execute(
+        "SELECT COUNT(*) FROM workflow_artifacts_search_content"
+    ).fetchone()[0]
+    artifact_count = conn.execute("SELECT COUNT(*) FROM workflow_artifacts").fetchone()[0]
+    missing_content = conn.execute(
+        """
+        SELECT 1
+        FROM workflow_artifacts a
+        LEFT JOIN workflow_artifacts_search_content s ON s.id = a.id
+        WHERE s.id IS NULL
+        LIMIT 1
+        """
+    ).fetchone() is not None
+    if force_rebuild or recreate or missing_content or content_count != artifact_count:
+        conn.execute("DELETE FROM workflow_artifacts_search_content")
+        rows = conn.execute(
+            "SELECT id, title, summary, path, content FROM workflow_artifacts ORDER BY id"
+        ).fetchall()
+        for row in rows:
+            upsert_workflow_artifact_search_content(
+                conn,
+                {
+                    "id": row[0],
+                    "title": row[1],
+                    "summary": row[2],
+                    "path": row[3],
+                    "content": row[4],
+                },
+            )
         conn.execute(
             """
             INSERT INTO workflow_artifacts_fts_meta(key, value)

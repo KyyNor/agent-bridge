@@ -4,22 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from .workflow_artifact_search import (
+    build_artifact_fts_query,
+    upsert_workflow_artifact_search_content,
+)
 from .workflow_common import _artifact_id, _content_hash, _json_dumps, _row_payload
-
-
-def _fts_match_query(query: str | None) -> str | None:
-    """将普通关键词转换为安全的 FTS5 phrase，不暴露 MATCH 语法。"""
-    if not query or not query.strip():
-        return None
-    normalized = " ".join(query.split())
-    escaped = normalized.replace('"', '""')
-    return f'"{escaped}"'
 
 
 class WorkflowArtifactsRepositoryMixin:
     @staticmethod
     def _artifact_search_source(query: str | None) -> tuple[str, str]:
-        has_query = _fts_match_query(query) is not None
+        has_query = build_artifact_fts_query(query) is not None
         from_sql = "workflow_artifacts a"
         if has_query:
             from_sql += " JOIN workflow_artifacts_fts ON workflow_artifacts_fts.rowid = a.id"
@@ -133,6 +128,7 @@ class WorkflowArtifactsRepositoryMixin:
             )
             if result is None:
                 raise KeyError(f"workflow artifact not found: {artifact_id}")
+            upsert_workflow_artifact_search_content(conn, result)
             return result
 
     def list_artifacts_for_run(self, run_id: str, *, include_reused: bool = True) -> list[dict[str, Any]]:
@@ -361,7 +357,7 @@ class WorkflowArtifactsRepositoryMixin:
                 "EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE json_each.value = ?)"
             )
             params.append(str(tag))
-        fts_query = _fts_match_query(query)
+        fts_query = build_artifact_fts_query(query)
         if fts_query is not None:
             clauses.append("workflow_artifacts_fts MATCH ?")
             params.append(fts_query)

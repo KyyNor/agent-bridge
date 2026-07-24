@@ -21,7 +21,7 @@
 - CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。
 - 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。
 - 仓库文件读取和文件列表基于 Git 镜像，不应依赖 CodeGraph 后端。
-- 工作流产物的文本检索使用 SQLite FTS5 trigram；结构化范围条件（Profile、current/history、标签、格式和路径前缀）必须继续在 `workflow_artifacts` 主表上过滤。当前不引入中文分词器，两字中文查询不作为保证能力。
+- 工作流产物的文本检索使用 jieba 预分词与 SQLite FTS5；结构化范围条件（Profile、current/history、标签、格式和路径前缀）必须继续在 `workflow_artifacts` 主表上过滤。中文查询按分词后的关键词组合匹配，英文标识符和路径分隔符需保持可检索。
 
 ## 时间处理规范
 

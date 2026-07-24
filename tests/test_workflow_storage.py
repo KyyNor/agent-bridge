@@ -964,7 +964,7 @@ def test_workflow_artifacts_keep_history_and_mark_only_latest_version_current(wm
     assert [item["task_version"] for item in history] == ["v2", "v1"]
 
 
-def test_workflow_artifact_fts5_trigram_search_and_index_sync(wm_paths):
+def test_workflow_artifact_jieba_fts5_search_and_index_sync(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 
     store = SQLiteStore(wm_paths.db_path)
@@ -984,11 +984,11 @@ def test_workflow_artifact_fts5_trigram_search_and_index_sync(wm_paths):
         profile_key="report-plane",
         run_id="run_1",
         task_key="page:a",
-        title="Finance page report",
+        title="DietrichGebert/ponytail — 让 AI 编程助手化身「最懒资深工程师」的技能 / 插件",
         path="reports/page-a.md",
         tags=["finance"],
         format="markdown",
-        summary="财务订单分析",
+        summary="财务订单分析，最懒资深工程师",
         content="Uses finance_orders and monthly totals.",
         metadata={},
     )
@@ -997,7 +997,8 @@ def test_workflow_artifact_fts5_trigram_search_and_index_sync(wm_paths):
         tokenizer = conn.execute(
             "SELECT sql FROM sqlite_master WHERE name = 'workflow_artifacts_fts'"
         ).fetchone()[0]
-        assert "tokenize='trigram'" in tokenizer
+        assert "unicode61" in tokenizer
+        assert "workflow_artifacts_search_content" in tokenizer
 
     english = store.search_workflow_artifacts(
         profile_key="report-plane",
@@ -1023,7 +1024,7 @@ def test_workflow_artifact_fts5_trigram_search_and_index_sync(wm_paths):
 
     chinese = store.search_workflow_artifacts(
         profile_key="report-plane",
-        query="财务订单",
+        query="财务",
         tags=[],
         path=None,
         workflow_key=None,
@@ -1032,28 +1033,27 @@ def test_workflow_artifact_fts5_trigram_search_and_index_sync(wm_paths):
     )
     assert [item["artifact_id"] for item in chinese] == [saved["artifact_id"]]
 
-    # Trigram 的已知边界：两字中文不会作为全文 MATCH 命中，后续如需支持再引入分词器。
-    short_chinese = store.search_workflow_artifacts(
+    compositional_chinese = store.search_workflow_artifacts(
         profile_key="report-plane",
-        query="财务",
+        query="最懒工程师",
         tags=[],
         path=None,
         workflow_key=None,
         include_history=False,
         limit=10,
     )
-    assert short_chinese == []
+    assert [item["artifact_id"] for item in compositional_chinese] == [saved["artifact_id"]]
 
     store.upsert_workflow_artifact(
         workflow_key="page-report",
         profile_key="report-plane",
         run_id="run_1",
         task_key="page:a",
-        title="Finance page report",
+        title="DietrichGebert/ponytail — 让 AI 编程助手化身「最懒资深工程师」的技能 / 插件",
         path="reports/page-a.md",
         tags=["finance"],
         format="markdown",
-        summary="updated",
+        summary="updated，最懒资深工程师",
         content="Uses revised_invoice_totals.",
         metadata={},
     )
@@ -1077,6 +1077,44 @@ def test_workflow_artifact_fts5_trigram_search_and_index_sync(wm_paths):
             limit=10,
         )
     ) == 1
+
+    # 已有 trigram 版本的索引在初始化时升级为 jieba 词索引，并回填现有产物。
+    with store.connect() as conn:
+        for trigger in (
+            "workflow_artifacts_search_content_ai",
+            "workflow_artifacts_search_content_ad",
+            "workflow_artifacts_search_content_au",
+            "workflow_artifacts_search_content_base_ad",
+            "workflow_artifacts_search_content_base_au",
+        ):
+            conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+        conn.execute("DROP TABLE workflow_artifacts_search_content")
+        conn.execute("DROP TABLE workflow_artifacts_fts")
+        conn.execute(
+            "UPDATE workflow_artifacts_fts_meta SET value = '1' WHERE key = 'index_version'"
+        )
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE workflow_artifacts_fts USING fts5(
+              title, summary, path, content,
+              content='workflow_artifacts',
+              content_rowid='id',
+              tokenize='trigram'
+            )
+            """
+        )
+        conn.execute("INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts) VALUES ('rebuild')")
+    store.init_schema()
+    upgraded = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="最懒工程师",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert [item["artifact_id"] for item in upgraded] == [saved["artifact_id"]]
 
     with store.connect() as conn:
         conn.execute("DELETE FROM workflow_artifacts WHERE artifact_id = ?", (saved["artifact_id"],))

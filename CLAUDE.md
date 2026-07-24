@@ -39,7 +39,7 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
-`workflow_artifacts` 的标题、摘要、路径和正文通过 SQLite FTS5 `trigram` 索引检索；Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。trigram 全文查询要求至少 3 个字符，中文两字词不属于当前版本的保证能力。
+`workflow_artifacts` 的标题、摘要、路径和正文通过 jieba 预分词与 SQLite FTS5 索引检索；中文查询词按 `AND` 组合，Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。原始产物正文不被改写，分词副本单独维护并随 artifact 生命周期同步。
 
 领域失败抛 `AgentBridgeError` 子类，由 API 全局异常处理器转换为 HTTP 响应。重新分类错误时使用明确类型并 `raise ... from exc`，不要修改任意异常对象。
 
