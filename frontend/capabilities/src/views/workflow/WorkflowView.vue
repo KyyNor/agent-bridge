@@ -18,6 +18,7 @@ import WorkflowTaskExecutionPreview from '../../components/workflow/WorkflowTask
 import WorkflowArtifactBrowser from '../../components/workflow/WorkflowArtifactBrowser.vue'
 import WorkflowArtifactDialogs from '../../components/workflow/WorkflowArtifactDialogs.vue'
 import WorkflowDesignerDrawer from '../../components/workflow/WorkflowDesignerDrawer.vue'
+import WorkflowTaskToolbar from '../../components/workflow/WorkflowTaskToolbar.vue'
 import WorkflowRunHistory from '../../components/workflow/WorkflowRunHistory.vue'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
@@ -2338,130 +2339,43 @@ async function confirmClearWorkflow() {
         </div>
       </div>
       <div class="space-y-4">
-          <!-- 筛选 / 搜索 / 排序 -->
-          <div class="flex flex-wrap items-center gap-2">
-            <Input
-              v-model="taskSearchInput"
-              type="search"
-              placeholder="搜索 task_key / 类型"
-              class="h-8 w-56 text-xs"
-              @input="onTaskSearchInput"
-            />
-            <Select v-model="taskStatusFilter">
-              <SelectTrigger class="h-8 w-[140px] text-xs">
-                <SelectValue placeholder="全部状态" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all_status__">全部状态</SelectItem>
-                <SelectItem v-for="status in taskStatuses" :key="status" :value="status">
-                  {{ taskStatusLabel(status) }} {{ taskStats[status] || 0 }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <Select v-model="taskTypeFilter">
-              <SelectTrigger class="h-8 w-[140px] text-xs">
-                <SelectValue placeholder="全部类型" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">全部类型</SelectItem>
-                <SelectItem v-for="t in taskTypes" :key="t" :value="t">{{ t }}</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select v-model="taskSort">
-              <SelectTrigger class="h-8 w-[150px] text-xs">
-                <SelectValue placeholder="排序" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">默认（状态优先）</SelectItem>
-                <SelectItem value="task_key_asc">task_key ↑</SelectItem>
-                <SelectItem value="task_key_desc">task_key ↓</SelectItem>
-                <SelectItem value="set_at_asc">设置时间 ↑</SelectItem>
-                <SelectItem value="set_at_desc">设置时间 ↓</SelectItem>
-                <SelectItem value="updated_at_desc">最近更新</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              v-if="taskStatusFilter !== ALL_STATUS_SENTINEL || taskTypeFilter !== ALL_TYPE_SENTINEL || taskSearch || taskSort !== 'default'"
-              variant="ghost"
-              size="sm"
-              class="h-8 text-xs"
-              @click="resetTaskFilters"
-            >
-              重置筛选
-            </Button>
-            <div class="ml-auto flex items-center gap-3">
-              <label v-if="pagedTasks.length" class="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  :checked="allVisibleTasksSelected"
-                  :indeterminate.prop="someVisibleTasksSelected && !allVisibleTasksSelected"
-                  :disabled="batchBusy"
-                  @change="setVisibleTasksSelectedFromEvent"
-                />
-                本页全选
-              </label>
-              <span v-if="selectedTasks.length" class="text-xs text-primary">已选 {{ selectedTasks.length }}</span>
-              <Button
-                v-if="selectedTasks.length"
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs text-warning"
-                :disabled="batchBusy"
-                @click="resetSelectedTasks"
-              >
-                {{ batchAction === 'reset' ? `重置中 ${batchProgress.current}/${batchProgress.total}` : '批量重置' }}
-              </Button>
-              <Button
-                v-if="selectedTasks.length"
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs text-primary"
-                :disabled="batchBusy"
-                @click="runSelectedTasks"
-              >
-                {{ batchAction === 'run' ? `运行中 ${batchProgress.current}/${batchProgress.total}` : '批量运行' }}
-              </Button>
-              <Button
-                v-if="batchAction === 'run'"
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs text-destructive"
-                :disabled="batchStopRequested"
-                @click="stopBatchRun"
-              >
-                {{ batchStopRequested ? '停止中' : '停止批量' }}
-              </Button>
-              <span class="text-xs text-muted-foreground">
-                {{ filteredTasks.length }} / {{ tasks.length }}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs"
-                :disabled="!taskWorkflow || batchBusy"
-                @click="downloadTaskImportTemplate"
-              >
-                下载模板
-              </Button>
-              <Button
-                size="sm"
-                class="h-8 text-xs"
-                :disabled="!taskWorkflow || batchBusy"
-                @click="openTaskImport"
-              >
-                导入 Excel
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                class="h-8 text-xs"
-                :disabled="tasksLoading || !taskWorkflow"
-                @click="taskWorkflow && loadTasks(taskWorkflow.workflow_key)"
-              >
-                {{ tasksLoading ? '刷新中' : '刷新' }}
-              </Button>
-            </div>
-          </div>
+          <WorkflowTaskToolbar
+            :search-input="taskSearchInput"
+            :status="taskStatusFilter"
+            :type="taskTypeFilter"
+            :sort="taskSort"
+            :statuses="taskStatuses"
+            :types="taskTypes"
+            :status-counts="taskStats"
+            :status-label="taskStatusLabel"
+            :show-reset="taskStatusFilter !== ALL_STATUS_SENTINEL || taskTypeFilter !== ALL_TYPE_SENTINEL || !!taskSearch || taskSort !== 'default'"
+            :visible-task-count="pagedTasks.length"
+            :all-visible-selected="allVisibleTasksSelected"
+            :some-visible-selected="someVisibleTasksSelected"
+            :selected-count="selectedTasks.length"
+            :batch-busy="batchBusy"
+            :batch-action="batchAction"
+            :batch-current="batchProgress.current"
+            :batch-total="batchProgress.total"
+            :stop-requested="batchStopRequested"
+            :filtered-count="filteredTasks.length"
+            :total-count="tasks.length"
+            :has-workflow="!!taskWorkflow"
+            :loading="tasksLoading"
+            @update:search-input="taskSearchInput = $event"
+            @update:status="taskStatusFilter = $event"
+            @update:type="taskTypeFilter = $event"
+            @update:sort="taskSort = $event"
+            @search="onTaskSearchInput"
+            @reset-filters="resetTaskFilters"
+            @select-visible="setVisibleTasksSelectedFromEvent"
+            @reset-selected="resetSelectedTasks"
+            @run-selected="runSelectedTasks"
+            @stop-batch="stopBatchRun"
+            @download-template="downloadTaskImportTemplate"
+            @import="openTaskImport"
+            @refresh="taskWorkflow && loadTasks(taskWorkflow.workflow_key)"
+          />
 
           <div v-if="taskError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
             {{ taskError }}
