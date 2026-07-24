@@ -10,14 +10,10 @@ logger = logging.getLogger(__name__)
 from typing import Any, Callable
 
 from agent_bridge.agent_runtime.service import AgentService
-from agent_bridge.app.document_paths import (
-    join_backend_path,
-    normalize_relative_document_path,
-    split_document_path,
-)
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.knowledge_management.docs_knowledge.ingest import DocumentIngestService
+from agent_bridge.knowledge_management.docs_knowledge.repo_sync import GitRepoSyncService
 from agent_bridge.knowledge_management.docs_knowledge.sync_runner import SyncJobRunner
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService
 from agent_bridge.capability_hub.service import CapabilityService
@@ -49,7 +45,6 @@ from agent_bridge.core.domain import (
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry, create_registry_from_db
 from agent_bridge.knowledge_management.docs_knowledge.service import DocsKnowledgeService
 from agent_bridge.knowledge_management.memory.service import MemoryService
-from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.service import ScriptService
@@ -141,6 +136,47 @@ class _SyncRunnerFacade:
         self._service.align_backends()
 
 
+class _RepoSyncFacade:
+    """把门面中 repo_sync 需要的能力暴露给 GitRepoSyncService。"""
+
+    __slots__ = ("_service",)
+
+    def __init__(self, service: "AgentBridgeService") -> None:
+        self._service = service
+
+    def require_kb_admin_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
+        return self._service._require_kb_admin_visible(actor, kb_slug)
+
+    def queue_placement_sync_jobs(self, doc: dict[str, Any], kb_id: int) -> None:
+        self._service._queue_placement_sync_jobs(doc, kb_id)
+
+    def add_document(
+        self,
+        actor: str,
+        source: Path,
+        kb_slugs: list[str],
+        later: bool,
+        original_filename: str | None = None,
+        source_type: str = "manual",
+        source_repo_key: str = "",
+        slug_override: str | None = None,
+        folder_id: int | None = None,
+        relative_path: str | None = None,
+    ) -> dict[str, Any]:
+        return self._service.add_document(
+            actor, source, kb_slugs, later,
+            original_filename=original_filename,
+            source_type=source_type,
+            source_repo_key=source_repo_key,
+            slug_override=slug_override,
+            folder_id=folder_id,
+            relative_path=relative_path,
+        )
+
+    def delete_document(self, actor: str, doc_slug: str, later: bool = True) -> dict[str, str]:
+        return self._service.delete_document(actor, doc_slug, later=later)
+
+
 class AgentBridgeService:
     def __init__(
         self,
@@ -183,6 +219,13 @@ class AgentBridgeService:
             coding_agents=create_coding_agent_registry(agent_runtime_config),
         )
         self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins, agent_service=self.agents)
+        self._repo_sync = GitRepoSyncService(
+            store=store,
+            codegraph=self.codegraph,
+            paths=paths,
+            facade=self._repo_sync_facade(),
+            ingest=self._ingest,
+        )
         self.codegraph_scheduler = CodeGraphScheduler(service=self.codegraph, store=store, admins=admins)
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
@@ -994,208 +1037,14 @@ class AgentBridgeService:
         return self.sync_kb_repo_source_changes(actor, kb_slug, repo_key)
 
     def delete_kb_repo_source(self, actor: str, kb_slug: str, repo_key: str) -> dict[str, Any]:
-        """删除 KB 的 git 数据源:解绑关联 + 软删除该 repo 提供的文档 + 生成 delete 同步任务。
-
-        遵循 delete_document 的顺序:先生成 Operation.delete 任务再 soft_delete。
-        保留 code_repositories 记录和本地克隆(其他 KB 可能引用)。
-        """
-        kb = self._require_kb_admin_visible(actor, kb_slug)
-        source = self.store.get_kb_repo_source(kb["id"], repo_key)
-        if source is None:
-            raise NotFound("knowledge repo source not found")
-        git_docs = self.store.list_git_docs_for_repo(kb["id"], repo_key)
-        for doc in git_docs:
-            self._delete_git_document(actor, doc)
-        self.store.delete_kb_repo_source(kb["id"], repo_key)
-        logger.info("git 数据源已删除 kb=%s repo=%s 删除文档数=%d", kb_slug, repo_key, len(git_docs))
-        return {"kb_slug": kb_slug, "repo_key": repo_key, "deleted_docs": len(git_docs)}
+        return self._repo_sync.delete_kb_repo_source(actor, kb_slug, repo_key)
 
     def sync_kb_repo_source_changes(self, actor: str, kb_slug: str, repo_key: str) -> dict[str, Any]:
-        """增量同步:对比仓库文件与已导入文档,生成 create/delete 同步任务。
+        return self._repo_sync.sync_kb_repo_source_changes(actor, kb_slug, repo_key)
 
-        diff 口径:按 slug + repo_key 匹配。
-        - 新增文件 → add_document(source_type='git')
-        - 仓库已删除 → delete_document(先生成 Operation.delete 任务再 soft_delete)
-        - 内容修改 → 先删后加(doc_id 变化)
-        - 内容不变 → 保留文档版本,按仓库相对路径对齐目录 placement
-        """
-        kb = self._require_kb_admin_visible(actor, kb_slug)
-        source = self.store.get_kb_repo_source(kb["id"], repo_key)
-        if source is None:
-            raise NotFound("knowledge repo source not found")
-        repo = self.store.get_code_repository(repo_key)
-        if repo is None:
-            raise NotFound("code repository not found")
+    def _normalize_repo_source_suffixes(self, suffixes: list[str]) -> list[str]:
+        return self._repo_sync._normalize_repo_source_suffixes(suffixes)
 
-        try:
-            self.codegraph.sync_repository(actor, repo_key)
-            repo = self.store.get_code_repository(repo_key) or repo
-            local_path = Path(str(repo.get("local_path") or "")) if repo.get("local_path") else self.paths.repos_dir / repo_key
-            if not local_path.exists():
-                raise ValidationError("code repository has not been synced")
-
-            suffixes = set(source["include_suffixes"])
-            # existing: {slug: doc}
-            existing = {
-                d["slug"]: d
-                for d in self.store.list_git_docs_for_repo(kb["id"], repo_key)
-            }
-            existing_slugs = set(existing.keys())
-
-            # current: 扫描仓库,按实际可存入的 slug 计算每个文件的 (path, content_hash)。
-            occupied_slugs = self.store.list_document_slugs() - existing_slugs
-            current: dict[str, dict[str, Any]] = {}
-            for path in sorted(local_path.rglob("*")):
-                if path.is_symlink() or not path.is_file():
-                    continue
-                try:
-                    relative_parts = path.relative_to(local_path).parts
-                except ValueError:
-                    continue
-                if ".git" in relative_parts:
-                    continue
-                if path.suffix.lower() not in suffixes:
-                    continue
-                if path.suffix.lower() not in ALLOWED_EXTENSIONS:
-                    continue
-                slug = unique_slug(make_slug(path.name), occupied_slugs | set(current.keys()))
-                current[slug] = {
-                    "path": path,
-                    "relative_path": path.relative_to(local_path).as_posix(),
-                    "content_hash": self._sha256_file(path),
-                }
-
-            added = removed = updated = unchanged = 0
-            # 新增 + 修改
-            for slug, item in current.items():
-                if slug not in existing_slugs:
-                    self._import_repo_file(
-                        actor, kb_slug, repo_key, item["path"], slug, item["relative_path"]
-                    )
-                    added += 1
-                elif (existing[slug].get("content_hash") or "") != item["content_hash"]:
-                    # 修改:先删后加
-                    self._delete_git_document(actor, existing[slug])
-                    self._import_repo_file(
-                        actor, kb_slug, repo_key, item["path"], slug, item["relative_path"]
-                    )
-                    updated += 1
-                else:
-                    # 内容不变时只修正当前 KB 的目录 placement,不重新导入全局 document。
-                    self._import_repo_file(
-                        actor, kb_slug, repo_key, item["path"], slug, item["relative_path"]
-                    )
-                    unchanged += 1
-            # 删除
-            for slug in existing_slugs - set(current.keys()):
-                self._delete_git_document(actor, existing[slug])
-                removed += 1
-
-            self.store.mark_kb_repo_source_sync(kb["id"], repo_key, success=True)
-            return {
-                "kb_slug": kb_slug, "repo_key": repo_key,
-                "added": added, "removed": removed, "updated": updated, "unchanged": unchanged,
-            }
-        except Exception as exc:
-            self.store.mark_kb_repo_source_sync(kb["id"], repo_key, success=False, error=str(exc))
-            raise
-
-    def _import_repo_file(
-        self,
-        actor: str,
-        kb_slug: str,
-        repo_key: str,
-        path: Path,
-        slug: str,
-        relative_path: str,
-    ) -> None:
-        existing = self.store.get_document_by_slug(slug)
-        if existing is not None:
-            kb = self._require_kb_admin_visible(actor, kb_slug)
-            placement = self.store.get_document_placement(existing["id"], kb["id"])
-            if placement is not None:
-                normalized_path = normalize_relative_document_path(relative_path)
-                parent_parts, basename = split_document_path(normalized_path)
-                current_document = self.store.get_document_by_id(existing["id"])
-                current_original_path = ""
-                if current_document and current_document.get("current_version_id"):
-                    current_version = next(
-                        (
-                            version
-                            for version in self.store.list_versions(existing["id"])
-                            if version["id"] == current_document["current_version_id"]
-                        ),
-                        None,
-                    )
-                    if current_version is not None:
-                        current_original_path = normalize_relative_document_path(
-                            current_version["original_filename"]
-                        )
-                        if split_document_path(current_original_path)[1] != basename:
-                            return
-
-                target_folder_path = "/".join(parent_parts)
-                current_folder_path = placement.get("folder_path") or ""
-                if (
-                    current_original_path == normalized_path
-                    and current_folder_path == target_folder_path
-                ):
-                    return
-                if current_folder_path == target_folder_path:
-                    return
-
-                target_folder_id = self._ensure_document_parent_folder(
-                    kb["id"], None, parent_parts
-                )
-                self.store.update_document_placement(
-                    existing["id"], kb["id"], target_folder_id
-                )
-                if current_document is not None:
-                    self._queue_placement_sync_jobs(current_document, kb["id"])
-                return
-
-        self.add_document(
-            actor, path, [kb_slug], later=True,
-            original_filename=relative_path,
-            relative_path=relative_path,
-            source_type="git", source_repo_key=repo_key,
-            slug_override=slug,
-        )
-
-    def _delete_git_document(self, actor: str, doc: dict[str, Any]) -> None:
-        self.delete_document(actor, doc["slug"], later=True)
-        released_slug = unique_slug(
-            f"{doc['slug']}-deleted-{doc['id']}",
-            self.store.list_document_slugs(),
-        )
-        self.store.rename_document_slug(doc["id"], released_slug)
-
-    @staticmethod
-    def _sha256_file(path: Path) -> str:
-        import hashlib
-
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-
-    @staticmethod
-    def _normalize_repo_source_suffixes(suffixes: list[str]) -> list[str]:
-        normalized: list[str] = []
-        for raw in suffixes:
-            value = str(raw or "").strip().lower()
-            if not value:
-                continue
-            if not value.startswith("."):
-                value = f".{value}"
-            if value not in normalized:
-                normalized.append(value)
-        if not normalized:
-            raise ValidationError("at least one suffix is required")
-        return normalized
-
-    # -- Sync config & scheduler --
 
     def get_sync_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -1515,6 +1364,9 @@ class AgentBridgeService:
     def _sync_runner_facade(self) -> "_SyncRunnerFacade":
         return _SyncRunnerFacade(self)
 
+    def _repo_sync_facade(self) -> "_RepoSyncFacade":
+        return _RepoSyncFacade(self)
+
     # -- 后端 Agent 能力（兼容门面） --
 
     def list_backend_agents(self, actor: str, slug: str) -> list[dict[str, Any]]:
@@ -1626,6 +1478,7 @@ class AgentBridgeService:
         if doc is None:
             raise NotFound("document not found")
         return doc
+
 
 
 
