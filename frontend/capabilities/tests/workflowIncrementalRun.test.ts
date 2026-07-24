@@ -30,10 +30,11 @@ test('execution plan retains reuse and execute nodes with reasons and sources fo
 
 test('WorkflowView previews stale increments and gives completed tasks a force-full entry', () => {
   const view = source('src/views/workflow/WorkflowView.vue')
+  const tasksComposable = source('src/composables/useWorkflowTasks.ts')
   const previewPanel = source('src/components/workflow/WorkflowTaskExecutionPreview.vue')
-  assert.match(view, /api\.previewWorkflowRun/)
-  assert.match(view, /execution_mode: 'incremental'/)
-  assert.match(view, /execution_mode: 'force_full'/)
+  assert.match(tasksComposable, /api\.previewWorkflowRun/)
+  assert.match(tasksComposable, /execution_mode: 'incremental'/)
+  assert.match(tasksComposable, /execution_mode: 'force_full'/)
   assert.match(view, /<WorkflowTaskExecutionPreview :plan="taskPreview\(task\)"/)
   assert.match(previewPanel, /复用节点/)
   assert.match(previewPanel, /重新执行节点/)
