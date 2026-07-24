@@ -177,33 +177,75 @@ class WorkflowIncrementalPlanner:
         previous_nodes = {str(row.get("node_id")): row for row in selected_node_runs if row.get("node_id")}
         artifacts_by_id = self._artifacts_by_id(selected_artifacts)
 
-        plans: list[NodePlan] = []
-        reasons: dict[str, str] = {}
-        for node in nodes:
-            node_id = str(node["id"])
-            node_fingerprint = fingerprints[node_id]
-            direct_reason = affected_reasons.get(node_id)
-            upstream_executing = any(plan.action == "execute" for plan in plans if plan.node_id in parents.get(node_id, set()))
-            if direct_reason:
-                plan = self._execute_plan(node_id, node_fingerprint, direct_reason)
-            elif upstream_executing:
-                plan = self._execute_plan(node_id, node_fingerprint, "upstream_execute")
-            else:
-                plan = self._reuse_or_execute(
-                    node_id=node_id,
-                    node_fingerprint=node_fingerprint,
-                    source_run_id=selected_id,
-                    source=previous_nodes.get(node_id),
-                    artifacts_by_id=artifacts_by_id,
-                    workflow_key=workflow_key,
-                    profile_key=profile_key,
-                    task_key=task_key,
-                    task_version=task_version,
+        plans_by_id: dict[str, NodePlan] = {}
+        pending_ids = {str(node["id"]) for node in nodes}
+        while pending_ids:
+            progress = False
+            for node in nodes:
+                node_id = str(node["id"])
+                if node_id not in pending_ids:
+                    continue
+                if any(parent_id not in plans_by_id for parent_id in parents.get(node_id, set())):
+                    continue
+
+                node_fingerprint = fingerprints[node_id]
+                direct_reason = affected_reasons.get(node_id)
+                node_type = str(node.get("type") or "")
+                source = previous_nodes.get(node_id)
+                if node_type == "get_task":
+                    # 每次刷新租约；选中任务的业务输入未变化时，仍保留下游复用。
+                    plan = self._execute_plan(
+                        node_id,
+                        node_fingerprint,
+                        direct_reason or "task_lease_must_refresh",
+                    )
+                    affected.add(node_id)
+                    task_changed = (
+                        direct_reason is not None
+                        or source is None
+                        or source.get("status") != "completed"
+                        or self._task_input_changed(task, source)
+                    )
+                    if task_changed:
+                        affected.update(self._downstream_closure({node_id}, edges))
+                elif direct_reason or node_id in affected:
+                    plan = self._execute_plan(
+                        node_id,
+                        node_fingerprint,
+                        direct_reason or "upstream_execute",
+                    )
+                else:
+                    plan = self._reuse_or_execute(
+                        node_id=node_id,
+                        node_fingerprint=node_fingerprint,
+                        source_run_id=selected_id,
+                        source=source,
+                        artifacts_by_id=artifacts_by_id,
+                        workflow_key=workflow_key,
+                        profile_key=profile_key,
+                        task_key=task_key,
+                        task_version=task_version,
+                    )
+                plans_by_id[node_id] = plan
+                pending_ids.remove(node_id)
+                progress = True
+                if plan.action == "execute" and node_type != "get_task":
+                    affected.update(self._downstream_closure({node_id}, edges))
+
+            if progress:
+                continue
+
+            # 图校验会拒绝环，但规划器脱离校验边界使用时仍保持总有结果。
+            for node_id in sorted(pending_ids):
+                plans_by_id[node_id] = self._execute_plan(
+                    node_id,
+                    fingerprints[node_id],
+                    "dependency_unresolved",
                 )
-            plans.append(plan)
-            reasons[node_id] = plan.reason
-            if plan.action == "execute":
-                affected.add(node_id)
+            pending_ids.clear()
+
+        plans = [plans_by_id[str(node["id"])] for node in nodes]
+        reasons = {plan.node_id: plan.reason for plan in plans}
 
         return IncrementalPlan(
             workflow_key=workflow_key,
@@ -378,6 +420,33 @@ class WorkflowIncrementalPlanner:
             if artifact_id is not None:
                 result[str(artifact_id)] = row
         return result
+
+    @staticmethod
+    def _task_input_fingerprint(value: Any) -> str | None:
+        if not isinstance(value, Mapping):
+            return None
+        payload = value.get("payload")
+        if payload is None:
+            raw_payload = value.get("payload_json")
+            if isinstance(raw_payload, str):
+                try:
+                    payload = json.loads(raw_payload)
+                except json.JSONDecodeError:
+                    payload = raw_payload
+        return execution_fingerprint(
+            {
+                "task_key": str(value.get("task_key") or ""),
+                "task_version": str(value.get("task_version") or ""),
+                "type": str(value.get("type") or ""),
+                "payload": payload,
+            }
+        )
+
+    @classmethod
+    def _task_input_changed(cls, current_task: Mapping[str, Any], source: Mapping[str, Any]) -> bool:
+        source_output = _as_mapping(source.get("output") if "output" in source else source.get("output_json"))
+        historic_task = source_output.get("task") if source_output is not None else None
+        return cls._task_input_fingerprint(current_task) != cls._task_input_fingerprint(historic_task)
 
     def _reuse_or_execute(
         self,

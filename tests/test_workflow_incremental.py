@@ -177,6 +177,69 @@ def test_unusable_baseline_node_executes_from_that_node(mutation, reason):
     ]
 
 
+def test_get_task_is_always_executed_to_refresh_the_current_run_lease():
+    planner = WorkflowIncrementalPlanner()
+    workflow = _workflow(
+        [_node("task", node_type="get_task"), _node("work")],
+        [_edge("task", "work")],
+    )
+    baseline_run, baseline_nodes = _baseline(planner, workflow)
+    next(node for node in baseline_nodes if node["node_id"] == "task").update(
+        output={"task": _task()}
+    )
+
+    plan = _plan(planner, workflow, baseline_run, baseline_nodes)
+
+    assert [(node.node_id, node.action, node.reason) for node in plan.nodes] == [
+        ("task", "execute", "task_lease_must_refresh"),
+        ("work", "reuse", "fingerprint_match"),
+    ]
+    assert set(plan.affected_node_ids) == {"task"}
+
+
+def test_changed_get_task_business_input_invalidates_downstream():
+    planner = WorkflowIncrementalPlanner()
+    workflow = _workflow(
+        [_node("task", node_type="get_task"), _node("work")],
+        [_edge("task", "work")],
+    )
+    baseline_run, baseline_nodes = _baseline(planner, workflow)
+    next(node for node in baseline_nodes if node["node_id"] == "task").update(
+        output={"task": {**_task(), "payload": {"version": 1}}}
+    )
+
+    plan = _plan(
+        planner,
+        workflow,
+        baseline_run,
+        baseline_nodes,
+        task={**_task(), "payload": {"version": 2}},
+    )
+
+    assert [(node.node_id, node.action, node.reason) for node in plan.nodes] == [
+        ("task", "execute", "task_lease_must_refresh"),
+        ("work", "execute", "upstream_execute"),
+    ]
+    assert set(plan.affected_node_ids) == {"task", "work"}
+
+
+def test_invalid_baseline_output_propagates_downstream_without_node_order_dependency():
+    planner = WorkflowIncrementalPlanner()
+    workflow = _workflow(
+        [_node("work"), _node("task")],
+        [_edge("task", "work")],
+    )
+    baseline_run, baseline_nodes = _baseline(planner, workflow)
+    next(node for node in baseline_nodes if node["node_id"] == "task").pop("output")
+
+    plan = _plan(planner, workflow, baseline_run, baseline_nodes)
+
+    assert [(node.node_id, node.action, node.reason) for node in plan.nodes] == [
+        ("work", "execute", "upstream_execute"),
+        ("task", "execute", "baseline_output_missing"),
+    ]
+
+
 def test_selects_one_newest_completed_compatible_baseline_without_cross_run_nodes():
     planner = WorkflowIncrementalPlanner()
     workflow = _workflow([_node("a")])

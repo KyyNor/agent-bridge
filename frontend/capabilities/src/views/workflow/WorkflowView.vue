@@ -2034,7 +2034,9 @@ async function loadProgressArtifacts() {
     const result = await api.searchWorkflowArtifacts({
       workflow_key: workflowKey,
       run_id: runId,
-      include_history: false,
+      // 编排收尾失败时，当前 run 仍可能有有效的部分产物；精确 run_id
+      // 会把查询范围限制在当前 run 内。
+      include_history: true,
       full: false,
       format: 'all',
       limit: 20,

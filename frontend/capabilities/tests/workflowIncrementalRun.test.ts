@@ -40,6 +40,13 @@ test('WorkflowView previews stale increments and gives completed tasks a force-f
   assert.match(view, /全量运行/)
 })
 
+test('progress artifact lookup keeps artifacts from the selected run', () => {
+  const view = source('src/views/workflow/WorkflowView.vue')
+  const loader = view.slice(view.indexOf('async function loadProgressArtifacts'))
+  assert.match(loader, /run_id: runId/)
+  assert.match(loader, /include_history: true/)
+})
+
 test('WorkflowRunGraph displays node actions, sources, and reuse reasons instead of waiting', () => {
   const graph = source('src/views/workflow/WorkflowRunGraph.vue')
   assert.match(graph, /action === 'reuse'/)

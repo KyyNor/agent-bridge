@@ -118,6 +118,8 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 - `WorkflowDagExecutor` 负责拓扑执行、条件、增量缓存和节点输出；
 - `WorkflowScheduler` 负责运行时间窗、并发和任务租约，不继承单 cron 基类。
 
+增量运行只复用无副作用的节点结果；`get_task` 负责把队列任务租约绑定到当前 run，因此每次都必须重新执行，但只有任务业务输入相对基线发生变化时才使下游结果失效。`workflow_set_task`、`workflow_run_log` 等 Agent 运行期间的辅助调用不因增量复用规则被强制重跑。
+
 导入/导出格式为 `agent-bridge.workflow`、`format_version=1`。`examples/workflows/*/workflow.json` 必须通过示例契约测试。不要恢复 `manifest.json + workflow.js` 双运行时。
 
 Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEventTimeline`、`SubagentDetailPanel` 和 `useSubagentDetails` 复用运行详情；不得在 Workflow 与 AgentRuns 页面分别维护另一套加载状态。

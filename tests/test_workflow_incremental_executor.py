@@ -99,12 +99,16 @@ async def test_incremental_executor_reuses_outputs_without_calling_handlers_and_
 
 
 @pytest.mark.asyncio
-async def test_reused_get_task_restores_task_for_downstream_handler_context():
+async def test_executed_get_task_refreshes_task_for_downstream_handler_context():
     graph = _graph([("task", "get_task"), ("work", "agent")], [("task", "work")])
+    calls = []
 
     class Handlers:
         async def execute(self, node, context):
-            assert node.id == "work"
+            calls.append(node.id)
+            if node.id == "task":
+                assert context.task is None
+                return NodeExecutionResult(output={"task": {"task_key": "t1", "task_version": "v1"}})
             assert context.task == {"task_key": "t1", "task_version": "v1"}
             assert context.execution_mode == "incremental"
             return NodeExecutionResult(output={"done": True})
@@ -112,12 +116,13 @@ async def test_reused_get_task_restores_task_for_downstream_handler_context():
     result = await WorkflowDagExecutor(store=Store(), handlers=Handlers()).run(
         workflow={"workflow_key": "wf", "profile_key": "p", "definition": graph}, run_id="new-run",
         input_data={}, actor="root", plan=_plan(
-            _node("task", "reuse", output={"task": {"task_key": "t1", "task_version": "v1"}}),
+            _node("task", "execute"),
             _node("work", "execute"),
         ),
     )
 
     assert result.task == {"task_key": "t1", "task_version": "v1"}
+    assert calls == ["task", "work"]
 
 
 @pytest.mark.asyncio
