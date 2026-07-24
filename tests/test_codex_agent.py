@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_bridge.agent_runtime.adapters import codex as codex_module
 from agent_bridge.agent_runtime.adapters.codex import (
     CodexCodingAgent,
     _build_command,
@@ -150,6 +151,57 @@ def test_codex_run_closes_stdin(monkeypatch, tmp_path: Path) -> None:
 
     assert captured["kwargs"]["stdin"] == subprocess.DEVNULL
     assert updates[-1].final is not None
+
+
+def test_codex_schema_fallback_emits_structured_output_event(monkeypatch, tmp_path: Path) -> None:
+    class _FakeCli:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def start(self):
+            return None
+
+        async def rows(self):
+            yield {"type": "agent_message", "message": '{"answer": 42}'}
+
+        async def wait(self):
+            return 0
+
+        async def close(self):
+            return None
+
+        async def abort(self):
+            return None
+
+        def stderr_summary(self):
+            return ""
+
+    monkeypatch.setattr(codex_module, "JsonlCliProcess", _FakeCli)
+    schema = {"type": "object", "properties": {"answer": {"type": "number"}}}
+    request = CodingAgentRequest(
+        prompt="compute",
+        cwd=tmp_path,
+        mcp_servers={},
+        setting_sources=[],
+        output_schema=schema,
+    )
+
+    updates = asyncio.run(_collect_updates(CodexCodingAgent().start(request)))
+
+    assert updates[0].final is None
+    assert updates[0].events[0]["kind"] == "agent_message"
+
+    # The fallback final update is the second update and carries the derived
+    # event used by the timeline; the original message remains untouched.
+    assert updates[-1].final is not None
+    assert updates[-1].final.structured_output == {"answer": 42}
+    assert updates[-1].events[0]["kind"] == "structured_output"
+    assert updates[-1].events[0]["output"] == {"answer": 42}
+    assert updates[-1].events[0]["output_content_type"] == "application/json"
+
+
+async def _collect_updates(run):
+    return [update async for update in run.updates()]
 
 
 def test_registry_can_create_codex_backend() -> None:

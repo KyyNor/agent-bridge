@@ -5,7 +5,7 @@ import json
 import subprocess
 import tempfile
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +65,10 @@ class _CodexRun:
                 if maybe_text:
                     final_text_parts.append(maybe_text)
                 if maybe_final is not None:
+                    maybe_final = _with_structured_output(maybe_final, self.request.output_schema)
+                    structured_event = _structured_output_event(maybe_final)
+                    if structured_event is not None:
+                        events.append(structured_event)
                     final = maybe_final
                 yield CodingAgentUpdate(raw=raw, events=events, final=maybe_final)
             return_code = await cli.wait()
@@ -80,13 +84,21 @@ class _CodexRun:
                 )
                 return
             if final is None:
+                text = _joined_text(final_text_parts)
+                final = _with_structured_output(
+                    CodingAgentFinal(result=text),
+                    self.request.output_schema,
+                )
                 yield CodingAgentUpdate(
-                    final=CodingAgentFinal(result=_joined_text(final_text_parts))
+                    events=_structured_output_events(final),
+                    final=final,
                 )
             elif self.request.output_schema and _extract_json(final.result or "") is None:
                 text = _joined_text(final_text_parts)
                 if _extract_json(text) is not None:
+                    final = _with_structured_output(replace(final, result=text), self.request.output_schema)
                     yield CodingAgentUpdate(
+                        events=_structured_output_events(final),
                         final=CodingAgentFinal(
                             result=text,
                             structured_output=final.structured_output,
@@ -128,6 +140,41 @@ def _schema_for_codex(schema: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(schema)
     _require_all_object_properties(normalized)
     return normalized
+
+
+def _with_structured_output(
+    final: CodingAgentFinal,
+    output_schema: dict[str, Any] | None,
+) -> CodingAgentFinal:
+    """Attach JSON parsed from Codex's final text when the CLI omits the field.
+
+    Codex's JSONL event stream can expose a schema-conforming response as an
+    ordinary message while the final ``CodingAgentFinal`` has no native
+    ``structured_output`` field. Keep the native value when it exists and only
+    use the same JSON extraction fallback already supported by AgentService.
+    """
+    if not output_schema or final.structured_output is not None:
+        return final
+    parsed = _extract_json(final.result or "")
+    return replace(final, structured_output=parsed) if parsed is not None else final
+
+
+def _structured_output_event(final: CodingAgentFinal) -> dict[str, Any] | None:
+    if final.structured_output is None:
+        return None
+    return _codex_event(
+        "structured_output",
+        agent_role="main",
+        status="success",
+        output=final.structured_output,
+        output_content_type="application/json",
+        session_id=final.session_id,
+    )
+
+
+def _structured_output_events(final: CodingAgentFinal) -> list[dict[str, Any]]:
+    event = _structured_output_event(final)
+    return [event] if event is not None else []
 
 
 def _require_all_object_properties(value: Any) -> None:

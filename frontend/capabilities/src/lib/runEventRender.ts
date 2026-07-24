@@ -25,6 +25,7 @@ export function eventKindLabel(event: WorkflowRunEvent): string {
     return '工具完成'
   }
   if (event.kind === 'result') return event.status === 'failed' ? '运行失败' : '运行结果'
+  if (event.kind === 'structured_output') return event.status === 'failed' ? '结构化输出失败' : '结构化输出'
   if (event.kind === 'error') return '异常'
   if (event.kind === 'status') return '状态'
   if (event.kind === 'subagent_start') return '子 Agent 启动'
@@ -39,6 +40,7 @@ export function eventKindLabel(event: WorkflowRunEvent): string {
  *  carry no `message` field (e.g. subagent_progress). */
 export function eventMessage(event: WorkflowRunEvent): string {
   if (event.message) return event.message
+  if (event.kind === 'structured_output') return '结构化输出已生成'
   if (event.tool_name && event.kind === 'tool_call') return `调用工具 ${event.tool_name}`
   if (event.tool_name && event.kind === 'tool_result') {
     const outcome = event.status === 'failed' ? '失败' : event.status === 'unknown' ? '未完成' : '成功'
@@ -66,7 +68,7 @@ export function eventMessage(event: WorkflowRunEvent): string {
 /** Semantic classes for an event's Badge (background tint by kind/status). */
 export function eventKindClass(kind: string, status?: string): string {
   if (kind === 'error' || status === 'failed') return 'bg-destructive-soft text-destructive-soft-fg'
-  if (kind === 'result' || status === 'success') return 'bg-success-soft text-success-soft-fg'
+  if (kind === 'result' || kind === 'structured_output' || status === 'success') return 'bg-success-soft text-success-soft-fg'
   if (kind === 'tool_call') return 'bg-info-soft text-info-soft-fg'
   if (kind === 'tool_result') return 'bg-cat-violet text-cat-violet-fg'
   if (kind === 'subagent_end' && status !== 'failed') return 'bg-success-soft text-success-soft-fg'
@@ -79,7 +81,7 @@ export function eventClass(event: WorkflowRunEvent): string {
   if (event.kind === 'error' || event.status === 'failed') return 'border-destructive/50'
   if (event.kind === 'tool_call') return 'border-info/50'
   if (event.kind === 'tool_result') return event.status === 'failed' ? 'border-destructive/50' : 'border-success/50'
-  if (event.kind === 'result') return 'border-foreground/40'
+  if (event.kind === 'result' || event.kind === 'structured_output') return 'border-foreground/40'
   return 'border-border'
 }
 
@@ -93,7 +95,7 @@ export function timelineKind(event: WorkflowRunEvent): TimelineKind {
   if (event.kind === 'tool_result') {
     return event.status === 'failed' || event.status === 'unknown' ? 'error' : 'result'
   }
-  if (event.kind === 'result') return event.status === 'failed' ? 'error' : 'result'
+  if (event.kind === 'result' || event.kind === 'structured_output') return event.status === 'failed' ? 'error' : 'result'
   if (event.kind === 'status') return 'status'
   if (event.kind === 'stage') return 'status'
   return 'message'
@@ -192,13 +194,19 @@ function coalesceMainEvents(
 
     // Pi's final result repeats the streamed assistant message. Keep the
     // canonical result node and avoid displaying the same large output twice.
-    if (event.kind === 'result' && typeof event.message === 'string') {
+    if (
+      (event.kind === 'result' || event.kind === 'structured_output')
+      && (event.kind === 'structured_output' || typeof event.message === 'string')
+    ) {
       const previous = result[result.length - 1]
       if (
         previous?.actor.role === 'main'
-        && previous.event.kind === 'agent_message'
+        && (previous.event.kind === 'agent_message' || previous.event.kind === 'result')
         && typeof previous.event.message === 'string'
-        && sameRenderedMessage(previous.event.message, event.message)
+        && (
+          event.kind === 'structured_output'
+          || (typeof event.message === 'string' && sameRenderedMessage(previous.event.message, event.message))
+        )
       ) {
         result[result.length - 1] = { actor, event }
         continue

@@ -188,9 +188,9 @@ def message_events(
 ) -> list[dict[str, Any]]:
     """Project one SDK message into semantic events.
 
-    Event kinds: status / agent_message / tool_call / tool_result / result, plus
-    subagent_start / subagent_progress / subagent_end / subagent_updated for
-    Task-lifecycle (sub-agent) messages. When ``attribution`` is supplied,
+    Event kinds: status / agent_message / tool_call / tool_result / result /
+    structured_output, plus subagent_start / subagent_progress / subagent_end /
+    subagent_updated for Task-lifecycle (sub-agent) messages. When ``attribution`` is supplied,
     events originating from a sub-agent (identified via ``parent_tool_use_id``)
     are tagged ``agent_role="subagent"`` with the originating ``task_id``;
     main-agent events are tagged ``agent_role="main"``.

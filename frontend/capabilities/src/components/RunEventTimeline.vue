@@ -233,7 +233,7 @@ function closePayload() {
             <p v-else>{{ renderEventMessage(entry.event) }}</p>
           </div>
           <div
-            v-if="entry.event.kind === 'tool_call' || entry.event.kind === 'tool_result'"
+            v-if="entry.event.kind === 'tool_call' || entry.event.kind === 'tool_result' || entry.event.kind === 'structured_output'"
             class="tl-tool-details"
           >
             <div v-if="entry.event.kind === 'tool_call' && payloadPreview(entry.event, 'input')" class="tl-tool-payload">
@@ -251,7 +251,7 @@ function closePayload() {
               <pre>{{ payloadPreview(entry.event, 'input') }}</pre>
               <div v-if="payloadError(payloadRef(entry.event, 'input'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'input')) }}</div>
             </div>
-            <div v-if="(entry.event.kind === 'tool_result' || entry.event.kind === 'tool_call') && payloadPreview(entry.event, 'output')" class="tl-tool-payload">
+            <div v-if="(entry.event.kind === 'tool_result' || entry.event.kind === 'tool_call' || entry.event.kind === 'structured_output') && payloadPreview(entry.event, 'output')" class="tl-tool-payload">
               <div class="tl-tool-payload-head">
                 <span>输出<span v-if="payloadSize(entry.event, 'output')"> · {{ payloadSize(entry.event, 'output') }}</span></span>
                 <button

@@ -71,3 +71,24 @@ test('buildTimeline merges a tool call and result into one card', () => {
   assert.equal(timeline[0].event.duration_ms, 9)
   assert.equal(eventKindLabel(timeline[0].event), '工具调用完成')
 })
+
+test('buildTimeline replaces Codex structured JSON message with structured output event', () => {
+  const raw = '{"title":"report","content":"<html><body>ok</body></html>"}'
+  const timeline = buildTimeline([{
+    actor: main,
+    events: [
+      ev('agent_message', '2026-07-23T10:00:00.001Z', { message: raw, source: 'codex_cli' }),
+      ev('structured_output', '2026-07-23T10:00:00.002Z', {
+        status: 'success',
+        output: { title: 'report', content: '<html><body>ok</body></html>' },
+        output_content_type: 'application/json',
+        source: 'codex_cli',
+      }),
+    ],
+  }])
+
+  assert.equal(timeline.length, 1)
+  assert.equal(timeline[0].event.kind, 'structured_output')
+  assert.equal(eventKindLabel(timeline[0].event), '结构化输出')
+  assert.equal(timeline[0].event.output_content_type, 'application/json')
+})
