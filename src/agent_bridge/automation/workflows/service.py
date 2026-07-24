@@ -26,8 +26,10 @@ from agent_bridge.automation.workflows.task_import import (
 from agent_bridge.automation.workflows.definition import WorkflowGraph, normalize_summary_graph
 from agent_bridge.automation.workflows.incremental import (
     IncrementalPlan,
-    NodePlan,
-    WorkflowIncrementalPlanner,
+    build_incremental_plan as _build_incremental_plan,
+    incremental_plan_from_payload,
+    incremental_plan_payload,
+    incremental_plan_preview_payload,
 )
 from agent_bridge.automation.workflows.artifact_service import ArtifactService
 from agent_bridge.automation.workflows.report_renderer import render_run_html_report
@@ -786,7 +788,7 @@ class WorkflowService:
             effective_mode = self.resolve_execution_mode(
                 task_status=task.get("status"), requested_mode=execution_mode
             )
-        return self.incremental_plan_preview_payload(
+        return incremental_plan_preview_payload(
             self.build_incremental_plan(
                 actor=actor,
                 workflow_key=workflow_key,
@@ -809,180 +811,47 @@ class WorkflowService:
     ) -> IncrementalPlan:
         """Resolve the current revision, task and selected baseline run.
 
-        The planner itself remains storage-agnostic; this method is the single
-        service boundary that supplies revision-scoped persistence data.
+        Thin coordinator over :func:`incremental.build_incremental_plan`; the
+        planning logic lives in the ``incremental`` module so this service stays
+        focused on orchestration.
         """
-        if execution_mode not in {"normal", "incremental", "force_full"}:
-            raise ValidationError(f"unsupported workflow execution mode: {execution_mode}")
-        workflow = workflow or self.store.get_workflow_definition(workflow_key)
-        if workflow is None:
-            raise NotFound("workflow not found")
-        graph_payload = definition or workflow.get("definition")
-        if not isinstance(graph_payload, WorkflowGraph):
-            if not isinstance(graph_payload, dict):
-                raise ValidationError("workflow definition is required")
-            graph = WorkflowGraph.model_validate(graph_payload)
-        else:
-            graph = graph_payload
-        current_revision_no = self.store.workflows.get_current_definition_revision_no(workflow_key)
-        current_revision = (
-            self.store.workflows.get_definition_revision(workflow_key, current_revision_no)
-            if current_revision_no > 0
-            else None
-        )
-        resolved_task: dict[str, Any]
-        if task_key is None:
-            resolved_task = {"task_key": "", "task_version": ""}
-        else:
-            resolved_task = self.store.get_workflow_task(
-                workflow_key, task_key, task_version=task_version
-            ) or {}
-            if not resolved_task:
-                raise NotFound("workflow task not found")
-        resolved_version = str(resolved_task.get("task_version") or "")
-        planner = WorkflowIncrementalPlanner()
-        baseline_run: dict[str, Any] | None = None
-        node_runs_by_id: dict[str, list[dict[str, Any]]] = {}
-        artifacts_by_id: dict[str, list[dict[str, Any]]] = {}
-        if resolved_task.get("task_key"):
-            candidates = self.store.workflows.list_completed_workflow_runs_for_task(
-                workflow_key,
-                str(resolved_task["task_key"]),
-                resolved_version,
-                limit=1,
-            )
-            baseline_run = planner.select_baseline(
-                baseline_run=candidates,
-                workflow_key=workflow_key,
-                profile_key=str(workflow.get("profile_key") or ""),
-                task_key=str(resolved_task["task_key"]),
-                task_version=resolved_version,
-            )
-
-        if baseline_run is not None and execution_mode == "incremental":
-            run_id = str(baseline_run["run_id"])
-            node_runs = self.store.list_workflow_node_runs(run_id)
-            node_runs_by_id[run_id] = node_runs
-            artifact_ids = {
-                str(artifact_id)
-                for row in node_runs
-                for artifact_id in (row.get("artifact_ids") or [])
-            }
-            artifacts: list[dict[str, Any]] = []
-            for artifact_id in artifact_ids:
-                artifact = self.store.get_workflow_artifact(artifact_id)
-                if artifact is not None:
-                    artifacts.append({**artifact, "run_id": run_id})
-            artifacts_by_id[run_id] = artifacts
-        runtime_fingerprint = self.validator.resolve_resource_fingerprints(actor=actor, graph=graph)
-        return planner.build(
-            workflow={**workflow, "definition": graph.model_dump(mode="json")},
-            current_revision=current_revision,
-            task=resolved_task,
-            mode=execution_mode,
-            baseline_run=baseline_run,
-            baseline_node_runs=node_runs_by_id,
-            baseline_artifacts=artifacts_by_id,
-            runtime_fingerprint=runtime_fingerprint,
+        return _build_incremental_plan(
+            store=self.store,
+            validator=self.validator,
+            actor=actor,
+            workflow_key=workflow_key,
+            task_key=task_key,
+            task_version=task_version,
+            execution_mode=execution_mode,
+            workflow=workflow,
+            definition=definition,
         )
 
     @staticmethod
     def incremental_plan_payload(plan: IncrementalPlan) -> dict[str, Any]:
-        return {
-            "workflow_key": plan.workflow_key,
-            "workflow_revision_no": plan.workflow_revision_no,
-            "workflow_content_hash": plan.workflow_content_hash,
-            "task_version": plan.task_version,
-            "mode": plan.mode,
-            "baseline_run_id": plan.baseline_run_id,
-            "nodes": [
-                {
-                    "node_id": node.node_id,
-                    "action": node.action,
-                    "reason": node.reason,
-                    "node_fingerprint": node.node_fingerprint,
-                    "source_run_id": node.source_run_id,
-                    "source_node_id": node.source_node_id,
-                    "source_node_fingerprint": node.source_node_fingerprint,
-                    "output_json": dict(node.output_json or {}),
-                    "artifact_ids": list(node.artifact_ids),
-                    "condition_results": [dict(item) for item in node.condition_results],
-                }
-                for node in plan.nodes
-            ],
-            "affected_node_ids": list(plan.affected_node_ids),
-            "reusable_node_ids": list(plan.reusable_node_ids),
-            "reasons": dict(plan.reasons),
-            "warnings": list(plan.warnings),
-        }
+        return incremental_plan_payload(plan)
 
     @staticmethod
     def incremental_plan_preview_payload(plan: IncrementalPlan) -> dict[str, Any]:
         """Public, non-artifact-bearing execution-plan representation."""
-        return {
-            "mode": plan.mode,
-            "baseline_run_id": plan.baseline_run_id,
-            "affected_node_ids": list(plan.affected_node_ids),
-            "reusable_node_ids": list(plan.reusable_node_ids),
-            "nodes": [
-                {
-                    "node_id": node.node_id,
-                    "action": node.action,
-                    "reason": node.reason,
-                    "source_run_id": node.source_run_id,
-                    "source_node_id": node.source_node_id,
-                    "node_fingerprint": node.node_fingerprint,
-                }
-                for node in plan.nodes
-            ],
-            "warnings": list(plan.warnings),
-        }
+        return incremental_plan_preview_payload(plan)
 
     def workflow_run_start_payload(self, started: dict[str, Any]) -> dict[str, Any]:
         """Return the stable API response for a synchronously-created run."""
         run_id = str(started.get("run_id") or "")
         run = self.store.get_workflow_run(run_id) if run_id else None
         execution_mode = str((run or {}).get("execution_mode") or "normal")
-        plan = self.incremental_plan_from_payload((run or {}).get("execution_plan") or {})
+        plan = incremental_plan_from_payload((run or {}).get("execution_plan") or {})
         return {
             "run_id": run_id,
             "run_status": str(started.get("status") or (run or {}).get("status") or "started"),
             "execution_mode": execution_mode,
-            "plan": self.incremental_plan_preview_payload(plan),
+            "plan": incremental_plan_preview_payload(plan),
         }
 
     @staticmethod
     def incremental_plan_from_payload(payload: dict[str, Any]) -> IncrementalPlan:
-        return IncrementalPlan(
-            workflow_key=str(payload.get("workflow_key") or ""),
-            workflow_revision_no=payload.get("workflow_revision_no"),
-            workflow_content_hash=payload.get("workflow_content_hash"),
-            task_version=str(payload.get("task_version") or ""),
-            mode=str(payload.get("mode") or "normal"),
-            baseline_run_id=payload.get("baseline_run_id"),
-            nodes=tuple(
-                NodePlan(
-                    node_id=str(node.get("node_id") or ""),
-                    action=str(node.get("action") or "execute"),
-                    reason=str(node.get("reason") or "plan_node_missing"),
-                    node_fingerprint=str(node.get("node_fingerprint") or ""),
-                    source_run_id=node.get("source_run_id"),
-                    source_node_id=node.get("source_node_id"),
-                    source_node_fingerprint=node.get("source_node_fingerprint"),
-                    output_json=node.get("output_json") if isinstance(node.get("output_json"), dict) else None,
-                    artifact_ids=tuple(str(item) for item in node.get("artifact_ids") or []),
-                    condition_results=tuple(
-                        item for item in node.get("condition_results") or [] if isinstance(item, dict)
-                    ),
-                )
-                for node in payload.get("nodes") or []
-                if isinstance(node, dict)
-            ),
-            affected_node_ids=tuple(str(item) for item in payload.get("affected_node_ids") or []),
-            reusable_node_ids=tuple(str(item) for item in payload.get("reusable_node_ids") or []),
-            reasons=dict(payload.get("reasons") or {}),
-            warnings=tuple(str(item) for item in payload.get("warnings") or []),
-        )
+        return incremental_plan_from_payload(payload)
 
     @staticmethod
     def _definition_payload(workflow: dict[str, Any]) -> dict[str, Any]:

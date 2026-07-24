@@ -10,10 +10,12 @@ from types import MappingProxyType
 from typing import Any, Iterable, Literal, Mapping, Sequence
 
 from agent_bridge.automation.workflows.definition import (
+    WorkflowGraph,
     edge_execution_payload,
     execution_fingerprint,
     node_execution_payload,
 )
+from agent_bridge.core.domain import NotFound, ValidationError
 from agent_bridge.core.timeutil import parse_utc, utc_now
 
 ExecutionMode = Literal["normal", "incremental", "force_full"]
@@ -552,3 +554,187 @@ class WorkflowIncrementalPlanner:
             reasons=MappingProxyType({node.node_id: reason for node in plans}),
             warnings=(),
         )
+
+
+# -- payload 转换与 service 边界的 build ---------------------------------
+#
+# 以下函数从 WorkflowService 抽出：plan 与 payload 互转是纯数据映射；
+# build_incremental_plan 是唯一的 service 边界，负责把 revision-scoped 持久化
+# 数据喂给 storage-agnostic 的 WorkflowIncrementalPlanner。
+
+
+def incremental_plan_payload(plan: IncrementalPlan) -> dict[str, Any]:
+    return {
+        "workflow_key": plan.workflow_key,
+        "workflow_revision_no": plan.workflow_revision_no,
+        "workflow_content_hash": plan.workflow_content_hash,
+        "task_version": plan.task_version,
+        "mode": plan.mode,
+        "baseline_run_id": plan.baseline_run_id,
+        "nodes": [
+            {
+                "node_id": node.node_id,
+                "action": node.action,
+                "reason": node.reason,
+                "node_fingerprint": node.node_fingerprint,
+                "source_run_id": node.source_run_id,
+                "source_node_id": node.source_node_id,
+                "source_node_fingerprint": node.source_node_fingerprint,
+                "output_json": dict(node.output_json or {}),
+                "artifact_ids": list(node.artifact_ids),
+                "condition_results": [dict(item) for item in node.condition_results],
+            }
+            for node in plan.nodes
+        ],
+        "affected_node_ids": list(plan.affected_node_ids),
+        "reusable_node_ids": list(plan.reusable_node_ids),
+        "reasons": dict(plan.reasons),
+        "warnings": list(plan.warnings),
+    }
+
+
+def incremental_plan_preview_payload(plan: IncrementalPlan) -> dict[str, Any]:
+    """Public, non-artifact-bearing execution-plan representation."""
+    return {
+        "mode": plan.mode,
+        "baseline_run_id": plan.baseline_run_id,
+        "affected_node_ids": list(plan.affected_node_ids),
+        "reusable_node_ids": list(plan.reusable_node_ids),
+        "nodes": [
+            {
+                "node_id": node.node_id,
+                "action": node.action,
+                "reason": node.reason,
+                "source_run_id": node.source_run_id,
+                "source_node_id": node.source_node_id,
+                "node_fingerprint": node.node_fingerprint,
+            }
+            for node in plan.nodes
+        ],
+        "warnings": list(plan.warnings),
+    }
+
+
+def incremental_plan_from_payload(payload: dict[str, Any]) -> IncrementalPlan:
+    return IncrementalPlan(
+        workflow_key=str(payload.get("workflow_key") or ""),
+        workflow_revision_no=payload.get("workflow_revision_no"),
+        workflow_content_hash=payload.get("workflow_content_hash"),
+        task_version=str(payload.get("task_version") or ""),
+        mode=str(payload.get("mode") or "normal"),
+        baseline_run_id=payload.get("baseline_run_id"),
+        nodes=tuple(
+            NodePlan(
+                node_id=str(node.get("node_id") or ""),
+                action=str(node.get("action") or "execute"),
+                reason=str(node.get("reason") or "plan_node_missing"),
+                node_fingerprint=str(node.get("node_fingerprint") or ""),
+                source_run_id=node.get("source_run_id"),
+                source_node_id=node.get("source_node_id"),
+                source_node_fingerprint=node.get("source_node_fingerprint"),
+                output_json=node.get("output_json") if isinstance(node.get("output_json"), dict) else None,
+                artifact_ids=tuple(str(item) for item in node.get("artifact_ids") or []),
+                condition_results=tuple(
+                    item for item in node.get("condition_results") or [] if isinstance(item, dict)
+                ),
+            )
+            for node in payload.get("nodes") or []
+            if isinstance(node, dict)
+        ),
+        affected_node_ids=tuple(str(item) for item in payload.get("affected_node_ids") or []),
+        reusable_node_ids=tuple(str(item) for item in payload.get("reusable_node_ids") or []),
+        reasons=dict(payload.get("reasons") or {}),
+        warnings=tuple(str(item) for item in payload.get("warnings") or []),
+    )
+
+
+def build_incremental_plan(
+    *,
+    store: Any,
+    validator: Any,
+    actor: str,
+    workflow_key: str,
+    task_key: str | None = None,
+    task_version: str | None = None,
+    execution_mode: str = "normal",
+    workflow: dict[str, Any] | None = None,
+    definition: dict[str, Any] | WorkflowGraph | None = None,
+) -> IncrementalPlan:
+    """Resolve the current revision, task and selected baseline run.
+
+    The planner itself remains storage-agnostic; this function is the single
+    service boundary that supplies revision-scoped persistence data.
+    """
+    if execution_mode not in {"normal", "incremental", "force_full"}:
+        raise ValidationError(f"unsupported workflow execution mode: {execution_mode}")
+    workflow = workflow or store.get_workflow_definition(workflow_key)
+    if workflow is None:
+        raise NotFound("workflow not found")
+    graph_payload = definition or workflow.get("definition")
+    if not isinstance(graph_payload, WorkflowGraph):
+        if not isinstance(graph_payload, dict):
+            raise ValidationError("workflow definition is required")
+        graph = WorkflowGraph.model_validate(graph_payload)
+    else:
+        graph = graph_payload
+    current_revision_no = store.workflows.get_current_definition_revision_no(workflow_key)
+    current_revision = (
+        store.workflows.get_definition_revision(workflow_key, current_revision_no)
+        if current_revision_no > 0
+        else None
+    )
+    resolved_task: dict[str, Any]
+    if task_key is None:
+        resolved_task = {"task_key": "", "task_version": ""}
+    else:
+        resolved_task = store.get_workflow_task(
+            workflow_key, task_key, task_version=task_version
+        ) or {}
+        if not resolved_task:
+            raise NotFound("workflow task not found")
+    resolved_version = str(resolved_task.get("task_version") or "")
+    planner = WorkflowIncrementalPlanner()
+    baseline_run: dict[str, Any] | None = None
+    node_runs_by_id: dict[str, list[dict[str, Any]]] = {}
+    artifacts_by_id: dict[str, list[dict[str, Any]]] = {}
+    if resolved_task.get("task_key"):
+        candidates = store.workflows.list_completed_workflow_runs_for_task(
+            workflow_key,
+            str(resolved_task["task_key"]),
+            resolved_version,
+            limit=1,
+        )
+        baseline_run = planner.select_baseline(
+            baseline_run=candidates,
+            workflow_key=workflow_key,
+            profile_key=str(workflow.get("profile_key") or ""),
+            task_key=str(resolved_task["task_key"]),
+            task_version=resolved_version,
+        )
+
+    if baseline_run is not None and execution_mode == "incremental":
+        run_id = str(baseline_run["run_id"])
+        node_runs = store.list_workflow_node_runs(run_id)
+        node_runs_by_id[run_id] = node_runs
+        artifact_ids = {
+            str(artifact_id)
+            for row in node_runs
+            for artifact_id in (row.get("artifact_ids") or [])
+        }
+        artifacts: list[dict[str, Any]] = []
+        for artifact_id in artifact_ids:
+            artifact = store.get_workflow_artifact(artifact_id)
+            if artifact is not None:
+                artifacts.append({**artifact, "run_id": run_id})
+        artifacts_by_id[run_id] = artifacts
+    runtime_fingerprint = validator.resolve_resource_fingerprints(actor=actor, graph=graph)
+    return planner.build(
+        workflow={**workflow, "definition": graph.model_dump(mode="json")},
+        current_revision=current_revision,
+        task=resolved_task,
+        mode=execution_mode,
+        baseline_run=baseline_run,
+        baseline_node_runs=node_runs_by_id,
+        baseline_artifacts=artifacts_by_id,
+        runtime_fingerprint=runtime_fingerprint,
+    )
