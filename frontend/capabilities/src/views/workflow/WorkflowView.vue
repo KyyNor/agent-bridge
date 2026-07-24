@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
+import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
 import type { ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -17,6 +17,7 @@ import WorkflowImportDialog from '../../components/workflow/WorkflowImportDialog
 import WorkflowTaskExecutionPreview from '../../components/workflow/WorkflowTaskExecutionPreview.vue'
 import WorkflowArtifactBrowser from '../../components/workflow/WorkflowArtifactBrowser.vue'
 import WorkflowArtifactDialogs from '../../components/workflow/WorkflowArtifactDialogs.vue'
+import WorkflowDesignerDrawer from '../../components/workflow/WorkflowDesignerDrawer.vue'
 import WorkflowRunHistory from '../../components/workflow/WorkflowRunHistory.vue'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
@@ -3111,68 +3112,23 @@ async function confirmClearWorkflow() {
         </WorkflowConfigDrawer>
       </div>
 
-      <!-- AI 设计抽屉：fixed 全屏，仅 tab → SegmentedTabs + bg-muted/10 对齐 -->
-      <aside
-        v-if="showDesigner"
-        class="fixed inset-y-0 right-0 z-40 flex w-full max-w-[560px] flex-col border-l bg-background shadow-xl"
-      >
-        <div class="flex items-start justify-between gap-3 border-b px-4 py-3">
-          <div>
-            <div class="text-sm font-semibold text-foreground">工作流设计 Agent</div>
-            <div class="font-mono text-xs text-muted-foreground">design_workflow</div>
-          </div>
-          <Button variant="ghost" size="sm" class="h-8 px-2" :disabled="designing" @click="showDesigner = false">关闭</Button>
-        </div>
-        <div class="flex-1 space-y-4 overflow-auto p-4">
-          <SegmentedTabs
-            :model-value="designMode"
-            :tabs="[{ key: 'modify', label: '修改' }, { key: 'create', label: '新建' }]"
-            @update:model-value="(v) => designMode = v as 'create' | 'modify'"
-          />
-
-          <div>
-            <label class="mb-1 block text-xs text-muted-foreground">提示词</label>
-            <textarea
-              v-model="designPrompt"
-              class="min-h-32 w-full rounded-md border bg-background p-3 text-sm"
-              placeholder="描述希望 agent 设计或修改的工作流目标"
-            />
-          </div>
-          <Button class="w-full" :disabled="designStopRequested" @click="designing ? stopWorkflowDesigner() : runWorkflowDesigner()">
-            <WandSparkles class="mr-1.5 h-4 w-4" />
-            {{ designing ? (designStopRequested ? '停止中' : '立即停止') : '生成方案' }}
-          </Button>
-
-          <div v-if="designError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
-            {{ designError }}
-          </div>
-
-          <section v-if="designResponse?.result" class="space-y-3 rounded-md border bg-muted/10 p-3">
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-sm font-semibold">生成结果</div>
-              <Badge v-if="designResponse.run_key" variant="outline">{{ designResponse.run_key }}</Badge>
-            </div>
-            <p class="text-sm text-muted-foreground">{{ designResponse.result.summary }}</p>
-            <div v-if="designResponse.result.notes?.length" class="space-y-1 text-xs text-muted-foreground">
-              <div v-for="note in designResponse.result.notes" :key="note">· {{ note }}</div>
-            </div>
-            <div v-if="workflowDesignDraft" class="grid gap-2 text-xs">
-              <div class="rounded-md border bg-muted/10 p-2">
-                <div class="font-mono font-medium text-foreground">{{ workflowDesignDraft.workflow_key }}</div>
-                <div class="mt-1 text-muted-foreground">{{ workflowDesignDraft.name }}</div>
-              </div>
-              <pre class="max-h-96 overflow-auto rounded-md border bg-muted/10 p-3 text-xs">{{ JSON.stringify(workflowDesignDraft.definition, null, 2) }}</pre>
-            </div>
-          </section>
-        </div>
-        <div class="flex items-center justify-end gap-2 border-t p-4">
-          <Button variant="outline" :disabled="designing" @click="showDesigner = false">取消</Button>
-          <Button :disabled="designing || !workflowDesignDraft || saving" @click="acceptWorkflowDesign">
-            <Check class="mr-1.5 h-4 w-4" />
-            {{ saving ? '保存中' : '采纳并保存' }}
-          </Button>
-        </div>
-      </aside>
+      <WorkflowDesignerDrawer
+        :open="showDesigner"
+        :mode="designMode"
+        :prompt="designPrompt"
+        :busy="designing"
+        :stop-requested="designStopRequested"
+        :error="designError"
+        :response="designResponse"
+        :draft="workflowDesignDraft"
+        :saving="saving"
+        @update:open="showDesigner = $event"
+        @update:mode="designMode = $event"
+        @update:prompt="designPrompt = $event"
+        @run="runWorkflowDesigner"
+        @stop="stopWorkflowDesigner"
+        @accept="acceptWorkflowDesign"
+      />
     </section>
 
     <WorkflowArtifactDialogs
