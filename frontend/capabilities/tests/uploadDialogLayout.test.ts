@@ -4,27 +4,25 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
+const uploadDialog = () => readFileSync(resolve(root, 'src/components/knowledge/KnowledgeUploadDialog.vue'), 'utf-8')
+const uploadQueue = () => readFileSync(resolve(root, 'src/composables/useKnowledgeUploadQueue.ts'), 'utf-8')
 
 test('long upload paths stay inside a constrained filename column and remain inspectable', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  const uploadDialog = file.slice(file.indexOf('<!-- 上传文档对话框 -->'))
-  assert.match(uploadDialog, /class="[^\"]*grid-cols-\[auto_minmax\(0,1fr\)_auto\][^\"]*"/)
-  assert.match(uploadDialog, /<span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="f\.relativePath">\{\{ f\.relativePath \}\}<\/span>/)
+  const dialog = uploadDialog()
+  assert.match(dialog, /class="[^\"]*grid-cols-\[auto_minmax\(0,1fr\)_auto\][^\"]*"/)
+  assert.match(dialog, /<span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" :title="file\.relativePath">\{\{ file\.relativePath \}\}<\/span>/)
 })
 
 test('upload dialog provides extra horizontal room for document names', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  const uploadDialog = file.slice(file.indexOf('<!-- 上传文档对话框 -->'))
-  assert.match(uploadDialog, /<DialogContent[^>]*class="sm:max-w-\[640px\]">/)
+  assert.match(uploadDialog(), /<DialogContent[^>]*class="sm:max-w-\[640px\]">/)
 })
 
 test('upload dialog accepts zip archives and surfaces upload outcomes', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  assert.match(file, /const ALLOWED_DOC_EXTENSIONS = \[[^\]]*'\.zip'/)
-  assert.match(file, /accept="[^"]*\.zip[^"]*"/)
-  assert.match(file, /const uploadError = ref\(''\)/)
-  assert.match(file, /v-if="uploadError"/)
-  assert.match(file, /skipped_count/)
+  assert.match(uploadQueue(), /const ALLOWED_DOC_EXTENSIONS = \[[^\]]*'\.zip'/)
+  assert.match(uploadDialog(), /accept="[^"]*\.zip[^"]*"/)
+  assert.match(uploadQueue(), /const uploadError = ref\(''\)/)
+  assert.match(uploadDialog(), /v-if="error"/)
+  assert.match(uploadQueue(), /skipped_count/)
 })
 
 test('upload API types include the zip summary response', () => {
@@ -51,34 +49,33 @@ test('document upload API exposes typed XHR progress and preserves complete serv
 })
 
 test('upload dialog renders per-file progress, processing stages, errors, and locks closing while uploading', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  const uploadDialog = file.slice(file.indexOf('<!-- 上传文档对话框 -->'))
-  assert.match(file, /status: 'pending'/)
-  assert.match(file, /progress: 0/)
-  assert.match(file, /stage: '等待上传'/)
-  assert.match(file, /error: ''/)
-  assert.match(uploadDialog, /:show-close-button="!uploading"/)
-  assert.match(uploadDialog, /f\.progress/)
-  assert.match(uploadDialog, /f\.stage/)
-  assert.match(uploadDialog, /f\.error/)
-  assert.match(file, /正在解析/)
-  assert.match(file, /正在解压/)
-  assert.match(file, /正在入库/)
-  assert.match(file, /排队同步/)
-  assert.match(uploadDialog, /:disabled="uploading"/)
+  const queue = uploadQueue()
+  const dialog = uploadDialog()
+  assert.match(queue, /status: 'pending'/)
+  assert.match(queue, /progress: 0/)
+  assert.match(queue, /stage: '等待上传'/)
+  assert.match(queue, /error: ''/)
+  assert.match(dialog, /:show-close-button="!uploading"/)
+  assert.match(dialog, /file\.progress/)
+  assert.match(dialog, /file\.stage/)
+  assert.match(dialog, /file\.error/)
+  assert.match(queue, /正在解析/)
+  assert.match(queue, /正在解压/)
+  assert.match(queue, /正在入库/)
+  assert.match(queue, /排队同步/)
+  assert.match(dialog, /:disabled="uploading"/)
 })
 
 test('upload dialog uses a shared queue index with at most three async workers', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  assert.match(file, /nextUploadIndex/)
-  assert.match(file, /Math\.min\(3,/)
-  assert.match(file, /async function uploadWorker/)
-  assert.match(file, /Promise\.all\(/)
+  const queue = uploadQueue()
+  assert.match(queue, /nextUploadIndex/)
+  assert.match(queue, /Math\.min\(3,/)
+  assert.match(queue, /async function uploadWorker/)
+  assert.match(queue, /Promise\.all\(/)
 })
 
 test('batch upload starts one sync pass after all files are queued', () => {
-  const file = readFileSync(resolve(root, 'src/views/knowledge/KnowledgeView.vue'), 'utf-8')
-  const uploadFunction = file.slice(file.indexOf('async function uploadDocuments'))
+  const uploadFunction = uploadQueue().slice(uploadQueue().indexOf('async function uploadDocuments'))
   assert.match(uploadFunction, /await api\.triggerSync\(\)/)
 })
 
