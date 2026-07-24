@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
+import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { ProjectProfile, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
+import type { ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -16,6 +16,7 @@ import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
 import WorkflowImportDialog from '../../components/workflow/WorkflowImportDialog.vue'
 import WorkflowTaskExecutionPreview from '../../components/workflow/WorkflowTaskExecutionPreview.vue'
 import WorkflowArtifactBrowser from '../../components/workflow/WorkflowArtifactBrowser.vue'
+import WorkflowArtifactDialogs from '../../components/workflow/WorkflowArtifactDialogs.vue'
 import WorkflowRunHistory from '../../components/workflow/WorkflowRunHistory.vue'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
@@ -36,7 +37,6 @@ import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from '../../lib/workflowDefinition'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import { deriveAvailableData } from '../../lib/workflowReferences'
-import { buildArtifactTree, flattenArtifactTree } from '../../lib/workflowArtifactTree'
 import {
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
@@ -67,6 +67,9 @@ import {
   navigateTo,
 } from '../../lib/navigation'
 import { useWorkflowRoute } from '../../composables/useWorkflowRoute'
+import { useWorkflowEditorState } from '../../composables/useWorkflowEditorState'
+import { useWorkflowArtifacts } from '../../composables/useWorkflowArtifacts'
+import { useWorkflowDesigner } from '../../composables/useWorkflowDesigner'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
@@ -81,31 +84,12 @@ const scripts = ref<ManagedScript[]>([])
 const skills = ref<SkillPrompt[]>([])
 const defaultBackend = ref('codex')
 const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'claude', backends: [] })
-const artifacts = ref<WorkflowArtifact[]>([])
 const selectedKey = ref('')
 const loading = ref(true)
 const workflowPage = ref(1)
 const workflowPageSize = ref(10)
-const artifactLoading = ref(false)
-const artifactTotal = ref(0)
-const artifactPage = ref(1)
-const artifactPageSize = ref(50)
 const error = ref('')
 const workflowDetailError = ref('')
-const artifactError = ref('')
-const saving = ref(false)
-const formError = ref('')
-const artifactQuery = ref('')
-const artifactPath = ref('')
-const artifactTags = ref('')
-const artifactDetail = ref<WorkflowArtifactDetail | null>(null)
-const artifactHistory = ref<WorkflowArtifactHistoryVersion[]>([])
-const artifactHistoryTarget = ref<WorkflowArtifact | null>(null)
-const detailLoading = ref(false)
-const historyLoading = ref(false)
-const showArtifact = ref(false)
-const showArtifactHistory = ref(false)
-const fullscreenArtifact = ref<{ title: string; path: string; summary: string; tags: string[]; content: string; format: string } | null>(null)
 const showGuide = ref(false)
 const showClearConfirm = ref(false)
 const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs' | 'versions'>('overview')
@@ -204,115 +188,130 @@ const batchStopRequested = ref(false)
 const taskActorFilter = ref<Record<string, string>>({})
 const taskArtifactActive = ref<Record<string, string>>({})
 let taskSearchDebounce: ReturnType<typeof setTimeout> | null = null
-let artifactRequestToken = 0
 const testing = ref(false)
 const testingRunId = ref('')
 const testError = ref('')
 const routeError = ref('')
-const showDesigner = ref(false)
-const designMode = ref<'create' | 'modify'>('modify')
-const designPrompt = ref('')
-const designing = ref(false)
-const designError = ref('')
-const designResponse = ref<DesignAgentResponse<WorkflowDesignResult> | null>(null)
-const designRunKey = ref('')
-const designStopRequested = ref(false)
-const selectedNodeId = ref<string | null>(null)
-const selectedEdgeId = ref<string | null>(null)
-const graphErrors = ref<WorkflowValidationError[]>([])
-const schemaEditorErrors = ref<Record<string, string>>({})
-const runValidationGuard = ref({ validating: false, token: 0 })
-const editedWorkflowRunBusy = computed(() => runValidationGuard.value.validating || testing.value)
-type WorkflowConfigDrawerMode = 'overlay' | 'fullscreen'
-const configDrawerOpen = ref(false)
-const configDrawerMode = ref<WorkflowConfigDrawerMode>('overlay')
 const manualInputValues = ref<Record<string, string>>({})
 const advancedInput = ref('{}')
 const progressRunDetail = ref<WorkflowRun | null>(null)
 let testPoll: ReturnType<typeof setInterval> | null = null
 
-const artifactHtml = computed(() =>
-  artifactDetail.value ? renderMarkdown(artifactDetail.value.content) : '',
-)
+const {
+  form,
+  saving,
+  formError,
+  formDirty,
+  graphErrors,
+  schemaEditorErrors,
+  runValidationGuard,
+  selectedNodeId,
+  selectedEdgeId,
+  configDrawerOpen,
+  configDrawerMode,
+  selectedNode,
+  selectedEdge,
+  resetForm,
+  prepareCreateForm,
+  prepareEditForm,
+  scopedGraphIssues,
+  parseWorkflowIssues,
+  workflowDraft,
+  validateWorkflowDraft,
+  saveWorkflow,
+  changeWorkflowType,
+  addNode,
+  selectWorkflowNode,
+  selectWorkflowEdge,
+  setConfigDrawerOpen,
+  setConfigDrawerMode,
+  setNodeSchemaValidity,
+  replaceNode,
+  replaceEdge,
+} = useWorkflowEditorState({
+  defaultBackend,
+  profiles,
+  toast,
+  onSaved: async (saved) => {
+    selectedKey.value = saved.workflow_key
+    workflows.value = await api.listWorkflows()
+    await loadRunOverviews()
+    void navigateTo(`workflow/${saved.workflow_key}/detail`, { replace: true })
+  },
+})
+const editedWorkflowRunBusy = computed(() => runValidationGuard.value.validating || testing.value)
 
-function openArtifactFullscreen(artifact: WorkflowArtifact | WorkflowArtifactDetail) {
-  // The fullscreen surface is teleported outside DialogContent. Close the
-  // underlying dialog first so clicks on Markdown content are not interpreted
-  // by the dialog as an outside click.
-  showArtifact.value = false
-  fullscreenArtifact.value = {
-    title: artifact.title,
-    path: artifact.path,
-    summary: artifact.summary,
-    tags: artifact.tags,
-    content: artifact.content || '',
-    format: artifact.format,
-  }
-}
-
-function openTaskArtifactFullscreen(task: WorkflowTask) {
-  const artifact = activeTaskArtifact(task)
-  if (artifact) openArtifactFullscreen(artifact)
-}
-
-function closeArtifactFullscreen() {
-  fullscreenArtifact.value = null
-}
-
-const fullscreenArtifactHtml = computed(() =>
-  fullscreenArtifact.value ? renderMarkdown(fullscreenArtifact.value.content) : '',
-)
-
-const form = ref({
-  workflow_key: '',
-  name: '',
-  description: '',
-  profile_key: '',
-  status: 'active',
-  workflow_type: 'operation' as WorkflowType,
-  definition: createDefaultGraph('operation', defaultBackend.value) as WorkflowGraph,
+const {
+  showDesigner,
+  designMode,
+  designPrompt,
+  designing,
+  designError,
+  designResponse,
+  designStopRequested,
+  workflowDesignDraft,
+  openWorkflowDesigner,
+  runWorkflowDesigner,
+  stopWorkflowDesigner,
+} = useWorkflowDesigner({
+  current: mode => mode === 'modify'
+    ? { ...workflowDraft() }
+    : {
+        profile_key: form.value.profile_key,
+        status: 'active',
+        workflow_type: form.value.workflow_type,
+        definition: createDefaultGraph(form.value.workflow_type, defaultBackend.value),
+      },
+  profileKey: () => form.value.profile_key || undefined,
 })
 
 const selectedWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === selectedKey.value) || workflows.value[0] || null
 )
 
-/** Whether the edit form has unsaved changes (any field touched since load). */
-const formDirty = ref(false)
-/** Suppress the dirty watcher while the form is being programmatically reset. */
-let suppressDirty = false
-watch(
-  form,
-  () => {
-    if (suppressDirty) return
-    formDirty.value = true
-    invalidateWorkflowValidationRun(runValidationGuard.value)
-  },
-  { deep: true },
-)
-watch(
-  () => form.value.definition.nodes.map(node => node.id),
-  (nodeIds) => {
-    const activeIds = new Set(nodeIds)
-    const next = Object.fromEntries(
-      Object.entries(schemaEditorErrors.value).filter(([nodeId]) => activeIds.has(nodeId)),
-    )
-    if (Object.keys(next).length !== Object.keys(schemaEditorErrors.value).length) {
-      schemaEditorErrors.value = next
-    }
-  },
-)
-function resetForm(next: typeof form.value) {
-  invalidateWorkflowValidationRun(runValidationGuard.value)
-  suppressDirty = true
-  form.value = { ...next }
-  schemaEditorErrors.value = {}
-  formDirty.value = false
-  // let the deep watcher's synchronous flush pass before re-enabling
-  void nextTick(() => {
-    suppressDirty = false
-  })
+const {
+  artifacts,
+  artifactLoading,
+  artifactTotal,
+  artifactPage,
+  artifactPageSize,
+  artifactError,
+  artifactQuery,
+  artifactPath,
+  artifactTags,
+  artifactDetail,
+  artifactHistory,
+  artifactHistoryTarget,
+  detailLoading,
+  historyLoading,
+  showArtifact,
+  showArtifactHistory,
+  fullscreenArtifact,
+  collapsedPaths,
+  artifactHtml,
+  fullscreenArtifactHtml,
+  recentArtifacts,
+  humanReadableArtifactCount,
+  artifactRows,
+  openArtifactFullscreen,
+  closeArtifactFullscreen,
+  togglePath,
+  loadRecentArtifacts,
+  searchArtifacts,
+  resetArtifactPage,
+  openArtifact,
+  openArtifactHistory,
+  clearArtifacts,
+} = useWorkflowArtifacts(() => ({
+  profileKey: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
+  workflowKey: selectedWorkflow.value?.workflow_key,
+}))
+
+function openTaskArtifactFullscreen(task: WorkflowTask) {
+  const artifact = activeTaskArtifact(task)
+  if (artifact) openArtifactFullscreen(artifact)
 }
+
 const {
   routeParts,
   workflowKey: routeWorkflowKey,
@@ -323,8 +322,6 @@ const pageWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === routeWorkflowKey.value) || null
 )
 
-const selectedNode = computed(() => form.value.definition.nodes.find(node => node.id === selectedNodeId.value) || null)
-const selectedEdge = computed(() => form.value.definition.edges.find(edge => edge.id === selectedEdgeId.value) || null)
 const selectedNodeIssues = computed(() => scopedGraphIssues('node', selectedNode.value?.id || null))
 const selectedEdgeIssues = computed(() => scopedGraphIssues('edge', selectedEdge.value?.id || null))
 const configDrawerTitle = computed(() => {
@@ -364,8 +361,6 @@ const tasks = computed(() => workflowTasks.value[taskWorkflow.value?.workflow_ke
 const taskStats = computed(() => computeTaskStats(tasks.value))
 const pendingTaskCount = computed(() => (taskStats.value.pending || 0) + (taskStats.value.failed || 0) + (taskStats.value.abandoned || 0))
 const workflowNodeCount = computed(() => selectedWorkflow.value?.definition?.nodes.length || 0)
-const humanReadableArtifactCount = computed(() => artifacts.value.filter(item => item.format === 'html').length)
-const recentArtifacts = computed(() => artifacts.value.slice(0, 3))
 const detailTabs = computed(() => [
   { key: 'overview', label: '概览' },
   { key: 'tasks', label: '任务队列', count: pendingTaskCount.value || undefined },
@@ -424,20 +419,6 @@ const progressArtifacts = computed(() => progressRunArtifacts.value[progressRunI
 const progressFinished = computed(() =>
   !!progressRun.value && ['completed', 'no_task', 'failed', 'stopped'].includes(progressRun.value.status),
 )
-const workflowDesignDraft = computed(() => designResponse.value?.result?.workflow || null)
-
-const collapsedPaths = ref<Set<string>>(new Set())
-
-function togglePath(path: string) {
-  const next = new Set(collapsedPaths.value)
-  if (next.has(path)) next.delete(path)
-  else next.add(path)
-  collapsedPaths.value = next
-}
-
-const artifactTree = computed(() => buildArtifactTree(artifacts.value))
-const artifactRows = computed(() => flattenArtifactTree(artifactTree.value, collapsedPaths.value))
-
 onMounted(async () => {
   await loadAll()
   await applyRoute()
@@ -552,65 +533,6 @@ async function ensureWorkflowDetail(workflow: WorkflowDefinition) {
   return detail
 }
 
-async function loadRecentArtifacts() {
-  const token = ++artifactRequestToken
-  artifactLoading.value = true
-  artifactError.value = ''
-  try {
-    const result = await api.searchWorkflowArtifacts({
-      profile_key: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
-      workflow_key: selectedWorkflow.value?.workflow_key || undefined,
-      format: 'all',
-      limit: 3,
-      offset: 0,
-    })
-    if (token !== artifactRequestToken) return
-    artifacts.value = result.items
-    artifactTotal.value = result.total ?? result.items.length
-  } catch (e: unknown) {
-    if (token !== artifactRequestToken) return
-    artifactError.value = errorMessage(e)
-    artifactTotal.value = 0
-  } finally {
-    if (token === artifactRequestToken) artifactLoading.value = false
-  }
-}
-
-async function searchArtifacts() {
-  const token = ++artifactRequestToken
-  artifactLoading.value = true
-  artifactError.value = ''
-  try {
-    const result = await api.searchWorkflowArtifacts({
-      profile_key: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
-      workflow_key: selectedWorkflow.value?.workflow_key || undefined,
-      query: artifactQuery.value || undefined,
-      path: artifactPath.value || undefined,
-      tags: artifactTags.value.split(',').map(tag => tag.trim()).filter(Boolean),
-      format: 'all',
-      limit: artifactPageSize.value,
-      offset: (artifactPage.value - 1) * artifactPageSize.value,
-    })
-    if (token !== artifactRequestToken) return
-    artifacts.value = result.items
-    artifactTotal.value = result.total ?? result.items.length
-  } catch (e: unknown) {
-    if (token !== artifactRequestToken) return
-    artifactError.value = errorMessage(e)
-    artifactTotal.value = 0
-  } finally {
-    if (token === artifactRequestToken) artifactLoading.value = false
-  }
-}
-
-function resetArtifactPage() {
-  artifactPage.value = 1
-}
-
-watch([artifactPage, artifactPageSize], () => {
-  if (selectedWorkflow.value) searchArtifacts()
-})
-
 watch([runPage, runPageSize], () => {
   if (detailTab.value === 'runs' && selectedWorkflow.value) {
     void loadRuns(selectedWorkflow.value.workflow_key)
@@ -621,234 +543,8 @@ function openCreate() {
   void navigateTo('workflow/new')
 }
 
-function prepareCreateForm() {
-  resetForm({
-    workflow_key: '',
-    name: '',
-    description: '',
-    profile_key: profiles.value[0]?.profile_key || '',
-    status: 'active',
-    workflow_type: 'operation',
-    definition: createDefaultGraph('operation', defaultBackend.value),
-  })
-  formError.value = ''
-  graphErrors.value = []
-  selectedNodeId.value = null
-  selectedEdgeId.value = null
-  configDrawerOpen.value = false
-}
-
 function openEdit(item: WorkflowDefinition) {
   void navigateTo(`workflow/${item.workflow_key}/edit`)
-}
-
-function prepareEditForm(item: WorkflowDefinition) {
-  resetForm({
-    workflow_key: item.workflow_key,
-    name: item.name,
-    description: item.description,
-    profile_key: item.profile_key,
-    status: item.status,
-    workflow_type: item.workflow_type === 'summary' ? 'summary' : 'operation',
-    definition: item.definition || createDefaultGraph(item.workflow_type === 'summary' ? 'summary' : 'operation', defaultBackend.value),
-  })
-  formError.value = ''
-  graphErrors.value = []
-  selectedNodeId.value = null
-  selectedEdgeId.value = null
-  configDrawerOpen.value = false
-}
-
-function normalizeWorkflowIssue(value: unknown): WorkflowValidationError | null {
-  if (!value || typeof value !== 'object') return null
-  const raw = value as Record<string, unknown>
-  const scope = raw.scope
-  if (scope !== 'workflow' && scope !== 'node' && scope !== 'edge') return null
-  const id = typeof raw.id === 'string' ? raw.id : null
-  const field = typeof raw.field === 'string' ? raw.field : null
-  const message = typeof raw.message === 'string' ? raw.message : ''
-  if (!message) return null
-  const code = typeof raw.code === 'string' ? raw.code : 'invalid_definition'
-  return { scope, id, field, message, code }
-}
-
-function collectWorkflowIssues(value: unknown): WorkflowValidationError[] {
-  if (Array.isArray(value)) return value.map(normalizeWorkflowIssue).filter((issue): issue is WorkflowValidationError => Boolean(issue))
-  if (!value || typeof value !== 'object') return []
-  const raw = value as Record<string, unknown>
-  for (const key of ['issues', 'errors']) {
-    const found = collectWorkflowIssues(raw[key])
-    if (found.length) return found
-  }
-  return collectWorkflowIssues(raw.detail)
-}
-
-function parseWorkflowIssues(message: string): WorkflowValidationError[] {
-  const body = message.replace(/^\d+:\s*/, '').trim()
-  try {
-    const parsed = JSON.parse(body)
-    const issues = collectWorkflowIssues(parsed)
-    if (issues.length) return issues
-  } catch {
-    // Some server errors are plain text containing a JSON issues array.
-  }
-  const match = message.match(/"(?:errors|issues)"\s*:\s*(\[[\s\S]*?\])\s*[},]?/)
-  if (!match) return []
-  try {
-    return collectWorkflowIssues(JSON.parse(match[1]))
-  } catch {
-    return []
-  }
-}
-
-function scopedGraphIssues(scope: WorkflowValidationError['scope'], id: string | null) {
-  return workflowValidationIssuesFor(graphErrors.value, scope, id)
-}
-
-function workflowDraft(): WorkflowDraft {
-  return {
-    workflow_key: form.value.workflow_key,
-    name: form.value.name,
-    description: form.value.description,
-    profile_key: form.value.profile_key,
-    status: form.value.status,
-    workflow_type: form.value.workflow_type,
-    definition: form.value.definition,
-  }
-}
-
-async function validateWorkflowDraft(options: { isCurrent?: () => boolean } = {}): Promise<boolean | null> {
-  graphErrors.value = []
-  const schemaError = Object.values(schemaEditorErrors.value).find(Boolean)
-  if (schemaError) {
-    formError.value = `保存前请修正 Schema：${schemaError}`
-    return false
-  }
-  const validation = await api.validateWorkflow(workflowDraft())
-  if (options.isCurrent && !options.isCurrent()) return null
-  if (!hasBlockingWorkflowValidationErrors(validation)) return true
-  graphErrors.value = validation.errors
-  formError.value = workflowValidationErrorMessage(validation)
-  return false
-}
-
-async function saveWorkflow(): Promise<WorkflowDefinition | null> {
-  formError.value = ''
-  if (!form.value.workflow_key || !form.value.name || !form.value.profile_key) {
-    formError.value = '请填写工作流标识、名称，并选择关联的能力平面'
-    return null
-  }
-  saving.value = true
-  try {
-    if (!await validateWorkflowDraft()) return null
-    const saved = await api.upsertWorkflow({
-      workflow_key: form.value.workflow_key,
-      name: form.value.name,
-      description: form.value.description,
-      profile_key: form.value.profile_key,
-      status: form.value.status,
-      workflow_type: form.value.workflow_type,
-      definition: form.value.definition,
-    })
-    selectedKey.value = saved.workflow_key
-    graphErrors.value = []
-    formDirty.value = false
-    workflows.value = await api.listWorkflows()
-    await loadRunOverviews()
-    toast({ title: '工作流已保存', description: `“${saved.name}” 已更新。`, variant: 'success' })
-    void navigateTo(`workflow/${saved.workflow_key}/detail`, { replace: true })
-    return saved
-  } catch (e: unknown) {
-    formError.value = errorMessage(e)
-    graphErrors.value = parseWorkflowIssues(formError.value)
-    toast({ title: '保存工作流失败', description: formError.value, variant: 'error' })
-    return null
-  } finally {
-    saving.value = false
-  }
-}
-
-function changeWorkflowType(value: WorkflowType) {
-  const previous = form.value.workflow_type
-  form.value.workflow_type = value
-  form.value.definition = migrateWorkflowGraph(form.value.definition, previous, value, defaultBackend.value)
-  selectedNodeId.value = null
-  selectedEdgeId.value = null
-  configDrawerOpen.value = false
-}
-
-function openWorkflowDesigner(mode: 'create' | 'modify' = 'modify') {
-  designMode.value = mode
-  showDesigner.value = true
-  designError.value = ''
-}
-
-function createDesignRunKey() {
-  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  return `design-workflow-${suffix}`
-}
-
-function workflowDesignerCurrent(): Record<string, unknown> {
-  if (designMode.value === 'modify') return { ...workflowDraft() }
-  return {
-    profile_key: form.value.profile_key,
-    status: 'active',
-    workflow_type: form.value.workflow_type,
-    definition: createDefaultGraph(form.value.workflow_type, defaultBackend.value),
-  }
-}
-
-function createNode(type: WorkflowNodeType, position = { x: 120 + form.value.definition.nodes.length * 36, y: 160 + form.value.definition.nodes.length * 32 }): WorkflowNode {
-  const id = `${type}-${Date.now()}`
-  if (type === 'get_task') return { id, type, name: '获取任务', position, config: { on_empty: 'terminate' } }
-  if (type === 'agent') return { id, type, name: 'Agent', position, config: { prompt: '', backend_key: defaultBackend.value, mcp_enabled: true, skill_names: [], result_mode: 'text', output_schema: null } }
-  if (type === 'script') return { id, type, name: '托管脚本', position, config: { script_key: '', params: {}, timeout_seconds: 60 } }
-  return { id, type, name: '输出结果', position, config: { format: 'markdown', title: '输出结果', path: 'reports/output.md', tags: [], prompt: '', backend_key: defaultBackend.value, mcp_enabled: false, skill_names: [] } }
-}
-
-function addNode(type: WorkflowNodeType, position?: { x: number; y: number }) {
-  if (form.value.workflow_type === 'summary' && type === 'output') {
-    formError.value = '总结型工作流的输出节点已固定'
-    return
-  }
-  form.value.definition = { ...form.value.definition, nodes: [...form.value.definition.nodes, createNode(type, position)] }
-}
-
-function selectWorkflowNode(id: string) {
-  selectedNodeId.value = id
-  selectedEdgeId.value = null
-  configDrawerOpen.value = true
-}
-
-function selectWorkflowEdge(id: string) {
-  selectedEdgeId.value = id
-  selectedNodeId.value = null
-  configDrawerOpen.value = true
-}
-
-function setConfigDrawerOpen(open: boolean) {
-  configDrawerOpen.value = open
-}
-
-function setConfigDrawerMode(mode: WorkflowConfigDrawerMode) {
-  configDrawerMode.value = mode
-}
-
-function replaceNode(node: WorkflowNode) {
-  form.value.definition = { ...form.value.definition, nodes: form.value.definition.nodes.map(item => item.id === node.id ? node : item) }
-}
-
-function setNodeSchemaValidity(nodeId: string, valid: boolean, message: string) {
-  const next = { ...schemaEditorErrors.value }
-  if (valid) delete next[nodeId]
-  else next[nodeId] = message || 'Schema 不合法'
-  schemaEditorErrors.value = next
-}
-
-function replaceEdge(edge: WorkflowEdge) {
-  form.value.definition = { ...form.value.definition, edges: form.value.definition.edges.map(item => item.id === edge.id ? edge : item) }
 }
 
 function manualInput(): Record<string, unknown> | null {
@@ -903,52 +599,6 @@ async function runEditedWorkflow() {
     graphErrors.value = parseWorkflowIssues(formError.value)
   } finally {
     finishWorkflowValidationRun(runValidationGuard.value, validationToken)
-  }
-}
-
-async function runWorkflowDesigner() {
-  designError.value = ''
-  if (!designPrompt.value.trim()) {
-    designError.value = '请输入提示词'
-    return
-  }
-  const runKey = createDesignRunKey()
-  designRunKey.value = runKey
-  designStopRequested.value = false
-  designResponse.value = null
-  designing.value = true
-  try {
-    const response = await api.designWorkflow({
-      run_key: runKey,
-      mode: designMode.value,
-      prompt: designPrompt.value,
-      current: workflowDesignerCurrent(),
-      profile_key: form.value.profile_key || undefined,
-    })
-    if (designRunKey.value !== runKey || designStopRequested.value) return
-    designResponse.value = response
-    if (!response.ok) designError.value = response.error || '设计 agent 执行失败'
-  } catch (e: unknown) {
-    if (designRunKey.value !== runKey || designStopRequested.value) return
-    designError.value = errorMessage(e)
-  } finally {
-    if (designRunKey.value === runKey) {
-      if (designStopRequested.value && !designError.value) designError.value = '已停止'
-      designing.value = false
-      designStopRequested.value = false
-    }
-  }
-}
-
-async function stopWorkflowDesigner() {
-  const runKey = designRunKey.value
-  if (!designing.value || !runKey || designStopRequested.value) return
-  designStopRequested.value = true
-  designError.value = ''
-  try {
-    await api.stopAgentRun(runKey)
-  } catch (e: unknown) {
-    designError.value = errorMessage(e)
   }
 }
 
@@ -1166,48 +816,6 @@ function resetBatchRunDetail() {
   batchCurrentTaskId.value = ''
   batchCurrentRunId.value = ''
   batchRunDetailError.value = ''
-}
-
-async function openArtifact(item: WorkflowArtifact) {
-  detailLoading.value = true
-  showArtifact.value = true
-  artifactDetail.value = null
-  fullscreenArtifact.value = null
-  try {
-    artifactDetail.value = await api.getWorkflowArtifact(
-      item.artifact_id,
-      selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
-    )
-  } catch (e: unknown) {
-    artifactDetail.value = null
-    showArtifact.value = false
-    artifactError.value = errorMessage(e)
-  } finally {
-    detailLoading.value = false
-  }
-}
-
-async function openArtifactHistory(item: WorkflowArtifact) {
-  if (!item.task_key) return
-  historyLoading.value = true
-  showArtifactHistory.value = true
-  artifactHistoryTarget.value = item
-  artifactHistory.value = []
-  try {
-    const result = await api.getWorkflowArtifactHistory({
-      profile_key: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
-      workflow_key: item.workflow_key,
-      task_key: item.task_key,
-      limit: 20,
-    })
-    artifactHistory.value = result.versions
-  } catch (e: unknown) {
-    artifactHistory.value = []
-    showArtifactHistory.value = false
-    artifactError.value = errorMessage(e)
-  } finally {
-    historyLoading.value = false
-  }
 }
 
 async function loadRuns(
@@ -2302,9 +1910,7 @@ async function confirmClearWorkflow() {
   error.value = ''
   try {
     await api.clearWorkflowExecutionData(wf.workflow_key)
-    artifacts.value = []
-    artifactDetail.value = null
-    artifactHistory.value = []
+    clearArtifacts()
     runEvents.value = []
     runLogs.value = []
     selectedRunId.value = ''
@@ -3569,120 +3175,21 @@ async function confirmClearWorkflow() {
       </aside>
     </section>
 
-    <Dialog v-model:open="showArtifact" @update:open="(v: boolean) => { if (!v) closeArtifactFullscreen() }">
-      <DialogContent class="max-w-[900px] sm:max-w-[900px]">
-        <DialogHeader>
-          <DialogTitle>{{ artifactDetail?.title || '产物详情' }}</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[74vh] space-y-3 overflow-x-hidden overflow-y-auto pr-1">
-          <div v-if="detailLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
-          <template v-else-if="artifactDetail">
-            <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline">{{ artifactDetail.path }}</Badge>
-              <Badge v-for="tag in artifactDetail.tags" :key="tag" variant="outline">{{ tag }}</Badge>
-            </div>
-            <p v-if="artifactDetail.summary" class="text-sm text-muted-foreground">{{ artifactDetail.summary }}</p>
-            <iframe
-              v-if="artifactDetail.format === 'html'"
-              :srcdoc="artifactDetail.content"
-              sandbox="allow-same-origin"
-              class="min-h-[60vh] w-full rounded-lg border bg-card"
-              :title="artifactDetail.title || 'HTML 报告'"
-            />
-            <div v-else class="prose prose-sm max-w-none overflow-x-auto rounded-md border bg-background p-4" v-html="artifactHtml"></div>
-          </template>
-          <div v-else class="py-8 text-center text-sm text-muted-foreground">无内容</div>
-        </div>
-        <DialogFooter>
-          <Button
-            v-if="artifactDetail"
-            variant="outline"
-            class="mr-auto"
-            title="全屏查看"
-            @click="openArtifactFullscreen(artifactDetail)"
-          >
-            <Maximize2 :size="14" />
-            全屏
-          </Button>
-          <Button variant="outline" @click="showArtifact = false">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    <Teleport to="body">
-      <div v-if="fullscreenArtifact" class="fixed inset-0 z-[10000] flex flex-col bg-background pointer-events-auto">
-        <div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-          <div class="flex min-w-0 items-center gap-2">
-            <span class="truncate text-sm font-medium">{{ fullscreenArtifact.title || '产物详情' }}</span>
-            <Badge variant="outline" class="shrink-0 font-mono text-xs">{{ fullscreenArtifact.path }}</Badge>
-            <Badge v-for="tag in fullscreenArtifact.tags" :key="tag" variant="outline" class="shrink-0 text-xs">{{ tag }}</Badge>
-          </div>
-          <Button variant="ghost" size="sm" class="h-8 w-8 shrink-0 p-0" title="退出全屏" @click="closeArtifactFullscreen()">
-            <Minimize2 :size="16" />
-          </Button>
-        </div>
-        <div class="flex-1 overflow-x-hidden overflow-y-auto px-6 py-4" @click="closeArtifactFullscreen">
-          <div v-if="fullscreenArtifact.format === 'html'" class="mx-auto h-full w-full max-w-[1360px]" @click.stop>
-            <iframe
-              :srcdoc="fullscreenArtifact.content"
-              sandbox="allow-same-origin"
-              class="h-full min-h-[70vh] w-full rounded-lg border bg-card"
-              :title="fullscreenArtifact.title || 'HTML 报告'"
-            />
-          </div>
-          <div v-else class="mx-auto w-full max-w-[1360px] space-y-4" @click.stop>
-            <div v-if="fullscreenArtifact.summary" class="text-sm text-muted-foreground">{{ fullscreenArtifact.summary }}</div>
-            <div class="prose prose-sm max-w-none overflow-x-auto" v-html="fullscreenArtifactHtml"></div>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-    <Dialog v-model:open="showArtifactHistory">
-      <DialogContent class="max-w-[980px] sm:max-w-[980px]">
-        <DialogHeader>
-          <DialogTitle>{{ artifactHistoryTarget?.title || '历史版本' }}</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[74vh] space-y-3 overflow-auto pr-1">
-          <div v-if="historyLoading" class="py-8 text-center text-sm text-muted-foreground">加载中</div>
-          <div v-else-if="!artifactHistory.length" class="py-8 text-center text-sm text-muted-foreground">暂无历史版本</div>
-          <template v-else>
-            <details
-              v-for="version in artifactHistory"
-              :key="version.task_version"
-              class="rounded-md border p-3"
-              :open="version.is_current"
-            >
-              <summary class="cursor-pointer text-sm font-medium">
-                <span class="font-mono">{{ version.task_version || 'default' }}</span>
-                <Badge v-if="version.is_current" variant="outline" class="ml-2">current</Badge>
-                <span class="ml-2 text-xs font-normal text-muted-foreground">{{ formatLocalDatetime(version.updated_at) }}</span>
-              </summary>
-              <div class="mt-3 space-y-3">
-                <div v-for="item in version.artifacts" :key="item.artifact_id" class="space-y-2">
-                  <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline">{{ item.path }}</Badge>
-                    <Badge variant="outline">{{ item.run_id }}</Badge>
-                    <span>{{ formatLocalDatetime(item.updated_at) }}</span>
-                    <Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge>
-                  </div>
-                  <div class="text-sm font-medium">{{ item.title }}</div>
-                  <p v-if="item.summary" class="text-sm text-muted-foreground">{{ item.summary }}</p>
-                  <iframe
-                    v-if="item.format === 'html'"
-                    :srcdoc="item.content"
-                    sandbox="allow-same-origin"
-                    class="min-h-[50vh] w-full rounded-lg border bg-card"
-                    :title="item.title || 'HTML 报告'"
-                  />
-                  <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="renderMarkdown(item.content)"></div>
-                </div>
-              </div>
-            </details>
-          </template>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showArtifactHistory = false">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <WorkflowArtifactDialogs
+      :open="showArtifact"
+      :detail="artifactDetail"
+      :detail-loading="detailLoading"
+      :detail-html="artifactHtml"
+      :fullscreen="fullscreenArtifact"
+      :fullscreen-html="fullscreenArtifactHtml"
+      :history-open="showArtifactHistory"
+      :history-title="artifactHistoryTarget?.title || ''"
+      :history-loading="historyLoading"
+      :history="artifactHistory"
+      @update:open="showArtifact = $event"
+      @update:history-open="showArtifactHistory = $event"
+      @open-fullscreen="openArtifactFullscreen"
+      @close-fullscreen="closeArtifactFullscreen"
+    />
   </div>
 </template>

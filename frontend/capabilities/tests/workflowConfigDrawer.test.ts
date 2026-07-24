@@ -67,15 +67,16 @@ test('agent output schema validity is wired to workflow save guards', async () =
   const panel = await readFile(new URL('../src/views/workflow/WorkflowNodeConfigPanel.vue', import.meta.url), 'utf8')
   const editor = await readFile(new URL('../src/components/SchemaFieldEditor.vue', import.meta.url), 'utf8')
   const view = await readFile(new URL('../src/views/workflow/WorkflowView.vue', import.meta.url), 'utf8')
+  const state = await readFile(new URL('../src/composables/useWorkflowEditorState.ts', import.meta.url), 'utf8')
 
   assert.match(editor, /validity-change/)
   assert.match(panel, /schema-validity/)
   assert.match(panel, /@validity-change=/)
   assert.match(panel, /value !== 'json'\) updateSchemaValidity\(true, ''\)/)
   assert.match(view, /@schema-validity=/)
-  assert.match(view, /schemaEditorErrors/)
-  assert.match(view, /activeIds\.has\(nodeId\)/)
-  assert.match(view, /保存前请修正 Schema/)
+  assert.match(state, /schemaEditorErrors/)
+  assert.match(state, /activeIds\.has\(nodeId\)/)
+  assert.match(state, /保存前请修正 Schema/)
 })
 
 test('node config panel adapts the existing schema editor for non-agent output contracts', async () => {

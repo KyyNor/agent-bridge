@@ -19,13 +19,14 @@ test('ScriptsView protects each design request with a run key and immediate stop
   assert.match(content, /designing \|\| !scriptDesignDraft/)
 })
 
-test('WorkflowView protects each design request with a run key and immediate stop', () => {
-  const content = source('workflow/WorkflowView.vue')
+test('工作流设计器 protects each design request with a run key and immediate stop', () => {
+  const content = readFileSync(new URL('../src/composables/useWorkflowDesigner.ts', import.meta.url), 'utf8')
+  const view = source('workflow/WorkflowView.vue')
 
   assert.match(content, /const designRunKey = ref\('\'\)/)
   assert.match(content, /run_key:\s*runKey/)
   assert.match(content, /api\.stopAgentRun\(runKey\)/)
-  assert.match(content, /立即停止/)
   assert.match(content, /designRunKey\.value !== runKey \|\| designStopRequested\.value\) return/)
-  assert.match(content, /designing \|\| !workflowDesignDraft/)
+  assert.match(view, /立即停止/)
+  assert.match(view, /designing \|\| !workflowDesignDraft/)
 })

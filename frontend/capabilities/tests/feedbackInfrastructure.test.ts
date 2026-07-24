@@ -28,6 +28,7 @@ test('shared feedback primitives and toast store are available to views', () => 
   ]) assert.ok(source(path).length > 0, `${path} must exist`)
 
   const workflow = source('views/workflow/WorkflowView.vue')
+  const editor = source('composables/useWorkflowEditorState.ts')
   assert.match(workflow, /useToast/)
-  assert.match(workflow, /工作流已保存/)
+  assert.match(editor, /工作流已保存/)
 })
