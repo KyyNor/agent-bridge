@@ -1122,6 +1122,23 @@ class SQLiteStore:
     ) -> dict[str, Any] | None:
         return self.workflows.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=lease_seconds)
 
+    def lease_workflow_task_by_key(
+        self,
+        workflow_key: str,
+        task_key: str,
+        *,
+        task_version: str,
+        run_id: str,
+        lease_seconds: int = 7200,
+    ) -> dict[str, Any] | None:
+        return self.workflows.lease_workflow_task_by_key(
+            workflow_key,
+            task_key,
+            task_version=task_version,
+            run_id=run_id,
+            lease_seconds=lease_seconds,
+        )
+
     def set_priority_for_task(
         self,
         workflow_key: str,

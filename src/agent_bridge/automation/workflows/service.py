@@ -1174,7 +1174,23 @@ class WorkflowService:
         return workflow, run
 
     def get_task_for_agent(self, *, profile_key: str | None, workflow_key: str, run_id: str) -> dict[str, Any]:
-        self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
+        _workflow, run = self.require_workflow_run_context(
+            profile_key=profile_key, workflow_key=workflow_key, run_id=run_id
+        )
+        selected_task_key = run.get("task_key")
+        selected_task_version = str(run.get("task_version") or "")
+        if selected_task_key is not None:
+            selected = self.store.get_workflow_task(
+                workflow_key, str(selected_task_key), task_version=selected_task_version
+            )
+            if (
+                selected is not None
+                and selected.get("status") == "running"
+                and selected.get("lease_run_id") == run_id
+            ):
+                # 按需运行会在启动执行线程前租赁指定任务。节点仍需执行以
+                # 完整记录时间轴，但必须返回该租约，不能领取另一条队列任务。
+                return {"task": selected}
         task = self.store.lease_workflow_task(workflow_key, run_id=run_id, lease_seconds=7200)
         return {"task": task}
 

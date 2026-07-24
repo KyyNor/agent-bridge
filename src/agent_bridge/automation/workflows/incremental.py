@@ -135,6 +135,12 @@ class WorkflowIncrementalPlanner:
             str(node["id"]): self.node_fingerprint(node, runtime_fingerprint=runtime_fingerprint)
             for node in nodes
         }
+        legacy_mcp_fingerprints = {
+            str(node["id"]): execution_fingerprint(node_execution_payload(node))
+            if isinstance(node.get("config"), Mapping) and node["config"].get("mcp_enabled") is True
+            else None
+            for node in nodes
+        }
         resources = {
             str(node["id"]): self._resource_fingerprint_for_node(node, runtime_fingerprint)
             for node in nodes
@@ -218,6 +224,7 @@ class WorkflowIncrementalPlanner:
                     plan = self._reuse_or_execute(
                         node_id=node_id,
                         node_fingerprint=node_fingerprint,
+                        legacy_mcp_fingerprint=legacy_mcp_fingerprints[node_id],
                         source_run_id=selected_id,
                         source=source,
                         artifacts_by_id=artifacts_by_id,
@@ -453,6 +460,7 @@ class WorkflowIncrementalPlanner:
         *,
         node_id: str,
         node_fingerprint: str,
+        legacy_mcp_fingerprint: str | None,
         source_run_id: str,
         source: Mapping[str, Any] | None,
         artifacts_by_id: Mapping[str, Mapping[str, Any]],
@@ -465,7 +473,12 @@ class WorkflowIncrementalPlanner:
             return self._execute_plan(node_id, node_fingerprint, "baseline_node_missing")
         if source.get("status") != "completed":
             return self._execute_plan(node_id, node_fingerprint, "baseline_node_not_completed")
-        if source.get("node_fingerprint") != node_fingerprint:
+        source_fingerprint = source.get("node_fingerprint")
+        legacy_mcp_match = (
+            legacy_mcp_fingerprint is not None
+            and source_fingerprint == legacy_mcp_fingerprint
+        )
+        if source_fingerprint != node_fingerprint and not legacy_mcp_match:
             return self._execute_plan(node_id, node_fingerprint, "node_fingerprint_changed")
         output = _as_mapping(source.get("output") if "output" in source else source.get("output_json"))
         if output is None:
@@ -500,7 +513,7 @@ class WorkflowIncrementalPlanner:
         return NodePlan(
             node_id=node_id,
             action="reuse",
-            reason="fingerprint_match",
+            reason="legacy_mcp_fingerprint_match" if legacy_mcp_match else "fingerprint_match",
             node_fingerprint=node_fingerprint,
             source_run_id=source_run_id,
             source_node_id=node_id,

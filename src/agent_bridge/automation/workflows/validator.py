@@ -87,9 +87,11 @@ class WorkflowValidator:
     def resolve_resource_fingerprints(self, *, actor: str, graph: WorkflowGraph) -> dict[str, str | None]:
         """Resolve stable execution-resource fingerprints for incremental plans.
 
-        ``None`` deliberately means that the backing resource is live or its
-        version cannot be established.  A planner must then execute the node
-        rather than reuse a result produced against an unknown resource.
+        ``None`` means that the backing resource version cannot be established.
+        Enabling the managed Profile MCP gateway does not itself make a node
+        non-reusable: its configuration is already part of the node fingerprint
+        and an unchanged task should reuse its persisted result.  Users can
+        request a fresh external read with ``force_full``.
         """
         return {
             node.id: self.resolve_resource_fingerprint(actor=actor, node=node)
@@ -113,10 +115,6 @@ class WorkflowValidator:
                 else None
             )
         if node.type not in {"agent", "output"}:
-            return None
-        if bool(getattr(config, "mcp_enabled", False)):
-            # External MCP data is live unless the caller supplies a dedicated,
-            # versioned runtime fingerprint to the planner.
             return None
         backend = None
         try:

@@ -184,6 +184,45 @@ def test_incremental_plan_selects_newest_compatible_completed_baseline(wm_paths)
     assert plan.baseline_run_id == "baseline-new"
 
 
+def test_get_task_returns_the_task_preleased_for_its_run(wm_paths):
+    service = _service(wm_paths)
+    _upsert_definition(service, name="Incremental report")
+    service.store.upsert_workflow_tasks(
+        "incremental-report",
+        [
+            {"task_key": "page:a", "task_version": "v1", "payload": {}},
+            {"task_key": "page:b", "task_version": "v1", "payload": {}},
+        ],
+    )
+    service.store.create_workflow_run(
+        run_id="selected-task-run",
+        workflow_key="incremental-report",
+        profile_key="report-plane",
+        task_key="page:b",
+        task_version="v1",
+        status="running",
+        temp_dir="",
+        definition_snapshot={"nodes": [], "edges": []},
+    )
+    leased = service.store.lease_workflow_task_by_key(
+        "incremental-report",
+        "page:b",
+        task_version="v1",
+        run_id="selected-task-run",
+        lease_seconds=7200,
+    )
+    assert leased is not None
+
+    result = service.workflows.get_task_for_agent(
+        profile_key="report-plane",
+        workflow_key="incremental-report",
+        run_id="selected-task-run",
+    )
+
+    assert result["task"]["task_key"] == "page:b"
+    assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "pending"
+
+
 def test_incremental_plan_reuses_prefix_when_current_graph_adds_a_node(wm_paths, monkeypatch):
     service = _service(wm_paths)
     _upsert_definition(service, name="Incremental report")

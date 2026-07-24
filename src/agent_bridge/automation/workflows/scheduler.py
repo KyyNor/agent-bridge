@@ -394,6 +394,43 @@ class WorkflowScheduler:
                 execution_plan=self._plan_payload(plan),
                 source_run_id=getattr(plan, "baseline_run_id", None),
             )
+            if selected_task is not None:
+                lease_exact = getattr(self._store, "lease_workflow_task_by_key", None)
+                if not callable(lease_exact):
+                    raise RuntimeError("工作流存储不支持指定任务精确租赁")
+                leased_task = lease_exact(
+                    workflow_key,
+                    str(selected_task["task_key"]),
+                    task_version=str(selected_task.get("task_version") or ""),
+                    run_id=run_id,
+                    lease_seconds=7200,
+                )
+                if leased_task is None:
+                    error = "指定任务在启动前已不满足租赁条件"
+                    self._store.finish_workflow_run(
+                        run_id,
+                        status="failed",
+                        exit_code=1,
+                        stdout_path=None,
+                        stderr_path=None,
+                        error=error,
+                        duration_ms=0,
+                    )
+                    logger.warning(
+                        "Workflow 指定任务租赁失败 workflow=%s run=%s task=%s version=%s",
+                        workflow_key,
+                        run_id,
+                        selected_task["task_key"],
+                        selected_task.get("task_version") or "",
+                    )
+                    raise ConflictError(error)
+                logger.info(
+                    "Workflow 指定任务已预租赁 workflow=%s run=%s task=%s version=%s",
+                    workflow_key,
+                    run_id,
+                    leased_task["task_key"],
+                    leased_task.get("task_version") or "",
+                )
             self._register_workflow_control(run_id)
             self._running.add(workflow_key)
         logger.info(

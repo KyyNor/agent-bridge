@@ -264,3 +264,49 @@ def test_mcp_node_without_stable_runtime_fingerprint_is_not_reused():
 
     assert plan.nodes[0].action == "execute"
     assert plan.nodes[0].reason == "resource_fingerprint_unavailable"
+
+
+def test_legacy_mcp_fingerprint_reuses_unchanged_prefix_when_only_final_backend_changes():
+    """旧 run 曾因 MCP 资源未知而未记录后端版本，仍应可迁移复用。"""
+    planner = WorkflowIncrementalPlanner()
+    original = _workflow(
+        [
+            _node(
+                "enrich",
+                node_type="agent",
+                config={"prompt": "collect", "backend_key": "opencode", "mcp_enabled": True},
+            ),
+            _node(
+                "markdown",
+                node_type="output",
+                config={"format": "markdown", "title": "Report", "path": "report.md", "prompt": "write", "backend_key": "claude"},
+            ),
+            _node(
+                "html",
+                node_type="output",
+                config={"format": "html", "title": "Report", "path": "report.html", "prompt": "render", "backend_key": "codex"},
+            ),
+        ],
+        [_edge("enrich", "markdown"), _edge("markdown", "html")],
+    )
+    baseline_run, baseline_nodes = _baseline(
+        planner,
+        original,
+        runtime={"enrich": None, "markdown": "claude-v1", "html": "codex-v1"},
+    )
+    changed = deepcopy(original)
+    changed["definition"]["nodes"][2]["config"]["backend_key"] = "pi"
+
+    plan = _plan(
+        planner,
+        changed,
+        baseline_run,
+        baseline_nodes,
+        runtime={"enrich": "opencode-v1", "markdown": "claude-v1", "html": "pi-v1"},
+    )
+
+    assert [(node.node_id, node.action, node.reason) for node in plan.nodes] == [
+        ("enrich", "reuse", "legacy_mcp_fingerprint_match"),
+        ("markdown", "reuse", "fingerprint_match"),
+        ("html", "execute", "node_fingerprint_changed"),
+    ]

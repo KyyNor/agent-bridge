@@ -876,6 +876,62 @@ class WorkflowsRepository:
             leased = conn.execute("SELECT * FROM workflow_tasks WHERE id = ?", (row["id"],)).fetchone()
             return _row_payload(leased)
 
+    def lease_workflow_task_by_key(
+        self,
+        workflow_key: str,
+        task_key: str,
+        *,
+        task_version: str,
+        run_id: str,
+        lease_seconds: int,
+    ) -> dict[str, Any] | None:
+        """为按需运行精确租赁指定任务。
+
+        已按任务建立计划的 run 在 ``get_task`` 节点启动时，不得退回到
+        队列中领取另一条任务；选择和状态迁移必须处于同一事务中。
+        """
+        current = utc_now()
+        now = utc_iso(current)
+        expires_at = utc_iso(current + timedelta(seconds=lease_seconds))
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT * FROM workflow_tasks
+                WHERE workflow_key = ?
+                  AND task_key = ?
+                  AND task_version = ?
+                  AND (
+                    status IN ('pending', 'stale')
+                    OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
+                  )
+                """,
+                (workflow_key, task_key, task_version, now),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                """
+                UPDATE workflow_tasks
+                SET status = 'running',
+                    lease_run_id = ?,
+                    lease_expires_at = ?,
+                    attempt_count = attempt_count + 1,
+                    priority_flag = NULL,
+                    lease_origin_status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    run_id,
+                    expires_at,
+                    row["status"] if row["status"] in {"pending", "stale"} else "pending",
+                    row["id"],
+                ),
+            )
+            leased = conn.execute("SELECT * FROM workflow_tasks WHERE id = ?", (row["id"],)).fetchone()
+            return _row_payload(leased)
+
     def set_priority_for_task(
         self,
         workflow_key: str,

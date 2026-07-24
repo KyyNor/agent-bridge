@@ -192,6 +192,27 @@ def test_workflow_task_lease_and_priority_only_consider_latest_set_at_version(wm
     assert store.get_workflow_task("w", "page:a", task_version="v1")["status"] == "pending"
 
 
+def test_exact_task_lease_does_not_fall_through_to_another_queue_item(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed_workflow_with_task(store)
+    store.upsert_workflow_tasks(
+        "w",
+        [{"task_key": "page:b", "task_version": "v1", "payload": {}}],
+    )
+
+    leased = store.lease_workflow_task_by_key(
+        "w", "page:b", task_version="v1", run_id="run_exact", lease_seconds=7200
+    )
+
+    assert leased is not None
+    assert leased["task_key"] == "page:b"
+    assert leased["lease_run_id"] == "run_exact"
+    assert store.get_workflow_task("w", "page:a", task_version="")["status"] == "pending"
+
+
 def test_stale_lease_restores_origin_status_after_failure_and_clears_it_on_complete(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 

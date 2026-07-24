@@ -118,7 +118,7 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 - `WorkflowDagExecutor` 负责拓扑执行、条件、增量缓存和节点输出；
 - `WorkflowScheduler` 负责运行时间窗、并发和任务租约，不继承单 cron 基类。
 
-增量运行只复用无副作用的节点结果；`get_task` 负责把队列任务租约绑定到当前 run，因此每次都必须重新执行，但只有任务业务输入相对基线发生变化时才使下游结果失效。`workflow_set_task`、`workflow_run_log` 等 Agent 运行期间的辅助调用不因增量复用规则被强制重跑。
+增量运行只复用无副作用的节点结果；`get_task` 负责把队列任务租约绑定到当前 run，因此每次都必须重新执行，但只有任务业务输入相对基线发生变化时才使下游结果失效。启用受管 Profile MCP 本身不使节点失去复用资格：节点配置与后端资源指纹稳定时复用既有结果；需要刷新外部读取时使用 `force_full`。按任务启动的 run 会先精确租赁已选任务，`get_task` 只返回该租约，不得改领其他队列任务。`workflow_set_task`、`workflow_run_log` 等 Agent 运行期间的辅助调用不因增量复用规则被强制重跑。
 
 导入/导出格式为 `agent-bridge.workflow`、`format_version=1`。`examples/workflows/*/workflow.json` 必须通过示例契约测试。不要恢复 `manifest.json + workflow.js` 双运行时。
 
