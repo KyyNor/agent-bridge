@@ -2,18 +2,21 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, Minimize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { ProjectProfile, ArtifactTreeNode, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
+import type { ProjectProfile, DesignAgentResponse, WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion, WorkflowDefinition, WorkflowDesignResult, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { confirm, alert } from '../../composables/useConfirm'
+import { useToast } from '../../composables/useToast'
 import { useSubagentDetails } from '../../composables/useSubagentDetails'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import WorkflowTaskImportDialog from './WorkflowTaskImportDialog.vue'
 import WorkflowImportDialog from '../../components/workflow/WorkflowImportDialog.vue'
 import WorkflowTaskExecutionPreview from '../../components/workflow/WorkflowTaskExecutionPreview.vue'
+import WorkflowArtifactBrowser from '../../components/workflow/WorkflowArtifactBrowser.vue'
+import WorkflowRunHistory from '../../components/workflow/WorkflowRunHistory.vue'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
 import WorkflowConfigDrawer from './WorkflowConfigDrawer.vue'
@@ -33,6 +36,7 @@ import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from '../../lib/workflowDefinition'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import { deriveAvailableData } from '../../lib/workflowReferences'
+import { buildArtifactTree, flattenArtifactTree } from '../../lib/workflowArtifactTree'
 import {
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
@@ -61,15 +65,15 @@ import {
   buildWorkflowTaskProgressHash,
   currentHash,
   navigateTo,
-  parseSubRoute,
-  registerNavigationGuard,
 } from '../../lib/navigation'
+import { useWorkflowRoute } from '../../composables/useWorkflowRoute'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const WORKFLOW_RUN_CACHE_LIMIT = 50
 const ARTIFACT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 const props = defineProps<{ routeKey: string }>()
+const { toast } = useToast()
 
 const workflows = ref<WorkflowDefinition[]>([])
 const profiles = ref<ProjectProfile[]>([])
@@ -309,28 +313,12 @@ function resetForm(next: typeof form.value) {
     suppressDirty = false
   })
 }
-const routeParts = computed(() => parseSubRoute(props.routeKey).segments)
-const routeWorkflowKey = computed(() => routeParts.value[0] || '')
-const routeMode = computed<'list' | 'new' | 'edit' | 'detail' | 'tasks' | 'progress'>(() => {
-  if (!props.routeKey) return 'list'
-  if (routeParts.value[0] === 'new') return 'new'
-  const action = routeParts.value[1]
-  if (action === 'edit' || action === 'tasks' || action === 'progress') return action
-  return 'detail'
-})
-const isWorkflowFormPage = computed(() => routeMode.value === 'new' || routeMode.value === 'edit')
-const removeNavigationGuard = registerNavigationGuard(() => {
-  if (!isWorkflowFormPage.value || !formDirty.value) return true
-  return confirm({
-    title: routeMode.value === 'new' ? '放弃新建' : '放弃修改',
-    description: routeMode.value === 'new'
-      ? '当前表单有未保存内容，确认离开？'
-      : '当前工作流有未保存的改动，确认离开？',
-    destructive: true,
-    confirmText: '离开',
-  })
-})
-onUnmounted(removeNavigationGuard)
+const {
+  routeParts,
+  workflowKey: routeWorkflowKey,
+  mode: routeMode,
+  isFormPage: isWorkflowFormPage,
+} = useWorkflowRoute(() => props.routeKey, formDirty)
 const pageWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === routeWorkflowKey.value) || null
 )
@@ -447,60 +435,8 @@ function togglePath(path: string) {
   collapsedPaths.value = next
 }
 
-function countArtifacts(node: ArtifactTreeNode): number {
-  return node.artifacts.length + node.children.reduce((sum, child) => sum + countArtifacts(child), 0)
-}
-
-const artifactTree = computed<ArtifactTreeNode[]>(() => {
-  const root: ArtifactTreeNode[] = []
-  for (const item of artifacts.value) {
-    const segments = item.path.split('/').filter(Boolean)
-    let nodes = root
-    let acc = ''
-    segments.forEach((segment, index) => {
-      acc = acc ? `${acc}/${segment}` : segment
-      let node = nodes.find(child => child.segment === segment)
-      if (!node) {
-        node = { segment, path: acc, children: [], artifacts: [] }
-        nodes.push(node)
-      }
-      if (index === segments.length - 1) node.artifacts.push(item)
-      nodes = node.children
-    })
-  }
-  const sortNodes = (nodes: ArtifactTreeNode[]) => {
-    nodes.sort((a, b) => a.segment.localeCompare(b.segment))
-    nodes.forEach(child => sortNodes(child.children))
-  }
-  sortNodes(root)
-  return root
-})
-
-interface ArtifactTreeRow {
-  type: 'folder' | 'artifact'
-  depth: number
-  path: string
-  segment?: string
-  count?: number
-  artifact?: WorkflowArtifact
-}
-
-const artifactRows = computed<ArtifactTreeRow[]>(() => {
-  const rows: ArtifactTreeRow[] = []
-  const walk = (nodes: ArtifactTreeNode[], depth: number) => {
-    for (const node of nodes) {
-      rows.push({ type: 'folder', depth, path: node.path, segment: node.segment, count: countArtifacts(node) })
-      if (!collapsedPaths.value.has(node.path)) {
-        for (const item of node.artifacts) {
-          rows.push({ type: 'artifact', depth: depth + 1, path: item.path, artifact: item })
-        }
-        walk(node.children, depth + 1)
-      }
-    }
-  }
-  walk(artifactTree.value, 0)
-  return rows
-})
+const artifactTree = computed(() => buildArtifactTree(artifacts.value))
+const artifactRows = computed(() => flattenArtifactTree(artifactTree.value, collapsedPaths.value))
 
 onMounted(async () => {
   await loadAll()
@@ -819,11 +755,13 @@ async function saveWorkflow(): Promise<WorkflowDefinition | null> {
     formDirty.value = false
     workflows.value = await api.listWorkflows()
     await loadRunOverviews()
+    toast({ title: '工作流已保存', description: `“${saved.name}” 已更新。`, variant: 'success' })
     void navigateTo(`workflow/${saved.workflow_key}/detail`, { replace: true })
     return saved
   } catch (e: unknown) {
     formError.value = errorMessage(e)
     graphErrors.value = parseWorkflowIssues(formError.value)
+    toast({ title: '保存工作流失败', description: formError.value, variant: 'error' })
     return null
   } finally {
     saving.value = false
@@ -2649,106 +2587,39 @@ async function confirmClearWorkflow() {
             </div>
           </div>
 
-          <section v-if="detailTab === 'artifacts'" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
-            <div class="flex flex-wrap items-end gap-3">
-              <div class="min-w-[220px] flex-1">
-                <label class="mb-1 block text-xs text-muted-foreground">检索</label>
-                <Input v-model="artifactQuery" placeholder="标题、摘要、路径" @keyup.enter="resetArtifactPage(); searchArtifacts()" />
-              </div>
-              <div class="min-w-[180px] flex-1">
-                <label class="mb-1 block text-xs text-muted-foreground">path</label>
-                <Input v-model="artifactPath" placeholder="reports/page-a/" @keyup.enter="resetArtifactPage(); searchArtifacts()" />
-              </div>
-              <div class="min-w-[180px] flex-1">
-                <label class="mb-1 block text-xs text-muted-foreground">tags</label>
-                <Input v-model="artifactTags" placeholder="finance, report" @keyup.enter="resetArtifactPage(); searchArtifacts()" />
-              </div>
-              <Button :disabled="artifactLoading" @click="resetArtifactPage(); searchArtifacts()">{{ artifactLoading ? '检索中' : '检索产物' }}</Button>
-            </div>
-            <div v-if="artifactError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
-              {{ artifactError }}
-            </div>
-            <div v-if="!artifactRows.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无产物</div>
-            <div class="space-y-1.5">
-              <template v-for="row in artifactRows" :key="row.type + ':' + row.path">
-                <button
-                  v-if="row.type === 'folder'"
-                  class="list-row-interactive flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
-                  :style="{ paddingLeft: `${row.depth * 16 + 8}px` }"
-                  @click="togglePath(row.path)"
-                >
-                  <span>{{ collapsedPaths.has(row.path) ? '▸' : '▾' }}</span>
-                  <span>{{ row.segment }}/</span>
-                  <span class="font-normal normal-case text-muted-foreground/70">({{ row.count }})</span>
-                </button>
-                <div v-else class="rounded-md border p-3" :style="{ marginLeft: `${row.depth * 16}px` }">
-                  <div class="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <div class="text-sm font-medium text-foreground">{{ row.artifact?.title }}</div>
-                      <div class="mt-1 text-xs text-muted-foreground">{{ row.artifact?.path }}</div>
-                      <div v-if="row.artifact?.task_version" class="mt-1 text-xs text-muted-foreground">
-                        version: <span class="font-mono">{{ row.artifact.task_version }}</span>
-                      </div>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-1">
-                      <Badge v-if="row.artifact?.is_current" variant="outline">current</Badge>
-                      <Badge v-if="row.artifact?.format === 'html'" variant="secondary" class="text-xs">人类阅读</Badge>
-                      <Badge v-else variant="secondary" class="text-xs">AI 检索</Badge>
-                      <Badge v-for="tag in row.artifact?.tags || []" :key="tag" variant="outline">{{ tag }}</Badge>
-                      <Button
-                        v-if="row.artifact?.task_key"
-                        variant="ghost"
-                        size="sm"
-                        class="h-7 text-xs"
-                        @click="row.artifact && openArtifactHistory(row.artifact)"
-                      >
-                        历史
-                      </Button>
-                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="row.artifact && openArtifact(row.artifact)">查看</Button>
-                    </div>
-                  </div>
-                  <p class="mt-2 text-sm text-muted-foreground">{{ row.artifact?.summary || row.artifact?.snippet }}</p>
-                </div>
-              </template>
-            </div>
-            <PaginationBar
-              v-if="artifactTotal"
-              v-model:page="artifactPage"
-              v-model:page-size="artifactPageSize"
-              :total="artifactTotal"
-              :page-size-options="ARTIFACT_PAGE_SIZE_OPTIONS"
-            />
-          </section>
+          <WorkflowArtifactBrowser
+            v-if="detailTab === 'artifacts'"
+            v-model:query="artifactQuery"
+            v-model:path="artifactPath"
+            v-model:tags="artifactTags"
+            v-model:page="artifactPage"
+            v-model:page-size="artifactPageSize"
+            :loading="artifactLoading"
+            :error="artifactError"
+            :rows="artifactRows"
+            :collapsed-paths="collapsedPaths"
+            :total="artifactTotal"
+            :page-size-options="ARTIFACT_PAGE_SIZE_OPTIONS"
+            @search="resetArtifactPage(); searchArtifacts()"
+            @toggle-folder="togglePath"
+            @open="openArtifact"
+            @history="openArtifactHistory"
+          />
 
-          <section v-if="detailTab === 'runs'" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
-            <div class="flex items-center justify-between">
-              <h3 class="text-sm font-semibold">运行记录</h3>
-              <Button variant="outline" size="sm" :disabled="runsLoading" @click="loadRuns(selectedWorkflow.workflow_key)">{{ runsLoading ? '刷新中' : '刷新' }}</Button>
-            </div>
-            <div v-if="runsLoading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
-            <div v-else-if="!runs.length" class="rounded-md border px-4 py-6 text-sm text-muted-foreground">暂无运行记录</div>
-            <div v-else class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              <button
-                v-for="run in runs"
-                :key="run.run_id"
-                class="list-row-interactive rounded-md border px-3 py-2 text-left"
-                @click="openProgress(selectedWorkflow, run.run_id)"
-              >
-                <div class="flex items-center justify-between gap-2">
-                  <span class="truncate font-mono text-xs">{{ run.run_id }}</span>
-                  <Badge :variant="run.status === 'completed' ? 'secondary' : 'outline'" :class="runBadgeClass(run.status)">{{ runStatusLabel(run.status) }}</Badge>
-                </div>
-                <div class="mt-1 text-xs text-muted-foreground">{{ formatLocalDatetime(run.started_at) }}</div>
-              </button>
-            </div>
-            <PaginationBar
-              v-if="runs.length"
-              v-model:page="runPage"
-              v-model:page-size="runPageSize"
-              :total="workflowRunTotals[selectedWorkflow.workflow_key] || 0"
-              :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
-              />
-          </section>
+          <WorkflowRunHistory
+            v-if="detailTab === 'runs'"
+            v-model:page="runPage"
+            v-model:page-size="runPageSize"
+            :runs="runs"
+            :total="workflowRunTotals[selectedWorkflow.workflow_key] || 0"
+            :loading="runsLoading"
+            :page-size-options="DEFAULT_PAGE_SIZE_OPTIONS"
+            :status-label="runStatusLabel"
+            :badge-class="runBadgeClass"
+            :format-datetime="formatLocalDatetime"
+            @refresh="loadRuns(selectedWorkflow.workflow_key)"
+            @open="openProgress(selectedWorkflow, $event)"
+          />
           <section v-if="detailTab === 'versions'" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-semibold">版本历史</h3>

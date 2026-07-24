@@ -1,0 +1,100 @@
+<script setup lang="ts">
+import type { WorkflowArtifact } from '../../api/types'
+import type { ArtifactTreeRow } from '../../lib/workflowArtifactTree'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Input } from '../ui/input'
+import PaginationBar from '../PaginationBar.vue'
+
+defineProps<{
+  query: string
+  path: string
+  tags: string
+  loading: boolean
+  error: string
+  rows: ArtifactTreeRow[]
+  collapsedPaths: Set<string>
+  total: number
+  page: number
+  pageSize: number
+  pageSizeOptions: readonly number[]
+}>()
+
+const emit = defineEmits<{
+  'update:query': [value: string]
+  'update:path': [value: string]
+  'update:tags': [value: string]
+  'update:page': [value: number]
+  'update:pageSize': [value: number]
+  search: []
+  toggleFolder: [path: string]
+  open: [artifact: WorkflowArtifact]
+  history: [artifact: WorkflowArtifact]
+}>()
+
+function updateQuery(value: string | number) { emit('update:query', String(value)) }
+function updatePath(value: string | number) { emit('update:path', String(value)) }
+function updateTags(value: string | number) { emit('update:tags', String(value)) }
+</script>
+
+<template>
+  <section class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
+    <div class="flex flex-wrap items-end gap-3">
+      <div class="min-w-[220px] flex-1">
+        <label class="mb-1 block text-xs text-muted-foreground">检索</label>
+        <Input :model-value="query" placeholder="标题、摘要、路径" @update:model-value="updateQuery" @keyup.enter="emit('search')" />
+      </div>
+      <div class="min-w-[180px] flex-1">
+        <label class="mb-1 block text-xs text-muted-foreground">path</label>
+        <Input :model-value="path" placeholder="reports/page-a/" @update:model-value="updatePath" @keyup.enter="emit('search')" />
+      </div>
+      <div class="min-w-[180px] flex-1">
+        <label class="mb-1 block text-xs text-muted-foreground">tags</label>
+        <Input :model-value="tags" placeholder="finance, report" @update:model-value="updateTags" @keyup.enter="emit('search')" />
+      </div>
+      <Button :disabled="loading" @click="emit('search')">{{ loading ? '检索中' : '检索产物' }}</Button>
+    </div>
+    <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">{{ error }}</div>
+    <div v-if="!rows.length" class="rounded-md border px-4 py-8 text-sm text-muted-foreground">暂无产物</div>
+    <div class="space-y-1.5">
+      <template v-for="row in rows" :key="row.type + ':' + row.path">
+        <button
+          v-if="row.type === 'folder'"
+          class="list-row-interactive flex w-full items-center gap-1.5 rounded-md py-1 text-left text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
+          :style="{ paddingLeft: `${row.depth * 16 + 8}px` }"
+          @click="emit('toggleFolder', row.path)"
+        >
+          <span>{{ collapsedPaths.has(row.path) ? '▸' : '▾' }}</span>
+          <span>{{ row.segment }}/</span>
+          <span class="font-normal normal-case text-muted-foreground/70">({{ row.count }})</span>
+        </button>
+        <div v-else-if="row.artifact" class="rounded-md border p-3" :style="{ marginLeft: `${row.depth * 16}px` }">
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div class="text-sm font-medium text-foreground">{{ row.artifact.title }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">{{ row.artifact.path }}</div>
+              <div v-if="row.artifact.task_version" class="mt-1 text-xs text-muted-foreground">version: <span class="font-mono">{{ row.artifact.task_version }}</span></div>
+            </div>
+            <div class="flex flex-wrap items-center gap-1">
+              <Badge v-if="row.artifact.is_current" variant="outline">current</Badge>
+              <Badge :variant="row.artifact.format === 'html' ? 'secondary' : 'secondary'" class="text-xs">{{ row.artifact.format === 'html' ? '人类阅读' : 'AI 检索' }}</Badge>
+              <Badge v-for="tag in row.artifact.tags || []" :key="tag" variant="outline">{{ tag }}</Badge>
+              <Button v-if="row.artifact.task_key" variant="ghost" size="sm" class="h-7 text-xs" @click="emit('history', row.artifact)">历史</Button>
+              <Button variant="ghost" size="sm" class="h-7 text-xs" @click="emit('open', row.artifact)">查看</Button>
+            </div>
+          </div>
+          <p class="mt-2 text-sm text-muted-foreground">{{ row.artifact.summary || row.artifact.snippet }}</p>
+        </div>
+      </template>
+    </div>
+    <PaginationBar
+      v-if="total"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :page-size-options="pageSizeOptions"
+      @update:page="emit('update:page', $event)"
+      @update:page-size="emit('update:pageSize', $event)"
+    />
+  </section>
+</template>

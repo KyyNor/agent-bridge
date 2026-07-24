@@ -8,6 +8,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { confirm } from '../../composables/useConfirm'
+import { useToast } from '../../composables/useToast'
 import PaginationBar from '../../components/PaginationBar.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
@@ -26,6 +27,7 @@ const showHistory = ref(false)
 const copied = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
+const { toast } = useToast()
 
 const hasChanges = computed(() => selected.value ? prompt.value !== (selected.value.prompt || '') : false)
 const sourceLabel = computed(() => selected.value?.source === 'database' ? '已自定义' : '默认提示词')
@@ -94,8 +96,10 @@ async function saveSkill() {
     prompt.value = selected.value.prompt || ''
     skills.value = await api.listSkills()
     message.value = '已保存到数据库'
+    toast({ title: 'Skill 已保存', description: `“${selected.value.name}” 已更新。`, variant: 'success' })
   } catch (e: unknown) {
     error.value = errorMessage(e)
+    toast({ title: '保存 Skill 失败', description: error.value, variant: 'error' })
   } finally {
     saving.value = false
   }
@@ -112,8 +116,10 @@ async function resetSkill() {
     prompt.value = selected.value.prompt || ''
     skills.value = await api.listSkills()
     message.value = '已恢复默认提示词'
+    toast({ title: '已恢复默认提示词', description: `“${selected.value.name}” 已恢复。`, variant: 'success' })
   } catch (e: unknown) {
     error.value = errorMessage(e)
+    toast({ title: '恢复默认提示词失败', description: error.value, variant: 'error' })
   } finally {
     saving.value = false
   }

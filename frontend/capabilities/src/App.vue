@@ -1,32 +1,51 @@
 <script setup lang="ts">
-import { defineAsyncComponent, ref, computed, onUnmounted } from 'vue'
+import { defineAsyncComponent, ref, computed, onUnmounted, type Component } from 'vue'
 import AppShell from './components/AppShell.vue'
 import type { NavGroup } from './components/AppShell.vue'
+import AppErrorBoundary from './components/AppErrorBoundary.vue'
+import AsyncViewError from './components/AsyncViewError.vue'
 import PageHeader from './components/PageHeader.vue'
 import ConfirmDialog from './components/ui/dialog/ConfirmDialog.vue'
+import { ErrorState, LoadingState } from './components/ui/feedback'
+import { ToastViewport } from './components/ui/toast'
 import {
   canNavigate,
   currentHash,
   installNavigationController,
+  navigateTo,
   normalizeHash,
   shouldShowPageHeader,
 } from './lib/navigation'
 
-const DashboardView = defineAsyncComponent(() => import('./views/dashboard/DashboardView.vue'))
-const ServicesView = defineAsyncComponent(() => import('./views/capabilities/ServicesView.vue'))
-const ToolsView = defineAsyncComponent(() => import('./views/capabilities/ToolsView.vue'))
-const ProfilesView = defineAsyncComponent(() => import('./views/capabilities/ProfilesView.vue'))
-const ToolDebugView = defineAsyncComponent(() => import('./views/capabilities/ToolDebugView.vue'))
-const CodeRepoView = defineAsyncComponent(() => import('./views/knowledge/CodeRepoView.vue'))
-const KnowledgeView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeView.vue'))
-const KnowledgeProcessingConfigView = defineAsyncComponent(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
-const MemoryView = defineAsyncComponent(() => import('./views/knowledge/MemoryView.vue'))
-const WorkflowView = defineAsyncComponent(() => import('./views/workflow/WorkflowView.vue'))
-const SkillManagementView = defineAsyncComponent(() => import('./views/system/SkillManagementView.vue'))
-const ScriptsView = defineAsyncComponent(() => import('./views/system/ScriptsView.vue'))
-const LogsView = defineAsyncComponent(() => import('./views/monitoring/LogsView.vue'))
-const StatsView = defineAsyncComponent(() => import('./views/monitoring/StatsView.vue'))
-const AgentRunsView = defineAsyncComponent(() => import('./views/monitoring/AgentRunsView.vue'))
+function asyncView(loader: () => Promise<Component>) {
+  return defineAsyncComponent({
+    loader,
+    loadingComponent: LoadingState,
+    errorComponent: AsyncViewError,
+    delay: 150,
+    timeout: 20_000,
+    onError(error, retry, fail, attempts) {
+      if (attempts === 1) retry()
+      else fail()
+    },
+  })
+}
+
+const DashboardView = asyncView(() => import('./views/dashboard/DashboardView.vue'))
+const ServicesView = asyncView(() => import('./views/capabilities/ServicesView.vue'))
+const ToolsView = asyncView(() => import('./views/capabilities/ToolsView.vue'))
+const ProfilesView = asyncView(() => import('./views/capabilities/ProfilesView.vue'))
+const ToolDebugView = asyncView(() => import('./views/capabilities/ToolDebugView.vue'))
+const CodeRepoView = asyncView(() => import('./views/knowledge/CodeRepoView.vue'))
+const KnowledgeView = asyncView(() => import('./views/knowledge/KnowledgeView.vue'))
+const KnowledgeProcessingConfigView = asyncView(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
+const MemoryView = asyncView(() => import('./views/knowledge/MemoryView.vue'))
+const WorkflowView = asyncView(() => import('./views/workflow/WorkflowView.vue'))
+const SkillManagementView = asyncView(() => import('./views/system/SkillManagementView.vue'))
+const ScriptsView = asyncView(() => import('./views/system/ScriptsView.vue'))
+const LogsView = asyncView(() => import('./views/monitoring/LogsView.vue'))
+const StatsView = asyncView(() => import('./views/monitoring/StatsView.vue'))
+const AgentRunsView = asyncView(() => import('./views/monitoring/AgentRunsView.vue'))
 
 const routeIndexKey = '__agent_bridge_route_index'
 const initialHash = currentHash()
@@ -214,23 +233,33 @@ const view = computed(() => activeNavKey.value)
       />
       <!-- Content -->
       <div class="min-w-0 p-7">
-        <DashboardView v-if="view === 'dashboard'" />
-        <ServicesView v-else-if="view === 'services'" :route-key="subRoute" />
-        <ToolsView v-else-if="view === 'tools'" />
-        <ProfilesView v-else-if="view === 'profiles'" :route-key="subRoute" />
-        <ToolDebugView v-else-if="view === 'tool-debug'" />
-        <CodeRepoView v-else-if="view === 'code-repos'" :route-key="subRoute" />
-        <KnowledgeView v-else-if="view === 'knowledge'" :route-key="subRoute" />
-        <MemoryView v-else-if="view === 'memory'" :route-key="subRoute" />
-        <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
-        <SkillManagementView v-else-if="view === 'skills'" />
-        <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
-        <WorkflowView v-else-if="view === 'workflow'" :route-key="subRoute" />
-        <LogsView v-else-if="view === 'logs'" />
-        <AgentRunsView v-else-if="view === 'agent-runs'" :route-key="subRoute" />
-        <StatsView v-else-if="view === 'stats'" />
+        <AppErrorBoundary :reset-key="hash">
+          <DashboardView v-if="view === 'dashboard'" />
+          <ServicesView v-else-if="view === 'services'" :route-key="subRoute" />
+          <ToolsView v-else-if="view === 'tools'" />
+          <ProfilesView v-else-if="view === 'profiles'" :route-key="subRoute" />
+          <ToolDebugView v-else-if="view === 'tool-debug'" />
+          <CodeRepoView v-else-if="view === 'code-repos'" :route-key="subRoute" />
+          <KnowledgeView v-else-if="view === 'knowledge'" :route-key="subRoute" />
+          <MemoryView v-else-if="view === 'memory'" :route-key="subRoute" />
+          <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
+          <SkillManagementView v-else-if="view === 'skills'" />
+          <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
+          <WorkflowView v-else-if="view === 'workflow'" :route-key="subRoute" />
+          <LogsView v-else-if="view === 'logs'" />
+          <AgentRunsView v-else-if="view === 'agent-runs'" :route-key="subRoute" />
+          <StatsView v-else-if="view === 'stats'" />
+          <ErrorState
+            v-else
+            title="页面不存在"
+            :description="`找不到 “${activeNavKey}” 对应的页面。`"
+            action-label="返回平台概览"
+            @action="navigateTo('dashboard', { replace: true })"
+          />
+        </AppErrorBoundary>
       </div>
     </div>
     <ConfirmDialog />
+    <ToastViewport />
   </AppShell>
 </template>
