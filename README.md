@@ -159,3 +159,7 @@ tests/                         # 后端测试
 - `examples/workflows/hellogithub-summary/workflow.json`
 
 示例均使用 `agent-bridge.workflow` / `format_version=1` 导入信封，并由测试校验结构化 DAG。
+
+## 工作流自动调度并发
+
+系统配置页面可分别设置自动调度的全局并发数（默认 4）和单个工作流并发数（默认 2）。调度器按工作流轮转分配运行槽位，既不会超过全局上限，也不会让单个工作流占用超过自身上限的槽位。`workflow_max_runs` 仍表示每个调度窗口内的自动运行次数上限，与并发配置独立。

@@ -114,3 +114,27 @@ def test_scheduler_does_not_complete_task_when_run_revision_is_no_longer_current
     assert result["status"] == "completed"
     assert store.completed_task is None
     assert store.released[:2] == ("workflow-1", "run-1")
+
+
+def test_scheduler_allocates_concurrent_slots_fairly_with_per_workflow_limit(tmp_path):
+    scheduler = WorkflowScheduler(
+        service=object(), store=SchedulerStore(), admins={"root"}, base_run_dir=tmp_path
+    )
+
+    initial = scheduler.next_workflow_batch({"workflow-a", "workflow-b", "workflow-c"}, available=4)
+
+    assert initial == ["workflow-a", "workflow-b", "workflow-c", "workflow-a"]
+    assert initial.count("workflow-a") == 2
+    assert initial.count("workflow-b") == 1
+    assert initial.count("workflow-c") == 1
+
+    scheduler._reserve_run_slot("workflow-a")
+    scheduler._reserve_run_slot("workflow-a")
+    follow_up = scheduler.next_workflow_batch({"workflow-a", "workflow-b", "workflow-c"}, available=4)
+
+    assert "workflow-a" not in follow_up
+    assert follow_up.count("workflow-b") == 2
+    assert follow_up.count("workflow-c") == 2
+    scheduler._release_run_slot("workflow-a")
+    scheduler._release_run_slot("workflow-a")
+    assert scheduler._running == set()

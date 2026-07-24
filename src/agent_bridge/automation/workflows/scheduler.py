@@ -43,7 +43,8 @@ class WorkflowScheduler:
         executor: WorkflowDagExecutor | None = None,
         validator: Any = None,
         base_run_dir: Path | None = None,
-        max_concurrent_workflows: int = 2,
+        max_concurrent_runs: int = 4,
+        max_concurrent_runs_per_workflow: int = 2,
     ) -> None:
         self._service = service
         self._store = store
@@ -53,7 +54,8 @@ class WorkflowScheduler:
         self._executor = executor
         self._validator = validator or getattr(service, "validator", None)
         self._base_run_dir = base_run_dir
-        self._max_concurrent = max_concurrent_workflows
+        self._max_concurrent_runs = max_concurrent_runs
+        self._max_concurrent_runs_per_workflow = max_concurrent_runs_per_workflow
         self._scheduler: BackgroundScheduler | None = None
         # Daily execution window [start, stop]; blank start+stop means always-on.
         self._start_time_str = _DEFAULT_START_TIME
@@ -63,6 +65,7 @@ class WorkflowScheduler:
         self._window_marker: date | None = None
         self._cursor = 0
         self._running: set[str] = set()
+        self._running_run_counts: dict[str, int] = {}
         self.finished_today: set[str] = set()
         # Per-window cap on auto-scheduled runs per workflow. 0 = unlimited.
         # Manual runs (run_workflow_now) bypass both the cap and the counting.
@@ -118,8 +121,10 @@ class WorkflowScheduler:
                 for job in self._scheduler.get_jobs()
             ] if self._scheduler and self._scheduler.running else [],
             "running_workflows": sorted(self._running),
+            "running_run_counts": dict(self._running_run_counts),
             "finished_today": sorted(self.finished_today),
-            "max_concurrent_workflows": self._max_concurrent,
+            "max_concurrent_runs": self._max_concurrent_runs,
+            "max_concurrent_runs_per_workflow": self._max_concurrent_runs_per_workflow,
             "max_runs": self._max_runs,
             "run_counts": dict(self.run_counts),
             "max_runtime_minutes": self._max_runtime_minutes,
@@ -137,6 +142,11 @@ class WorkflowScheduler:
         self._stop_time = _parse_hhmm(self._stop_time_str)
         self._max_runs = int(config.get("workflow_max_runs") or 0)
         self._max_runtime_minutes = int(config.get("workflow_max_runtime_minutes") or 0)
+        self._max_concurrent_runs = max(1, int(config.get("workflow_max_concurrent_runs") or 4))
+        self._max_concurrent_runs_per_workflow = max(
+            1,
+            int(config.get("workflow_max_concurrent_runs_per_workflow") or 2),
+        )
 
     def _refresh_jobs(self) -> None:
         if not self._scheduler:
@@ -187,19 +197,26 @@ class WorkflowScheduler:
         if self._scheduler and self._scheduler.get_job(_TICK_JOB_ID):
             self._scheduler.remove_job(_TICK_JOB_ID)
 
-    def next_workflow_batch(self, candidates: set[str], running: set[str]) -> list[str]:
+    def next_workflow_batch(self, candidates: set[str], *, available: int) -> list[str]:
         ordered = sorted(candidates)
-        if not ordered:
+        if not ordered or available <= 0:
             return []
         selected: list[str] = []
-        attempts = 0
-        while len(selected) < self._max_concurrent and attempts < len(ordered):
-            index = (self._cursor + attempts) % len(ordered)
-            key = ordered[index]
-            if key not in running and key not in selected:
+        selected_counts: dict[str, int] = {}
+        blocked_attempts = 0
+        while len(selected) < available and blocked_attempts < len(ordered):
+            key = ordered[self._cursor % len(ordered)]
+            self._cursor = (self._cursor + 1) % len(ordered)
+            active_runs = self._running_run_counts.get(key, 0)
+            newly_selected = selected_counts.get(key, 0)
+            within_per_workflow_limit = active_runs + newly_selected < self._max_concurrent_runs_per_workflow
+            within_window_limit = self._max_runs <= 0 or self.run_counts.get(key, 0) + newly_selected < self._max_runs
+            if within_per_workflow_limit and within_window_limit:
                 selected.append(key)
-            attempts += 1
-        self._cursor = (self._cursor + attempts) % len(ordered)
+                selected_counts[key] = newly_selected + 1
+                blocked_attempts = 0
+            else:
+                blocked_attempts += 1
         return selected
 
     def _window_anchor(self, now: datetime) -> date | None:
@@ -252,15 +269,16 @@ class WorkflowScheduler:
                 candidates = {
                     key for key in candidates if self.run_counts.get(key, 0) < self._max_runs
                 }
-            available = self._max_concurrent - len(self._running)
+            active_run_count = max(sum(self._running_run_counts.values()), len(self._running))
+            available = self._max_concurrent_runs - active_run_count
             if available <= 0:
                 logger.info(
                     "Workflow 并发上限已占满 运行中=%s 上限=%d",
                     sorted(self._running),
-                    self._max_concurrent,
+                    self._max_concurrent_runs,
                 )
                 return
-            batch = self.next_workflow_batch(candidates, self._running)[:available]
+            batch = self.next_workflow_batch(candidates, available=available)
             workflows_by_key = {item["workflow_key"]: item for item in workflows}
             for workflow_key in batch:
                 workflow = workflows_by_key[workflow_key]
@@ -271,7 +289,7 @@ class WorkflowScheduler:
                     self._log_validation_failure(workflow_key, exc)
                     continue
                 definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
-                self._running.add(workflow_key)
+                self._reserve_run_slot(workflow_key)
                 if self._max_runs > 0:
                     self.run_counts[workflow_key] = self.run_counts.get(workflow_key, 0) + 1
                 logger.info(
@@ -310,7 +328,19 @@ class WorkflowScheduler:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
         finally:
             with self._lock:
-                self._running.discard(workflow_key)
+                self._release_run_slot(workflow_key)
+
+    def _reserve_run_slot(self, workflow_key: str) -> None:
+        self._running.add(workflow_key)
+        self._running_run_counts[workflow_key] = self._running_run_counts.get(workflow_key, 0) + 1
+
+    def _release_run_slot(self, workflow_key: str) -> None:
+        remaining = self._running_run_counts.get(workflow_key, 0) - 1
+        if remaining > 0:
+            self._running_run_counts[workflow_key] = remaining
+            return
+        self._running_run_counts.pop(workflow_key, None)
+        self._running.discard(workflow_key)
 
     def stop_workflow_run(self, run_id: str) -> dict[str, Any]:
         with self._workflow_run_lock(run_id):
@@ -432,7 +462,7 @@ class WorkflowScheduler:
                     leased_task.get("task_version") or "",
                 )
             self._register_workflow_control(run_id)
-            self._running.add(workflow_key)
+            self._reserve_run_slot(workflow_key)
         logger.info(
             "Workflow 即时测试 run 启动 workflow=%s run=%s profile=%s",
             workflow_key,

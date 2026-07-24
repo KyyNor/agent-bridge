@@ -26,6 +26,8 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   workflow_start_time: '22:00',
   workflow_stop_time: '07:00',
   workflow_max_runs: 0,
+  workflow_max_concurrent_runs: 4,
+  workflow_max_concurrent_runs_per_workflow: 2,
   workflow_max_runtime_minutes: 30,
   workflow_task_rerun_days: 30,
   log_retention_days: 180,
@@ -161,6 +163,13 @@ const workflowTimesValid = computed(() =>
 const maxRunsValid = computed(() =>
   Number.isInteger(syncConfig.value.workflow_max_runs) && syncConfig.value.workflow_max_runs >= 0,
 )
+const maxConcurrentRunsValid = computed(() =>
+  Number.isInteger(syncConfig.value.workflow_max_concurrent_runs) && syncConfig.value.workflow_max_concurrent_runs > 0,
+)
+const maxConcurrentRunsPerWorkflowValid = computed(() =>
+  Number.isInteger(syncConfig.value.workflow_max_concurrent_runs_per_workflow)
+  && syncConfig.value.workflow_max_concurrent_runs_per_workflow > 0,
+)
 const taskRerunDaysValid = computed(() =>
   Number.isInteger(syncConfig.value.workflow_task_rerun_days) && syncConfig.value.workflow_task_rerun_days >= 0,
 )
@@ -184,6 +193,8 @@ const cronValid = computed(() =>
   && docSyncNextRuns.value !== null
   && workflowTimesValid.value
   && maxRunsValid.value
+  && maxConcurrentRunsValid.value
+  && maxConcurrentRunsPerWorkflowValid.value
   && taskRerunDaysValid.value
   && workflowRuntimeValid.value
   && logRetentionValid.value
@@ -198,6 +209,13 @@ const runCountText = computed(() => {
   const entries = Object.entries(wf.run_counts ?? {})
   if (!entries.length) return `0/${cap}（暂无运行）`
   return entries.map(([k, v]) => `${k} ${v}/${cap}`).join('、')
+})
+const runningWorkflowText = computed(() => {
+  const workflow = schedulerStatus.value?.workflow
+  if (!workflow?.running_workflows?.length) return '无'
+  return workflow.running_workflows
+    .map(key => `${key} ×${workflow.running_run_counts?.[key] || 1}`)
+    .join(', ')
 })
 
 // 任务运行 status → StatusBadge 语义状态
@@ -478,6 +496,18 @@ async function deleteBackend(slug: string) {
           <span v-else class="text-xs text-destructive">请输入非负整数</span>
         </div>
         <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">工作流全局并发 <span class="text-xs text-muted-foreground">(运行数)</span></div>
+          <Input v-model.number="syncConfig.workflow_max_concurrent_runs" type="number" min="1" placeholder="4" class="w-32 font-mono text-sm" />
+          <span v-if="maxConcurrentRunsValid" class="text-xs text-muted-foreground">自动调度中，所有工作流合计最多同时运行 {{ syncConfig.workflow_max_concurrent_runs }} 个</span>
+          <span v-else class="text-xs text-destructive">请输入正整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">单工作流并发 <span class="text-xs text-muted-foreground">(运行数)</span></div>
+          <Input v-model.number="syncConfig.workflow_max_concurrent_runs_per_workflow" type="number" min="1" placeholder="2" class="w-32 font-mono text-sm" />
+          <span v-if="maxConcurrentRunsPerWorkflowValid" class="text-xs text-muted-foreground">自动调度中，同一工作流最多同时运行 {{ syncConfig.workflow_max_concurrent_runs_per_workflow }} 个</span>
+          <span v-else class="text-xs text-destructive">请输入正整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">工作流运行时长上限 <span class="text-xs text-muted-foreground">(分钟)</span></div>
           <Input v-model.number="syncConfig.workflow_max_runtime_minutes" type="number" min="0" placeholder="30" class="w-32 font-mono text-sm" />
           <span v-if="workflowRuntimeValid" class="text-xs text-muted-foreground">{{ syncConfig.workflow_max_runtime_minutes > 0 ? `单次工作流运行超过 ${syncConfig.workflow_max_runtime_minutes} 分钟即强制终止` : '不限（0，回退默认上限）' }}</span>
@@ -627,10 +657,10 @@ async function deleteBackend(slug: string) {
                   每日 {{ schedulerStatus.workflow?.start_time || '--' }} → {{ schedulerStatus.workflow?.stop_time || '--' }}
                 </span>
                 <Badge v-if="schedulerStatus.workflow?.in_window" variant="secondary" class="bg-info-soft text-info-soft-fg">窗口内</Badge>
-                <span class="text-xs text-muted-foreground">最多并发 {{ schedulerStatus.workflow?.max_concurrent_workflows || 2 }} 个工作流</span>
+                <span class="text-xs text-muted-foreground">全局并发 {{ schedulerStatus.workflow?.max_concurrent_runs || 4 }}，单工作流 {{ schedulerStatus.workflow?.max_concurrent_runs_per_workflow || 2 }}</span>
               </div>
               <div class="space-y-2 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-                <div>正在执行：{{ schedulerStatus.workflow?.running_workflows?.length ? schedulerStatus.workflow.running_workflows.join(', ') : '无' }}</div>
+                <div>正在执行：{{ runningWorkflowText }}</div>
                 <div>今日结束：{{ schedulerStatus.workflow?.finished_today?.length ? schedulerStatus.workflow.finished_today.join(', ') : '无' }}</div>
                 <div>运行计数：{{ runCountText }}</div>
               </div>

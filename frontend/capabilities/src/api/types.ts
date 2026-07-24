@@ -1138,6 +1138,8 @@ export interface KnowledgeSyncConfig {
   workflow_start_time: string
   workflow_stop_time: string
   workflow_max_runs: number
+  workflow_max_concurrent_runs: number
+  workflow_max_concurrent_runs_per_workflow: number
   workflow_max_runtime_minutes: number
   workflow_task_rerun_days: number
   log_retention_days: number
@@ -1240,8 +1242,10 @@ export interface SchedulerStatus {
     stop_time: string
     in_window: boolean
     running_workflows?: string[]
+    running_run_counts?: Record<string, number>
     finished_today?: string[]
-    max_concurrent_workflows?: number
+    max_concurrent_runs?: number
+    max_concurrent_runs_per_workflow?: number
     max_runs?: number
     run_counts?: Record<string, number>
   }

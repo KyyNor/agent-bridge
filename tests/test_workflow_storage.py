@@ -1249,3 +1249,25 @@ def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm
         metadata={},
     )
     assert first["artifact_id"] != second["artifact_id"]
+
+
+def test_workflow_concurrency_settings_default_and_persist(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+
+    defaults = store.get_sync_config()
+    assert defaults["workflow_max_concurrent_runs"] == 4
+    assert defaults["workflow_max_concurrent_runs_per_workflow"] == 2
+
+    saved = store.save_sync_config(
+        code_sync_cron="0 * * * *",
+        workflow_max_concurrent_runs=8,
+        workflow_max_concurrent_runs_per_workflow=3,
+    )
+
+    assert saved["workflow_max_concurrent_runs"] == 8
+    assert saved["workflow_max_concurrent_runs_per_workflow"] == 3
+    assert store.get_sync_config()["workflow_max_concurrent_runs"] == 8
+    assert store.get_sync_config()["workflow_max_concurrent_runs_per_workflow"] == 3
