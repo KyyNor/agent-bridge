@@ -9,6 +9,75 @@ from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.types import row_to_dict
 
 
+SYNC_CONFIG_COLUMNS = (
+    "code_sync_cron, ua_git_url, ua_plugin_update_cron, claude_mem_git_url, "
+    "claude_mem_plugin_update_cron, understand_cron, doc_sync_cron, "
+    "workflow_start_time, workflow_stop_time, workflow_max_runs, "
+    "workflow_max_concurrent_runs, workflow_max_concurrent_runs_per_workflow, "
+    "workflow_max_runtime_minutes, workflow_task_rerun_days, log_retention_days, "
+    "mcp_timeout_seconds, understand_timeout_minutes"
+)
+
+SYNC_CONFIG_DEFAULTS: dict[str, Any] = {
+    "code_sync_cron": "0 * * * *",
+    "ua_git_url": "",
+    "ua_plugin_update_cron": "0 3 * * 0",
+    "claude_mem_git_url": "",
+    "claude_mem_plugin_update_cron": "30 3 * * 0",
+    "understand_cron": "0 2 * * *",
+    "doc_sync_cron": "*/30 * * * *",
+    "workflow_start_time": "22:00",
+    "workflow_stop_time": "07:00",
+    "workflow_max_runs": 0,
+    "workflow_max_concurrent_runs": 4,
+    "workflow_max_concurrent_runs_per_workflow": 2,
+    "workflow_max_runtime_minutes": 30,
+    "workflow_task_rerun_days": 30,
+    "log_retention_days": 180,
+    "mcp_timeout_seconds": DEFAULT_MCP_TIMEOUT_SECONDS,
+    "understand_timeout_minutes": 120,
+}
+
+
+def resolve_sync_config(row: sqlite3.Row | None) -> dict[str, Any]:
+    """将 ``knowledge_sync_config`` 的单行查询结果解析为配置字典。
+
+    单一权威解析点：``get_sync_config`` 的主路径与在同一事务内读取单个
+    配置项的调用方（如工作流任务重跑窗口）都经过此处，保证默认值与字段
+    映射只有一份实现。``row`` 为 ``None`` 时返回完整默认配置。
+    """
+    defaults = SYNC_CONFIG_DEFAULTS
+    if row is None:
+        return dict(defaults)
+    return {
+        "code_sync_cron": row[0] or defaults["code_sync_cron"],
+        "ua_git_url": row[1] or "",
+        "ua_plugin_update_cron": row[2] or defaults["ua_plugin_update_cron"],
+        "claude_mem_git_url": row[3] or "",
+        "claude_mem_plugin_update_cron": row[4] or defaults["claude_mem_plugin_update_cron"],
+        "understand_cron": row[5] or defaults["understand_cron"],
+        "doc_sync_cron": row[6] if len(row) > 6 and row[6] else defaults["doc_sync_cron"],
+        "workflow_start_time": row[7] if len(row) > 7 and row[7] else defaults["workflow_start_time"],
+        "workflow_stop_time": row[8] if len(row) > 8 and row[8] else defaults["workflow_stop_time"],
+        "workflow_max_runs": int(row[9]) if len(row) > 9 and row[9] is not None else 0,
+        "workflow_max_concurrent_runs": int(row[10]) if len(row) > 10 and row[10] is not None else 4,
+        "workflow_max_concurrent_runs_per_workflow": int(row[11]) if len(row) > 11 and row[11] is not None else 2,
+        "workflow_max_runtime_minutes": int(row[12]) if len(row) > 12 and row[12] is not None else 30,
+        "workflow_task_rerun_days": int(row[13]) if len(row) > 13 and row[13] is not None else 30,
+        "log_retention_days": int(row[14]) if len(row) > 14 and row[14] is not None else 180,
+        "mcp_timeout_seconds": int(row[15]) if len(row) > 15 and row[15] is not None else DEFAULT_MCP_TIMEOUT_SECONDS,
+        "understand_timeout_minutes": int(row[16]) if len(row) > 16 and row[16] is not None else 120,
+    }
+
+
+def fetch_sync_config(conn: sqlite3.Connection) -> dict[str, Any]:
+    """在指定连接上读取全局同步配置，复用 :func:`resolve_sync_config`。"""
+    row = conn.execute(
+        f"SELECT {SYNC_CONFIG_COLUMNS} FROM knowledge_sync_config WHERE id = 1"
+    ).fetchone()
+    return resolve_sync_config(row)
+
+
 class CodeGraphRepository:
     def __init__(self, db_path, connect):
         self._db_path = db_path
@@ -240,55 +309,8 @@ class CodeGraphRepository:
     # -- Sync Config --
 
     def get_sync_config(self) -> dict[str, Any]:
-        defaults = {
-            "code_sync_cron": "0 * * * *",
-            "ua_git_url": "",
-            "ua_plugin_update_cron": "0 3 * * 0",
-            "claude_mem_git_url": "",
-            "claude_mem_plugin_update_cron": "30 3 * * 0",
-            "understand_cron": "0 2 * * *",
-            "doc_sync_cron": "*/30 * * * *",
-            "workflow_start_time": "22:00",
-            "workflow_stop_time": "07:00",
-            "workflow_max_runs": 0,
-            "workflow_max_concurrent_runs": 4,
-            "workflow_max_concurrent_runs_per_workflow": 2,
-            "workflow_max_runtime_minutes": 30,
-            "workflow_task_rerun_days": 30,
-            "log_retention_days": 180,
-            "mcp_timeout_seconds": DEFAULT_MCP_TIMEOUT_SECONDS,
-            "understand_timeout_minutes": 120,
-        }
         with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT code_sync_cron, ua_git_url, ua_plugin_update_cron, claude_mem_git_url, claude_mem_plugin_update_cron, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_concurrent_runs, workflow_max_concurrent_runs_per_workflow, workflow_max_runtime_minutes, workflow_task_rerun_days, log_retention_days, mcp_timeout_seconds, understand_timeout_minutes
-                FROM knowledge_sync_config
-                WHERE id = 1
-                """
-            ).fetchone()
-            if row is None:
-                return defaults
-            result = {
-                "code_sync_cron": row[0] or defaults["code_sync_cron"],
-                "ua_git_url": row[1] or "",
-                "ua_plugin_update_cron": row[2] or defaults["ua_plugin_update_cron"],
-                "claude_mem_git_url": row[3] or "",
-                "claude_mem_plugin_update_cron": row[4] or defaults["claude_mem_plugin_update_cron"],
-                "understand_cron": row[5] or defaults["understand_cron"],
-                "doc_sync_cron": row[6] if len(row) > 6 and row[6] else defaults["doc_sync_cron"],
-                "workflow_start_time": row[7] if len(row) > 7 and row[7] else defaults["workflow_start_time"],
-                "workflow_stop_time": row[8] if len(row) > 8 and row[8] else defaults["workflow_stop_time"],
-                "workflow_max_runs": int(row[9]) if len(row) > 9 and row[9] is not None else 0,
-                "workflow_max_concurrent_runs": int(row[10]) if len(row) > 10 and row[10] is not None else 4,
-                "workflow_max_concurrent_runs_per_workflow": int(row[11]) if len(row) > 11 and row[11] is not None else 2,
-                "workflow_max_runtime_minutes": int(row[12]) if len(row) > 12 and row[12] is not None else 30,
-                "workflow_task_rerun_days": int(row[13]) if len(row) > 13 and row[13] is not None else 30,
-                "log_retention_days": int(row[14]) if len(row) > 14 and row[14] is not None else 180,
-                "mcp_timeout_seconds": int(row[15]) if len(row) > 15 and row[15] is not None else DEFAULT_MCP_TIMEOUT_SECONDS,
-                "understand_timeout_minutes": int(row[16]) if len(row) > 16 and row[16] is not None else 120,
-            }
-            return result
+            return fetch_sync_config(conn)
 
     def save_sync_config(
         self,

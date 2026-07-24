@@ -32,6 +32,7 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
     )
     store._backfill_agent_run_backend_keys(conn)
     store._drop_column(conn, "workflow_definitions", "manifest_json")
+    store._drop_column(conn, "workflow_definitions", "workflow_js")
     store._ensure_columns(
         conn,
         "workflow_definitions",
@@ -272,6 +273,8 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
     store._drop_column(conn, "knowledge_sync_config", "workflow_cron")
     store._drop_column(conn, "workflow_definitions", "schedule_json")
     store._drop_column(conn, "workflow_definitions", "manifest_json")
+    store._drop_column(conn, "workflow_runs", "stdout_path")
+    store._drop_column(conn, "workflow_runs", "stderr_path")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS profile_doc_cache (

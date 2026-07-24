@@ -108,7 +108,6 @@ def _seed(store, workflow_key: str = "w"):
         name=workflow_key,
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )

@@ -84,12 +84,8 @@ class WorkflowService:
         status: str,
         workflow_type: str = "operation",
         definition: dict[str, Any] | WorkflowGraph | None = None,
-        workflow_js: str = "",
         revision_source: str = "edit",
     ) -> dict[str, Any]:
-        # Kept only for internal callers that still construct historical test
-        # fixtures. New API schemas do not expose or execute this field.
-        del workflow_js
         require_admin_user(actor, self.admins)
         if revision_source not in WORKFLOW_REVISION_SOURCES:
             raise ValidationError(f"unsupported workflow revision source: {revision_source}")
@@ -120,7 +116,6 @@ class WorkflowService:
                 description=description,
                 profile_key=profile_key,
                 definition=graph_payload,
-                workflow_js="",
                 status=next_status,
                 workflow_type=next_type,
                 created_by=actor,

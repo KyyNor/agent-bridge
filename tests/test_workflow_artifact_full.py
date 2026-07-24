@@ -15,7 +15,6 @@ def _service(wm_paths):
         name="w",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     return svc
@@ -155,7 +154,7 @@ def test_running_artifacts_do_not_replace_current_until_run_completes(wm_paths):
     assert saved["producer_node_fingerprint"] == "fingerprint-v2"
 
     svc.store.finish_workflow_run(
-        "run_2", status="completed", exit_code=0, stdout_path=None, stderr_path=None,
+        "run_2", status="completed", exit_code=0,
         error=None, duration_ms=0, output={},
     )
     current = svc.store.search_workflow_artifacts(

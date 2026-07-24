@@ -346,7 +346,6 @@ def test_finish_workflow_run_uses_running_compare_and_set(wm_paths):
         name="W",
         description="",
         profile_key="p",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -364,8 +363,6 @@ def test_finish_workflow_run_uses_running_compare_and_set(wm_paths):
         expected_status="running",
         status="stopped",
         exit_code=1,
-        stdout_path=None,
-        stderr_path=None,
         error="stop",
         duration_ms=2,
     )
@@ -395,7 +392,6 @@ def test_workflow_definition_requires_profile_reference(wm_paths):
             name="Page Report",
             description="",
             profile_key="missing-profile",
-            workflow_js="export default async function workflow() {}",
             status="active",
             created_by="root",
         )
@@ -419,7 +415,6 @@ def test_workflow_definition_round_trips_without_manifest(wm_paths):
         name="Page Report",
         description="Nightly page report",
         profile_key="report-plane",
-        workflow_js="export default async function workflow() {}",
         status="active",
         created_by="root",
     )
@@ -444,7 +439,6 @@ def test_workflow_task_upsert_is_idempotent_and_does_not_replace_completed(wm_pa
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -483,7 +477,6 @@ def test_workflow_task_version_allows_same_key_to_run_again(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -535,7 +528,6 @@ def test_workflow_task_completed_same_version_reopens_after_configured_rerun_win
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -600,7 +592,6 @@ def test_workflow_task_lease_is_exclusive_and_expired_leases_are_reclaimed(wm_pa
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -629,7 +620,6 @@ def test_release_tasks_for_stopped_run_is_exact_and_preserves_attempt_count(wm_p
             name=workflow_key,
             description="",
             profile_key="report-plane",
-            workflow_js="",
             status="active",
             created_by="root",
         )
@@ -678,7 +668,6 @@ def test_workflow_task_lease_backfills_run_task_key(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -710,7 +699,6 @@ def test_workflow_task_upsert_does_not_release_active_lease(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -743,7 +731,6 @@ def test_workflow_task_upsert_reopens_expired_running_task(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -776,7 +763,6 @@ def test_workflow_task_complete_requires_current_lease_owner(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -808,7 +794,6 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -838,7 +823,9 @@ def test_workflow_task_upsert_uses_immediate_transaction_before_read(wm_paths):
 
     assert result == task_counts(updated=1)
     assert statements[0] == "BEGIN IMMEDIATE"
-    assert statements[1].startswith("SELECT WORKFLOW_TASK_RERUN_DAYS")
+    # 重跑窗口走统一的 knowledge_sync_config 读取入口（全字段 SELECT）。
+    assert "FROM KNOWLEDGE_SYNC_CONFIG" in statements[1]
+    assert "WORKFLOW_TASK_RERUN_DAYS" in statements[1]
     assert statements[2].startswith("SELECT ID, STATUS, LEASE_EXPIRES_AT, SET_AT")
 
 
@@ -849,7 +836,6 @@ def _seed_workflow_with_task(store, workflow_key: str = "w", task_key: str = "pa
         name=workflow_key,
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -915,7 +901,6 @@ def test_workflow_artifacts_keep_history_and_mark_only_latest_version_current(wm
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -990,7 +975,6 @@ def test_workflow_artifacts_keep_same_version_outputs_for_different_runs(wm_path
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -1056,7 +1040,6 @@ def test_workflow_artifact_page_reuses_filters_for_items_and_total(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )
@@ -1206,7 +1189,6 @@ def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )

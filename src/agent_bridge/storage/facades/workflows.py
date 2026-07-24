@@ -18,7 +18,6 @@ class WorkflowsFacadeMixin:
         created_by: str,
         workflow_type: str = "operation",
         definition: dict[str, Any] | None = None,
-        workflow_js: str = "",
     ) -> dict[str, Any]:
         return self.workflows.upsert_workflow_definition(
             workflow_key=workflow_key,
@@ -26,7 +25,6 @@ class WorkflowsFacadeMixin:
             description=description,
             profile_key=profile_key,
             definition=definition,
-            workflow_js=workflow_js,
             status=status,
             created_by=created_by,
             workflow_type=workflow_type,
@@ -283,8 +281,6 @@ class WorkflowsFacadeMixin:
         expected_status: str = "running",
         status: str,
         exit_code: int | None,
-        stdout_path: str | None,
-        stderr_path: str | None,
         error: str | None,
         duration_ms: int | None,
         output: dict[str, Any] | None = None,
@@ -294,8 +290,6 @@ class WorkflowsFacadeMixin:
             expected_status=expected_status,
             status=status,
             exit_code=exit_code,
-            stdout_path=stdout_path,
-            stderr_path=stderr_path,
             error=error,
             duration_ms=duration_ms,
             output=output,

@@ -20,7 +20,6 @@ def _create_service_with_workflow(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     return svc
@@ -198,7 +197,6 @@ def test_workflow_mcp_rejects_mismatched_run_context(wm_paths):
         name="Other Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     _create_run(svc, run_id="run_other", workflow_key="other-report")

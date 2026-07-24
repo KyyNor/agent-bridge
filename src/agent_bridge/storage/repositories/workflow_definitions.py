@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
 from agent_bridge.core.timeutil import utc_iso
-from agent_bridge.storage.types import row_to_dict
 
+from . import revisions as _revisions
 from .workflow_common import (
     _datetime_iso,
     _json_dumps,
@@ -29,20 +28,18 @@ class WorkflowDefinitionsRepositoryMixin:
         created_by: str,
         workflow_type: str = "operation",
         definition: dict[str, Any] | None = None,
-        workflow_js: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO workflow_definitions (
-                  workflow_key, name, description, profile_key, workflow_js, definition_json, status, workflow_type, created_by
+                  workflow_key, name, description, profile_key, definition_json, status, workflow_type, created_by
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
                   profile_key = excluded.profile_key,
-                  workflow_js = excluded.workflow_js,
                   definition_json = excluded.definition_json,
                   status = excluded.status,
                   workflow_type = excluded.workflow_type,
@@ -53,7 +50,6 @@ class WorkflowDefinitionsRepositoryMixin:
                     name,
                     description,
                     profile_key,
-                    workflow_js,
                     _json_dumps(definition) if definition is not None else None,
                     status,
                     workflow_type,
@@ -109,74 +105,43 @@ class WorkflowDefinitionsRepositoryMixin:
         actor: str,
         source: str = "edit",
     ) -> dict[str, Any]:
-        snapshot_json = _json_dumps(snapshot)
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT COALESCE(MAX(revision_no), 0) FROM workflow_definition_revisions WHERE workflow_key = ?",
-                (workflow_key,),
-            ).fetchone()
-            next_no = int(row[0]) + 1
-            conn.execute(
-                """
-                INSERT INTO workflow_definition_revisions (
-                  workflow_key, revision_no, content_hash, snapshot_json, created_by, source
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (workflow_key, next_no, content_hash, snapshot_json, actor, source),
-            )
-            conn.execute(
-                "UPDATE workflow_definitions SET current_revision_no = ? WHERE workflow_key = ?",
-                (next_no, workflow_key),
-            )
-            return dict(
-                conn.execute(
-                    """
-                    SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, source, created_at
-                    FROM workflow_definition_revisions WHERE workflow_key = ? AND revision_no = ?
-                    """,
-                    (workflow_key, next_no),
-                ).fetchone()
+            return _revisions.create_revision(
+                conn,
+                table="workflow_definition_revisions",
+                key_column="workflow_key",
+                key_value=workflow_key,
+                content_hash=content_hash,
+                snapshot=snapshot,
+                actor=actor,
+                owner_table="workflow_definitions",
+                snapshot_label="workflow",
+                extra_columns=("source",),
+                extra_values=(source,),
             )
 
     def list_definition_revisions(self, workflow_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
-        bounded = min(max(limit, 1), 500)
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT workflow_key AS entity_key, revision_no, content_hash, created_by, source, created_at
-                FROM workflow_definition_revisions
-                WHERE workflow_key = ?
-                ORDER BY revision_no DESC
-                LIMIT ?
-                """,
-                (workflow_key, bounded),
-            ).fetchall()
-            return [dict(row) for row in rows]
+            return _revisions.list_revisions(
+                conn,
+                table="workflow_definition_revisions",
+                key_column="workflow_key",
+                key_value=workflow_key,
+                limit=limit,
+                extra_columns=("source",),
+            )
 
     def get_definition_revision(self, workflow_key: str, revision_no: int) -> dict[str, Any] | None:
         with self._connect() as conn:
-            item = row_to_dict(
-                conn.execute(
-                    """
-                    SELECT workflow_key AS entity_key, revision_no, content_hash, snapshot_json, created_by, source, created_at
-                    FROM workflow_definition_revisions
-                    WHERE workflow_key = ? AND revision_no = ?
-                    """,
-                    (workflow_key, revision_no),
-                ).fetchone()
+            return _revisions.get_revision(
+                conn,
+                table="workflow_definition_revisions",
+                key_column="workflow_key",
+                key_value=workflow_key,
+                revision_no=revision_no,
+                snapshot_label="workflow",
+                extra_columns=("source",),
             )
-            if item is None:
-                return None
-            snapshot_json = item.pop("snapshot_json", None)
-            try:
-                snapshot = json.loads(snapshot_json)
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise ValueError("corrupt workflow revision snapshot") from exc
-            if not isinstance(snapshot, dict):
-                raise ValueError("corrupt workflow revision snapshot")
-            item["snapshot"] = snapshot
-            return item
 
     def get_current_definition_revision_no(self, workflow_key: str) -> int:
         with self._connect() as conn:

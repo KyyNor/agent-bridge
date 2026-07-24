@@ -236,7 +236,6 @@ def test_workflow_api_can_list_more_than_default_twenty_runs(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     for i in range(75):
@@ -272,7 +271,6 @@ def test_workflow_api_lists_artifacts(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     svc.workflows.save_artifact(
@@ -311,7 +309,6 @@ def test_workflow_api_paginates_artifacts_with_total_and_offset(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     for index in range(3):
@@ -355,7 +352,6 @@ def test_workflow_api_artifact_page_crosses_the_original_thirty_row_limit(wm_pat
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     for index in range(31):
@@ -399,7 +395,6 @@ def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     svc.workflows.save_artifact(
@@ -464,7 +459,6 @@ def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     svc.workflows.save_artifact(
@@ -498,7 +492,6 @@ def _seed_artifact(svc, content: str = "# Page A\n\nFull body") -> str:
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     saved = svc.workflows.save_artifact(
@@ -580,7 +573,6 @@ def _seed_workflow(svc, key: str = "page-report") -> None:
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
 

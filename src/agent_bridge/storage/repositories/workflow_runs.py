@@ -282,8 +282,6 @@ class WorkflowRunsRepositoryMixin:
         expected_status: str = "running",
         status: str,
         exit_code: int | None,
-        stdout_path: str | None,
-        stderr_path: str | None,
         error: str | None,
         duration_ms: int | None,
         output: dict[str, Any] | None = None,
@@ -294,15 +292,13 @@ class WorkflowRunsRepositoryMixin:
                 UPDATE workflow_runs
                 SET status = ?,
                     exit_code = ?,
-                    stdout_path = ?,
-                    stderr_path = ?,
                     error = ?,
                     duration_ms = ?,
                     output_json = ?,
                     finished_at = CURRENT_TIMESTAMP
                 WHERE run_id = ? AND status = ?
                 """,
-                (status, exit_code, stdout_path, stderr_path, error, duration_ms, _json_dumps(output or {}), run_id, expected_status),
+                (status, exit_code, error, duration_ms, _json_dumps(output or {}), run_id, expected_status),
             )
             if status == "completed":
                 conn.execute(

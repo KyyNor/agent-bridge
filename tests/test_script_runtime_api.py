@@ -51,7 +51,6 @@ def test_script_test_route_injects_profile_and_workflow_headers(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     svc.store.create_workflow_run(
@@ -105,7 +104,6 @@ def test_runtime_workflow_set_task_keeps_workflows_isolated_and_accepts_large_ba
             name=workflow_key,
             description="",
             profile_key="report-plane",
-            workflow_js="",
             status="active",
         )
         svc.store.create_workflow_run(
@@ -186,7 +184,6 @@ def test_runtime_workflow_routes_use_trusted_header_context(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     svc.store.create_workflow_run(

@@ -19,7 +19,6 @@ def _service(wm_paths):
         name="w",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     return svc

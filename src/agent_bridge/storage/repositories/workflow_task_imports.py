@@ -9,6 +9,8 @@ from agent_bridge.automation.workflows.models import WorkflowTaskStatus
 from agent_bridge.core.json_util import json_loads as _json_loads
 from agent_bridge.core.timeutil import utc_iso, utc_now
 
+from .codegraph import fetch_sync_config
+
 from .workflow_common import (
     _datetime_iso,
     _json_dumps,
@@ -43,14 +45,8 @@ class WorkflowTaskImportsRepositoryMixin:
         return "updated"
 
     def _workflow_task_rerun_cutoff(self, conn: sqlite3.Connection, now: datetime) -> datetime:
-        config = conn.execute(
-            "SELECT workflow_task_rerun_days FROM knowledge_sync_config WHERE id = 1"
-        ).fetchone()
-        rerun_days = (
-            int(config["workflow_task_rerun_days"])
-            if config is not None and config["workflow_task_rerun_days"] is not None
-            else 30
-        )
+        config = fetch_sync_config(conn)
+        rerun_days = int(config.get("workflow_task_rerun_days") or 0)
         return now - timedelta(days=max(rerun_days, 0))
 
     def _apply_workflow_tasks(

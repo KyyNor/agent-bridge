@@ -780,7 +780,6 @@ def test_script_workflow_helpers_round_trip_tasks_and_logs(wm_paths):
         name="Page Report",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     service.store.create_workflow_run(

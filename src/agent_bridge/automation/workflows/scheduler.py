@@ -441,8 +441,6 @@ class WorkflowScheduler:
                         run_id,
                         status="failed",
                         exit_code=1,
-                        stdout_path=None,
-                        stderr_path=None,
                         error=error,
                         duration_ms=0,
                     )
@@ -523,8 +521,6 @@ class WorkflowScheduler:
                         run_id,
                         status="failed",
                         exit_code=1,
-                        stdout_path=None,
-                        stderr_path=None,
                         error=str(exc),
                         duration_ms=None,
                     )
@@ -630,7 +626,7 @@ class WorkflowScheduler:
                 run_id,
                 expected_status="running",
                 status=execution.status, exit_code=0 if execution.status != "failed" else 1,
-                stdout_path=None, stderr_path=None, error=execution.error, duration_ms=duration_ms, output=execution.output,
+                error=execution.error, duration_ms=duration_ms, output=execution.output,
             )
             if execution.status == "failed":
                 self._release_leased_tasks(workflow_key, run_id, execution.error or "workflow failed")
@@ -665,8 +661,6 @@ class WorkflowScheduler:
                 expected_status="running",
                 status="failed",
                 exit_code=1,
-                stdout_path=None,
-                stderr_path=None,
                 error=str(exc),
                 duration_ms=duration_ms,
             )
@@ -795,8 +789,6 @@ class WorkflowScheduler:
                 expected_status="running",
                 status="stopped",
                 exit_code=None,
-                stdout_path=None,
-                stderr_path=None,
                 error=STOPPED_ERROR,
                 duration_ms=duration_ms,
             )

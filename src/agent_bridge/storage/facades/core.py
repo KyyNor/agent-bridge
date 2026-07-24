@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
+
+from agent_bridge.storage.repositories import revisions as _revisions
 
 
 class CoreFacadeMixin:
@@ -45,73 +46,42 @@ class CoreFacadeMixin:
     def create_skill_prompt_revision(
         self, *, skill_name: str, content_hash: str, snapshot: dict[str, Any], actor: str
     ) -> dict[str, Any]:
-        snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT COALESCE(MAX(revision_no), 0) FROM skill_prompt_revisions WHERE skill_name = ?",
-                (skill_name,),
-            ).fetchone()
-            next_no = int(row[0]) + 1
-            conn.execute(
-                """
-                INSERT INTO skill_prompt_revisions (skill_name, revision_no, content_hash, snapshot_json, created_by)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (skill_name, next_no, content_hash, snapshot_json, actor),
-            )
             # current_revision_no lives on skill_prompts; reset (delete override) means
-            # the row is gone, so we only bump it when an override still exists.
-            conn.execute(
-                "UPDATE skill_prompts SET current_revision_no = ? WHERE skill_name = ?",
-                (next_no, skill_name),
-            )
-            return dict(
-                conn.execute(
-                    """
-                    SELECT skill_name AS entity_key, revision_no, content_hash, created_by, created_at
-                    FROM skill_prompt_revisions WHERE skill_name = ? AND revision_no = ?
-                    """,
-                    (skill_name, next_no),
-                ).fetchone()
+            # the row is gone, so the UPDATE inside create_revision bumps 0 rows in
+            # that case — matching the previous conditional behavior.
+            return _revisions.create_revision(
+                conn,
+                table="skill_prompt_revisions",
+                key_column="skill_name",
+                key_value=skill_name,
+                content_hash=content_hash,
+                snapshot=snapshot,
+                actor=actor,
+                owner_table="skill_prompts",
+                snapshot_label="skill",
             )
 
     def list_skill_prompt_revisions(self, skill_name: str, *, limit: int = 100) -> list[dict[str, Any]]:
-        bounded = min(max(limit, 1), 500)
         with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT skill_name AS entity_key, revision_no, content_hash, created_by, created_at
-                FROM skill_prompt_revisions
-                WHERE skill_name = ?
-                ORDER BY revision_no DESC
-                LIMIT ?
-                """,
-                (skill_name, bounded),
-            ).fetchall()
-            return [dict(row) for row in rows]
+            return _revisions.list_revisions(
+                conn,
+                table="skill_prompt_revisions",
+                key_column="skill_name",
+                key_value=skill_name,
+                limit=limit,
+            )
 
     def get_skill_prompt_revision(self, skill_name: str, revision_no: int) -> dict[str, Any] | None:
         with self.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT skill_name AS entity_key, revision_no, content_hash, snapshot_json, created_by, created_at
-                FROM skill_prompt_revisions
-                WHERE skill_name = ? AND revision_no = ?
-                """,
-                (skill_name, revision_no),
-            ).fetchone()
-            if row is None:
-                return None
-            item = dict(row)
-            snapshot_json = item.pop("snapshot_json", None)
-            try:
-                snapshot = json.loads(snapshot_json)
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise ValueError("corrupt skill revision snapshot") from exc
-            if not isinstance(snapshot, dict):
-                raise ValueError("corrupt skill revision snapshot")
-            item["snapshot"] = snapshot
-            return item
+            return _revisions.get_revision(
+                conn,
+                table="skill_prompt_revisions",
+                key_column="skill_name",
+                key_value=skill_name,
+                revision_no=revision_no,
+                snapshot_label="skill",
+            )
 
     def upsert_code_repository(
         self,

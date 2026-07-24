@@ -12,7 +12,6 @@ def _seed(store) -> None:
         name="w",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
         created_by="root",
     )

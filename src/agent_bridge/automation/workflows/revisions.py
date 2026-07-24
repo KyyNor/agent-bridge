@@ -10,7 +10,6 @@ from typing import Any
 def definition_payload(workflow: dict[str, Any]) -> dict[str, Any]:
     payload = dict(workflow)
     payload.pop("definition_json", None)
-    payload.pop("workflow_js", None)
     if "revision_no" not in payload:
         payload["revision_no"] = int(payload.get("current_revision_no") or 0)
     payload.pop("current_revision_no", None)

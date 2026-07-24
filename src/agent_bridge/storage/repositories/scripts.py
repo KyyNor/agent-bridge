@@ -7,6 +7,8 @@ from typing import Any
 
 from agent_bridge.storage.types import row_to_dict
 
+from . import revisions as _revisions
+
 
 class ScriptsRepository:
     def __init__(self, db_path, connect):
@@ -207,73 +209,39 @@ class ScriptsRepository:
     def create_revision(
         self, *, script_key: str, content_hash: str, snapshot: dict[str, Any], actor: str
     ) -> dict[str, Any]:
-        snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT COALESCE(MAX(revision_no), 0) FROM script_revisions WHERE script_key = ?",
-                (script_key,),
-            ).fetchone()
-            next_no = int(row[0]) + 1
-            conn.execute(
-                """
-                INSERT INTO script_revisions (script_key, revision_no, content_hash, snapshot_json, created_by)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (script_key, next_no, content_hash, snapshot_json, actor),
+            return _revisions.create_revision(
+                conn,
+                table="script_revisions",
+                key_column="script_key",
+                key_value=script_key,
+                content_hash=content_hash,
+                snapshot=snapshot,
+                actor=actor,
+                owner_table="scripts",
+                snapshot_label="script",
             )
-            conn.execute(
-                "UPDATE scripts SET current_revision_no = ? WHERE script_key = ?",
-                (next_no, script_key),
-            )
-            revision = row_to_dict(
-                conn.execute(
-                    """
-                    SELECT script_key AS entity_key, revision_no, content_hash, created_by, created_at
-                    FROM script_revisions WHERE script_key = ? AND revision_no = ?
-                    """,
-                    (script_key, next_no),
-                ).fetchone()
-            )
-            return revision
 
     def list_revisions(self, script_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
-        bounded = min(max(limit, 1), 500)
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT script_key AS entity_key, revision_no, content_hash, created_by, created_at
-                FROM script_revisions
-                WHERE script_key = ?
-                ORDER BY revision_no DESC
-                LIMIT ?
-                """,
-                (script_key, bounded),
-            ).fetchall()
-            return [dict(row) for row in rows]
+            return _revisions.list_revisions(
+                conn,
+                table="script_revisions",
+                key_column="script_key",
+                key_value=script_key,
+                limit=limit,
+            )
 
     def get_revision(self, script_key: str, revision_no: int) -> dict[str, Any] | None:
         with self._connect() as conn:
-            row = row_to_dict(
-                conn.execute(
-                    """
-                    SELECT script_key AS entity_key, revision_no, content_hash, snapshot_json, created_by, created_at
-                    FROM script_revisions
-                    WHERE script_key = ? AND revision_no = ?
-                    """,
-                    (script_key, revision_no),
-                ).fetchone()
+            return _revisions.get_revision(
+                conn,
+                table="script_revisions",
+                key_column="script_key",
+                key_value=script_key,
+                revision_no=revision_no,
+                snapshot_label="script",
             )
-            if row is None:
-                return None
-            snapshot_json = row.pop("snapshot_json", None)
-            try:
-                snapshot = json.loads(snapshot_json)
-            except (TypeError, json.JSONDecodeError) as exc:
-                raise ValueError("corrupt script revision snapshot") from exc
-            if not isinstance(snapshot, dict):
-                raise ValueError("corrupt script revision snapshot")
-            row["snapshot"] = snapshot
-            return row
 
     def get_current_revision_no(self, script_key: str) -> int:
         with self._connect() as conn:

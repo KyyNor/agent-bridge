@@ -27,7 +27,6 @@ def _client(wm_paths):
         name="w",
         description="",
         profile_key="report-plane",
-        workflow_js="",
         status="active",
     )
     return svc, TestClient(create_app(wm_paths, {"root"}))
