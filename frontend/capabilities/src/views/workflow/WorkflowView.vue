@@ -59,6 +59,7 @@ import { useWorkflowEditorState } from '../../composables/useWorkflowEditorState
 import { useWorkflowArtifacts } from '../../composables/useWorkflowArtifacts'
 import { useWorkflowDesigner } from '../../composables/useWorkflowDesigner'
 import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
+import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
@@ -82,30 +83,12 @@ const workflowDetailError = ref('')
 const showGuide = ref(false)
 const showClearConfirm = ref(false)
 const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs' | 'versions'>('overview')
-const progressWorkflowKey = ref('')
-const progressRunId = ref('')
 const taskWorkflowKey = ref('')
-const workflowRuns = ref<Record<string, WorkflowRunSummary[]>>({})
-const workflowRunTotals = ref<Record<string, number>>({})
-const runsLoading = ref(false)
-const selectedRunId = ref('')
-const runEvents = ref<WorkflowRunEvent[]>([])
-const runLogs = ref<WorkflowRunLog[]>([])
-const logsLoading = ref(false)
-const progressRunArtifacts = ref<Record<string, WorkflowArtifact[]>>({})
-const progressArtifactsLoading = ref(false)
 const clearing = ref(false)
 const clearTarget = ref<WorkflowDefinition | null>(null)
-const runPage = ref(1)
-const runPageSize = ref(10)
-// Progress page: multiple agent runs (e.g. workflow + html_reporter).
-const progressAgentRuns = ref<AgentRun[]>([])
-const progressAgentRunKey = ref('')
-const progressAgentRunsLoading = ref(false)
-const progressDetailError = ref('')
-/** Maps a workflow_run_id to its agent_runs.run_key, so subagent-detail (which is
- *  keyed by run_key under /agent-runs) can be resolved from the workflow view. */
-const runIdToAgentRunKey = ref<Record<string, string>>({})
+// `runIdToAgentRunKey` and `progressSubagentDetailState` are owned by the run-progress
+// composable (resolved below). The task subagent detail state closures read those
+// lazily at call time, so referencing them before the composable is set up is safe.
 const taskSubagentDetailState = useSubagentDetails(async (runId, taskIdStr) => {
   let runKey = runIdToAgentRunKey.value[runId]
   if (!runKey) {
@@ -116,9 +99,6 @@ const taskSubagentDetailState = useSubagentDetails(async (runId, taskIdStr) => {
   }
   return api.getAgentRunSubagentDetail(runKey, taskIdStr)
 })
-const progressSubagentDetailState = useSubagentDetails(
-  (runKey, taskIdStr) => api.getAgentRunSubagentDetail(runKey, taskIdStr),
-)
 const showWorkflowImport = ref(false)
 const workflowImportPreview = ref<WorkflowImportPreview | null>(null)
 const workflowImportLoading = ref(false)
@@ -128,14 +108,9 @@ const workflowImportTargetKey = ref('')
 const workflowImportTargetMode = ref<WorkflowImportTargetMode>('auto')
 const workflowImportFile = ref<File | null>(null)
 let workflowImportRequestToken = 0
-const testing = ref(false)
-const testingRunId = ref('')
-const testError = ref('')
 const routeError = ref('')
 const manualInputValues = ref<Record<string, string>>({})
 const advancedInput = ref('{}')
-const progressRunDetail = ref<WorkflowRun | null>(null)
-let testPoll: ReturnType<typeof setInterval> | null = null
 
 const {
   form,
@@ -262,6 +237,73 @@ const pageWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === routeWorkflowKey.value) || null
 )
 
+const {
+  progressWorkflowKey,
+  progressRunId,
+  workflowRuns,
+  workflowRunTotals,
+  runsLoading,
+  selectedRunId,
+  runEvents,
+  runLogs,
+  logsLoading,
+  progressRunArtifacts,
+  progressArtifactsLoading,
+  progressAgentRuns,
+  progressAgentRunKey,
+  progressAgentRunsLoading,
+  progressDetailError,
+  progressRunDetail,
+  runIdToAgentRunKey,
+  testing,
+  testingRunId,
+  testError,
+  runPage,
+  runPageSize,
+  progressWorkflow,
+  progressRun,
+  progressArtifacts,
+  progressFinished,
+  applyRunOverviews,
+  loadRunOverviews,
+  mergeWorkflowRun,
+  loadRuns,
+  runningRunFor,
+  loadLogs,
+  selectRun,
+  loadProgressAgentRuns,
+  loadProgressAgentEvents,
+  selectProgressAgentRun,
+  progressSubagentDetail,
+  progressSubagentDetailLoading,
+  progressSubagentDetailError,
+  ensureProgressSubagentDetail,
+  loadProgressArtifacts,
+  openProgressArtifactDetail,
+  openProgressArtifact,
+  openProgressHtmlReport,
+  stopTestPolling,
+  pollTestRun,
+  startTestPolling,
+  runWorkflow,
+  openProgress,
+  prepareProgress,
+  refreshProgress,
+  openScriptRun,
+  openAgentRun,
+  applyProgressRoute,
+} = useWorkflowRunProgress({
+  selectedWorkflow,
+  workflows,
+  formProfileKey: () => form.value.profile_key,
+  routeParts,
+  openArtifactFullscreen,
+  setSelectedKey: (value: string) => { selectedKey.value = value },
+  searchArtifacts,
+  setArtifactError: (value: string) => { artifactError.value = value },
+  setPageError: (value: string) => { error.value = value },
+})
+
 const selectedNodeIssues = computed(() => scopedGraphIssues('node', selectedNode.value?.id || null))
 const selectedEdgeIssues = computed(() => scopedGraphIssues('edge', selectedEdge.value?.id || null))
 const configDrawerTitle = computed(() => {
@@ -290,9 +332,6 @@ const latestRunValue = computed(() => {
 })
 const hasAnyRunningRun = computed(() =>
   Object.values(workflowRuns.value).some(items => items.some(run => run.status === 'running')),
-)
-const progressWorkflow = computed(() =>
-  workflows.value.find(item => item.workflow_key === progressWorkflowKey.value) || selectedWorkflow.value
 )
 const taskWorkflow = computed(() =>
   workflows.value.find(item => item.workflow_key === taskWorkflowKey.value) || selectedWorkflow.value
@@ -431,13 +470,6 @@ const detailTabs = computed(() => [
   { key: 'versions', label: '版本历史' },
 ])
 const pagedWorkflows = computed(() => paginate(workflows.value, workflowPage.value, workflowPageSize.value))
-const progressRun = computed(() =>
-  (workflowRuns.value[progressWorkflowKey.value] || []).find(run => run.run_id === progressRunId.value) || null,
-)
-const progressArtifacts = computed(() => progressRunArtifacts.value[progressRunId.value] || [])
-const progressFinished = computed(() =>
-  !!progressRun.value && ['completed', 'no_task', 'failed', 'stopped'].includes(progressRun.value.status),
-)
 onMounted(async () => {
   await loadAll()
   await applyRoute()
@@ -480,46 +512,6 @@ async function loadAll() {
     error.value = errorMessage(e)
   } finally {
     loading.value = false
-  }
-}
-
-function applyRunOverviews(overviews: Array<{
-  workflow_key: string
-  run_count: number
-  latest_run: WorkflowRunSummary | null
-  running_run: WorkflowRunSummary | null
-}>) {
-  const nextRuns: Record<string, WorkflowRunSummary[]> = {}
-  const nextTotals: Record<string, number> = {}
-  for (const overview of overviews) {
-    const items = [overview.latest_run, overview.running_run]
-      .filter((run): run is WorkflowRunSummary => Boolean(run))
-      .filter((run, index, list) => list.findIndex(item => item.run_id === run.run_id) === index)
-    nextRuns[overview.workflow_key] = items
-    nextTotals[overview.workflow_key] = overview.run_count
-  }
-  workflowRuns.value = nextRuns
-  workflowRunTotals.value = nextTotals
-  const runningEntry = overviews.find(item => item.running_run)
-  if (runningEntry?.running_run) {
-    testing.value = true
-    testingRunId.value = runningEntry.running_run.run_id
-    progressWorkflowKey.value = progressWorkflowKey.value || runningEntry.workflow_key
-  } else {
-    testing.value = false
-    testingRunId.value = ''
-    stopTestPolling()
-  }
-}
-
-async function loadRunOverviews() {
-  runsLoading.value = true
-  try {
-    applyRunOverviews(await api.listWorkflowRunOverviews())
-  } catch (e: unknown) {
-    error.value = errorMessage(e)
-  } finally {
-    runsLoading.value = false
   }
 }
 
@@ -719,27 +711,7 @@ async function applyRoute() {
     taskWorkflowKey.value = workflow.workflow_key
     await loadTasks(workflow.workflow_key)
   } else if (routeMode.value === 'progress') {
-    const runId = routeParts.value[2] || runningRunFor(workflow.workflow_key)?.run_id || ''
-    progressWorkflowKey.value = workflow.workflow_key
-    progressRunId.value = runId
-    selectedRunId.value = runId
-    progressAgentRunKey.value = ''
-    await loadRuns(workflow.workflow_key, { preserveSelectedRun: true })
-    if (runId) {
-      const detail = await api.getWorkflowRun(runId)
-      progressRunDetail.value = detail
-      mergeWorkflowRun(detail)
-      selectedRunId.value = runId
-      await loadProgressAgentRuns()
-      await loadProgressAgentEvents()
-    }
-    const run = (workflowRuns.value[workflow.workflow_key] || []).find(item => item.run_id === runId)
-    if (run?.status === 'running') {
-      testing.value = true
-      testingRunId.value = run.run_id
-      stopTestPolling()
-      testPoll = setInterval(pollTestRun, 1500)
-    }
+    await applyProgressRoute(workflow)
   }
 }
 
@@ -819,53 +791,6 @@ function subagentDetailErrorFor(runId: string | null | undefined, taskIdStr: str
 
 function errorMessage(e: unknown) {
   return e instanceof Error ? e.message : '未知错误'
-}
-
-async function loadRuns(
-  workflowKey = selectedWorkflow.value?.workflow_key || '',
-  options: { preserveSelectedRun?: boolean } = {},
-) {
-  const key = workflowKey
-  if (!key) {
-    workflowRuns.value = { ...workflowRuns.value }
-    return
-  }
-  runsLoading.value = true
-  try {
-    const result = await api.listWorkflowRunSummaries(
-      key,
-      runPageSize.value,
-      (runPage.value - 1) * runPageSize.value,
-    )
-    workflowRuns.value = { ...workflowRuns.value, [key]: result.runs }
-    workflowRunTotals.value = { ...workflowRunTotals.value, [key]: result.total }
-    if (
-      !options.preserveSelectedRun
-      && key === selectedWorkflow.value?.workflow_key
-      && !result.runs.some(r => r.run_id === selectedRunId.value)
-    ) {
-      selectedRunId.value = result.runs[0]?.run_id || ''
-      await loadLogs()
-    }
-  } catch (e: unknown) {
-    error.value = errorMessage(e)
-  } finally {
-    runsLoading.value = false
-  }
-}
-
-function mergeWorkflowRun(run: WorkflowRun) {
-  const key = run.workflow_key
-  const currentRuns = workflowRuns.value[key] || []
-  const index = currentRuns.findIndex(item => item.run_id === run.run_id)
-  const nextRuns = index >= 0
-    ? currentRuns.map(item => item.run_id === run.run_id ? run : item)
-    : [run, ...currentRuns]
-  workflowRuns.value = { ...workflowRuns.value, [key]: nextRuns.slice(0, WORKFLOW_RUN_CACHE_LIMIT) }
-  workflowRunTotals.value = {
-    ...workflowRunTotals.value,
-    [key]: Math.max(workflowRunTotals.value[key] || 0, nextRuns.length),
-  }
 }
 
 function resetWorkflowImportState() {
@@ -987,189 +912,6 @@ async function handleWorkflowRestored() {
   if (workflowKey) await Promise.all([loadRuns(workflowKey), loadTasks(workflowKey), searchArtifacts()])
 }
 
-async function loadLogs(options: { quiet?: boolean } = {}) {
-  if (!selectedRunId.value) {
-    runLogs.value = []
-    runEvents.value = []
-    return
-  }
-  if (!options.quiet) logsLoading.value = true
-  try {
-    // Logs are workflow-scheduling-specific; agent execution events live under
-    // /agent-runs (unified). Resolve the run_key once, then stream events from
-    // the live events.jsonl via /agent-runs/{run_key}/events (real time, not
-    // just the DB copy flushed at completion).
-    let runKey = runIdToAgentRunKey.value[selectedRunId.value]
-    const logsPromise = api.getWorkflowRunLogs(selectedRunId.value)
-    if (!runKey) {
-      const agentRun = await api.getAgentRunForWorkflowRun(selectedRunId.value)
-      if (agentRun) {
-        runKey = agentRun.run_key
-        runIdToAgentRunKey.value = { ...runIdToAgentRunKey.value, [selectedRunId.value]: runKey }
-      }
-    }
-    const [logs, events] = await Promise.all([
-      logsPromise,
-      runKey ? api.getAgentRunEvents(runKey) : Promise.resolve([] as WorkflowRunEvent[]),
-    ])
-    runLogs.value = logs
-    runEvents.value = events
-    if (options.quiet) {
-      await refreshLoadedSubagentDetailsForRun(selectedRunId.value)
-    }
-  } catch (e: unknown) {
-    if (!options.quiet) {
-      runLogs.value = []
-      runEvents.value = []
-    }
-  } finally {
-    if (!options.quiet) logsLoading.value = false
-  }
-}
-
-async function refreshLoadedSubagentDetailsForRun(runId: string) {
-  await taskSubagentDetailState.refreshLoaded(runId)
-}
-
-// ===== Progress page: multi agent-run support =====
-
-/** Load all agent runs associated with the current progress workflow run. */
-async function loadProgressAgentRuns() {
-  const workflowRunId = progressRunId.value
-  if (!workflowRunId) {
-    progressAgentRuns.value = []
-    progressAgentRunKey.value = ''
-    return
-  }
-  progressAgentRunsLoading.value = true
-  try {
-    const runs = await api.listAgentRunsForWorkflowRun(workflowRunId)
-    progressAgentRuns.value = runs
-    progressDetailError.value = ''
-    // Default to the first agent run (oldest = main workflow agent).
-    if (!progressAgentRunKey.value || !runs.some(r => r.run_key === progressAgentRunKey.value)) {
-      progressAgentRunKey.value = runs[0]?.run_key || ''
-    }
-  } catch (e: unknown) {
-    progressAgentRuns.value = []
-    progressAgentRunKey.value = ''
-    progressDetailError.value = errorMessage(e)
-  } finally {
-    progressAgentRunsLoading.value = false
-  }
-}
-
-/** Load events for the currently selected progress agent run. */
-async function loadProgressAgentEvents(options: { quiet?: boolean } = {}) {
-  const agentRunKey = progressAgentRunKey.value
-  if (!agentRunKey) {
-    runEvents.value = []
-    return
-  }
-  if (!options.quiet) logsLoading.value = true
-  try {
-    const events = await api.getAgentRunEvents(agentRunKey)
-    runEvents.value = events
-    progressDetailError.value = ''
-    if (options.quiet) {
-      await refreshProgressSubagentDetails(agentRunKey)
-    }
-  } catch (e: unknown) {
-    progressDetailError.value = errorMessage(e)
-    if (!options.quiet) {
-      runEvents.value = []
-    }
-  } finally {
-    if (!options.quiet) logsLoading.value = false
-  }
-}
-
-async function refreshProgressSubagentDetails(agentRunKey: string) {
-  await progressSubagentDetailState.refreshLoaded(agentRunKey)
-}
-
-/** Switch to a different agent run in the progress page. */
-async function selectProgressAgentRun(agentRunKey: string) {
-  if (agentRunKey === progressAgentRunKey.value) return
-  progressAgentRunKey.value = agentRunKey
-  await loadProgressAgentEvents()
-}
-
-/** Subagent detail for the currently selected progress agent run. */
-function progressSubagentDetail(taskIdStr: string) {
-  return progressSubagentDetailState.detailFor(progressAgentRunKey.value, taskIdStr)
-}
-
-function progressSubagentDetailLoading(taskIdStr: string) {
-  return progressSubagentDetailState.isLoading(progressAgentRunKey.value, taskIdStr)
-}
-
-function progressSubagentDetailError(taskIdStr: string) {
-  return progressSubagentDetailState.errorFor(progressAgentRunKey.value, taskIdStr)
-}
-
-async function ensureProgressSubagentDetail(taskIdStr: string) {
-  await progressSubagentDetailState.ensure(progressAgentRunKey.value, taskIdStr)
-}
-
-async function loadProgressArtifacts() {
-  const runId = progressRunId.value
-  const workflowKey = progressWorkflowKey.value
-  if (!runId || !workflowKey) return
-  if (progressRunArtifacts.value[runId]) return
-  progressArtifactsLoading.value = true
-  try {
-    const result = await api.searchWorkflowArtifacts({
-      workflow_key: workflowKey,
-      run_id: runId,
-      // 编排收尾失败时，当前 run 仍可能有有效的部分产物；精确 run_id
-      // 会把查询范围限制在当前 run 内。
-      include_history: true,
-      full: false,
-      format: 'all',
-      limit: 20,
-    })
-    progressRunArtifacts.value = { ...progressRunArtifacts.value, [runId]: result.items }
-  } catch (e: unknown) {
-    artifactError.value = errorMessage(e)
-    progressRunArtifacts.value = { ...progressRunArtifacts.value, [runId]: [] }
-  } finally {
-    progressArtifactsLoading.value = false
-  }
-}
-
-async function openProgressArtifactDetail(artifact: WorkflowArtifact) {
-  try {
-    const detail = await api.getWorkflowArtifact(
-      artifact.artifact_id,
-      selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
-    )
-    openArtifactFullscreen(detail)
-  } catch (e: unknown) {
-    artifactError.value = errorMessage(e)
-  }
-}
-
-async function openProgressArtifact() {
-  await loadProgressArtifacts()
-  const artifact = progressArtifacts.value.find(item => item.format === 'markdown') || progressArtifacts.value[0]
-  if (!artifact) {
-    await alert({ title: '暂无产物', description: '本次运行没有可查看的报告产物。' })
-    return
-  }
-  await openProgressArtifactDetail(artifact)
-}
-
-async function openProgressHtmlReport() {
-  await loadProgressArtifacts()
-  const artifact = progressArtifacts.value.find(item => item.format === 'html')
-  if (!artifact) {
-    await alert({ title: '暂无 HTML 报告', description: '本次运行没有生成 HTML 报告，或报告仍在生成中。' })
-    return
-  }
-  await openProgressArtifactDetail(artifact)
-}
-
 async function openTasks(item: WorkflowDefinition) {
   selectedKey.value = item.workflow_key
   taskWorkflowKey.value = item.workflow_key
@@ -1186,132 +928,6 @@ async function prepareTasks(item: WorkflowDefinition) {
   taskWorkflowKey.value = item.workflow_key
   prepareTaskState(item)
   await loadTasks(item.workflow_key)
-}
-
-async function selectRun(runId: string) {
-  selectedRunId.value = runId
-  await loadLogs()
-}
-
-function runningRunFor(workflowKey: string) {
-  return (workflowRuns.value[workflowKey] || []).find(run => run.status === 'running') || null
-}
-
-function stopTestPolling() {
-  if (testPoll) {
-    clearInterval(testPoll)
-    testPoll = null
-  }
-}
-
-async function runWorkflow(item: WorkflowDefinition, input: Record<string, unknown> = {}) {
-  const wf = item
-  if (!wf || testing.value) return
-  testError.value = ''
-  testing.value = true
-  try {
-    const res = await api.runWorkflow(wf.workflow_key, input)
-    // The API normalizes the scheduler response to `run_status`; a run id is
-    // the stable signal that the progress page can load and poll.
-    if (res.run_id) {
-      testingRunId.value = res.run_id
-      progressWorkflowKey.value = wf.workflow_key
-      progressRunId.value = res.run_id
-      selectedKey.value = wf.workflow_key
-      selectedRunId.value = res.run_id
-      progressAgentRunKey.value = ''
-      void navigateTo(`workflow/${wf.workflow_key}/progress/${res.run_id}`)
-      await loadRuns(wf.workflow_key)
-      await loadProgressAgentRuns()
-      await loadProgressAgentEvents()
-      stopTestPolling()
-      testPoll = setInterval(pollTestRun, 1500)
-    } else {
-      testing.value = false
-    }
-  } catch (e: unknown) {
-    testing.value = false
-    testError.value = errorMessage(e)
-  }
-}
-
-async function openProgress(item: WorkflowDefinition, runId?: string) {
-  const run = runId ? (workflowRuns.value[item.workflow_key] || []).find(r => r.run_id === runId) : runningRunFor(item.workflow_key)
-  if (!run) return
-  void navigateTo(`workflow/${item.workflow_key}/progress/${run.run_id}`)
-}
-
-async function prepareProgress(item: WorkflowDefinition, runId?: string) {
-  const run = runId ? (workflowRuns.value[item.workflow_key] || []).find(r => r.run_id === runId) : runningRunFor(item.workflow_key)
-  if (!run) return
-  selectedKey.value = item.workflow_key
-  progressWorkflowKey.value = item.workflow_key
-  progressRunId.value = run.run_id
-  selectedRunId.value = run.run_id
-  progressAgentRunKey.value = ''
-  progressRunDetail.value = await api.getWorkflowRun(run.run_id)
-  await loadProgressAgentRuns()
-  await loadProgressAgentEvents()
-  if (run.status === 'running') {
-    testing.value = true
-    testingRunId.value = run.run_id
-    stopTestPolling()
-    testPoll = setInterval(pollTestRun, 1500)
-  }
-}
-
-async function refreshProgress() {
-  if (progressWorkflowKey.value) {
-    await loadRuns(progressWorkflowKey.value, { preserveSelectedRun: true })
-  }
-  await loadProgressAgentRuns()
-  await loadProgressAgentEvents()
-  if (progressRunId.value) {
-    const detail = await api.getWorkflowRun(progressRunId.value)
-    progressRunDetail.value = detail
-    mergeWorkflowRun(detail)
-    selectedRunId.value = progressRunId.value
-  }
-}
-
-async function openScriptRun(runId: string) {
-  const returnTo = currentHash()
-  try {
-    const scriptRun = await api.getScriptRun(runId)
-    void navigateTo(buildScriptRunHash(scriptRun.script_key, runId, returnTo))
-  } catch (e: unknown) {
-    testError.value = errorMessage(e)
-  }
-}
-
-function openAgentRun(runKey: string) {
-  void navigateTo(buildAgentRunHash(runKey, currentHash()))
-}
-
-async function pollTestRun() {
-  const runId = testingRunId.value
-  if (!runId) return
-  try {
-    const run = await api.getWorkflowRun(runId)
-    progressRunDetail.value = run
-    mergeWorkflowRun(run)
-    // Refresh agent runs list (to pick up html reporter when it starts) and
-    // refresh events for the currently selected agent run.
-    await loadProgressAgentRuns()
-    await loadProgressAgentEvents({ quiet: true })
-    if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) {
-      stopTestPolling()
-      testing.value = false
-      testingRunId.value = ''
-      const workflowKey = progressWorkflowKey.value || run.workflow_key
-      await loadRuns(workflowKey)
-      if (run.status === 'completed' || run.status === 'no_task') {
-        await searchArtifacts()
-      }
-    }
-  } catch {
-    // transient poll error: keep polling
-  }
 }
 
 async function deleteCurrent() {

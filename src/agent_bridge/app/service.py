@@ -1478,7 +1478,3 @@ class AgentBridgeService:
         if doc is None:
             raise NotFound("document not found")
         return doc
-
-
-
-

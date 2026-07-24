@@ -42,8 +42,7 @@ test('WorkflowView previews stale increments and gives completed tasks a force-f
 })
 
 test('progress artifact lookup keeps artifacts from the selected run', () => {
-  const view = source('src/views/workflow/WorkflowView.vue')
-  const loader = view.slice(view.indexOf('async function loadProgressArtifacts'))
+  const loader = source('src/composables/useWorkflowRunProgress.ts')
   assert.match(loader, /run_id: runId/)
   assert.match(loader, /include_history: true/)
 })

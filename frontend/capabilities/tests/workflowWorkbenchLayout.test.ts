@@ -20,6 +20,7 @@ test('workflow detail uses the real layered workbench component and all informat
 test('workflow detail implements the approved layered workbench without replacing deep-link routes', () => {
   const workflowPath = resolve(root, 'src/views/workflow/WorkflowView.vue')
   const file = readFileSync(workflowPath, 'utf-8')
+  const progress = readFileSync(resolve(root, 'src/composables/useWorkflowRunProgress.ts'), 'utf-8')
 
   assert.match(file, /import SegmentedTabs from ['"]\.\.\/\.\.\/components\/SegmentedTabs\.vue['"]/)
   assert.match(file, /import StatCard from ['"]\.\.\/\.\.\/components\/StatCard\.vue['"]/)
@@ -34,7 +35,7 @@ test('workflow detail implements the approved layered workbench without replacin
   assert.match(file, /detailTab === 'artifacts'/)
   assert.match(file, /detailTab === 'runs'/)
   assert.match(file, /routeMode === 'tasks' \|\| \(routeMode === 'detail' && detailTab === 'tasks'\)/)
-  assert.match(file, /navigateTo\(`workflow\/\$\{item\.workflow_key\}\/progress\/\$\{run\.run_id\}`\)/)
+  assert.match(progress, /navigateTo\(`workflow\/\$\{item\.workflow_key\}\/progress\/\$\{run\.run_id\}`\)/)
 })
 
 test('workflow detail header uses the shared large control size for its primary action', () => {
