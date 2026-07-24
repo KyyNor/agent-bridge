@@ -7,7 +7,29 @@ from typing import Any
 from .workflow_common import _artifact_id, _content_hash, _json_dumps, _row_payload
 
 
+def _fts_match_query(query: str | None) -> str | None:
+    """将普通关键词转换为安全的 FTS5 phrase，不暴露 MATCH 语法。"""
+    if not query or not query.strip():
+        return None
+    normalized = " ".join(query.split())
+    escaped = normalized.replace('"', '""')
+    return f'"{escaped}"'
+
+
 class WorkflowArtifactsRepositoryMixin:
+    @staticmethod
+    def _artifact_search_source(query: str | None) -> tuple[str, str]:
+        has_query = _fts_match_query(query) is not None
+        from_sql = "workflow_artifacts a"
+        if has_query:
+            from_sql += " JOIN workflow_artifacts_fts ON workflow_artifacts_fts.rowid = a.id"
+        order_by = (
+            "bm25(workflow_artifacts_fts) ASC, a.updated_at DESC, a.id DESC"
+            if has_query
+            else "a.updated_at DESC, a.id DESC"
+        )
+        return from_sql, order_by
+
     def upsert_workflow_artifact(
         self,
         *,
@@ -223,12 +245,13 @@ class WorkflowArtifactsRepositoryMixin:
             format=format,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        from_sql, order_by = self._artifact_search_source(query)
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT * FROM workflow_artifacts
+                SELECT a.* FROM {from_sql}
                 {where}
-                ORDER BY updated_at DESC, id DESC
+                ORDER BY {order_by}
                 LIMIT ?
                 """,
                 (*params, limit),
@@ -266,16 +289,17 @@ class WorkflowArtifactsRepositoryMixin:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         bounded_limit = min(max(limit, 1), 50)
         bounded_offset = max(offset, 0)
+        from_sql, order_by = self._artifact_search_source(query)
         with self._connect() as conn:
             total = conn.execute(
-                f"SELECT COUNT(*) AS total FROM workflow_artifacts {where}",
+                f"SELECT COUNT(*) AS total FROM {from_sql} {where}",
                 params,
             ).fetchone()["total"]
             rows = conn.execute(
                 f"""
-                SELECT * FROM workflow_artifacts
+                SELECT a.* FROM {from_sql}
                 {where}
-                ORDER BY updated_at DESC, id DESC
+                ORDER BY {order_by}
                 LIMIT ? OFFSET ?
                 """,
                 (*params, bounded_limit, bounded_offset),
@@ -305,42 +329,40 @@ class WorkflowArtifactsRepositoryMixin:
         clauses: list[str] = []
         params: list[Any] = []
         if not include_history:
-            clauses.append("is_current = 1")
+            clauses.append("a.is_current = 1")
         if profile_key:
-            clauses.append("profile_key = ?")
+            clauses.append("a.profile_key = ?")
             params.append(profile_key)
         if workflow_key:
-            clauses.append("workflow_key = ?")
+            clauses.append("a.workflow_key = ?")
             params.append(workflow_key)
         if task_key:
-            clauses.append("task_key = ?")
+            clauses.append("a.task_key = ?")
             params.append(task_key)
         if task_version is not None:
-            clauses.append("task_version = ?")
+            clauses.append("a.task_version = ?")
             params.append(task_version)
         if run_id:
-            clauses.append("run_id = ?")
+            clauses.append("a.run_id = ?")
             params.append(run_id)
         if path:
-            clauses.append("path LIKE ?")
+            clauses.append("a.path LIKE ?")
             params.append(f"{path}%")
         # Format filter: by default (None) only markdown is returned so that
         # derived artifacts like HTML reports never leak into agent retrieval.
         # Pass format="all" (or "") to disable the filter.
         if format and format != "all":
-            clauses.append("format = ?")
+            clauses.append("a.format = ?")
             params.append(format)
         elif format is None:
-            clauses.append("format = 'markdown'")
+            clauses.append("a.format = 'markdown'")
         for tag in tags:
             clauses.append(
-                "EXISTS (SELECT 1 FROM json_each(workflow_artifacts.tags_json) WHERE json_each.value = ?)"
+                "EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE json_each.value = ?)"
             )
             params.append(str(tag))
-        if query:
-            lowered = f"%{query.lower()}%"
-            clauses.append(
-                "(lower(title) LIKE ? OR lower(summary) LIKE ? OR lower(content) LIKE ? OR lower(path) LIKE ?)"
-            )
-            params.extend([lowered, lowered, lowered, lowered])
+        fts_query = _fts_match_query(query)
+        if fts_query is not None:
+            clauses.append("workflow_artifacts_fts MATCH ?")
+            params.append(fts_query)
         return clauses, params

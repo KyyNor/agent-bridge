@@ -964,6 +964,134 @@ def test_workflow_artifacts_keep_history_and_mark_only_latest_version_current(wm
     assert [item["task_version"] for item in history] == ["v2", "v1"]
 
 
+def test_workflow_artifact_fts5_trigram_search_and_index_sync(wm_paths):
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        status="active",
+        created_by="root",
+    )
+
+    saved = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        title="Finance page report",
+        path="reports/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="财务订单分析",
+        content="Uses finance_orders and monthly totals.",
+        metadata={},
+    )
+
+    with store.connect() as conn:
+        tokenizer = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'workflow_artifacts_fts'"
+        ).fetchone()[0]
+        assert "tokenize='trigram'" in tokenizer
+
+    english = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="finance_orders",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert [item["artifact_id"] for item in english] == [saved["artifact_id"]]
+
+    path_match = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="page-a.md",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert [item["artifact_id"] for item in path_match] == [saved["artifact_id"]]
+
+    chinese = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="财务订单",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert [item["artifact_id"] for item in chinese] == [saved["artifact_id"]]
+
+    # Trigram 的已知边界：两字中文不会作为全文 MATCH 命中，后续如需支持再引入分词器。
+    short_chinese = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="财务",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert short_chinese == []
+
+    store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="page:a",
+        title="Finance page report",
+        path="reports/page-a.md",
+        tags=["finance"],
+        format="markdown",
+        summary="updated",
+        content="Uses revised_invoice_totals.",
+        metadata={},
+    )
+    assert store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="finance_orders",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    ) == []
+    assert len(
+        store.search_workflow_artifacts(
+            profile_key="report-plane",
+            query="revised_invoice_totals",
+            tags=[],
+            path=None,
+            workflow_key=None,
+            include_history=False,
+            limit=10,
+        )
+    ) == 1
+
+    with store.connect() as conn:
+        conn.execute("DELETE FROM workflow_artifacts WHERE artifact_id = ?", (saved["artifact_id"],))
+    store.init_schema()
+    assert store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="revised_invoice_totals",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    ) == []
+
+
 def test_workflow_artifacts_keep_same_version_outputs_for_different_runs(wm_paths):
     from agent_bridge.storage.sqlite import SQLiteStore
 

@@ -5,6 +5,9 @@ from __future__ import annotations
 import sqlite3
 
 
+WORKFLOW_ARTIFACTS_FTS_VERSION = "1"
+
+
 def has_unique_index(conn: sqlite3.Connection, table: str, columns: list[str]) -> bool:
     for index in conn.execute(f"PRAGMA index_list({table})").fetchall():
         if not index["unique"]:
@@ -77,9 +80,9 @@ def rebuild_workflow_tasks_if_needed(conn: sqlite3.Connection) -> None:
 
 
 
-def rebuild_workflow_artifacts_if_needed(conn: sqlite3.Connection) -> None:
+def rebuild_workflow_artifacts_if_needed(conn: sqlite3.Connection) -> bool:
     if has_unique_index(conn, "workflow_artifacts", ["workflow_key", "task_key", "task_version", "run_id", "path"]):
-        return
+        return False
     conn.execute("DROP TABLE IF EXISTS workflow_artifacts_new")
     conn.execute(
         """
@@ -130,3 +133,90 @@ def rebuild_workflow_artifacts_if_needed(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE workflow_artifacts_new RENAME TO workflow_artifacts")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_profile ON workflow_artifacts(profile_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_path ON workflow_artifacts(path)")
+    return True
+
+
+def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bool = False) -> None:
+    """创建并维护工作流产物的 trigram FTS5 索引。
+
+    FTS5 使用 external-content 表，正文仍以 ``workflow_artifacts`` 为唯一事实来源。
+    trigger 负责增删改同步，迁移版本变化或底层产物表重建时执行一次全量 rebuild。
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_artifacts_fts_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+        """
+    )
+    fts_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workflow_artifacts_fts'"
+    ).fetchone() is not None
+    if not fts_exists:
+        try:
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE workflow_artifacts_fts USING fts5(
+                  title,
+                  summary,
+                  path,
+                  content,
+                  content='workflow_artifacts',
+                  content_rowid='id',
+                  tokenize='trigram'
+                )
+                """
+            )
+        except sqlite3.OperationalError as exc:
+            raise RuntimeError("当前 SQLite 未启用 FTS5，无法创建工作流产物全文索引") from exc
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_fts_ai
+        AFTER INSERT ON workflow_artifacts
+        BEGIN
+          INSERT INTO workflow_artifacts_fts(rowid, title, summary, path, content)
+          VALUES (new.id, new.title, new.summary, new.path, new.content);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_fts_ad
+        AFTER DELETE ON workflow_artifacts
+        BEGIN
+          INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts, rowid, title, summary, path, content)
+          VALUES ('delete', old.id, old.title, old.summary, old.path, old.content);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS workflow_artifacts_fts_au
+        AFTER UPDATE OF title, summary, path, content ON workflow_artifacts
+        BEGIN
+          INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts, rowid, title, summary, path, content)
+          VALUES ('delete', old.id, old.title, old.summary, old.path, old.content);
+          INSERT INTO workflow_artifacts_fts(rowid, title, summary, path, content)
+          VALUES (new.id, new.title, new.summary, new.path, new.content);
+        END
+        """
+    )
+
+    version = conn.execute(
+        "SELECT value FROM workflow_artifacts_fts_meta WHERE key = 'index_version'"
+    ).fetchone()
+    if force_rebuild or version is None or version[0] != WORKFLOW_ARTIFACTS_FTS_VERSION:
+        try:
+            conn.execute("INSERT INTO workflow_artifacts_fts(workflow_artifacts_fts) VALUES ('rebuild')")
+        except sqlite3.OperationalError as exc:
+            raise RuntimeError("工作流产物 FTS5 索引重建失败") from exc
+        conn.execute(
+            """
+            INSERT INTO workflow_artifacts_fts_meta(key, value)
+            VALUES ('index_version', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (WORKFLOW_ARTIFACTS_FTS_VERSION,),
+        )

@@ -7,6 +7,7 @@ from typing import Any
 
 from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEMA
 from agent_bridge.storage.migrations.workflows import (
+    ensure_workflow_artifacts_fts,
     rebuild_workflow_artifacts_if_needed,
     rebuild_workflow_tasks_if_needed,
 )
@@ -142,7 +143,8 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
         },
     )
     rebuild_workflow_tasks_if_needed(conn)
-    rebuild_workflow_artifacts_if_needed(conn)
+    artifacts_rebuilt = rebuild_workflow_artifacts_if_needed(conn)
+    ensure_workflow_artifacts_fts(conn, force_rebuild=artifacts_rebuilt)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_workflow_tasks_latest "
         "ON workflow_tasks(workflow_key, task_key, set_at DESC, id DESC)"
