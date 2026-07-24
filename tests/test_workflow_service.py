@@ -52,6 +52,34 @@ def test_workflow_service_allows_stale_task_to_be_prioritized(wm_paths):
     )
 
     assert result["task_version"] == "v1"
+    assert result["execution_mode"] == "incremental"
+
+
+def test_workflow_service_preview_resolves_stale_task_to_incremental(wm_paths):
+    svc = _service(wm_paths)
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        definition={"nodes": [], "edges": []},
+        status="active",
+    )
+    svc.store.upsert_workflow_tasks(
+        "page-report", [{"task_key": "page:a", "task_version": "v1", "payload": {}}]
+    )
+    with svc.store.transaction() as conn:
+        conn.execute(
+            "UPDATE workflow_tasks SET status = 'stale' WHERE workflow_key = ? AND task_key = ?",
+            ("page-report", "page:a"),
+        )
+
+    result = svc.workflows.preview_incremental_run(
+        actor="root", workflow_key="page-report", task_key="page:a", task_version="v1"
+    )
+
+    assert result["mode"] == "incremental"
 
 
 def test_workflow_service_rejects_missing_profile(wm_paths):

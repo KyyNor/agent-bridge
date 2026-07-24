@@ -364,8 +364,6 @@ class WorkflowScheduler:
                 )
                 if selected_task is None:
                     raise NotFound("workflow task not found")
-                if selected_task.get("status") == "stale" and execution_mode == "normal":
-                    effective_mode = "incremental"
                 self._store.set_priority_for_task(
                     workflow_key,
                     str(selected_task["task_key"]),

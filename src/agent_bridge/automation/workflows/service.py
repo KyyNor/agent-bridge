@@ -653,6 +653,13 @@ class WorkflowService:
                 return parsed_expires_at is not None and parsed_expires_at < utc_now()
         return False
 
+    @staticmethod
+    def resolve_execution_mode(*, task_status: Any, requested_mode: str) -> str:
+        """将 stale 任务的默认普通执行升级为增量执行。"""
+        if task_status == "stale" and requested_mode == "normal":
+            return "incremental"
+        return requested_mode
+
     def execute_task(
         self,
         *,
@@ -679,7 +686,9 @@ class WorkflowService:
         task = self.store.get_workflow_task(workflow_key, task_key, task_version=(task_version or None))
         if task is None:
             raise NotFound("workflow task not found")
-        effective_mode = "incremental" if task.get("status") == "stale" and execution_mode == "normal" else execution_mode
+        effective_mode = self.resolve_execution_mode(
+            task_status=task.get("status"), requested_mode=execution_mode
+        )
         if task.get("status") == "completed":
             if execution_mode != "force_full":
                 # Keep the historical validation response for callers that do
@@ -783,8 +792,9 @@ class WorkflowService:
             if task is None:
                 raise NotFound("workflow task not found")
             task_version = str(task.get("task_version") or "")
-            if task.get("status") == "stale" and execution_mode == "normal":
-                effective_mode = "incremental"
+            effective_mode = self.resolve_execution_mode(
+                task_status=task.get("status"), requested_mode=execution_mode
+            )
         return self.incremental_plan_preview_payload(
             self.build_incremental_plan(
                 actor=actor,
@@ -806,7 +816,7 @@ class WorkflowService:
         workflow: dict[str, Any] | None = None,
         definition: dict[str, Any] | WorkflowGraph | None = None,
     ) -> IncrementalPlan:
-        """Resolve the current revision, task and complete baseline runs.
+        """Resolve the current revision, task and selected baseline run.
 
         The planner itself remains storage-agnostic; this method is the single
         service boundary that supplies revision-scoped persistence data.
@@ -839,43 +849,47 @@ class WorkflowService:
             if not resolved_task:
                 raise NotFound("workflow task not found")
         resolved_version = str(resolved_task.get("task_version") or "")
-        candidates = (
-            self.store.workflows.list_completed_workflow_runs_for_task(
-                workflow_key, str(resolved_task.get("task_key") or ""), resolved_version
-            )
-            if resolved_task.get("task_key")
-            else []
-        )
-        usable_runs: list[dict[str, Any]] = []
+        planner = WorkflowIncrementalPlanner()
+        baseline_run: dict[str, Any] | None = None
         node_runs_by_id: dict[str, list[dict[str, Any]]] = {}
         artifacts_by_id: dict[str, list[dict[str, Any]]] = {}
-        current_node_ids = {node.id for node in graph.nodes}
-        for run in candidates:
-            run_id = str(run["run_id"])
+        if resolved_task.get("task_key"):
+            candidates = self.store.workflows.list_completed_workflow_runs_for_task(
+                workflow_key,
+                str(resolved_task["task_key"]),
+                resolved_version,
+                limit=1,
+            )
+            baseline_run = planner.select_baseline(
+                baseline_run=candidates,
+                workflow_key=workflow_key,
+                profile_key=str(workflow.get("profile_key") or ""),
+                task_key=str(resolved_task["task_key"]),
+                task_version=resolved_version,
+            )
+
+        if baseline_run is not None and execution_mode == "incremental":
+            run_id = str(baseline_run["run_id"])
             node_runs = self.store.list_workflow_node_runs(run_id)
-            rows_by_node = {str(row.get("node_id")): row for row in node_runs}
-            if any(
-                node_id not in rows_by_node
-                or rows_by_node[node_id].get("status") != "completed"
-                for node_id in current_node_ids
-            ):
-                continue
-            usable_runs.append(run)
             node_runs_by_id[run_id] = node_runs
+            artifact_ids = {
+                str(artifact_id)
+                for row in node_runs
+                for artifact_id in (row.get("artifact_ids") or [])
+            }
             artifacts: list[dict[str, Any]] = []
-            for row in node_runs:
-                for artifact_id in row.get("artifact_ids") or []:
-                    artifact = self.store.get_workflow_artifact(str(artifact_id))
-                    if artifact is not None:
-                        artifacts.append({**artifact, "run_id": run_id})
+            for artifact_id in artifact_ids:
+                artifact = self.store.get_workflow_artifact(artifact_id)
+                if artifact is not None:
+                    artifacts.append({**artifact, "run_id": run_id})
             artifacts_by_id[run_id] = artifacts
         runtime_fingerprint = self.validator.resolve_resource_fingerprints(actor=actor, graph=graph)
-        return WorkflowIncrementalPlanner().build(
+        return planner.build(
             workflow={**workflow, "definition": graph.model_dump(mode="json")},
             current_revision=current_revision,
             task=resolved_task,
             mode=execution_mode,
-            baseline_run=usable_runs,
+            baseline_run=baseline_run,
             baseline_node_runs=node_runs_by_id,
             baseline_artifacts=artifacts_by_id,
             runtime_fingerprint=runtime_fingerprint,
