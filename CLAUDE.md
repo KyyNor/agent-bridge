@@ -78,6 +78,14 @@ MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped �
 
 Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。claude-mem worker 是按需进程池；插件更新由独立多 job 的 `PluginUpdateScheduler` 管理。它与单 cron 的 `BaseCronScheduler` 语义不同，不要为了继承而继承。
 
+`RetrievalProbeService` 为弱模型提供 Profile 范围的多来源轻量路由探测。Wiki、
+CodeGraph、Memory 和 Artifact 分别通过 `RetrievalProbeAdapter` 注册，领域服务只
+负责分词、并发 deadline、状态聚合和审计，不按来源类型建立中心分发链。探测只返回
+资源级命中计数和建议工具，不返回正文；Wiki 不调用 `wiki_ask`，CodeGraph 不调用
+Explore。`POST /retrieval/probe` 与
+`profile hook claude-code retrieval-probe` 是独立入口，当前不得接入 `profile use`
+或修改现有 Profile 提示词。
+
 ## Coding Agent
 
 `CodingAgent` / `CodingAgentRun` 是统一契约，Claude、Codex、OpenCode、Pi 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
