@@ -8,10 +8,12 @@ from typing import Annotated, Any
 import typer
 
 from agent_bridge.capability_hub.profiles.docs import pointer_block, replace_agent_bridge_block
+from agent_bridge.cli.profile_hooks import profile_hook_app
 
 profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
 pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=True)
 profile_app.add_typer(pins_app, name="pins")
+profile_app.add_typer(profile_hook_app, name="hook")
 
 AGENT_BRIDGE_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
 
