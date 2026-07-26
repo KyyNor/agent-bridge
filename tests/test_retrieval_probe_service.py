@@ -14,6 +14,9 @@ from agent_bridge.knowledge_management.retrieval_probe.models import (
 )
 from agent_bridge.knowledge_management.retrieval_probe.registry import RetrievalProbeRegistry
 from agent_bridge.knowledge_management.retrieval_probe.service import RetrievalProbeService
+from agent_bridge.knowledge_management.retrieval_probe.tokenizer import (
+    extract_probe_keywords,
+)
 
 
 class FakeStore:
@@ -40,11 +43,14 @@ class FakeAdapter:
     source_type: str
     target_keys: tuple[str, ...] = ("target",)
     results: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    list_delay: float = 0
     delay: float = 0
     failure: Exception | None = None
     calls: list[tuple[str, str]] = field(default_factory=list)
 
     def list_targets(self, *, actor: str, profile_key: str):
+        if self.list_delay:
+            time.sleep(self.list_delay)
         return [
             ProbeTarget(
                 source_type=self.source_type,
@@ -154,6 +160,25 @@ async def test_probe_returns_partial_results_and_marks_slow_jobs_timeout() -> No
     assert response.source_statuses["wiki"] is ProbeStatus.timeout
     wiki = next(target for target in response.targets if target.target.source_type == "wiki")
     assert wiki.keyword_hits[0].status is ProbeStatus.timeout
+
+
+@pytest.mark.asyncio
+async def test_probe_applies_overall_deadline_to_target_discovery() -> None:
+    slow = FakeAdapter(source_type="wiki", list_delay=0.2)
+    service, _ = service_with(slow)
+    extract_probe_keywords("分词预热")
+    started = time.monotonic()
+
+    response = await service.probe(
+        actor="root",
+        profile_key="dev",
+        prompt="订单",
+        timeout_seconds=0.05,
+    )
+
+    assert time.monotonic() - started < 0.15
+    assert response.source_statuses["wiki"] is ProbeStatus.timeout
+    assert response.targets == ()
 
 
 @pytest.mark.asyncio

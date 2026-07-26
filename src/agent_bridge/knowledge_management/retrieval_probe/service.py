@@ -90,26 +90,18 @@ class RetrievalProbeService:
             len(keywords),
         )
         adapters = self.registry.list()
+        deadline = started + timeout_seconds
+        targets_by_source, source_boot_status = await self._discover_targets(
+            probe_id=probe_id,
+            actor=actor,
+            profile_key=profile_key,
+            adapters=adapters,
+            timeout_seconds=max(0.0, deadline - time.monotonic()),
+        )
         target_order: list[ProbeTarget] = []
         jobs: list[_ProbeJob] = []
-        source_boot_status: dict[str, ProbeStatus] = {}
         for adapter in adapters:
-            try:
-                targets = adapter.list_targets(actor=actor, profile_key=profile_key)
-            except Exception as exc:
-                logger.warning(
-                    "检索探测资源枚举失败 probe=%s profile=%s source=%s 原因=%s",
-                    probe_id,
-                    profile_key,
-                    adapter.source_type,
-                    exc,
-                    exc_info=True,
-                )
-                source_boot_status[adapter.source_type] = ProbeStatus.unavailable
-                continue
-            if not targets:
-                source_boot_status[adapter.source_type] = ProbeStatus.not_configured
-                continue
+            targets = targets_by_source.get(adapter.source_type, ())
             target_order.extend(targets)
             jobs.extend(
                 _ProbeJob(adapter=adapter, target=target, keyword=keyword)
@@ -123,7 +115,7 @@ class RetrievalProbeService:
             profile_key=profile_key,
             jobs=jobs,
             result_limit=result_limit,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=max(0.0, deadline - time.monotonic()),
         )
         summaries = self._summaries(target_order, results)
         source_statuses = self._source_statuses(
@@ -159,6 +151,68 @@ class RetrievalProbeService:
             duration_ms,
         )
         return response
+
+    async def _discover_targets(
+        self,
+        *,
+        probe_id: str,
+        actor: str,
+        profile_key: str,
+        adapters: tuple[RetrievalProbeAdapter, ...],
+        timeout_seconds: float,
+    ) -> tuple[dict[str, tuple[ProbeTarget, ...]], dict[str, ProbeStatus]]:
+        tasks = [
+            asyncio.create_task(
+                asyncio.to_thread(
+                    adapter.list_targets,
+                    actor=actor,
+                    profile_key=profile_key,
+                )
+            )
+            for adapter in adapters
+        ]
+        if not tasks:
+            return {}, {}
+
+        done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+        task_adapter = {
+            task: adapter
+            for task, adapter in zip(tasks, adapters, strict=True)
+        }
+        targets_by_source: dict[str, tuple[ProbeTarget, ...]] = {}
+        boot_status: dict[str, ProbeStatus] = {}
+        for task in done:
+            adapter = task_adapter[task]
+            try:
+                targets = tuple(task.result())
+            except Exception as exc:
+                logger.warning(
+                    "检索探测资源枚举失败 probe=%s profile=%s source=%s 原因=%s",
+                    probe_id,
+                    profile_key,
+                    adapter.source_type,
+                    exc,
+                    exc_info=True,
+                )
+                boot_status[adapter.source_type] = ProbeStatus.unavailable
+                continue
+            targets_by_source[adapter.source_type] = targets
+            if not targets:
+                boot_status[adapter.source_type] = ProbeStatus.not_configured
+
+        for task in pending:
+            adapter = task_adapter[task]
+            boot_status[adapter.source_type] = ProbeStatus.timeout
+            task.cancel()
+            logger.warning(
+                "检索探测资源枚举超时 probe=%s profile=%s source=%s",
+                probe_id,
+                profile_key,
+                adapter.source_type,
+            )
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        return targets_by_source, boot_status
 
     def _validate_request(
         self,
