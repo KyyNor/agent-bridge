@@ -116,6 +116,19 @@ class AgentBridgeClient:
             params["backend"] = backend
         return self._request("GET", "/search", params=params, timeout=30.0).json()
 
+    def probe_retrieval(
+        self,
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/retrieval/probe",
+            json=payload,
+            timeout=timeout,
+        ).json()
+
     def ask(self, kb_slug: str, question: str, backend: str | None = None, session_id: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"kb": kb_slug, "question": question}
         if backend:
