@@ -7,6 +7,7 @@ from .models import (
     ProbeTarget,
     TargetProbeSummary,
 )
+from .service import RetrievalProbeService
 from .tokenizer import extract_probe_keywords
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "ProbeStatus",
     "ProbeTarget",
     "TargetProbeSummary",
+    "RetrievalProbeService",
     "extract_probe_keywords",
 ]
