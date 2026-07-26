@@ -16,6 +16,8 @@ jieba.setLogLevel(logging.WARNING)
 _SEARCH_SEGMENT_RE = re.compile(
     r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+|[A-Za-z0-9_./:-]+"
 )
+_ASCII_PREFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+_MIN_PREFIX_LENGTH = 3
 
 
 def _segments(text: str) -> list[str]:
@@ -26,8 +28,8 @@ def _segments(text: str) -> list[str]:
 def tokenize_artifact_text(text: str) -> str:
     """将原文转成写入 FTS5 的空格分隔 token 文本。
 
-    中文使用搜索引擎模式以提高短词召回；ASCII 连续片段保持整体，避免
-    ``finance_orders``、``DietrichGebert/ponytail`` 等标识符被拆散。
+    中文使用搜索引擎模式以提高短词召回；ASCII 连续片段保留原始字符，最终
+    由 FTS5 的 ``unicode61`` tokenizer 按配置拆分，下划线仍保留在 token 内。
     """
     tokens: list[str] = []
     for segment in _segments(text):
@@ -50,14 +52,26 @@ def _query_tokens(query: str) -> list[str]:
 
 
 def build_artifact_fts_query(query: str | None) -> str | None:
-    """将普通查询转换为由多个安全 token 组成的 FTS5 AND 表达式。"""
+    """将普通查询转换为由多个安全 token 组成的 FTS5 AND 表达式。
+
+    足够长的 ASCII 标识符使用前缀匹配，便于用 ``repo`` 检索
+    ``repos/...``；短 token 和带分隔符的路径/标识符保持字面匹配，避免
+    前缀扩展造成过宽召回。
+    """
     if not query or not query.strip():
         return None
     tokens = _query_tokens(query)
     if not tokens:
         return None
-    quoted = (f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
+    quoted = (_fts_query_token(token) for token in tokens)
     return " AND ".join(quoted)
+
+
+def _fts_query_token(token: str) -> str:
+    escaped = token.replace('"', '""')
+    if len(token) >= _MIN_PREFIX_LENGTH and _ASCII_PREFIX_RE.fullmatch(token):
+        return f'"{escaped}"*'
+    return f'"{escaped}"'
 
 
 def search_content_values(*, title: str, summary: str, path: str, content: str) -> tuple[str, str, str, str]:

@@ -985,7 +985,7 @@ def test_workflow_artifact_jieba_fts5_search_and_index_sync(wm_paths):
         run_id="run_1",
         task_key="page:a",
         title="DietrichGebert/ponytail — 让 AI 编程助手化身「最懒资深工程师」的技能 / 插件",
-        path="reports/page-a.md",
+        path="repos/AlexsJones/llmfit.md",
         tags=["finance"],
         format="markdown",
         summary="财务订单分析，最懒资深工程师",
@@ -1011,9 +1011,64 @@ def test_workflow_artifact_jieba_fts5_search_and_index_sync(wm_paths):
     )
     assert [item["artifact_id"] for item in english] == [saved["artifact_id"]]
 
+    prefix_path = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="repo",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert [item["artifact_id"] for item in prefix_path] == [saved["artifact_id"]]
+
+    prefix_identifier = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="llm",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert [item["artifact_id"] for item in prefix_identifier] == [saved["artifact_id"]]
+
+    prefix_identifier_with_underscore = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="finance_order",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert [item["artifact_id"] for item in prefix_identifier_with_underscore] == [saved["artifact_id"]]
+
+    short_token = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="re",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert short_token == []
+
+    infix_token = store.search_workflow_artifacts(
+        profile_key="report-plane",
+        query="fit",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        include_history=False,
+        limit=10,
+    )
+    assert infix_token == []
+
     path_match = store.search_workflow_artifacts(
         profile_key="report-plane",
-        query="page-a.md",
+        query="repos/AlexsJones/llmfit.md",
         tags=[],
         path=None,
         workflow_key=None,
@@ -1050,7 +1105,7 @@ def test_workflow_artifact_jieba_fts5_search_and_index_sync(wm_paths):
         run_id="run_1",
         task_key="page:a",
         title="DietrichGebert/ponytail — 让 AI 编程助手化身「最懒资深工程师」的技能 / 插件",
-        path="reports/page-a.md",
+        path="repos/AlexsJones/llmfit.md",
         tags=["finance"],
         format="markdown",
         summary="updated，最懒资深工程师",
