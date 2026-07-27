@@ -68,9 +68,11 @@ uv run agent-bridge profile use safe-readonly \
 
 - 项目级 `.mcp.json`（`scope=project`）或用户级 `~/.mcp.json`；
 - Claude Code hooks 配置；
-- 项目 `CLAUDE.md` 或用户 `~/.claude/CLAUDE.md` 中由 Agent Bridge 管理的 profile 指针块。
+- 项目 `CLAUDE.md` 或用户 `~/.claude/CLAUDE.md` 中由 Agent Bridge 管理的
+  `<system-reminder>` 语义说明块。
 
-它不会把完整 profile 正文复制进 CLAUDE.md。动态 profile 与 memory 上下文由服务端维护，并在会话 hook 中刷新。
+它不会把完整 profile 正文或绝对文件路径复制进 CLAUDE.md。动态 profile 与
+memory 上下文由服务端维护，并通过 `SessionStart` Hook 注入。
 
 常用 Profile 命令：
 
@@ -80,6 +82,11 @@ uv run agent-bridge profile show safe-readonly
 uv run agent-bridge profile config --scope project
 uv run agent-bridge profile pins refresh safe-readonly
 ```
+
+`profile use` 会自动安装 Claude Code 普通 `async` 全量检索探测 Hook，帮助
+较弱模型选择 Wiki、CodeGraph、Memory 或工作流产出物。当前关键词使用确定性
+Jieba/标识符规则生成，尚未接入小模型查询改写。工作方式和独立 API 契约见
+[Claude Code 全量检索探测 Hook](docs/integrations/retrieval-probe-hook/README.md)。
 
 ## 测试与质量检查
 

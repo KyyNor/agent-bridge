@@ -84,6 +84,7 @@ def test_install_profile_to_cwd_writes_doc_and_pointer(tmp_path: Path) -> None:
     assert doc.read_text(encoding="utf-8") == "# guidance"
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert f"@{doc.resolve()}" in claude_md
+    assert "`<system-reminder>` 是补充的系统信息。" in claude_md
     assert POINTER_START in claude_md
 
 

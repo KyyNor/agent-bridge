@@ -7,13 +7,24 @@ from typing import Annotated, Any
 
 import typer
 
-from agent_bridge.capability_hub.profiles.docs import pointer_block, replace_agent_bridge_block
+from agent_bridge.capability_hub.profiles.docs import (
+    SYSTEM_REMINDER_GUIDANCE,
+    pointer_block,
+    replace_agent_bridge_block,
+)
+from agent_bridge.cli.profile_hooks import profile_hook_app
 
 profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
 pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=True)
 profile_app.add_typer(pins_app, name="pins")
+profile_app.add_typer(profile_hook_app, name="hook")
 
-AGENT_BRIDGE_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
+AGENT_BRIDGE_MEMORY_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
+AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-retrieval-probe"
+AGENT_BRIDGE_HOOK_MARKERS = (
+    AGENT_BRIDGE_MEMORY_HOOK_MARKER,
+    AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER,
+)
 
 CLAUDE_MEM_COMPATIBLE_HOOKS = {
     "Setup": [
@@ -33,9 +44,6 @@ CLAUDE_MEM_COMPATIBLE_HOOKS = {
     ],
     "Stop": [
         {"matcher": None, "actions": [("summarize", 120)]},
-    ],
-    "SessionEnd": [
-        {"matcher": None, "actions": [("session-end", 60)]},
     ],
 }
 
@@ -87,6 +95,30 @@ def _agent_bridge_hook_command(
     return " ".join(shlex.quote(part) for part in parts)
 
 
+def _agent_bridge_retrieval_hook_command(
+    *,
+    profile: str,
+    server_url: str,
+    timeout: int,
+) -> str:
+    parts = [
+        "agent-bridge",
+        "profile",
+        "hook",
+        "claude-code",
+        "retrieval-probe",
+        "--profile",
+        profile,
+        "--server-url",
+        server_url,
+        "--timeout",
+        str(timeout),
+        "--agent-bridge-hook-id",
+        "agent-bridge-retrieval-probe",
+    ]
+    return " ".join(shlex.quote(part) for part in parts)
+
+
 def _load_claude_settings(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -118,7 +150,10 @@ def _strip_agent_bridge_hooks(settings: dict[str, Any]) -> dict[str, Any]:
             kept_hooks = [
                 hook
                 for hook in hooks
-                if not (isinstance(hook, dict) and AGENT_BRIDGE_HOOK_MARKER in str(hook.get("command") or ""))
+                if not (
+                    isinstance(hook, dict)
+                    and any(marker in str(hook.get("command") or "") for marker in AGENT_BRIDGE_HOOK_MARKERS)
+                )
             ]
             if kept_hooks:
                 new_entry = dict(entry)
@@ -133,7 +168,13 @@ def _strip_agent_bridge_hooks(settings: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
-def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url: str, scope: str) -> dict[str, Any]:
+def _install_profile_hooks(
+    settings: dict[str, Any],
+    *,
+    profile: str,
+    server_url: str,
+    scope: str,
+) -> dict[str, Any]:
     copied = _strip_agent_bridge_hooks(settings)
     hooks = copied.get("hooks")
     if not isinstance(hooks, dict):
@@ -167,15 +208,45 @@ def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url:
                 entry["matcher"] = matcher
             event_entries.append(entry)
         hooks[event] = event_entries
+    prompt_entries = list(hooks.get("UserPromptSubmit") or [])
+    prompt_entries.append(
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "shell": "bash",
+                    "command": _agent_bridge_retrieval_hook_command(
+                        profile=profile,
+                        server_url=server_url,
+                        timeout=12,
+                    ),
+                    "async": True,
+                    "timeout": 15,
+                }
+            ]
+        }
+    )
+    hooks["UserPromptSubmit"] = prompt_entries
     copied["hooks"] = hooks
     return copied
 
 
-def _write_memory_hooks(scope: str, *, profile: str, server_url: str, enabled: bool) -> Path:
+def _write_profile_hooks(
+    scope: str,
+    *,
+    profile: str,
+    server_url: str,
+    enabled: bool,
+) -> Path:
     settings_path = _claude_settings_path(scope)
     settings = _load_claude_settings(settings_path)
     updated = (
-        _install_memory_hooks(settings, profile=profile, server_url=server_url, scope=scope)
+        _install_profile_hooks(
+            settings,
+            profile=profile,
+            server_url=server_url,
+            scope=scope,
+        )
         if enabled
         else _strip_agent_bridge_hooks(settings)
     )
@@ -184,24 +255,17 @@ def _write_memory_hooks(scope: str, *, profile: str, server_url: str, enabled: b
     return settings_path
 
 
-def _server_profile_doc_path(rendered_doc: dict[str, Any]) -> Path:
-    raw_path = str(rendered_doc.get("profile_doc_path") or "").strip()
-    if not raw_path:
-        raise RuntimeError("server did not return profile_doc_path")
-    profile_path = Path(raw_path).expanduser()
-    if not profile_path.is_absolute():
-        raise RuntimeError(f"server returned non-absolute profile_doc_path: {raw_path}")
-    return profile_path
-
-
-def _write_claude_profile_pointer(scope: str, *, profile_path: Path) -> Path:
+def _write_claude_profile_guidance(scope: str) -> Path:
     if scope == "project":
         claude_path = Path.cwd() / "CLAUDE.md"
     elif scope == "user":
         claude_path = Path.home() / ".claude" / "CLAUDE.md"
     else:
         raise ValueError("scope 必须是 project 或 user")
-    replace_agent_bridge_block(claude_path, pointer_block(f"@{profile_path}"))
+    replace_agent_bridge_block(
+        claude_path,
+        pointer_block(SYSTEM_REMINDER_GUIDANCE),
+    )
     return claude_path
 
 
@@ -274,7 +338,6 @@ def profile_use(
         _claude_config_path,
         _confirm_overwrite,
         _load_json_file,
-        _run_client,
         _resolve_metamcp_scope,
         _server_url_from_mcp_url,
         _with_metamcp_config,
@@ -285,20 +348,18 @@ def profile_use(
         path = _claude_config_path(resolved_scope)
         existing = _load_json_file(path)
         _confirm_overwrite(existing, yes)
-        rendered_doc = _run_client(lambda client: client.refresh_profile_doc_context_file(profile))
-        profile_path = _server_profile_doc_path(rendered_doc)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        hooks_path = _write_memory_hooks(
+        hooks_path = _write_profile_hooks(
             resolved_scope,
             profile=profile,
             server_url=_server_url_from_mcp_url(url),
             enabled=True,
         )
-        claude_path = _write_claude_profile_pointer(resolved_scope, profile_path=profile_path)
+        claude_path = _write_claude_profile_guidance(resolved_scope)
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)
         raise typer.Exit(1) from None

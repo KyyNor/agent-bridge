@@ -330,7 +330,7 @@ Cline/Hermes/Kimi/Kilo/ZCode/Pi/VSCode **没有 agents kind**或用 null。
 
 **可移植事件地板（所有支持 hook 的 agent 共享的最小集）**：
 `SessionStart` / `PreToolUse` / `PostToolUse` / `Stop` / `SessionEnd`。
-我们的 memory hooks 已经命中了其中四个（SessionStart/PostToolUse/PreToolUse/Stop/SessionEnd/UserPromptSubmit）——这是个好基础。
+我们的 memory hooks 已经命中了其中六个事件（Setup/SessionStart/UserPromptSubmit/PostToolUse/PreToolUse/Stop）——这是个好基础。
 
 ---
 
@@ -367,8 +367,8 @@ Cline/Hermes/Kimi/Kilo/ZCode/Pi/VSCode **没有 agents kind**或用 null。
 ### 现状对照
 
 我们目前对接 agent 的方式（`cli/profile.py`）：
-- **只支持 Claude Code**：写 `.claude/settings.local.json`（hooks）+ `.mcp.json` + CLAUDE.md pointer
-- **Memory hooks** 绑定 7 个 Claude 事件（Setup/SessionStart/UserPromptSubmit/PostToolUse/PreToolUse/Stop/SessionEnd）
+- **只支持 Claude Code**：写 `.claude/settings.local.json`（hooks）+ `.mcp.json` + CLAUDE.md system-reminder 说明块
+- **Memory hooks** 绑定 6 个 Claude 事件（Setup/SessionStart/UserPromptSubmit/PostToolUse/PreToolUse/Stop）
 - **核心是 MCP 网关**：agent 通过 MetaMCP 的 `search`/`execute` 两个工具访问能力，不靠 asset 投影
 
 我们的 `multi-agent-adapter-research.md` 已经规划了 **CodingAgent 执行层抽象**（怎么跑各家 SDK）。

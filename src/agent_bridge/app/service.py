@@ -248,6 +248,36 @@ class AgentBridgeService:
             validate_structure_on_run=False,
         )
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
+        from agent_bridge.knowledge_management.retrieval_probe.adapters import (
+            ArtifactProbeAdapter,
+            CodeGraphProbeAdapter,
+            MemoryProbeAdapter,
+            WikiProbeAdapter,
+        )
+        from agent_bridge.knowledge_management.retrieval_probe.registry import RetrievalProbeRegistry
+        from agent_bridge.knowledge_management.retrieval_probe.service import RetrievalProbeService
+
+        retrieval_probe_registry = RetrievalProbeRegistry()
+        retrieval_probe_registry.register(
+            WikiProbeAdapter(
+                store=store,
+                governance=self.governance,
+                search=self.search,
+            )
+        )
+        retrieval_probe_registry.register(
+            CodeGraphProbeAdapter(
+                codegraph=self.codegraph,
+                governance=self.governance,
+            )
+        )
+        retrieval_probe_registry.register(MemoryProbeAdapter(memory=self.memory))
+        retrieval_probe_registry.register(ArtifactProbeAdapter(workflows=self.workflows))
+        self.retrieval_probe = RetrievalProbeService(
+            store=store,
+            registry=retrieval_probe_registry,
+            governance=self.governance,
+        )
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(
             service=self.workflows,
@@ -288,7 +318,7 @@ class AgentBridgeService:
         service.registry = create_registry_from_db(paths, service.store)
         logger.info(
             "AgentBridgeService 装配完成 子服务=governance/capabilities/agents/codegraph/"
-            "memory/workflows/skills/scripts 后端数=%d",
+            "memory/retrieval_probe/workflows/skills/scripts 后端数=%d",
             len(service.registry.list_slugs()) if service.registry else 0,
         )
         return service

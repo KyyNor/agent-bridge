@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Any
 
 
-# --- Profile pointer integration (CLAUDE.md / AGENTS.md @-import blocks) ---
-# These mirror the `agb profile use` behavior: the rendered profile markdown
-# lives in its own file and is referenced from CLAUDE.md via an @-import
-# pointer wrapped in marker comments, so the block can be replaced idempotently.
+# --- Agent Runtime profile projection (CLAUDE.md / AGENTS.md @-import blocks) ---
+# Isolated Agent runs write rendered profile markdown into their work directory
+# and reference it from CLAUDE.md through a replaceable marker block. Interactive
+# `profile use` only reuses the marker helpers for system-reminder guidance.
 POINTER_START = "<!-- agent-bridge:profile-pointer start -->"
 POINTER_END = "<!-- agent-bridge:profile-pointer end -->"
+SYSTEM_REMINDER_GUIDANCE = "`<system-reminder>` 是补充的系统信息。"
 
 
 def stable_hash(value: Any) -> str:
@@ -24,6 +25,13 @@ def stable_hash(value: Any) -> str:
 def pointer_block(content: str) -> str:
     """Wrap profile-pointer content in the agent-bridge marker block."""
     return f"{POINTER_START}\n{content}\n{POINTER_END}"
+
+
+def profile_pointer_block(profile_path: str | Path) -> str:
+    """构造 Claude Profile 引用及 system-reminder 语义说明。"""
+    return pointer_block(
+        f"@{profile_path}\n\n{SYSTEM_REMINDER_GUIDANCE}"
+    )
 
 
 def replace_agent_bridge_block(path: Path, block: str) -> None:
@@ -61,15 +69,19 @@ def install_profile_to_cwd(cwd: Path, profile: str, markdown: str) -> Path:
 
     Writes the profile document to ``cwd/.agent-bridge/profiles/{profile}.md``
     and injects a ``@``-import pointer into ``cwd/CLAUDE.md`` so Claude Code
-    loads it as project guidance. Mirrors ``agb profile use``. Returns the
-    profile document path.
+    loads it as project guidance. This is specific to isolated Agent Runtime
+    workspaces; interactive ``profile use`` does not write this pointer.
+    Returns the profile document path.
     """
     from agent_bridge.core.slug import make_slug
 
     doc_path = cwd / ".agent-bridge" / "profiles" / f"{make_slug(profile)}.md"
     doc_path.parent.mkdir(parents=True, exist_ok=True)
     doc_path.write_text(markdown, encoding="utf-8")
-    replace_agent_bridge_block(cwd / "CLAUDE.md", pointer_block(f"@{doc_path.resolve()}"))
+    replace_agent_bridge_block(
+        cwd / "CLAUDE.md",
+        profile_pointer_block(doc_path.resolve()),
+    )
     return doc_path
 
 
@@ -86,8 +98,7 @@ def render_profile_markdown(summary: dict[str, Any], manual_notes: str) -> str:
             "",
             "## 如何使用 Agent Bridge",
             "",
-            "- 用户描述需求时，优先使用 `artifacts_search` 检索已有产出物。",
-            "- 用户询问过去做过什么、上次讨论或历史决策时，先调用 `memory_search`；需要按时间回顾时调用 `memory_timeline`，需要完整记录时再调用 `memory_get`。",
+            "- 收到 Agent Bridge 后台探测结果时，根据命中资源和建议工具继续检索；探测命中数仅用于路由，不应作为答案证据。",
             "- 仅当用户询问下方「可用代码仓库」所列仓库中的源码实现（函数 / 模块 / 调用关系）时，调用 `codegraph_explore`。",
             "- SQL、数据加工、ETL、报表口径等不在代码仓库里的逻辑，不要使用 `codegraph_explore`。",
             "- 使用 `search` 发现此 profile 可用的相关工具和资源。",
