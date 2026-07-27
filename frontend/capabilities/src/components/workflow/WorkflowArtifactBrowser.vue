@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import type { WorkflowArtifact } from '../../api/types'
 import type { ArtifactTreeRow } from '../../lib/workflowArtifactTree'
+import { artifactFormatBadgeClass, artifactFormatLabel, artifactFormatOptions } from '../../lib/workflowArtifactFormats'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import PaginationBar from '../PaginationBar.vue'
+import { CodeXml, FileText } from '@lucide/vue'
 
 defineProps<{
   query: string
   path: string
   tags: string
+  format: 'all' | 'markdown' | 'html'
   loading: boolean
   error: string
   rows: ArtifactTreeRow[]
@@ -24,6 +27,7 @@ const emit = defineEmits<{
   'update:query': [value: string]
   'update:path': [value: string]
   'update:tags': [value: string]
+  'update:format': [value: 'all' | 'markdown' | 'html']
   'update:page': [value: number]
   'update:pageSize': [value: number]
   search: []
@@ -52,6 +56,20 @@ function updateTags(value: string | number) { emit('update:tags', String(value))
         <label class="mb-1 block text-xs text-muted-foreground">tags</label>
         <Input :model-value="tags" placeholder="finance, report" @update:model-value="updateTags" @keyup.enter="emit('search')" />
       </div>
+      <div>
+        <label class="mb-1 block text-xs text-muted-foreground">格式</label>
+        <div class="flex rounded-md border bg-background p-0.5" role="group" aria-label="产物格式筛选">
+          <Button
+            v-for="option in artifactFormatOptions"
+            :key="option.value"
+            type="button"
+            size="sm"
+            :variant="format === option.value ? 'secondary' : 'ghost'"
+            class="h-7 px-2 text-xs"
+            @click="emit('update:format', option.value)"
+          >{{ option.label }}</Button>
+        </div>
+      </div>
       <Button :disabled="loading" @click="emit('search')">{{ loading ? '检索中' : '检索产物' }}</Button>
     </div>
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">{{ error }}</div>
@@ -77,7 +95,14 @@ function updateTags(value: string | number) { emit('update:tags', String(value))
             </div>
             <div class="flex flex-wrap items-center gap-1">
               <Badge v-if="row.artifact.is_current" variant="outline">current</Badge>
-              <Badge :variant="row.artifact.format === 'html' ? 'secondary' : 'secondary'" class="text-xs">{{ row.artifact.format === 'html' ? '人类阅读' : 'AI 检索' }}</Badge>
+              <Badge
+                class="text-xs"
+                :class="artifactFormatBadgeClass(row.artifact.format === 'html' ? 'html' : 'markdown')"
+              >
+                <CodeXml v-if="row.artifact.format === 'html'" />
+                <FileText v-else />
+                {{ artifactFormatLabel(row.artifact.format === 'html' ? 'html' : 'markdown') }}
+              </Badge>
               <Badge v-for="tag in row.artifact.tags || []" :key="tag" variant="outline">{{ tag }}</Badge>
               <Button v-if="row.artifact.task_key" variant="ghost" size="sm" class="h-7 text-xs" @click="emit('history', row.artifact)">历史</Button>
               <Button variant="ghost" size="sm" class="h-7 text-xs" @click="emit('open', row.artifact)">查看</Button>

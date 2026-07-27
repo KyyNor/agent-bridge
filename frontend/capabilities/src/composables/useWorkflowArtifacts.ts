@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../api/client'
 import type { WorkflowArtifact, WorkflowArtifactDetail, WorkflowArtifactHistoryVersion } from '../api/types'
 import { buildArtifactTree, flattenArtifactTree } from '../lib/workflowArtifactTree'
+import type { ArtifactFormat } from '../lib/workflowArtifactFormats'
 import { renderMarkdown } from '../lib/markdown'
 
 type ArtifactContext = {
@@ -33,6 +34,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
   const artifactQuery = ref('')
   const artifactPath = ref('')
   const artifactTags = ref('')
+  const artifactFormat = ref<ArtifactFormat>('all')
   const artifactDetail = ref<WorkflowArtifactDetail | null>(null)
   const artifactHistory = ref<WorkflowArtifactHistoryVersion[]>([])
   const artifactHistoryTarget = ref<WorkflowArtifact | null>(null)
@@ -119,7 +121,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
         query: artifactQuery.value || undefined,
         path: artifactPath.value || undefined,
         tags: artifactTags.value.split(',').map(tag => tag.trim()).filter(Boolean),
-        format: 'all',
+        format: artifactFormat.value,
         limit: artifactPageSize.value,
         offset: (artifactPage.value - 1) * artifactPageSize.value,
       })
@@ -137,6 +139,12 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
 
   function resetArtifactPage() {
     artifactPage.value = 1
+  }
+
+  async function setArtifactFormat(format: ArtifactFormat) {
+    artifactFormat.value = format
+    resetArtifactPage()
+    await searchArtifacts()
   }
 
   async function openArtifact(item: WorkflowArtifact) {
@@ -199,6 +207,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
     artifactQuery,
     artifactPath,
     artifactTags,
+    artifactFormat,
     artifactDetail,
     artifactHistory,
     artifactHistoryTarget,
@@ -219,6 +228,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
     loadRecentArtifacts,
     searchArtifacts,
     resetArtifactPage,
+    setArtifactFormat,
     openArtifact,
     openArtifactHistory,
     clearArtifacts,

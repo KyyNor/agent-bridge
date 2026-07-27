@@ -194,6 +194,7 @@ const {
   artifactQuery,
   artifactPath,
   artifactTags,
+  artifactFormat,
   artifactDetail,
   artifactHistory,
   artifactHistoryTarget,
@@ -214,6 +215,7 @@ const {
   loadRecentArtifacts,
   searchArtifacts,
   resetArtifactPage,
+  setArtifactFormat,
   openArtifact,
   openArtifactHistory,
   clearArtifacts,
@@ -1240,6 +1242,7 @@ async function confirmClearWorkflow() {
             v-model:tags="artifactTags"
             v-model:page="artifactPage"
             v-model:page-size="artifactPageSize"
+            :format="artifactFormat"
             :loading="artifactLoading"
             :error="artifactError"
             :rows="artifactRows"
@@ -1247,6 +1250,7 @@ async function confirmClearWorkflow() {
             :total="artifactTotal"
             :page-size-options="ARTIFACT_PAGE_SIZE_OPTIONS"
             @search="resetArtifactPage(); searchArtifacts()"
+            @update:format="setArtifactFormat"
             @toggle-folder="togglePath"
             @open="openArtifact"
             @history="openArtifactHistory"
