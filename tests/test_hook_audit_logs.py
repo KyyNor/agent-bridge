@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.capability_hub.models import SourceType
+from agent_bridge.hooks.claude_code import audit_claude_code_hook_call
 
 
 class FakeWorkerService:
@@ -22,6 +25,14 @@ class FakeWorkerService:
         }
 
 
+class FakeGovernance:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def log_tool_call(self, **kwargs) -> None:
+        self.calls.append(kwargs)
+
+
 def _service(wm_paths):
     service = AgentBridgeService.create(wm_paths, admins={"root"})
     service.init_system()
@@ -29,6 +40,90 @@ def _service(wm_paths):
     service.memory.create_block("root", "dev-memory", "Dev Memory", "")
     service.memory.set_profile_binding("root", "dev", "dev-memory", enabled=True)
     return service
+
+
+def _audit(*, governance: FakeGovernance, result: dict[str, object], exception: Exception | None = None) -> dict:
+    audit_claude_code_hook_call(
+        governance,
+        actor="root",
+        profile_key="dev",
+        entrypoint="memory_hook_claude_code",
+        action="session-start",
+        event_name="SessionStart",
+        matcher="startup|resume|clear|compact",
+        payload={"source": "startup"},
+        timeout_seconds=60,
+        result=result,
+        duration_ms=12,
+        exception=exception,
+    )
+    return governance.calls[0]
+
+
+def test_audit_claude_code_hook_call_records_standard_hook_envelopes() -> None:
+    captured = _audit(
+        governance=FakeGovernance(),
+        result={
+            "stdout": '{"hookSpecificOutput":{}}',
+            "stderr": "",
+            "exit_code": 0,
+            "status": "ok",
+        },
+    )
+
+    assert captured["request"] == {
+        "action": "session-start",
+        "event_name": "SessionStart",
+        "matcher": "startup|resume|clear|compact",
+        "payload": {"source": "startup"},
+        "timeout_seconds": 60,
+        "source": "claude-code",
+    }
+    assert captured["response"] == {
+        "stdout": '{"hookSpecificOutput":{}}',
+        "stderr": "",
+        "exit_code": 0,
+        "status": "ok",
+    }
+    assert captured["status"] == "success"
+
+
+@pytest.mark.parametrize(
+    ("result", "error_message", "error_type"),
+    [
+        (
+            {"stdout": "", "stderr": "command failed", "exit_code": 1, "status": "ok"},
+            "command failed",
+            "ok",
+        ),
+        (
+            {"stdout": "", "stderr": "worker is unavailable", "exit_code": 0, "status": "worker_error"},
+            "worker is unavailable",
+            "worker_error",
+        ),
+    ],
+)
+def test_audit_claude_code_hook_call_records_hook_errors(
+    result: dict[str, object], error_message: str, error_type: str
+) -> None:
+    captured = _audit(governance=FakeGovernance(), result=result)
+
+    assert captured["status"] == "error"
+    assert captured["error_message"] == error_message
+    assert captured["error_type"] == error_type
+
+
+def test_audit_claude_code_hook_call_records_dispatch_exception() -> None:
+    captured = _audit(
+        governance=FakeGovernance(),
+        result={},
+        exception=RuntimeError("worker crashed"),
+    )
+
+    assert captured["response"] == {"exception_type": "RuntimeError", "message": "worker crashed"}
+    assert captured["status"] == "error"
+    assert captured["error_message"] == "RuntimeError: worker crashed"
+    assert captured["error_type"] == "hook_exception"
 
 
 def test_memory_hook_writes_compatible_tool_call_log(wm_paths) -> None:
