@@ -7,9 +7,9 @@
 探测结果只告诉 Agent “哪些关键词在哪些资源中命中、建议继续调用哪个工具”，
 不返回正文，也不替 Agent 生成答案。
 
-该功能默认不启用，`profile use` 不会安装或修改这个 Hook。它只会在 Claude
-Profile 引用旁说明 `<system-reminder>` 是补充的系统信息。只有手工加入下方
-Claude Code 配置的项目或用户环境才会触发探测，删除对应配置即可完整停用。
+`profile use` 会在所选 project/user scope 自动安装这个 Hook，并在 Claude
+Profile 引用旁说明 `<system-reminder>` 是补充的系统信息。重复执行不会累加；
+切换 Profile 时会替换 Agent Bridge 管理的旧 Hook，用户已有 Hook 保持不变。
 
 ## 工作方式
 
@@ -32,6 +32,8 @@ UserPromptSubmit
 请求具有统一的整体 deadline，超时后仍会返回已经完成的部分结果。后端不可用、
 超时和正常无命中分别表示为 `unavailable`、`timeout` 和 `no_hit`。
 
+当前关键词由确定性 Jieba 和 ASCII 标识符规则生成，尚未接入小模型查询改写。
+
 ## 前置条件
 
 1. Agent Bridge 服务已启动。
@@ -39,7 +41,18 @@ UserPromptSubmit
 3. Claude Code 运行环境可以执行 `agent-bridge`，并访问 Agent Bridge API。
 4. Profile 已配置相应资源权限；API 不接受客户端传入资源列表绕过 Profile。
 
-## 手工配置 Claude Code
+## 自动安装与手工配置
+
+正常使用时执行：
+
+```bash
+agent-bridge profile use chengdu \
+  --scope project \
+  --url http://127.0.0.1:8765/mcp
+```
+
+Agent Bridge 会生成等价于下方内容的 Claude Code settings。下方 JSON 仅用于
+排障或需要绕过 `profile use` 的独立调试：
 
 在所需作用域的 Claude Code settings 中加入：
 
@@ -51,7 +64,7 @@ UserPromptSubmit
         "hooks": [
           {
             "type": "command",
-            "command": "agent-bridge profile hook claude-code retrieval-probe --profile chengdu --server-url http://127.0.0.1:8765 --timeout 12",
+            "command": "agent-bridge profile hook claude-code retrieval-probe --profile chengdu --server-url http://127.0.0.1:8765 --timeout 12 --agent-bridge-hook-id agent-bridge-retrieval-probe",
             "asyncRewake": true,
             "timeout": 15
           }
@@ -153,10 +166,11 @@ curl -X POST http://127.0.0.1:8765/retrieval/probe \
 - `result_limit`：1–20，默认 3。
 - `timeout_seconds`：0.1–30 秒，默认 10 秒。
 
-## 停用
+## 临时停用
 
-从 Claude Code settings 中删除上述 `UserPromptSubmit` Hook 条目即可。无需修改
-Profile、Agent Bridge 服务配置或已有的 `profile use` 配置。
+从 Claude Code settings 中删除带
+`--agent-bridge-hook-id agent-bridge-retrieval-probe` 的 `UserPromptSubmit`
+Hook entry 即可临时停用。再次执行 `profile use` 会重新安装它。
 
 ## 当前边界
 

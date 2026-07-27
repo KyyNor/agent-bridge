@@ -83,8 +83,10 @@ CodeGraph、Memory 和 Artifact 分别通过 `RetrievalProbeAdapter` 注册，�
 负责分词、并发 deadline、状态聚合和审计，不按来源类型建立中心分发链。探测只返回
 资源级命中计数和建议工具，不返回正文；Wiki 不调用 `wiki_ask`，CodeGraph 不调用
 Explore。`POST /retrieval/probe` 与
-`profile hook claude-code retrieval-probe` 是独立入口，当前不得由 `profile use`
-自动安装；Profile 引用块只补充 `<system-reminder>` 是系统补充信息的语义说明。
+`profile hook claude-code retrieval-probe` 是独立入口；`profile use` 会自动、
+幂等安装该 Hook，并保留用户已有 Hook。Profile 引用块补充
+`<system-reminder>` 是系统补充信息的语义说明。当前关键词仍使用确定性
+Jieba/标识符规则，尚未接入小模型查询改写。
 
 ## Coding Agent
 

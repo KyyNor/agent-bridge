@@ -81,9 +81,9 @@ uv run agent-bridge profile config --scope project
 uv run agent-bridge profile pins refresh safe-readonly
 ```
 
-需要帮助较弱模型选择 Wiki、CodeGraph、Memory 或工作流产出物时，可以手工配置
-Claude Code `asyncRewake` 全量检索探测 Hook。它不会由 `profile use` 自动安装，
-也不会改变现有 Profile 行为。配置方式和独立 API 契约见
+`profile use` 会自动安装 Claude Code `asyncRewake` 全量检索探测 Hook，帮助
+较弱模型选择 Wiki、CodeGraph、Memory 或工作流产出物。当前关键词使用确定性
+Jieba/标识符规则生成，尚未接入小模型查询改写。工作方式和独立 API 契约见
 [Claude Code 全量检索探测 Hook](docs/integrations/retrieval-probe-hook/README.md)。
 
 ## 测试与质量检查

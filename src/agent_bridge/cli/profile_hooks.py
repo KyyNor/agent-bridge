@@ -54,7 +54,12 @@ def retrieval_probe_hook(
         int,
         typer.Option("--timeout", min=1, max=30, help="探测超时秒数"),
     ] = 12,
+    hook_id: Annotated[
+        str,
+        typer.Option("--agent-bridge-hook-id", hidden=True),
+    ] = "",
 ) -> None:
+    del hook_id
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}

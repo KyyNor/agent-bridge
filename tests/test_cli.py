@@ -322,6 +322,101 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     assert hooks["SessionEnd"][0]["hooks"][0]["timeout"] == 60
     session_end_argv = shlex.split(hooks["SessionEnd"][0]["hooks"][0]["command"])
     assert session_end_argv[4] == "session-end"
+    probe_entries = [
+        entry
+        for entry in hooks["UserPromptSubmit"]
+        if any(
+            "profile hook claude-code retrieval-probe" in str(hook.get("command") or "")
+            for hook in entry.get("hooks", [])
+            if isinstance(hook, dict)
+        )
+    ]
+    assert len(probe_entries) == 1
+    probe_hook = probe_entries[0]["hooks"][0]
+    assert probe_hook["asyncRewake"] is True
+    assert probe_hook["timeout"] == 15
+    probe_argv = shlex.split(probe_hook["command"])
+    assert probe_argv[probe_argv.index("--profile") + 1] == "safe-readonly"
+    assert probe_argv[probe_argv.index("--server-url") + 1] == "http://127.0.0.1:8765"
+    assert probe_argv[probe_argv.index("--timeout") + 1] == "12"
+    assert probe_argv[probe_argv.index("--agent-bridge-hook-id") + 1] == "agent-bridge-retrieval-probe"
+
+
+def test_profile_use_replaces_retrieval_probe_hook(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    settings_path = tmp_path / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True)
+    user_hook = {"type": "command", "command": "echo user-prompt-hook"}
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {"hooks": [user_hook]},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeClient:
+        def refresh_profile_doc_context_file(self, profile_key):
+            return _server_profile_doc(profile_key)
+
+    monkeypatch.setattr(
+        "agent_bridge.cli.app.AgentBridgeClient.from_config",
+        lambda: FakeClient(),
+    )
+
+    first = runner.invoke(
+        app,
+        [
+            "profile",
+            "use",
+            "first-profile",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+            "--yes",
+        ],
+    )
+    second = runner.invoke(
+        app,
+        [
+            "profile",
+            "use",
+            "second-profile",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+            "--yes",
+        ],
+    )
+
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    entries = settings["hooks"]["UserPromptSubmit"]
+    assert sum(entry.get("hooks") == [user_hook] for entry in entries) == 1
+    probe_hooks = [
+        hook
+        for entry in entries
+        for hook in entry.get("hooks", [])
+        if "profile hook claude-code retrieval-probe" in str(hook.get("command") or "")
+    ]
+    assert len(probe_hooks) == 1
+    probe_argv = shlex.split(probe_hooks[0]["command"])
+    assert probe_argv[probe_argv.index("--profile") + 1] == "second-profile"
+    memory_hooks = [
+        hook
+        for entry in entries
+        for hook in entry.get("hooks", [])
+        if "memory hook claude-code session-init" in str(hook.get("command") or "")
+    ]
+    assert len(memory_hooks) == 1
 
 
 def test_profile_use_adds_absolute_profile_pointer_to_claude_md(monkeypatch, tmp_path: Path) -> None:

@@ -50,9 +50,11 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
 
     assert "# Agent Bridge Profile：Safe Profile" in rendered["markdown"]
     markdown = rendered["markdown"]
-    assert markdown.index("artifacts_search") < markdown.index("memory_search")
-    assert "用户描述需求时，优先使用 `artifacts_search` 检索已有产出物" in markdown
-    assert "用户询问过去做过什么、上次讨论或历史决策" in markdown
+    assert "优先使用 `artifacts_search`" not in markdown
+    assert "先调用 `memory_search`" not in markdown
+    assert "后台探测结果" in markdown
+    assert "命中资源" in markdown
+    assert "不应作为答案证据" in markdown
     assert "仅当用户询问下方「可用代码仓库」所列仓库中的源码实现" in markdown
     assert "SQL、数据加工、ETL、报表口径等不在代码仓库里的逻辑，不要使用 `codegraph_explore`" in markdown
     assert "证据要求" not in markdown

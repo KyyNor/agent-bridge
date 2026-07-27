@@ -18,7 +18,12 @@ pins_app = typer.Typer(help="管理 Profile 自动 Pin 缓存", no_args_is_help=
 profile_app.add_typer(pins_app, name="pins")
 profile_app.add_typer(profile_hook_app, name="hook")
 
-AGENT_BRIDGE_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
+AGENT_BRIDGE_MEMORY_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
+AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-retrieval-probe"
+AGENT_BRIDGE_HOOK_MARKERS = (
+    AGENT_BRIDGE_MEMORY_HOOK_MARKER,
+    AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER,
+)
 
 CLAUDE_MEM_COMPATIBLE_HOOKS = {
     "Setup": [
@@ -92,6 +97,30 @@ def _agent_bridge_hook_command(
     return " ".join(shlex.quote(part) for part in parts)
 
 
+def _agent_bridge_retrieval_hook_command(
+    *,
+    profile: str,
+    server_url: str,
+    timeout: int,
+) -> str:
+    parts = [
+        "agent-bridge",
+        "profile",
+        "hook",
+        "claude-code",
+        "retrieval-probe",
+        "--profile",
+        profile,
+        "--server-url",
+        server_url,
+        "--timeout",
+        str(timeout),
+        "--agent-bridge-hook-id",
+        "agent-bridge-retrieval-probe",
+    ]
+    return " ".join(shlex.quote(part) for part in parts)
+
+
 def _load_claude_settings(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -123,7 +152,10 @@ def _strip_agent_bridge_hooks(settings: dict[str, Any]) -> dict[str, Any]:
             kept_hooks = [
                 hook
                 for hook in hooks
-                if not (isinstance(hook, dict) and AGENT_BRIDGE_HOOK_MARKER in str(hook.get("command") or ""))
+                if not (
+                    isinstance(hook, dict)
+                    and any(marker in str(hook.get("command") or "") for marker in AGENT_BRIDGE_HOOK_MARKERS)
+                )
             ]
             if kept_hooks:
                 new_entry = dict(entry)
@@ -138,7 +170,13 @@ def _strip_agent_bridge_hooks(settings: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
-def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url: str, scope: str) -> dict[str, Any]:
+def _install_profile_hooks(
+    settings: dict[str, Any],
+    *,
+    profile: str,
+    server_url: str,
+    scope: str,
+) -> dict[str, Any]:
     copied = _strip_agent_bridge_hooks(settings)
     hooks = copied.get("hooks")
     if not isinstance(hooks, dict):
@@ -172,15 +210,45 @@ def _install_memory_hooks(settings: dict[str, Any], *, profile: str, server_url:
                 entry["matcher"] = matcher
             event_entries.append(entry)
         hooks[event] = event_entries
+    prompt_entries = list(hooks.get("UserPromptSubmit") or [])
+    prompt_entries.append(
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "shell": "bash",
+                    "command": _agent_bridge_retrieval_hook_command(
+                        profile=profile,
+                        server_url=server_url,
+                        timeout=12,
+                    ),
+                    "asyncRewake": True,
+                    "timeout": 15,
+                }
+            ]
+        }
+    )
+    hooks["UserPromptSubmit"] = prompt_entries
     copied["hooks"] = hooks
     return copied
 
 
-def _write_memory_hooks(scope: str, *, profile: str, server_url: str, enabled: bool) -> Path:
+def _write_profile_hooks(
+    scope: str,
+    *,
+    profile: str,
+    server_url: str,
+    enabled: bool,
+) -> Path:
     settings_path = _claude_settings_path(scope)
     settings = _load_claude_settings(settings_path)
     updated = (
-        _install_memory_hooks(settings, profile=profile, server_url=server_url, scope=scope)
+        _install_profile_hooks(
+            settings,
+            profile=profile,
+            server_url=server_url,
+            scope=scope,
+        )
         if enabled
         else _strip_agent_bridge_hooks(settings)
     )
@@ -297,7 +365,7 @@ def profile_use(
             json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        hooks_path = _write_memory_hooks(
+        hooks_path = _write_profile_hooks(
             resolved_scope,
             profile=profile,
             server_url=_server_url_from_mcp_url(url),

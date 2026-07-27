@@ -100,6 +100,8 @@ def test_probe_hook_posts_user_prompt_and_rewakes_on_hit(monkeypatch) -> None:
             "http://bridge.example",
             "--timeout",
             "12",
+            "--agent-bridge-hook-id",
+            "agent-bridge-retrieval-probe",
         ],
         input=json.dumps(
             {

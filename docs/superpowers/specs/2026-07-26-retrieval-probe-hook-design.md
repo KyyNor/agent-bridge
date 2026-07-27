@@ -273,7 +273,7 @@ Hook 请求探测 API 后：
           {
             "type": "command",
             "shell": "bash",
-            "command": "agent-bridge profile hook claude-code retrieval-probe --profile chengdu --server-url http://127.0.0.1:8765 --timeout 12",
+            "command": "agent-bridge profile hook claude-code retrieval-probe --profile chengdu --server-url http://127.0.0.1:8765 --timeout 12 --agent-bridge-hook-id agent-bridge-retrieval-probe",
             "asyncRewake": true,
             "timeout": 12
           }
