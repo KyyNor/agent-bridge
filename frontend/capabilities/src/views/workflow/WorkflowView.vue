@@ -254,6 +254,9 @@ const {
   progressAgentRuns,
   progressAgentRunKey,
   progressAgentRunsLoading,
+  progressAgentRunDetail,
+  progressAgentRunDetailLoading,
+  progressAgentRunDetailError,
   progressDetailError,
   progressRunDetail,
   runIdToAgentRunKey,
@@ -276,6 +279,7 @@ const {
   loadProgressAgentRuns,
   loadProgressAgentEvents,
   selectProgressAgentRun,
+  setProgressAgentRunKey,
   progressSubagentDetail,
   progressSubagentDetailLoading,
   progressSubagentDetailError,
@@ -455,7 +459,7 @@ const {
     setProgressWorkflowKey: (value: string) => { progressWorkflowKey.value = value },
     setProgressRunId: (value: string) => { progressRunId.value = value },
     setSelectedRunId: (value: string) => { selectedRunId.value = value },
-    setProgressAgentRunKey: (value: string) => { progressAgentRunKey.value = value },
+    setProgressAgentRunKey,
     setProgressDetailError: (value: string) => { progressDetailError.value = value },
   },
   navigateToTaskProgress: (workflowKey, runId) => {
@@ -1473,6 +1477,9 @@ async function confirmClearWorkflow() {
               :event-count="runEvents.length"
               :events-loading="logsLoading"
               :agent-runs-loading="progressAgentRunsLoading"
+              :agent-run-detail="progressAgentRunDetail"
+              :agent-run-detail-loading="progressAgentRunDetailLoading"
+              :agent-run-detail-error="progressAgentRunDetailError"
               :detail-error="batchRunDetailError || progressDetailError"
               :sticky="false"
               @select-agent-run="selectProgressAgentRun"
@@ -1777,6 +1784,9 @@ async function confirmClearWorkflow() {
               :event-count="runEvents.length"
               :events-loading="logsLoading"
               :agent-runs-loading="runsLoading || progressAgentRunsLoading"
+              :agent-run-detail="progressAgentRunDetail"
+              :agent-run-detail-loading="progressAgentRunDetailLoading"
+              :agent-run-detail-error="progressAgentRunDetailError"
               :detail-error="progressDetailError"
               :sticky="false"
               :workflow-run-id="selectedRunId"

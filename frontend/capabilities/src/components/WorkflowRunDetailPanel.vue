@@ -85,6 +85,7 @@ function expandSubagent(taskId: string) {
 
     <AgentRunExecutionPanel
       :run="props.agentRunDetail || null"
+      :expected-run-key="props.selectedAgentRunKey"
       :loading="props.agentRunDetailLoading"
       :error="props.agentRunDetailError"
     />

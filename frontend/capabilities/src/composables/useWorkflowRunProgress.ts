@@ -88,6 +88,9 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
   const progressAgentRuns = ref<AgentRun[]>([])
   const progressAgentRunKey = ref('')
   const progressAgentRunsLoading = ref(false)
+  const progressAgentRunDetail = ref<AgentRun | null>(null)
+  const progressAgentRunDetailLoading = ref(false)
+  const progressAgentRunDetailError = ref('')
   const progressDetailError = ref('')
   const progressRunDetail = ref<WorkflowRun | null>(null)
   /** Maps a workflow_run_id to its agent_runs.run_key, so subagent-detail (which is
@@ -99,6 +102,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
   const runPage = ref(1)
   const runPageSize = ref(10)
   let testPoll: ReturnType<typeof setInterval> | null = null
+  let progressAgentRunDetailRequest = 0
 
   const progressSubagentDetailState = useSubagentDetails(
     (runKey, taskIdStr) => api.getAgentRunSubagentDetail(runKey, taskIdStr),
@@ -248,28 +252,67 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
 
   // ===== Progress page: multi agent-run support =====
 
-  async function loadProgressAgentRuns() {
+  function clearProgressAgentRunDetail() {
+    progressAgentRunDetailRequest += 1
+    progressAgentRunDetail.value = null
+    progressAgentRunDetailLoading.value = false
+    progressAgentRunDetailError.value = ''
+  }
+
+  function setProgressAgentRunKey(value: string) {
+    progressAgentRunKey.value = value
+    progressAgentRunDetailError.value = ''
+    if (!value) clearProgressAgentRunDetail()
+  }
+
+  async function loadProgressAgentRunDetail(options: { quiet?: boolean } = {}) {
+    const requestId = ++progressAgentRunDetailRequest
+    const agentRunKey = progressAgentRunKey.value
+    if (!agentRunKey) {
+      progressAgentRunDetail.value = null
+      progressAgentRunDetailLoading.value = false
+      progressAgentRunDetailError.value = ''
+      return
+    }
+    if (!options.quiet) progressAgentRunDetailLoading.value = true
+    try {
+      const detail = await api.getAgentRun(agentRunKey)
+      if (requestId !== progressAgentRunDetailRequest || agentRunKey !== progressAgentRunKey.value) return
+      progressAgentRunDetail.value = detail
+      progressAgentRunDetailError.value = ''
+    } catch (error: unknown) {
+      if (requestId !== progressAgentRunDetailRequest || agentRunKey !== progressAgentRunKey.value) return
+      progressAgentRunDetailError.value = errorMessage(error)
+    } finally {
+      if (requestId === progressAgentRunDetailRequest && agentRunKey === progressAgentRunKey.value) {
+        progressAgentRunDetailLoading.value = false
+      }
+    }
+  }
+
+  async function loadProgressAgentRuns(options: { quiet?: boolean } = {}) {
     const workflowRunId = progressRunId.value
     if (!workflowRunId) {
       progressAgentRuns.value = []
-      progressAgentRunKey.value = ''
+      setProgressAgentRunKey('')
       return
     }
-    progressAgentRunsLoading.value = true
+    if (!options.quiet) progressAgentRunsLoading.value = true
     try {
       const runs = await api.listAgentRunsForWorkflowRun(workflowRunId)
       progressAgentRuns.value = runs
       progressDetailError.value = ''
       // Default to the first agent run (oldest = main workflow agent).
       if (!progressAgentRunKey.value || !runs.some(r => r.run_key === progressAgentRunKey.value)) {
-        progressAgentRunKey.value = runs[0]?.run_key || ''
+        setProgressAgentRunKey(runs[0]?.run_key || '')
       }
+      await loadProgressAgentRunDetail(options)
     } catch (e: unknown) {
       progressAgentRuns.value = []
-      progressAgentRunKey.value = ''
+      setProgressAgentRunKey('')
       progressDetailError.value = errorMessage(e)
     } finally {
-      progressAgentRunsLoading.value = false
+      if (!options.quiet) progressAgentRunsLoading.value = false
     }
   }
 
@@ -303,8 +346,8 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
 
   async function selectProgressAgentRun(agentRunKey: string) {
     if (agentRunKey === progressAgentRunKey.value) return
-    progressAgentRunKey.value = agentRunKey
-    await loadProgressAgentEvents()
+    setProgressAgentRunKey(agentRunKey)
+    await Promise.all([loadProgressAgentEvents(), loadProgressAgentRunDetail()])
   }
 
   function progressSubagentDetail(taskIdStr: string) {
@@ -397,7 +440,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
       mergeWorkflowRun(run)
       // Refresh agent runs list (to pick up html reporter when it starts) and
       // refresh events for the currently selected agent run.
-      await loadProgressAgentRuns()
+      await loadProgressAgentRuns({ quiet: true })
       await loadProgressAgentEvents({ quiet: true })
       if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) {
         stopTestPolling()
@@ -436,7 +479,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
         progressRunId.value = res.run_id
         setSelectedKey(wf.workflow_key)
         selectedRunId.value = res.run_id
-        progressAgentRunKey.value = ''
+        setProgressAgentRunKey('')
         void navigateTo(`workflow/${wf.workflow_key}/progress/${res.run_id}`)
         await loadRuns(wf.workflow_key)
         await loadProgressAgentRuns()
@@ -465,7 +508,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     progressWorkflowKey.value = item.workflow_key
     progressRunId.value = run.run_id
     selectedRunId.value = run.run_id
-    progressAgentRunKey.value = ''
+    setProgressAgentRunKey('')
     progressRunDetail.value = await api.getWorkflowRun(run.run_id)
     await loadProgressAgentRuns()
     await loadProgressAgentEvents()
@@ -510,7 +553,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     progressWorkflowKey.value = workflow.workflow_key
     progressRunId.value = runId
     selectedRunId.value = runId
-    progressAgentRunKey.value = ''
+    setProgressAgentRunKey('')
     await loadRuns(workflow.workflow_key, { preserveSelectedRun: true })
     if (runId) {
       const detail = await api.getWorkflowRun(runId)
@@ -542,6 +585,9 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     progressAgentRuns,
     progressAgentRunKey,
     progressAgentRunsLoading,
+    progressAgentRunDetail,
+    progressAgentRunDetailLoading,
+    progressAgentRunDetailError,
     progressDetailError,
     progressRunDetail,
     runIdToAgentRunKey,
@@ -565,7 +611,9 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     selectRun,
     loadProgressAgentRuns,
     loadProgressAgentEvents,
+    loadProgressAgentRunDetail,
     selectProgressAgentRun,
+    setProgressAgentRunKey,
     progressSubagentDetail,
     progressSubagentDetailLoading,
     progressSubagentDetailError,
