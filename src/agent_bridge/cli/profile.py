@@ -7,7 +7,10 @@ from typing import Annotated, Any
 
 import typer
 
-from agent_bridge.capability_hub.profiles.docs import pointer_block, replace_agent_bridge_block
+from agent_bridge.capability_hub.profiles.docs import (
+    profile_pointer_block,
+    replace_agent_bridge_block,
+)
 from agent_bridge.cli.profile_hooks import profile_hook_app
 
 profile_app = typer.Typer(help="管理能力平面", no_args_is_help=True)
@@ -203,7 +206,7 @@ def _write_claude_profile_pointer(scope: str, *, profile_path: Path) -> Path:
         claude_path = Path.home() / ".claude" / "CLAUDE.md"
     else:
         raise ValueError("scope 必须是 project 或 user")
-    replace_agent_bridge_block(claude_path, pointer_block(f"@{profile_path}"))
+    replace_agent_bridge_block(claude_path, profile_pointer_block(profile_path))
     return claude_path
 
 

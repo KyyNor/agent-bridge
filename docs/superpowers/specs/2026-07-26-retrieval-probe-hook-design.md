@@ -21,9 +21,10 @@ Agent Bridge 当前向 Agent 暴露文档知识库、CodeGraph、记忆和工作
 
 本期不包含：
 
-- 不修改 `profile use`，不自动安装或删除 Hook。
+- `profile use` 不自动安装或删除 Hook，只在 Claude Profile 引用旁增加
+  `<system-reminder>` 语义说明。
 - 不修改 `.claude/settings.json` 或 `.claude/settings.local.json`。
-- 不改变现有 MCP 工具暴露和 Profile 提示词。
+- 不改变现有 MCP 工具暴露；Profile 指引只增加 system-reminder 语义说明。
 - 不调用 `wiki_ask` 或 CodeGraph Explore。
 - 不返回正文、片段或候选标题。
 - 不增加前端页面、数据库表或持久化配置。
@@ -282,7 +283,11 @@ Hook 请求探测 API 后：
 }
 ```
 
-`asyncRewake` 在后台命令以 exit code 2 结束时唤醒 Claude，并把 stderr 作为 system reminder 交付。本期接受该通道带有 Hook error 语义的限制。
+`asyncRewake` 在后台命令以 exit code 2 结束时唤醒 Claude，并把 stderr 作为
+system reminder 交付。本期接受该通道带有 Hook error 语义的限制。对于经
+LiteLLM 转发到未知 Chat Template 的内网模型，兼容 callback 保持顶层 system
+不变，并将 messages 中的 system reminder 原位置改为 user；不合并相邻消息，
+不改写 `<system-reminder>` 标签。
 
 ## 9. Hook 提醒格式
 
@@ -367,7 +372,8 @@ delivery_id: probe_01J...
 
 ### 回归
 
-- `profile use` 的 Hook 配置快照保持不变。
+- `profile use` 的 Hook 配置快照保持不变，Claude Profile 引用块增加
+  system-reminder 语义说明。
 - 现有 MCP 工具列表保持不变。
 
 ## 12. 文档与交付

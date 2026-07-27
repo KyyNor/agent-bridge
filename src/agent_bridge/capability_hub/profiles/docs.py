@@ -14,6 +14,7 @@ from typing import Any
 # pointer wrapped in marker comments, so the block can be replaced idempotently.
 POINTER_START = "<!-- agent-bridge:profile-pointer start -->"
 POINTER_END = "<!-- agent-bridge:profile-pointer end -->"
+SYSTEM_REMINDER_GUIDANCE = "`<system-reminder>` 是补充的系统信息。"
 
 
 def stable_hash(value: Any) -> str:
@@ -24,6 +25,13 @@ def stable_hash(value: Any) -> str:
 def pointer_block(content: str) -> str:
     """Wrap profile-pointer content in the agent-bridge marker block."""
     return f"{POINTER_START}\n{content}\n{POINTER_END}"
+
+
+def profile_pointer_block(profile_path: str | Path) -> str:
+    """构造 Claude Profile 引用及 system-reminder 语义说明。"""
+    return pointer_block(
+        f"@{profile_path}\n\n{SYSTEM_REMINDER_GUIDANCE}"
+    )
 
 
 def replace_agent_bridge_block(path: Path, block: str) -> None:
@@ -69,7 +77,10 @@ def install_profile_to_cwd(cwd: Path, profile: str, markdown: str) -> Path:
     doc_path = cwd / ".agent-bridge" / "profiles" / f"{make_slug(profile)}.md"
     doc_path.parent.mkdir(parents=True, exist_ok=True)
     doc_path.write_text(markdown, encoding="utf-8")
-    replace_agent_bridge_block(cwd / "CLAUDE.md", pointer_block(f"@{doc_path.resolve()}"))
+    replace_agent_bridge_block(
+        cwd / "CLAUDE.md",
+        profile_pointer_block(doc_path.resolve()),
+    )
     return doc_path
 
 

@@ -7,7 +7,8 @@
 探测结果只告诉 Agent “哪些关键词在哪些资源中命中、建议继续调用哪个工具”，
 不返回正文，也不替 Agent 生成答案。
 
-该功能默认不启用，`profile use` 不会安装或修改这个 Hook。只有手工加入下方
+该功能默认不启用，`profile use` 不会安装或修改这个 Hook。它只会在 Claude
+Profile 引用旁说明 `<system-reminder>` 是补充的系统信息。只有手工加入下方
 Claude Code 配置的项目或用户环境才会触发探测，删除对应配置即可完整停用。
 
 ## 工作方式
@@ -75,6 +76,11 @@ API 暂时不可用时均以状态码 0 结束，不主动唤醒 Agent。
 `asyncRewake` 会让 Hook 在后台运行；状态码 2 会把 stderr 作为 system reminder
 交付给 Claude Code。当前 Agent 可以先读文件或调用其他工具，探测完成后再在后续
 轮次消费这条路由信息。
+
+若 Claude Code 通过 LiteLLM 的 Anthropic → OpenAI Chat 适配链访问只接受
+user/assistant 的后端，应启用相邻目录
+`claude-mem-litellm-vllm/custom_callbacks.py`：它会把中途 system reminder
+原位置转换成 user，同时保留 `<system-reminder>` 标签。
 
 提醒包含唯一 `delivery_id`，并明确要求 Agent：
 

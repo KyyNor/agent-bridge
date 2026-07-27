@@ -10,9 +10,9 @@
 
 ## Global Constraints
 
-- 不修改 `profile use`，不自动安装或删除 Hook。
+- `profile use` 不自动安装或删除 Hook，只增加 system-reminder 语义说明。
 - 不修改 `.claude/settings.json` 或 `.claude/settings.local.json`。
-- 不改变现有 MCP 工具暴露和 Profile 提示词。
+- 不改变现有 MCP 工具暴露；Profile 指引只增加 system-reminder 语义说明。
 - 不调用 `wiki_ask` 或 CodeGraph Explore。
 - 不返回正文、片段或候选标题。
 - 不增加前端页面、数据库表、持久化配置或 LLM 查询改写。
@@ -50,7 +50,8 @@
 - `src/agent_bridge/app/service.py`：装配 registry、adapter 和 `RetrievalProbeService`，不承载探测逻辑。
 - `src/agent_bridge/api/app.py`：注册 retrieval probe router，并同步动态 admin 集合。
 - `src/agent_bridge/client.py`：增加 `probe_retrieval()`。
-- `src/agent_bridge/cli/profile.py`：挂载独立的 `profile hook` 子应用，不修改 `profile use` 安装逻辑。
+- `src/agent_bridge/cli/profile.py`：挂载独立的 `profile hook` 子应用；不自动安装
+  retrieval Hook，但在 Profile 引用块加入 system-reminder 语义说明。
 - `README.md`：增加独立 API/手工 Hook 文档入口。
 - `CLAUDE.md`：记录新领域服务和“未接入 profile use”的兼容边界。
 

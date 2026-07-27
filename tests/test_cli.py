@@ -342,6 +342,7 @@ def test_profile_use_adds_absolute_profile_pointer_to_claude_md(monkeypatch, tmp
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert result.exit_code == 0
     assert "@/server/profiles/safe-readonly.md" in claude_md
+    assert "`<system-reminder>` 是补充的系统信息。" in claude_md
     assert "agent-bridge:profile-pointer" in claude_md
 
 
