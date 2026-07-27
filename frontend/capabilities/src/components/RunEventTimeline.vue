@@ -400,17 +400,6 @@ function closePayload() {
 .tl-payload-button{border:1px solid var(--border);border-radius:var(--radius-compact);padding:2px 7px;color:var(--primary);background:var(--card);font-size:10px;cursor:pointer}
 .tl-payload-button:hover{background:var(--accent)}
 .tl-payload-error{padding:4px 9px;color:var(--destructive);font-size:11px}
-.payload-markdown{max-height:min(68vh,720px);overflow:auto;line-height:1.65;color:var(--foreground)}
-.payload-markdown h1,.payload-markdown h2,.payload-markdown h3,.payload-markdown h4{font-weight:600;line-height:1.3;margin:14px 0 6px}
-.payload-markdown h1{font-size:1.35em}.payload-markdown h2{font-size:1.2em}.payload-markdown h3{font-size:1.08em}.payload-markdown h4{font-size:1em}
-.payload-markdown>:first-child{margin-top:0}.payload-markdown>:last-child{margin-bottom:0}
-.payload-markdown p{margin:0 0 8px}.payload-markdown ul,.payload-markdown ol{margin:4px 0 8px;padding-left:22px}
-.payload-markdown blockquote{margin:8px 0;padding:4px 12px;border-left:3px solid var(--border);color:var(--muted-foreground)}
-.payload-markdown pre{overflow:auto;margin:8px 0;padding:10px 12px;background:var(--muted);border-radius:var(--radius-control);font-family:var(--font-mono);font-size:12px}
-.payload-markdown code{font-family:var(--font-mono);font-size:.9em;background:var(--muted);padding:1px 5px;border-radius:var(--radius-compact)}
-.payload-markdown pre code{background:transparent;padding:0}
-.payload-markdown table{width:100%;border-collapse:collapse;margin:8px 0}.payload-markdown th,.payload-markdown td{border:1px solid var(--border);padding:5px 8px;text-align:left}.payload-markdown th{background:var(--muted)}
-
 /* ===== Subagent thread card ===== */
 .tl-sub{position:relative;min-width:0;max-width:100%;background:var(--subagent-surface);border:1px solid var(--subagent-border);border-radius:var(--radius-card);overflow:hidden;transition:border-color .12s ease}
 .tl-sub-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;cursor:pointer;width:100%;text-align:left;background:transparent;border:none}

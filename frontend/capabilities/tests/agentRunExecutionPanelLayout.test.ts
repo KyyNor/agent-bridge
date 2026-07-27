@@ -49,3 +49,10 @@ test('expanded task logs cache and display their main Agent detail', () => {
   assert.match(tasks, /taskAgentRun,/)
   assert.match(workflow, /<AgentRunExecutionPanel :run="taskAgentRun\(task\)" :loading="isTaskLogLoading\(task\)" \/>/)
 })
+
+test('README documents that workflow reuses the agent input and result detail view', () => {
+  const readme = readFileSync(resolve(root, '../../README.md'), 'utf8')
+
+  assert.match(readme, /输入提示词和执行结果/)
+  assert.match(readme, /工作流/)
+})

@@ -25,6 +25,8 @@ test('payload detail dialog shares Markdown and syntax-highlighted rendering', a
   assert.match(source, /import \{ Dialog, DialogContent, DialogHeader, DialogTitle \} from '\.\/ui\/dialog'/)
   assert.match(source, /v-html="renderMarkdown\(content\)"/)
   assert.match(source, /<PayloadCodeViewer/)
+  assert.match(source, /\.payload-markdown\{/)
+  assert.doesNotMatch(await readFile(timelinePath, 'utf8'), /\.payload-markdown\{/)
 })
 
 test('payload code viewer provides readonly syntax-highlighted editors', async () => {
