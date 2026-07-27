@@ -14,8 +14,11 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import LogMarkdownPreview from '../../components/LogMarkdownPreview.vue'
 import { countToolCallTabs } from '../../lib/filterTabs'
+import { extractLogMarkdownPreview } from '../../lib/logMarkdownPreview'
 import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
+import { toolCallDisplayName } from '../../lib/toolCallDisplay'
 
 const logs = ref<ToolCallLog[]>([])
 const logTotal = ref(0)
@@ -30,6 +33,7 @@ const pageSize = ref(100)
 const showDetail = ref(false)
 const detailLog = ref<ToolCallLog | null>(null)
 const detailLoading = ref(false)
+const previewOpen = ref(false)
 let listRequestToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
@@ -121,6 +125,7 @@ watch([page, pageSize], () => {
 async function openDetail(log: ToolCallLog) {
   detailLog.value = log
   showDetail.value = true
+  previewOpen.value = false
   detailLoading.value = true
   try {
     detailLog.value = await api.getLog(log.log_id)
@@ -131,6 +136,7 @@ async function openDetail(log: ToolCallLog) {
 const displayLogs = computed(() => logs.value)
 const filterTabs = computed(() => countToolCallTabs(logCounts.value))
 const pagedLogs = computed(() => displayLogs.value)
+const detailMarkdownPreview = computed(() => detailLog.value ? extractLogMarkdownPreview(detailLog.value) : null)
 
 const sourceOptions = [
   { value: '__all__', label: '全部来源' },
@@ -227,7 +233,7 @@ function entrypointLabel(entrypoint: string): string {
                 </div>
               </td>
               <td class="px-4 py-3 text-sm">{{ l.profile_key || '—' }}</td>
-              <td class="px-4 py-3 font-mono text-sm">{{ l.tool_name || '—' }}</td>
+              <td :title="l.tool_name || ''" class="px-4 py-3 font-mono text-sm">{{ toolCallDisplayName(l) }}</td>
               <td class="px-4 py-3 text-sm font-mono tabular-nums text-muted-foreground" :class="durationClass(l.duration_ms)">{{ l.duration_ms != null ? `${l.duration_ms}ms` : '—' }}</td>
               <td class="px-4 py-3">
                 <StatusBadge :status="statusOf(l.status)" />
@@ -261,7 +267,7 @@ function entrypointLabel(entrypoint: string): string {
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div><span class="text-muted-foreground">调用者</span><div class="font-medium">{{ detailLog.actor }}</div></div>
             <div><span class="text-muted-foreground">入口</span><div class="font-medium">{{ entrypointLabel(detailLog.entrypoint) }}</div></div>
-            <div><span class="text-muted-foreground">工具</span><div class="font-mono font-medium">{{ detailLog.tool_name || '—' }}</div></div>
+            <div><span class="text-muted-foreground">工具</span><div :title="detailLog.tool_name || ''" class="font-mono font-medium">{{ toolCallDisplayName(detailLog) }}</div></div>
             <div><span class="text-muted-foreground">耗时</span><div class="font-medium tabular-nums">{{ detailLog.duration_ms != null ? `${detailLog.duration_ms}ms` : '—' }}</div></div>
             <div><span class="text-muted-foreground">Profile</span><div class="font-medium">{{ detailLog.profile_key || '—' }}</div></div>
             <div>
@@ -295,11 +301,21 @@ function entrypointLabel(entrypoint: string): string {
           </div>
 
           <div v-if="detailLog.response_json">
-            <div class="mb-1 text-xs font-medium text-muted-foreground">响应</div>
+            <div class="mb-1 flex items-center justify-between gap-3 text-xs font-medium text-muted-foreground">
+              <span>响应</span>
+              <Button v-if="detailMarkdownPreview" variant="outline" size="sm" class="h-7 text-xs" @click="previewOpen = true">预览</Button>
+            </div>
             <JsonViewer :value="detailLog.response_json" max-height="260px" />
           </div>
         </div>
       </DialogContent>
     </Dialog>
+
+    <LogMarkdownPreview
+      v-if="detailMarkdownPreview"
+      v-model:open="previewOpen"
+      :title="detailMarkdownPreview.title"
+      :markdown="detailMarkdownPreview.markdown"
+    />
   </div>
 </template>
