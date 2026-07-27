@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 新增一个按 Profile 对 Wiki、CodeGraph、Memory、Artifact 执行多关键词全量轻量探测的 API，以及一个通过 Claude Code `asyncRewake` 交付命中路由的手工 Hook 命令。
+**Goal:** 新增一个按 Profile 对 Wiki、CodeGraph、Memory、Artifact 执行多关键词
+全量轻量探测的 API，以及一个由 `profile use` 安装、通过 Claude Code
+`asyncRewake` 交付命中路由的 Hook。
 
 **Architecture:** 新增独立 `retrieval_probe` 领域包，通过 `RetrievalProbeAdapter` Protocol 和 registry 注册四类来源；`RetrievalProbeService` 负责分词、并发、deadline、聚合和审计。FastAPI 只做请求校验与领域服务调用，CLI Hook 只做 Claude Code stdin、HTTP API、路由提醒和退出码之间的转换。
 
@@ -10,9 +12,9 @@
 
 ## Global Constraints
 
-- `profile use` 不自动安装或删除 Hook，只增加 system-reminder 语义说明。
-- 不修改 `.claude/settings.json` 或 `.claude/settings.local.json`。
-- 不改变现有 MCP 工具暴露；Profile 指引只增加 system-reminder 语义说明。
+- `profile use` 自动、幂等安装 retrieval-probe Hook，并保留用户已有 Hook。
+- 不改变现有 MCP 工具暴露；Profile 指引删除固定“优先/先调用”路由，改为消费
+  后台探测结果。
 - 不调用 `wiki_ask` 或 CodeGraph Explore。
 - 不返回正文、片段或候选标题。
 - 不增加前端页面、数据库表、持久化配置或 LLM 查询改写。
@@ -43,16 +45,17 @@
 - `tests/test_retrieval_probe_service.py`：并发、deadline、聚合和来源状态。
 - `tests/test_retrieval_probe_api.py`：API 契约。
 - `tests/test_retrieval_probe_hook.py`：CLI stdin、提醒、安全清理和退出码。
-- `docs/integrations/retrieval-probe-hook/README.md`：API 和手工 Hook 配置说明。
+- `docs/integrations/retrieval-probe-hook/README.md`：API、自动安装和手工 Hook
+  配置说明。
 
 ### 修改
 
 - `src/agent_bridge/app/service.py`：装配 registry、adapter 和 `RetrievalProbeService`，不承载探测逻辑。
 - `src/agent_bridge/api/app.py`：注册 retrieval probe router，并同步动态 admin 集合。
 - `src/agent_bridge/client.py`：增加 `probe_retrieval()`。
-- `src/agent_bridge/cli/profile.py`：挂载独立的 `profile hook` 子应用；不自动安装
-  retrieval Hook，但在 Profile 引用块加入 system-reminder 语义说明。
-- `README.md`：增加独立 API/手工 Hook 文档入口。
+- `src/agent_bridge/cli/profile.py`：挂载独立的 `profile hook` 子应用，并在 Task 7
+  接入 `profile use`。
+- `README.md`：增加独立 API/Hook 文档入口。
 - `CLAUDE.md`：记录新领域服务和“未接入 profile use”的兼容边界。
 
 ---
@@ -708,14 +711,16 @@ raise typer.Exit(2)
 
 捕获 JSON、HTTP 和 RuntimeError 后静默 exit 0；使用 logger 写 warning，不向 stdout 输出 fallback JSON。
 
-- [ ] **Step 4: 挂载子应用但不修改 profile use**
+- [ ] **Step 4: 挂载独立子应用**
 
-仅在 `src/agent_bridge/cli/profile.py` 导入并挂载 `profile_hook_app`。不得修改：
+先在 `src/agent_bridge/cli/profile.py` 导入并挂载 `profile_hook_app`。本任务不修改：
 
 - `CLAUDE_MEM_COMPATIBLE_HOOKS`
 - `_install_memory_hooks()`
 - `_write_memory_hooks()`
 - `profile use` 的配置写入逻辑
+
+自动安装由 Task 7 在 Hook 命令稳定后接入。
 
 - [ ] **Step 5: 运行 Hook 与 profile use 回归测试**
 
@@ -784,15 +789,16 @@ git commit -m "feat(cli): add manual retrieval probe hook"
 
 并明确：
 
-- 该 Hook 当前不会被 `profile use` 自动安装。
-- 删除这一条手工 Hook 配置即可停用。
+- `profile use` 会在 Task 7 自动安装该 Hook，手工配置仍可用于独立调试。
+- 删除 Agent Bridge 管理的 Hook entry 可以停用。
 - 有命中时使用 exit 2 主动唤醒；无命中或服务不可用时静默。
 - 只做路由探测，不返回正文，不调用 Wiki Agent 或 CodeGraph Explore。
 - `asyncRewake` 使用 Claude Code 的后台失败反馈通道，界面可能显示 Hook error 语义。
 
 - [ ] **Step 2: 更新 README 与 CLAUDE**
 
-README 的主要能力或使用区增加文档链接。CLAUDE 的知识与记忆架构段增加 `RetrievalProbeService` 边界，注明 Profile 安装流程暂不启用该 Hook。
+README 的主要能力或使用区增加文档链接。CLAUDE 的知识与记忆架构段增加
+`RetrievalProbeService` 边界；Task 7 再同步自动安装行为。
 
 - [ ] **Step 3: 运行目标测试**
 
@@ -877,3 +883,186 @@ git status --short --branch
 ```
 
 Expected: 分支只包含设计、计划、实现、测试和文档提交，工作区干净。
+
+---
+
+### Task 7: 将 retrieval-probe Hook 接入 Profile
+
+**Files:**
+
+- Modify: `src/agent_bridge/cli/profile.py`
+- Modify: `src/agent_bridge/cli/profile_hooks.py`
+- Modify: `src/agent_bridge/capability_hub/profiles/docs.py`
+- Modify: `tests/test_cli.py`
+- Modify: `tests/test_profile_docs.py`
+- Modify: `docs/integrations/retrieval-probe-hook/README.md`
+- Modify: `README.md`
+- Modify: `CLAUDE.md`
+
+**Interfaces:**
+
+- Produces: `_agent_bridge_retrieval_hook_command(profile, server_url, timeout)`
+  生成可由 Agent Bridge 唯一识别的 Hook 命令。
+- `profile use` 在当前 scope 的 Claude settings 中安装一条
+  `UserPromptSubmit + asyncRewake` retrieval-probe Hook。
+- 重复执行或切换 Profile 时先删除旧的 Agent Bridge retrieval-probe entry，
+  再写入新 entry；不删除用户 Hook和 memory Hook。
+- Profile Markdown 删除固定数据源先后顺序，增加后台探测结果消费说明。
+
+- [ ] **Step 1: 写 Hook 安装失败测试**
+
+在 `tests/test_cli.py` 扩展 `test_profile_use_installs_claude_mem_compatible_hooks`：
+
+```python
+probe_entries = [
+    entry
+    for entry in hooks["UserPromptSubmit"]
+    if any(
+        "profile hook claude-code retrieval-probe" in hook.get("command", "")
+        for hook in entry.get("hooks", [])
+    )
+]
+assert len(probe_entries) == 1
+probe_hook = probe_entries[0]["hooks"][0]
+assert probe_hook["asyncRewake"] is True
+assert probe_hook["timeout"] == 15
+probe_argv = shlex.split(probe_hook["command"])
+assert probe_argv[probe_argv.index("--profile") + 1] == "safe-readonly"
+assert probe_argv[probe_argv.index("--server-url") + 1] == "http://127.0.0.1:8765"
+```
+
+新增测试连续执行两次 `profile use`，第二次使用另一个 Profile，断言只剩一条
+Agent Bridge retrieval-probe Hook、命令中的 Profile 已更新、用户 Hook仍存在。
+
+- [ ] **Step 2: 运行 Hook 安装测试确认失败**
+
+Run:
+
+```bash
+uv run pytest -q \
+  tests/test_cli.py::test_profile_use_installs_claude_mem_compatible_hooks \
+  tests/test_cli.py::test_profile_use_replaces_retrieval_probe_hook
+```
+
+Expected: FAIL，当前 `profile use` 没有安装 retrieval-probe Hook。
+
+- [ ] **Step 3: 实现幂等 Hook 安装**
+
+在 `profile_hooks.py` 为 `retrieval-probe` 命令增加隐藏参数：
+
+```python
+hook_id: Annotated[
+    str,
+    typer.Option("--agent-bridge-hook-id", hidden=True),
+] = "",
+```
+
+在 `profile.py`：
+
+```python
+RETRIEVAL_PROBE_HOOK_MARKER = (
+    "--agent-bridge-hook-id agent-bridge-retrieval-probe"
+)
+```
+
+清理逻辑同时识别 memory 与 retrieval marker。安装时在独立
+`UserPromptSubmit` entry 写入：
+
+```python
+{
+    "hooks": [
+        {
+            "type": "command",
+            "shell": "bash",
+            "command": command,
+            "asyncRewake": True,
+            "timeout": 15,
+        }
+    ]
+}
+```
+
+命令参数固定 `--timeout 12`，Hook 进程 timeout 使用 15 秒，为 HTTP 客户端
+收尾保留 3 秒。
+
+- [ ] **Step 4: 运行 Hook 回归测试**
+
+Run:
+
+```bash
+uv run pytest -q tests/test_cli.py tests/test_retrieval_probe_hook.py
+```
+
+Expected: PASS。
+
+- [ ] **Step 5: 写 Profile 提示词失败测试**
+
+在 `tests/test_profile_docs.py` 断言：
+
+```python
+assert "优先使用 `artifacts_search`" not in markdown
+assert "先调用 `memory_search`" not in markdown
+assert "后台探测结果" in markdown
+assert "命中资源" in markdown
+assert "不应作为答案证据" in markdown
+```
+
+- [ ] **Step 6: 运行提示词测试确认失败**
+
+Run:
+
+```bash
+uv run pytest -q \
+  tests/test_profile_docs.py::test_render_profile_markdown_includes_usage_resources_and_manual_notes
+```
+
+Expected: FAIL，现有 Profile Markdown 仍包含固定优先顺序。
+
+- [ ] **Step 7: 修改 Profile Markdown**
+
+删除 `render_profile_markdown()` 中的 artifacts-first 与 memory-first 两行，增加：
+
+```text
+- 收到 Agent Bridge 后台探测结果时，根据命中资源和建议工具继续检索；探测命中数仅用于路由，不应作为答案证据。
+```
+
+保留 CodeGraph 适用边界、`search`、`execute`、`wiki_ask` 和 pin 工具说明。
+
+- [ ] **Step 8: 更新用户文档并运行相关测试**
+
+README 和集成说明改为 `profile use` 自动安装 Hook，并说明当前仍使用确定性 Jieba
+分词、尚未接入小模型查询改写。
+
+Run:
+
+```bash
+uv run pytest -q \
+  tests/test_cli.py \
+  tests/test_profile_docs.py \
+  tests/test_retrieval_probe_hook.py \
+  tests/test_agent_service.py
+uv run ruff check \
+  src/agent_bridge/cli/profile.py \
+  src/agent_bridge/cli/profile_hooks.py \
+  src/agent_bridge/capability_hub/profiles/docs.py \
+  tests/test_cli.py \
+  tests/test_profile_docs.py
+git diff --check
+```
+
+Expected: PASS。
+
+- [ ] **Step 9: 提交**
+
+```bash
+git add \
+  src/agent_bridge/cli/profile.py \
+  src/agent_bridge/cli/profile_hooks.py \
+  src/agent_bridge/capability_hub/profiles/docs.py \
+  tests/test_cli.py \
+  tests/test_profile_docs.py \
+  docs/integrations/retrieval-probe-hook/README.md \
+  README.md \
+  CLAUDE.md
+git commit -m "feat(profile): install retrieval probe hook"
+```

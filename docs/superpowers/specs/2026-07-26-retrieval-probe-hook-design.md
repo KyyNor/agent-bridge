@@ -16,21 +16,22 @@ Agent Bridge 当前向 Agent 暴露文档知识库、CodeGraph、记忆和工作
 - Wiki、CodeGraph、Memory、Artifact 四类探测 adapter 和 registry。
 - 用户问题的确定性分词。
 - 独立 HTTP API。
-- 可手工配置的 Claude Code `UserPromptSubmit + asyncRewake` Hook 命令。
+- 由 `profile use` 自动安装的 Claude Code
+  `UserPromptSubmit + asyncRewake` Hook。
 - 相关单元测试、API 测试、CLI Hook 测试和使用说明。
 
 本期不包含：
 
-- `profile use` 不自动安装或删除 Hook，只在 Claude Profile 引用旁增加
-  `<system-reminder>` 语义说明。
-- 不修改 `.claude/settings.json` 或 `.claude/settings.local.json`。
+- 不增加独立的 Hook 开关或前端配置；启停随 `profile use` 管理。
 - 不改变现有 MCP 工具暴露；Profile 指引只增加 system-reminder 语义说明。
 - 不调用 `wiki_ask` 或 CodeGraph Explore。
 - 不返回正文、片段或候选标题。
 - 不增加前端页面、数据库表或持久化配置。
 - 不增加 LLM 查询改写、统一重排或学习路由。
 
-只有手工配置新 Hook 的项目才会启用该能力，现有行为保持不变。
+执行 `profile use` 后，Agent Bridge 会在对应 project/user scope 的 Claude settings
+中幂等安装 retrieval-probe Hook；重复执行不会累加，切换 Profile 会替换旧命令，
+用户自己的 Hook 保持不变。
 
 ## 3. 总体架构
 
@@ -261,7 +262,7 @@ Hook 请求探测 API 后：
 
 服务不可用的具体错误由服务端或 CLI 日志记录，不能把失败伪装成“所有来源无命中”。
 
-手工配置示例：
+`profile use` 生成的配置示例：
 
 ```json
 {
@@ -288,6 +289,24 @@ system reminder 交付。本期接受该通道带有 Hook error 语义的限制�
 LiteLLM 转发到未知 Chat Template 的内网模型，兼容 callback 保持顶层 system
 不变，并将 messages 中的 system reminder 原位置改为 user；不合并相邻消息，
 不改写 `<system-reminder>` 标签。
+
+`profile use` 写入单独的 `UserPromptSubmit` Hook entry：
+
+```json
+{
+  "hooks": [
+    {
+      "type": "command",
+      "command": "agent-bridge profile hook claude-code retrieval-probe --profile chengdu --server-url http://127.0.0.1:8765 --timeout 12 --agent-bridge-hook-id agent-bridge-retrieval-probe",
+      "asyncRewake": true,
+      "timeout": 15
+    }
+  ]
+}
+```
+
+Agent Bridge 使用独立 hook id 清理自己安装的旧 entry，不删除 claude-mem Hook
+或用户 Hook。
 
 ## 9. Hook 提醒格式
 
@@ -372,16 +391,29 @@ delivery_id: probe_01J...
 
 ### 回归
 
-- `profile use` 的 Hook 配置快照保持不变，Claude Profile 引用块增加
-  system-reminder 语义说明。
+- `profile use` 重复执行只保留一条 retrieval-probe Hook，切换 Profile 后命令
+  指向新 Profile。
+- 用户已有 Hook 和 claude-mem Hook 保持不变。
+- Claude Profile 引用块保留 system-reminder 语义说明。
 - 现有 MCP 工具列表保持不变。
+
+### Profile 提示词
+
+后台探测开始承担数据源路由后，删除以下固定先后顺序：
+
+- “用户描述需求时，优先使用 `artifacts_search`”。
+- “用户询问过去做过什么时，先调用 `memory_search`”。
+
+保留每类工具的适用范围、CodeGraph/非代码边界和可用资源列表。新增一条中性说明：
+收到 Agent Bridge 后台探测结果时，根据命中资源及建议工具继续检索，不把探测数量
+当作答案证据。
 
 ## 12. 文档与交付
 
 同步更新 README 或独立集成说明，说明：
 
 - API 请求与响应。
-- 手工 Claude Code Hook 配置。
+- `profile use` 自动安装的 Claude Code Hook 配置。
 - `asyncRewake` 的 exit code 2 语义。
 - 当前只做路由探测、不返回内容的边界。
-- 如何删除手工配置以停用功能。
+- 如何通过重新生成或删除 Agent Bridge 管理的 Hook 停用功能。
