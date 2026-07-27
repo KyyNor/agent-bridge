@@ -8,7 +8,7 @@
 不返回正文，也不替 Agent 生成答案。
 
 `profile use` 会在所选 project/user scope 自动安装这个 Hook，并在 Claude
-Profile 引用旁说明 `<system-reminder>` 是补充的系统信息。重复执行不会累加；
+托管说明块中声明 `<system-reminder>` 是补充的系统信息。重复执行不会累加；
 切换 Profile 时会替换 Agent Bridge 管理的旧 Hook，用户已有 Hook 保持不变。
 
 ## 工作方式

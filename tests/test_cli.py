@@ -14,10 +14,6 @@ from agent_bridge.cli.app import app
 runner = CliRunner()
 
 
-def _server_profile_doc(profile_key: str) -> dict[str, str]:
-    return {"profile_doc_path": f"/server/profiles/{profile_key}.md", "markdown": f"# {profile_key}\n"}
-
-
 def test_wiki_cli_commands_are_not_registered() -> None:
     result = runner.invoke(app, ["wiki"])
     assert result.exit_code == 2
@@ -204,11 +200,6 @@ def test_profile_rules_calls_client(monkeypatch) -> None:
 def test_profile_use_writes_project_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         [
@@ -236,11 +227,6 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         [
@@ -261,16 +247,14 @@ def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> 
     assert "agent-capability-hub" not in data["mcpServers"]
 
 
-def test_profile_use_writes_stable_channel_without_profile_files(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_writes_system_reminder_guidance_without_profile_pointer(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "home"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         ["profile", "use", "safe", "--scope", "project", "--url", "http://127.0.0.1:8765/mcp"],
@@ -281,21 +265,15 @@ def test_profile_use_writes_stable_channel_without_profile_files(monkeypatch, tm
     assert "agent-bridge" in data["mcpServers"]
     assert "agent-capability-hub" not in data["mcpServers"]
     assert not (tmp_path / ".agent-bridge" / "profiles" / "safe.md").exists()
-    assert "@/server/profiles/safe.md" in (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "@/server/profiles/" not in claude_md
+    assert "`<system-reminder>` 是补充的系统信息。" in claude_md
     assert not (tmp_path / "AGENTS.md").exists()
 
 
 def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-        def get_profile_memory(self, profile_key):
-            return {"profile_key": profile_key, "block_key": "dev-memory", "enabled": 1}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         ["profile", "use", "safe-readonly", "--scope", "project", "--url", "http://127.0.0.1:8765/mcp", "--yes"],
@@ -359,15 +337,6 @@ def test_profile_use_replaces_retrieval_probe_hook(monkeypatch, tmp_path: Path) 
         encoding="utf-8",
     )
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr(
-        "agent_bridge.cli.app.AgentBridgeClient.from_config",
-        lambda: FakeClient(),
-    )
-
     first = runner.invoke(
         app,
         [
@@ -420,14 +389,14 @@ def test_profile_use_replaces_retrieval_probe_hook(monkeypatch, tmp_path: Path) 
     assert len(memory_hooks) == 1
 
 
-def test_profile_use_adds_absolute_profile_pointer_to_claude_md(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_does_not_refresh_profile_doc(monkeypatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     class FakeClient:
         def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
+            raise AssertionError("profile use must not refresh profile docs")
 
     monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
@@ -437,7 +406,7 @@ def test_profile_use_adds_absolute_profile_pointer_to_claude_md(monkeypatch, tmp
 
     claude_md = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     assert result.exit_code == 0
-    assert "@/server/profiles/safe-readonly.md" in claude_md
+    assert "@/server/profiles/" not in claude_md
     assert "`<system-reminder>` 是补充的系统信息。" in claude_md
     assert "agent-bridge:profile-pointer" in claude_md
 
@@ -451,14 +420,6 @@ def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-        def get_profile_memory(self, profile_key):
-            return {"profile_key": profile_key, "block_key": None, "enabled": 1}
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         ["profile", "use", "safe-readonly", "--scope", "project", "--url", "http://127.0.0.1:8765/mcp", "--yes"],
@@ -499,11 +460,6 @@ def test_profile_use_removes_managed_session_end_hook_and_preserves_user_hook(
         encoding="utf-8",
     )
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(
         app,
         ["profile", "use", "safe-readonly", "--scope", "project", "--yes"],
@@ -514,55 +470,22 @@ def test_profile_use_removes_managed_session_end_hook_and_preserves_user_hook(
     assert settings["hooks"]["SessionEnd"] == [{"hooks": [user_hook]}]
 
 
-def test_profile_use_gets_profile_doc_path_from_server(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project"])
-
-    assert result.exit_code == 0
-    assert (tmp_path / ".mcp.json").exists()
-
-
-def test_profile_use_gets_profile_doc_path_when_preserving_config(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    config = tmp_path / ".mcp.json"
-    original = {"mcpServers": {"existing": {"command": "node"}}}
-    config.write_text(json.dumps(original), encoding="utf-8")
-
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
-    result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project", "--yes"])
-
-    assert result.exit_code == 0
-    data = json.loads(config.read_text(encoding="utf-8"))
-    assert "existing" in data["mcpServers"]
-    assert "agent-bridge" in data["mcpServers"]
-
-
-def test_profile_use_writes_user_scope_channel_without_profile_files(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_writes_user_scope_guidance_without_profile_pointer(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "home"
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["profile", "use", "safe", "--scope", "user"])
 
     assert result.exit_code == 0
     data = json.loads((home / ".mcp.json").read_text(encoding="utf-8"))
     assert "agent-bridge" in data["mcpServers"]
     assert not (home / ".agent-bridge" / "profiles" / "safe.md").exists()
-    assert "@/server/profiles/safe.md" in (home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+    claude_md = (home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "@/server/profiles/" not in claude_md
+    assert "`<system-reminder>` 是补充的系统信息。" in claude_md
     assert not (home / ".codex" / "AGENTS.md").exists()
 
 
@@ -581,11 +504,6 @@ def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, 
         encoding="utf-8",
     )
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["profile", "use", "safe", "--scope", "project", "--yes"])
 
     data = json.loads(config.read_text(encoding="utf-8"))
@@ -595,7 +513,10 @@ def test_profile_use_migrates_legacy_server_and_preserves_existing(monkeypatch, 
     assert "agent-capability-hub" not in data["mcpServers"]
 
 
-def test_profile_use_replaces_claude_pointer_and_preserves_agents_file(monkeypatch, tmp_path: Path) -> None:
+def test_profile_use_replaces_old_pointer_with_guidance_and_preserves_other_files(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "home"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
@@ -610,18 +531,15 @@ def test_profile_use_replaces_claude_pointer_and_preserves_agents_file(monkeypat
         encoding="utf-8",
     )
 
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
     result = runner.invoke(app, ["profile", "use", "new-profile", "--scope", "project", "--yes"])
 
     assert result.exit_code == 0
     claude = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
     agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert "keep me" in claude
-    assert "@/server/profiles/new-profile.md" in claude
+    assert "@/old/profile.md" not in claude
+    assert "@/server/profiles/" not in claude
+    assert "`<system-reminder>` 是补充的系统信息。" in claude
     assert "keep agents" in agents
     assert "old pointer" in agents
     assert not (tmp_path / ".agent-bridge" / "profiles" / "new-profile.md").exists()
@@ -632,12 +550,6 @@ def test_profile_use_prompts_for_scope_when_missing(monkeypatch, tmp_path: Path)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
     monkeypatch.setattr("agent_bridge.cli.app._stdin_is_interactive", lambda: True)
     monkeypatch.setattr("questionary.select", lambda *args, **kwargs: type("Prompt", (), {"ask": lambda self: "project"})())
-
-    class FakeClient:
-        def refresh_profile_doc_context_file(self, profile_key):
-            return _server_profile_doc(profile_key)
-
-    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
 
     result = runner.invoke(
         app,

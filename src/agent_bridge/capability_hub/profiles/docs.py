@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 
 
-# --- Profile pointer integration (CLAUDE.md / AGENTS.md @-import blocks) ---
-# These mirror the `agb profile use` behavior: the rendered profile markdown
-# lives in its own file and is referenced from CLAUDE.md via an @-import
-# pointer wrapped in marker comments, so the block can be replaced idempotently.
+# --- Agent Runtime profile projection (CLAUDE.md / AGENTS.md @-import blocks) ---
+# Isolated Agent runs write rendered profile markdown into their work directory
+# and reference it from CLAUDE.md through a replaceable marker block. Interactive
+# `profile use` only reuses the marker helpers for system-reminder guidance.
 POINTER_START = "<!-- agent-bridge:profile-pointer start -->"
 POINTER_END = "<!-- agent-bridge:profile-pointer end -->"
 SYSTEM_REMINDER_GUIDANCE = "`<system-reminder>` 是补充的系统信息。"
@@ -69,8 +69,9 @@ def install_profile_to_cwd(cwd: Path, profile: str, markdown: str) -> Path:
 
     Writes the profile document to ``cwd/.agent-bridge/profiles/{profile}.md``
     and injects a ``@``-import pointer into ``cwd/CLAUDE.md`` so Claude Code
-    loads it as project guidance. Mirrors ``agb profile use``. Returns the
-    profile document path.
+    loads it as project guidance. This is specific to isolated Agent Runtime
+    workspaces; interactive ``profile use`` does not write this pointer.
+    Returns the profile document path.
     """
     from agent_bridge.core.slug import make_slug
 

@@ -68,9 +68,11 @@ uv run agent-bridge profile use safe-readonly \
 
 - 项目级 `.mcp.json`（`scope=project`）或用户级 `~/.mcp.json`；
 - Claude Code hooks 配置；
-- 项目 `CLAUDE.md` 或用户 `~/.claude/CLAUDE.md` 中由 Agent Bridge 管理的 profile 指针块。
+- 项目 `CLAUDE.md` 或用户 `~/.claude/CLAUDE.md` 中由 Agent Bridge 管理的
+  `<system-reminder>` 语义说明块。
 
-它不会把完整 profile 正文复制进 CLAUDE.md。动态 profile 与 memory 上下文由服务端维护，并在会话 hook 中刷新。
+它不会把完整 profile 正文或绝对文件路径复制进 CLAUDE.md。动态 profile 与
+memory 上下文由服务端维护，并通过 `SessionStart` Hook 注入。
 
 常用 Profile 命令：
 

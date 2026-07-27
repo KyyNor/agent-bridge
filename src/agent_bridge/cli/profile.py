@@ -8,7 +8,8 @@ from typing import Annotated, Any
 import typer
 
 from agent_bridge.capability_hub.profiles.docs import (
-    profile_pointer_block,
+    SYSTEM_REMINDER_GUIDANCE,
+    pointer_block,
     replace_agent_bridge_block,
 )
 from agent_bridge.cli.profile_hooks import profile_hook_app
@@ -254,24 +255,17 @@ def _write_profile_hooks(
     return settings_path
 
 
-def _server_profile_doc_path(rendered_doc: dict[str, Any]) -> Path:
-    raw_path = str(rendered_doc.get("profile_doc_path") or "").strip()
-    if not raw_path:
-        raise RuntimeError("server did not return profile_doc_path")
-    profile_path = Path(raw_path).expanduser()
-    if not profile_path.is_absolute():
-        raise RuntimeError(f"server returned non-absolute profile_doc_path: {raw_path}")
-    return profile_path
-
-
-def _write_claude_profile_pointer(scope: str, *, profile_path: Path) -> Path:
+def _write_claude_profile_guidance(scope: str) -> Path:
     if scope == "project":
         claude_path = Path.cwd() / "CLAUDE.md"
     elif scope == "user":
         claude_path = Path.home() / ".claude" / "CLAUDE.md"
     else:
         raise ValueError("scope 必须是 project 或 user")
-    replace_agent_bridge_block(claude_path, profile_pointer_block(profile_path))
+    replace_agent_bridge_block(
+        claude_path,
+        pointer_block(SYSTEM_REMINDER_GUIDANCE),
+    )
     return claude_path
 
 
@@ -344,7 +338,6 @@ def profile_use(
         _claude_config_path,
         _confirm_overwrite,
         _load_json_file,
-        _run_client,
         _resolve_metamcp_scope,
         _server_url_from_mcp_url,
         _with_metamcp_config,
@@ -355,8 +348,6 @@ def profile_use(
         path = _claude_config_path(resolved_scope)
         existing = _load_json_file(path)
         _confirm_overwrite(existing, yes)
-        rendered_doc = _run_client(lambda client: client.refresh_profile_doc_context_file(profile))
-        profile_path = _server_profile_doc_path(rendered_doc)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
@@ -368,7 +359,7 @@ def profile_use(
             server_url=_server_url_from_mcp_url(url),
             enabled=True,
         )
-        claude_path = _write_claude_profile_pointer(resolved_scope, profile_path=profile_path)
+        claude_path = _write_claude_profile_guidance(resolved_scope)
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)
         raise typer.Exit(1) from None

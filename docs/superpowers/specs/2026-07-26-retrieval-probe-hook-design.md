@@ -395,7 +395,8 @@ delivery_id: probe_01J...
 - `profile use` 重复执行只保留一条 retrieval-probe Hook，切换 Profile 后命令
   指向新 Profile。
 - 用户已有 Hook 和 claude-mem Hook 保持不变。
-- Claude Profile 引用块保留 system-reminder 语义说明。
+- Claude `CLAUDE.md` 托管块保留 system-reminder 语义说明，不写入 Profile
+  文件绝对路径。
 - 现有 MCP 工具列表保持不变。
 
 ### Profile 提示词

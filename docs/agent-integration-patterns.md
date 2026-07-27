@@ -367,7 +367,7 @@ Cline/Hermes/Kimi/Kilo/ZCode/Pi/VSCode **没有 agents kind**或用 null。
 ### 现状对照
 
 我们目前对接 agent 的方式（`cli/profile.py`）：
-- **只支持 Claude Code**：写 `.claude/settings.local.json`（hooks）+ `.mcp.json` + CLAUDE.md pointer
+- **只支持 Claude Code**：写 `.claude/settings.local.json`（hooks）+ `.mcp.json` + CLAUDE.md system-reminder 说明块
 - **Memory hooks** 绑定 6 个 Claude 事件（Setup/SessionStart/UserPromptSubmit/PostToolUse/PreToolUse/Stop）
 - **核心是 MCP 网关**：agent 通过 MetaMCP 的 `search`/`execute` 两个工具访问能力，不靠 asset 投影
 
