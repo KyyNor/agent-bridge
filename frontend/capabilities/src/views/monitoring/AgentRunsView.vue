@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
-import JsonViewer from '../../components/JsonViewer.vue'
+import AgentRunExecutionPanel from '../../components/AgentRunExecutionPanel.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
@@ -353,15 +353,7 @@ function backendBadgeClass(backend: string | null | undefined): string {
         {{ detailRun.error }}
       </div>
 
-      <div v-if="detailRun.prompt">
-        <div class="mb-1 text-xs font-medium text-muted-foreground">Prompt</div>
-        <pre class="max-h-[180px] overflow-auto whitespace-pre-wrap rounded-lg bg-secondary px-4 py-3 text-xs">{{ detailRun.prompt }}</pre>
-      </div>
-
-      <div v-if="detailRun.result != null">
-        <div class="mb-1 text-xs font-medium text-muted-foreground">结果</div>
-        <JsonViewer :value="detailRun.result" max-height="240px" />
-      </div>
+      <AgentRunExecutionPanel :run="detailRun" />
 
       <div v-if="detailEvents.length">
         <div class="mb-1 text-xs font-medium text-muted-foreground">

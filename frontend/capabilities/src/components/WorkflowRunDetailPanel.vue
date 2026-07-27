@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { api } from '../api/client'
 import type { AgentRun, WorkflowRunEvent, WorkflowSubagentDetail } from '../api/types'
 import AgentRunTabs from './AgentRunTabs.vue'
+import AgentRunExecutionPanel from './AgentRunExecutionPanel.vue'
 import RunEventTimeline from './RunEventTimeline.vue'
 import SubagentDetailPanel from './SubagentDetailPanel.vue'
 
@@ -14,6 +15,9 @@ const props = withDefaults(defineProps<{
   selectedAgentRunKey: string
   eventsLoading: boolean
   agentRunsLoading: boolean
+  agentRunDetail?: AgentRun | null
+  agentRunDetailLoading?: boolean
+  agentRunDetailError?: string
   contextKey?: string
   detailError?: string
   subagentDetail: DetailFn<WorkflowSubagentDetail | null>
@@ -23,6 +27,9 @@ const props = withDefaults(defineProps<{
 }>(), {
   contextKey: 'run:detail',
   detailError: '',
+  agentRunDetail: null,
+  agentRunDetailLoading: false,
+  agentRunDetailError: '',
   showHeader: true,
 })
 
@@ -74,6 +81,12 @@ function expandSubagent(taskId: string) {
       :detail-error="props.detailError"
       @select-agent-run="selectAgentRun"
       @refresh="emit('refresh')"
+    />
+
+    <AgentRunExecutionPanel
+      :run="props.agentRunDetail || null"
+      :loading="props.agentRunDetailLoading"
+      :error="props.agentRunDetailError"
     />
 
     <div v-if="props.eventsLoading" class="rounded-md border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
