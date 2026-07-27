@@ -4,7 +4,7 @@
 
 **Goal:** 新增一个按 Profile 对 Wiki、CodeGraph、Memory、Artifact 执行多关键词
 全量轻量探测的 API，以及一个由 `profile use` 安装、通过 Claude Code
-`asyncRewake` 交付命中路由的 Hook。
+普通 `async` 的 `additionalContext` 交付命中路由的 Hook。
 
 **Architecture:** 新增独立 `retrieval_probe` 领域包，通过 `RetrievalProbeAdapter` Protocol 和 registry 注册四类来源；`RetrievalProbeService` 负责分词、并发、deadline、聚合和审计。FastAPI 只做请求校验与领域服务调用，CLI Hook 只做 Claude Code stdin、HTTP API、路由提醒和退出码之间的转换。
 
@@ -588,7 +588,7 @@ git commit -m "feat(api): expose retrieval probe endpoint"
 
 ---
 
-### Task 5: 手工 Claude Code asyncRewake Hook
+### Task 5: 手工 Claude Code async Hook
 
 **Files:**
 
@@ -617,7 +617,7 @@ render_probe_reminder(payload: dict[str, Any], *, max_chars: int = 8000) -> str
 - [ ] **Step 1: 写 CLI Hook 失败测试**
 
 ```python
-def test_probe_hook_posts_user_prompt_and_rewakes_on_hit(monkeypatch):
+def test_probe_hook_posts_user_prompt_and_returns_async_context_on_hit(monkeypatch):
     captured = {}
 
     class FakeClient:
@@ -645,9 +645,11 @@ def test_probe_hook_posts_user_prompt_and_rewakes_on_hit(monkeypatch):
             "prompt": "订单同步失败",
         }),
     )
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "delivery_id: probe_test" in result.stderr
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    output = json.loads(result.stdout)
+    assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert "delivery_id: probe_test" in output["hookSpecificOutput"]["additionalContext"]
     assert captured["payload"]["prompt"] == "订单同步失败"
 ```
 
@@ -759,8 +761,8 @@ git commit -m "feat(cli): add manual retrieval probe hook"
 **Interfaces:**
 
 - Documents: `/retrieval/probe`。
-- Documents: manual `asyncRewake` Hook configuration。
-- Documents: silent exit 0 and stderr + exit 2 behavior。
+- Documents: manual ordinary `async` Hook configuration。
+- Documents: silent exit 0 and stdout JSON `additionalContext` behavior。
 - Documents: removal/disable procedure。
 
 - [ ] **Step 1: 写集成文档**
@@ -777,7 +779,7 @@ git commit -m "feat(cli): add manual retrieval probe hook"
             "type": "command",
             "shell": "bash",
             "command": "agent-bridge profile hook claude-code retrieval-probe --profile chengdu --server-url http://127.0.0.1:8765 --timeout 12",
-            "asyncRewake": true,
+            "async": true,
             "timeout": 12
           }
         ]
@@ -791,9 +793,10 @@ git commit -m "feat(cli): add manual retrieval probe hook"
 
 - `profile use` 会在 Task 7 自动安装该 Hook，手工配置仍可用于独立调试。
 - 删除 Agent Bridge 管理的 Hook entry 可以停用。
-- 有命中时使用 exit 2 主动唤醒；无命中或服务不可用时静默。
+- 有命中时通过 stdout JSON 返回 `additionalContext` 并 exit 0；无命中或服务
+  不可用时静默。
 - 只做路由探测，不返回正文，不调用 Wiki Agent 或 CodeGraph Explore。
-- `asyncRewake` 使用 Claude Code 的后台失败反馈通道，界面可能显示 Hook error 语义。
+- 普通 `async` 不主动唤醒空闲会话，结果在下一次对话轮次交付。
 
 - [ ] **Step 2: 更新 README 与 CLAUDE**
 
@@ -904,7 +907,7 @@ Expected: 分支只包含设计、计划、实现、测试和文档提交，工�
 - Produces: `_agent_bridge_retrieval_hook_command(profile, server_url, timeout)`
   生成可由 Agent Bridge 唯一识别的 Hook 命令。
 - `profile use` 在当前 scope 的 Claude settings 中安装一条
-  `UserPromptSubmit + asyncRewake` retrieval-probe Hook。
+  `UserPromptSubmit + async` retrieval-probe Hook。
 - 重复执行或切换 Profile 时先删除旧的 Agent Bridge retrieval-probe entry，
   再写入新 entry；不删除用户 Hook和 memory Hook。
 - Profile Markdown 删除固定数据源先后顺序，增加后台探测结果消费说明。
@@ -924,7 +927,8 @@ probe_entries = [
 ]
 assert len(probe_entries) == 1
 probe_hook = probe_entries[0]["hooks"][0]
-assert probe_hook["asyncRewake"] is True
+assert probe_hook["async"] is True
+assert "asyncRewake" not in probe_hook
 assert probe_hook["timeout"] == 15
 probe_argv = shlex.split(probe_hook["command"])
 assert probe_argv[probe_argv.index("--profile") + 1] == "safe-readonly"
@@ -975,7 +979,7 @@ RETRIEVAL_PROBE_HOOK_MARKER = (
             "type": "command",
             "shell": "bash",
             "command": command,
-            "asyncRewake": True,
+            "async": True,
             "timeout": 15,
         }
     ]

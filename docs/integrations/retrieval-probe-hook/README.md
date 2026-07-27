@@ -18,8 +18,8 @@ UserPromptSubmit
   → Claude Code 后台启动 Hook
   → POST /retrieval/probe
   → 分词并并发探测 Profile 允许的全部资源
-  → 有命中：stderr + exit 2
-  → asyncRewake 将路由提醒交给 Agent
+  → 有命中：stdout JSON additionalContext + exit 0
+  → Claude Code 在下一次对话轮次将路由提醒交给 Agent
 ```
 
 四类来源均使用轻量检索：
@@ -65,7 +65,7 @@ Agent Bridge 会生成等价于下方内容的 Claude Code settings。下方 JSO
           {
             "type": "command",
             "command": "agent-bridge profile hook claude-code retrieval-probe --profile chengdu --server-url http://127.0.0.1:8765 --timeout 12 --agent-bridge-hook-id agent-bridge-retrieval-probe",
-            "asyncRewake": true,
+            "async": true,
             "timeout": 15
           }
         ]
@@ -83,12 +83,13 @@ uv run agent-bridge profile hook claude-code retrieval-probe ...
 ```
 
 命令从 stdin 读取 Claude Code 的 `UserPromptSubmit` JSON。只有事件正确、prompt
-非空且至少一个资源命中时，它才输出提醒并以状态码 2 退出。无命中、输入不适用或
-API 暂时不可用时均以状态码 0 结束，不主动唤醒 Agent。
+非空且至少一个资源命中时，它才向 stdout 输出包含 `additionalContext` 的合法
+JSON，并以状态码 0 退出。无命中、输入不适用或 API 暂时不可用时不输出内容，同样
+以状态码 0 结束。
 
-`asyncRewake` 会让 Hook 在后台运行；状态码 2 会把 stderr 作为 system reminder
-交付给 Claude Code。当前 Agent 可以先读文件或调用其他工具，探测完成后再在后续
-轮次消费这条路由信息。
+普通 `async` 会让 Hook 在后台运行。探测结果在下一次对话轮次作为 system reminder
+上下文交付：Agent 仍在工作时，可在后续模型轮次消费；会话已经空闲时不会主动唤醒，
+而是等待下一次用户交互。
 
 若 Claude Code 通过 LiteLLM 的 Anthropic → OpenAI Chat 适配链访问只接受
 user/assistant 的后端，应启用相邻目录
@@ -177,5 +178,5 @@ Hook entry 即可临时停用。再次执行 `profile use` 会重新安装它。
 - 当前只有“全量探测”策略，没有基于分类器的选择性探测。
 - 分词为确定性 jieba/标识符规则，不调用 LLM 做查询改写。
 - 返回结果用于路由，不应被当成答案依据；Agent 仍需调用建议工具取得真实内容。
-- `asyncRewake` 使用 Claude Code 的 Hook 错误反馈通道，因此界面可能显示 Hook
-  feedback；这是交付机制的现有限制，不表示 Agent Bridge API 调用失败。
+- 普通 `async` 不主动唤醒已结束的会话；若当前任务需要确保结果送达，应让 Agent
+  在检索窗口内继续工作，或由用户发起下一次交互。

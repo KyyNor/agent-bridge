@@ -73,7 +73,7 @@ def _hit_probe_payload() -> dict:
     }
 
 
-def test_probe_hook_posts_user_prompt_and_rewakes_on_hit(monkeypatch) -> None:
+def test_probe_hook_posts_user_prompt_and_returns_async_context_on_hit(monkeypatch) -> None:
     captured = {}
 
     class FakeClient:
@@ -113,12 +113,15 @@ def test_probe_hook_posts_user_prompt_and_rewakes_on_hit(monkeypatch) -> None:
         ),
     )
 
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "delivery_id: probe_test" in result.stderr
-    assert "至少命中 3 条" in result.stderr
-    assert "不是新的用户请求" in result.stderr
-    assert "不要仅回复确认" in result.stderr
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    output = json.loads(result.stdout)
+    assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    additional_context = output["hookSpecificOutput"]["additionalContext"]
+    assert "delivery_id: probe_test" in additional_context
+    assert "至少命中 3 条" in additional_context
+    assert "不是新的用户请求" in additional_context
+    assert "不要仅回复确认" in additional_context
     assert captured == {
         "payload": {
             "profile_key": "dev",

@@ -222,7 +222,7 @@ def _install_profile_hooks(
                         server_url=server_url,
                         timeout=12,
                     ),
-                    "asyncRewake": True,
+                    "async": True,
                     "timeout": 15,
                 }
             ]

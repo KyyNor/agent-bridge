@@ -333,7 +333,8 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     ]
     assert len(probe_entries) == 1
     probe_hook = probe_entries[0]["hooks"][0]
-    assert probe_hook["asyncRewake"] is True
+    assert probe_hook["async"] is True
+    assert "asyncRewake" not in probe_hook
     assert probe_hook["timeout"] == 15
     probe_argv = shlex.split(probe_hook["command"])
     assert probe_argv[probe_argv.index("--profile") + 1] == "safe-readonly"
@@ -408,6 +409,8 @@ def test_profile_use_replaces_retrieval_probe_hook(monkeypatch, tmp_path: Path) 
         if "profile hook claude-code retrieval-probe" in str(hook.get("command") or "")
     ]
     assert len(probe_hooks) == 1
+    assert probe_hooks[0]["async"] is True
+    assert "asyncRewake" not in probe_hooks[0]
     probe_argv = shlex.split(probe_hooks[0]["command"])
     assert probe_argv[probe_argv.index("--profile") + 1] == "second-profile"
     memory_hooks = [

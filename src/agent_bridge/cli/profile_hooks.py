@@ -93,8 +93,17 @@ def retrieval_probe_hook(
     reminder = render_probe_reminder(response)
     if not reminder:
         return
-    typer.echo(reminder, err=True)
-    raise typer.Exit(2)
+    typer.echo(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": reminder,
+                }
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 def render_probe_reminder(
