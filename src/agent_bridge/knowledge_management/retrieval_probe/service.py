@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ from typing import Any
 from agent_bridge.capability_hub.models import CallLogStatus, SourceType
 from agent_bridge.core.domain import NotFound, ValidationError
 from agent_bridge.core.ids import new_run_id
+from agent_bridge.hooks.claude_code import audit_claude_code_hook_call
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 from .adapters import RetrievalProbeAdapter
 from .models import (
@@ -22,6 +25,7 @@ from .models import (
     TargetProbeSummary,
 )
 from .registry import RetrievalProbeRegistry
+from .reminder import render_probe_reminder
 from .tokenizer import extract_probe_keywords
 
 
@@ -69,6 +73,7 @@ class RetrievalProbeService:
         keyword_limit: int = 8,
         result_limit: int = 3,
         timeout_seconds: float = 10.0,
+        audit: bool = True,
     ) -> ProbeResponse:
         self._validate_request(
             profile_key=profile_key,
@@ -133,15 +138,16 @@ class RetrievalProbeService:
             targets=tuple(summaries),
             duration_ms=duration_ms,
         )
-        self._audit(
-            actor=actor,
-            profile_key=profile_key,
-            prompt=prompt,
-            response=response,
-            keyword_limit=keyword_limit,
-            result_limit=result_limit,
-            timeout_seconds=timeout_seconds,
-        )
+        if audit:
+            self._audit(
+                actor=actor,
+                profile_key=profile_key,
+                prompt=prompt,
+                response=response,
+                keyword_limit=keyword_limit,
+                result_limit=result_limit,
+                timeout_seconds=timeout_seconds,
+            )
         logger.info(
             "全量检索探测完成 probe=%s profile=%s 目标数=%d 命中目标=%d 耗时=%dms",
             probe_id,
@@ -151,6 +157,72 @@ class RetrievalProbeService:
             duration_ms,
         )
         return response
+
+    async def handle_claude_code_hook(
+        self,
+        *,
+        actor: str,
+        profile_key: str,
+        event_name: str | None,
+        matcher: str | None,
+        payload: dict[str, Any],
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        """执行 full-probe 并返回 Claude Code 的标准 Hook 结果。"""
+        started = time.monotonic()
+        result: dict[str, Any] = {}
+        try:
+            response = await self.probe(
+                actor=actor,
+                profile_key=profile_key,
+                prompt=str(payload.get("prompt") or ""),
+                session_id=str(payload.get("session_id") or ""),
+                timeout_seconds=float(timeout_seconds),
+                audit=False,
+            )
+            reminder = render_probe_reminder(response)
+            stdout = NOOP_HOOK_STDOUT
+            if reminder:
+                stdout = json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": event_name or "UserPromptSubmit",
+                            "additionalContext": reminder,
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+            result = {"stdout": stdout, "stderr": "", "exit_code": 0, "status": "ok"}
+        except Exception as exc:
+            audit_claude_code_hook_call(
+                self.governance,
+                actor=actor,
+                profile_key=profile_key,
+                entrypoint="retrieval_probe_hook_claude_code",
+                action="full-probe",
+                event_name=event_name,
+                matcher=matcher,
+                payload=payload,
+                timeout_seconds=timeout_seconds,
+                result=result,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                exception=exc,
+            )
+            raise
+        audit_claude_code_hook_call(
+            self.governance,
+            actor=actor,
+            profile_key=profile_key,
+            entrypoint="retrieval_probe_hook_claude_code",
+            action="full-probe",
+            event_name=event_name,
+            matcher=matcher,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+            result=result,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return result
 
     async def _discover_targets(
         self,
@@ -407,10 +479,10 @@ class RetrievalProbeService:
             self.governance.log_tool_call(
                 actor=actor,
                 profile_key=profile_key,
-                entrypoint="retrieval_probe",
-                source_type=SourceType.hook.value,
-                source_key="claude_code",
-                tool_name="full_probe",
+                entrypoint="retrieval_probe_api",
+                source_type=SourceType.builtin.value,
+                source_key="retrieval_probe",
+                tool_name="retrieval-probe",
                 request={
                     "prompt_length": len(prompt),
                     "prompt_sha256": hashlib.sha256(

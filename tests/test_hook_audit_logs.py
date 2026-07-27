@@ -7,6 +7,7 @@ import pytest
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.capability_hub.models import SourceType
 from agent_bridge.hooks.claude_code import audit_claude_code_hook_call
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
 class FakeWorkerService:
@@ -186,3 +187,44 @@ def test_memory_hook_logs_worker_failures_as_error_rows(wm_paths) -> None:
     log = logs[0]
     assert log["tool_name"] == "context"
     assert log["error_message"] == "worker unavailable"
+
+
+@pytest.mark.asyncio
+async def test_full_probe_hook_uses_standard_audit_envelope_and_preserves_raw_payload(wm_paths) -> None:
+    service = _service(wm_paths)
+    raw_payload = {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "session-1",
+        "cwd": "/repo",
+        "prompt": "订单同步失败",
+    }
+
+    result = await service.retrieval_probe.handle_claude_code_hook(
+        actor="root",
+        profile_key="dev",
+        event_name="UserPromptSubmit",
+        matcher=None,
+        payload=raw_payload,
+        timeout_seconds=12,
+    )
+
+    logs = service.governance.list_logs(actor="root", source_type=SourceType.hook.value)
+    assert len(logs) == 1
+    log = logs[0]
+    assert log["tool_name"] == "full-probe"
+    assert log["status"] == "success"
+    assert json.loads(log["request_json"]) == {
+        "action": "full-probe",
+        "event_name": "UserPromptSubmit",
+        "matcher": None,
+        "payload": raw_payload,
+        "timeout_seconds": 12,
+        "source": "claude-code",
+    }
+    assert json.loads(log["response_json"]) == result
+    assert result == {
+        "stdout": NOOP_HOOK_STDOUT,
+        "stderr": "",
+        "exit_code": 0,
+        "status": "ok",
+    }

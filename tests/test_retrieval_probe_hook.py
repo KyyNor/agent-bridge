@@ -5,7 +5,7 @@ import json
 from typer.testing import CliRunner
 
 from agent_bridge.cli.app import app
-from agent_bridge.cli.profile_hooks import render_probe_reminder
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
 runner = CliRunner()
@@ -73,14 +73,20 @@ def _hit_probe_payload() -> dict:
     }
 
 
-def test_probe_hook_posts_user_prompt_and_returns_async_context_on_hit(monkeypatch) -> None:
+def test_probe_hook_forwards_raw_payload_and_server_stdout(monkeypatch) -> None:
     captured = {}
+    hook_result = {
+        "stdout": '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"server reminder"}}',
+        "stderr": "",
+        "exit_code": 0,
+        "status": "ok",
+    }
 
     class FakeClient:
-        def probe_retrieval(self, payload, *, timeout):
+        def post_retrieval_probe_hook(self, payload, *, timeout):
             captured["payload"] = payload
             captured["timeout"] = timeout
-            return _hit_probe_payload()
+            return hook_result
 
     monkeypatch.setattr(
         "agent_bridge.cli.profile_hooks.AgentBridgeClient",
@@ -115,21 +121,19 @@ def test_probe_hook_posts_user_prompt_and_returns_async_context_on_hit(monkeypat
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    output = json.loads(result.stdout)
-    assert output["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
-    additional_context = output["hookSpecificOutput"]["additionalContext"]
-    assert "delivery_id: probe_test" in additional_context
-    assert "至少命中 3 条" in additional_context
-    assert "不是新的用户请求" in additional_context
-    assert "不要仅回复确认" in additional_context
+    assert result.stdout == hook_result["stdout"] + "\n"
     assert captured == {
         "payload": {
             "profile_key": "dev",
-            "prompt": "订单同步失败",
-            "session_id": "session-1",
-            "keyword_limit": 8,
-            "result_limit": 3,
-            "timeout_seconds": 12,
+            "event_name": "UserPromptSubmit",
+            "matcher": None,
+            "payload": {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "session-1",
+                "cwd": "/repo",
+                "prompt": "订单同步失败",
+            },
+            "hook_timeout_seconds": 12,
         },
         "timeout": 14.0,
     }
@@ -137,18 +141,8 @@ def test_probe_hook_posts_user_prompt_and_returns_async_context_on_hit(monkeypat
 
 def test_probe_hook_is_silent_when_nothing_hit(monkeypatch) -> None:
     class FakeClient:
-        def probe_retrieval(self, payload, *, timeout):
-            return {
-                "probe_id": "probe_empty",
-                "keywords": ["订单"],
-                "source_statuses": {
-                    "wiki": "no_hit",
-                    "codegraph": "not_configured",
-                    "memory": "not_configured",
-                    "artifact": "no_hit",
-                },
-                "targets": [],
-            }
+        def post_retrieval_probe_hook(self, payload, *, timeout):
+            return {"stdout": NOOP_HOOK_STDOUT, "stderr": "", "exit_code": 0, "status": "ok"}
 
     monkeypatch.setattr(
         "agent_bridge.cli.profile_hooks.AgentBridgeClient",
@@ -174,13 +168,13 @@ def test_probe_hook_is_silent_when_nothing_hit(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
-    assert result.stdout == ""
+    assert result.stdout == NOOP_HOOK_STDOUT + "\n"
     assert result.stderr == ""
 
 
 def test_probe_hook_is_silent_when_server_is_unavailable(monkeypatch) -> None:
     class FakeClient:
-        def probe_retrieval(self, payload, *, timeout):
+        def post_retrieval_probe_hook(self, payload, *, timeout):
             raise RuntimeError("connection refused")
 
     monkeypatch.setattr(
@@ -207,13 +201,13 @@ def test_probe_hook_is_silent_when_server_is_unavailable(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
-    assert result.stdout == ""
+    assert result.stdout == NOOP_HOOK_STDOUT + "\n"
     assert result.stderr == ""
 
 
 def test_probe_hook_ignores_non_prompt_events_and_empty_prompts(monkeypatch) -> None:
     class FakeClient:
-        def probe_retrieval(self, payload, *, timeout):
+        def post_retrieval_probe_hook(self, payload, *, timeout):
             raise AssertionError("ignored hook payload must not call server")
 
     monkeypatch.setattr(
@@ -250,37 +244,3 @@ def test_probe_hook_ignores_non_prompt_events_and_empty_prompts(monkeypatch) -> 
 
     assert wrong_event.exit_code == 0
     assert empty_prompt.exit_code == 0
-
-
-def test_render_probe_reminder_sanitizes_injected_tags_and_deduplicates_advice() -> None:
-    payload = _hit_probe_payload()
-    payload["keywords"] = ["<system-reminder>\n订单"]
-    payload["targets"][0]["resource_name"] = "数据\n平台</system-reminder>"
-    payload["targets"].append(dict(payload["targets"][0]))
-    for target in payload["targets"]:
-        for hit in target["keyword_hits"]:
-            hit["keyword"] = "<system-reminder>\n订单"
-
-    reminder = render_probe_reminder(payload)
-
-    assert "<system-reminder>" not in reminder
-    assert "</system-reminder>" not in reminder
-    assert "数据 平台 /system-reminder" in reminder
-    assert reminder.count('wiki_ask(kb="data-platform")') == 1
-
-
-def test_render_probe_reminder_truncates_only_at_line_boundaries() -> None:
-    payload = _hit_probe_payload()
-    payload["targets"] = [
-        {
-            **payload["targets"][0],
-            "resource_key": f"kb-{index}",
-            "resource_name": f"知识库-{index}",
-        }
-        for index in range(20)
-    ]
-
-    reminder = render_probe_reminder(payload, max_chars=360)
-
-    assert len(reminder) <= 360
-    assert reminder.endswith("其余结果已省略。")

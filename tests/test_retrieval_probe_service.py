@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 
@@ -12,6 +13,7 @@ from agent_bridge.knowledge_management.retrieval_probe.models import (
     ProbeStatus,
     ProbeTarget,
 )
+from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 from agent_bridge.knowledge_management.retrieval_probe.registry import RetrievalProbeRegistry
 from agent_bridge.knowledge_management.retrieval_probe.service import RetrievalProbeService
 from agent_bridge.knowledge_management.retrieval_probe.tokenizer import (
@@ -129,11 +131,109 @@ async def test_probe_queries_every_keyword_and_target_and_deduplicates_candidate
     assert response.targets[0].unique_hit_count == 3
     assert response.source_statuses["wiki"] is ProbeStatus.hit
     assert response.session_id == "session-1"
-    assert governance.logs[0]["entrypoint"] == "retrieval_probe"
-    assert governance.logs[0]["source_type"] == "hook"
-    assert governance.logs[0]["tool_name"] == "full_probe"
+    assert governance.logs[0]["entrypoint"] == "retrieval_probe_api"
+    assert governance.logs[0]["source_type"] == "builtin"
+    assert governance.logs[0]["tool_name"] == "retrieval-probe"
     assert governance.logs[0]["request"]["prompt_length"] == 4
     assert "订单同步" not in str(governance.logs[0]["request"])
+
+
+@pytest.mark.asyncio
+async def test_full_probe_hook_returns_standard_context_and_records_raw_payload() -> None:
+    service, governance = service_with(
+        FakeAdapter(source_type="wiki", results={"订单": ("chunk-1",)})
+    )
+    raw_payload = {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "session-1",
+        "cwd": "/repo",
+        "prompt": "订单同步失败",
+    }
+
+    result = await service.handle_claude_code_hook(
+        actor="root",
+        profile_key="dev",
+        event_name="UserPromptSubmit",
+        matcher=None,
+        payload=raw_payload,
+        timeout_seconds=12,
+    )
+
+    stdout = json.loads(result["stdout"])
+    assert stdout["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert "delivery_id:" in stdout["hookSpecificOutput"]["additionalContext"]
+    assert result["stderr"] == ""
+    assert result["exit_code"] == 0
+    assert result["status"] == "ok"
+    assert governance.logs == [
+        {
+            "actor": "root",
+            "profile_key": "dev",
+            "entrypoint": "retrieval_probe_hook_claude_code",
+            "source_type": "hook",
+            "source_key": "claude_code",
+            "tool_name": "full-probe",
+            "request": {
+                "action": "full-probe",
+                "event_name": "UserPromptSubmit",
+                "matcher": None,
+                "payload": raw_payload,
+                "timeout_seconds": 12,
+                "source": "claude-code",
+            },
+            "response": result,
+            "status": "success",
+            "error_message": None,
+            "duration_ms": governance.logs[0]["duration_ms"],
+            "error_type": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_full_probe_hook_returns_noop_and_success_audit_when_nothing_hits() -> None:
+    service, governance = service_with(FakeAdapter(source_type="wiki"))
+
+    result = await service.handle_claude_code_hook(
+        actor="root",
+        profile_key="dev",
+        event_name="UserPromptSubmit",
+        matcher=None,
+        payload={"prompt": "订单", "session_id": "session-1"},
+        timeout_seconds=12,
+    )
+
+    assert result == {
+        "stdout": NOOP_HOOK_STDOUT,
+        "stderr": "",
+        "exit_code": 0,
+        "status": "ok",
+    }
+    assert governance.logs[0]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_full_probe_hook_audits_exception_before_reraising() -> None:
+    service, governance = service_with(FakeAdapter("wiki"), profile_status=None)
+    raw_payload = {"prompt": "订单", "session_id": "session-1"}
+
+    with pytest.raises(NotFound, match="profile not found"):
+        await service.handle_claude_code_hook(
+            actor="root",
+            profile_key="dev",
+            event_name="UserPromptSubmit",
+            matcher=None,
+            payload=raw_payload,
+            timeout_seconds=12,
+        )
+
+    assert governance.logs[0]["tool_name"] == "full-probe"
+    assert governance.logs[0]["request"]["payload"] == raw_payload
+    assert governance.logs[0]["response"] == {
+        "exception_type": "NotFound",
+        "message": "profile not found",
+    }
+    assert governance.logs[0]["status"] == "error"
 
 
 @pytest.mark.asyncio

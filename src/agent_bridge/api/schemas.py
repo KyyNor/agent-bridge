@@ -20,13 +20,12 @@ class ProfileMemoryBindingRequest(BaseModel):
     enabled: bool = True
 
 
-class MemoryHookRequest(BaseModel):
+class ClaudeCodeHookRequest(BaseModel):
     profile_key: str
     event_name: str | None = None
     matcher: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-    hook_timeout_seconds: int = 60
-    source: str = "claude-code"
+    hook_timeout_seconds: int = Field(default=60, ge=1, le=300)
 
 
 class CreateKbRequest(BaseModel):

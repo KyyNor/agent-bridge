@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from agent_bridge.api.schemas import (
+    ClaudeCodeHookRequest,
     CreateMemoryBlockRequest,
-    MemoryHookRequest,
     ProfileMemoryBindingRequest,
     UpdateMemoryBlockStatusRequest,
 )
@@ -133,7 +133,7 @@ def create_memory_routes(service, actor):
     @router.post("/memory/hooks/claude-code/{action}")
     def handle_claude_code_memory_hook(
         action: str,
-        payload: MemoryHookRequest,
+        payload: ClaudeCodeHookRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         return service.memory.hooks.handle_claude_code_hook(

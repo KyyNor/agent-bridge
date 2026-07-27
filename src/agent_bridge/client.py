@@ -129,6 +129,19 @@ class AgentBridgeClient:
             timeout=timeout,
         ).json()
 
+    def post_retrieval_probe_hook(
+        self,
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/retrieval/hooks/claude-code/full-probe",
+            json=payload,
+            timeout=timeout,
+        ).json()
+
     def ask(self, kb_slug: str, question: str, backend: str | None = None, session_id: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"kb": kb_slug, "question": question}
         if backend:
