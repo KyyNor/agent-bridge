@@ -38,3 +38,14 @@ test('workflow detail follows the selected Agent tab when loading prompt and res
   assert.equal((workflow.match(/:agent-run-detail-loading="progressAgentRunDetailLoading"/g) || []).length, 2)
   assert.equal((workflow.match(/:agent-run-detail-error="progressAgentRunDetailError"/g) || []).length, 2)
 })
+
+test('expanded task logs cache and display their main Agent detail', () => {
+  const tasks = readSource('composables/useWorkflowTasks.ts')
+  const workflow = readSource('views/workflow/WorkflowView.vue')
+
+  assert.match(tasks, /const taskRunDetails = ref<Record<string, AgentRun>>\(\{\}\)/)
+  assert.match(tasks, /function taskAgentRun\(task: WorkflowTask\)/)
+  assert.match(tasks, /taskRunDetails\.value = \{[\s\S]*\[task\.lease_run_id\]: agentRun/)
+  assert.match(tasks, /taskAgentRun,/)
+  assert.match(workflow, /<AgentRunExecutionPanel :run="taskAgentRun\(task\)" :loading="isTaskLogLoading\(task\)" \/>/)
+})

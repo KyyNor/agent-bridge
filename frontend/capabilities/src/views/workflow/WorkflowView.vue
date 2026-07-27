@@ -29,6 +29,7 @@ import WorkflowRunGraph from './WorkflowRunGraph.vue'
 import SubagentDetailPanel from '../../components/SubagentDetailPanel.vue'
 import RunEventTimeline from '../../components/RunEventTimeline.vue'
 import AgentRunTabs from '../../components/AgentRunTabs.vue'
+import AgentRunExecutionPanel from '../../components/AgentRunExecutionPanel.vue'
 import WorkflowRunDetailPanel from '../../components/WorkflowRunDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
@@ -436,6 +437,7 @@ const {
   taskRunLogKey,
   taskLogs,
   taskEvents,
+  taskAgentRun,
   loadTaskPayload,
   taskActors,
   taskActorFilterFor,
@@ -1688,6 +1690,7 @@ async function confirmClearWorkflow() {
                       </button>
                     </div>
                   </div>
+                  <AgentRunExecutionPanel :run="taskAgentRun(task)" :loading="isTaskLogLoading(task)" />
                   <div v-if="!taskEvents(task).length" class="rounded-md border bg-background px-3 py-6 text-center text-sm text-muted-foreground">
                     还没有 Agent 输出，任务被领取执行后这里会按时间顺序显示对话流。
                   </div>

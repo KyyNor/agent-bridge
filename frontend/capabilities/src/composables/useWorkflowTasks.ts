@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
 import { api } from '../api/client'
 import type {
+  AgentRun,
   WorkflowArtifact,
   WorkflowDefinition,
   WorkflowExecutionMode,
@@ -89,6 +90,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
   const expandedTaskIds = ref<Set<string>>(new Set())
   const taskRunLogs = ref<Record<string, WorkflowRunLog[]>>({})
   const taskRunEvents = ref<Record<string, WorkflowRunEvent[]>>({})
+  const taskRunDetails = ref<Record<string, AgentRun>>({})
   const taskRunPayloads = ref<Record<string, Record<string, string>>>({})
   const taskRunPayloadErrors = ref<Record<string, Record<string, string>>>({})
   const taskLogLoading = ref<Set<string>>(new Set())
@@ -662,6 +664,10 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     return task.lease_run_id ? taskRunEvents.value[task.lease_run_id] || [] : []
   }
 
+  function taskAgentRun(task: WorkflowTask) {
+    return task.lease_run_id ? taskRunDetails.value[task.lease_run_id] || null : null
+  }
+
   async function loadTaskPayload(runId: string | null | undefined, refKey: string) {
     if (!runId) return
     let runKey = batchRunDetail.runIdToAgentRunKey.value[runId]
@@ -720,23 +726,32 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     }
     next.add(id)
     expandedTaskIds.value = next
-    if (!task.lease_run_id || taskRunLogs.value[task.lease_run_id]) return
+    if (!task.lease_run_id || (taskRunLogs.value[task.lease_run_id] && taskRunDetails.value[task.lease_run_id])) return
     const loading = new Set(taskLogLoading.value)
     loading.add(task.lease_run_id)
     taskLogLoading.value = loading
     try {
-      const logsPromise = api.getWorkflowRunLogs(task.lease_run_id)
+      const logsPromise = taskRunLogs.value[task.lease_run_id]
+        ? Promise.resolve(taskRunLogs.value[task.lease_run_id])
+        : api.getWorkflowRunLogs(task.lease_run_id)
       let runKey = batchRunDetail.runIdToAgentRunKey.value[task.lease_run_id]
-      if (!runKey) {
-        const agentRun = await api.getAgentRunForWorkflowRun(task.lease_run_id)
-        if (agentRun) {
-          runKey = agentRun.run_key
-          batchRunDetail.runIdToAgentRunKey.value = { ...batchRunDetail.runIdToAgentRunKey.value, [task.lease_run_id]: runKey }
-        }
+      let agentRun: AgentRun | null = taskRunDetails.value[task.lease_run_id] || null
+      if (!agentRun && runKey) {
+        agentRun = await api.getAgentRun(runKey)
+      }
+      if (!agentRun) {
+        agentRun = await api.getAgentRunForWorkflowRun(task.lease_run_id)
+      }
+      if (agentRun) {
+        runKey = agentRun.run_key
+        batchRunDetail.runIdToAgentRunKey.value = { ...batchRunDetail.runIdToAgentRunKey.value, [task.lease_run_id]: runKey }
+        taskRunDetails.value = { ...taskRunDetails.value, [task.lease_run_id]: agentRun }
       }
       const [logs, events] = await Promise.all([
         logsPromise,
-        runKey ? api.getAgentRunEvents(runKey) : Promise.resolve([] as WorkflowRunEvent[]),
+        taskRunEvents.value[task.lease_run_id]
+          ? Promise.resolve(taskRunEvents.value[task.lease_run_id])
+          : runKey ? api.getAgentRunEvents(runKey) : Promise.resolve([] as WorkflowRunEvent[]),
       ])
       taskRunLogs.value = { ...taskRunLogs.value, [task.lease_run_id]: logs }
       taskRunEvents.value = { ...taskRunEvents.value, [task.lease_run_id]: events }
@@ -772,6 +787,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     expandedTaskIds.value = new Set()
     taskRunLogs.value = {}
     taskRunEvents.value = {}
+    taskRunDetails.value = {}
     taskRunPayloads.value = {}
     taskRunPayloadErrors.value = {}
     resetTaskFilters()
@@ -792,6 +808,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     expandedTaskIds,
     taskRunLogs,
     taskRunEvents,
+    taskRunDetails,
     taskRunPayloads,
     taskRunPayloadErrors,
     taskLogLoading,
@@ -881,6 +898,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     taskRunLogKey,
     taskLogs,
     taskEvents,
+    taskAgentRun,
     loadTaskPayload,
     taskActors,
     taskActorFilterFor,
