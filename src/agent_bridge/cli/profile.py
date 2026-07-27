@@ -44,9 +44,6 @@ CLAUDE_MEM_COMPATIBLE_HOOKS = {
     "Stop": [
         {"matcher": None, "actions": [("summarize", 120)]},
     ],
-    "SessionEnd": [
-        {"matcher": None, "actions": [("session-end", 60)]},
-    ],
 }
 
 

@@ -319,9 +319,7 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     assert hooks["PostToolUse"][0]["matcher"] == "*"
     assert hooks["PreToolUse"][0]["matcher"] == "Read"
     assert hooks["Stop"][0]["hooks"][0]["timeout"] == 120
-    assert hooks["SessionEnd"][0]["hooks"][0]["timeout"] == 60
-    session_end_argv = shlex.split(hooks["SessionEnd"][0]["hooks"][0]["command"])
-    assert session_end_argv[4] == "session-end"
+    assert "SessionEnd" not in hooks
     probe_entries = [
         entry
         for entry in hooks["UserPromptSubmit"]
@@ -470,6 +468,50 @@ def test_profile_use_preserves_user_hooks(monkeypatch, tmp_path: Path) -> None:
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings["hooks"]["Stop"][0]["hooks"] == [{"type": "command", "command": "echo user"}]
     assert "agent-bridge memory hook claude-code summarize" in settings["hooks"]["Stop"][1]["hooks"][0]["command"]
+
+
+def test_profile_use_removes_managed_session_end_hook_and_preserves_user_hook(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    settings_path = tmp_path / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True)
+    old_managed_hook = {
+        "type": "command",
+        "command": (
+            "agent-bridge memory hook claude-code session-end "
+            "--agent-bridge-hook-id agent-bridge-memory"
+        ),
+    }
+    user_hook = {"type": "command", "command": "echo user-session-end"}
+    settings_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionEnd": [
+                        {"hooks": [old_managed_hook]},
+                        {"hooks": [user_hook]},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeClient:
+        def refresh_profile_doc_context_file(self, profile_key):
+            return _server_profile_doc(profile_key)
+
+    monkeypatch.setattr("agent_bridge.cli.app.AgentBridgeClient.from_config", lambda: FakeClient())
+    result = runner.invoke(
+        app,
+        ["profile", "use", "safe-readonly", "--scope", "project", "--yes"],
+    )
+
+    assert result.exit_code == 0
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["hooks"]["SessionEnd"] == [{"hooks": [user_hook]}]
 
 
 def test_profile_use_gets_profile_doc_path_from_server(monkeypatch, tmp_path: Path) -> None:
