@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const timelinePath = new URL('../src/components/RunEventTimeline.vue', import.meta.url)
 const viewerPath = new URL('../src/components/PayloadCodeViewer.vue', import.meta.url)
+const dialogPath = new URL('../src/components/PayloadDetailDialog.vue', import.meta.url)
 
 test('long payloads keep a preview and open in a typed modal', async () => {
   const source = await readFile(timelinePath, 'utf8')
@@ -11,12 +12,19 @@ test('long payloads keep a preview and open in a typed modal', async () => {
   assert.match(source, /@click\.stop="openPayload\(entry\.event, 'input'\)"/)
   assert.match(source, /@click\.stop="openPayload\(entry\.event, 'output'\)"/)
   assert.match(source, /@click\.stop="openPayload\(entry\.event, 'detail'\)"/)
-  assert.match(source, /w-\[min\(1280px,calc\(100vw-2rem\)\)\]/)
-  assert.match(source, /查看\n/)
-  assert.match(source, /<Dialog :open="payloadModal !== null"/)
-  assert.match(source, /v-html="renderMd\(payloadModal\.content\)"/)
+  assert.match(source, /import PayloadDetailDialog from '\.\/PayloadDetailDialog\.vue'/)
+  assert.match(source, /<PayloadDetailDialog/)
+  assert.doesNotMatch(source, /<Dialog :open="payloadModal !== null"/)
+})
+
+test('payload detail dialog shares Markdown and syntax-highlighted rendering', async () => {
+  const source = await readFile(dialogPath, 'utf8')
+
+  assert.match(source, /import \{ renderMarkdown \} from '\.\.\/lib\/markdown'/)
+  assert.match(source, /import PayloadCodeViewer from '\.\/PayloadCodeViewer\.vue'/)
+  assert.match(source, /import \{ Dialog, DialogContent, DialogHeader, DialogTitle \} from '\.\/ui\/dialog'/)
+  assert.match(source, /v-html="renderMarkdown\(content\)"/)
   assert.match(source, /<PayloadCodeViewer/)
-  assert.match(source, /content: language === 'json' \? formatJsonValue\(content\) : content/)
 })
 
 test('payload code viewer provides readonly syntax-highlighted editors', async () => {

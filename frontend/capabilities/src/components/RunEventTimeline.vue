@@ -21,8 +21,7 @@
 import { computed, ref, watch } from 'vue'
 import { Bot, ChevronRight } from '@lucide/vue'
 import { Badge } from './ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
-import PayloadCodeViewer from './PayloadCodeViewer.vue'
+import PayloadDetailDialog from './PayloadDetailDialog.vue'
 import { useSubagentCollapse } from '../composables/useSubagentCollapse'
 import { groupEventsByActor, subagentStatus, subagentStatusLabel, subagentUsage } from '../lib/workflowEvents'
 import {
@@ -33,7 +32,7 @@ import {
   timelineKind,
 } from '../lib/runEventRender'
 import { renderMarkdown as renderMd } from '../lib/markdown'
-import { formatJsonValue } from '../lib/jsonDisplay'
+import { preparePayloadPresentation, type PayloadLanguage } from '../lib/payloadPresentation'
 import { formatLocalDatetime } from '../lib/time'
 import type { WorkflowRunEvent } from '../api/types'
 
@@ -60,7 +59,6 @@ const emit = defineEmits<{
 const { isCollapsed, toggle, initCollapsed } = useSubagentCollapse()
 
 type PayloadSide = 'input' | 'output' | 'detail'
-type PayloadLanguage = 'markdown' | 'json' | 'html' | 'python' | 'javascript' | 'text'
 type PayloadTarget = { event: WorkflowRunEvent; side: PayloadSide; ref: string }
 type PayloadModal = PayloadTarget & { content: string; language: PayloadLanguage }
 
@@ -146,40 +144,14 @@ function payloadError(ref: string): string {
   return props.payloadErrors?.[ref] || ''
 }
 
-function payloadLanguage(event: WorkflowRunEvent, side: PayloadSide, content: string): PayloadLanguage {
-  const contentType = String(event[`${side}_content_type`] || '').toLowerCase()
-  const ref = payloadRef(event, side).toLowerCase()
-  const text = content.trim()
-  if (contentType.includes('markdown') || /\.(md|markdown)$/.test(ref)) return 'markdown'
-  if (contentType.includes('json') || /\.json$/.test(ref)) return 'json'
-  if (contentType.includes('html') || /\.(html?|xhtml)$/.test(ref) || /^<!doctype\s+html|^<html\b/i.test(text)) return 'html'
-  try {
-    JSON.parse(text)
-    if (text.startsWith('{') || text.startsWith('[')) return 'json'
-  } catch { /* plain text or source code */ }
-  if (/^\s*(#|>|[-*]\s|\d+\.\s|```)/m.test(text) || /\[[^\]]+\]\([^)]+\)/.test(text)) return 'markdown'
-  if (/\b(def|class|from|import)\s+[A-Za-z_]|__name__|print\(/.test(text)) return 'python'
-  if (/\b(const|let|var|function|import|export)\b|=>/.test(text)) return 'javascript'
-  return 'text'
-}
-
-function payloadLanguageLabel(language: PayloadLanguage): string {
-  return {
-    markdown: 'Markdown',
-    json: 'JSON',
-    html: 'HTML',
-    python: 'Python',
-    javascript: 'JavaScript',
-    text: '纯文本',
-  }[language]
-}
-
 function buildPayloadModal(target: PayloadTarget, content: string): PayloadModal {
-  const language = payloadLanguage(target.event, target.side, content)
+  const presentation = preparePayloadPresentation(content, {
+    contentType: String(target.event[`${target.side}_content_type`] || ''),
+    ref: target.ref,
+  })
   return {
     ...target,
-    content: language === 'json' ? formatJsonValue(content) : content,
-    language,
+    ...presentation,
   }
 }
 
@@ -339,31 +311,15 @@ function closePayload() {
     </template>
   </div>
 
-  <Dialog :open="payloadModal !== null" @update:open="(open: boolean) => { if (!open) closePayload() }">
-    <DialogContent class="w-[min(1280px,calc(100vw-2rem))] !max-w-[1280px] sm:!max-w-[1280px] max-h-[calc(100vh-2rem)] overflow-hidden">
-      <DialogHeader>
-        <DialogTitle>
-          查看<span v-if="payloadModal"> · {{ payloadLanguageLabel(payloadModal.language) }}</span>
-        </DialogTitle>
-        <div v-if="payloadModal" class="text-xs text-muted-foreground">
-          {{ payloadModal.side === 'input' ? '输入' : payloadModal.side === 'output' ? '输出' : '详细信息' }}
-          <span v-if="payloadSize(payloadModal.event, payloadModal.side)"> · {{ payloadSize(payloadModal.event, payloadModal.side) }}</span>
-        </div>
-      </DialogHeader>
-      <div v-if="payloadModal" class="min-h-0 overflow-auto">
-        <div
-          v-if="payloadModal.language === 'markdown'"
-          class="payload-markdown rounded-md border bg-background p-4"
-          v-html="renderMd(payloadModal.content)"
-        />
-        <PayloadCodeViewer
-          v-else
-          :content="payloadModal.content"
-          :language="payloadModal.language"
-        />
-      </div>
-    </DialogContent>
-  </Dialog>
+  <PayloadDetailDialog
+    v-if="payloadModal"
+    :open="payloadModal !== null"
+    title="查看"
+    :label="`${payloadModal.side === 'input' ? '输入' : payloadModal.side === 'output' ? '输出' : '详细信息'}${payloadSize(payloadModal.event, payloadModal.side) ? ` · ${payloadSize(payloadModal.event, payloadModal.side)}` : ''}`"
+    :content="payloadModal.content"
+    :language="payloadModal.language"
+    @update:open="(open: boolean) => { if (!open) closePayload() }"
+  />
 </template>
 
 <style>
