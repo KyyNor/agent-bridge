@@ -36,7 +36,7 @@ test('WorkflowView previews stale increments and gives completed tasks a force-f
   assert.match(tasksComposable, /execution_mode: 'incremental'/)
   assert.match(tasksComposable, /execution_mode: 'force_full'/)
   assert.match(view, /<WorkflowTaskExecutionPreview :plan="taskPreview\(task\)"/)
-  assert.match(previewPanel, /复用节点/)
+  assert.match(previewPanel, /复用候选/)
   assert.match(previewPanel, /重新执行节点/)
   assert.match(view, /全量运行/)
 })
