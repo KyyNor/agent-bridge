@@ -16,9 +16,11 @@
 ```text
 UserPromptSubmit
   → Claude Code 后台启动 Hook
-  → POST /retrieval/probe
+  → CLI 原样转发 stdin 的 Hook payload
+  → POST /retrieval/hooks/claude-code/full-probe
   → 分词并并发探测 Profile 允许的全部资源
-  → 有命中：stdout JSON additionalContext + exit 0
+  → 服务端生成 stdout JSON additionalContext + exit 0
+  → 通用 Hook 审计保存原始 prompt、请求和响应
   → Claude Code 在下一次对话轮次将路由提醒交给 Agent
 ```
 
@@ -82,10 +84,12 @@ Agent Bridge 会生成等价于下方内容的 Claude Code settings。下方 JSO
 uv run agent-bridge profile hook claude-code retrieval-probe ...
 ```
 
-命令从 stdin 读取 Claude Code 的 `UserPromptSubmit` JSON。只有事件正确、prompt
-非空且至少一个资源命中时，它才向 stdout 输出包含 `additionalContext` 的合法
-JSON，并以状态码 0 退出。无命中、输入不适用或 API 暂时不可用时不输出内容，同样
-以状态码 0 结束。
+命令从 stdin 读取 Claude Code 的 `UserPromptSubmit` JSON，作为轻量转发器将原始
+payload 交给服务端的 `POST /retrieval/hooks/claude-code/full-probe`。服务端生成标准
+Hook 输出：只有事件正确、prompt 非空且至少一个资源命中时，stdout 才包含
+`additionalContext` 的合法 JSON；无命中、输入不适用或 API 暂时不可用时不输出内容，
+同样以状态码 0 结束。每次 `full-probe` 调用都会进入通用 Hook 审计，审计请求中保留
+原始 payload（包括 prompt），响应中保留 Hook 的 stdout、stderr、退出码和状态。
 
 普通 `async` 会让 Hook 在后台运行。探测结果在下一次对话轮次作为 system reminder
 上下文交付：Agent 仍在工作时，可在后续模型轮次消费；会话已经空闲时不会主动唤醒，
@@ -160,6 +164,14 @@ curl -X POST http://127.0.0.1:8765/retrieval/probe \
 
 `count` 受 `result_limit` 限制；`capped=true` 表示实际候选可能更多，因此 Hook
 会显示“至少命中 N 条”。API 不返回候选正文、标题和内部候选标识。
+
+## 监控与审计
+
+管理后台的调用日志可查看完整 JSON 请求/响应。为避免将任意日志内容当作 Markdown
+渲染，页面只预览下列已定义字段：`codegraph_explore` 的 MCP 文本结果，以及
+`session-start`、`full-probe` Hook stdout 中的 `hookSpecificOutput.additionalContext`。
+其他工具或字段不会生成 Markdown 预览，仍可在 JSON 查看器中按需检查。由于审计会
+保存原始 prompt，日志访问应按现有 Profile 和用户权限控制，并避免向无关人员导出。
 
 参数边界：
 

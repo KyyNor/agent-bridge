@@ -84,8 +84,12 @@ uv run agent-bridge profile pins refresh safe-readonly
 ```
 
 `profile use` 会自动安装 Claude Code 普通 `async` 全量检索探测 Hook，帮助
-较弱模型选择 Wiki、CodeGraph、Memory 或工作流产出物。当前关键词使用确定性
-Jieba/标识符规则生成，尚未接入小模型查询改写。工作方式和独立 API 契约见
+较弱模型选择 Wiki、CodeGraph、Memory 或工作流产出物。CLI 只转发 Claude Code
+的原始 Hook payload；服务端通过标准 `full-probe` Hook 路由生成
+`additionalContext`，并将原始 prompt 与完整 Hook 请求/响应写入通用审计日志。监控页
+仅对 `codegraph_explore`、`session-start` 和 `full-probe` 的限定 Markdown 字段提供
+预览，其余日志仍通过 JSON 查看完整载荷。当前关键词使用确定性 Jieba/标识符规则生成，
+尚未接入小模型查询改写。工作方式和独立 API 契约见
 [Claude Code 全量检索探测 Hook](docs/integrations/retrieval-probe-hook/README.md)。
 
 ## 测试与质量检查
