@@ -5,7 +5,6 @@ type JsonObject = Record<string, unknown>
 
 const HOOK_PREVIEW_TITLES: Record<string, string> = {
   'session-start': '会话启动',
-  'session-init': '会话初始化',
   'full-probe': '全量检索探测',
   full_probe: '全量检索探测',
 }

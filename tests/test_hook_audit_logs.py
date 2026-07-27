@@ -127,6 +127,27 @@ def test_audit_claude_code_hook_call_records_dispatch_exception() -> None:
     assert captured["error_type"] == "hook_exception"
 
 
+def test_memory_hook_preserves_worker_result_with_non_numeric_audit_exit_code(wm_paths) -> None:
+    service = _service(wm_paths)
+    fake_worker = FakeWorkerService(exit_code="not-a-number")
+    service.memory.worker_service = fake_worker
+    service.memory.hooks.worker_service = fake_worker
+
+    result = service.memory.hooks.handle_claude_code_hook(
+        actor="root",
+        profile_key="dev",
+        action="observation",
+        event_name="PostToolUse",
+        matcher="*",
+        payload={"tool_name": "Read"},
+        timeout_seconds=60,
+    )
+
+    assert result == {"stdout": "{\"continue\":true}", "stderr": "", "exit_code": "not-a-number", "status": "ok"}
+    logs = service.governance.list_logs(actor="root", source_type=SourceType.hook.value)
+    assert logs[0]["status"] == "error"
+
+
 def test_memory_hook_writes_compatible_tool_call_log(wm_paths) -> None:
     service = _service(wm_paths)
     fake_worker = FakeWorkerService()

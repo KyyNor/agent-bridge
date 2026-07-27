@@ -1,8 +1,15 @@
 import type { ToolCallLog } from '../api/types'
 
 const TOOL_LABELS: Record<string, string> = {
+  'hook:claude_code:version-check': '版本检查',
+  'hook:claude_code:start': '启动记忆服务',
+  'hook:claude_code:context': '获取记忆上下文',
   'hook:claude_code:session-start': '会话启动',
+  'hook:claude_code:session-end': '会话结束',
   'hook:claude_code:session-init': '会话初始化',
+  'hook:claude_code:observation': '记录观察',
+  'hook:claude_code:file-context': '文件上下文',
+  'hook:claude_code:summarize': '总结记忆',
   'hook:claude_code:full-probe': '全量检索探测',
   'hook:claude_code:full_probe': '全量检索探测',
   'builtin:built-in:load_skill': '加载技能',

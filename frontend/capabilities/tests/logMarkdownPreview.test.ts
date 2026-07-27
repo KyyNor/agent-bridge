@@ -31,6 +31,14 @@ test('extractLogMarkdownPreview reads Claude Hook additionalContext for full-pro
   })
 })
 
+test('extractLogMarkdownPreview keeps the Hook preview allowlist strict', () => {
+  const response = responseJson({
+    stdout: JSON.stringify({ hookSpecificOutput: { additionalContext: '# Session initialization' } }),
+  })
+
+  assert.equal(extractLogMarkdownPreview({ tool_name: 'session-init', response_json: response }), null)
+})
+
 test('extractLogMarkdownPreview reads the CodeGraph text result only from its designated content path', () => {
   const preview = extractLogMarkdownPreview({
     tool_name: 'codegraph_explore',

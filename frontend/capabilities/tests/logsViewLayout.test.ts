@@ -23,10 +23,10 @@ test('LogsView conditionally opens only an extracted Markdown preview', () => {
   assert.match(source, /<LogMarkdownPreview[^>]*v-model:open="previewOpen"[^>]*:title="detailMarkdownPreview\.title"[^>]*:markdown="detailMarkdownPreview\.markdown"/)
 })
 
-test('LogMarkdownPreview uses the shared dialog primitives and markdown renderer', () => {
+test('LogMarkdownPreview uses the shared dialog primitives and safe markdown renderer', () => {
   const source = markdownPreview()
-  assert.match(source, /import \{ renderMarkdown \} from '\.\.\/lib\/markdown'/)
+  assert.match(source, /import \{ renderSafeMarkdown \} from '\.\.\/lib\/markdown'/)
   assert.match(source, /import \{ Dialog, DialogContent, DialogHeader, DialogTitle \} from '\.\/ui\/dialog'/)
   assert.match(source, /@update:open="\$emit\('update:open', \$event\)"/)
-  assert.match(source, /v-html="renderMarkdown\(markdown\)"/)
+  assert.match(source, /v-html="renderSafeMarkdown\(markdown\)"/)
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { renderMarkdown } from '../lib/markdown'
+import { renderSafeMarkdown } from '../lib/markdown'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
 
 defineProps<{
@@ -17,7 +17,7 @@ defineEmits<{
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="w-[min(1180px,calc(100vw-2rem))] sm:max-w-[1180px]">
       <DialogHeader><DialogTitle>{{ title }}</DialogTitle></DialogHeader>
-      <div class="prose prose-sm max-h-[70vh] max-w-none overflow-y-auto" v-html="renderMarkdown(markdown)" />
+      <div class="prose prose-sm max-h-[70vh] max-w-none overflow-y-auto" v-html="renderSafeMarkdown(markdown)" />
     </DialogContent>
   </Dialog>
 </template>
