@@ -16,6 +16,10 @@ from agent_bridge.knowledge_management.retrieval_probe.models import (
 from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 from agent_bridge.knowledge_management.retrieval_probe.registry import RetrievalProbeRegistry
 from agent_bridge.knowledge_management.retrieval_probe.service import RetrievalProbeService
+from agent_bridge.knowledge_management.retrieval_probe.extractor import (
+    KeywordExtraction,
+    KeywordExtractionStatus,
+)
 from agent_bridge.knowledge_management.retrieval_probe.tokenizer import (
     extract_probe_keywords,
 )
@@ -38,6 +42,23 @@ class FakeGovernance:
     def log_tool_call(self, **kwargs):
         self.logs.append(kwargs)
         return {"log_id": "call-1"}
+
+
+class FakeExtractor:
+    def extract(self, prompt, *, max_keywords, timeout_seconds):
+        keywords = tuple(extract_probe_keywords(prompt, max_keywords))
+        if len(keywords) < 2:
+            keywords = ("订单", "同步")
+        return KeywordExtraction(
+            status=KeywordExtractionStatus.success,
+            keywords=keywords,
+            model="fake",
+        )
+
+
+class FailedExtractor:
+    def extract(self, prompt, *, max_keywords, timeout_seconds):
+        return KeywordExtraction(status=KeywordExtractionStatus.invalid_output, error_type="invalid_output")
 
 
 @dataclass
@@ -98,6 +119,7 @@ def service_with(
             store=FakeStore(profile_status),
             registry=registry_with(*adapters),
             governance=governance,
+            keyword_extractor=FakeExtractor(),
             concurrency=8,
         ),
         governance,
@@ -136,6 +158,23 @@ async def test_probe_queries_every_keyword_and_target_and_deduplicates_candidate
     assert governance.logs[0]["tool_name"] == "retrieval-probe"
     assert governance.logs[0]["request"]["prompt_length"] == 4
     assert "订单同步" not in str(governance.logs[0]["request"])
+
+
+@pytest.mark.asyncio
+async def test_probe_does_not_search_when_keyword_extraction_fails() -> None:
+    adapter = FakeAdapter(source_type="artifact")
+    governance = FakeGovernance()
+    service = RetrievalProbeService(
+        store=FakeStore(),
+        registry=registry_with(adapter),
+        governance=governance,
+        keyword_extractor=FailedExtractor(),
+    )
+    response = await service.probe(actor="root", profile_key="dev", prompt="任意问题")
+    assert response.keywords == ()
+    assert response.targets == ()
+    assert adapter.calls == []
+    assert response.keyword_extraction.status is KeywordExtractionStatus.invalid_output
 
 
 @pytest.mark.asyncio
@@ -326,10 +365,9 @@ async def test_probe_rejects_missing_or_disabled_profile() -> None:
     ("kwargs", "message"),
     [
         ({"prompt": "  "}, "prompt is required"),
-        ({"prompt": "怎么如何"}, "prompt has no searchable keywords"),
-        ({"keyword_limit": 0}, "keyword_limit must be positive"),
+        ({"keyword_limit": 0}, "keyword_limit must be between 2 and 8"),
         ({"result_limit": 0}, "result_limit must be positive"),
-        ({"timeout_seconds": 0}, "timeout_seconds must be positive"),
+        ({"timeout_seconds": 0}, "timeout_seconds must be between 0 and 20"),
     ],
 )
 async def test_probe_validates_request_boundaries(kwargs, message) -> None:
@@ -341,10 +379,10 @@ async def test_probe_validates_request_boundaries(kwargs, message) -> None:
         await service.probe(**defaults)
 
 
-def test_agent_bridge_service_registers_all_builtin_probe_adapters(wm_paths) -> None:
+def test_agent_bridge_service_registers_artifact_probe_adapter_only(wm_paths) -> None:
     service = AgentBridgeService.create(wm_paths, {"root"})
 
     assert [
         adapter.source_type
         for adapter in service.retrieval_probe.registry.list()
-    ] == ["wiki", "codegraph", "memory", "artifact"]
+    ] == ["artifact"]

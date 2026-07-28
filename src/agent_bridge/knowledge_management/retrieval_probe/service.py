@@ -17,6 +17,7 @@ from agent_bridge.hooks.claude_code import audit_claude_code_hook_call
 from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 from .adapters import RetrievalProbeAdapter
+from .extractor import KeywordExtraction, KeywordExtractionStatus, ProbeKeywordExtractor
 from .models import (
     KeywordProbeResult,
     ProbeResponse,
@@ -26,7 +27,6 @@ from .models import (
 )
 from .registry import RetrievalProbeRegistry
 from .reminder import render_probe_reminder
-from .tokenizer import extract_probe_keywords
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ class RetrievalProbeService:
         store: Any,
         registry: RetrievalProbeRegistry,
         governance: Any,
+        keyword_extractor: ProbeKeywordExtractor,
         concurrency: int = 8,
     ) -> None:
         if concurrency < 1:
@@ -61,6 +62,7 @@ class RetrievalProbeService:
         self.store = store
         self.registry = registry
         self.governance = governance
+        self.keyword_extractor = keyword_extractor
         self.concurrency = concurrency
 
     async def probe(
@@ -82,12 +84,31 @@ class RetrievalProbeService:
             result_limit=result_limit,
             timeout_seconds=timeout_seconds,
         )
-        keywords = tuple(extract_probe_keywords(prompt, keyword_limit))
-        if not keywords:
-            raise ValidationError("prompt has no searchable keywords")
-
         probe_id = new_run_id("probe")
         started = time.monotonic()
+        deadline = started + timeout_seconds
+        extraction = await asyncio.to_thread(
+            self.keyword_extractor.extract,
+            prompt,
+            max_keywords=keyword_limit,
+            timeout_seconds=min(10.0, max(0.0, deadline - time.monotonic())),
+        )
+        if extraction.status is not KeywordExtractionStatus.success:
+            response = ProbeResponse(
+                probe_id=probe_id,
+                profile_key=profile_key,
+                session_id=session_id,
+                keywords=(),
+                source_statuses={},
+                targets=(),
+                duration_ms=int((time.monotonic() - started) * 1000),
+                keyword_extraction=extraction,
+            )
+            if audit:
+                self._audit(actor=actor, profile_key=profile_key, prompt=prompt, response=response,
+                            keyword_limit=keyword_limit, result_limit=result_limit, timeout_seconds=timeout_seconds)
+            return response
+        keywords = extraction.keywords
         logger.info(
             "全量检索探测开始 probe=%s profile=%s 关键词数=%d",
             probe_id,
@@ -95,7 +116,6 @@ class RetrievalProbeService:
             len(keywords),
         )
         adapters = self.registry.list()
-        deadline = started + timeout_seconds
         targets_by_source, source_boot_status = await self._discover_targets(
             probe_id=probe_id,
             actor=actor,
@@ -137,6 +157,7 @@ class RetrievalProbeService:
             source_statuses=source_statuses,
             targets=tuple(summaries),
             duration_ms=duration_ms,
+            keyword_extraction=extraction,
         )
         if audit:
             self._audit(
@@ -299,12 +320,12 @@ class RetrievalProbeService:
             raise ValidationError("profile_key is required")
         if not prompt.strip():
             raise ValidationError("prompt is required")
-        if keyword_limit < 1:
-            raise ValidationError("keyword_limit must be positive")
+        if not 2 <= keyword_limit <= 8:
+            raise ValidationError("keyword_limit must be between 2 and 8")
         if result_limit < 1:
             raise ValidationError("result_limit must be positive")
-        if timeout_seconds <= 0:
-            raise ValidationError("timeout_seconds must be positive")
+        if not 0 < timeout_seconds <= 20:
+            raise ValidationError("timeout_seconds must be between 0 and 20")
         profile = self.store.get_project_profile(profile_key)
         if profile is None:
             raise NotFound("profile not found")
@@ -493,6 +514,12 @@ class RetrievalProbeService:
                     "result_limit": result_limit,
                     "timeout_seconds": timeout_seconds,
                     "session_id": response.session_id,
+                    "keyword_extraction": {
+                        "status": response.keyword_extraction.status.value,
+                        "model": response.keyword_extraction.model,
+                        "duration_ms": response.keyword_extraction.duration_ms,
+                        "error_type": response.keyword_extraction.error_type,
+                    },
                 },
                 response={
                     "probe_id": response.probe_id,

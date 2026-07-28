@@ -251,33 +251,18 @@ class AgentBridgeService:
         self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
         from agent_bridge.knowledge_management.retrieval_probe.adapters import (
             ArtifactProbeAdapter,
-            CodeGraphProbeAdapter,
-            MemoryProbeAdapter,
-            WikiProbeAdapter,
         )
+        from agent_bridge.knowledge_management.retrieval_probe.extractor import OpenAIChatProbeKeywordExtractor
         from agent_bridge.knowledge_management.retrieval_probe.registry import RetrievalProbeRegistry
         from agent_bridge.knowledge_management.retrieval_probe.service import RetrievalProbeService
 
         retrieval_probe_registry = RetrievalProbeRegistry()
-        retrieval_probe_registry.register(
-            WikiProbeAdapter(
-                store=store,
-                governance=self.governance,
-                search=self.search,
-            )
-        )
-        retrieval_probe_registry.register(
-            CodeGraphProbeAdapter(
-                codegraph=self.codegraph,
-                governance=self.governance,
-            )
-        )
-        retrieval_probe_registry.register(MemoryProbeAdapter(memory=self.memory))
         retrieval_probe_registry.register(ArtifactProbeAdapter(workflows=self.workflows))
         self.retrieval_probe = RetrievalProbeService(
             store=store,
             registry=retrieval_probe_registry,
             governance=self.governance,
+            keyword_extractor=OpenAIChatProbeKeywordExtractor(store=store),
         )
         self.plugin_update_scheduler = PluginUpdateScheduler(service=self, store=store, admins=admins)
         self.workflow_scheduler = WorkflowScheduler(

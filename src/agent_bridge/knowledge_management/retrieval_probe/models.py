@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from .extractor import KeywordExtraction, KeywordExtractionStatus
 
 
 class ProbeStatus(str, Enum):
@@ -78,6 +80,9 @@ class ProbeResponse:
     source_statuses: dict[str, ProbeStatus]
     targets: tuple[TargetProbeSummary, ...]
     duration_ms: int
+    keyword_extraction: KeywordExtraction = field(
+        default_factory=lambda: KeywordExtraction(status=KeywordExtractionStatus.not_configured)
+    )
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -91,4 +96,10 @@ class ProbeResponse:
             },
             "targets": [target.to_payload() for target in self.targets],
             "duration_ms": self.duration_ms,
+            "keyword_extraction": {
+                "status": self.keyword_extraction.status.value,
+                "model": self.keyword_extraction.model,
+                "duration_ms": self.keyword_extraction.duration_ms,
+                "error_type": self.keyword_extraction.error_type,
+            },
         }

@@ -14,9 +14,9 @@ class RetrievalProbeRequest(BaseModel):
     profile_key: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
     session_id: str = ""
-    keyword_limit: int = Field(default=8, ge=1, le=32)
+    keyword_limit: int = Field(default=8, ge=2, le=8)
     result_limit: int = Field(default=3, ge=1, le=20)
-    timeout_seconds: float = Field(default=10.0, ge=0.1, le=30.0)
+    timeout_seconds: float = Field(default=20.0, gt=0, le=20.0)
 
 
 def create_retrieval_probe_routes(service, actor) -> APIRouter:
