@@ -43,6 +43,22 @@ test('extractMcpStructuredPayload unwraps a JSON string only inside the MCP resp
   })
 })
 
+test('extractMcpStructuredPayload unwraps a JSON result nested inside structured', () => {
+  const result = extractMcpStructuredPayload(JSON.stringify({
+    service: 'example',
+    tool_name: 'inspect',
+    success: true,
+    result: {
+      structured: {
+        result: '{\n  "name": "test"\n}',
+      },
+      content: [],
+    },
+  }))
+
+  assert.deepEqual(result?.structured, { name: 'test' })
+})
+
 test('extractMcpStructuredPayload rejects non-MCP and non-JSON structured strings', () => {
   assert.equal(extractMcpStructuredPayload('{"result":{"structured":"plain text"}}'), null)
   assert.equal(extractMcpStructuredPayload(JSON.stringify({

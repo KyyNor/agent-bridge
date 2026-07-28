@@ -96,7 +96,7 @@ async function copyContent(content: string) {
               :variant="jsonView === 'structured' ? 'outline' : 'ghost'"
               :class="jsonView === 'structured' ? 'bg-card shadow-sm' : ''"
               @click="jsonView = 'structured'"
-            >structured</Button>
+            >结构化响应</Button>
           </div>
           <div v-if="jsonView === 'structured'" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>service <span class="font-mono text-foreground">{{ mcpStructured.service }}</span></span>

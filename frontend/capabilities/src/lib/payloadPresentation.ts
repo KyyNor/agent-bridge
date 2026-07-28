@@ -90,18 +90,15 @@ export function extractMcpStructuredPayload(content: string): McpStructuredPaylo
     : typeof envelope.tool === 'string' ? envelope.tool : ''
   if (!toolName) return null
 
-  const rawStructured = envelope.result.structured
-  let structured: unknown
-  if (typeof rawStructured === 'string') {
-    try {
-      structured = JSON.parse(rawStructured)
-    } catch {
-      return null
-    }
-  } else {
-    structured = rawStructured
+  let structured = parseJsonContainer(envelope.result.structured)
+  if (!structured) return null
+
+  // 部分 MCP 在 structured 外又包一层 { result: "{...}" }。该 result
+  // 是调用方真正关心的响应正文，解析成功时优先展示它；完整信封仍可切回查看。
+  if (isRecord(structured)) {
+    const nestedResult = parseJsonContainer(structured.result)
+    if (nestedResult) structured = nestedResult
   }
-  if (!isJsonContainer(structured)) return null
 
   return {
     service: envelope.service,
@@ -117,4 +114,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isJsonContainer(value: unknown): value is Record<string, unknown> | unknown[] {
   return Array.isArray(value) || isRecord(value)
+}
+
+function parseJsonContainer(value: unknown): Record<string, unknown> | unknown[] | null {
+  if (isJsonContainer(value)) return value
+  if (typeof value !== 'string') return null
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return isJsonContainer(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }

@@ -29,7 +29,7 @@ test('payload detail dialog shares Markdown and syntax-highlighted rendering', a
   assert.match(source, /v-else-if="language === 'json'"/)
   assert.match(source, /extractMcpStructuredPayload/)
   assert.match(source, /完整响应/)
-  assert.match(source, />structured<\/Button>/)
+  assert.match(source, />结构化响应<\/Button>/)
   assert.match(source, /<JsonViewer/)
   assert.match(source, /<PayloadCodeViewer/)
   assert.match(source, /\.payload-markdown\{/)
