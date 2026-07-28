@@ -311,11 +311,11 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     probe_hook = probe_entries[0]["hooks"][0]
     assert probe_hook["async"] is True
     assert "asyncRewake" not in probe_hook
-    assert probe_hook["timeout"] == 15
+    assert probe_hook["timeout"] == 25
     probe_argv = shlex.split(probe_hook["command"])
     assert probe_argv[probe_argv.index("--profile") + 1] == "safe-readonly"
     assert probe_argv[probe_argv.index("--server-url") + 1] == "http://127.0.0.1:8765"
-    assert probe_argv[probe_argv.index("--timeout") + 1] == "12"
+    assert probe_argv[probe_argv.index("--timeout") + 1] == "20"
     assert probe_argv[probe_argv.index("--agent-bridge-hook-id") + 1] == "agent-bridge-retrieval-probe"
 
 

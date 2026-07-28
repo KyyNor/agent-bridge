@@ -135,7 +135,7 @@ def test_probe_hook_forwards_raw_payload_and_server_stdout(monkeypatch) -> None:
             },
             "hook_timeout_seconds": 12,
         },
-        "timeout": 14.0,
+        "timeout": 22.0,
     }
 
 

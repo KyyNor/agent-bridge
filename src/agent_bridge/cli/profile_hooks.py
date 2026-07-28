@@ -16,6 +16,8 @@ from agent_bridge.knowledge_management.memory.models import NOOP_HOOK_STDOUT
 
 
 logger = logging.getLogger(__name__)
+RETRIEVAL_PROBE_TIMEOUT_SECONDS = 20
+RETRIEVAL_PROBE_CLIENT_TIMEOUT_SECONDS = 22.0
 
 profile_hook_app = typer.Typer(
     help="手工调用的 Profile Hook",
@@ -40,7 +42,7 @@ def retrieval_probe_hook(
     timeout: Annotated[
         int,
         typer.Option("--timeout", min=1, max=30, help="探测超时秒数"),
-    ] = 12,
+    ] = RETRIEVAL_PROBE_TIMEOUT_SECONDS,
     hook_id: Annotated[
         str,
         typer.Option("--agent-bridge-hook-id", hidden=True),
@@ -66,7 +68,7 @@ def retrieval_probe_hook(
                 "payload": payload,
                 "hook_timeout_seconds": timeout,
             },
-            timeout=float(timeout + 2),
+            timeout=RETRIEVAL_PROBE_CLIENT_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         logger.warning(

@@ -25,6 +25,8 @@ AGENT_BRIDGE_HOOK_MARKERS = (
     AGENT_BRIDGE_MEMORY_HOOK_MARKER,
     AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER,
 )
+RETRIEVAL_PROBE_TIMEOUT_SECONDS = 20
+RETRIEVAL_PROBE_COMMAND_TIMEOUT_SECONDS = 25
 
 CLAUDE_MEM_COMPATIBLE_HOOKS = {
     "Setup": [
@@ -218,10 +220,10 @@ def _install_profile_hooks(
                     "command": _agent_bridge_retrieval_hook_command(
                         profile=profile,
                         server_url=server_url,
-                        timeout=12,
+                        timeout=RETRIEVAL_PROBE_TIMEOUT_SECONDS,
                     ),
                     "async": True,
-                    "timeout": 15,
+                    "timeout": RETRIEVAL_PROBE_COMMAND_TIMEOUT_SECONDS,
                 }
             ]
         }
