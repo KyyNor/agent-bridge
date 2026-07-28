@@ -83,12 +83,12 @@ CodeGraph、Memory 和 Artifact 分别通过 `RetrievalProbeAdapter` 注册，�
 负责分词、并发 deadline、状态聚合和审计，不按来源类型建立中心分发链。探测只返回
 资源级命中计数和建议工具，不返回正文；Wiki 不调用 `wiki_ask`，CodeGraph 不调用
 Explore。供外部调用的 `POST /retrieval/probe` 与 Claude Code Hook 的
-`POST /retrieval/hooks/claude-code/full-probe` 路由分离：CLI 只转发原始 Hook
-payload，服务端负责生成标准 `additionalContext` 输出并写入通用 Hook 审计（审计保留
-原始 prompt）。`profile use` 会自动、幂等安装该 Hook，并保留用户已有 Hook。
+`POST /retrieval/hooks/claude-code/full-probe` 路由分离：CLI 只转发原始 Hook payload，
+服务端使用系统配置的 OpenAI Chat 小模型提取 2–8 个短句，并仅检索 current 工作流产出物；
+抽取失败不得回退 Jieba 短词检索。服务端负责生成标准 `additionalContext` 输出并写入通用
+Hook 审计（审计保留原始 prompt）。`profile use` 会自动、幂等安装该 Hook，并保留用户已有 Hook。
 `CLAUDE.md` 托管块只补充
-`<system-reminder>` 是系统补充信息的语义说明。当前关键词仍使用确定性
-Jieba/标识符规则，尚未接入小模型查询改写。
+`<system-reminder>` 是系统补充信息的语义说明。
 
 ## Coding Agent
 

@@ -34,7 +34,9 @@ UserPromptSubmit
 请求具有统一的整体 deadline，超时后仍会返回已经完成的部分结果。后端不可用、
 超时和正常无命中分别表示为 `unavailable`、`timeout` 和 `no_hit`。
 
-当前关键词由确定性 Jieba 和 ASCII 标识符规则生成，尚未接入小模型查询改写。
+关键词由系统配置中的 OpenAI Chat 兼容小模型提取为 2–8 个业务短句；配置未完成、模型调用
+失败、超时或输出不合法时会静默结束，不回退短词分词。当前只搜索 Profile 范围内的 current
+工作流产出物；模型抽取最多 10 秒，完整探测最多 20 秒。
 
 ## 前置条件
 
@@ -175,9 +177,9 @@ curl -X POST http://127.0.0.1:8765/retrieval/probe \
 
 参数边界：
 
-- `keyword_limit`：1–32，默认 8。
+- `keyword_limit`：2–8，默认 8。
 - `result_limit`：1–20，默认 3。
-- `timeout_seconds`：0.1–30 秒，默认 10 秒。
+- `timeout_seconds`：大于 0 且不超过 20 秒，默认 20 秒。
 
 ## 临时停用
 

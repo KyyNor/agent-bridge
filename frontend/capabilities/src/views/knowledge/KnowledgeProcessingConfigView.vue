@@ -2,7 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { CronExpressionParser } from 'cron-parser'
 import { api } from '../../api/client'
-import type { AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, SchedulerStatus } from '../../api/types'
+import type { AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, RetrievalProbeLlmConfig, SchedulerStatus } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -41,6 +41,11 @@ const claudeMemConfig = ref<ClaudeMemConfig | null>(null)
 const claudeMemForm = ref({ base_url: '', model: '', auth_token: '', api_key: '', clear_auth_token: false, clear_api_key: false })
 const claudeMemSaving = ref(false)
 const claudeMemError = ref('')
+
+const retrievalProbeLlmConfig = ref<RetrievalProbeLlmConfig | null>(null)
+const retrievalProbeLlmForm = ref({ base_url: '', model: '', api_key: '', clear_api_key: false })
+const retrievalProbeLlmSaving = ref(false)
+const retrievalProbeLlmError = ref('')
 
 const agentRuntimeConfig = ref<AgentRuntimeConfig>({ default_backend: 'claude', backends: [] })
 const agentRuntimeSaving = ref(false)
@@ -83,7 +88,7 @@ const isPageIndex = computed(() => backendForm.value.backend_type === 'pageindex
 const supportsModelConfig = computed(() => isWeknora.value || isPageIndex.value)
 
 onMounted(async () => {
-  await Promise.all([loadSyncConfig(), loadClaudeMemConfig(), loadAgentRuntimeConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
+  await Promise.all([loadSyncConfig(), loadClaudeMemConfig(), loadRetrievalProbeLlmConfig(), loadAgentRuntimeConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
   loading.value = false
 })
 
@@ -105,6 +110,18 @@ async function loadClaudeMemConfig() {
     }
   } catch {
     claudeMemConfig.value = null
+  }
+}
+
+async function loadRetrievalProbeLlmConfig() {
+  try {
+    const config = await api.getRetrievalProbeLlmConfig()
+    retrievalProbeLlmConfig.value = config
+    retrievalProbeLlmForm.value = { base_url: config.base_url, model: config.model, api_key: '', clear_api_key: false }
+    retrievalProbeLlmError.value = ''
+  } catch (e: any) {
+    retrievalProbeLlmConfig.value = null
+    retrievalProbeLlmError.value = e.message || '无法加载全量探测关键词模型配置'
   }
 }
 
@@ -284,6 +301,24 @@ async function saveClaudeMemConfig() {
     claudeMemError.value = e.message || '保存失败'
   }
   claudeMemSaving.value = false
+}
+
+async function saveRetrievalProbeLlmConfig() {
+  retrievalProbeLlmSaving.value = true
+  retrievalProbeLlmError.value = ''
+  try {
+    const saved = await api.saveRetrievalProbeLlmConfig({
+      base_url: retrievalProbeLlmForm.value.base_url,
+      model: retrievalProbeLlmForm.value.model,
+      api_key: retrievalProbeLlmForm.value.api_key || null,
+      clear_api_key: retrievalProbeLlmForm.value.clear_api_key,
+    })
+    retrievalProbeLlmConfig.value = saved
+    retrievalProbeLlmForm.value = { base_url: saved.base_url, model: saved.model, api_key: '', clear_api_key: false }
+  } catch (e: any) {
+    retrievalProbeLlmError.value = e.message || '保存失败'
+  }
+  retrievalProbeLlmSaving.value = false
 }
 
 function normalizeFixedAgentRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
@@ -800,6 +835,42 @@ async function deleteBackend(slug: string) {
             </Button>
             <span v-if="claudeMemError" class="text-xs text-destructive">{{ claudeMemError }}</span>
             <span v-else class="text-xs text-muted-foreground">新配置会在下一次 worker 启动或 hook 调用时生效</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardContent class="space-y-4 p-5">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <div class="text-sm font-medium">全量探测关键词模型</div>
+            <div class="mt-1 text-xs text-muted-foreground">全局共用的小模型连接，用于把问题提炼为工作流产物检索短句</div>
+          </div>
+          <Button variant="outline" size="sm" @click="loadRetrievalProbeLlmConfig">刷新</Button>
+        </div>
+        <div v-if="!retrievalProbeLlmConfig" class="py-4 text-center text-sm text-muted-foreground">{{ retrievalProbeLlmError || '无法获取配置' }}</div>
+        <div v-else class="space-y-4">
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm">Base URL</div>
+            <Input v-model="retrievalProbeLlmForm.base_url" placeholder="http://127.0.0.1:8000/v1" class="font-mono text-xs" />
+          </div>
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm">Model</div>
+            <Input v-model="retrievalProbeLlmForm.model" placeholder="qwen2.5-3b-instruct" class="font-mono text-xs" />
+          </div>
+          <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
+            <div class="text-sm">API Key</div>
+            <div class="flex items-center gap-3">
+              <Input v-model="retrievalProbeLlmForm.api_key" type="password" placeholder="留空保持不变" class="font-mono text-xs" :disabled="retrievalProbeLlmForm.clear_api_key" />
+              <StatusBadge :status="retrievalProbeLlmConfig.api_key_set ? 'enabled' : 'disabled'" :label="retrievalProbeLlmConfig.api_key_set ? '已配置' : '未配置'" />
+              <label class="flex items-center gap-2 text-xs text-muted-foreground"><input v-model="retrievalProbeLlmForm.clear_api_key" type="checkbox" class="h-4 w-4" />清除</label>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <Button @click="saveRetrievalProbeLlmConfig" :disabled="retrievalProbeLlmSaving" size="sm">{{ retrievalProbeLlmSaving ? '保存中...' : '保存配置' }}</Button>
+            <span v-if="retrievalProbeLlmError" class="text-xs text-destructive">{{ retrievalProbeLlmError }}</span>
+            <span v-else class="text-xs text-muted-foreground">模型抽取最多 10 秒，完整探测最多 20 秒；当前仅搜索工作流产物。</span>
           </div>
         </div>
       </CardContent>

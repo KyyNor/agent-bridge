@@ -5,6 +5,8 @@ import type {
   CatalogSource,
   ClaudeMemConfig,
   ClaudeMemConfigUpdate,
+  RetrievalProbeLlmConfig,
+  RetrievalProbeLlmConfigUpdate,
   CodeGraphStatus,
   CodeGraphNode,
   CodeGraphExploreResult,
@@ -412,6 +414,9 @@ export const api = {
   getClaudeMemConfig: () => get<ClaudeMemConfig>('/claude-mem/config'),
   saveClaudeMemConfig: (config: ClaudeMemConfigUpdate) =>
     post<ClaudeMemConfig>('/claude-mem/config', config),
+  getRetrievalProbeLlmConfig: () => get<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config'),
+  saveRetrievalProbeLlmConfig: (config: RetrievalProbeLlmConfigUpdate) =>
+    put<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config', config),
 
   // Workflows
   listWorkflows: () => get<WorkflowDefinition[]>('/workflows'),

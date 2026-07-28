@@ -1200,6 +1200,20 @@ export interface ClaudeMemConfigUpdate {
   clear_api_key?: boolean
 }
 
+export interface RetrievalProbeLlmConfig {
+  base_url: string
+  model: string
+  api_key_set: boolean
+  updated_at: string | null
+}
+
+export interface RetrievalProbeLlmConfigUpdate {
+  base_url: string
+  model: string
+  api_key?: string | null
+  clear_api_key?: boolean
+}
+
 export interface SingleSchedulerStatus {
   running: boolean
   cron: string
