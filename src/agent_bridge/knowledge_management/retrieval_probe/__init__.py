@@ -9,6 +9,12 @@ from .models import (
 )
 from .service import RetrievalProbeService
 from .tokenizer import extract_probe_keywords
+from .extractor import (
+    KeywordExtraction,
+    KeywordExtractionStatus,
+    OpenAIChatProbeKeywordExtractor,
+    ProbeKeywordExtractor,
+)
 
 __all__ = [
     "KeywordProbeResult",
@@ -18,4 +24,8 @@ __all__ = [
     "TargetProbeSummary",
     "RetrievalProbeService",
     "extract_probe_keywords",
+    "KeywordExtraction",
+    "KeywordExtractionStatus",
+    "OpenAIChatProbeKeywordExtractor",
+    "ProbeKeywordExtractor",
 ]
