@@ -12,6 +12,14 @@ export interface PayloadPresentation {
   language: PayloadLanguage
 }
 
+/** MCP execute 的统一信封中，可单独展示的结构化结果。 */
+export interface McpStructuredPayload {
+  service: string
+  toolName: string
+  success: boolean | null
+  structured: Record<string, unknown> | unknown[]
+}
+
 export function payloadText(value: unknown): string {
   if (typeof value === 'string') return value
   if (value == null) return ''
@@ -59,4 +67,54 @@ export function preparePayloadPresentation(value: unknown, hints: PayloadHints =
     content: language === 'json' ? formatJsonValue(raw) : raw,
     language,
   }
+}
+
+/**
+ * 识别 MetaMCP execute 的响应信封。
+ *
+ * 一些上游 MCP 会把 structuredContent 再编码为 JSON 字符串。这里仅接受完整的
+ * JSON 对象或数组，避免把普通文本错误地当成结构化结果；原始响应仍由调用方保留。
+ */
+export function extractMcpStructuredPayload(content: string): McpStructuredPayload | null {
+  let envelope: unknown
+  try {
+    envelope = JSON.parse(content)
+  } catch {
+    return null
+  }
+  if (!isRecord(envelope) || !isRecord(envelope.result)) return null
+  if (typeof envelope.service !== 'string') return null
+
+  const toolName = typeof envelope.tool_name === 'string'
+    ? envelope.tool_name
+    : typeof envelope.tool === 'string' ? envelope.tool : ''
+  if (!toolName) return null
+
+  const rawStructured = envelope.result.structured
+  let structured: unknown
+  if (typeof rawStructured === 'string') {
+    try {
+      structured = JSON.parse(rawStructured)
+    } catch {
+      return null
+    }
+  } else {
+    structured = rawStructured
+  }
+  if (!isJsonContainer(structured)) return null
+
+  return {
+    service: envelope.service,
+    toolName,
+    success: typeof envelope.success === 'boolean' ? envelope.success : null,
+    structured,
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isJsonContainer(value: unknown): value is Record<string, unknown> | unknown[] {
+  return Array.isArray(value) || isRecord(value)
 }

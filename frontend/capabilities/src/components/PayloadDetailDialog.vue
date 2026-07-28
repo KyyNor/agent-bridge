@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Check, Copy } from '@lucide/vue'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
 import { Button } from './ui/button'
 import JsonViewer from './JsonViewer.vue'
 import PayloadCodeViewer from './PayloadCodeViewer.vue'
 import { renderMarkdown } from '../lib/markdown'
-import { payloadLanguageLabel, type PayloadLanguage } from '../lib/payloadPresentation'
+import {
+  extractMcpStructuredPayload,
+  payloadLanguageLabel,
+  type PayloadLanguage,
+} from '../lib/payloadPresentation'
+import { formatJsonValue } from '../lib/jsonDisplay'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   title: string
   label?: string
@@ -22,7 +27,27 @@ defineEmits<{
 
 const copied = ref(false)
 const copyFailed = ref(false)
+const jsonView = ref<'raw' | 'structured'>('raw')
 let resetCopyStateTimer: ReturnType<typeof setTimeout> | undefined
+
+const mcpStructured = computed(() => (
+  props.language === 'json' ? extractMcpStructuredPayload(props.content) : null
+))
+const displayedJson = computed(() => (
+  jsonView.value === 'structured' && mcpStructured.value
+    ? mcpStructured.value.structured
+    : props.content
+))
+const copyText = computed(() => (
+  jsonView.value === 'structured' && mcpStructured.value
+    ? formatJsonValue(mcpStructured.value.structured)
+    : props.content
+))
+
+watch(
+  () => [props.content, props.language],
+  () => { jsonView.value = 'raw' },
+)
 
 async function copyContent(content: string) {
   copied.value = false
@@ -50,7 +75,7 @@ async function copyContent(content: string) {
             <DialogTitle>{{ title }} · {{ payloadLanguageLabel(language) }}</DialogTitle>
             <div v-if="label" class="mt-1 text-xs text-muted-foreground">{{ label }}</div>
           </div>
-          <Button variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 text-xs" @click="copyContent(content)">
+          <Button variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 text-xs" @click="copyContent(copyText)">
             <Check v-if="copied" :size="13" />
             <Copy v-else :size="13" />
             {{ copied ? '已复制' : copyFailed ? '复制失败' : '复制' }}
@@ -58,6 +83,29 @@ async function copyContent(content: string) {
         </div>
       </DialogHeader>
       <div class="min-h-0 overflow-auto">
+        <div v-if="mcpStructured" class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div class="inline-flex rounded-md bg-secondary p-0.5" role="group" aria-label="MCP JSON 视图">
+            <Button
+              size="xs"
+              :variant="jsonView === 'raw' ? 'outline' : 'ghost'"
+              :class="jsonView === 'raw' ? 'bg-card shadow-sm' : ''"
+              @click="jsonView = 'raw'"
+            >完整响应</Button>
+            <Button
+              size="xs"
+              :variant="jsonView === 'structured' ? 'outline' : 'ghost'"
+              :class="jsonView === 'structured' ? 'bg-card shadow-sm' : ''"
+              @click="jsonView = 'structured'"
+            >structured</Button>
+          </div>
+          <div v-if="jsonView === 'structured'" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>service <span class="font-mono text-foreground">{{ mcpStructured.service }}</span></span>
+            <span>tool <span class="font-mono text-foreground">{{ mcpStructured.toolName }}</span></span>
+            <span v-if="mcpStructured.success !== null" :class="mcpStructured.success ? 'text-success-soft-fg' : 'text-destructive-soft-fg'">
+              {{ mcpStructured.success ? '成功' : '失败' }}
+            </span>
+          </div>
+        </div>
         <div
           v-if="language === 'markdown'"
           class="payload-markdown rounded-md border bg-background p-4"
@@ -65,7 +113,7 @@ async function copyContent(content: string) {
         />
         <JsonViewer
           v-else-if="language === 'json'"
-          :value="content"
+          :value="displayedJson"
           max-height="min(68vh, 720px)"
         />
         <PayloadCodeViewer

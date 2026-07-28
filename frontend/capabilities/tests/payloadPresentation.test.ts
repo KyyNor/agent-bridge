@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { detectPayloadLanguage, preparePayloadPresentation } from '../src/lib/payloadPresentation.ts'
+import {
+  detectPayloadLanguage,
+  extractMcpStructuredPayload,
+  preparePayloadPresentation,
+} from '../src/lib/payloadPresentation.ts'
 
 test('detectPayloadLanguage honors content metadata before content inference', () => {
   assert.equal(detectPayloadLanguage('# heading', { contentType: 'text/markdown' }), 'markdown')
@@ -17,4 +21,33 @@ test('preparePayloadPresentation formats structured JSON before opening it', () 
     content: '{\n  "ok": true\n}',
     language: 'json',
   })
+})
+
+test('extractMcpStructuredPayload unwraps a JSON string only inside the MCP response envelope', () => {
+  const result = extractMcpStructuredPayload(JSON.stringify({
+    service: 'codegraph',
+    tool: 'explore',
+    tool_name: 'explore',
+    success: true,
+    result: {
+      structured: JSON.stringify({ matches: [{ path: 'src/app.py' }] }),
+      content: [],
+    },
+  }))
+
+  assert.deepEqual(result, {
+    service: 'codegraph',
+    toolName: 'explore',
+    success: true,
+    structured: { matches: [{ path: 'src/app.py' }] },
+  })
+})
+
+test('extractMcpStructuredPayload rejects non-MCP and non-JSON structured strings', () => {
+  assert.equal(extractMcpStructuredPayload('{"result":{"structured":"plain text"}}'), null)
+  assert.equal(extractMcpStructuredPayload(JSON.stringify({
+    service: 'codegraph',
+    tool: 'explore',
+    result: { structured: 'plain text' },
+  })), null)
 })
