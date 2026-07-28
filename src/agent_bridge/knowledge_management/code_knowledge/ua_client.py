@@ -19,7 +19,8 @@ from agent_bridge.agent_runtime.events import message_log_record
 
 logger = logging.getLogger(__name__)
 
-UA_DIR = ".understand-anything"
+UA_DIR_NEW = ".ua"
+UA_DIR_LEGACY = ".understand-anything"
 GRAPH_FILE = "knowledge-graph.json"
 META_FILE = "meta.json"
 SKILL_DIR_NAME = ".claude/skills"
@@ -38,7 +39,7 @@ ANALYZE_PROMPT = """\
 Analyze this repository using the loaded `understand` skill: {project_dir}
 
 Requirements:
-- Generate .understand-anything/knowledge-graph.json
+- Generate knowledge-graph.json in the understand skill's default output directory
 - Use --language zh
 - Prefer incremental update if the graph already exists
 - Do not modify source code
@@ -219,6 +220,13 @@ class UnderstandAnythingClient:
         self._agent_service = agent_service
         self.pool = DashboardPool(max_sessions=20, idle_timeout=3600)
 
+    def _ua_dir(self, project_dir: Path) -> Path:
+        """UA 2.9.0 起新项目默认写入 ``.ua``；优先读新目录,不存在时回退到 ``.understand-anything``。"""
+        new_dir = project_dir / UA_DIR_NEW
+        if new_dir.is_dir():
+            return new_dir
+        return project_dir / UA_DIR_LEGACY
+
     def _ua_repo_dir(self) -> Path:
         if self._root is not None:
             return self._root / "plugins" / "understand-anything"
@@ -394,7 +402,7 @@ class UnderstandAnythingClient:
             )
             return UAAnalyzeResult(success=False, error=error, output=output, duration_ms=duration_ms)
 
-        graph_path = project_dir / UA_DIR / GRAPH_FILE
+        graph_path = self._ua_dir(project_dir) / GRAPH_FILE
         if not graph_path.is_file():
             logger.error(
                 "UA 解析错误 repo=%s 原因=%s 耗时=%dms",
@@ -431,7 +439,7 @@ class UnderstandAnythingClient:
         )
 
     def status(self, project_dir: Path, current_commit: str | None = None) -> UAGraphStatus:
-        graph_path = project_dir / UA_DIR / GRAPH_FILE
+        graph_path = self._ua_dir(project_dir) / GRAPH_FILE
         if not graph_path.is_file():
             return UAGraphStatus(graph_exists=False)
 
@@ -468,7 +476,7 @@ class UnderstandAnythingClient:
         )
 
     def summary(self, project_dir: Path) -> UAGraphSummary | None:
-        graph_path = project_dir / UA_DIR / GRAPH_FILE
+        graph_path = self._ua_dir(project_dir) / GRAPH_FILE
         if not graph_path.is_file():
             return None
 
@@ -520,7 +528,7 @@ class UnderstandAnythingClient:
         )
 
     def read_graph_raw(self, project_dir: Path) -> dict[str, Any] | None:
-        graph_path = project_dir / UA_DIR / GRAPH_FILE
+        graph_path = self._ua_dir(project_dir) / GRAPH_FILE
         if not graph_path.is_file():
             return None
         try:
@@ -535,7 +543,7 @@ class UnderstandAnythingClient:
 
     def start_dashboard(self, project_dir: Path, *, timeout: int = 90) -> dict[str, Any]:
         # Check graph exists first
-        if not (project_dir / UA_DIR / GRAPH_FILE).is_file():
+        if not (self._ua_dir(project_dir) / GRAPH_FILE).is_file():
             return {"success": False, "error": "请先运行分析生成知识图谱"}
         dashboard_dir = self._find_dashboard_dir(project_dir)
         if dashboard_dir is None:
@@ -694,7 +702,7 @@ class UnderstandAnythingClient:
         return None
 
     def _read_meta(self, project_dir: Path) -> dict[str, Any] | None:
-        meta_path = project_dir / UA_DIR / META_FILE
+        meta_path = self._ua_dir(project_dir) / META_FILE
         if not meta_path.is_file():
             return None
         try:
