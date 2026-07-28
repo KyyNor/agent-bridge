@@ -312,6 +312,13 @@ class ClaudeMemConfigRequest(BaseModel):
     clear_api_key: bool = False
 
 
+class RetrievalProbeLlmConfigRequest(BaseModel):
+    base_url: str = Field(min_length=1, max_length=2048)
+    model: str = Field(min_length=1, max_length=256)
+    api_key: str | None = Field(default=None, max_length=4096)
+    clear_api_key: bool = False
+
+
 class AgentBackendConfigRequest(BaseModel):
     slug: str
     type: str

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 from typing import Any, Callable
@@ -1214,6 +1215,54 @@ class AgentBridgeService:
         )
         self.memory.worker_service.stop_all_workers()
         return config
+
+    def get_retrieval_probe_llm_config(self, actor: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        return self._public_retrieval_probe_llm_config(
+            self.store.get_retrieval_probe_llm_config()
+        )
+
+    def save_retrieval_probe_llm_config(
+        self,
+        actor: str,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str | None = None,
+        clear_api_key: bool = False,
+    ) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        cleaned_url = base_url.strip().rstrip("/")
+        cleaned_model = model.strip()
+        parsed = urlparse(cleaned_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValidationError("base_url 必须是 http 或 https 的完整地址")
+        if not cleaned_model:
+            raise ValidationError("model 不能为空")
+        if clear_api_key and api_key and api_key.strip():
+            raise ValidationError("不能同时设置和清除 API Key")
+        saved = self.store.save_retrieval_probe_llm_config(
+            base_url=cleaned_url,
+            model=cleaned_model,
+            api_key=api_key.strip() if api_key else None,
+            clear_api_key=clear_api_key,
+        )
+        logger.info(
+            "全量检索探测模型配置已保存 base_url=%s model=%s api_key_set=%s",
+            cleaned_url,
+            cleaned_model,
+            bool(saved["api_key"]),
+        )
+        return self._public_retrieval_probe_llm_config(saved)
+
+    @staticmethod
+    def _public_retrieval_probe_llm_config(config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "base_url": str(config.get("base_url") or ""),
+            "model": str(config.get("model") or ""),
+            "api_key_set": bool(config.get("api_key")),
+            "updated_at": config.get("updated_at"),
+        }
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
         require_admin_user(actor, self.admins)

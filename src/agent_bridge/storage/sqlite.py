@@ -30,6 +30,7 @@ class SQLiteStore(SQLiteStoreFacade):
         from agent_bridge.storage.repositories.knowledge import KnowledgeRepository
         from agent_bridge.storage.repositories.memory import MemoryRepository
         from agent_bridge.storage.repositories.scripts import ScriptsRepository
+        from agent_bridge.storage.repositories.retrieval_probe import RetrievalProbeConfigRepository
         from agent_bridge.storage.repositories.workflows import WorkflowsRepository
 
         self.folders = FolderRepository(db_path, self.connect)
@@ -40,6 +41,7 @@ class SQLiteStore(SQLiteStoreFacade):
         self.codegraph = CodeGraphRepository(db_path, self.connect)
         self.workflows = WorkflowsRepository(db_path, self.connect)
         self.scripts = ScriptsRepository(db_path, self.connect)
+        self.retrieval_probe_config = RetrievalProbeConfigRepository(db_path, self.connect)
         self.agent_runs = AgentRunsRepository(db_path, self.connect, prune_callback=self.maybe_prune_runtime_logs)
 
     def _open_connection(self) -> sqlite3.Connection:

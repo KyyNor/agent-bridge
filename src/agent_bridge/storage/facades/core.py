@@ -8,6 +8,24 @@ from agent_bridge.storage.repositories import revisions as _revisions
 
 
 class CoreFacadeMixin:
+    def get_retrieval_probe_llm_config(self) -> dict[str, Any]:
+        return self.retrieval_probe_config.get_llm_config()
+
+    def save_retrieval_probe_llm_config(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str | None,
+        clear_api_key: bool,
+    ) -> dict[str, Any]:
+        return self.retrieval_probe_config.save_llm_config(
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            clear_api_key=clear_api_key,
+        )
+
     def get_skill_prompt_override(self, skill_name: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM skill_prompts WHERE skill_name = ?", (skill_name,)).fetchone()

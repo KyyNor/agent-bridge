@@ -507,6 +507,13 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   understand_timeout_minutes INTEGER NOT NULL DEFAULT 120,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS retrieval_probe_llm_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  base_url TEXT NOT NULL DEFAULT '',
+  api_key TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
 """
 
 WORKFLOW_SCHEMA = """

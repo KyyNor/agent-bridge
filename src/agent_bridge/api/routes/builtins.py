@@ -10,6 +10,7 @@ from agent_bridge.api.schemas import (
     CodeRepoCategoryRequest,
     CodeRepositoryRequest,
     ClaudeMemConfigRequest,
+    RetrievalProbeLlmConfigRequest,
     KnowledgeSyncConfigRequest,
     ScriptRequest,
     ScriptTestRunRequest,
@@ -171,6 +172,17 @@ def create_builtin_routes(service, actor):
     @router.post("/claude-mem/config")
     def save_claude_mem_config(payload: ClaudeMemConfigRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.save_claude_mem_config(current_actor, **payload.model_dump())
+
+    @router.get("/retrieval-probe/llm-config")
+    def get_retrieval_probe_llm_config(current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.get_retrieval_probe_llm_config(current_actor)
+
+    @router.put("/retrieval-probe/llm-config")
+    def save_retrieval_probe_llm_config(
+        payload: RetrievalProbeLlmConfigRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.save_retrieval_probe_llm_config(current_actor, **payload.model_dump())
 
     # -- Skills --
 
