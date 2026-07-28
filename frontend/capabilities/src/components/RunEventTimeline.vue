@@ -21,6 +21,7 @@
 import { computed, ref, watch } from 'vue'
 import { Bot, ChevronRight } from '@lucide/vue'
 import { Badge } from './ui/badge'
+import JsonViewer from './JsonViewer.vue'
 import PayloadDetailDialog from './PayloadDetailDialog.vue'
 import { useSubagentCollapse } from '../composables/useSubagentCollapse'
 import { groupEventsByActor, subagentStatus, subagentStatusLabel, subagentUsage } from '../lib/workflowEvents'
@@ -32,7 +33,7 @@ import {
   timelineKind,
 } from '../lib/runEventRender'
 import { renderMarkdown as renderMd } from '../lib/markdown'
-import { preparePayloadPresentation, type PayloadLanguage } from '../lib/payloadPresentation'
+import { detectPayloadLanguage, preparePayloadPresentation, type PayloadLanguage } from '../lib/payloadPresentation'
 import { formatLocalDatetime } from '../lib/time'
 import type { WorkflowRunEvent } from '../api/types'
 
@@ -111,6 +112,16 @@ function payloadValueText(event: WorkflowRunEvent, side: PayloadSide): string {
   } catch {
     return String(value)
   }
+}
+
+function payloadIsJson(event: WorkflowRunEvent, side: PayloadSide): boolean {
+  const value = event[side]
+  if (value && typeof value === 'object') return true
+  const content = payloadValueText(event, side) || payloadPreview(event, side)
+  return detectPayloadLanguage(content, {
+    contentType: String(event[`${side}_content_type`] || ''),
+    ref: payloadRef(event, side),
+  }) === 'json'
 }
 
 /** Support old events that retained the full value but only stored a preview marker. */
@@ -220,7 +231,13 @@ function closePayload() {
                   查看
                 </button>
               </div>
-              <pre>{{ payloadPreview(entry.event, 'input') }}</pre>
+              <JsonViewer
+                v-if="payloadIsJson(entry.event, 'input')"
+                :value="payloadPreview(entry.event, 'input')"
+                max-height="180px"
+                density="compact"
+              />
+              <pre v-else>{{ payloadPreview(entry.event, 'input') }}</pre>
               <div v-if="payloadError(payloadRef(entry.event, 'input'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'input')) }}</div>
             </div>
             <div v-if="(entry.event.kind === 'tool_result' || entry.event.kind === 'tool_call' || entry.event.kind === 'structured_output') && payloadPreview(entry.event, 'output')" class="tl-tool-payload">
@@ -235,7 +252,13 @@ function closePayload() {
                   查看
                 </button>
               </div>
-              <pre>{{ payloadPreview(entry.event, 'output') }}</pre>
+              <JsonViewer
+                v-if="payloadIsJson(entry.event, 'output')"
+                :value="payloadPreview(entry.event, 'output')"
+                max-height="180px"
+                density="compact"
+              />
+              <pre v-else>{{ payloadPreview(entry.event, 'output') }}</pre>
               <div v-if="payloadError(payloadRef(entry.event, 'output'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'output')) }}</div>
             </div>
           </div>
@@ -251,7 +274,13 @@ function closePayload() {
                 查看
               </button>
             </div>
-            <pre>{{ payloadPreview(entry.event, 'detail') }}</pre>
+            <JsonViewer
+              v-if="payloadIsJson(entry.event, 'detail')"
+              :value="payloadPreview(entry.event, 'detail')"
+              max-height="260px"
+              density="compact"
+            />
+            <pre v-else>{{ payloadPreview(entry.event, 'detail') }}</pre>
             <div v-if="payloadError(payloadRef(entry.event, 'detail'))" class="tl-payload-error">{{ payloadError(payloadRef(entry.event, 'detail')) }}</div>
           </div>
         </div>

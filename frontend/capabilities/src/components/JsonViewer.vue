@@ -5,8 +5,11 @@ import { formatJsonValue, tokenizeJson } from '../lib/jsonDisplay'
 const props = withDefaults(defineProps<{
   value: unknown
   maxHeight?: string
+  /** 嵌入卡片时移除自身底色和外边距，由父容器提供表面。 */
+  density?: 'default' | 'compact'
 }>(), {
   maxHeight: '240px',
+  density: 'default',
 })
 
 const formatted = computed(() => formatJsonValue(props.value))
@@ -16,6 +19,7 @@ const tokens = computed(() => tokenizeJson(formatted.value))
 <template>
   <pre
     class="json-viewer"
+    :class="{ 'json-viewer-compact': density === 'compact' }"
     :style="{ maxHeight }"
   ><span
     v-for="(token, index) in tokens"
@@ -38,6 +42,14 @@ const tokens = computed(() => tokenizeJson(formatted.value))
   font-size: 0.75rem;
   line-height: 1.65;
   color: var(--foreground);
+}
+
+.json-viewer.json-viewer-compact {
+  border-radius: 0;
+  background: transparent;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.6875rem;
+  line-height: 1.55;
 }
 
 .json-key { color: var(--json-key); }

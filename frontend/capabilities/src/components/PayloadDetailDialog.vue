@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { Check, Copy } from '@lucide/vue'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog'
+import { Button } from './ui/button'
+import JsonViewer from './JsonViewer.vue'
 import PayloadCodeViewer from './PayloadCodeViewer.vue'
 import { renderMarkdown } from '../lib/markdown'
 import { payloadLanguageLabel, type PayloadLanguage } from '../lib/payloadPresentation'
@@ -15,20 +19,54 @@ defineProps<{
 defineEmits<{
   (event: 'update:open', open: boolean): void
 }>()
+
+const copied = ref(false)
+const copyFailed = ref(false)
+let resetCopyStateTimer: ReturnType<typeof setTimeout> | undefined
+
+async function copyContent(content: string) {
+  copied.value = false
+  copyFailed.value = false
+  try {
+    await navigator.clipboard.writeText(content)
+    copied.value = true
+  } catch {
+    copyFailed.value = true
+  }
+  if (resetCopyStateTimer) clearTimeout(resetCopyStateTimer)
+  resetCopyStateTimer = setTimeout(() => {
+    copied.value = false
+    copyFailed.value = false
+  }, 1800)
+}
 </script>
 
 <template>
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="w-[min(1280px,calc(100vw-2rem))] !max-w-[1280px] sm:!max-w-[1280px] max-h-[calc(100vh-2rem)] overflow-hidden">
       <DialogHeader>
-        <DialogTitle>{{ title }} · {{ payloadLanguageLabel(language) }}</DialogTitle>
-        <div v-if="label" class="text-xs text-muted-foreground">{{ label }}</div>
+        <div class="flex items-start justify-between gap-3 pr-6">
+          <div class="min-w-0">
+            <DialogTitle>{{ title }} · {{ payloadLanguageLabel(language) }}</DialogTitle>
+            <div v-if="label" class="mt-1 text-xs text-muted-foreground">{{ label }}</div>
+          </div>
+          <Button variant="outline" size="sm" class="h-7 shrink-0 gap-1.5 text-xs" @click="copyContent(content)">
+            <Check v-if="copied" :size="13" />
+            <Copy v-else :size="13" />
+            {{ copied ? '已复制' : copyFailed ? '复制失败' : '复制' }}
+          </Button>
+        </div>
       </DialogHeader>
       <div class="min-h-0 overflow-auto">
         <div
           v-if="language === 'markdown'"
           class="payload-markdown rounded-md border bg-background p-4"
           v-html="renderMarkdown(content)"
+        />
+        <JsonViewer
+          v-else-if="language === 'json'"
+          :value="content"
+          max-height="min(68vh, 720px)"
         />
         <PayloadCodeViewer
           v-else
