@@ -34,9 +34,13 @@ test('workflow detail follows the selected Agent tab when loading prompt and res
   assert.match(progress, /agentRunKey !== progressAgentRunKey\.value/)
   assert.match(progress, /progressAgentRunDetail,/)
   assert.match(workflow, /progressAgentRunDetail,/)
-  assert.equal((workflow.match(/:agent-run-detail="progressAgentRunDetail"/g) || []).length, 2)
-  assert.equal((workflow.match(/:agent-run-detail-loading="progressAgentRunDetailLoading"/g) || []).length, 2)
-  assert.equal((workflow.match(/:agent-run-detail-error="progressAgentRunDetailError"/g) || []).length, 2)
+  const detailPanels = Array.from(workflow.matchAll(/<WorkflowRunDetailPanel\b[\s\S]*?\/>/g)).map(match => match[0])
+  assert.equal(detailPanels.length, 2)
+  for (const panel of detailPanels) {
+    assert.match(panel, /:agent-run-detail="progressAgentRunDetail"/)
+    assert.match(panel, /:agent-run-detail-loading="progressAgentRunDetailLoading"/)
+    assert.match(panel, /:agent-run-detail-error="progressAgentRunDetailError"/)
+  }
 })
 
 test('expanded task logs cache and display their main Agent detail', () => {
