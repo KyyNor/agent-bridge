@@ -15,6 +15,14 @@ from .extractor import (
     OpenAIChatProbeKeywordExtractor,
     ProbeKeywordExtractor,
 )
+from .session_history import (
+    ProbeHistoryEntry,
+    ProbeSessionHistoryStore,
+    ProbeSessionHistoryStoreProtocol,
+    SESSION_HISTORY_PROMPT_ROUNDS,
+    SESSION_HISTORY_RETAINED_ROUNDS,
+    SESSION_HISTORY_TTL_SECONDS,
+)
 
 __all__ = [
     "KeywordProbeResult",
@@ -28,4 +36,10 @@ __all__ = [
     "KeywordExtractionStatus",
     "OpenAIChatProbeKeywordExtractor",
     "ProbeKeywordExtractor",
+    "ProbeHistoryEntry",
+    "ProbeSessionHistoryStore",
+    "ProbeSessionHistoryStoreProtocol",
+    "SESSION_HISTORY_PROMPT_ROUNDS",
+    "SESSION_HISTORY_RETAINED_ROUNDS",
+    "SESSION_HISTORY_TTL_SECONDS",
 ]

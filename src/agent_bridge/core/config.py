@@ -35,6 +35,7 @@ class AgentBridgePaths:
     server_config_path: Path
     server_log_path: Path
     server_pid_path: Path
+    retrieval_probe_session_cache_dir: Path
 
     @classmethod
     def from_root(cls, root: Path | None = None) -> "AgentBridgePaths":
@@ -51,6 +52,7 @@ class AgentBridgePaths:
             server_config_path=root / "config" / "server.toml",
             server_log_path=root / "logs" / "server.log",
             server_pid_path=root / "run" / "server.pid",
+            retrieval_probe_session_cache_dir=root / "data" / "retrieval-probe-sessions",
         )
 
     @property
@@ -131,6 +133,7 @@ def ensure_directories(paths: AgentBridgePaths) -> None:
         paths.config_dir,
         paths.data_dir,
         paths.archive_dir,
+        paths.retrieval_probe_session_cache_dir,
         paths.mock_backend_dir,
         paths.repos_dir,
         paths.plugins_dir,

@@ -78,13 +78,13 @@ MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped �
 
 Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。claude-mem worker 是按需进程池；插件更新由独立多 job 的 `PluginUpdateScheduler` 管理。它与单 cron 的 `BaseCronScheduler` 语义不同，不要为了继承而继承。
 
-`RetrievalProbeService` 为弱模型提供 Profile 范围的多来源轻量路由探测。Wiki、
-CodeGraph、Memory 和 Artifact 分别通过 `RetrievalProbeAdapter` 注册，领域服务只
-负责分词、并发 deadline、状态聚合和审计，不按来源类型建立中心分发链。探测只返回
-资源级命中计数和建议工具，不返回正文；Wiki 不调用 `wiki_ask`，CodeGraph 不调用
-Explore。供外部调用的 `POST /retrieval/probe` 与 Claude Code Hook 的
+`RetrievalProbeService` 为弱模型提供 Profile 范围的轻量路由探测。来源通过
+`RetrievalProbeAdapter` 注册，领域服务只负责模型短句、并发 deadline、状态聚合和审计，
+不按来源类型建立中心分发链。当前 full-probe 只装配 Artifact 来源，探测只返回资源级
+命中计数和建议工具，不返回正文。供外部调用的 `POST /retrieval/probe` 与 Claude Code Hook 的
 `POST /retrieval/hooks/claude-code/full-probe` 路由分离：CLI 只转发原始 Hook payload，
-服务端使用系统配置的 OpenAI Chat 小模型提取 2–8 个短句，并仅检索 current 工作流产出物；
+服务端使用系统配置的 OpenAI Chat 小模型提取 0–8 个短句，并按 Profile/session 结合最近 3 轮
+历史去重（最多缓存 12 轮、30 天滑动 TTL），仅检索 current 工作流产出物；
 抽取失败不得回退 Jieba 短词检索。服务端负责生成标准 `additionalContext` 输出并写入通用
 Hook 审计（审计保留原始 prompt）。`profile use` 会自动、幂等安装该 Hook，并保留用户已有 Hook。
 `CLAUDE.md` 托管块只补充
