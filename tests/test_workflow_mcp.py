@@ -73,10 +73,11 @@ def test_workflow_mcp_context_sees_workflow_task_tools(wm_paths):
     assert "workflow_set_task" in names
     assert "workflow_run_log" in names
     assert tools_by_name["artifacts_search"].description == (
-        "搜索当前 profile 可见的工作流产物。请优先调用本工具检索已有产出物，拿到结果后再决定下一步。"
+        "搜索当前 profile 的工作流产物。需要全文时，将结果的完整 path 作为 path 重新调用。"
     )
-    assert tools_by_name["artifacts_search"].inputSchema["properties"]["query"]["description"] == "按标题、摘要或内容检索产物的关键词。"
-    assert tools_by_name["artifacts_search"].inputSchema["properties"]["tags"]["description"] == "要匹配的产物标签列表。"
+    artifact_schema = tools_by_name["artifacts_search"].inputSchema
+    assert set(artifact_schema["properties"]) == {"query", "path", "limit"}
+    assert artifact_schema["properties"]["path"]["description"] == "产物路径前缀；传入完整路径时返回正文。"
     assert tools_by_name["workflow_get_task"].description == "领取当前工作流运行中的一个待处理任务。"
     assert tools_by_name["workflow_set_task"].description == "创建或刷新当前工作流的待处理任务。"
     assert tools_by_name["workflow_set_task"].inputSchema["properties"]["tasks"]["description"] == "要写入工作流队列的任务列表。"
@@ -246,20 +247,35 @@ def test_artifacts_search_tool_returns_profile_artifacts(wm_paths):
     )
 
     mcp = create_mcp_server(svc, profile_key="report-plane", workflow_context=None)
-    _, result = asyncio.run(mcp.call_tool("artifacts_search", {"query": "finance_orders", "tags": ["finance"]}))
-    assert result["items"][0]["title"] == "Page A"
+    _, result = asyncio.run(mcp.call_tool("artifacts_search", {"query": "finance_orders"}))
+    item = result["items"][0]
+    assert item["title"] == "Page A"
+    assert "content" not in item
+    for field in (
+        "artifact_id", "workflow_key", "profile_key", "run_id", "task_key",
+        "task_version", "is_current", "format", "tags",
+    ):
+        assert field not in item
+    assert result["hint"] == "结果默认只含摘要；将完整 path 作为 path 重新调用可获取正文。"
+
+    _, detail = asyncio.run(mcp.call_tool("artifacts_search", {"path": "reports/page-a/index.md"}))
+    assert detail["items"][0]["content"] == "# Page A\nfinance_orders"
 
     logs = svc.governance.list_logs(
         actor="root",
         entrypoint="metamcp_search",
         tool_name="artifacts_search",
     )
-    assert len(logs) == 1
-    assert logs[0]["status"] == "success"
-    assert logs[0]["source_type"] == "builtin"
-    assert logs[0]["source_key"] == "workflow"
-    detail = svc.governance.get_log(actor="root", log_id=logs[0]["log_id"])
-    assert json.loads(detail["request_json"])["query"] == "finance_orders"
+    assert len(logs) == 2
+    assert all(log["status"] == "success" for log in logs)
+    assert all(log["source_type"] == "builtin" for log in logs)
+    assert all(log["source_key"] == "workflow" for log in logs)
+    requests = [
+        json.loads(svc.governance.get_log(actor="root", log_id=log["log_id"])["request_json"])
+        for log in logs
+    ]
+    assert {"query": "finance_orders", "path": "", "limit": 20} in requests
+    assert {"query": "", "path": "reports/page-a/index.md", "limit": 20} in requests
 
 
 def test_artifacts_search_logs_failure(wm_paths):

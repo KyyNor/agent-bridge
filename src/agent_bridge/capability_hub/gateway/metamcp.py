@@ -198,15 +198,11 @@ def create_mcp_server(
             )
             raise
 
-    @mcp.tool(description="搜索当前 profile 可见的工作流产物。请优先调用本工具检索已有产出物，拿到结果后再决定下一步。")
+    @mcp.tool(description="搜索当前 profile 的工作流产物。需要全文时，将结果的完整 path 作为 path 重新调用。")
     def artifacts_search(
-        query: str = Field(default="", description="按标题、摘要或内容检索产物的关键词。"),
-        tags: list[str] = Field(default_factory=list, description="要匹配的产物标签列表。"),
-        path: str = Field(default="", description="按产物路径前缀过滤结果。"),
-        workflow_key: str = Field(default="", description="只返回指定工作流的产物。"),
-        task_key: str = Field(default="", description="只返回指定任务键关联的产物。"),
-        task_version: str = Field(default="", description="只返回指定任务版本关联的产物。"),
-        limit: int = Field(default=20, description="本次最多返回的产物数量。"),
+        query: str = Field(default="", description="检索关键词。"),
+        path: str = Field(default="", description="产物路径前缀；传入完整路径时返回正文。"),
+        limit: int = Field(default=20, description="最多返回数量（1-50）。"),
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
         result = bridge_service.capabilities.invoke_logged_tool(
@@ -218,34 +214,36 @@ def create_mcp_server(
             tool_name="artifacts_search",
             request={
                 "query": query,
-                "tags": tags or [],
                 "path": path,
-                "workflow_key": workflow_key,
-                "task_key": task_key,
-                "task_version": task_version,
                 "limit": limit,
             },
             handler=lambda: service.workflows.search_artifacts(
                 actor=default_user(),
                 profile_key=active_profile,
                 query=query,
-                tags=tags or [],
+                tags=[],
                 path=path,
-                workflow_key=workflow_key,
-                task_key=task_key,
-                task_version=task_version,
+                workflow_key=None,
                 include_history=False,
                 limit=limit,
                 trusted_profile_context=True,
             ),
         )
-        # 引导 agent：命中结果默认只含摘要片段，用完整 path 再查一次可取全文。
-        # 仅在有数据时提示，避免空结果噪声。
+        for item in result.get("items", []):
+            for field in (
+                "artifact_id",
+                "workflow_key",
+                "profile_key",
+                "run_id",
+                "task_key",
+                "task_version",
+                "is_current",
+                "format",
+                "tags",
+            ):
+                item.pop(field, None)
         if result.get("items"):
-            result["hint"] = (
-                "结果默认只含摘要片段。将任一结果的完整 path 作为 path 参数重新调用本工具，"
-                "即可获取该产物的完整正文。"
-            )
+            result["hint"] = "结果默认只含摘要；将完整 path 作为 path 重新调用可获取正文。"
         return result
 
     active_workflow_context = workflow_context or _request_workflow_context.get()
