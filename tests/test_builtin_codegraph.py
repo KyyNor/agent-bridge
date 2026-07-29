@@ -128,6 +128,10 @@ def test_codegraph_builtin_explore_uses_repo_scoped_stdio_mcp_after_profile_chec
         )
     )
 
+    assert "service" not in result
+    assert "tool" not in result
+    assert "tool_name" not in result
+    assert result["success"] is True
     assert result["result"]["repo"] == "web-app"
     assert result["result"]["query"] == "App flow"
     assert result["result"]["mcp_result"]["structured"] == {"answer": "explored"}

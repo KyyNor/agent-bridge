@@ -841,9 +841,6 @@ class CapabilityService:
                 error_type="mcp_transport_error",
             ) from exc
         return {
-            "service": service,
-            "tool": tool_name,
-            "tool_name": tool_name,
             "success": not bool(result.get("is_error")) if isinstance(result, dict) else True,
             "result": result,
         }
@@ -892,7 +889,7 @@ class CapabilityService:
                 owner=FailureOwner.upstream_openapi.value,
                 error_type="openapi_transport_error",
             ) from exc
-        return {"service": service, "tool": tool_name, "tool_name": tool_name, "success": True, "result": result}
+        return {"success": True, "result": result}
 
     def _require_enabled(
         self,

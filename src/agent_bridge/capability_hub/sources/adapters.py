@@ -133,9 +133,6 @@ class BuiltinSourceAdapter:
             ) from exc
         return SourceExecution(
             result={
-                "service": source_key,
-                "tool": tool_name,
-                "tool_name": tool_name,
                 "success": True,
                 "result": result,
             },

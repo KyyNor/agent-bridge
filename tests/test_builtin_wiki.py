@@ -88,8 +88,10 @@ def test_wiki_list_kbs_respects_profile_resources(wm_paths: AgentBridgePaths) ->
 
     result = asyncio.run(service.capabilities.execute("root", "wiki", "list_kbs", {}, profile_key="safe-readonly"))
 
-    assert result["service"] == "wiki"
-    assert result["tool"] == "list_kbs"
+    assert "service" not in result
+    assert "tool" not in result
+    assert "tool_name" not in result
+    assert result["success"] is True
     assert [kb["slug"] for kb in result["result"]["kbs"]] == ["frontend-docs"]
 
 

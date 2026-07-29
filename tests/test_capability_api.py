@@ -1173,8 +1173,9 @@ def test_execute_capability_api_uses_service_tool_name_params(wm_paths) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["service"] == "built-in"
-    assert response.json()["tool_name"] == "load_skill"
+    assert "service" not in response.json()
+    assert "tool" not in response.json()
+    assert "tool_name" not in response.json()
     assert response.json()["result"]["skill_name"] == "design_workflow"
 
 

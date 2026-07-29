@@ -472,8 +472,9 @@ def test_execute_calls_readonly_tool(wm_paths: AgentBridgePaths) -> None:
 
     result = asyncio.run(service.execute("alice", "docs-api", "search_docs", {"query": "hello"}))
 
-    assert result["service"] == "docs-api"
-    assert result["tool"] == "search_docs"
+    assert "service" not in result
+    assert "tool" not in result
+    assert "tool_name" not in result
     assert result["success"] is True
     assert result["result"] == {"is_error": False, "structured": {"rows": [{"id": 1}]}, "content": []}
     assert result["log_id"].startswith("call_")

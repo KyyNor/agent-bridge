@@ -612,8 +612,9 @@ def test_builtin_run_script_executes_managed_script(wm_paths):
         )
     )
 
-    assert result["service"] == "built-in"
-    assert result["tool_name"] == "run_script"
+    assert "service" not in result
+    assert "tool" not in result
+    assert "tool_name" not in result
     assert result["success"] is True
     assert result["result"]["run_type"] == "mcp"
     assert result["result"]["result"]["params"] == {"name": "Ada"}
