@@ -65,7 +65,7 @@ def test_openai_extractor_returns_business_phrases(monkeypatch, wm_paths) -> Non
     }
     assert captured["request"]["extra_body"] == {
         "structured_outputs": {
-            "json_schema": {
+            "json": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {"keywords": {"type": "array", "minItems": 0, "maxItems": 8, "items": {"type": "string"}}},

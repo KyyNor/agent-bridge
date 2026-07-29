@@ -126,7 +126,9 @@ class OpenAIChatProbeKeywordExtractor:
                 ],
                 extra_body={
                     "structured_outputs": {
-                        "json_schema": _KEYWORDS_JSON_SCHEMA,
+                        # LiteLLM 会原样透传该扩展字段；vLLM 的 JSON Schema
+                        # 约束键名为 json，而非 OpenAI response_format 的 json_schema。
+                        "json": _KEYWORDS_JSON_SCHEMA,
                     }
                 },
             )
