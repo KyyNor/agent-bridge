@@ -101,5 +101,7 @@ class ProbeResponse:
                 "model": self.keyword_extraction.model,
                 "duration_ms": self.keyword_extraction.duration_ms,
                 "error_type": self.keyword_extraction.error_type,
+                "history_rounds": self.keyword_extraction.history_rounds,
+                "filtered_keyword_count": self.keyword_extraction.filtered_keyword_count,
             },
         }

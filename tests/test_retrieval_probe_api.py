@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from agent_bridge.api.routes.retrieval_probe import RetrievalProbeRequest
 
 from agent_bridge.api.app import create_app
 from agent_bridge.client import AgentBridgeClient
@@ -109,6 +110,7 @@ def test_retrieval_probe_api_validates_required_fields_and_bounds(wm_paths) -> N
 
     assert missing.status_code == 422
     assert invalid.status_code == 422
+    assert RetrievalProbeRequest(profile_key="dev", prompt="订单", keyword_limit=0).keyword_limit == 0
 
 
 def test_retrieval_probe_hook_api_forwards_standard_hook_request(wm_paths, monkeypatch) -> None:

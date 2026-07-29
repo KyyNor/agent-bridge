@@ -90,6 +90,8 @@ class RetrievalProbeService:
         extraction = await asyncio.to_thread(
             self.keyword_extractor.extract,
             prompt,
+            profile_key=profile_key,
+            session_id=session_id,
             max_keywords=keyword_limit,
             timeout_seconds=min(10.0, max(0.0, deadline - time.monotonic())),
         )
@@ -109,6 +111,21 @@ class RetrievalProbeService:
                             keyword_limit=keyword_limit, result_limit=result_limit, timeout_seconds=timeout_seconds)
             return response
         keywords = extraction.keywords
+        if not keywords:
+            response = ProbeResponse(
+                probe_id=probe_id,
+                profile_key=profile_key,
+                session_id=session_id,
+                keywords=(),
+                source_statuses={},
+                targets=(),
+                duration_ms=int((time.monotonic() - started) * 1000),
+                keyword_extraction=extraction,
+            )
+            if audit:
+                self._audit(actor=actor, profile_key=profile_key, prompt=prompt, response=response,
+                            keyword_limit=keyword_limit, result_limit=result_limit, timeout_seconds=timeout_seconds)
+            return response
         logger.info(
             "全量检索探测开始 probe=%s profile=%s 关键词数=%d",
             probe_id,
@@ -320,8 +337,8 @@ class RetrievalProbeService:
             raise ValidationError("profile_key is required")
         if not prompt.strip():
             raise ValidationError("prompt is required")
-        if not 2 <= keyword_limit <= 8:
-            raise ValidationError("keyword_limit must be between 2 and 8")
+        if not 0 <= keyword_limit <= 8:
+            raise ValidationError("keyword_limit must be between 0 and 8")
         if result_limit < 1:
             raise ValidationError("result_limit must be positive")
         if not 0 < timeout_seconds <= 20:
@@ -519,6 +536,8 @@ class RetrievalProbeService:
                         "model": response.keyword_extraction.model,
                         "duration_ms": response.keyword_extraction.duration_ms,
                         "error_type": response.keyword_extraction.error_type,
+                        "history_rounds": response.keyword_extraction.history_rounds,
+                        "filtered_keyword_count": response.keyword_extraction.filtered_keyword_count,
                     },
                 },
                 response={

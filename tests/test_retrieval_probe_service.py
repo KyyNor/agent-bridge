@@ -45,7 +45,13 @@ class FakeGovernance:
 
 
 class FakeExtractor:
-    def extract(self, prompt, *, max_keywords, timeout_seconds):
+    def extract(self, prompt, *, profile_key="", session_id="", max_keywords, timeout_seconds):
+        if max_keywords == 0:
+            return KeywordExtraction(
+                status=KeywordExtractionStatus.success,
+                keywords=(),
+                model="fake",
+            )
         keywords = tuple(extract_probe_keywords(prompt, max_keywords))
         if len(keywords) < 2:
             keywords = ("订单", "同步")
@@ -57,8 +63,27 @@ class FakeExtractor:
 
 
 class FailedExtractor:
-    def extract(self, prompt, *, max_keywords, timeout_seconds):
+    def extract(self, prompt, *, profile_key="", session_id="", max_keywords, timeout_seconds):
         return KeywordExtraction(status=KeywordExtractionStatus.invalid_output, error_type="invalid_output")
+
+
+class RecordingExtractor(FakeExtractor):
+    def __init__(self):
+        self.calls = []
+
+    def extract(self, prompt, *, profile_key="", session_id="", max_keywords, timeout_seconds):
+        self.calls.append({
+            "prompt": prompt,
+            "profile_key": profile_key,
+            "session_id": session_id,
+            "max_keywords": max_keywords,
+            "timeout_seconds": timeout_seconds,
+        })
+        return KeywordExtraction(
+            status=KeywordExtractionStatus.success,
+            keywords=("新术语",),
+            model="fake",
+        )
 
 
 @dataclass
@@ -365,7 +390,6 @@ async def test_probe_rejects_missing_or_disabled_profile() -> None:
     ("kwargs", "message"),
     [
         ({"prompt": "  "}, "prompt is required"),
-        ({"keyword_limit": 0}, "keyword_limit must be between 2 and 8"),
         ({"result_limit": 0}, "result_limit must be positive"),
         ({"timeout_seconds": 0}, "timeout_seconds must be between 0 and 20"),
     ],
@@ -377,6 +401,42 @@ async def test_probe_validates_request_boundaries(kwargs, message) -> None:
 
     with pytest.raises(ValidationError, match=message):
         await service.probe(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_probe_allows_zero_keyword_limit_without_searching() -> None:
+    adapter = FakeAdapter("wiki")
+    service, _ = service_with(adapter)
+    response = await service.probe(
+        actor="root",
+        profile_key="dev",
+        prompt="订单",
+        keyword_limit=0,
+    )
+    assert response.keywords == ()
+    assert response.targets == ()
+    assert adapter.calls == []
+
+
+@pytest.mark.asyncio
+async def test_probe_forwards_profile_and_session_to_extractor() -> None:
+    extractor = RecordingExtractor()
+    adapter = FakeAdapter("artifact")
+    service = RetrievalProbeService(
+        store=FakeStore(),
+        registry=registry_with(adapter),
+        governance=FakeGovernance(),
+        keyword_extractor=extractor,
+    )
+    await service.probe(
+        actor="root",
+        profile_key="dev",
+        prompt="问题",
+        session_id="session-1",
+        timeout_seconds=1,
+    )
+    assert extractor.calls[0]["profile_key"] == "dev"
+    assert extractor.calls[0]["session_id"] == "session-1"
 
 
 def test_agent_bridge_service_registers_artifact_probe_adapter_only(wm_paths) -> None:

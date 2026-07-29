@@ -3,7 +3,7 @@
 ## 用途
 
 该集成在 Claude Code 收到用户问题后，异步调用 Agent Bridge，对当前 Profile
-允许访问的 Wiki、CodeGraph、Memory 和工作流产出物执行多关键词轻量探测。
+允许访问的工作流产出物执行多关键词轻量探测。
 探测结果只告诉 Agent “哪些关键词在哪些资源中命中、建议继续调用哪个工具”，
 不返回正文，也不替 Agent 生成答案。
 
@@ -18,25 +18,24 @@ UserPromptSubmit
   → Claude Code 后台启动 Hook
   → CLI 原样转发 stdin 的 Hook payload
   → POST /retrieval/hooks/claude-code/full-probe
-  → 分词并并发探测 Profile 允许的全部资源
+  → 小模型结合会话历史提取本轮新增短句
+  → 并发探测 Profile 允许的工作流产出物
   → 服务端生成 stdout JSON additionalContext + exit 0
   → 通用 Hook 审计保存原始 prompt、请求和响应
   → Claude Code 在下一次对话轮次将路由提醒交给 Agent
 ```
 
-四类来源均使用轻量检索：
-
-- Wiki 调用知识后端原始检索，不调用带 Agent 的 `wiki_ask`。
-- CodeGraph 调用代码查询，不调用 Explore。
-- Memory 搜索 Profile 绑定的 active memory block。
-- Artifact 只搜索该 Profile 范围内的 current 工作流产出物。
+当前 full-probe 只注册 Artifact 来源，只搜索该 Profile 范围内的 current 工作流产出物；
+Wiki、CodeGraph 和 Memory 不参与本探测。
 
 请求具有统一的整体 deadline，超时后仍会返回已经完成的部分结果。后端不可用、
 超时和正常无命中分别表示为 `unavailable`、`timeout` 和 `no_hit`。
 
-关键词由系统配置中的 OpenAI Chat 兼容小模型提取为 2–8 个业务短句；配置未完成、模型调用
-失败、超时或输出不合法时会静默结束，不回退短词分词。当前只搜索 Profile 范围内的 current
-工作流产出物；模型抽取最多 10 秒，完整探测最多 20 秒。
+关键词由系统配置中的 OpenAI Chat 兼容小模型结合会话历史提取为 0–8 个业务短句；服务端
+还会过滤空值、停用词、单字、过长项和历史重复项。当前请求只向模型提供同一 Profile/session
+最近 3 轮成功结果，缓存最多保留 12 轮，DiskCache 使用 30 天滑动 TTL。配置未完成、模型调用
+失败、超时或输出结构不合法时会静默结束，不回退短词分词，也不修改历史。有效的空列表会
+记录到历史，但不会产生检索任务；模型抽取最多 10 秒，完整探测最多 20 秒。
 
 ## 前置条件
 
@@ -135,17 +134,14 @@ curl -X POST http://127.0.0.1:8765/retrieval/probe \
   "session_id": "session-123",
   "keywords": ["订单", "同步", "失败", "处理"],
   "source_statuses": {
-    "wiki": "hit",
-    "codegraph": "no_hit",
-    "memory": "hit",
-    "artifact": "not_configured"
+    "artifact": "hit"
   },
   "targets": [
     {
-      "source_type": "wiki",
-      "resource_key": "data-platform",
-      "resource_name": "数据平台知识库",
-      "suggested_tool": "wiki_ask",
+      "source_type": "artifact",
+      "resource_key": "chengdu",
+      "resource_name": "工作流产出物",
+      "suggested_tool": "artifacts_search",
       "status": "hit",
       "unique_hit_count": 3,
       "keyword_hits": [
@@ -160,7 +156,15 @@ curl -X POST http://127.0.0.1:8765/retrieval/probe \
       ]
     }
   ],
-  "duration_ms": 1820
+  "duration_ms": 1820,
+  "keyword_extraction": {
+    "status": "success",
+    "model": "small",
+    "duration_ms": 240,
+    "error_type": null,
+    "history_rounds": 3,
+    "filtered_keyword_count": 1
+  }
 }
 ```
 
@@ -177,7 +181,7 @@ curl -X POST http://127.0.0.1:8765/retrieval/probe \
 
 参数边界：
 
-- `keyword_limit`：2–8，默认 8。
+- `keyword_limit`：0–8，默认 8。返回空列表时不会调用产物检索。
 - `result_limit`：1–20，默认 3。
 - `timeout_seconds`：大于 0 且不超过 20 秒，默认 20 秒。
 
@@ -190,7 +194,10 @@ Hook entry 即可临时停用。再次执行 `profile use` 会重新安装它。
 ## 当前边界
 
 - 当前只有“全量探测”策略，没有基于分类器的选择性探测。
-- 分词为确定性 jieba/标识符规则，不调用 LLM 做查询改写。
+- 关键词由 OpenAI Chat 兼容小模型生成，并由服务端执行确定性结构校验和过滤；不回退到
+  jieba 短词分词。
+- 传入 `session_id` 后，历史按 Profile/session 隔离保存；缺少 `session_id` 时仅执行单轮
+  提取，不读写历史。
 - 返回结果用于路由，不应被当成答案依据；Agent 仍需调用建议工具取得真实内容。
 - 普通 `async` 不主动唤醒已结束的会话；若当前任务需要确保结果送达，应让 Agent
   在检索窗口内继续工作，或由用户发起下一次交互。

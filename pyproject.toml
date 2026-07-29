@@ -8,6 +8,7 @@ dependencies = [
     "apscheduler>=3.10.0,<4",
     "claude-agent-sdk>=0.2.103",
     "cryptography>=48.0.0",
+    "diskcache>=5.6.3,<6",
     "fastapi>=0.124.0",
     "httpx>=0.28.0",
     "jieba>=0.42.1,<1",
