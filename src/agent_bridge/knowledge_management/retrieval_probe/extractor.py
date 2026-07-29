@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
-import httpx
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,19 @@ _STOPWORDS = {"什么", "怎么", "如何", "一下", "请", "帮我", "的", "�
 _SYSTEM_PROMPT = """你是检索短句提取器。只输出 JSON 对象，格式严格为 {\"keywords\":[\"短句\"]}。
 从用户问题中提取 2 到 8 个原始且高区分度的业务短句，优先保留报表名、业务专名、指标名和状态短语。
 不要拆分中文专名，不要输出单字、泛化动词、解释、补造词或任何 JSON 之外的文字。"""
+_KEYWORDS_JSON_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "keywords": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 8,
+            "items": {"type": "string"},
+        }
+    },
+    "required": ["keywords"],
+}
 
 
 class KeywordExtractionStatus(str, Enum):
@@ -59,31 +72,35 @@ class OpenAIChatProbeKeywordExtractor:
         if not base_url or not api_key or not model:
             return self._result(KeywordExtractionStatus.not_configured, model, started)
         try:
-            response = httpx.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": model,
-                    "temperature": 0,
-                    "max_tokens": 160,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
+            client = OpenAI(
+                base_url=base_url,
+                api_key=api_key,
                 timeout=timeout_seconds,
+                max_retries=0,
             )
-            response.raise_for_status()
-            payload = response.json()
-            content = str(payload["choices"][0]["message"]["content"])
+            completion = client.chat.completions.create(
+                model=model,
+                temperature=0,
+                max_tokens=160,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                extra_body={
+                    "structured_outputs": {
+                        "json_schema": _KEYWORDS_JSON_SCHEMA,
+                    }
+                },
+            )
+            content = str(completion.choices[0].message.content or "")
             keywords = parse_probe_keywords(content, max_keywords=max_keywords)
-        except httpx.TimeoutException:
-            return self._result(KeywordExtractionStatus.timeout, model, started, "http_timeout")
+        except APITimeoutError:
+            return self._result(KeywordExtractionStatus.timeout, model, started, "sdk_timeout")
         except ValueError:
             return self._result(KeywordExtractionStatus.invalid_output, model, started, "invalid_output")
-        except (httpx.HTTPError, KeyError, IndexError, TypeError):
+        except (APIConnectionError, APIStatusError, IndexError, TypeError):
             logger.warning("检索短句模型调用失败 model=%s", model, exc_info=True)
-            return self._result(KeywordExtractionStatus.unavailable, model, started, "chat_completion_error")
+            return self._result(KeywordExtractionStatus.unavailable, model, started, "openai_sdk_error")
         return KeywordExtraction(
             status=KeywordExtractionStatus.success,
             keywords=keywords,

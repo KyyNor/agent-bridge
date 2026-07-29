@@ -1,4 +1,3 @@
-import httpx
 import pytest
 
 from agent_bridge.knowledge_management.retrieval_probe.extractor import (
@@ -21,11 +20,30 @@ def _store(wm_paths) -> SQLiteStore:
     return store
 
 
-def test_openai_extractor_returns_business_phrases(respx_mock, wm_paths) -> None:
-    route = respx_mock.post("https://llm.test/v1/chat/completions").mock(
-        return_value=httpx.Response(200, json={
-            "choices": [{"message": {"content": '{"keywords":["新开发对公基础客户明细","当年新开未提升"]}'}}]
-        })
+def test_openai_extractor_returns_business_phrases(monkeypatch, wm_paths) -> None:
+    captured = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured["request"] = kwargs
+            return type("Completion", (), {
+                "choices": [type("Choice", (), {
+                    "message": type("Message", (), {
+                        "content": '{"keywords":["新开发对公基础客户明细","当年新开未提升"]}'
+                    })()
+                })()]
+            })()
+
+    class FakeClient:
+        chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+    def fake_openai(**kwargs):
+        captured["client"] = kwargs
+        return FakeClient()
+
+    monkeypatch.setattr(
+        "agent_bridge.knowledge_management.retrieval_probe.extractor.OpenAI",
+        fake_openai,
     )
     result = OpenAIChatProbeKeywordExtractor(store=_store(wm_paths)).extract(
         "新开发对公基础客户明细中‘当年新开未提升’中的‘提升’指的是什么",
@@ -34,7 +52,22 @@ def test_openai_extractor_returns_business_phrases(respx_mock, wm_paths) -> None
     )
     assert result.status is KeywordExtractionStatus.success
     assert result.keywords == ("新开发对公基础客户明细", "当年新开未提升")
-    assert route.calls[0].request.headers["Authorization"] == "Bearer secret"
+    assert captured["client"] == {
+        "base_url": "https://llm.test/v1",
+        "api_key": "secret",
+        "timeout": 10,
+        "max_retries": 0,
+    }
+    assert captured["request"]["extra_body"] == {
+        "structured_outputs": {
+            "json_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"keywords": {"type": "array", "minItems": 2, "maxItems": 8, "items": {"type": "string"}}},
+                "required": ["keywords"],
+            }
+        }
+    }
 
 
 @pytest.mark.parametrize("content", ["not json", '{"keywords":["只有一个"]}', '{"keywords":[]}'])
