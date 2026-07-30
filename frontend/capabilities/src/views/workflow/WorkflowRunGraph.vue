@@ -5,6 +5,7 @@ import { Controls } from '@vue-flow/controls'
 import { Handle, Position, VueFlow, type NodeMouseEvent } from '@vue-flow/core'
 import { AlertTriangle, Bot, Check, Clock3, FileOutput, FileTerminal, LoaderCircle, XCircle } from '@lucide/vue'
 import type { WorkflowGraph, WorkflowNodeRun } from '../../api/types'
+import { formatWorkflowConditionActual } from '../../lib/workflowConditionResults'
 import { workflowReuseReasonText } from '../../lib/workflowExecutionPlan'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import '@vue-flow/core/dist/style.css'
@@ -31,7 +32,7 @@ const edges = computed(() => props.definitionSnapshot.edges.map(edge => {
     target: edge.target,
     selectable: false,
     animated: runs.value.get(edge.target)?.status === 'running' && condition?.matched !== false,
-    label: condition ? `${condition.matched ? '命中' : '未命中'}${condition.actual == null ? '' : ` · ${String(condition.actual)}`}` : '',
+    label: condition ? `${condition.matched ? '命中' : '未命中'}${condition.actual == null ? '' : ` · ${formatWorkflowConditionActual(condition.actual)}`}` : '',
     style: condition && !condition.matched ? { strokeDasharray: '5 4', opacity: 0.45 } : undefined,
   }
 }))
