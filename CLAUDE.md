@@ -117,6 +117,11 @@ Agent run 由 `adapters/opencode_server.py` 启动一个独立 server，等待�
 负责长内容外置。结构化输出使用 OpenCode 的 `format.type=json_schema`，从
 `StructuredOutput` tool part 的 `state.input` 提取。
 
+所有 Coding Agent 的结构化输出 Schema 统一按 JSON Schema Draft 07 传递和校验。历史
+2020-12 Schema 中可无损转换的 `$defs` 和本地 `$ref` 会在 agent runtime 边界改写为
+`definitions`；`unevaluatedProperties`、`prefixItems` 等无法无损转换的关键字必须明确拒绝，
+不得静默降级为弱校验。
+
 运行时间轴保留原始事件流的可追踪性，但展示层会将同一 `tool_use_id` 的工具调用与结果合并为
 一个工具卡片，并将同一 `stream_id` 的文本增量拼接后展示，避免 SSE token 粒度造成大量碎片节点。
 

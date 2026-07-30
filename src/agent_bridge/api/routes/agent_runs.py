@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response
 
 from agent_bridge.api.schemas import DesignAgentRequest
+from agent_bridge.agent_runtime.json_schema import DRAFT7_SCHEMA_URI
 from agent_bridge.agent_runtime.trace import read_payload
 from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.core.domain import ConflictError, NotFound, require_admin_user
@@ -92,13 +93,13 @@ def _extract_json(text: str) -> Any | None:
         return None
 
 
-_WORKFLOW_GRAPH_SCHEMA = WorkflowGraph.model_json_schema(ref_template="#/$defs/{model}")
+_WORKFLOW_GRAPH_SCHEMA = WorkflowGraph.model_json_schema(ref_template="#/definitions/{model}")
 _WORKFLOW_GRAPH_DEFS = _WORKFLOW_GRAPH_SCHEMA.pop("$defs", {})
 _WORKFLOW_GRAPH_SCHEMA["required"] = ["nodes", "edges"]
 
 WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$defs": _WORKFLOW_GRAPH_DEFS,
+    "$schema": DRAFT7_SCHEMA_URI,
+    "definitions": _WORKFLOW_GRAPH_DEFS,
     "type": "object",
     "additionalProperties": False,
     "required": ["summary", "notes", "workflow"],
@@ -131,6 +132,7 @@ WORKFLOW_DESIGN_SCHEMA: dict[str, Any] = {
 }
 
 SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
+    "$schema": DRAFT7_SCHEMA_URI,
     "type": "object",
     "additionalProperties": False,
     "required": ["summary", "script"],

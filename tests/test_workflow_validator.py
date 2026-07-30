@@ -433,6 +433,31 @@ def test_validator_rejects_invalid_agent_output_schema(wm_paths):
     )
 
 
+def test_validator_rejects_draft_2020_only_agent_output_schema(wm_paths):
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    result = service.workflows.validator.validate(
+        actor="root",
+        workflow=_workflow(
+            {
+                "nodes": [
+                    _agent(
+                        "invalid-schema",
+                        result_mode="json",
+                        output_schema={"type": "object", "unevaluatedProperties": False},
+                    )
+                ],
+                "edges": [],
+            }
+        ),
+    )
+
+    assert any(
+        issue.field == "config.output_schema" and issue.code == "invalid_output_schema"
+        for issue in result.errors
+    )
+
+
 def test_validator_limits_template_namespaces_ancestors_and_known_output_fields(wm_paths):
     service = AgentBridgeService.create(wm_paths, {"root"})
     output_schema = {

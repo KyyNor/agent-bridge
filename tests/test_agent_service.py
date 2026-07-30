@@ -315,6 +315,55 @@ def test_run_success_structured_result(wm_paths, monkeypatch) -> None:
     assert res.result == {"answer": 42}
 
 
+def test_run_normalizes_draft_2020_defs_for_claude(wm_paths, monkeypatch) -> None:
+    schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"answer": {"$ref": "#/$defs/answer"}},
+        "required": ["answer"],
+        "$defs": {"answer": {"type": "integer"}},
+    }
+    expected_schema = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {"answer": {"$ref": "#/definitions/answer"}},
+        "required": ["answer"],
+        "definitions": {"answer": {"type": "integer"}},
+    }
+
+    async def fake_query(*, prompt, options):
+        assert options.kwargs["output_format"] == {"type": "json_schema", "schema": expected_schema}
+        yield _result(structured_output={"answer": 42})
+
+    _patch_sdk(monkeypatch, fake_query)
+    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+
+    result = asyncio.run(service.run(prompt="compute", agent_name="calc", output_schema=schema))
+
+    assert result.ok is True
+    assert result.result == {"answer": 42}
+
+
+def test_run_rejects_2020_only_output_schema_keyword(wm_paths, monkeypatch) -> None:
+    async def fake_query(*, prompt, options):
+        raise AssertionError("unsupported schema must not reach Claude")
+        yield  # pragma: no cover - makes this an async generator
+
+    _patch_sdk(monkeypatch, fake_query)
+    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+
+    result = asyncio.run(
+        service.run(
+            prompt="compute",
+            agent_name="calc",
+            output_schema={"type": "object", "unevaluatedProperties": False},
+        )
+    )
+
+    assert result.ok is False
+    assert "unevaluatedProperties" in (result.error or "")
+
+
 def test_run_rejects_adapter_independent_output_schema_violation(wm_paths) -> None:
     from agent_bridge.agent_runtime.registry import CodingAgentRegistry
     from agent_bridge.agent_runtime.types import (

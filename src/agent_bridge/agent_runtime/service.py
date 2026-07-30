@@ -20,10 +20,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft7Validator
 
 from agent_bridge.agent_runtime.control import RunControlRegistry
 from agent_bridge.agent_runtime.events import event_record, write_event
+from agent_bridge.agent_runtime.json_schema import normalize_draft7_schema
 from agent_bridge.agent_runtime.registry import CodingAgentRegistry, create_coding_agent_registry
 from agent_bridge.agent_runtime.support import (
     build_agent_bridge_server_config,
@@ -171,6 +172,7 @@ class AgentService:
         events: list[dict[str, Any]] = []
         result_msg: CodingAgentFinal | None = None
         error: str | None = None
+        effective_output_schema = output_schema
         mode = "in-place" if cwd is not None else "managed"
         logger.info(
             "Agent run 开始 agent=%s backend=%s mode=%s profile=%s skills=%s",
@@ -217,6 +219,8 @@ class AgentService:
             logger.error("Agent run 占位记录创建失败 run_key=%s", run_key, exc_info=True)
 
         try:
+            if output_schema is not None:
+                effective_output_schema = normalize_draft7_schema(output_schema)
             coding_agent = self.coding_agents.get(effective_backend_key)
             if cwd is not None:
                 work_dir = Path(cwd)
@@ -259,8 +263,8 @@ class AgentService:
                 cwd=work_dir,
                 mcp_servers=effective_mcp_servers,
                 setting_sources=effective_setting_sources,
-                output_schema=output_schema,
-                system_prompt_append=self._system_prompt_append(output_schema, system_prompt_append),
+                output_schema=effective_output_schema,
+                system_prompt_append=self._system_prompt_append(effective_output_schema, system_prompt_append),
                 include_partial_messages=include_partial_messages,
                 skills=skills,
                 stderr=stderr,
@@ -325,7 +329,7 @@ class AgentService:
             work_dir,
             started,
             result_msg,
-            output_schema,
+            effective_output_schema,
             error,
             stopped=error == STOPPED_ERROR,
         )
@@ -627,7 +631,7 @@ def _output_schema_error(output_schema: dict[str, Any] | None, result: Any) -> s
     if output_schema is None:
         return None
     errors = sorted(
-        Draft202012Validator(output_schema).iter_errors(result),
+        Draft7Validator(output_schema).iter_errors(result),
         key=lambda item: (list(item.absolute_path), str(item.validator)),
     )
     if not errors:

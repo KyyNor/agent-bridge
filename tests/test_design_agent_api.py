@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
-from jsonschema import Draft202012Validator
+from jsonschema import Draft7Validator
 
 from agent_bridge.api.routes.agent_runs import SCRIPT_DESIGN_SCHEMA, WORKFLOW_DESIGN_SCHEMA
 
@@ -90,7 +90,10 @@ def test_workflow_design_agent_uses_design_workflow_skill(wm_paths) -> None:
 
 
 def test_workflow_design_schema_accepts_structured_definition() -> None:
-    validator = Draft202012Validator(WORKFLOW_DESIGN_SCHEMA)
+    assert WORKFLOW_DESIGN_SCHEMA["$schema"] == "http://json-schema.org/draft-07/schema#"
+    assert "definitions" in WORKFLOW_DESIGN_SCHEMA
+    assert "$defs" not in WORKFLOW_DESIGN_SCHEMA
+    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
     result = {
         "summary": "updated",
         "notes": ["kept DAG shape"],
@@ -109,7 +112,7 @@ def test_workflow_design_schema_accepts_structured_definition() -> None:
 
 
 def test_workflow_design_schema_requires_complete_envelope() -> None:
-    validator = Draft202012Validator(WORKFLOW_DESIGN_SCHEMA)
+    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
     result = {
         "summary": "updated",
         "workflow": {
@@ -127,7 +130,7 @@ def test_workflow_design_schema_requires_complete_envelope() -> None:
 
 
 def test_workflow_design_schema_rejects_legacy_workflow_js() -> None:
-    validator = Draft202012Validator(WORKFLOW_DESIGN_SCHEMA)
+    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
     result = {
         "summary": "updated",
         "workflow": {
@@ -147,7 +150,7 @@ def test_workflow_design_schema_rejects_legacy_workflow_js() -> None:
 
 
 def test_workflow_design_schema_rejects_incomplete_definition_node_config() -> None:
-    validator = Draft202012Validator(WORKFLOW_DESIGN_SCHEMA)
+    validator = Draft7Validator(WORKFLOW_DESIGN_SCHEMA)
     result = {
         "summary": "invalid",
         "workflow": {
@@ -234,7 +237,7 @@ def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:
 
 
 def test_script_design_schema_requires_object_input_schema_shape() -> None:
-    validator = Draft202012Validator(SCRIPT_DESIGN_SCHEMA)
+    validator = Draft7Validator(SCRIPT_DESIGN_SCHEMA)
     base_script = {
         "script_key": "system.echo",
         "name": "Echo",
@@ -254,7 +257,7 @@ def test_script_design_schema_requires_object_input_schema_shape() -> None:
 
 
 def test_script_design_schema_accepts_nullable_output_schema_and_requires_field() -> None:
-    validator = Draft202012Validator(SCRIPT_DESIGN_SCHEMA)
+    validator = Draft7Validator(SCRIPT_DESIGN_SCHEMA)
     base_script = {
         "script_key": "system.echo",
         "name": "Echo",

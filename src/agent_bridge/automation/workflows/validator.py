@@ -8,6 +8,7 @@ from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel, ConfigDict, ValidationError as PydanticValidationError
 
 from agent_bridge.automation.workflows.definition import WorkflowGraph, WorkflowNode, execution_fingerprint
+from agent_bridge.agent_runtime.json_schema import normalize_draft7_schema
 from agent_bridge.automation.workflows.models import WorkflowStatus, WorkflowType
 from agent_bridge.automation.workflows.references import REFERENCE_RE, parse_reference
 from agent_bridge.automation.workflows.validation import (
@@ -254,7 +255,7 @@ class WorkflowValidator:
             if node.type in {"agent", "output"}:
                 if node.type == "agent" and config.result_mode == "json" and config.output_schema:
                     try:
-                        Draft202012Validator.check_schema(config.output_schema)
+                        normalize_draft7_schema(config.output_schema)
                     except SchemaError:
                         issues.append(
                             WorkflowValidationIssue(
