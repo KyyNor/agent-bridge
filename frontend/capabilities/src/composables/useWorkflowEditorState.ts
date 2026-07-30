@@ -145,9 +145,9 @@ export function useWorkflowEditorState(options: {
   function createNode(type: WorkflowNodeType, position = { x: 120 + form.value.definition.nodes.length * 36, y: 160 + form.value.definition.nodes.length * 32 }): WorkflowNode {
     const id = `${type}-${Date.now()}`
     if (type === 'get_task') return { id, type, name: '获取任务', position, config: { on_empty: 'terminate' } }
-    if (type === 'agent') return { id, type, name: 'Agent', position, config: { prompt: '', backend_key: options.defaultBackend.value, mcp_enabled: true, skill_names: [], result_mode: 'text', output_schema: null } }
+    if (type === 'agent') return { id, type, name: 'Agent', position, config: { prompt: '', backend_key: options.defaultBackend.value, mcp_enabled: true, skill_names: [], timeout_seconds: 600, result_mode: 'text', output_schema: null } }
     if (type === 'script') return { id, type, name: '托管脚本', position, config: { script_key: '', params: {}, timeout_seconds: 60 } }
-    return { id, type, name: '输出结果', position, config: { format: 'markdown', title: '输出结果', path: 'reports/output.md', tags: [], prompt: '', backend_key: options.defaultBackend.value, mcp_enabled: false, skill_names: [] } }
+    return { id, type, name: '输出结果', position, config: { format: 'markdown', title: '输出结果', path: 'reports/output.md', tags: [], prompt: '', backend_key: options.defaultBackend.value, mcp_enabled: false, skill_names: [], timeout_seconds: 600 } }
   }
   function addNode(type: WorkflowNodeType, position?: { x: number; y: number }) {
     if (form.value.workflow_type === 'summary' && type === 'output') {

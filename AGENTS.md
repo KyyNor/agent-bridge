@@ -22,6 +22,7 @@
 - 禁止为 CodeGraph 恢复 SQLite 隐式文本索引降级；后端缺失或索引未就绪必须明确失败。
 - 仓库文件读取和文件列表基于 Git 镜像，不应依赖 CodeGraph 后端。
 - 工作流产物的文本检索使用 jieba 预分词与 SQLite FTS5；结构化范围条件（Profile、current/history、标签、格式和路径前缀）必须继续在 `workflow_artifacts` 主表上过滤。中文查询按分词后的关键词组合匹配，长度至少 3 的 ASCII 标识符支持前缀匹配，短 token 和带分隔符的路径/标识符保持字面匹配。
+- 工作流 `agent` 与 `output` 节点的 `timeout_seconds` 仅为运行控制参数；工作流名称/描述、节点显示名称和 Output 配置标题均为展示字段。调整这些字段不能改变增量复用判定、创建增量版本或触发下游重跑。
 
 ## 时间处理规范
 

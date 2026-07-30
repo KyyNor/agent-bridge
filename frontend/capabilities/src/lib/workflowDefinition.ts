@@ -10,8 +10,8 @@ export function createDefaultGraph(type: WorkflowType, defaultBackend: string): 
   if (type === 'operation') return { nodes: [], edges: [] }
   return {
     nodes: [
-      { id: 'markdown-output', type: 'output', name: 'Markdown 主报告', position: { x: 160, y: 120 }, config: { format: 'markdown', title: '总结报告', path: 'reports/index.md', tags: [], prompt: markdownPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: [], system_role: 'summary_markdown' } },
-      { id: 'html-output', type: 'output', name: 'HTML 派生报告', position: { x: 480, y: 120 }, config: { format: 'html', title: '总结报告 HTML', path: 'reports/index.html', tags: [], prompt: htmlPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: ['design_html_report'], system_role: 'summary_html' } },
+      { id: 'markdown-output', type: 'output', name: 'Markdown 主报告', position: { x: 160, y: 120 }, config: { format: 'markdown', title: '总结报告', path: 'reports/index.md', tags: [], prompt: markdownPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: [], timeout_seconds: 600, system_role: 'summary_markdown' } },
+      { id: 'html-output', type: 'output', name: 'HTML 派生报告', position: { x: 480, y: 120 }, config: { format: 'html', title: '总结报告 HTML', path: 'reports/index.html', tags: [], prompt: htmlPrompt, backend_key: defaultBackend, mcp_enabled: false, skill_names: ['design_html_report'], timeout_seconds: 600, system_role: 'summary_html' } },
     ],
     edges: [{ id: 'markdown-to-html', source: 'markdown-output', target: 'html-output', condition: null, system_role: 'summary_markdown_to_html' }],
   }

@@ -167,6 +167,40 @@ def test_position_and_display_metadata_changes_do_not_change_reuse():
     assert {node.node_id for node in plan.nodes if node.action == "reuse"} == {"a", "b"}
 
 
+@pytest.mark.parametrize("node_type, config", [
+    ("agent", {"prompt": "x", "backend_key": "claude", "timeout_seconds": 600}),
+    ("output", {"format": "markdown", "title": "Report", "path": "report.md", "prompt": "x", "backend_key": "claude", "timeout_seconds": 600}),
+])
+def test_agent_timeout_change_does_not_invalidate_incremental_reuse(node_type, config):
+    planner = WorkflowIncrementalPlanner()
+    original = _workflow([_node("a", node_type=node_type, config=config)])
+    baseline_run, baseline_nodes = _baseline(planner, original)
+    changed = deepcopy(original)
+    changed["definition"]["nodes"][0]["config"]["timeout_seconds"] = 1800
+
+    plan = _plan(planner, changed, baseline_run, baseline_nodes)
+
+    assert [(node.node_id, node.action, node.reason) for node in plan.nodes] == [
+        ("a", "reuse", "fingerprint_match"),
+    ]
+
+
+def test_output_display_title_change_does_not_invalidate_incremental_reuse():
+    planner = WorkflowIncrementalPlanner()
+    original = _workflow([_node("report", node_type="output", config={
+        "format": "markdown", "title": "旧标题", "path": "report.md", "prompt": "x", "backend_key": "claude",
+    })])
+    baseline_run, baseline_nodes = _baseline(planner, original)
+    changed = deepcopy(original)
+    changed["definition"]["nodes"][0]["config"]["title"] = "新标题"
+
+    plan = _plan(planner, changed, baseline_run, baseline_nodes)
+
+    assert [(node.node_id, node.action, node.reason) for node in plan.nodes] == [
+        ("report", "reuse", "fingerprint_match"),
+    ]
+
+
 def test_task_version_change_force_full_and_missing_baseline_execute_all():
     planner = WorkflowIncrementalPlanner()
     workflow = _workflow([_node("a"), _node("b")], [_edge("a", "b")])

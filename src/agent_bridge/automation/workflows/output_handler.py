@@ -82,7 +82,7 @@ class OutputHandler:
         result = await self.agent_service.run(
             prompt=prompt, agent_name=f"workflow_{node.id}", profile=context.workflow["profile_key"] if config.mcp_enabled else None,
             workflow_key=context.workflow["workflow_key"], run_id=context.run_id, output_schema=OUTPUT_SCHEMA,
-            backend_key=config.backend_key, skills=None, actor=context.actor,
+            backend_key=config.backend_key, timeout=config.timeout_seconds, skills=None, actor=context.actor,
         )
         if not result.ok or not isinstance(result.result, dict):
             raise NodeExecutionError(node.id, result.error or "output agent failed")

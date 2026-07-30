@@ -59,6 +59,7 @@
         "config": {
           "prompt": "使用当前任务上下文中的 cpt_file_path 和 report_id，查询 metadata_fine_cpt_raw_content 获取原始 XML，解析报表结构，识别报表类型、主要功能、数据集和处理逻辑。必要时使用 fine_search 定位相关定义。输出严格 JSON；不确定的判断保留在 analysis_notes，不要编造字段。",
           "backend_key": "claude",
+          "timeout_seconds": 600,
           "mcp_enabled": true,
           "skill_names": [],
           "result_mode": "json",
@@ -84,6 +85,7 @@
         "config": {
           "prompt": "使用当前任务上下文中的 cpt_file_path 和 report_id，从当前报表的 CPT/XML 和 FineRepo 知识库中追踪数据血缘：用 fine_search 定位直接来源表，过滤 whfruser 和 dim_ 开头的表；用 ds_search 在当前工作流内按有限深度 BFS 追踪上游任务，记录 code_path、输入输出、SQL 逻辑，并防止循环。跨工作流依赖只记录边界，不继续展开。输出严格 JSON，无法确认的信息放入 filtered_out 或相应数组。",
           "backend_key": "claude",
+          "timeout_seconds": 600,
           "mcp_enabled": true,
           "skill_names": [],
           "result_mode": "json",
@@ -164,6 +166,7 @@
           "tags": ["fine-report", "analytics", "data_center"],
           "prompt": "综合全部上游节点输出，生成一份完整 Markdown 报告。必须包含报表标识和任务信息、访问量统计、报表内容分析、数据血缘、发现的问题与不确定项。保留可核验的表名、数据库、项目、工作流和代码路径；缺失信息明确标注，不得猜测。返回 title、summary、content，其中 content 必须是完整 Markdown。",
           "backend_key": "claude",
+          "timeout_seconds": 600,
           "mcp_enabled": false,
           "skill_names": [],
           "system_role": "summary_markdown"
@@ -181,6 +184,7 @@
           "tags": ["fine-report", "analytics", "data_center"],
           "prompt": "只根据 Markdown 主产物生成完整 HTML 文档，保留当前任务上下文中的报表标识和任务信息；返回 title、summary、content，content 必须包含 html 或 body 标签、内联 CSS、无外链脚本。",
           "backend_key": "claude",
+          "timeout_seconds": 600,
           "mcp_enabled": false,
           "skill_names": [],
           "system_role": "summary_html"

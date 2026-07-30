@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 def _service(wm_paths):
     from agent_bridge.app.service import AgentBridgeService
@@ -53,6 +55,79 @@ def test_workflow_service_allows_stale_task_to_be_prioritized(wm_paths):
 
     assert result["task_version"] == "v1"
     assert result["execution_mode"] == "incremental"
+
+
+def test_workflow_agent_timeout_change_does_not_create_incremental_revision(wm_paths):
+    svc = _service(wm_paths)
+    backend_key = svc.agents.coding_agents.default_backend
+    definition = {
+        "nodes": [{
+            "id": "agent",
+            "type": "agent",
+            "name": "Agent",
+            "position": {"x": 0, "y": 0},
+            "config": {"prompt": "处理任务", "backend_key": backend_key, "mcp_enabled": False},
+        }],
+        "edges": [],
+    }
+    first = svc.workflows.upsert_definition(
+        actor="root", workflow_key="timeout-control", name="Timeout Control", description="",
+        profile_key="report-plane", definition=definition, status="active",
+    )
+    definition["nodes"][0]["config"]["timeout_seconds"] = 1800
+    second = svc.workflows.upsert_definition(
+        actor="root", workflow_key="timeout-control", name="Timeout Control", description="",
+        profile_key="report-plane", definition=definition, status="active",
+    )
+
+    assert second["revision_no"] == first["revision_no"]
+    assert second["content_hash"] == first["content_hash"]
+
+
+@pytest.mark.parametrize("change", [
+    lambda payload: payload.update(name="改名后的工作流"),
+    lambda payload: payload.update(description="更新说明文字"),
+    lambda payload: payload["definition"]["nodes"][0].update(name="改名后的 Agent 节点"),
+    lambda payload: payload["definition"]["nodes"][1]["config"].update(title="改名后的输出标题"),
+])
+def test_workflow_display_change_does_not_create_incremental_revision(wm_paths, change):
+    svc = _service(wm_paths)
+    backend_key = svc.agents.coding_agents.default_backend
+    payload = {
+        "workflow_key": "display-control",
+        "name": "展示字段测试",
+        "description": "",
+        "profile_key": "report-plane",
+        "status": "active",
+        "definition": {
+            "nodes": [
+                {
+                    "id": "agent",
+                    "type": "agent",
+                    "name": "Agent",
+                    "position": {"x": 0, "y": 0},
+                    "config": {"prompt": "处理任务", "backend_key": backend_key, "mcp_enabled": False},
+                },
+                {
+                    "id": "output",
+                    "type": "output",
+                    "name": "输出",
+                    "position": {"x": 1, "y": 0},
+                    "config": {
+                        "format": "markdown", "title": "初始标题", "path": "report.md",
+                        "prompt": "生成报告", "backend_key": backend_key, "mcp_enabled": False,
+                    },
+                },
+            ],
+            "edges": [{"id": "agent-output", "source": "agent", "target": "output"}],
+        },
+    }
+    first = svc.workflows.upsert_definition(actor="root", **payload)
+    change(payload)
+    second = svc.workflows.upsert_definition(actor="root", **payload)
+
+    assert second["revision_no"] == first["revision_no"]
+    assert second["content_hash"] == first["content_hash"]
 
 
 def test_workflow_service_preview_resolves_stale_task_to_incremental(wm_paths):

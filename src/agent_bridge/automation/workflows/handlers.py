@@ -121,6 +121,7 @@ class WorkflowNodeHandlers:
             run_id=context.run_id,
             output_schema=output_schema,
             backend_key=config.backend_key,
+            timeout=config.timeout_seconds,
             skills=None,
             actor=context.actor,
         )

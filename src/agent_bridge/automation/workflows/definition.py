@@ -48,6 +48,8 @@ class AgentConfig(BaseModel):
     backend_key: str
     mcp_enabled: bool = True
     skill_names: list[str] = Field(default_factory=list)
+    # 运行控制参数不参与增量复用判定；仅改变等待 Agent 的最长时间。
+    timeout_seconds: int = Field(default=600, ge=1, le=86_400)
     result_mode: Literal["text", "json"] = "text"
     output_schema: dict[str, Any] | None = None
 
@@ -71,6 +73,8 @@ class OutputConfig(BaseModel):
     backend_key: str
     mcp_enabled: bool = False
     skill_names: list[str] = Field(default_factory=list)
+    # 输出节点同样通过 Coding Agent 生成内容，需要独立的运行时上限。
+    timeout_seconds: int = Field(default=600, ge=1, le=86_400)
     system_role: Literal["summary_markdown", "summary_html"] | None = None
 
 
@@ -155,12 +159,20 @@ def execution_fingerprint(value: Any) -> str:
 
 
 def node_execution_payload(node: WorkflowNode | Mapping[str, Any], *, resource_fingerprint: Any = None) -> dict[str, Any]:
-    """Pick the execution-relevant, position-independent node fields."""
+    """Pick node fields that affect produced output, excluding run controls."""
     raw = node.model_dump(mode="json") if isinstance(node, BaseModel) else dict(node)
+    config = dict(raw.get("config") or {})
+    # 超时只控制本次等待时长，不会改变相同输入下的处理语义或产物。
+    # 排除它可确保仅调整超时不会让增量执行失去既有结果复用资格。
+    if raw.get("type") in {"agent", "output"}:
+        config.pop("timeout_seconds", None)
+    if raw.get("type") == "output":
+        # Output 标题仅用于编辑器展示，实际产物标题来自 Agent 的结构化结果。
+        config.pop("title", None)
     return {
         "id": raw.get("id"),
         "type": raw.get("type"),
-        "config": normalize_execution_value(raw.get("config") or {}),
+        "config": normalize_execution_value(config),
         "resource_fingerprint": normalize_execution_value(resource_fingerprint),
     }
 

@@ -189,9 +189,9 @@ export interface WorkflowPosition { x: number; y: number }
 export interface WorkflowCondition { field: string; operator: ConditionOperator; value?: unknown }
 export interface WorkflowEdge { id: string; source: string; target: string; condition: WorkflowCondition | null; system_role?: 'summary_markdown_to_html' | null }
 export interface GetTaskWorkflowNode { id: string; type: 'get_task'; name: string; position: WorkflowPosition; config: { on_empty?: 'terminate' | 'continue' } }
-export interface AgentWorkflowNode { id: string; type: 'agent'; name: string; position: WorkflowPosition; config: { prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; result_mode: 'text' | 'json'; output_schema: Record<string, unknown> | null } }
+export interface AgentWorkflowNode { id: string; type: 'agent'; name: string; position: WorkflowPosition; config: { prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; timeout_seconds?: number; result_mode: 'text' | 'json'; output_schema: Record<string, unknown> | null } }
 export interface ScriptWorkflowNode { id: string; type: 'script'; name: string; position: WorkflowPosition; config: { script_key: string; params: Record<string, unknown>; timeout_seconds: number } }
-export interface OutputWorkflowNode { id: string; type: 'output'; name: string; position: WorkflowPosition; config: { format: 'markdown' | 'html'; title: string; path: string; tags: string[]; prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; system_role?: 'summary_markdown' | 'summary_html' | null } }
+export interface OutputWorkflowNode { id: string; type: 'output'; name: string; position: WorkflowPosition; config: { format: 'markdown' | 'html'; title: string; path: string; tags: string[]; prompt: string; backend_key: string; mcp_enabled: boolean; skill_names: string[]; timeout_seconds?: number; system_role?: 'summary_markdown' | 'summary_html' | null } }
 export type WorkflowNode = GetTaskWorkflowNode | AgentWorkflowNode | ScriptWorkflowNode | OutputWorkflowNode
 export interface WorkflowGraph { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
 export interface WorkflowValidationIssue { scope: 'workflow' | 'node' | 'edge'; id: string | null; field: string | null; code: string; message: string }

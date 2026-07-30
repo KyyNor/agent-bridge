@@ -36,7 +36,7 @@ class FailingWorkflows:
 async def test_markdown_output_injects_ancestors_and_saves_artifact():
     graph = WorkflowGraph.model_validate({"nodes": [
         {"id": "analysis", "type": "agent", "name": "Analysis", "position": {"x": 0, "y": 0}, "config": {"prompt": "analyze", "backend_key": "claude"}},
-        {"id": "out", "type": "output", "name": "Out", "position": {"x": 1, "y": 0}, "config": {"format": "markdown", "title": "T", "path": "reports/index.md", "prompt": "render", "backend_key": "claude"}},
+        {"id": "out", "type": "output", "name": "Out", "position": {"x": 1, "y": 0}, "config": {"format": "markdown", "title": "T", "path": "reports/index.md", "prompt": "render", "backend_key": "claude", "timeout_seconds": 1200}},
     ], "edges": [{"id": "analysis-out", "source": "analysis", "target": "out"}]})
     node = graph.nodes[1]
     agent = Agent()
@@ -47,6 +47,7 @@ async def test_markdown_output_injects_ancestors_and_saves_artifact():
     assert "/reports/demo.cpt" in agent.kwargs["prompt"]
     assert "[上游节点输出]" in agent.kwargs["prompt"]
     assert result.artifact_ids == ["artifact_markdown"]
+    assert agent.kwargs["timeout"] == 1200
     assert workflows.kwargs["producer_node_id"] == "out"
     assert workflows.kwargs["producer_node_fingerprint"] == "current-fingerprint"
 

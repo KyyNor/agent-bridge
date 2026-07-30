@@ -27,6 +27,7 @@
           "config": {
             "prompt": "根据当前任务 payload 中的 full_name、url、title、hot_value 和 source，访问仓库主页与 README，核验仓库用途、主要语言、许可证、活跃度和核心能力。只记录可核验事实；访问失败或字段缺失时明确标注。返回严格 JSON。",
             "backend_key": "claude",
+            "timeout_seconds": 600,
             "mcp_enabled": true,
             "skill_names": [],
             "result_mode": "json",
@@ -54,6 +55,7 @@
           "config": {
             "prompt": "结合上游仓库事实和当前任务上下文，调研该项目的典型使用场景、主要替代方案、已知限制与采用风险。优先使用官方仓库、官方文档和项目发布记录；无法核验的内容不要推断。返回严格 JSON。",
             "backend_key": "claude",
+            "timeout_seconds": 600,
             "mcp_enabled": true,
             "skill_names": [],
             "result_mode": "json",
@@ -83,6 +85,7 @@
             "tags": ["hellogithub", "github", "repo-summary"],
             "prompt": "根据全部上游输出生成中文 Markdown 仓库速览。包含热榜任务信息、仓库用途、核心能力、技术与许可证、典型场景、替代方案、局限、采用建议和证据说明。区分事实与评价，缺失信息明确标注。返回 title、summary、content。",
             "backend_key": "claude",
+            "timeout_seconds": 600,
             "mcp_enabled": false,
             "skill_names": [],
             "system_role": "summary_markdown"
@@ -100,6 +103,7 @@
             "tags": ["hellogithub", "github", "repo-summary"],
             "prompt": "只根据 Markdown 主产物生成结构清晰、适合阅读的完整中文 HTML 文档。保留事实与评价的区分；使用内联 CSS，不使用外链脚本。返回 title、summary、content。",
             "backend_key": "claude",
+            "timeout_seconds": 600,
             "mcp_enabled": false,
             "skill_names": ["design_html_report"],
             "system_role": "summary_html"
