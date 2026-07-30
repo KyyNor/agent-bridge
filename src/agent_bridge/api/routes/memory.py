@@ -128,7 +128,13 @@ def create_memory_routes(service, actor):
         payload: ProfileMemoryBindingRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.memory.set_profile_binding(current_actor, profile_key, payload.block_key, enabled=payload.enabled)
+        return service.memory.set_profile_binding(
+            current_actor,
+            profile_key,
+            payload.block_key,
+            enabled=payload.enabled,
+            expected_edit_token=payload.expected_edit_token,
+        )
 
     @router.post("/memory/hooks/claude-code/{action}")
     def handle_claude_code_memory_hook(

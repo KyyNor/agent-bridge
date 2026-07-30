@@ -18,6 +18,7 @@ class UpdateMemoryBlockStatusRequest(BaseModel):
 class ProfileMemoryBindingRequest(BaseModel):
     block_key: str | None = None
     enabled: bool = True
+    expected_edit_token: str | None = None
 
 
 class ClaudeCodeHookRequest(BaseModel):
@@ -150,6 +151,7 @@ class RegisterMcpServiceRequest(BaseModel):
     headers: dict[str, Any] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    expected_edit_token: str | None = None
 
 
 class RegisterOpenApiServiceRequest(BaseModel):
@@ -162,6 +164,7 @@ class RegisterOpenApiServiceRequest(BaseModel):
     headers: dict[str, Any] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    expected_edit_token: str | None = None
 
 
 class ImportOpenApiOperationsRequest(BaseModel):
@@ -203,6 +206,7 @@ class ProjectProfileRequest(BaseModel):
     name: str
     description: str = ""
     status: str = "active"
+    expected_edit_token: str | None = None
 
 
 class ProfileSourceRuleRequest(BaseModel):
@@ -213,6 +217,7 @@ class ProfileSourceRuleRequest(BaseModel):
 
 class ProfileRulesRequest(BaseModel):
     rules: list[ProfileSourceRuleRequest] = Field(default_factory=list)
+    expected_edit_token: str | None = None
 
 
 class ProfilePinRuleRequest(BaseModel):
@@ -222,16 +227,19 @@ class ProfilePinRuleRequest(BaseModel):
 
 class ProfilePinsRequest(BaseModel):
     pins: list[ProfilePinRuleRequest] = Field(default_factory=list)
+    expected_edit_token: str | None = None
 
 
 class ProfileManualNotesRequest(BaseModel):
     manual_notes: str = ""
+    expected_edit_token: str | None = None
 
 
 class ProfilePinSettingsRequest(BaseModel):
     mode: str
     ratio_percent: int | None = None
     count: int | None = None
+    expected_edit_token: str | None = None
 
 
 class ProfileResourceRuleRequest(BaseModel):
@@ -241,6 +249,7 @@ class ProfileResourceRuleRequest(BaseModel):
 
 class ProfileResourcesRequest(BaseModel):
     resources: list[ProfileResourceRuleRequest] = Field(default_factory=list)
+    expected_edit_token: str | None = None
 
 
 class ResourceProfilesRequest(BaseModel):
@@ -251,6 +260,7 @@ class ResourceProfilesRequest(BaseModel):
 class UpdateKbDefaultsRequest(BaseModel):
     default_backend_slug: str | None = None
     default_agent_id: str | None = None
+    expected_edit_token: str | None = None
 
 
 class CreateAgentRequest(BaseModel):
@@ -270,6 +280,7 @@ class CodeRepositoryRequest(BaseModel):
     sync_interval_minutes: int = 60
     auto_understand: bool = False
     status: str = "active"
+    expected_edit_token: str | None = None
 
 
 class KbRepoSourceRequest(BaseModel):
@@ -281,6 +292,7 @@ class CodeRepoCategoryRequest(BaseModel):
     category_key: str
     name: str
     description: str = ""
+    expected_edit_token: str | None = None
 
 
 class KnowledgeSyncConfigRequest(BaseModel):
@@ -301,6 +313,7 @@ class KnowledgeSyncConfigRequest(BaseModel):
     log_retention_days: int = Field(default=180, ge=1)
     mcp_timeout_seconds: int = 150
     understand_timeout_minutes: int = 120
+    expected_edit_token: str | None = None
 
 
 class ClaudeMemConfigRequest(BaseModel):
@@ -310,6 +323,7 @@ class ClaudeMemConfigRequest(BaseModel):
     model: str | None = None
     clear_auth_token: bool = False
     clear_api_key: bool = False
+    expected_edit_token: str | None = None
 
 
 class RetrievalProbeLlmConfigRequest(BaseModel):
@@ -317,6 +331,7 @@ class RetrievalProbeLlmConfigRequest(BaseModel):
     model: str = Field(min_length=1, max_length=256)
     api_key: str | None = Field(default=None, max_length=4096)
     clear_api_key: bool = False
+    expected_edit_token: str | None = None
 
 
 class AgentBackendConfigRequest(BaseModel):
@@ -329,6 +344,7 @@ class AgentBackendConfigRequest(BaseModel):
 class AgentRuntimeConfigRequest(BaseModel):
     default_backend: str = "claude"
     backends: list[AgentBackendConfigRequest] = Field(default_factory=list)
+    expected_edit_token: str | None = None
 
 
 class WorkflowDefinitionRequest(BaseModel):
@@ -371,6 +387,11 @@ class WorkflowValidationRequest(BaseModel):
 
 class SkillPromptRequest(BaseModel):
     prompt: str
+    expected_edit_token: str | None = None
+
+
+class EditTokenRequest(BaseModel):
+    expected_edit_token: str | None = None
 
 
 class ScriptRequest(BaseModel):
@@ -384,6 +405,7 @@ class ScriptRequest(BaseModel):
     status: str = "active"
     owner_type: str = "system"
     owner_key: str = ""
+    expected_edit_token: str | None = None
 
 
 class ScriptValidateRequest(BaseModel):
@@ -432,6 +454,7 @@ class UpsertBackendRequest(BaseModel):
     embedding_model_id: str | None = None
     summary_model_id: str | None = None
     rerank_model_id: str | None = None
+    expected_edit_token: str | None = None
 
 
 class UpdateBackendRequest(BaseModel):
@@ -442,3 +465,4 @@ class UpdateBackendRequest(BaseModel):
     embedding_model_id: str | None = None
     summary_model_id: str | None = None
     rerank_model_id: str | None = None
+    expected_edit_token: str | None = None

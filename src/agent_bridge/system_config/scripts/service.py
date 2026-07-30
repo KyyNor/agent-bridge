@@ -17,6 +17,7 @@ from jsonschema.exceptions import SchemaError
 from agent_bridge.automation.workflows.validation import WORKFLOW_VALIDATION_INPUT_SCHEMA
 from agent_bridge.core.config import AgentBridgePaths, load_server_config
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.diff import text_diff
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.runtime_support import render_runner, render_runtime_helper
@@ -111,6 +112,7 @@ class ScriptService:
         owner_key: str,
         input_schema: dict[str, Any] | None = None,
         output_schema: dict[str, Any] | None = None,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
@@ -147,6 +149,18 @@ class ScriptService:
             output_schema=normalized_output_schema,
         )
         with self.store.transaction():
+            current = self.store.scripts.get_script(normalized_key)
+            if current is not None:
+                current = self._with_script_source(current)
+            elif builtin is not None:
+                current = self._default_script(builtin)
+            require_edit_token(
+                expected=expected_edit_token,
+                current_snapshot=self._script_revision_snapshot(current) if current else None,
+                resource_type="script",
+                resource_key=normalized_key,
+                actor=actor,
+            )
             previous_revisions = self.store.scripts.list_revisions(normalized_key, limit=1)
             is_first_revision = not previous_revisions
             previous_hash = previous_revisions[0]["content_hash"] if previous_revisions else None
@@ -192,7 +206,13 @@ class ScriptService:
             raise NotFound("script not found")
         return {"script_key": script_key, "deleted": True}
 
-    def reset_script(self, actor: str, script_key: str) -> dict[str, Any]:
+    def reset_script(
+        self,
+        actor: str,
+        script_key: str,
+        *,
+        expected_edit_token: str | None = None,
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
         definition = self._builtins.get(normalized_key)
@@ -200,6 +220,18 @@ class ScriptService:
             raise NotFound("built-in script not found")
         default = self._default_script(definition)
         with self.store.transaction():
+            current = self.store.scripts.get_script(normalized_key)
+            if current is not None:
+                current = self._with_script_source(current)
+            else:
+                current = default
+            require_edit_token(
+                expected=expected_edit_token,
+                current_snapshot=self._script_revision_snapshot(current),
+                resource_type="script",
+                resource_key=normalized_key,
+                actor=actor,
+            )
             stored = self._materialize_default_script(definition)
             revisions = self.store.scripts.list_revisions(normalized_key, limit=1)
             revision_no = revisions[0]["revision_no"] if revisions else 0
@@ -579,7 +611,10 @@ class ScriptService:
         return timeout
 
     def _script_payload(self, script: dict[str, Any], *, include_code: bool) -> dict[str, Any]:
-        payload = dict(script)
+        payload = attach_edit_token(
+            dict(script),
+            self._script_revision_snapshot(script),
+        )
         payload.setdefault("source", "database")
         payload["is_builtin"] = str(payload.get("script_key") or "") in self._builtins
         if "revision_no" not in payload:

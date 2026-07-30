@@ -10,6 +10,7 @@ from agent_bridge.api.schemas import (
     CodeRepoCategoryRequest,
     CodeRepositoryRequest,
     ClaudeMemConfigRequest,
+    EditTokenRequest,
     RetrievalProbeLlmConfigRequest,
     KnowledgeSyncConfigRequest,
     ScriptRequest,
@@ -37,6 +38,13 @@ def create_builtin_routes(service, actor):
     @router.get("/code-repo/repositories")
     def list_code_repositories(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.codegraph.list_repositories(current_actor)
+
+    @router.get("/code-repo/repositories/{repo_key}")
+    def get_code_repository(
+        repo_key: str,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.codegraph.get_repository(current_actor, repo_key)
 
     @router.post("/code-repo/repositories")
     def upsert_code_repository(payload: CodeRepositoryRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
@@ -200,11 +208,24 @@ def create_builtin_routes(service, actor):
         payload: SkillPromptRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        return service.skills.save_skill(current_actor, skill_name, payload.prompt)
+        return service.skills.save_skill(
+            current_actor,
+            skill_name,
+            payload.prompt,
+            expected_edit_token=payload.expected_edit_token,
+        )
 
     @router.post("/skills/{skill_name}/reset")
-    def reset_skill(skill_name: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.skills.reset_skill(current_actor, skill_name)
+    def reset_skill(
+        skill_name: str,
+        payload: EditTokenRequest | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.skills.reset_skill(
+            current_actor,
+            skill_name,
+            expected_edit_token=payload.expected_edit_token if payload else None,
+        )
 
     @router.get("/skills/{skill_name}/revisions")
     def list_skill_revisions(
@@ -252,8 +273,16 @@ def create_builtin_routes(service, actor):
         return service.scripts.delete_script(current_actor, script_key)
 
     @router.post("/scripts/{script_key}/reset")
-    def reset_script(script_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.scripts.reset_script(current_actor, script_key)
+    def reset_script(
+        script_key: str,
+        payload: EditTokenRequest | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.scripts.reset_script(
+            current_actor,
+            script_key,
+            expected_edit_token=payload.expected_edit_token if payload else None,
+        )
 
     @router.post("/scripts/{script_key}/test")
     def test_script(

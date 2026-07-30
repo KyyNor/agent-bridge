@@ -22,6 +22,7 @@ from agent_bridge.capability_hub.errors import capability_failure, failure_metad
 from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService, monotonic_ms
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.json_util import json_loads as _json_loads
 from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
 from agent_bridge.capability_hub.sources.openapi.http_client import OpenApiHttpClient
@@ -288,6 +289,8 @@ class CapabilityService:
         headers: dict[str, Any] | None,
         description: str,
         tags: list[str],
+        *,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         self._validate_service_key(service_key)
@@ -296,6 +299,13 @@ class CapabilityService:
         if self.store.get_openapi_service(service_key) is not None:
             raise ValidationError("service_key is already used by an OpenAPI service")
         existing = self.store.get_mcp_service(service_key)
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=self._service_edit_snapshot(existing) if existing else None,
+            resource_type="mcp_service",
+            resource_key=service_key,
+            actor=actor,
+        )
         if headers is None:
             headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
         if existing is None:
@@ -331,6 +341,8 @@ class CapabilityService:
         headers: dict[str, Any] | None,
         description: str,
         tags: list[str],
+        *,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         self._validate_service_key(service_key)
@@ -339,6 +351,13 @@ class CapabilityService:
         if not base_url.strip():
             raise ValidationError("base_url is required")
         existing = self.store.get_openapi_service(service_key)
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=self._openapi_service_edit_snapshot(existing) if existing else None,
+            resource_type="openapi_service",
+            resource_key=service_key,
+            actor=actor,
+        )
         if auth_config is None:
             auth_config = _json_loads(existing.get("auth_config_json"), {}) if existing is not None else {}
         if headers is None:
@@ -1038,7 +1057,7 @@ class CapabilityService:
         return [tool for tool in self.store.list_openapi_tools(service_key) if tool.get("status") == "active"]
 
     def _service_payload(self, service: dict[str, Any], *, redact_headers: bool = False) -> dict[str, Any]:
-        payload = dict(service)
+        payload = attach_edit_token(dict(service), self._service_edit_snapshot(service))
         headers = _json_loads(payload.pop("headers_json", None), {})
         if redact_headers:
             headers = {key: "***" if value else value for key, value in headers.items()}
@@ -1074,7 +1093,10 @@ class CapabilityService:
         }
 
     def _openapi_service_payload(self, service: dict[str, Any], *, redact_secrets: bool = False) -> dict[str, Any]:
-        payload = dict(service)
+        payload = attach_edit_token(
+            dict(service),
+            self._openapi_service_edit_snapshot(service),
+        )
         headers = _json_loads(payload.pop("headers_json", None), {})
         auth_config = _json_loads(payload.pop("auth_config_json", None), {})
         if redact_secrets:
@@ -1088,6 +1110,37 @@ class CapabilityService:
         payload["tags"] = _json_loads(payload.pop("tags_json", None), [])
         payload["source_type"] = SourceType.openapi_service.value
         return payload
+
+    @staticmethod
+    def _service_edit_snapshot(service: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: service.get(key)
+            for key in (
+                "service_key",
+                "name",
+                "endpoint_url",
+                "headers_json",
+                "description",
+                "tags_json",
+            )
+        }
+
+    @staticmethod
+    def _openapi_service_edit_snapshot(service: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: service.get(key)
+            for key in (
+                "service_key",
+                "name",
+                "base_url",
+                "spec_url",
+                "spec_content",
+                "auth_config_json",
+                "headers_json",
+                "description",
+                "tags_json",
+            )
+        }
 
     def _openapi_service_summary_payload(self, service: dict[str, Any]) -> dict[str, Any]:
         payload = dict(service)

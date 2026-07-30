@@ -7,6 +7,7 @@ from typing import Any
 
 from agent_bridge.core.diff import text_diff
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -58,7 +59,14 @@ class SkillService:
         override = self.store.get_skill_prompt_override(skill_name)
         return self._payload(definition, override, include_prompt=True)
 
-    def save_skill(self, actor: str, skill_name: str, prompt: str) -> dict[str, Any]:
+    def save_skill(
+        self,
+        actor: str,
+        skill_name: str,
+        prompt: str,
+        *,
+        expected_edit_token: str | None = None,
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         definition = self._definition(skill_name)
         normalized = prompt.strip()
@@ -66,6 +74,14 @@ class SkillService:
             raise ValidationError("prompt is required")
         new_hash = self._skill_content_hash(normalized)
         with self.store.transaction():
+            current_override = self.store.get_skill_prompt_override(definition.skill_name)
+            require_edit_token(
+                expected=expected_edit_token,
+                current_snapshot=self._edit_snapshot(definition, current_override),
+                resource_type="skill",
+                resource_key=definition.skill_name,
+                actor=actor,
+            )
             revisions = self.store.list_skill_prompt_revisions(definition.skill_name, limit=1)
             previous_hash = revisions[0]["content_hash"] if revisions else None
             override = self.store.upsert_skill_prompt_override(
@@ -87,12 +103,26 @@ class SkillService:
         payload["revision_no"] = revision_no
         return payload
 
-    def reset_skill(self, actor: str, skill_name: str) -> dict[str, Any]:
+    def reset_skill(
+        self,
+        actor: str,
+        skill_name: str,
+        *,
+        expected_edit_token: str | None = None,
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         definition = self._definition(skill_name)
         default_prompt = self._default_prompt(definition)
         new_hash = self._skill_content_hash(default_prompt)
         with self.store.transaction():
+            current_override = self.store.get_skill_prompt_override(definition.skill_name)
+            require_edit_token(
+                expected=expected_edit_token,
+                current_snapshot=self._edit_snapshot(definition, current_override),
+                resource_type="skill",
+                resource_key=definition.skill_name,
+                actor=actor,
+            )
             revisions = self.store.list_skill_prompt_revisions(definition.skill_name, limit=1)
             self.store.delete_skill_prompt_override(definition.skill_name)
             if not revisions or revisions[0]["content_hash"] != new_hash:
@@ -221,4 +251,18 @@ class SkillService:
             payload["default_prompt"] = default_prompt
         else:
             payload["prompt_preview"] = prompt[:160]
-        return payload
+        return attach_edit_token(payload, self._edit_snapshot(definition, override))
+
+    def _edit_snapshot(
+        self,
+        definition: SkillDefinition,
+        override: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return {
+            "prompt": (
+                str(override["prompt"])
+                if override is not None
+                else self._default_prompt(definition)
+            ),
+            "source": "database" if override is not None else "default",
+        }

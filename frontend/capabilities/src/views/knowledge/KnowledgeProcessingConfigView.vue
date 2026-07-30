@@ -63,6 +63,7 @@ const showCategoryDialog = ref(false)
 const categoryForm = ref({ category_key: '', name: '', description: '' })
 const categorySaving = ref(false)
 const editingCategory = ref(false)
+const categoryExpectedEditToken = ref<string | null>('')
 
 // Scheduler status
 const schedulerStatus = ref<SchedulerStatus | null>(null)
@@ -74,6 +75,7 @@ const backendForm = ref({ slug: '', backend_type: 'ragflow', base_url: '', api_k
 const backendSaving = ref(false)
 const backendError = ref('')
 const editingBackend = ref(false)
+const backendExpectedEditToken = ref<string | null>('')
 
 const backendTypes = [
   { value: 'ragflow', label: 'RagFlow' },
@@ -287,6 +289,7 @@ async function saveClaudeMemConfig() {
       api_key: claudeMemForm.value.api_key || null,
       clear_auth_token: claudeMemForm.value.clear_auth_token,
       clear_api_key: claudeMemForm.value.clear_api_key,
+      expected_edit_token: claudeMemConfig.value?.edit_token,
     })
     claudeMemConfig.value = saved
     claudeMemForm.value = {
@@ -312,6 +315,7 @@ async function saveRetrievalProbeLlmConfig() {
       model: retrievalProbeLlmForm.value.model,
       api_key: retrievalProbeLlmForm.value.api_key || null,
       clear_api_key: retrievalProbeLlmForm.value.clear_api_key,
+      expected_edit_token: retrievalProbeLlmConfig.value?.edit_token,
     })
     retrievalProbeLlmConfig.value = saved
     retrievalProbeLlmForm.value = { base_url: saved.base_url, model: saved.model, api_key: '', clear_api_key: false }
@@ -336,6 +340,7 @@ function normalizeFixedAgentRuntimeConfig(config: AgentRuntimeConfig): AgentRunt
   return {
     default_backend: allowed.has(config.default_backend) ? config.default_backend : 'claude',
     backends,
+    edit_token: config.edit_token,
   }
 }
 
@@ -347,6 +352,7 @@ async function saveAgentRuntimeConfig() {
     const normalized = normalizeFixedAgentRuntimeConfig(agentRuntimeConfig.value)
     const saved = await api.saveAgentRuntimeConfig({
       default_backend: normalized.default_backend,
+      edit_token: normalized.edit_token,
       backends: normalized.backends.map(item => ({
         slug: item.slug.trim(),
         type: item.type,
@@ -364,12 +370,22 @@ async function saveAgentRuntimeConfig() {
 
 function openAddCategory() {
   editingCategory.value = false
+  categoryExpectedEditToken.value = ''
   categoryForm.value = { category_key: '', name: '', description: '' }
   showCategoryDialog.value = true
 }
 
-function openEditCategory(c: CodeRepoCategory) {
+async function openEditCategory(c: CodeRepoCategory) {
+  try {
+    categories.value = await api.listCategories()
+  } catch {
+    return
+  }
+  const latest = categories.value.find(item => item.category_key === c.category_key)
+  if (!latest) return
+  c = latest
   editingCategory.value = true
+  categoryExpectedEditToken.value = c.edit_token ?? null
   categoryForm.value = { category_key: c.category_key, name: c.name, description: c.description }
   showCategoryDialog.value = true
 }
@@ -377,7 +393,10 @@ function openEditCategory(c: CodeRepoCategory) {
 async function saveCategory() {
   categorySaving.value = true
   try {
-    await api.upsertCategory(categoryForm.value)
+    await api.upsertCategory({
+      ...categoryForm.value,
+      expected_edit_token: categoryExpectedEditToken.value,
+    })
     showCategoryDialog.value = false
     await loadCategories()
   } catch { /* ignore */ }
@@ -396,13 +415,23 @@ async function deleteCategory(key: string) {
 
 function openAddBackend() {
   editingBackend.value = false
+  backendExpectedEditToken.value = ''
   backendForm.value = { slug: '', backend_type: 'ragflow', base_url: '', api_key: '', timeout: 120, embedding_model_id: '', summary_model_id: '', rerank_model_id: '' }
   backendError.value = ''
   showBackendDialog.value = true
 }
 
-function openEditBackend(b: BackendInfo) {
+async function openEditBackend(b: BackendInfo) {
+  try {
+    backends.value = await api.listBackends()
+  } catch {
+    return
+  }
+  const latest = backends.value.find(item => item.slug === b.slug)
+  if (!latest) return
+  b = latest
   editingBackend.value = true
+  backendExpectedEditToken.value = b.edit_token ?? null
   backendForm.value = {
     slug: b.slug,
     backend_type: b.backend_type,
@@ -429,6 +458,7 @@ async function saveBackend() {
       slug: backendForm.value.slug,
       backend_type: backendForm.value.backend_type,
       timeout: backendForm.value.timeout,
+      expected_edit_token: backendExpectedEditToken.value,
     }
     if (needsBackendConnection.value) {
       data.base_url = backendForm.value.base_url || null

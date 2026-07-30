@@ -24,6 +24,7 @@ from agent_bridge.core.domain import (
     ValidationError,
     require_admin_user,
 )
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.plugin_runtime import GitPluginRuntime
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -68,6 +69,7 @@ class CodeGraphService:
         sync_interval_minutes: int,
         auto_understand: bool,
         status: str,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if status not in {"active", "disabled"}:
@@ -83,8 +85,15 @@ class CodeGraphService:
         if sync_interval_minutes < 1:
             raise ValidationError("sync interval must be positive")
 
+        existing = self.store.get_code_repository(repo_key)
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=self._repository_edit_snapshot(existing) if existing else None,
+            resource_type="code_repository",
+            resource_key=repo_key,
+            actor=actor,
+        )
         if not auth_ref:
-            existing = self.store.get_code_repository(repo_key)
             if existing:
                 auth_ref = existing.get("auth_ref", "")
 
@@ -106,6 +115,13 @@ class CodeGraphService:
     def list_repositories(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         return [self._repository_payload(repo) for repo in self.store.list_code_repositories()]
+
+    def get_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        repository = self.store.get_code_repository(repo_key)
+        if repository is None:
+            raise NotFound("repository not found")
+        return self._repository_payload(repository)
 
     def delete_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
         """硬删除一个代码仓库，并清理其副作用数据。
@@ -685,11 +701,30 @@ class CodeGraphService:
             return {"success": False, "message": str(e)}
 
     def _repository_payload(self, repo: dict[str, Any]) -> dict[str, Any]:
-        payload = dict(repo)
+        payload = attach_edit_token(dict(repo), self._repository_edit_snapshot(repo))
         payload["tags"] = json.loads(str(payload.pop("tags_json", "[]") or "[]"))
         payload["has_auth_ref"] = bool(payload.get("auth_ref", ""))
         payload.pop("auth_ref", None)
         return payload
+
+    @staticmethod
+    def _repository_edit_snapshot(repo: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: repo.get(key)
+            for key in (
+                "repo_key",
+                "name",
+                "git_url",
+                "branch",
+                "auth_ref",
+                "description",
+                "tags_json",
+                "category_key",
+                "sync_interval_minutes",
+                "auto_understand",
+                "status",
+            )
+        }
 
     def _language_for_path(self, path: Path) -> str | None:
         return {

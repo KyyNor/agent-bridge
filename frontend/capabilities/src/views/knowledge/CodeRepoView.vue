@@ -35,6 +35,7 @@ const repoFormMode = ref<'add' | 'edit'>('add')
 const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false })
 const repoSaving = ref(false)
 const repoError = ref('')
+const repoExpectedEditToken = ref<string | null>('')
 const syncingKey = ref('')
 
 // Clone auth
@@ -69,7 +70,7 @@ async function loadCategories() {
   try { categories.value = await api.listCategories() } catch { categories.value = [] }
 }
 
-function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
+async function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
   repoFormMode.value = mode
   repoError.value = ''
   authType.value = 'none'
@@ -79,6 +80,13 @@ function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
   testCloneResult.value = null
   editingHasAuth.value = false
   if (mode === 'edit' && r) {
+    try {
+      r = await api.getCodeRepo(r.repo_key)
+    } catch (e: any) {
+      repoError.value = e.message || '加载代码仓库详情失败'
+      return
+    }
+    repoExpectedEditToken.value = r.edit_token ?? null
     repoForm.value = {
       repo_key: r.repo_key,
       name: r.name,
@@ -90,6 +98,7 @@ function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
     }
     editingHasAuth.value = r.has_auth_ref || false
   } else {
+    repoExpectedEditToken.value = ''
     repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false }
   }
   showRepoForm.value = true
@@ -121,11 +130,13 @@ async function saveRepo() {
       description: repoForm.value.description,
       category_key: repoForm.value.category_key === '__none__' ? '' : repoForm.value.category_key,
       auto_understand: repoForm.value.auto_understand,
+      expected_edit_token: repoExpectedEditToken.value,
     }
     if (authRef || repoFormMode.value === 'add') {
       payload.auth_ref = authRef
     }
-    await api.upsertCodeRepo(payload)
+    const saved = await api.upsertCodeRepo(payload)
+    repoExpectedEditToken.value = saved.edit_token ?? null
     showRepoForm.value = false
     await loadRepos()
   } catch (e: any) {

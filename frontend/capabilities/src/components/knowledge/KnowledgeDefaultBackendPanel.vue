@@ -19,6 +19,8 @@ const agentId = ref('')
 const agents = ref<BackendAgent[]>([])
 const agentsLoading = ref(false)
 const saving = ref(false)
+const editToken = ref<string | undefined>()
+const saveError = ref('')
 const agentsByBackend = ref<Record<string, BackendAgent[]>>({})
 
 function isWeknoraBackend(slug: string | null | undefined) {
@@ -49,7 +51,23 @@ async function syncFromKnowledgeBase() {
   editing.value = false
   backendSlug.value = props.kb.default_backend_slug || ''
   agentId.value = props.kb.default_agent_id || ''
+  editToken.value = props.kb.edit_token
   agents.value = isWeknoraBackend(backendSlug.value) ? await loadAgentsForBackend(backendSlug.value) : []
+}
+
+async function startEditing() {
+  saveError.value = ''
+  try {
+    const latest = (await api.listWikiKbs()).find(kb => kb.slug === props.kb.slug)
+    if (!latest) throw new Error('文档知识库不存在')
+    backendSlug.value = latest.default_backend_slug || ''
+    agentId.value = latest.default_agent_id || ''
+    editToken.value = latest.edit_token
+    agents.value = isWeknoraBackend(backendSlug.value) ? await loadAgentsForBackend(backendSlug.value) : []
+    editing.value = true
+  } catch (e: unknown) {
+    saveError.value = e instanceof Error ? e.message : '刷新默认检索配置失败'
+  }
 }
 
 async function onBackendChange() {
@@ -63,14 +81,20 @@ async function onBackendChange() {
 
 async function save() {
   saving.value = true
+  saveError.value = ''
   try {
     const default_backend_slug = backendSlug.value || null
     const default_agent_id = isWeknoraBackend(backendSlug.value) ? (agentId.value || null) : null
-    await api.updateKbDefaults(props.kb.slug, { default_backend_slug, default_agent_id })
+    const saved = await api.updateKbDefaults(props.kb.slug, {
+      default_backend_slug,
+      default_agent_id,
+      expected_edit_token: editToken.value,
+    })
+    editToken.value = saved.edit_token
     emit('saved', { default_backend_slug, default_agent_id })
     editing.value = false
-  } catch {
-    // 保存失败时保留编辑值，允许用户修正后重试。
+  } catch (e: unknown) {
+    saveError.value = e instanceof Error ? e.message : '保存失败'
   } finally {
     saving.value = false
   }
@@ -90,7 +114,7 @@ watch(() => [props.kb.slug, props.kb.default_backend_slug, props.kb.default_agen
         <span class="text-xs text-muted-foreground">· 默认 Agent:</span>
         <span class="text-sm font-medium">{{ agentLabel }}</span>
       </template>
-      <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="editing = true">修改</Button>
+      <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="startEditing">修改</Button>
     </template>
     <template v-else>
       <select v-model="backendSlug" @change="onBackendChange" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">
@@ -104,5 +128,6 @@ watch(() => [props.kb.slug, props.kb.default_backend_slug, props.kb.default_agen
       <Button variant="ghost" size="sm" class="h-6 text-xs" @click="syncFromKnowledgeBase">取消</Button>
       <Button size="sm" class="h-6 text-xs" @click="save" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</Button>
     </template>
+    <div v-if="saveError" class="w-full text-xs text-destructive">{{ saveError }}</div>
   </div>
 </template>

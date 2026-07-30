@@ -141,6 +141,8 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 工作流编辑使用与增量版本分离的 `edit_version` 乐观锁。前端进入编辑路由时必须重新读取详情，保存时传回 `expected_edit_version`；版本不一致返回 `409`，不得以旧标签页内容覆盖当前定义。不要用 `revision_no` 替代该并发令牌，因为展示字段修改不会创建增量版本。
 
+除工作流外，可编辑管理资源统一通过 `agent_bridge.core.editing` 生成不透明 `edit_token`。读取接口返回令牌，写接口接受可选的 `expected_edit_token`；新建表单用空字符串表示“读取时资源不存在”，旧客户端未传令牌时保持兼容。令牌快照只包含该编辑域的可写字段，必须包含被脱敏的秘密原值以发现其他页面对秘密的修改，但不得把原值返回客户端。进入独立编辑页或打开列表编辑弹窗时应重新读取服务端详情；冲突统一抛出 `ConflictError`（HTTP `409`），不得静默覆盖。
+
 增量运行只复用无副作用的节点结果；`get_task` 负责把队列任务租约绑定到当前 run，因此每次都必须重新执行，但只有任务业务输入相对基线发生变化时才使下游结果失效。带条件入边的节点及其下游在预览中只能作为“待条件结果”的候选；`WorkflowDagExecutor` 在条件实际命中、节点 ready 时再决定是否复用，未命中的分支不得使汇合后的节点失效。启用受管 Profile MCP 本身不使节点失去复用资格：节点配置与后端资源指纹稳定时复用既有结果；需要刷新外部读取时使用 `force_full`。按任务启动的 run 会先精确租赁已选任务，`get_task` 只返回该租约，不得改领其他队列任务。`workflow_set_task`、`workflow_run_log` 等 Agent 运行期间的辅助调用不因增量复用规则被强制重跑。
 
 导入/导出格式为 `agent-bridge.workflow`、`format_version=1`。`examples/workflows/*/workflow.json` 必须通过示例契约测试。不要恢复 `manifest.json + workflow.js` 双运行时。

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.slug import make_slug
 from agent_bridge.knowledge_management.memory.claude_mem.worker import ClaudeMemWorkerService
 from agent_bridge.knowledge_management.memory.hooks import MemoryHookService
@@ -100,7 +101,8 @@ class MemoryService:
         require_admin_user(actor, self.admins)
         self._require_profile(profile_key)
         binding = self.store.memory.get_profile_memory_binding(profile_key)
-        return binding or {"profile_key": profile_key, "block_key": None, "enabled": 1}
+        payload = binding or {"profile_key": profile_key, "block_key": None, "enabled": 1}
+        return attach_edit_token(payload, self._profile_binding_snapshot(payload))
 
     def set_profile_binding(
         self,
@@ -109,16 +111,37 @@ class MemoryService:
         block_key: str | None,
         *,
         enabled: bool,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         self._require_profile(profile_key)
+        current = self.store.memory.get_profile_memory_binding(profile_key) or {
+            "profile_key": profile_key,
+            "block_key": None,
+            "enabled": 1,
+        }
+        require_edit_token(
+            expected_edit_token,
+            self._profile_binding_snapshot(current),
+            resource_type="能力平面记忆绑定",
+            resource_key=profile_key,
+            actor=actor,
+        )
         if block_key:
             block = self.store.memory.get_memory_block(block_key)
             if block is None:
                 raise NotFound("memory block not found")
             if block.get("status") != "active":
                 raise ValidationError("memory block is not active")
-        return self.store.memory.set_profile_memory_binding(profile_key, block_key, enabled=enabled)
+        saved = self.store.memory.set_profile_memory_binding(profile_key, block_key, enabled=enabled)
+        return attach_edit_token(saved, self._profile_binding_snapshot(saved))
+
+    @staticmethod
+    def _profile_binding_snapshot(binding: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "block_key": binding.get("block_key"),
+            "enabled": bool(binding.get("enabled")),
+        }
 
     def resolve_profile_block(self, actor: str, profile_key: str | None) -> dict[str, Any]:
         """解析 profile 当前绑定的记忆块：任一环节缺失/未启用/未激活即返回 not_configured。"""

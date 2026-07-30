@@ -304,7 +304,7 @@ export const api = {
   // MCP Services
   listServices: (summary = false) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`),
   getService: (key: string) => get<McpService>(`/capabilities/mcp-services/${key}`),
-  registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string }) =>
+  registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string; expected_edit_token?: string | null }) =>
     post<McpService>('/capabilities/mcp-services', s),
   updateServiceStatus: (key: string, status: string) =>
     post(`/capabilities/mcp-services/${key}/status`, { status }),
@@ -332,7 +332,7 @@ export const api = {
   // OpenAPI Services
   listOpenApiServices: (summary = false) => get<OpenApiService[]>(`/capabilities/openapi-services${summary ? '?summary=true' : ''}`),
   getOpenApiService: (key: string) => get<OpenApiService>(`/capabilities/openapi-services/${key}`),
-  registerOpenApiService: (s: Partial<OpenApiService> & { service_key: string; name: string; base_url: string }) =>
+  registerOpenApiService: (s: Partial<OpenApiService> & { service_key: string; name: string; base_url: string; expected_edit_token?: string | null }) =>
     post<OpenApiService>('/capabilities/openapi-services', s),
   updateOpenApiServiceStatus: (key: string, status: string) =>
     post(`/capabilities/openapi-services/${key}/status`, { status }),
@@ -365,27 +365,31 @@ export const api = {
   // Profiles
   listProfiles: () => get<ProjectProfile[]>('/capability-profiles'),
   getProfile: (key: string) => get<ProjectProfile>(`/capability-profiles/${key}`),
-  upsertProfile: (p: Partial<ProjectProfile> & { profile_key: string; name: string }) =>
+  upsertProfile: (p: Partial<ProjectProfile> & { profile_key: string; name: string; expected_edit_token?: string | null }) =>
     post<ProjectProfile>('/capability-profiles', { status: 'active', ...p }),
-  replaceProfileRules: (key: string, rules: ProfileSourceRule[]) =>
-    put(`/capability-profiles/${key}/rules`, { rules }),
-  replaceProfileResources: (key: string, resources: ProfileResourceRule[]) =>
-    put(`/capability-profiles/${key}/resources`, { resources }),
+  replaceProfileRules: (key: string, rules: ProfileSourceRule[], expectedEditToken?: string | null) =>
+    put<ProjectProfile>(`/capability-profiles/${key}/rules`, { rules, expected_edit_token: expectedEditToken }),
+  replaceProfileResources: (key: string, resources: ProfileResourceRule[], expectedEditToken?: string | null) =>
+    put<ProjectProfile>(`/capability-profiles/${key}/resources`, { resources, expected_edit_token: expectedEditToken }),
   getProfilePins: (key: string) => get<ProfilePinPreview>(`/capability-profiles/${key}/pins`),
-  replaceProfilePins: (key: string, pins: ProfilePinRule[]) =>
-    put<ProfilePinPreview>(`/capability-profiles/${key}/pins`, { pins }),
-  updateProfilePinSettings: (key: string, settings: ProfilePinSettingsUpdate) =>
-    put<ProfilePinPreview>(`/capability-profiles/${key}/pins/settings`, settings),
+  replaceProfilePins: (key: string, pins: ProfilePinRule[], expectedEditToken?: string | null) =>
+    put<ProfilePinPreview>(`/capability-profiles/${key}/pins`, { pins, expected_edit_token: expectedEditToken }),
+  updateProfilePinSettings: (key: string, settings: ProfilePinSettingsUpdate, expectedEditToken?: string | null) =>
+    put<ProfilePinPreview>(`/capability-profiles/${key}/pins/settings`, { ...settings, expected_edit_token: expectedEditToken }),
   refreshProfilePins: (key: string) =>
     post<ProfilePinPreview>(`/capability-profiles/${key}/pins/refresh`),
   renderProfileDoc: (key: string) =>
     post<ProfileDocRender>(`/capability-profiles/${key}/doc/render`),
-  updateProfileManualNotes: (key: string, manual_notes: string) =>
-    put<ProfileDocRender>(`/capability-profiles/${key}/doc/manual-notes`, { manual_notes }),
+  updateProfileManualNotes: (key: string, manual_notes: string, expectedEditToken?: string | null) =>
+    put<ProfileDocRender>(`/capability-profiles/${key}/doc/manual-notes`, { manual_notes, expected_edit_token: expectedEditToken }),
   getProfileMemory: (key: string) =>
     get<ProfileMemoryBinding>(`/capability-profiles/${key}/memory`),
-  setProfileMemory: (key: string, blockKey: string | null, enabled = true) =>
-    put<ProfileMemoryBinding>(`/capability-profiles/${key}/memory`, { block_key: blockKey, enabled }),
+  setProfileMemory: (key: string, blockKey: string | null, enabled = true, expectedEditToken?: string | null) =>
+    put<ProfileMemoryBinding>(`/capability-profiles/${key}/memory`, {
+      block_key: blockKey,
+      enabled,
+      expected_edit_token: expectedEditToken,
+    }),
 
   // Memory Blocks
   listMemoryBlocks: () => get<MemoryBlock[]>('/memory/blocks'),
@@ -663,7 +667,8 @@ export const api = {
 
   // Code Repos
   listCodeRepos: () => get<CodeRepository[]>('/code-repo/repositories'),
-  upsertCodeRepo: (r: Partial<CodeRepository> & { repo_key: string; name: string; git_url: string }) =>
+  getCodeRepo: (key: string) => get<CodeRepository>(`/code-repo/repositories/${key}`),
+  upsertCodeRepo: (r: Partial<CodeRepository> & { repo_key: string; name: string; git_url: string; expected_edit_token?: string | null }) =>
     post<CodeRepository>('/code-repo/repositories', { status: 'active', ...r }),
   testClone: (gitUrl: string, authRef: string) =>
     post<TestCloneResult>('/code-repo/test-clone', { git_url: gitUrl, auth_ref: authRef }),
@@ -698,22 +703,30 @@ export const api = {
 
   // Categories
   listCategories: () => get<CodeRepoCategory[]>('/code-repo/categories'),
-  upsertCategory: (c: { category_key: string; name: string; description?: string }) =>
+  upsertCategory: (c: { category_key: string; name: string; description?: string; expected_edit_token?: string | null }) =>
     post<CodeRepoCategory>('/code-repo/categories', c),
   deleteCategory: (key: string) => post<{ ok: boolean }>(`/code-repo/categories/${key}/delete`),
 
   // Sync Config
   getSyncConfig: () => get<KnowledgeSyncConfig>('/sync-config'),
-  saveSyncConfig: (config: KnowledgeSyncConfig) => post<KnowledgeSyncConfig>('/sync-config', config),
+  saveSyncConfig: (config: KnowledgeSyncConfig) => {
+    const { edit_token, ...payload } = config
+    return post<KnowledgeSyncConfig>('/sync-config', { ...payload, expected_edit_token: edit_token })
+  },
   getSchedulerStatus: () => get<SchedulerStatus>('/sync-config/scheduler-status'),
   getAgentRuntimeConfig: () => get<AgentRuntimeConfig>('/agent-runtime/config'),
-  saveAgentRuntimeConfig: (config: AgentRuntimeConfig) => post<AgentRuntimeConfig>('/agent-runtime/config', config),
+  saveAgentRuntimeConfig: (config: AgentRuntimeConfig) => {
+    const { edit_token, available_backends: _availableBackends, ...payload } = config
+    return post<AgentRuntimeConfig>('/agent-runtime/config', { ...payload, expected_edit_token: edit_token })
+  },
 
   // Skills
   listSkills: () => get<SkillPrompt[]>('/skills'),
   getSkill: (skillName: string) => get<SkillPrompt>(`/skills/${skillName}`),
-  saveSkill: (skillName: string, prompt: string) => post<SkillPrompt>(`/skills/${skillName}`, { prompt }),
-  resetSkill: (skillName: string) => post<SkillPrompt>(`/skills/${skillName}/reset`),
+  saveSkill: (skillName: string, prompt: string, expectedEditToken?: string | null) =>
+    post<SkillPrompt>(`/skills/${skillName}`, { prompt, expected_edit_token: expectedEditToken }),
+  resetSkill: (skillName: string, expectedEditToken?: string | null) =>
+    post<SkillPrompt>(`/skills/${skillName}/reset`, { expected_edit_token: expectedEditToken }),
   listSkillRevisions: (skillName: string, limit = 100) => {
     const qs = new URLSearchParams({ limit: String(limit) })
     return get<Revision[]>(`/skills/${skillName}/revisions?${qs}`)
@@ -730,9 +743,10 @@ export const api = {
   // Scripts
   listScripts: () => get<ManagedScript[]>('/scripts'),
   getScript: (scriptKey: string) => get<ManagedScript>(`/scripts/${scriptKey}`),
-  upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string; input_schema: Record<string, unknown> }) =>
+  upsertScript: (s: Partial<ManagedScript> & { script_key: string; name: string; code: string; input_schema: Record<string, unknown>; expected_edit_token?: string | null }) =>
     post<ManagedScript>('/scripts', { language: 'python', status: 'active', owner_type: 'system', owner_key: '', description: '', ...s }),
-  resetScript: (scriptKey: string) => post<ManagedScript>(scriptResetPath(scriptKey)),
+  resetScript: (scriptKey: string, expectedEditToken?: string | null) =>
+    post<ManagedScript>(scriptResetPath(scriptKey), { expected_edit_token: expectedEditToken }),
   deleteScript: (scriptKey: string) => post<{ script_key: string; deleted: boolean }>(`/scripts/${scriptKey}/delete`),
   testScript: (
     scriptKey: string,
@@ -777,8 +791,8 @@ export const api = {
   listKbs: () => get<KnowledgeBase[]>('/kbs'),
   createKb: (data: { slug: string; name: string; description?: string }) =>
     post<KnowledgeBase>('/kbs', data),
-  updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null }) =>
-    put<{ ok: boolean }>(`/kbs/${kbSlug}/defaults`, data),
+  updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null; expected_edit_token?: string | null }) =>
+    put<KnowledgeBase>(`/kbs/${kbSlug}/defaults`, data),
   listKbRepoSources: (kbSlug: string) =>
     get<KbRepoSource[]>(`/kbs/${kbSlug}/repo-sources`),
   saveKbRepoSource: (kbSlug: string, data: { repo_key: string; include_suffixes: string[] }) =>
@@ -889,9 +903,9 @@ export const api = {
 
   // Backends
   listBackends: () => get<BackendInfo[]>('/backends'),
-  createBackend: (data: { slug: string; backend_type: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null }) =>
+  createBackend: (data: { slug: string; backend_type: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>
     post<BackendInfo>('/backends', data),
-  updateBackend: (slug: string, data: { backend_type?: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null }) =>
+  updateBackend: (slug: string, data: { backend_type?: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>
     put<BackendInfo>(`/backends/${slug}`, data),
   deleteBackend: (slug: string) =>
     post<{ slug: string; status: string }>(`/backends/${slug}/delete`),

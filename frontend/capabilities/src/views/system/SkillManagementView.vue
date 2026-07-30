@@ -17,6 +17,7 @@ import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 const skills = ref<SkillPrompt[]>([])
 const selectedName = ref('')
 const selected = ref<SkillPrompt | null>(null)
+const expectedEditToken = ref<string | null>(null)
 const prompt = ref('')
 const loading = ref(true)
 const detailLoading = ref(false)
@@ -32,6 +33,8 @@ const { toast } = useToast()
 
 const hasChanges = computed(() => selected.value ? prompt.value !== (selected.value.prompt || '') : false)
 const sourceLabel = computed(() => selected.value?.source === 'database' ? '已自定义' : '默认提示词')
+const selectedSkillName = computed(() => selected.value?.skill_name || '')
+const selectedRevisionNo = computed(() => selected.value?.revision_no)
 const previewRenderer = new marked.Renderer()
 previewRenderer.html = ({ text }: Tokens.HTML) => escapeHtml(text)
 previewRenderer.link = function ({ href, title, tokens }: Tokens.Link) {
@@ -78,9 +81,11 @@ async function selectSkill(skillName: string) {
   error.value = ''
   try {
     selected.value = await api.getSkill(skillName)
+    expectedEditToken.value = selected.value.edit_token
     prompt.value = selected.value.prompt || ''
   } catch (e: unknown) {
     selected.value = null
+    expectedEditToken.value = null
     error.value = errorMessage(e)
   } finally {
     detailLoading.value = false
@@ -93,7 +98,12 @@ async function saveSkill() {
   message.value = ''
   error.value = ''
   try {
-    selected.value = await api.saveSkill(selected.value.skill_name, prompt.value)
+    selected.value = await api.saveSkill(
+      selected.value.skill_name,
+      prompt.value,
+      expectedEditToken.value,
+    )
+    expectedEditToken.value = selected.value.edit_token
     prompt.value = selected.value.prompt || ''
     skills.value = await api.listSkills()
     message.value = '已保存到数据库'
@@ -113,7 +123,8 @@ async function resetSkill() {
   message.value = ''
   error.value = ''
   try {
-    selected.value = await api.resetSkill(selected.value.skill_name)
+    selected.value = await api.resetSkill(selected.value.skill_name, expectedEditToken.value)
+    expectedEditToken.value = selected.value.edit_token
     prompt.value = selected.value.prompt || ''
     skills.value = await api.listSkills()
     message.value = '已恢复默认提示词'
@@ -262,7 +273,6 @@ function safeUrl(value: string): string | null {
                   </div>
                 </div>
               </div>
-              </div>
             </EditorActionBar>
 
             <textarea
@@ -288,13 +298,13 @@ function safeUrl(value: string): string | null {
                 @click="showHistory = !showHistory"
               >
                 {{ showHistory ? '▾ 收起版本历史' : '▸ 查看版本历史' }}
-                <span v-if="selected.revision_no" class="rounded bg-secondary px-1.5 py-0.5 font-mono">v{{ selected.revision_no }}</span>
+                <span v-if="selectedRevisionNo" class="rounded bg-secondary px-1.5 py-0.5 font-mono">v{{ selectedRevisionNo }}</span>
               </button>
               <div v-if="showHistory" class="mt-3">
                 <RevisionHistoryPanel
-                  :key="`skill-${selected.skill_name}`"
+                  :key="`skill-${selectedSkillName}`"
                   entity-type="skill"
-                  :entity-key="selected.skill_name"
+                  :entity-key="selectedSkillName"
                 />
               </div>
             </div>

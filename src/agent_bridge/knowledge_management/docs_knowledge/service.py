@@ -20,6 +20,7 @@ from agent_bridge.core.domain import (
     ValidationError,
     require_admin_user,
 )
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.knowledge_management.docs_knowledge.backends.registry import BackendRegistry
 
 logger = logging.getLogger(__name__)
@@ -304,6 +305,10 @@ class DocsKnowledgeService:
         rows = self.store.list_backends()
         registry = self.registry
         for row in rows:
+            row["edit_token"] = attach_edit_token(
+                {},
+                self._backend_edit_snapshot(row),
+            )["edit_token"]
             row["api_key_set"] = bool(row.get("api_key"))
             row.pop("api_key", None)
             row["runtime_status"] = (
@@ -324,8 +329,17 @@ class DocsKnowledgeService:
         embedding_model_id: str | None = None,
         summary_model_id: str | None = None,
         rerank_model_id: str | None = None,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
+        current = self.store.get_backend(slug)
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=self._backend_edit_snapshot(current) if current else None,
+            resource_type="knowledge_backend",
+            resource_key=slug,
+            actor=actor,
+        )
         if backend_type not in SUPPORTED_BACKEND_TYPES:
             raise ValidationError(f"unsupported backend type: {backend_type}")
         row = self.store.upsert_backend(
@@ -365,11 +379,19 @@ class DocsKnowledgeService:
         embedding_model_id: str | None = None,
         summary_model_id: str | None = None,
         rerank_model_id: str | None = None,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         existing = self.store.get_backend(slug)
         if existing is None:
             raise NotFound(f"backend '{slug}' not found")
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=self._backend_edit_snapshot(existing),
+            resource_type="knowledge_backend",
+            resource_key=slug,
+            actor=actor,
+        )
         resolved_type = backend_type or existing["backend_type"]
         if resolved_type not in SUPPORTED_BACKEND_TYPES:
             raise ValidationError(f"unsupported backend type: {resolved_type}")
@@ -430,7 +452,24 @@ class DocsKnowledgeService:
     def _public_backend_row(
         row: dict[str, Any], *, api_key: str | None, active: bool
     ) -> dict[str, Any]:
+        row = attach_edit_token(row, DocsKnowledgeService._backend_edit_snapshot(row))
         row["api_key_set"] = bool(api_key)
         row.pop("api_key", None)
         row["runtime_status"] = "active" if active else "inactive"
         return row
+
+    @staticmethod
+    def _backend_edit_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: row.get(key)
+            for key in (
+                "slug",
+                "backend_type",
+                "base_url",
+                "api_key",
+                "timeout",
+                "embedding_model_id",
+                "summary_model_id",
+                "rerank_model_id",
+            )
+        }

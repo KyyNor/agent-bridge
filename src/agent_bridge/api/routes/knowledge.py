@@ -38,6 +38,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             base_url=payload.base_url, api_key=payload.api_key,
             timeout=payload.timeout, embedding_model_id=payload.embedding_model_id,
             summary_model_id=payload.summary_model_id, rerank_model_id=payload.rerank_model_id,
+            expected_edit_token=payload.expected_edit_token,
         )
 
     @router.put("/backends/{slug}")
@@ -48,6 +49,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             api_key=payload.api_key, timeout=payload.timeout,
             embedding_model_id=payload.embedding_model_id,
             summary_model_id=payload.summary_model_id, rerank_model_id=payload.rerank_model_id,
+            expected_edit_token=payload.expected_edit_token,
         )
 
     @router.post("/backends/{slug}/delete")
@@ -280,7 +282,13 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
 
     @router.put("/kbs/{kb_slug}/defaults")
     def update_kb_defaults(kb_slug: str, payload: UpdateKbDefaultsRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.update_kb_defaults(current_actor, kb_slug, default_backend_slug=payload.default_backend_slug, default_agent_id=payload.default_agent_id)
+        return service.update_kb_defaults(
+            current_actor,
+            kb_slug,
+            default_backend_slug=payload.default_backend_slug,
+            default_agent_id=payload.default_agent_id,
+            expected_edit_token=payload.expected_edit_token,
+        )
 
     @router.get("/builtin/wiki/kbs")
     def list_builtin_wiki_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:

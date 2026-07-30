@@ -56,6 +56,7 @@ const saving = ref(false)
 const formError = ref('')
 const serviceNotFound = ref(false)
 const formBaseline = ref('')
+const expectedEditToken = ref<string | null>('')
 
 const showImport = ref(false)
 const importService = ref<OpenApiService | null>(null)
@@ -185,6 +186,7 @@ async function applyRoute() {
   serviceNotFound.value = false
   if (!props.routeKey) return
   if (props.routeKey === 'new') {
+    expectedEditToken.value = ''
     resetCreateForm()
     formBaseline.value = snapshotForm()
     return
@@ -210,6 +212,7 @@ async function applyRoute() {
     return
   }
   formMode.value = 'edit'
+  expectedEditToken.value = service.edit_token ?? null
   sourceType.value = service.source_type
   if (service.source_type === 'openapi_service') openApiForm.value = openApiServiceToForm(service)
   else mcpForm.value = serviceToForm(service)
@@ -219,6 +222,7 @@ async function applyRoute() {
 function resetCreateForm(type: ServiceSourceType = 'mcp_service') {
   formMode.value = 'create'
   sourceType.value = type
+  expectedEditToken.value = ''
   mcpForm.value = defaultServiceForm()
   openApiForm.value = defaultOpenApiServiceForm()
   formError.value = ''
@@ -229,9 +233,15 @@ async function saveService() {
   saving.value = true
   try {
     if (sourceType.value === 'openapi_service') {
-      await api.registerOpenApiService(buildOpenApiServicePayload(openApiForm.value, formMode.value))
+      await api.registerOpenApiService({
+        ...buildOpenApiServicePayload(openApiForm.value, formMode.value),
+        expected_edit_token: expectedEditToken.value,
+      })
     } else {
-      await api.registerService(buildServicePayload(mcpForm.value, formMode.value))
+      await api.registerService({
+        ...buildServicePayload(mcpForm.value, formMode.value),
+        expected_edit_token: expectedEditToken.value,
+      })
     }
     await loadServices()
     formBaseline.value = snapshotForm()

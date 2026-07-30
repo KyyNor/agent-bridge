@@ -30,6 +30,7 @@ from agent_bridge.capability_hub.profiles.docs import (
     stable_hash,
 )
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.timeutil import parse_utc, utc_now
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -59,31 +60,49 @@ class CapabilityGovernanceService:
         name: str,
         description: str,
         status: str,
+        *,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if status not in VALID_PROFILE_STATUSES:
             raise ValidationError("invalid profile status")
-        return self.store.upsert_project_profile(
+        current = self.store.get_project_profile(profile_key)
+        require_edit_token(
+            expected_edit_token,
+            self._profile_edit_snapshot(current),
+            resource_type="能力平面",
+            resource_key=profile_key,
+            actor=actor,
+        )
+        saved = self.store.upsert_project_profile(
             profile_key=profile_key,
             name=name,
             description=description,
             status=status,
             created_by=actor,
         )
+        return attach_edit_token(saved, self._profile_edit_snapshot(saved))
 
     def list_profiles(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        return self.store.list_project_profiles()
+        return [
+            attach_edit_token(profile, self._profile_edit_snapshot(profile))
+            for profile in self.store.list_project_profiles()
+        ]
 
     def get_profile(self, actor: str, profile_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         profile = self.store.get_project_profile(profile_key)
         if profile is None:
             raise NotFound("profile not found")
+        rules = self.store.list_profile_source_rules(profile_key)
+        resource_rules = self.store.list_profile_resource_rules(profile_key)
         return {
-            **profile,
-            "rules": self.store.list_profile_source_rules(profile_key),
-            "resource_rules": self.store.list_profile_resource_rules(profile_key),
+            **attach_edit_token(profile, self._profile_edit_snapshot(profile)),
+            "rules": rules,
+            "resource_rules": resource_rules,
+            "rules_edit_token": attach_edit_token({}, self._rules_edit_snapshot(rules))["edit_token"],
+            "resources_edit_token": attach_edit_token({}, self._resources_edit_snapshot(resource_rules))["edit_token"],
         }
 
     def replace_profile_rules(
@@ -91,10 +110,20 @@ class CapabilityGovernanceService:
         actor: str,
         profile_key: str,
         rules: list[dict[str, str]],
+        *,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise NotFound("profile not found")
+        current_rules = self.store.list_profile_source_rules(profile_key)
+        require_edit_token(
+            expected_edit_token,
+            self._rules_edit_snapshot(current_rules),
+            resource_type="能力平面规则",
+            resource_key=profile_key,
+            actor=actor,
+        )
         normalized = [self._validate_rule(rule) for rule in rules]
         self.store.replace_profile_source_rules(profile_key, normalized)
         self.store.clear_profile_pin_auto_cache(profile_key)
@@ -105,10 +134,20 @@ class CapabilityGovernanceService:
         actor: str,
         profile_key: str,
         rules: list[dict[str, Any]],
+        *,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise NotFound("profile not found")
+        current_rules = self.store.list_profile_resource_rules(profile_key)
+        require_edit_token(
+            expected_edit_token,
+            self._resources_edit_snapshot(current_rules),
+            resource_type="能力平面资源规则",
+            resource_key=profile_key,
+            actor=actor,
+        )
         normalized = [self._validate_resource_rule(rule) for rule in rules]
         self.store.replace_profile_resource_rules(profile_key, normalized)
         return self.get_profile(actor, profile_key)
@@ -118,11 +157,20 @@ class CapabilityGovernanceService:
         actor: str,
         profile_key: str,
         pins: list[dict[str, Any]],
+        *,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise NotFound("profile not found")
 
+        require_edit_token(
+            expected_edit_token,
+            self._pins_edit_snapshot(profile_key),
+            resource_type="能力平面 Pin 配置",
+            resource_key=profile_key,
+            actor=actor,
+        )
         normalized = []
         for pin in pins:
             service_key = str(pin.get("service_key") or "").strip()
@@ -157,11 +205,19 @@ class CapabilityGovernanceService:
         ratio_percent: int | None = None,
         count_limit: int | None = None,
         count: int | None = None,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise NotFound("profile not found")
 
+        require_edit_token(
+            expected_edit_token,
+            self._pins_edit_snapshot(profile_key),
+            resource_type="能力平面 Pin 配置",
+            resource_key=profile_key,
+            actor=actor,
+        )
         normalized_auto_mode = str(auto_mode or "").strip()
         normalized_mode = str(mode or "").strip()
         if normalized_auto_mode and normalized_mode and normalized_auto_mode != normalized_mode:
@@ -204,10 +260,25 @@ class CapabilityGovernanceService:
         self.store.clear_profile_pin_auto_cache(profile_key)
         return self.profile_pin_preview(actor, profile_key)
 
-    def update_profile_manual_notes(self, actor: str, profile_key: str, manual_notes: str) -> dict[str, Any]:
+    def update_profile_manual_notes(
+        self,
+        actor: str,
+        profile_key: str,
+        manual_notes: str,
+        *,
+        expected_edit_token: str | None = None,
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if self.store.get_project_profile(profile_key) is None:
             raise NotFound("profile not found")
+        cache = self.store.get_profile_doc_cache(profile_key) or {}
+        require_edit_token(
+            expected_edit_token,
+            {"manual_notes": str(cache.get("manual_notes") or "")},
+            resource_type="能力平面手动说明",
+            resource_key=profile_key,
+            actor=actor,
+        )
         self.store.upsert_profile_manual_notes(profile_key, manual_notes)
         return self.render_profile_markdown(actor, profile_key)
 
@@ -293,7 +364,10 @@ class CapabilityGovernanceService:
             markdown=markdown,
             mark_written=False,
         )
-        return {"profile_key": profile_key, "markdown": markdown, "rendered_hash": rendered_hash, "manual_notes": manual_notes}
+        return attach_edit_token(
+            {"profile_key": profile_key, "markdown": markdown, "rendered_hash": rendered_hash, "manual_notes": manual_notes},
+            {"manual_notes": manual_notes},
+        )
 
     def profile_pin_preview(self, actor: str, profile_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -425,11 +499,70 @@ class CapabilityGovernanceService:
             generated_tool_names.add(generated_tool_name)
             tools.append(pin_tool)
 
-        return {
+        return attach_edit_token({
             "profile_key": profile_key,
             "settings": dict(settings),
             "groups": groups,
             "tools": tools,
+        }, self._pins_edit_snapshot(profile_key))
+
+    @staticmethod
+    def _profile_edit_snapshot(profile: dict[str, Any] | None) -> dict[str, Any] | None:
+        if profile is None:
+            return None
+        return {
+            "profile_key": profile.get("profile_key"),
+            "name": profile.get("name") or "",
+            "description": profile.get("description") or "",
+            "status": profile.get("status") or "active",
+        }
+
+    @staticmethod
+    def _rules_edit_snapshot(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            (
+                {
+                    "source_type": rule.get("source_type"),
+                    "source_key": rule.get("source_key"),
+                    "effect": rule.get("effect"),
+                }
+                for rule in rules
+            ),
+            key=lambda rule: (str(rule["source_type"]), str(rule["source_key"]), str(rule["effect"])),
+        )
+
+    @staticmethod
+    def _resources_edit_snapshot(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            (
+                {
+                    "resource_type": rule.get("resource_type"),
+                    "resource_key": rule.get("resource_key"),
+                }
+                for rule in rules
+            ),
+            key=lambda rule: (str(rule["resource_type"]), str(rule["resource_key"])),
+        )
+
+    def _pins_edit_snapshot(self, profile_key: str) -> dict[str, Any]:
+        settings = self.store.get_profile_pin_settings(profile_key) or {}
+        pins = sorted(
+            (
+                {
+                    "service_key": pin.get("service_key"),
+                    "tool_type": pin.get("tool_type"),
+                }
+                for pin in self.store.list_profile_pin_rules(profile_key)
+            ),
+            key=lambda pin: (str(pin["service_key"]), str(pin["tool_type"])),
+        )
+        return {
+            "pins": pins,
+            "settings": {
+                "mode": settings.get("mode") or "disabled",
+                "ratio_percent": settings.get("ratio_percent"),
+                "count": settings.get("count"),
+            },
         }
 
     def _get_valid_pin_auto_cache(self, settings: dict[str, Any]) -> list[dict[str, Any]] | None:

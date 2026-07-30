@@ -51,6 +51,18 @@ class ClaudeMemConfigManager:
             "has_secret": has_secret,
         }
 
+    def edit_snapshot(self, *, bootstrap: bool = True) -> dict[str, Any]:
+        """返回仅用于并发校验的完整配置快照，不直接暴露给 API。"""
+        if bootstrap:
+            self.ensure_env_file()
+        values = self._read_env_file()
+        return {
+            "base_url": values.get("ANTHROPIC_BASE_URL", ""),
+            "auth_token": values.get("ANTHROPIC_AUTH_TOKEN", ""),
+            "api_key": values.get("ANTHROPIC_API_KEY", ""),
+            "model": self._read_shared_config().get("model", ""),
+        }
+
     def save_config(
         self,
         *,

@@ -36,6 +36,8 @@ const configProfile = ref<ProjectProfile | null>(null)
 const configLoading = ref(false)
 const configRules = ref<ProfileSourceRule[]>([])
 const configResources = ref<ProfileResourceRule[]>([])
+const rulesEditToken = ref<string | undefined>()
+const resourcesEditToken = ref<string | undefined>()
 const pendingRules = ref<ProfileSourceRule[]>([])
 const pendingResources = ref<ProfileResourceRule[]>([])
 const allServices = ref<CatalogSource[]>([])
@@ -50,6 +52,7 @@ const configSaving = ref(false)
 const configError = ref('')
 const saveError = ref('')
 const pinPreview = ref<ProfilePinPreview | null>(null)
+const pinEditToken = ref<string | undefined>()
 const pendingPins = ref<ProfilePinRule[]>([])
 const pinMode = ref<'disabled' | 'ratio' | 'count'>('disabled')
 const pinRatio = ref(10)
@@ -59,6 +62,7 @@ const pinsLoaded = ref(false)
 const pinError = ref('')
 const profileMarkdown = ref('')
 const manualNotes = ref('')
+const notesEditToken = ref<string | undefined>()
 const docSaving = ref(false)
 const docError = ref('')
 const initialDraft = ref<ProfileConfigDraft | null>(null)
@@ -160,6 +164,8 @@ function resetConfigState() {
   docError.value = ''
   configRules.value = []
   configResources.value = []
+  rulesEditToken.value = undefined
+  resourcesEditToken.value = undefined
   pendingRules.value = []
   pendingResources.value = []
   allServices.value = []
@@ -171,6 +177,7 @@ function resetConfigState() {
   memoryLoaded.value = false
   memoryError.value = ''
   pinPreview.value = null
+  pinEditToken.value = undefined
   pendingPins.value = []
   pinMode.value = 'disabled'
   pinRatio.value = 10
@@ -178,6 +185,7 @@ function resetConfigState() {
   pinsLoaded.value = false
   profileMarkdown.value = ''
   manualNotes.value = ''
+  notesEditToken.value = undefined
   initialDraft.value = null
 }
 
@@ -203,6 +211,9 @@ async function loadProfile(profileKey: string) {
     allServices.value = catalog.sources
     allKbs.value = kbs
     allRepos.value = repos
+    configProfile.value = full
+    rulesEditToken.value = full.rules_edit_token
+    resourcesEditToken.value = full.resources_edit_token
     configRules.value = full.rules || []
     configResources.value = full.resource_rules || []
     pendingRules.value = [...configRules.value]
@@ -289,6 +300,7 @@ function onAdvancedToggle(event: Event) {
 
 function applyPinPreview(pins: ProfilePinPreview) {
   pinPreview.value = pins
+  pinEditToken.value = pins.edit_token
   pendingPins.value = pins.groups
     .filter(g => g.source === 'manual')
     .map(({ service_key, tool_type }) => ({ service_key, tool_type }))
@@ -299,6 +311,7 @@ function applyPinPreview(pins: ProfilePinPreview) {
 
 function applyProfileDoc(doc: ProfileDocRender) {
   profileMarkdown.value = doc.markdown
+  notesEditToken.value = doc.edit_token
   // Echoed manual_notes lets the edit textarea show what's already saved, so
   // the user can tweak it instead of retyping the whole note. Only pre-fill
   // when the user hasn't started typing (avoid clobbering in-flight edits).
@@ -385,14 +398,25 @@ async function saveConfig() {
   configSaving.value = true
   saveError.value = ''
   try {
-    await api.replaceProfileRules(configProfile.value.profile_key, pendingRules.value)
-    await api.replaceProfileResources(configProfile.value.profile_key, pendingResources.value)
+    const rulesResult = await api.replaceProfileRules(
+      configProfile.value.profile_key,
+      pendingRules.value,
+      rulesEditToken.value,
+    )
+    rulesEditToken.value = rulesResult.rules_edit_token
+    const resourcesResult = await api.replaceProfileResources(
+      configProfile.value.profile_key,
+      pendingResources.value,
+      resourcesEditToken.value,
+    )
+    resourcesEditToken.value = resourcesResult.resources_edit_token
     if (pinsLoaded.value) await savePins(true)
     if (memoryLoaded.value) {
       profileMemory.value = await api.setProfileMemory(
         configProfile.value.profile_key,
         pendingMemoryBlock.value || null,
         true,
+        profileMemory.value?.edit_token,
       )
     }
     if (manualNotes.value.trim()) await saveManualNotes(true)
@@ -412,12 +436,17 @@ async function savePins(raiseError = false) {
   pinSaving.value = true
   pinError.value = ''
   try {
-    await api.replaceProfilePins(configProfile.value.profile_key, pendingPins.value)
+    const replaced = await api.replaceProfilePins(
+      configProfile.value.profile_key,
+      pendingPins.value,
+      pinEditToken.value,
+    )
+    applyPinPreview(replaced)
     const pins = await api.updateProfilePinSettings(configProfile.value.profile_key, {
       mode: pinMode.value,
       ratio_percent: pinMode.value === 'ratio' ? pinRatio.value : null,
       count: pinMode.value === 'count' ? pinCount.value : null,
-    })
+    }, pinEditToken.value)
     applyPinPreview(pins)
     pinsLoaded.value = true
     syncInitialPinDraft()
@@ -449,7 +478,11 @@ async function saveManualNotes(raiseError = false) {
   docSaving.value = true
   docError.value = ''
   try {
-    const doc = await api.updateProfileManualNotes(configProfile.value.profile_key, manualNotes.value)
+    const doc = await api.updateProfileManualNotes(
+      configProfile.value.profile_key,
+      manualNotes.value,
+      notesEditToken.value,
+    )
     // Re-render carries the saved manual_notes; reflect it so the textarea
     // stays in sync with what was persisted (and is no longer "dirty").
     applyProfileDoc(doc)

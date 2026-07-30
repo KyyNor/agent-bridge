@@ -63,6 +63,7 @@ const formLoading = ref(false)
 const saving = ref(false)
 const scriptNotFound = ref(false)
 const formBaseline = ref('')
+const expectedEditToken = ref<string | null>('')
 
 // 运行状态
 const runs = ref<ScriptRun[]>([])
@@ -200,6 +201,7 @@ watch(
     formError.value = ''
     scriptNotFound.value = false
     if (isNew.value) {
+      expectedEditToken.value = ''
       form.value = emptyForm()
       outputSchemaEnabled.value = false
       formBaseline.value = snapshotForm()
@@ -212,6 +214,7 @@ watch(
     formLoading.value = true
     try {
       const detail = await api.getScript(editingKey.value)
+      expectedEditToken.value = detail.edit_token
       const state = toScriptFormState(detail, defaultInputSchema())
       form.value = state.form
       outputSchemaEnabled.value = state.outputSchemaEnabled
@@ -223,6 +226,7 @@ watch(
       else runDetail.value = null
     } catch (e: unknown) {
       scriptNotFound.value = true
+      expectedEditToken.value = null
       form.value = emptyForm()
       formBaseline.value = snapshotForm()
       formError.value = errorMessage(e)
@@ -465,7 +469,11 @@ async function saveScript(): Promise<ManagedScript | null> {
   }
   saving.value = true
   try {
-    const saved = await api.upsertScript(toScriptUpsertPayload(form.value, outputSchemaEnabled.value))
+    const saved = await api.upsertScript({
+      ...toScriptUpsertPayload(form.value, outputSchemaEnabled.value),
+      expected_edit_token: expectedEditToken.value,
+    })
+    expectedEditToken.value = saved.edit_token
     syntaxRequestId += 1
     liveSyntax.value = null
     syntaxChecking.value = false
@@ -587,7 +595,8 @@ async function resetBuiltInScript() {
   if (!item || !canResetScript(item)) return
   formError.value = ''
   try {
-    const detail = await api.resetScript(item.script_key)
+    const detail = await api.resetScript(item.script_key, expectedEditToken.value)
+    expectedEditToken.value = detail.edit_token
     const state = toScriptFormState(detail, defaultInputSchema())
     form.value = state.form
     outputSchemaEnabled.value = state.outputSchemaEnabled

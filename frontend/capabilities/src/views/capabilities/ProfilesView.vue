@@ -80,6 +80,7 @@ async function createProfile() {
       name: form.value.name,
       description: form.value.description,
       status: form.value.status,
+      expected_edit_token: '',
     })
     showAdd.value = false
     profiles.value = await api.listProfiles()
@@ -90,10 +91,13 @@ async function createProfile() {
 }
 
 async function toggleStatus(profile: ProjectProfile) {
+  const latest = await api.getProfile(profile.profile_key)
   await api.upsertProfile({
-    profile_key: profile.profile_key,
-    name: profile.name,
-    status: profile.status === 'active' ? 'disabled' : 'active',
+    profile_key: latest.profile_key,
+    name: latest.name,
+    description: latest.description,
+    status: latest.status === 'active' ? 'disabled' : 'active',
+    expected_edit_token: latest.edit_token,
   })
   profiles.value = await api.listProfiles()
 }

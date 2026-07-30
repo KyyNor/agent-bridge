@@ -13,6 +13,7 @@ export interface McpService {
   last_error: string | null
   tool_count?: number
   source_type?: 'mcp_service'
+  edit_token?: string
 }
 
 export interface McpTool {
@@ -45,6 +46,7 @@ export interface OpenApiService {
   last_imported_at: string | null
   last_error: string | null
   tool_count?: number
+  edit_token?: string
 }
 
 export interface OpenApiTool extends McpTool {
@@ -121,6 +123,9 @@ export interface ProjectProfile {
   status: string
   allow_count: number
   deny_count: number
+  edit_token?: string
+  rules_edit_token?: string
+  resources_edit_token?: string
   rules?: ProfileSourceRule[]
   resource_rules?: ProfileResourceRule[]
 }
@@ -141,6 +146,7 @@ export interface MemoryBlock {
 
 export interface ProfileMemoryBinding {
   profile_key: string
+  edit_token: string
   block_key: string | null
   enabled: number | boolean
 }
@@ -235,6 +241,7 @@ export interface SkillPrompt {
   updated_at: string | null
   updated_by: string | null
   revision_no?: number
+  edit_token: string
 }
 
 export interface WorkflowArtifact {
@@ -648,6 +655,7 @@ export interface ProfilePinnedTool {
 
 export interface ProfilePinPreview {
   profile_key: string
+  edit_token: string
   settings: ProfilePinSettings
   groups: ProfilePinRule[]
   tools: ProfilePinnedTool[]
@@ -655,6 +663,7 @@ export interface ProfilePinPreview {
 
 export interface ProfileDocRender {
   profile_key: string
+  edit_token: string
   markdown: string
   rendered_hash: string
   /** Stored manual notes — echoed so the edit textarea can be pre-filled. */
@@ -808,6 +817,7 @@ export interface CodeRepository {
   last_synced_at: string | null
   last_error: string | null
   has_auth_ref?: boolean
+  edit_token?: string
 }
 
 export interface KbRepoSource {
@@ -850,6 +860,7 @@ export interface KnowledgeBaseSummary {
   role?: string
   default_backend_slug?: string | null
   default_agent_id?: string | null
+  edit_token?: string
   backend_targets: { id: number; kb_id: number; slug: string; backend_type: string; backend_kb_id: string | null; config_json: string; status: string; created_at: string; updated_at: string }[]
   document_count: number
   sync_failed_count: number
@@ -865,6 +876,9 @@ export interface KnowledgeBase {
   created_at: string
   updated_at: string
   role?: string
+  default_backend_slug?: string | null
+  default_agent_id?: string | null
+  edit_token?: string
 }
 
 export interface FolderCounts {
@@ -1069,6 +1083,7 @@ export interface BackendInfo {
   summary_model_id: string | null
   rerank_model_id: string | null
   runtime_status: string
+  edit_token?: string
 }
 
 export interface BackendAgent {
@@ -1127,6 +1142,7 @@ export interface CodeRepoCategory {
   description: string
   created_at: string
   updated_at: string
+  edit_token?: string
 }
 
 export interface KnowledgeSyncConfig {
@@ -1147,6 +1163,7 @@ export interface KnowledgeSyncConfig {
   log_retention_days: number
   mcp_timeout_seconds: number
   understand_timeout_minutes: number
+  edit_token?: string
 }
 
 export interface AgentBackendConfig {
@@ -1176,6 +1193,7 @@ export interface AgentRuntimeConfig {
   default_backend: string
   backends: AgentBackendConfig[]
   available_backends?: AvailableAgentBackend[]
+  edit_token?: string
 }
 
 export interface ClaudeMemConfig {
@@ -1190,6 +1208,7 @@ export interface ClaudeMemConfig {
   has_auth_token: boolean
   has_api_key: boolean
   has_secret: boolean
+  edit_token: string
 }
 
 export interface ClaudeMemConfigUpdate {
@@ -1199,6 +1218,7 @@ export interface ClaudeMemConfigUpdate {
   model?: string | null
   clear_auth_token?: boolean
   clear_api_key?: boolean
+  expected_edit_token?: string | null
 }
 
 export interface RetrievalProbeLlmConfig {
@@ -1206,6 +1226,7 @@ export interface RetrievalProbeLlmConfig {
   model: string
   api_key_set: boolean
   updated_at: string | null
+  edit_token: string
 }
 
 export interface RetrievalProbeLlmConfigUpdate {
@@ -1213,6 +1234,7 @@ export interface RetrievalProbeLlmConfigUpdate {
   model: string
   api_key?: string | null
   clear_api_key?: boolean
+  expected_edit_token?: string | null
 }
 
 export interface SingleSchedulerStatus {
@@ -1337,6 +1359,7 @@ export interface ManagedScript {
   code_preview?: string
   revision_no?: number
   syntax_check?: SyntaxCheckResult
+  edit_token: string
 }
 
 export interface ScriptRun {

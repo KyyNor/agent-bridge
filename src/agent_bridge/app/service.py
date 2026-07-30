@@ -47,6 +47,7 @@ from agent_bridge.knowledge_management.docs_knowledge.backends.registry import B
 from agent_bridge.knowledge_management.docs_knowledge.service import DocsKnowledgeService
 from agent_bridge.knowledge_management.memory.service import MemoryService
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
+from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.service import ScriptService
 from agent_bridge.system_config.skills.service import SkillService
@@ -406,7 +407,10 @@ class AgentBridgeService:
 
     def list_kbs(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        return self.store.list_kbs()
+        return [
+            attach_edit_token(kb, self._kb_defaults_edit_snapshot(kb))
+            for kb in self.store.list_kbs()
+        ]
 
     def list_kb_status_summaries(self, actor: str) -> list[dict[str, Any]]:
         summaries: list[dict[str, Any]] = []
@@ -1022,11 +1026,46 @@ class AgentBridgeService:
 
     def list_categories(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
-        return self.store.list_categories()
+        return [
+            attach_edit_token(item, self._category_edit_snapshot(item))
+            for item in self.store.list_categories()
+        ]
 
-    def upsert_category(self, actor: str, *, category_key: str, name: str, description: str) -> dict[str, Any]:
+    def upsert_category(
+        self,
+        actor: str,
+        *,
+        category_key: str,
+        name: str,
+        description: str,
+        expected_edit_token: str | None = None,
+    ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        return self.store.upsert_category(category_key=category_key, name=name, description=description)
+        current = next(
+            (item for item in self.store.list_categories() if item["category_key"] == category_key),
+            None,
+        )
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=self._category_edit_snapshot(current) if current else None,
+            resource_type="code_repo_category",
+            resource_key=category_key,
+            actor=actor,
+        )
+        saved = self.store.upsert_category(
+            category_key=category_key,
+            name=name,
+            description=description,
+        )
+        return attach_edit_token(saved, self._category_edit_snapshot(saved))
+
+    @staticmethod
+    def _category_edit_snapshot(category: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "category_key": category.get("category_key"),
+            "name": category.get("name"),
+            "description": category.get("description"),
+        }
 
     def delete_category(self, actor: str, category_key: str) -> None:
         require_admin_user(actor, self.admins)
@@ -1066,7 +1105,8 @@ class AgentBridgeService:
 
     def get_sync_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        return self.store.get_sync_config()
+        config = self.store.get_sync_config()
+        return attach_edit_token(config, self._sync_config_edit_snapshot(config))
 
     def save_sync_config(
         self,
@@ -1089,8 +1129,17 @@ class AgentBridgeService:
         log_retention_days: int = 180,
         mcp_timeout_seconds: int = DEFAULT_MCP_TIMEOUT_SECONDS,
         understand_timeout_minutes: int = 120,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
+        current = self.store.get_sync_config()
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=self._sync_config_edit_snapshot(current),
+            resource_type="system_config",
+            resource_key="knowledge_sync",
+            actor=actor,
+        )
         result = self.store.save_sync_config(
             code_sync_cron=code_sync_cron,
             ua_git_url=ua_git_url,
@@ -1130,7 +1179,15 @@ class AgentBridgeService:
         self.plugin_update_scheduler.refresh()
         self.doc_sync_scheduler.refresh()
         self.workflow_scheduler.refresh()
-        return result
+        return attach_edit_token(result, self._sync_config_edit_snapshot(result))
+
+    @staticmethod
+    def _sync_config_edit_snapshot(config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in config.items()
+            if key not in {"edit_token", "updated_at"}
+        }
 
     def get_scheduler_status(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -1145,10 +1202,20 @@ class AgentBridgeService:
     def get_agent_runtime_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         config = load_agent_runtime_config(self.paths)
-        return _agent_runtime_config_payload(config, self.agents.coding_agents)
+        payload = _agent_runtime_config_payload(config, self.agents.coding_agents)
+        return attach_edit_token(payload, _agent_runtime_config_payload(config))
 
     def save_agent_runtime_config(self, actor: str, payload: dict[str, Any]) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
+        expected_edit_token = payload.pop("expected_edit_token", None)
+        current_config = load_agent_runtime_config(self.paths)
+        require_edit_token(
+            expected=expected_edit_token,
+            current_snapshot=_agent_runtime_config_payload(current_config),
+            resource_type="system_config",
+            resource_key="agent_runtime",
+            actor=actor,
+        )
         backends = [
             AgentBackendConfig(
                 slug=str(item.get("slug") or ""),
@@ -1174,11 +1241,14 @@ class AgentBridgeService:
             saved.default_backend,
             [item.slug for item in saved.backends],
         )
-        return _agent_runtime_config_payload(saved, registry)
+        result = _agent_runtime_config_payload(saved, registry)
+        return attach_edit_token(result, _agent_runtime_config_payload(saved))
 
     def get_claude_mem_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        return self.memory.worker_service.config.get_config(bootstrap=True)
+        manager = self.memory.worker_service.config
+        config = manager.get_config(bootstrap=True)
+        return attach_edit_token(config, manager.edit_snapshot(bootstrap=False))
 
     def save_claude_mem_config(
         self,
@@ -1190,9 +1260,18 @@ class AgentBridgeService:
         model: str | None = None,
         clear_auth_token: bool = False,
         clear_api_key: bool = False,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        config = self.memory.worker_service.config.save_config(
+        manager = self.memory.worker_service.config
+        require_edit_token(
+            expected_edit_token,
+            manager.edit_snapshot(bootstrap=True),
+            resource_type="Claude Mem 配置",
+            resource_key="global",
+            actor=actor,
+        )
+        config = manager.save_config(
             base_url=base_url,
             auth_token=auth_token,
             api_key=api_key,
@@ -1201,12 +1280,14 @@ class AgentBridgeService:
             clear_api_key=clear_api_key,
         )
         self.memory.worker_service.stop_all_workers()
-        return config
+        return attach_edit_token(config, manager.edit_snapshot(bootstrap=False))
 
     def get_retrieval_probe_llm_config(self, actor: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
-        return self._public_retrieval_probe_llm_config(
-            self.store.get_retrieval_probe_llm_config()
+        config = self.store.get_retrieval_probe_llm_config()
+        return attach_edit_token(
+            self._public_retrieval_probe_llm_config(config),
+            self._retrieval_probe_llm_edit_snapshot(config),
         )
 
     def save_retrieval_probe_llm_config(
@@ -1217,8 +1298,18 @@ class AgentBridgeService:
         model: str,
         api_key: str | None = None,
         clear_api_key: bool = False,
+        expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
+        require_edit_token(
+            expected_edit_token,
+            self._retrieval_probe_llm_edit_snapshot(
+                self.store.get_retrieval_probe_llm_config()
+            ),
+            resource_type="全量检索探测模型配置",
+            resource_key="global",
+            actor=actor,
+        )
         cleaned_url = base_url.strip().rstrip("/")
         cleaned_model = model.strip()
         parsed = urlparse(cleaned_url)
@@ -1240,7 +1331,10 @@ class AgentBridgeService:
             cleaned_model,
             bool(saved["api_key"]),
         )
-        return self._public_retrieval_probe_llm_config(saved)
+        return attach_edit_token(
+            self._public_retrieval_probe_llm_config(saved),
+            self._retrieval_probe_llm_edit_snapshot(saved),
+        )
 
     @staticmethod
     def _public_retrieval_probe_llm_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -1249,6 +1343,14 @@ class AgentBridgeService:
             "model": str(config.get("model") or ""),
             "api_key_set": bool(config.get("api_key")),
             "updated_at": config.get("updated_at"),
+        }
+
+    @staticmethod
+    def _retrieval_probe_llm_edit_snapshot(config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "base_url": str(config.get("base_url") or ""),
+            "model": str(config.get("model") or ""),
+            "api_key": str(config.get("api_key") or ""),
         }
 
     def status(self, actor: str, backend: str | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -1301,13 +1403,31 @@ class AgentBridgeService:
 
     def update_kb_defaults(self, actor: str, kb_slug: str, *,
                            default_backend_slug: str | None = None,
-                           default_agent_id: str | None = None) -> dict[str, Any]:
+                           default_agent_id: str | None = None,
+                           expected_edit_token: str | None = None) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         kb = self.store.get_kb_by_slug(kb_slug)
         if kb is None:
             raise NotFound("knowledge base not found")
+        require_edit_token(
+            expected_edit_token,
+            self._kb_defaults_edit_snapshot(kb),
+            resource_type="文档知识库默认检索配置",
+            resource_key=kb_slug,
+            actor=actor,
+        )
         self.store.update_kb_defaults(kb["id"], default_backend_slug, default_agent_id)
-        return self.store.get_kb_by_slug(kb_slug)
+        saved = self.store.get_kb_by_slug(kb_slug)
+        return attach_edit_token(saved or {}, self._kb_defaults_edit_snapshot(saved))
+
+    @staticmethod
+    def _kb_defaults_edit_snapshot(kb: dict[str, Any] | None) -> dict[str, Any] | None:
+        if kb is None:
+            return None
+        return {
+            "default_backend_slug": kb.get("default_backend_slug"),
+            "default_agent_id": kb.get("default_agent_id"),
+        }
 
     def resolve_retrieval_strategy(self, kb_slug: str, profile_key: str | None) -> tuple[dict[str, Any], RetrievalStrategy]:
         kb = self.store.get_kb_by_slug(kb_slug)

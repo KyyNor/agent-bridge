@@ -22,7 +22,16 @@ def create_capability_routes(service, actor, catalog_sources):
 
     @router.post("/capabilities/mcp-services")
     def register_mcp_service(payload: RegisterMcpServiceRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.capabilities.register_service(current_actor, payload.service_key, payload.name, payload.endpoint_url, payload.headers, payload.description, payload.tags)
+        return service.capabilities.register_service(
+            current_actor,
+            payload.service_key,
+            payload.name,
+            payload.endpoint_url,
+            payload.headers,
+            payload.description,
+            payload.tags,
+            expected_edit_token=payload.expected_edit_token,
+        )
 
     @router.get("/capabilities/mcp-services")
     def list_mcp_services(summary: bool = False, current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
@@ -79,6 +88,7 @@ def create_capability_routes(service, actor, catalog_sources):
             payload.headers,
             payload.description,
             payload.tags,
+            expected_edit_token=payload.expected_edit_token,
         )
 
     @router.get("/capabilities/openapi-services")
