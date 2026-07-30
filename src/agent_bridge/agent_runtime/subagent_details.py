@@ -96,7 +96,7 @@ def _append_usage(event: dict[str, Any], message: dict[str, Any]) -> None:
         event["usage"] = usage
 
 
-def _message_events(row: dict[str, Any]) -> list[dict[str, Any]]:
+def _message_events(row: dict[str, Any], tool_names: dict[str, str]) -> list[dict[str, Any]]:
     message = row.get("message")
     if not isinstance(message, dict):
         return []
@@ -130,14 +130,22 @@ def _message_events(row: dict[str, Any]) -> list[dict[str, Any]]:
         elif block_type == "text":
             event = _event_base(row, kind="text", role=role)
             event["content"] = str(block.get("text") or "")
-        elif block_type == "tool_use":
+        elif block_type in {"tool_use", "server_tool_use"}:
             event = _event_base(row, kind="tool_call", role=role)
-            event["tool_use_id"] = block.get("id")
-            event["tool_name"] = block.get("name")
+            tool_use_id = block.get("id")
+            tool_name = block.get("name")
+            event["tool_use_id"] = tool_use_id
+            event["tool_name"] = tool_name
             event["input"] = block.get("input")
-        elif block_type == "tool_result":
+            if isinstance(tool_use_id, str) and isinstance(tool_name, str) and tool_name:
+                tool_names[tool_use_id] = tool_name
+        elif block_type in {"tool_result", "server_tool_result"}:
             event = _event_base(row, kind="tool_result", role=role)
-            event["tool_use_id"] = block.get("tool_use_id")
+            tool_use_id = block.get("tool_use_id")
+            event["tool_use_id"] = tool_use_id
+            tool_name = block.get("name") or tool_names.get(str(tool_use_id))
+            if tool_name:
+                event["tool_name"] = tool_name
             event["content"] = block.get("content")
             if block.get("is_error") is not None:
                 event["is_error"] = block.get("is_error")
@@ -183,11 +191,12 @@ def _prompt_preview(events: list[dict[str, Any]]) -> str:
 def _agent_detail(path: Path, result: Any) -> dict[str, Any]:
     events: list[dict[str, Any]] = []
     agent_id = _agent_id_from_path(path)
+    tool_names: dict[str, str] = {}
     for row in _read_jsonl(path):
         row_agent_id = row.get("agentId")
         if isinstance(row_agent_id, str) and row_agent_id:
             agent_id = row_agent_id
-        events.extend(_message_events(row))
+        events.extend(_message_events(row, tool_names))
     return {
         "agent_id": agent_id,
         "result": result,

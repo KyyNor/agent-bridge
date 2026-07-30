@@ -478,6 +478,9 @@ function closePayload() {
 .tl-mini-content{min-width:0;max-width:100%;font-size:12.5px;color:var(--muted-foreground);line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 .tl-mini-content.tl-dump{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);background:var(--muted);padding:6px 9px;border-radius:var(--radius-compact);margin-top:4px;white-space:pre-wrap;overflow-x:hidden;overflow-y:auto;max-height:160px;overflow-wrap:anywhere}
 .tl-mini-content > .tl-md{color:var(--foreground);white-space:normal;word-break:break-word}
+.tl-mini-action{border:0;background:transparent;padding:0;color:var(--primary);font-size:10.5px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.tl-mini-action:hover{opacity:.8}
+.tl-mini-payload-action{margin-top:4px}
 
 @media (prefers-reduced-motion: reduce){
   .tl-body,.tl-sub,.tl-chevron{transition:none}

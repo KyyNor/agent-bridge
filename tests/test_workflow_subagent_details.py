@@ -72,6 +72,24 @@ def _sample_run(tmp_path: Path) -> tuple[Path, str]:
             {
                 "type": "assistant",
                 "agentId": agent_id,
+                "timestamp": "2026-07-02T14:40:52.100Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "server_tool_use", "id": "tool_2", "name": "webReader", "input": {"url": "https://example.test"}}],
+                },
+            },
+            {
+                "type": "user",
+                "agentId": agent_id,
+                "timestamp": "2026-07-02T14:40:53.100Z",
+                "message": {
+                    "role": "user",
+                    "content": [{"tool_use_id": "tool_2", "type": "tool_result", "content": "网页正文"}],
+                },
+            },
+            {
+                "type": "assistant",
+                "agentId": agent_id,
                 "timestamp": "2026-07-02T14:40:34.405Z",
                 "message": {
                     "role": "assistant",
@@ -116,12 +134,16 @@ def test_build_subagent_detail_reads_claude_transcript_and_task_output(tmp_path:
     assert detail["agents"][0]["agent_id"] == "agent-one"
     assert detail["agents"][0]["result"] == {"answer": "done"}
     events = detail["agents"][0]["events"]
-    assert [event["kind"] for event in events] == ["prompt", "thinking", "tool_call", "tool_result", "text"]
+    assert [event["kind"] for event in events] == ["prompt", "thinking", "tool_call", "tool_result", "tool_call", "tool_result", "text"]
     assert events[0]["content"] == "请调用工具并返回结果"
     assert events[1]["content"] == "我需要调用工具"
-    assert events[2]["tool_name"] == "demo_tool"
-    assert events[3]["content"] == '{"value": 2}'
-    assert events[4]["content"] == "完成"
+    assert events[2]["tool_name"] == "webReader"
+    assert events[2]["input"] == {"url": "https://example.test"}
+    assert events[3]["tool_name"] == "webReader"
+    assert events[3]["content"] == "网页正文"
+    assert events[4]["tool_name"] == "demo_tool"
+    assert events[5]["content"] == '{"value": 2}'
+    assert events[6]["content"] == "完成"
 
 
 def test_agent_runs_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> None:
@@ -165,4 +187,3 @@ def test_agent_runs_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> Non
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert old.status_code == 404
-

@@ -4,7 +4,9 @@ import { ChevronDown, ChevronRight } from '@lucide/vue'
 import type { WorkflowSubagentDetail, WorkflowSubagentTranscriptAgent, WorkflowSubagentTranscriptEvent } from '../api/types'
 import { formatLocalDatetime } from '../lib/time'
 import { renderMarkdown } from '../lib/markdown'
+import { preparePayloadPresentation, type PayloadLanguage } from '../lib/payloadPresentation'
 import JsonViewer from './JsonViewer.vue'
+import PayloadDetailDialog from './PayloadDetailDialog.vue'
 
 const props = defineProps<{
   detail: WorkflowSubagentDetail | null
@@ -13,6 +15,7 @@ const props = defineProps<{
 }>()
 
 const expandedAgents = ref<Set<string>>(new Set())
+const payloadModal = ref<{ label: string; content: string; language: PayloadLanguage } | null>(null)
 
 function shortAgentId(agentId: string) {
   return agentId.length > 12 ? `${agentId.slice(0, 8)}…${agentId.slice(-4)}` : agentId
@@ -27,6 +30,17 @@ function toggleAgent(agentId: string) {
 
 function isAgentExpanded(agentId: string) {
   return expandedAgents.value.has(agentId)
+}
+
+function toggleAllAgents() {
+  const agents = props.detail?.agents || []
+  const everyExpanded = agents.length > 0 && agents.every(agent => expandedAgents.value.has(agent.agent_id))
+  expandedAgents.value = everyExpanded ? new Set() : new Set(agents.map(agent => agent.agent_id))
+}
+
+function areAllAgentsExpanded() {
+  const agents = props.detail?.agents || []
+  return agents.length > 0 && agents.every(agent => expandedAgents.value.has(agent.agent_id))
 }
 
 /** Map a transcript event.kind into a timeline visual family. */
@@ -70,6 +84,21 @@ function isMarkdown(event: WorkflowSubagentTranscriptEvent) {
 function eventBody(event: WorkflowSubagentTranscriptEvent) {
   if (event.kind === 'tool_call') return formatValue(event.input)
   return formatValue(event.content)
+}
+
+function openPayload(event: WorkflowSubagentTranscriptEvent) {
+  const content = eventBody(event)
+  if (!content) return
+  const presentation = preparePayloadPresentation(content)
+  payloadModal.value = {
+    label: event.kind === 'tool_call' ? '工具输入' : '工具输出',
+    content: presentation.content,
+    language: presentation.language,
+  }
+}
+
+function closePayload() {
+  payloadModal.value = null
 }
 
 function promptEvents(agent: WorkflowSubagentTranscriptAgent) {
@@ -118,7 +147,11 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
         <div class="tl-mini-head">
           <span class="tl-mini-kind" style="background:var(--muted);color:var(--muted-foreground)">内部子 Agent</span>
           <span class="tl-mini-target"><b>{{ props.detail.agent_count || props.detail.agents.length }}</b> 个</span>
+          <button type="button" class="tl-mini-action" @click="toggleAllAgents">
+            {{ areAllAgentsExpanded() ? '收起全部' : '展开全部' }}
+          </button>
         </div>
+        <div class="tl-mini-content">展开后可查看每次工具调用的输入与输出；长内容可在“查看完整内容”中打开。</div>
       </div>
 
       <!-- 返回主 Agent 的结果（thread card 顶部高亮块） -->
@@ -179,6 +212,12 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
                 />
                 <template v-else>{{ eventBody(event) }}</template>
               </div>
+              <button
+                v-if="isDump(event) && eventBody(event)"
+                type="button"
+                class="tl-mini-action tl-mini-payload-action"
+                @click="openPayload(event)"
+              >查看完整内容</button>
             </div>
           </div>
 
@@ -192,5 +231,15 @@ function agentStatusLabel(agent: WorkflowSubagentTranscriptAgent) {
         </div>
       </div>
     </template>
+
+    <PayloadDetailDialog
+      v-if="payloadModal"
+      :open="payloadModal !== null"
+      title="工具调用内容"
+      :label="payloadModal.label"
+      :content="payloadModal.content"
+      :language="payloadModal.language"
+      @update:open="(open: boolean) => { if (!open) closePayload() }"
+    />
   </div>
 </template>
