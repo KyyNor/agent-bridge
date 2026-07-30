@@ -7,6 +7,7 @@ import type { SkillPrompt } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
+import EditorActionBar from '../../components/EditorActionBar.vue'
 import { confirm } from '../../composables/useConfirm'
 import { useToast } from '../../composables/useToast'
 import PaginationBar from '../../components/PaginationBar.vue'
@@ -215,51 +216,54 @@ function safeUrl(value: string): string | null {
         <CardContent class="space-y-4 p-4">
           <div v-if="detailLoading" class="py-12 text-center text-sm text-muted-foreground">加载中</div>
           <template v-else-if="selected">
-            <div class="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h3 class="text-base font-semibold text-foreground">{{ selected.name }}</h3>
-                  <Badge variant="outline">{{ sourceLabel }}</Badge>
+            <EditorActionBar>
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="text-base font-semibold text-foreground">{{ selected.name }}</h3>
+                    <Badge variant="outline">{{ sourceLabel }}</Badge>
+                  </div>
+                  <div class="mt-1 font-mono text-xs text-muted-foreground">{{ selected.skill_name }}</div>
+                  <p class="mt-2 text-sm text-muted-foreground">{{ selected.description }}</p>
                 </div>
-                <div class="mt-1 font-mono text-xs text-muted-foreground">{{ selected.skill_name }}</div>
-                <p class="mt-2 text-sm text-muted-foreground">{{ selected.description }}</p>
+                <div>
+                  <div class="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" @click="copyRunPrompt">
+                      <Check v-if="copied" class="mr-1.5 h-4 w-4" />
+                      <Copy v-else class="mr-1.5 h-4 w-4" />
+                      {{ copied ? '已复制' : '复制运行提示' }}
+                    </Button>
+                    <Button variant="outline" size="sm" :disabled="saving || selected.source === 'default'" @click="resetSkill">
+                      <RotateCcw class="mr-1.5 h-4 w-4" />
+                      恢复默认
+                    </Button>
+                    <Button size="sm" :disabled="saving || !hasChanges" @click="saveSkill">
+                      <Save class="mr-1.5 h-4 w-4" />
+                      {{ saving ? '保存中' : '保存' }}
+                    </Button>
+                  </div>
+                  <div class="mt-2 flex items-center justify-end gap-1">
+                    <button
+                      class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition"
+                      :class="previewTab === 'edit' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+                      @click="previewTab = 'edit'"
+                    >
+                      <Pencil class="h-3.5 w-3.5" />
+                      编辑
+                    </button>
+                    <button
+                      class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition"
+                      :class="previewTab === 'preview' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+                      @click="previewTab = 'preview'"
+                    >
+                      <Eye class="h-3.5 w-3.5" />
+                      预览
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div class="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" @click="copyRunPrompt">
-                    <Check v-if="copied" class="mr-1.5 h-4 w-4" />
-                    <Copy v-else class="mr-1.5 h-4 w-4" />
-                    {{ copied ? '已复制' : '复制运行提示' }}
-                  </Button>
-                  <Button variant="outline" size="sm" :disabled="saving || selected.source === 'default'" @click="resetSkill">
-                    <RotateCcw class="mr-1.5 h-4 w-4" />
-                    恢复默认
-                  </Button>
-                  <Button size="sm" :disabled="saving || !hasChanges" @click="saveSkill">
-                    <Save class="mr-1.5 h-4 w-4" />
-                    {{ saving ? '保存中' : '保存' }}
-                  </Button>
-                </div>
-                <div class="mt-2 flex items-center justify-end gap-1">
-                  <button
-                    class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition"
-                    :class="previewTab === 'edit' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
-                    @click="previewTab = 'edit'"
-                  >
-                    <Pencil class="h-3.5 w-3.5" />
-                    编辑
-                  </button>
-                  <button
-                    class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition"
-                    :class="previewTab === 'preview' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
-                    @click="previewTab = 'preview'"
-                  >
-                    <Eye class="h-3.5 w-3.5" />
-                    预览
-                  </button>
-                </div>
               </div>
-            </div>
+            </EditorActionBar>
 
             <textarea
               v-if="previewTab === 'edit'"

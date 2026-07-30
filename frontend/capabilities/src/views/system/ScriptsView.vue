@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import CodeMirror from '../../components/CodeMirror.vue'
+import EditorActionBar from '../../components/EditorActionBar.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import SchemaFieldEditor from '../../components/SchemaFieldEditor.vue'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
@@ -904,47 +905,49 @@ def main(envelope):
   <!-- 编辑/运行二级页面 -->
   <div v-else class="space-y-4">
     <!-- 顶栏 -->
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
-          <ArrowLeft class="mr-1 h-4 w-4" />
-          返回
-        </Button>
-        <div>
-          <h2 class="text-lg font-semibold text-foreground">
-            {{ isNew ? '新建脚本' : (editingScript?.name || form.name || '编辑脚本') }}
-          </h2>
-          <div class="mt-1 flex flex-wrap items-center gap-2">
-            <p class="font-mono text-xs text-muted-foreground">
-              {{ isNew ? '新建后将自动生成 script_key' : editingKey }}
-            </p>
-            <Badge v-if="editingScript && isBuiltInScript" variant="secondary" :class="sourceBadgeClass(editingScript.source)">{{ sourceLabel(editingScript.source) }}</Badge>
+    <EditorActionBar class="-mx-7 px-7">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+            <ArrowLeft class="mr-1 h-4 w-4" />
+            返回
+          </Button>
+          <div>
+            <h2 class="text-lg font-semibold text-foreground">
+              {{ isNew ? '新建脚本' : (editingScript?.name || form.name || '编辑脚本') }}
+            </h2>
+            <div class="mt-1 flex flex-wrap items-center gap-2">
+              <p class="font-mono text-xs text-muted-foreground">
+                {{ isNew ? '新建后将自动生成 script_key' : editingKey }}
+              </p>
+              <Badge v-if="editingScript && isBuiltInScript" variant="secondary" :class="sourceBadgeClass(editingScript.source)">{{ sourceLabel(editingScript.source) }}</Badge>
+            </div>
           </div>
         </div>
+        <div class="flex flex-wrap gap-2">
+          <Button v-if="isBuiltInScript" variant="outline" size="sm" :disabled="saving || testing" @click="resetBuiltInScript">
+            <RotateCcw class="mr-1.5 h-4 w-4" />
+            恢复默认
+          </Button>
+          <Button variant="outline" size="sm" :disabled="designing || !canEditContract" @click="openScriptDesigner('modify')">
+            <WandSparkles class="mr-1.5 h-4 w-4" />
+            AI 设计
+          </Button>
+          <Button variant="outline" size="sm" :disabled="saving" @click="saveScript">
+            <Save class="mr-1.5 h-4 w-4" />
+            {{ saving ? '保存中' : '保存' }}
+          </Button>
+          <Button size="sm" :disabled="testing || form.status !== 'active'" @click="runScript">
+            <Play class="mr-1.5 h-4 w-4" />
+            {{ testing ? '运行中' : (isNew ? '保存并运行' : '运行') }}
+          </Button>
+          <Button v-if="editingKey" variant="outline" size="sm" @click="showHistory = true">
+            版本历史
+            <span v-if="editingScript?.revision_no" class="ml-1.5 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px]">v{{ editingScript.revision_no }}</span>
+          </Button>
+        </div>
       </div>
-      <div class="flex flex-wrap gap-2">
-        <Button v-if="isBuiltInScript" variant="outline" size="sm" :disabled="saving || testing" @click="resetBuiltInScript">
-          <RotateCcw class="mr-1.5 h-4 w-4" />
-          恢复默认
-        </Button>
-        <Button variant="outline" size="sm" :disabled="designing || !canEditContract" @click="openScriptDesigner('modify')">
-          <WandSparkles class="mr-1.5 h-4 w-4" />
-          AI 设计
-        </Button>
-        <Button variant="outline" size="sm" :disabled="saving" @click="saveScript">
-          <Save class="mr-1.5 h-4 w-4" />
-          {{ saving ? '保存中' : '保存' }}
-        </Button>
-        <Button size="sm" :disabled="testing || form.status !== 'active'" @click="runScript">
-          <Play class="mr-1.5 h-4 w-4" />
-          {{ testing ? '运行中' : (isNew ? '保存并运行' : '运行') }}
-        </Button>
-        <Button v-if="editingKey" variant="outline" size="sm" @click="showHistory = true">
-          版本历史
-          <span v-if="editingScript?.revision_no" class="ml-1.5 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px]">v{{ editingScript.revision_no }}</span>
-        </Button>
-      </div>
-    </div>
+    </EditorActionBar>
 
     <Dialog v-if="editingKey" v-model:open="showHistory">
       <DialogContent class="w-[96vw] max-w-[1100px] sm:max-w-[1100px]">

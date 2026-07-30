@@ -6,6 +6,7 @@ import type { ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraf
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
+import EditorActionBar from '../../components/EditorActionBar.vue'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { Input } from '../../components/ui/input'
 import { confirm, alert } from '../../composables/useConfirm'
@@ -1829,35 +1830,37 @@ async function confirmClearWorkflow() {
 
     <section v-if="isWorkflowFormPage && !routeError" class="space-y-5">
       <!-- Header：对齐 detail 页 text-xl font-semibold tracking-tight -->
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="flex items-center gap-3">
-          <Button variant="ghost" size="sm" class="h-8 px-2" @click="backFromForm">
-            <ArrowLeft class="mr-1 h-4 w-4" />
-            返回
-          </Button>
-          <div>
-            <h2 class="text-xl font-semibold tracking-tight text-foreground">{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</h2>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              <span class="font-mono">{{ form.workflow_key || 'workflow/new' }}</span>
-              <span v-if="form.profile_key"> · {{ profileName(form.profile_key) }}</span>
-            </p>
+      <EditorActionBar class="-mx-7 px-7">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <Button variant="ghost" size="sm" class="h-8 px-2" @click="backFromForm">
+              <ArrowLeft class="mr-1 h-4 w-4" />
+              返回
+            </Button>
+            <div>
+              <h2 class="text-xl font-semibold tracking-tight text-foreground">{{ form.workflow_key ? '编辑工作流' : '新建工作流' }}</h2>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                <span class="font-mono">{{ form.workflow_key || 'workflow/new' }}</span>
+                <span v-if="form.profile_key"> · {{ profileName(form.profile_key) }}</span>
+              </p>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" :disabled="designing" @click="openWorkflowDesigner('modify')">
+              <WandSparkles class="mr-1.5 h-4 w-4" />
+              AI 设计
+            </Button>
+            <Button variant="outline" size="sm" :disabled="editedWorkflowRunBusy" @click="runEditedWorkflow">
+              <Play class="mr-1.5 h-4 w-4" />
+              测试运行
+            </Button>
+            <Button :disabled="saving" size="sm" @click="saveWorkflow">
+              <Save class="mr-1.5 h-4 w-4" />
+              {{ saving ? '保存中' : '保存' }}
+            </Button>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" :disabled="designing" @click="openWorkflowDesigner('modify')">
-            <WandSparkles class="mr-1.5 h-4 w-4" />
-            AI 设计
-          </Button>
-          <Button variant="outline" size="sm" :disabled="editedWorkflowRunBusy" @click="runEditedWorkflow">
-            <Play class="mr-1.5 h-4 w-4" />
-            测试运行
-          </Button>
-          <Button :disabled="saving" size="sm" @click="saveWorkflow">
-            <Save class="mr-1.5 h-4 w-4" />
-            {{ saving ? '保存中' : '保存' }}
-          </Button>
-        </div>
-      </div>
+      </EditorActionBar>
 
       <!-- 错误条 -->
       <div v-if="formError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">

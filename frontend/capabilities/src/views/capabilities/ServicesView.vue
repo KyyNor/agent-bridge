@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
+import EditorActionBar from '../../components/EditorActionBar.vue'
 import { timeAgo } from '../../lib/time'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
@@ -322,24 +323,26 @@ const toolTypeOptions = [
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else-if="isFormPage" class="space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
-          <ArrowLeft class="mr-1 h-4 w-4" />
-          返回
-        </Button>
-        <div>
-          <h2 class="text-lg font-semibold text-foreground">{{ dialogTitle }}</h2>
-          <p class="font-mono text-xs text-muted-foreground">
-            {{ formMode === 'create' ? 'services/new' : `${sourceType}/${editingServiceKey}` }}
-          </p>
+    <EditorActionBar class="-mx-7 px-7">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <Button variant="ghost" size="sm" class="h-8 px-2" @click="goList">
+            <ArrowLeft class="mr-1 h-4 w-4" />
+            返回
+          </Button>
+          <div>
+            <h2 class="text-lg font-semibold text-foreground">{{ dialogTitle }}</h2>
+            <p class="font-mono text-xs text-muted-foreground">
+              {{ formMode === 'create' ? 'services/new' : `${sourceType}/${editingServiceKey}` }}
+            </p>
+          </div>
         </div>
+        <Button :disabled="saving || serviceNotFound" size="sm" @click="saveService">
+          <Save class="mr-1.5 h-4 w-4" />
+          {{ primaryActionLabel }}
+        </Button>
       </div>
-      <Button :disabled="saving || serviceNotFound" size="sm" @click="saveService">
-        <Save class="mr-1.5 h-4 w-4" />
-        {{ primaryActionLabel }}
-      </Button>
-    </div>
+    </EditorActionBar>
 
     <div v-if="serviceNotFound" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
       无法加载该服务（可能已被删除或不存在）。请<a class="underline" href="#services" @click.prevent="goList">返回列表</a>。
