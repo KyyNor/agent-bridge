@@ -43,6 +43,7 @@ class WorkflowDefinitionsRepositoryMixin:
                   definition_json = excluded.definition_json,
                   status = excluded.status,
                   workflow_type = excluded.workflow_type,
+                  edit_version = workflow_definitions.edit_version + 1,
                   updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -87,7 +88,7 @@ class WorkflowDefinitionsRepositoryMixin:
             rows = conn.execute(
                 """
                 SELECT workflow_key, name, description, profile_key, status,
-                       workflow_type, created_by, created_at, updated_at
+                       workflow_type, edit_version, created_by, created_at, updated_at
                 FROM workflow_definitions
                 ORDER BY workflow_key
                 """

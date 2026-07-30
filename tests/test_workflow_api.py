@@ -223,6 +223,58 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
     assert detail.json()["definition"] == {"nodes": [], "edges": []}
 
 
+def test_workflow_api_rejects_stale_editor_save(wm_paths):
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(
+        profile_key="report-plane", name="Report Plane", created_by="root"
+    )
+    client = TestClient(create_app(wm_paths, {"root"}))
+    headers = {"X-Agent-Bridge-User": "root"}
+    payload = {
+        "workflow_key": "concurrent-edit",
+        "name": "Initial",
+        "description": "",
+        "profile_key": "report-plane",
+        "definition": {"nodes": [], "edges": []},
+        "status": "active",
+    }
+    created = client.post("/workflows", headers=headers, json=payload)
+    assert created.status_code == 200, created.text
+    assert created.json()["edit_version"] == 1
+
+    first_editor = client.get("/workflows/concurrent-edit", headers=headers).json()
+    stale_editor = client.get("/workflows/concurrent-edit", headers=headers).json()
+
+    first_save = client.post(
+        "/workflows",
+        headers=headers,
+        json={
+            **payload,
+            "name": "First editor",
+            "expected_edit_version": first_editor["edit_version"],
+        },
+    )
+    assert first_save.status_code == 200, first_save.text
+    assert first_save.json()["edit_version"] == 2
+
+    stale_save = client.post(
+        "/workflows",
+        headers=headers,
+        json={
+            **payload,
+            "name": "Stale editor",
+            "expected_edit_version": stale_editor["edit_version"],
+        },
+    )
+    assert stale_save.status_code == 409, stale_save.text
+    assert "其他页面更新" in stale_save.json()["detail"]
+    assert client.get("/workflows/concurrent-edit", headers=headers).json()["name"] == "First editor"
+
+
 def test_workflow_api_can_list_more_than_default_twenty_runs(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService

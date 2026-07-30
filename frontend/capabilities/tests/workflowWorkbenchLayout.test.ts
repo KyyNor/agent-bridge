@@ -54,3 +54,18 @@ test('workflow view error surfaces use the destructive soft token pair', () => {
   assert.match(file, /bg-destructive-soft/)
   assert.match(file, /text-destructive-soft-fg/)
 })
+
+test('workflow editor refreshes detail and sends an optimistic edit version', () => {
+  const workflowPath = resolve(root, 'src/views/workflow/WorkflowView.vue')
+  const editorPath = resolve(root, 'src/composables/useWorkflowEditorState.ts')
+  const view = readFileSync(workflowPath, 'utf-8')
+  const editor = readFileSync(editorPath, 'utf-8')
+
+  assert.match(
+    view,
+    /async function ensureWorkflowDetail[\s\S]*const detail = await api\.getWorkflow\(workflow\.workflow_key\)/,
+  )
+  assert.doesNotMatch(view, /if \(workflow\.definition\) return workflow/)
+  assert.match(editor, /expectedEditVersion\.value = Number\.isInteger\(item\.edit_version\)/)
+  assert.match(editor, /expected_edit_version: expectedEditVersion\.value/)
+})

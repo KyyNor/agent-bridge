@@ -32,6 +32,7 @@ export function useWorkflowEditorState(options: {
   const selectedEdgeId = ref<string | null>(null)
   const configDrawerOpen = ref(false)
   const configDrawerMode = ref<'overlay' | 'fullscreen'>('overlay')
+  const expectedEditVersion = ref<number | null>(0)
   let suppressDirty = false
 
   watch(form, () => {
@@ -54,6 +55,7 @@ export function useWorkflowEditorState(options: {
     void nextTick(() => { suppressDirty = false })
   }
   function prepareCreateForm() {
+    expectedEditVersion.value = 0
     resetForm({
       workflow_key: '', name: '', description: '', profile_key: options.profiles.value[0]?.profile_key || '', status: 'active',
       workflow_type: 'operation', definition: createDefaultGraph('operation', options.defaultBackend.value),
@@ -61,6 +63,7 @@ export function useWorkflowEditorState(options: {
     clearEditorSelection()
   }
   function prepareEditForm(item: WorkflowDefinition) {
+    expectedEditVersion.value = Number.isInteger(item.edit_version) ? item.edit_version : null
     const workflowType = item.workflow_type === 'summary' ? 'summary' : 'operation'
     resetForm({
       workflow_key: item.workflow_key, name: item.name, description: item.description, profile_key: item.profile_key, status: item.status,
@@ -121,9 +124,13 @@ export function useWorkflowEditorState(options: {
     saving.value = true
     try {
       if (!await validateWorkflowDraft()) return null
-      const saved = await api.upsertWorkflow(draft())
+      const saved = await api.upsertWorkflow({
+        ...draft(),
+        expected_edit_version: expectedEditVersion.value,
+      })
       graphErrors.value = []
       formDirty.value = false
+      expectedEditVersion.value = saved.edit_version
       await options.onSaved(saved)
       options.toast({ title: '工作流已保存', description: `“${saved.name}” 已更新。`, variant: 'success' })
       return saved

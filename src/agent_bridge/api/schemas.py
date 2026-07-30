@@ -341,6 +341,9 @@ class WorkflowDefinitionRequest(BaseModel):
     definition: dict[str, Any]
     status: str = "active"
     workflow_type: str = "operation"
+    # 0 表示客户端确认目标尚不存在；正整数用于并发编辑的乐观锁。
+    # 省略时兼容旧客户端，由服务端继续执行原有 upsert 语义。
+    expected_edit_version: int | None = Field(default=None, ge=0)
 
 
 class WorkflowTaskImportConfirmRequest(BaseModel):

@@ -219,6 +219,7 @@ export interface WorkflowDefinition {
   created_by: string
   created_at: string
   updated_at: string
+  edit_version: number
   revision_no?: number
   content_hash?: string
 }

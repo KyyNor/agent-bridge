@@ -1403,6 +1403,11 @@ def test_workflow_migration_rebuilds_old_task_and_artifact_unique_constraints(wm
     with store.connect() as conn:
         workflow_columns = {row["name"] for row in conn.execute("PRAGMA table_info(workflow_definitions)").fetchall()}
         assert "manifest_json" not in workflow_columns
+        assert "edit_version" in workflow_columns
+        legacy = conn.execute(
+            "SELECT edit_version FROM workflow_definitions WHERE workflow_key = 'legacy-report'"
+        ).fetchone()
+        assert legacy["edit_version"] == 1
 
     store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
     store.upsert_workflow_definition(

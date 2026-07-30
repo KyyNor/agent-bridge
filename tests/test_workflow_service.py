@@ -128,6 +128,7 @@ def test_workflow_display_change_does_not_create_incremental_revision(wm_paths, 
 
     assert second["revision_no"] == first["revision_no"]
     assert second["content_hash"] == first["content_hash"]
+    assert second["edit_version"] == first["edit_version"] + 1
 
 
 def test_workflow_service_preview_resolves_stale_task_to_incremental(wm_paths):

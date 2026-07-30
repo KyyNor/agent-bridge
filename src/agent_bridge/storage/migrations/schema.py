@@ -161,7 +161,10 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
     store._ensure_columns(
         conn,
         "workflow_definitions",
-        {"current_revision_no": "INTEGER NOT NULL DEFAULT 0"},
+        {
+            "current_revision_no": "INTEGER NOT NULL DEFAULT 0",
+            "edit_version": "INTEGER NOT NULL DEFAULT 1",
+        },
     )
     store._ensure_columns(
         conn,

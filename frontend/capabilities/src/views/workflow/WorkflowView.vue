@@ -540,7 +540,7 @@ async function loadEditorResources() {
 }
 
 async function ensureWorkflowDetail(workflow: WorkflowDefinition) {
-  if (workflow.definition) return workflow
+  // 详情定义不能跨路由复用：另一个标签页可能已经保存了更新。
   const detail = await api.getWorkflow(workflow.workflow_key)
   workflows.value = workflows.value.map(item =>
     item.workflow_key === detail.workflow_key ? detail : item,

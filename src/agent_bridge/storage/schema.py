@@ -526,6 +526,7 @@ CREATE TABLE IF NOT EXISTS workflow_definitions (
   definition_json TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   workflow_type TEXT NOT NULL DEFAULT 'operation',
+  edit_version INTEGER NOT NULL DEFAULT 1,
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

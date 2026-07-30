@@ -7,7 +7,7 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.core.domain import ConflictError, NotFound, ValidationError, require_admin_user
 from agent_bridge.core.diff import text_diff, workflow_structured_diff
 from agent_bridge.core.timeutil import parse_utc, utc_iso, utc_now
 from agent_bridge.storage.sqlite import SQLiteStore
@@ -85,6 +85,7 @@ class WorkflowService:
         workflow_type: str = "operation",
         definition: dict[str, Any] | WorkflowGraph | None = None,
         revision_source: str = "edit",
+        expected_edit_version: int | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if revision_source not in WORKFLOW_REVISION_SOURCES:
@@ -108,6 +109,20 @@ class WorkflowService:
             graph_payload, name, description, profile_key, next_status, next_type
         )
         with self.store.transaction():
+            current = self.store.get_workflow_definition(workflow_key)
+            if expected_edit_version is not None:
+                current_edit_version = int(current.get("edit_version") or 1) if current else 0
+                if current_edit_version != expected_edit_version:
+                    logger.warning(
+                        "Workflow 保存被拒绝：编辑版本冲突 workflow=%s actor=%s expected=%s current=%s",
+                        workflow_key,
+                        actor,
+                        expected_edit_version,
+                        current_edit_version,
+                    )
+                    raise ConflictError(
+                        "工作流已在其他页面更新或目标标识已被占用，请刷新后重新编辑"
+                    )
             previous_revisions = self.store.workflows.list_definition_revisions(workflow_key, limit=1)
             previous_hash = previous_revisions[0]["content_hash"] if previous_revisions else None
             result = self.store.upsert_workflow_definition(

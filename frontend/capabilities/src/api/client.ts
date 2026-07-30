@@ -493,6 +493,7 @@ export const api = {
     name: string
     profile_key: string
     definition: WorkflowGraph
+    expected_edit_version?: number | null
   }) => post<WorkflowDefinition>('/workflows', { status: 'active', ...w }),
   runWorkflow: (
     key: string,
