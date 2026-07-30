@@ -133,10 +133,10 @@
 统一提示词结构：
 
 ```text
-[技能：skill-a]
+[skill-a 说明]
 <skill-a 正文>
 
-[技能：skill-b]
+[skill-b 说明]
 <skill-b 正文>
 
 [任务指令]

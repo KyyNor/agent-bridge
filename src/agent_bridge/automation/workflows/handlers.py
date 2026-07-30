@@ -48,7 +48,7 @@ def build_agent_prompt(
     blocks: list[str] = []
     for skill_name in skill_names:
         skill = skill_service.get_skill(actor, skill_name)
-        blocks.append(f"[技能：{skill_name}]\n{skill['prompt']}")
+        blocks.append(f"[{skill_name} 说明]\n{skill['prompt']}")
     task = context.get("task")
     if isinstance(task, dict):
         blocks.append(build_task_context_block(task))

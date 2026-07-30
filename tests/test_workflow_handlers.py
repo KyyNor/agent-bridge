@@ -23,7 +23,8 @@ async def test_agent_handler_prepends_skills_and_wraps_text():
     node = graph.nodes[0]
     agent = FakeAgent()
     result = await WorkflowNodeHandlers(agent_service=agent, scripts=SimpleNamespace(), skill_service=FakeSkills()).execute(node, NodeExecutionContext(actor="root", workflow={"workflow_key": "w", "profile_key": "p"}, run_id="r", input={}, task=None, nodes={}, graph=graph))
-    assert agent.kwargs["prompt"].index("[技能：review]") < agent.kwargs["prompt"].index("[任务指令]")
+    assert agent.kwargs["prompt"].index("[review 说明]") < agent.kwargs["prompt"].index("[任务指令]")
+    assert "[技能" not in agent.kwargs["prompt"]
     assert agent.kwargs["timeout"] == 1200
     assert result.output == {"text": "ok"}
 
