@@ -859,7 +859,7 @@ class WorkflowService:
                 result,
             )
         logger.info(
-            "workflow_set_task 写入任务批次 workflow=%s run=%s received=%d action_total=%d created=%d updated=%d skipped_completed=%d skipped_running=%d skipped_historical=%d reopened_expired=%d",
+            "workflow_set_task 写入任务批次 workflow=%s run=%s received=%d action_total=%d created=%d updated=%d skipped_completed=%d skipped_running=%d skipped_historical=%d reopened_expired=%d superseded=%d",
             workflow_key,
             run_id,
             len(normalized),
@@ -870,6 +870,7 @@ class WorkflowService:
             result.get("skipped_running", 0),
             result.get("skipped_historical", 0),
             result.get("reopened_expired", 0),
+            result.get("superseded", 0),
         )
         return {
             "workflow_key": workflow_key,

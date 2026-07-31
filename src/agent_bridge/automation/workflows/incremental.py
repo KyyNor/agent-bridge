@@ -312,6 +312,8 @@ class WorkflowIncrementalPlanner:
             candidates = [baseline_run]
         else:
             candidates = list(baseline_run or [])
+        # 跨版本禁止复用是设计意图：task_version 不同代表报表内容/解析结构不同，
+        # 故 baseline 必须 task_version 硬等值。新版本首次执行因无同 version baseline 而全量跑。
         compatible = [
             dict(run)
             for run in candidates

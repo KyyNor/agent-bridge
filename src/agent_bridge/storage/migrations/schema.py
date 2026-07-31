@@ -7,6 +7,7 @@ from typing import Any
 
 from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEMA
 from agent_bridge.storage.migrations.workflows import (
+    backfill_workflow_tasks_superseded,
     ensure_workflow_artifacts_fts,
     rebuild_workflow_artifacts_if_needed,
     rebuild_workflow_tasks_if_needed,
@@ -153,6 +154,8 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_workflow_tasks_version_status "
         "ON workflow_tasks(workflow_key, task_version, status)"
     )
+    # task_version 演进模型：回填存量多 version 排队任务为 superseded（幂等）。
+    backfill_workflow_tasks_superseded(conn)
     store._ensure_columns(
         conn,
         "scripts",

@@ -20,7 +20,7 @@ export const ALL_STATUS_SENTINEL = '__all_status__'
 export const ALL_TYPE_SENTINEL = '__all__'
 
 /** Canonical display order for task statuses. */
-export const TASK_STATUS_ORDER = ['running', 'pending', 'stale', 'failed', 'abandoned', 'completed']
+export const TASK_STATUS_ORDER = ['running', 'pending', 'stale', 'failed', 'abandoned', 'completed', 'superseded']
 
 export const TASK_STATUS_LABELS: Record<string, string> = {
   pending: '待处理',
@@ -29,6 +29,7 @@ export const TASK_STATUS_LABELS: Record<string, string> = {
   completed: '已完成',
   failed: '失败',
   abandoned: '已放弃',
+  superseded: '已取代',
 }
 
 export function taskStatusLabel(status: string): string {

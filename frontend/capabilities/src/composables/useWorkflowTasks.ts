@@ -285,7 +285,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
       if (!isCurrentTaskImportRequest(requestToken, workflowKey)) return
       closeTaskImport()
       selectedTaskIds.value = new Set()
-      batchSummary.value = `导入完成：新增 ${result.created}，更新 ${result.updated}，跳过（运行中） ${result.skipped_running}，跳过（已完成） ${result.skipped_completed}，重开（已过期） ${result.reopened_expired}`
+      batchSummary.value = `导入完成：新增 ${result.created}，更新 ${result.updated}，取代旧版本 ${result.superseded ?? 0}，跳过（运行中） ${result.skipped_running}，跳过（已完成） ${result.skipped_completed}，跳过（历史版本） ${result.skipped_historical ?? 0}，重开（已过期） ${result.reopened_expired}`
       await loadTasks(workflowKey)
     } catch (e: unknown) {
       if (isCurrentTaskImportRequest(requestToken, workflowKey)) taskImportError.value = errorMessage(e)

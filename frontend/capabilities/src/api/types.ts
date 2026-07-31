@@ -451,7 +451,7 @@ export interface WorkflowTaskImportRow {
   task_version: string
   type: string
   payload: Record<string, unknown>
-  action: 'created' | 'updated' | 'skipped_running' | 'skipped_completed' | 'reopened_expired' | 'error'
+  action: 'created' | 'updated' | 'skipped_running' | 'skipped_completed' | 'skipped_historical' | 'reopened_expired' | 'error'
   errors: string[]
 }
 
@@ -463,7 +463,10 @@ export interface WorkflowTaskImportSummary {
   updated: number
   skipped_running: number
   skipped_completed: number
+  skipped_historical: number
   reopened_expired: number
+  /** 本次导入将取代的同 task_key 未运行旧版本数量。 */
+  superseded: number
 }
 
 export interface WorkflowTaskImportPreview {
@@ -482,7 +485,10 @@ export interface WorkflowTaskImportResult {
   updated: number
   skipped_running: number
   skipped_completed: number
+  skipped_historical: number
   reopened_expired: number
+  /** 本次导入实际取代的同 task_key 未运行旧版本数量。 */
+  superseded: number
 }
 
 /** Server-side query params for listing a workflow's tasks (筛选/搜索/排序). */

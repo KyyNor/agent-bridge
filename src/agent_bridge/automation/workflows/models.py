@@ -23,6 +23,9 @@ class WorkflowTaskStatus(str, Enum):
     completed = "completed"
     failed = "failed"
     abandoned = "abandoned"
+    # 同 task_key 出现更新的 task_version 后，未运行的旧版本被取代。
+    # 调度器永不领取 superseded，但其产物历史仍保留在 workflow_artifacts 中。
+    superseded = "superseded"
 
 
 class WorkflowArtifactFormat(str, Enum):

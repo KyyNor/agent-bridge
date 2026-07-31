@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 from agent_bridge.storage.repositories.workflow_artifact_search import (
     upsert_workflow_artifact_search_content,
 )
+
+logger = logging.getLogger(__name__)
 
 WORKFLOW_ARTIFACTS_FTS_VERSION = "3"
 
@@ -302,3 +305,68 @@ def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bo
             """,
             (WORKFLOW_ARTIFACTS_FTS_VERSION,),
         )
+
+
+# task_version 演进模型引入的存量数据迁移版本号。
+# 见 backfill_workflow_tasks_superseded：把同 task_key 下非最新 version 的未运行旧任务标为 superseded。
+WORKFLOW_TASKS_SUPERSEDED_BACKFILL_VERSION = "1"
+
+
+def backfill_workflow_tasks_superseded(conn: sqlite3.Connection) -> None:
+    """把存量中“同 task_key 多个 version 都在排队”的旧版本回填为 superseded。
+
+    旧模型下不同 task_version 是相互独立的任务行，全部会进队列执行；引入演进模型后，
+    每个 task_key 只应保留一个最新版本参与执行。本迁移把每个 task_key 下“非最新 version 且
+    仍在 pending/stale”的旧行标为 superseded（调度器永不领取），最新行保持原状。
+
+    幂等：通过 workflow_artifacts_fts_meta 表记录已执行的迁移版本号，每个版本只跑一次。
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_artifacts_fts_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+        """
+    )
+    applied = conn.execute(
+        "SELECT value FROM workflow_artifacts_fts_meta WHERE key = 'tasks_superseded_backfill'"
+    ).fetchone()
+    if applied is not None and applied[0] == WORKFLOW_TASKS_SUPERSEDED_BACKFILL_VERSION:
+        return
+
+    # 每个 (workflow_key, task_key) 下按 set_at DESC, id DESC 取最新一行，其余 pending/stale
+    # 旧行视为被取代。最新行选取与运行时 current 判定保持一致。
+    cursor = conn.execute(
+        """
+        UPDATE workflow_tasks
+        SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (
+            SELECT t.id
+            FROM workflow_tasks t
+            WHERE t.status IN ('pending', 'stale')
+              AND t.id <> (
+                SELECT tt.id
+                FROM workflow_tasks tt
+                WHERE tt.workflow_key = t.workflow_key
+                  AND tt.task_key = t.task_key
+                ORDER BY tt.set_at DESC, tt.id DESC
+                LIMIT 1
+              )
+        )
+        """
+    )
+    affected = int(cursor.rowcount if cursor.rowcount is not None else 0)
+    if affected:
+        logger.info(
+            "工作流任务版本演进迁移 完成 状态=superseded 影响行数=%s 阶段=task_superseded_backfill",
+            affected,
+        )
+    conn.execute(
+        """
+        INSERT INTO workflow_artifacts_fts_meta(key, value)
+        VALUES ('tasks_superseded_backfill', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (WORKFLOW_TASKS_SUPERSEDED_BACKFILL_VERSION,),
+    )

@@ -145,6 +145,8 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 增量运行只复用无副作用的节点结果；`get_task` 负责把队列任务租约绑定到当前 run，因此每次都必须重新执行，但只有任务业务输入相对基线发生变化时才使下游结果失效。带条件入边的节点及其下游在预览中只能作为“待条件结果”的候选；`WorkflowDagExecutor` 在条件实际命中、节点 ready 时再决定是否复用，未命中的分支不得使汇合后的节点失效。启用受管 Profile MCP 本身不使节点失去复用资格：节点配置与后端资源指纹稳定时复用既有结果；需要刷新外部读取时使用 `force_full`。按任务启动的 run 会先精确租赁已选任务，`get_task` 只返回该租约，不得改领其他队列任务。`workflow_set_task`、`workflow_run_log` 等 Agent 运行期间的辅助调用不因增量复用规则被强制重跑。
 
+`task_key` 是任务的唯一身份，`task_version` 是版本演进线。同 `task_key` 出现新 `task_version` 时，尚未运行或无需继续重试的旧版本（`pending`/`stale`/`failed`/`abandoned`）由导入入口统一标为 `superseded`，调度器永不领取；`running` 的旧版本让它跑完，`completed` 的旧版本保留为历史产物。跨版本禁止增量复用：新版本首次执行因无同 `task_version` 基线而全量运行，`select_baseline` 的 `task_version` 硬等值匹配不得放宽。`workflow_set_task`（MCP 单发/批量）与 Excel 导入确认共用 `_apply_workflow_tasks`，取代行为一致；存量“同 task_key 多 version 排队”的数据由启动迁移 `backfill_workflow_tasks_superseded` 自动回填。
+
 导入/导出格式为 `agent-bridge.workflow`、`format_version=1`。`examples/workflows/*/workflow.json` 必须通过示例契约测试。不要恢复 `manifest.json + workflow.js` 双运行时。
 
 Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEventTimeline`、`SubagentDetailPanel` 和 `useSubagentDetails` 复用运行详情；不得在 Workflow 与 AgentRuns 页面分别维护另一套加载状态。

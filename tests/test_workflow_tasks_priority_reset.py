@@ -69,11 +69,14 @@ def store_abandoned(wm_paths):
 def store_versioned_abandoned(wm_paths):
     store = _fresh_store(wm_paths)
     _seed(store)
+    # 两个独立 task_key 各自只有一个 version；新版本演进语义下，
+    # 同 task_key 的未运行旧 version 会被取代，无法再用作共存样本，
+    # 因此这里用不同 task_key 验证 reset 按 task_version 精确定位。
     store.upsert_workflow_tasks(
         "w",
         [
             {"task_key": "page:a", "task_version": "v1", "payload": {}},
-            {"task_key": "page:a", "task_version": "v2", "payload": {}},
+            {"task_key": "page:b", "task_version": "v1", "payload": {}},
         ],
     )
     store.create_workflow_run(
@@ -84,13 +87,13 @@ def store_versioned_abandoned(wm_paths):
         status="running",
         temp_dir="/tmp/run_1",
     )
-    # Lease & abandon v1 (lower id is picked first). v2 remains pending.
+    # Lease & abandon page:a (lower id is picked first). page:b remains pending.
     store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
-    leased_v1 = store.get_workflow_task("w", "page:a", task_version="v1")
-    assert leased_v1["lease_run_id"] == "run_1"
+    leased_a = store.get_workflow_task("w", "page:a", task_version="v1")
+    assert leased_a["lease_run_id"] == "run_1"
     store.release_or_abandon_tasks_for_run("w", "run_1", max_attempts=0, error_message="boom")
     assert store.get_workflow_task("w", "page:a", task_version="v1")["status"] == "abandoned"
-    assert store.get_workflow_task("w", "page:a", task_version="v2")["status"] == "pending"
+    assert store.get_workflow_task("w", "page:b", task_version="v1")["status"] == "pending"
     return store
 
 
@@ -244,5 +247,5 @@ def test_reset_supports_task_version(store_versioned_abandoned):
     store = store_versioned_abandoned
     assert store.reset_workflow_task("w", "page:a", task_version="v1") is True
     assert store.get_workflow_task("w", "page:a", task_version="v1")["status"] == "pending"
-    # The other version is untouched (it was never abandoned).
-    assert store.get_workflow_task("w", "page:a", task_version="v2")["status"] == "pending"
+    # The other task is untouched (it was never abandoned).
+    assert store.get_workflow_task("w", "page:b", task_version="v1")["status"] == "pending"

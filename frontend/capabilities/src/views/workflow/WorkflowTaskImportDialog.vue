@@ -40,8 +40,10 @@ const summaryCards = computed(() => {
     { label: '无效', value: summary.invalid_rows, class: 'text-destructive' },
     { label: '新增', value: summary.created, class: 'text-cat-blue-fg' },
     { label: '更新', value: summary.updated, class: 'text-cat-violet-fg' },
+    { label: '取代旧版本', value: summary.superseded ?? 0, class: 'text-cat-teal-fg' },
     { label: '跳过（运行中）', value: summary.skipped_running, class: 'text-cat-amber-fg' },
     { label: '跳过（已完成）', value: summary.skipped_completed, class: 'text-cat-amber-fg' },
+    { label: '跳过（历史版本）', value: summary.skipped_historical ?? 0, class: 'text-muted-foreground' },
     { label: '重开（已过期）', value: summary.reopened_expired, class: 'text-cat-teal-fg' },
   ]
 })

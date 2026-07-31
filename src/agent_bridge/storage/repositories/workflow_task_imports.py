@@ -49,6 +49,73 @@ class WorkflowTaskImportsRepositoryMixin:
         rerun_days = int(config.get("workflow_task_rerun_days") or 0)
         return now - timedelta(days=max(rerun_days, 0))
 
+    #: 新版本到来时会被取代的旧版本状态：尚未运行的（pending/stale）以及已经失败/放弃、
+    #: 无需继续重试的（failed/abandoned）。正在跑的（running，含租约过期回收）让它跑完；
+    #: 已成功完成（completed）保留为历史产物，永不取代。
+    _SUPERSEDED_STATUSES = (
+        WorkflowTaskStatus.pending.value,
+        WorkflowTaskStatus.stale.value,
+        WorkflowTaskStatus.failed.value,
+        WorkflowTaskStatus.abandoned.value,
+    )
+
+    def _count_superseded_targets(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        workflow_key: str,
+        task_key: str,
+        task_version: str,
+    ) -> int:
+        """统计导入 task_version 后，同 task_key 下会被取代的旧版本数量。
+
+        见 :attr:`_SUPERSEDED_STATUSES`。预览路径不写库，用本方法预估；
+        应用路径用 :meth:`_supersede_old_versions`。
+        """
+        placeholders = ", ".join(["?"] * len(self._SUPERSEDED_STATUSES))
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) FROM workflow_tasks
+            WHERE workflow_key = ?
+              AND task_key = ?
+              AND task_version <> ?
+              AND status IN ({placeholders})
+            """,
+            (workflow_key, task_key, task_version, *self._SUPERSEDED_STATUSES),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def _supersede_old_versions(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        workflow_key: str,
+        task_key: str,
+        task_version: str,
+    ) -> int:
+        """把同 task_key 下会被取代的旧版本标为 superseded，返回受影响行数。"""
+        placeholders = ", ".join(["?"] * len(self._SUPERSEDED_STATUSES))
+        return conn.execute(
+            f"""
+            UPDATE workflow_tasks
+            SET status = ?,
+                lease_run_id = NULL,
+                lease_expires_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE workflow_key = ?
+              AND task_key = ?
+              AND task_version <> ?
+              AND status IN ({placeholders})
+            """,
+            (
+                WorkflowTaskStatus.superseded.value,
+                workflow_key,
+                task_key,
+                task_version,
+                *self._SUPERSEDED_STATUSES,
+            ),
+        ).rowcount
+
     def _apply_workflow_tasks(
         self,
         conn: sqlite3.Connection,
@@ -66,6 +133,7 @@ class WorkflowTaskImportsRepositoryMixin:
             "skipped_running": 0,
             "skipped_historical": 0,
             "reopened_expired": 0,
+            "superseded": 0,
         }
         for task in tasks:
             task_key = str(task["task_key"])
@@ -105,6 +173,14 @@ class WorkflowTaskImportsRepositoryMixin:
                     """,
                     (workflow_key, task_key, task_version, task_type, _json_dumps(payload), now_iso),
                 )
+                # task_version 演进语义：新版本到来时，取代同 task_key 下还没运行的旧版本。
+                # 仅取代 pending/stale；正在跑的（running，含租约过期回收）让它跑完，
+                # 已完成/失败/放弃的不动以保留历史产物。
+                superseded = self._supersede_old_versions(
+                    conn, workflow_key=workflow_key, task_key=task_key, task_version=task_version
+                )
+                if superseded:
+                    counts["superseded"] += superseded
             elif action == "reopened_expired":
                 conn.execute(
                     """
@@ -162,6 +238,7 @@ class WorkflowTaskImportsRepositoryMixin:
                 "skipped_running": 0,
                 "skipped_historical": 0,
                 "reopened_expired": 0,
+                "superseded": 0,
             }
             rows: list[dict[str, Any]] = []
             for task in tasks:
@@ -194,6 +271,11 @@ class WorkflowTaskImportsRepositoryMixin:
                 )
                 if action in counts:
                     counts[action] += 1
+                if action == "created":
+                    # 预览不写库，仅预估本次导入会取代多少未运行的旧版本。
+                    counts["superseded"] += self._count_superseded_targets(
+                        conn, workflow_key=workflow_key, task_key=task_key, task_version=task_version
+                    )
                 rows.append(
                     {
                         "task_key": task_key,

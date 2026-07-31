@@ -189,7 +189,8 @@ def test_workflow_task_lease_and_priority_only_consider_latest_set_at_version(wm
 
     leased = store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
     assert leased["task_version"] == "v2"
-    assert store.get_workflow_task("w", "page:a", task_version="v1")["status"] == "pending"
+    # 新版本 v2 到来后，尚未运行的旧版本 v1 被取代（task_version 演进语义）。
+    assert store.get_workflow_task("w", "page:a", task_version="v1")["status"] == "superseded"
 
 
 def test_exact_task_lease_does_not_fall_through_to_another_queue_item(wm_paths):
@@ -326,6 +327,7 @@ TASK_COUNTS_EMPTY = {
     "skipped_running": 0,
     "skipped_historical": 0,
     "reopened_expired": 0,
+    "superseded": 0,
 }
 
 

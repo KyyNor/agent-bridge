@@ -79,6 +79,10 @@ class WorkflowTaskQueueRepositoryMixin:
         if status:
             clauses.append("status = ?")
             params.append(status)
+        else:
+            # task_version 演进模型下，被取代的旧版本默认不进任务队列视图；
+            # 调用方显式按 status 查询时（如查看历史）可仍能看到 superseded。
+            clauses.append("status <> 'superseded'")
         if type:
             clauses.append("type = ?")
             params.append(type)
