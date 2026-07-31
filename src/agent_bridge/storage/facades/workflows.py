@@ -416,6 +416,7 @@ class WorkflowsFacadeMixin:
         run_id: str | None = None,
         include_history: bool = False,
         format: str | None = None,
+        path_match: str | None = None,
     ) -> list[dict[str, Any]]:
         return self.workflows.search_workflow_artifacts(
             profile_key=profile_key,
@@ -429,4 +430,5 @@ class WorkflowsFacadeMixin:
             include_history=include_history,
             limit=limit,
             format=format,
+            path_match=path_match,
         )

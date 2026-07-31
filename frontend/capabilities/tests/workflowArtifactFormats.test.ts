@@ -30,7 +30,7 @@ test('changing artifact format restarts from the first page and searches that fo
     await artifacts.setArtifactFormat('html')
 
     assert.equal(artifacts.artifactPage.value, 1)
-    assert.deepEqual(params.at(-1), { profile_key: 'profile', workflow_key: 'workflow', query: undefined, path: undefined, tags: [], format: 'html', limit: 50, offset: 0 })
+    assert.deepEqual(params.at(-1), { profile_key: 'profile', workflow_key: 'workflow', query: undefined, path_match: undefined, format: 'html', limit: 50, offset: 0 })
   } finally {
     api.searchWorkflowArtifacts = originalSearch
   }

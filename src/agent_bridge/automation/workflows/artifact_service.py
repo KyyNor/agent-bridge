@@ -208,6 +208,7 @@ class ArtifactService:
         full: bool = False,
         format: str | None = None,
         paginated: bool = False,
+        path_match: str | None = None,
     ) -> dict[str, Any]:
         if actor not in self.admins and not profile_key:
             raise AccessDenied("capability profile is required")
@@ -237,6 +238,7 @@ class ArtifactService:
                 limit=bounded_limit,
                 offset=bounded_offset,
                 format=format,
+                path_match=path_match,
             )
             items = page["items"]
         else:
@@ -252,6 +254,7 @@ class ArtifactService:
                 include_history=include_history,
                 limit=bounded_limit,
                 format=format,
+                path_match=path_match,
             )
         def _entry(item: dict[str, Any]) -> dict[str, Any]:
             entry = {

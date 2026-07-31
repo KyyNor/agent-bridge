@@ -194,8 +194,7 @@ const {
   artifactPageSize,
   artifactError,
   artifactQuery,
-  artifactPath,
-  artifactTags,
+  artifactPathMatch,
   artifactFormat,
   artifactDetail,
   artifactHistory,
@@ -1245,8 +1244,7 @@ async function confirmClearWorkflow() {
           <WorkflowArtifactBrowser
             v-if="detailTab === 'artifacts'"
             v-model:query="artifactQuery"
-            v-model:path="artifactPath"
-            v-model:tags="artifactTags"
+            v-model:path-match="artifactPathMatch"
             v-model:page="artifactPage"
             v-model:page-size="artifactPageSize"
             :format="artifactFormat"

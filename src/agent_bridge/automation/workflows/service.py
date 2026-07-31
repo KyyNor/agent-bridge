@@ -991,6 +991,7 @@ class WorkflowService:
         full: bool = False,
         format: str | None = None,
         paginated: bool = False,
+        path_match: str | None = None,
     ) -> dict[str, Any]:
         return self._artifacts.search_artifacts(
             actor=actor,
@@ -1009,6 +1010,7 @@ class WorkflowService:
             full=full,
             format=format,
             paginated=paginated,
+            path_match=path_match,
         )
 
     def list_artifact_history(

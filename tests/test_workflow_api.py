@@ -348,6 +348,68 @@ def test_workflow_api_lists_artifacts(wm_paths):
     assert response.json()["items"][0]["title"] == "Page A"
 
 
+def test_workflow_api_searches_artifacts_by_path_match(wm_paths):
+    """GET /workflow-artifacts?path_match= 应模糊匹配 task_key 与产物 path。"""
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    svc.workflows.upsert_definition(
+        actor="root",
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        status="active",
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="report_finance_summary",
+        title="财务汇总",
+        path="outputs/summary.md",
+        tags=["finance"],
+        format="markdown",
+        summary="月度财务汇总",
+        content="finance totals",
+        metadata={},
+    )
+    svc.workflows.save_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="report_marketing",
+        title="营销报告",
+        path="reports/finance/index.md",
+        tags=[],
+        format="markdown",
+        summary="营销与财务交叉",
+        content="marketing vs finance",
+        metadata={},
+    )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    # "finance" 同时命中 task_key 子串与 path 子串
+    response = client.get(
+        "/workflow-artifacts?profile_key=report-plane&path_match=finance",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert response.status_code == 200
+    titles = sorted(item["title"] for item in response.json()["items"])
+    assert titles == ["营销报告", "财务汇总"]
+
+    # 不匹配的片段返回空
+    miss = client.get(
+        "/workflow-artifacts?profile_key=report-plane&path_match=nonexistent",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert miss.status_code == 200
+    assert miss.json()["items"] == []
+
+
 def test_workflow_api_paginates_artifacts_with_total_and_offset(wm_paths):
     from agent_bridge.api.app import create_app
     from agent_bridge.app.service import AgentBridgeService

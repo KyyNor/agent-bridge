@@ -32,8 +32,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
   const artifactPageSize = ref(50)
   const artifactError = ref('')
   const artifactQuery = ref('')
-  const artifactPath = ref('')
-  const artifactTags = ref('')
+  const artifactPathMatch = ref('')
   const artifactFormat = ref<ArtifactFormat>('all')
   const artifactDetail = ref<WorkflowArtifactDetail | null>(null)
   const artifactHistory = ref<WorkflowArtifactHistoryVersion[]>([])
@@ -119,8 +118,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
         profile_key: profileKey,
         workflow_key: workflowKey,
         query: artifactQuery.value || undefined,
-        path: artifactPath.value || undefined,
-        tags: artifactTags.value.split(',').map(tag => tag.trim()).filter(Boolean),
+        path_match: artifactPathMatch.value || undefined,
         format: artifactFormat.value,
         limit: artifactPageSize.value,
         offset: (artifactPage.value - 1) * artifactPageSize.value,
@@ -205,8 +203,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
     artifactPageSize,
     artifactError,
     artifactQuery,
-    artifactPath,
-    artifactTags,
+    artifactPathMatch,
     artifactFormat,
     artifactDetail,
     artifactHistory,

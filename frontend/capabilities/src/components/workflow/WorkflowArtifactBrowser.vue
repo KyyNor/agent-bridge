@@ -10,8 +10,7 @@ import { CodeXml, FileText } from '@lucide/vue'
 
 defineProps<{
   query: string
-  path: string
-  tags: string
+  pathMatch: string
   format: 'all' | 'markdown' | 'html'
   loading: boolean
   error: string
@@ -25,8 +24,7 @@ defineProps<{
 
 const emit = defineEmits<{
   'update:query': [value: string]
-  'update:path': [value: string]
-  'update:tags': [value: string]
+  'update:pathMatch': [value: string]
   'update:format': [value: 'all' | 'markdown' | 'html']
   'update:page': [value: number]
   'update:pageSize': [value: number]
@@ -37,8 +35,7 @@ const emit = defineEmits<{
 }>()
 
 function updateQuery(value: string | number) { emit('update:query', String(value)) }
-function updatePath(value: string | number) { emit('update:path', String(value)) }
-function updateTags(value: string | number) { emit('update:tags', String(value)) }
+function updatePathMatch(value: string | number) { emit('update:pathMatch', String(value)) }
 </script>
 
 <template>
@@ -49,12 +46,8 @@ function updateTags(value: string | number) { emit('update:tags', String(value))
         <Input :model-value="query" placeholder="标题、摘要、路径" @update:model-value="updateQuery" @keyup.enter="emit('search')" />
       </div>
       <div class="min-w-[180px] flex-1">
-        <label class="mb-1 block text-xs text-muted-foreground">path</label>
-        <Input :model-value="path" placeholder="reports/page-a/" @update:model-value="updatePath" @keyup.enter="emit('search')" />
-      </div>
-      <div class="min-w-[180px] flex-1">
-        <label class="mb-1 block text-xs text-muted-foreground">tags</label>
-        <Input :model-value="tags" placeholder="finance, report" @update:model-value="updateTags" @keyup.enter="emit('search')" />
+        <label class="mb-1 block text-xs text-muted-foreground">路径匹配</label>
+        <Input :model-value="pathMatch" placeholder="task key 或产物路径" @update:model-value="updatePathMatch" @keyup.enter="emit('search')" />
       </div>
       <div>
         <label class="mb-1 block text-xs text-muted-foreground">格式</label>

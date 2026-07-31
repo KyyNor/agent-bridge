@@ -227,6 +227,7 @@ class WorkflowArtifactsRepositoryMixin:
         run_id: str | None = None,
         include_history: bool = False,
         format: str | None = None,
+        path_match: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses, params = self._artifact_search_filters(
             profile_key=profile_key,
@@ -239,6 +240,7 @@ class WorkflowArtifactsRepositoryMixin:
             run_id=run_id,
             include_history=include_history,
             format=format,
+            path_match=path_match,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         from_sql, order_by = self._artifact_search_source(query)
@@ -269,6 +271,7 @@ class WorkflowArtifactsRepositoryMixin:
         run_id: str | None = None,
         include_history: bool = False,
         format: str | None = None,
+        path_match: str | None = None,
     ) -> dict[str, Any]:
         clauses, params = self._artifact_search_filters(
             profile_key=profile_key,
@@ -281,6 +284,7 @@ class WorkflowArtifactsRepositoryMixin:
             run_id=run_id,
             include_history=include_history,
             format=format,
+            path_match=path_match,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         bounded_limit = min(max(limit, 1), 50)
@@ -321,6 +325,7 @@ class WorkflowArtifactsRepositoryMixin:
         run_id: str | None,
         include_history: bool,
         format: str | None,
+        path_match: str | None = None,
     ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -344,6 +349,13 @@ class WorkflowArtifactsRepositoryMixin:
         if path:
             clauses.append("a.path LIKE ?")
             params.append(f"{path}%")
+        # 路径模糊匹配：同时覆盖 task_key 与产物 path 的子串命中，供前端
+        # 产物检索页使用。与上面的 ``path`` 前缀匹配是两套独立条件，后者
+        # 仍由 MCP 的 artifacts_search 按前缀+精确语义使用，不可改动。
+        if path_match:
+            like = f"%{path_match}%"
+            clauses.append("(a.task_key LIKE ? OR a.path LIKE ?)")
+            params.extend([like, like])
         # Format filter: by default (None) only markdown is returned so that
         # derived artifacts like HTML reports never leak into agent retrieval.
         # Pass format="all" (or "") to disable the filter.

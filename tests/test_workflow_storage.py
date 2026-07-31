@@ -1481,3 +1481,71 @@ def test_workflow_concurrency_settings_default_and_persist(wm_paths):
     assert saved["workflow_max_concurrent_runs_per_workflow"] == 3
     assert store.get_sync_config()["workflow_max_concurrent_runs"] == 8
     assert store.get_sync_config()["workflow_max_concurrent_runs_per_workflow"] == 3
+
+
+def test_workflow_artifact_path_match_covers_task_key_and_path(wm_paths):
+    """path_match 模糊匹配应同时覆盖 task_key 与产物 path 的子串。"""
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="page-report",
+        name="Page Report",
+        description="",
+        profile_key="report-plane",
+        status="active",
+        created_by="root",
+    )
+
+    by_task = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_1",
+        task_key="report_finance_summary",
+        title="财务汇总",
+        path="outputs/summary.md",
+        tags=["finance"],
+        format="markdown",
+        summary="月度财务汇总",
+        content="finance totals",
+        metadata={},
+    )
+    by_path = store.upsert_workflow_artifact(
+        workflow_key="page-report",
+        profile_key="report-plane",
+        run_id="run_2",
+        task_key="report_marketing",
+        title="营销报告",
+        path="reports/finance/index.md",
+        tags=[],
+        format="markdown",
+        summary="营销与财务交叉",
+        content="marketing vs finance",
+        metadata={},
+    )
+
+    def ids(**filters):
+        result = store.search_workflow_artifacts(
+            profile_key="report-plane",
+            query=None,
+            tags=[],
+            path=None,
+            workflow_key=None,
+            include_history=False,
+            limit=10,
+            **filters,
+        )
+        return sorted(item["artifact_id"] for item in result)
+
+    expected = sorted([by_task["artifact_id"], by_path["artifact_id"]])
+    # 命中 task_key 子串与 path 子串
+    assert ids(path_match="finance") == expected
+    # 前缀子串也能命中
+    assert ids(path_match="report_fin") == [by_task["artifact_id"]]
+    assert ids(path_match="reports/finance") == [by_path["artifact_id"]]
+    # 不匹配的片段返回空
+    assert ids(path_match="nonexistent") == []
+    # 不传 path_match 时不施加过滤，返回全部
+    assert ids() == expected

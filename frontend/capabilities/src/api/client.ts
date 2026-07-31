@@ -515,6 +515,7 @@ export const api = {
     workflow_key?: string
     query?: string
     path?: string
+    path_match?: string
     task_key?: string
     task_version?: string
     run_id?: string
@@ -530,6 +531,7 @@ export const api = {
     if (params.workflow_key) qs.set('workflow_key', params.workflow_key)
     if (params.query) qs.set('query', params.query)
     if (params.path) qs.set('path', params.path)
+    if (params.path_match) qs.set('path_match', params.path_match)
     if (params.task_key) qs.set('task_key', params.task_key)
     if (params.task_version) qs.set('task_version', params.task_version)
     if (params.run_id) qs.set('run_id', params.run_id)

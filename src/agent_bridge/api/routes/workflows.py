@@ -183,6 +183,7 @@ def create_workflow_routes(service, actor):
         full: bool = False,
         tags: list[str] = Query(default=[]),
         format: str | None = None,
+        path_match: str | None = None,
         limit: int = 20,
         offset: int = 0,
         current_actor: str = Depends(actor),
@@ -202,6 +203,7 @@ def create_workflow_routes(service, actor):
             limit=limit,
             offset=offset,
             format=format,
+            path_match=path_match,
             paginated=True,
         )
 
