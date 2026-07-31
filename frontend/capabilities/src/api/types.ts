@@ -450,6 +450,8 @@ export interface WorkflowTask {
   created_at: string
   updated_at: string
   completed_at: string | null
+  /** 该任务是否已有产物（workflow_artifacts 表 EXISTS 派生）。 */
+  has_artifacts: boolean
 }
 
 export interface WorkflowTasksResult {

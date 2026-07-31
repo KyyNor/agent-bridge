@@ -42,6 +42,7 @@ import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys,
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
 import { deriveAvailableData } from '../../lib/workflowReferences'
 import {
+  ALL_ARTIFACTS_SENTINEL,
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
   taskStatusLabel as labelTaskStatus,
@@ -368,6 +369,7 @@ const {
   taskPageSize,
   taskStatusFilter,
   taskTypeFilter,
+  taskArtifactsFilter,
   taskSearchInput,
   taskSearch,
   taskSort,
@@ -1402,12 +1404,13 @@ async function confirmClearWorkflow() {
             :search-input="taskSearchInput"
             :status="taskStatusFilter"
             :type="taskTypeFilter"
+            :has-artifacts="taskArtifactsFilter"
             :sort="taskSort"
             :statuses="taskStatuses"
             :types="taskTypes"
             :status-counts="taskStats"
             :status-label="taskStatusLabel"
-            :show-reset="taskStatusFilter !== ALL_STATUS_SENTINEL || taskTypeFilter !== ALL_TYPE_SENTINEL || !!taskSearch || taskSort !== 'default'"
+            :show-reset="taskStatusFilter !== ALL_STATUS_SENTINEL || taskTypeFilter !== ALL_TYPE_SENTINEL || taskArtifactsFilter !== ALL_ARTIFACTS_SENTINEL || !!taskSearch || taskSort !== 'default'"
             :visible-task-count="pagedTasks.length"
             :all-visible-selected="allVisibleTasksSelected"
             :some-visible-selected="someVisibleTasksSelected"
@@ -1424,6 +1427,7 @@ async function confirmClearWorkflow() {
             @update:search-input="taskSearchInput = $event"
             @update:status="taskStatusFilter = $event"
             @update:type="taskTypeFilter = $event"
+            @update:has-artifacts="taskArtifactsFilter = $event"
             @update:sort="taskSort = $event"
             @search="onTaskSearchInput"
             @reset-filters="resetTaskFilters"

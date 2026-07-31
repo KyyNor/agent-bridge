@@ -11,6 +11,8 @@ export interface WorkflowTaskFilters {
   status: string
   /** Sentinel {@link ALL_TYPE_SENTINEL} means "no type filter" (reka-ui Select rejects empty values). */
   type: string
+  /** Sentinel {@link ALL_ARTIFACTS_SENTINEL} means "no artifact filter"; otherwise 'with' | 'without'. */
+  hasArtifacts: string
   search: string
   /** Recognised: default | task_key_asc | task_key_desc | set_at_asc | set_at_desc | updated_at_desc */
   sort: string
@@ -18,6 +20,7 @@ export interface WorkflowTaskFilters {
 
 export const ALL_STATUS_SENTINEL = '__all_status__'
 export const ALL_TYPE_SENTINEL = '__all__'
+export const ALL_ARTIFACTS_SENTINEL = '__all_artifacts__'
 
 /** Canonical display order for task statuses. */
 export const TASK_STATUS_ORDER = ['running', 'pending', 'stale', 'failed', 'abandoned', 'completed', 'superseded']
@@ -74,10 +77,12 @@ export function taskStats(tasks: WorkflowTask[]): Record<string, number> {
   return stats
 }
 
-/** Whether a single task passes the active status/type/search filters. */
+/** Whether a single task passes the active status/type/artifact/search filters. */
 export function matchTaskFilter(task: WorkflowTask, filters: WorkflowTaskFilters): boolean {
   if (filters.status && filters.status !== ALL_STATUS_SENTINEL && task.status !== filters.status) return false
   if (filters.type && filters.type !== ALL_TYPE_SENTINEL && task.type !== filters.type) return false
+  if (filters.hasArtifacts === 'with' && !task.has_artifacts) return false
+  if (filters.hasArtifacts === 'without' && task.has_artifacts) return false
   const q = filters.search.trim().toLowerCase()
   if (q && !(task.task_key.toLowerCase().includes(q) || (task.type || '').toLowerCase().includes(q))) return false
   return true

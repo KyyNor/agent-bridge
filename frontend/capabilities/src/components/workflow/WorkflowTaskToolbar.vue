@@ -7,6 +7,7 @@ defineProps<{
   searchInput: string
   status: string
   type: string
+  hasArtifacts: string
   sort: string
   statuses: string[]
   types: string[]
@@ -29,7 +30,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits([
-  'update:searchInput', 'update:status', 'update:type', 'update:sort',
+  'update:searchInput', 'update:status', 'update:type', 'update:hasArtifacts', 'update:sort',
   'search', 'resetFilters', 'selectVisible', 'resetSelected', 'runSelected',
   'stopBatch', 'downloadTemplate', 'import', 'refresh',
 ])
@@ -45,6 +46,10 @@ const emit = defineEmits([
     <Select :model-value="type" @update:model-value="emit('update:type', $event)">
       <SelectTrigger class="h-8 w-[140px] text-xs"><SelectValue placeholder="全部类型" /></SelectTrigger>
       <SelectContent><SelectItem value="__all__">全部类型</SelectItem><SelectItem v-for="item in types" :key="item" :value="item">{{ item }}</SelectItem></SelectContent>
+    </Select>
+    <Select :model-value="hasArtifacts" @update:model-value="emit('update:hasArtifacts', $event)">
+      <SelectTrigger class="h-8 w-[120px] text-xs"><SelectValue placeholder="产物" /></SelectTrigger>
+      <SelectContent><SelectItem value="__all_artifacts__">全部产物</SelectItem><SelectItem value="with">有产物</SelectItem><SelectItem value="without">无产物</SelectItem></SelectContent>
     </Select>
     <Select :model-value="sort" @update:model-value="emit('update:sort', $event)">
       <SelectTrigger class="h-8 w-[150px] text-xs"><SelectValue placeholder="排序" /></SelectTrigger>

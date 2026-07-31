@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  ALL_ARTIFACTS_SENTINEL,
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
   filterAndSortTasks,
@@ -35,22 +36,24 @@ function makeTask(overrides: Partial<WorkflowTask> = {}): WorkflowTask {
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     completed_at: null,
+    has_artifacts: false,
     ...overrides,
   }
 }
 
 const sample = [
-  makeTask({ task_key: 'page:alpha', type: 'report', status: 'pending', set_at: '2026-01-01T00:00:00Z' }),
+  makeTask({ task_key: 'page:alpha', type: 'report', status: 'pending', set_at: '2026-01-01T00:00:00Z', has_artifacts: true }),
   makeTask({ task_key: 'page:beta', type: 'report', status: 'completed', set_at: '2026-01-02T00:00:00Z' }),
   makeTask({ task_key: 'page:gamma', type: 'index', status: 'running', set_at: '2026-01-03T00:00:00Z' }),
 ]
 
 const staleTask = makeTask({ task_key: 'page:stale', status: 'stale' })
 
-function filters(overrides: Partial<{ status: string; type: string; search: string; sort: string }> = {}) {
+function filters(overrides: Partial<{ status: string; type: string; hasArtifacts: string; search: string; sort: string }> = {}) {
   return {
     status: ALL_STATUS_SENTINEL,
     type: ALL_TYPE_SENTINEL,
+    hasArtifacts: ALL_ARTIFACTS_SENTINEL,
     search: '',
     sort: 'default',
     ...overrides,
@@ -127,6 +130,25 @@ test('filterAndSortTasks treats ALL_STATUS_SENTINEL like no status filter', () =
 test('filterAndSortTasks filters by type, respecting the __all__ sentinel', () => {
   assert.equal(filterAndSortTasks(sample, filters({ type: 'index' })).length, 1)
   assert.equal(filterAndSortTasks(sample, filters({ type: ALL_TYPE_SENTINEL })).length, 3)
+})
+
+test('filterAndSortTasks filters tasks without artifacts', () => {
+  // sample 只有 alpha 有产物。
+  assert.deepEqual(
+    filterAndSortTasks(sample, filters({ hasArtifacts: 'without' })).map(t => t.task_key),
+    ['page:beta', 'page:gamma'],
+  )
+})
+
+test('filterAndSortTasks filters tasks with artifacts', () => {
+  assert.deepEqual(
+    filterAndSortTasks(sample, filters({ hasArtifacts: 'with' })).map(t => t.task_key),
+    ['page:alpha'],
+  )
+})
+
+test('filterAndSortTasks treats ALL_ARTIFACTS_SENTINEL like no artifact filter', () => {
+  assert.equal(filterAndSortTasks(sample, filters({ hasArtifacts: ALL_ARTIFACTS_SENTINEL })).length, 3)
 })
 
 test('filterAndSortTasks search matches task_key (case-insensitive) and type', () => {

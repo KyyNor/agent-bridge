@@ -14,6 +14,7 @@ import type {
   WorkflowTaskImportPreview,
 } from '../api/types'
 import {
+  ALL_ARTIFACTS_SENTINEL,
   ALL_STATUS_SENTINEL,
   ALL_TYPE_SENTINEL,
   canForceRun,
@@ -98,6 +99,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
   const taskPageSize = ref(10)
   const taskStatusFilter = ref(ALL_STATUS_SENTINEL)
   const taskTypeFilter = ref(ALL_TYPE_SENTINEL)
+  const taskArtifactsFilter = ref(ALL_ARTIFACTS_SENTINEL)
   const taskSearchInput = ref('')
   const taskSearch = ref('')
   const taskSort = ref('default')
@@ -139,6 +141,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     filterAndSortTasks(tasks.value, {
       status: taskStatusFilter.value,
       type: taskTypeFilter.value,
+      hasArtifacts: taskArtifactsFilter.value,
       search: taskSearch.value,
       sort: taskSort.value,
     }),
@@ -187,6 +190,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
   function resetTaskFilters() {
     taskStatusFilter.value = ALL_STATUS_SENTINEL
     taskTypeFilter.value = ALL_TYPE_SENTINEL
+    taskArtifactsFilter.value = ALL_ARTIFACTS_SENTINEL
     taskSearchInput.value = ''
     taskSearch.value = ''
     taskSort.value = 'default'
@@ -816,6 +820,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     taskPageSize,
     taskStatusFilter,
     taskTypeFilter,
+    taskArtifactsFilter,
     taskSearchInput,
     taskSearch,
     taskSort,

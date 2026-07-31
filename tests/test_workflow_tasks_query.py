@@ -190,3 +190,64 @@ def test_list_tasks_combined_filter_and_sort(wm_paths):
     # Only reports, sorted by id ascending.
     hits = store.list_workflow_tasks("w", type="report", sort="id_asc")
     assert _task_keys(hits) == ["page:alpha", "page:beta"]
+
+
+def test_list_tasks_carries_has_artifacts_flag(wm_paths):
+    """每行任务带 has_artifacts 派生字段，按 workflow_artifacts 是否存在判定。"""
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed(store)
+
+    # 给 alpha 写一条产物；run_id 不存在的 run 默认视为 completed，is_current=1。
+    store.upsert_workflow_artifact(
+        workflow_key="w",
+        profile_key="report-plane",
+        run_id="run_alpha",
+        task_key="page:alpha",
+        task_version="",
+        title="alpha 报告",
+        path="alpha.md",
+        tags=[],
+        format="markdown",
+        summary="",
+        content="alpha",
+        metadata={},
+    )
+
+    tasks = store.list_workflow_tasks("w")
+    by_key = {t["task_key"]: t for t in tasks}
+    assert by_key["page:alpha"]["has_artifacts"] is True
+    assert by_key["page:beta"]["has_artifacts"] is False
+    assert by_key["page:gamma"]["has_artifacts"] is False
+
+
+def test_list_tasks_has_artifacts_scoped_by_task_version(wm_paths):
+    """has_artifacts 按 task_version 精确匹配，不同版本的产物不计入。"""
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    _seed(store)
+
+    # 为 alpha 的 v2 写产物，但队列里仍是默认空版本（''）。
+    store.upsert_workflow_artifact(
+        workflow_key="w",
+        profile_key="report-plane",
+        run_id="run_alpha_v2",
+        task_key="page:alpha",
+        task_version="v2",
+        title="alpha v2 报告",
+        path="alpha-v2.md",
+        tags=[],
+        format="markdown",
+        summary="",
+        content="alpha v2",
+        metadata={},
+    )
+
+    tasks = store.list_workflow_tasks("w")
+    alpha = next(t for t in tasks if t["task_key"] == "page:alpha")
+    assert alpha["task_version"] == ""
+    assert alpha["has_artifacts"] is False

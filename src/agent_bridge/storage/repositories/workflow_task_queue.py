@@ -74,27 +74,33 @@ class WorkflowTaskQueueRepositoryMixin:
         search: str | None = None,
         sort: str | None = None,
     ) -> list[dict[str, Any]]:
-        clauses = ["workflow_key = ?"]
+        clauses = ["t.workflow_key = ?"]
         params: list[Any] = [workflow_key]
         if status:
-            clauses.append("status = ?")
+            clauses.append("t.status = ?")
             params.append(status)
         else:
             # task_version 演进模型下，被取代的旧版本默认不进任务队列视图；
             # 调用方显式按 status 查询时（如查看历史）可仍能看到 superseded。
-            clauses.append("status <> 'superseded'")
+            clauses.append("t.status <> 'superseded'")
         if type:
-            clauses.append("type = ?")
+            clauses.append("t.type = ?")
             params.append(type)
         if search:
-            clauses.append("(lower(task_key) LIKE ? OR lower(type) LIKE ?)")
+            clauses.append("(lower(t.task_key) LIKE ? OR lower(t.type) LIKE ?)")
             like = f"%{search.lower()}%"
             params.extend([like, like])
         order_by = self._TASK_SORT_ORDER_BY.get(sort or "", self._TASK_SORT_DEFAULT_ORDER_BY)
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT * FROM workflow_tasks
+                SELECT t.*, EXISTS (
+                    SELECT 1 FROM workflow_artifacts a
+                    WHERE a.workflow_key = t.workflow_key
+                      AND a.task_key = t.task_key
+                      AND a.task_version = t.task_version
+                ) AS has_artifacts
+                FROM workflow_tasks t
                 WHERE {' AND '.join(clauses)}
                 ORDER BY {order_by}
                 """,

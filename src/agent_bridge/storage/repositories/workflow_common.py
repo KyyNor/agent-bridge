@@ -39,6 +39,8 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         item["is_current"] = bool(item["is_current"])
     if "reuse_allowed" in item:
         item["reuse_allowed"] = bool(item["reuse_allowed"])
+    if "has_artifacts" in item:
+        item["has_artifacts"] = bool(item["has_artifacts"])
     for source, target, default in [
         ("payload_json", "payload", {}),
         ("tags_json", "tags", []),
