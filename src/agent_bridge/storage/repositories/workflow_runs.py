@@ -7,6 +7,23 @@ from typing import Any
 from .workflow_common import _json_dumps, _row_payload, _run_summary_from_prefixed_row
 
 
+def _aggregate_task_status(*, task_total: int, task_completed: int, task_running: int) -> str:
+    """把每个 task_key 代表版本的状态聚合成 workflow 级状态。
+
+    - 有 running 代表版本 → ``running``
+    - 代表版本全部 completed → ``completed``
+    - 否则（存在 pending/stale/failed/abandoned）→ ``pending``
+    - 无任务 → ``completed``（兜底，避免无任务工作流永远显示未完成）
+    """
+    if task_running > 0:
+        return "running"
+    if task_total == 0:
+        return "completed"
+    if task_completed >= task_total:
+        return "completed"
+    return "pending"
+
+
 class WorkflowRunsRepositoryMixin:
     def create_workflow_run(
         self,
@@ -112,7 +129,12 @@ class WorkflowRunsRepositoryMixin:
         }
 
     def list_workflow_run_overviews(self) -> list[dict[str, Any]]:
-        """Return one latest/running summary per workflow for list pages."""
+        """Return one latest/running summary per workflow for list pages.
+
+        ``task_aggregated_status`` 基于每个 task_key 的代表版本（按 ``set_at DESC``
+        取最新，与 ``get_workflow_task`` 一致）聚合：只有所有代表版本都 completed
+        才算 completed，旧版本状态忽略。无任务的 workflow 兜底为 completed。
+        """
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -140,6 +162,28 @@ class WorkflowRunsRepositoryMixin:
                     ) AS row_number
                   FROM workflow_runs r
                   WHERE r.status = 'running'
+                ), task_reps AS (
+                  -- 每个 task_key 的代表版本（set_at 最新），与运行时 current 判定一致
+                  SELECT workflow_key, task_key, status
+                  FROM (
+                    SELECT
+                      t.workflow_key,
+                      t.task_key,
+                      t.status,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY t.workflow_key, t.task_key
+                        ORDER BY t.set_at DESC, t.id DESC
+                      ) AS rn
+                    FROM workflow_tasks t
+                  ) WHERE rn = 1
+                ), task_agg AS (
+                  SELECT
+                    workflow_key,
+                    COUNT(*) AS task_total,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS task_completed,
+                    SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS task_running
+                  FROM task_reps
+                  GROUP BY workflow_key
                 )
                 SELECT
                   w.workflow_key,
@@ -171,7 +215,10 @@ class WorkflowRunsRepositoryMixin:
                   running.error AS running_error,
                   running.started_at AS running_started_at,
                   running.finished_at AS running_finished_at,
-                  running.duration_ms AS running_duration_ms
+                  running.duration_ms AS running_duration_ms,
+                  COALESCE(task_agg.task_total, 0) AS task_total,
+                  COALESCE(task_agg.task_completed, 0) AS task_completed,
+                  COALESCE(task_agg.task_running, 0) AS task_running
                 FROM workflow_definitions w
                 LEFT JOIN latest
                   ON latest.workflow_key = w.workflow_key
@@ -179,6 +226,8 @@ class WorkflowRunsRepositoryMixin:
                 LEFT JOIN running
                   ON running.workflow_key = w.workflow_key
                  AND running.row_number = 1
+                LEFT JOIN task_agg
+                  ON task_agg.workflow_key = w.workflow_key
                 ORDER BY w.workflow_key
                 """
             ).fetchall()
@@ -188,12 +237,23 @@ class WorkflowRunsRepositoryMixin:
             item = dict(row)
             latest_run = _run_summary_from_prefixed_row(item, "latest_")
             running_run = _run_summary_from_prefixed_row(item, "running_")
+            task_total = int(item["task_total"] or 0)
+            task_completed = int(item["task_completed"] or 0)
+            task_running = int(item["task_running"] or 0)
             result.append(
                 {
                     "workflow_key": item["workflow_key"],
                     "run_count": int(item["run_count"] or 0),
                     "latest_run": latest_run,
                     "running_run": running_run,
+                    "task_total": task_total,
+                    "task_completed": task_completed,
+                    "task_running": task_running,
+                    "task_aggregated_status": _aggregate_task_status(
+                        task_total=task_total,
+                        task_completed=task_completed,
+                        task_running=task_running,
+                    ),
                 }
             )
         return result

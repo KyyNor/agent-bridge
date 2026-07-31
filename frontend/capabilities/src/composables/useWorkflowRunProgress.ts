@@ -10,6 +10,14 @@ import type {
   WorkflowRunLog,
   WorkflowRunSummary,
 } from '../api/types'
+
+/** Task 代表版本聚合后的 workflow 状态（缺失时回退到 latestRun.status）。 */
+type WorkflowTaskStatus = Record<string, {
+  status: string
+  total: number
+  completed: number
+  running: number
+}>
 import { useSubagentDetails } from './useSubagentDetails'
 import { alert } from './useConfirm'
 import {
@@ -78,6 +86,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
   const progressRunId = ref('')
   const workflowRuns = ref<Record<string, WorkflowRunSummary[]>>({})
   const workflowRunTotals = ref<Record<string, number>>({})
+  const workflowTaskStatus = ref<WorkflowTaskStatus>({})
   const runsLoading = ref(false)
   const selectedRunId = ref('')
   const runEvents = ref<WorkflowRunEvent[]>([])
@@ -124,18 +133,32 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     run_count: number
     latest_run: WorkflowRunSummary | null
     running_run: WorkflowRunSummary | null
+    task_aggregated_status?: string
+    task_total?: number
+    task_completed?: number
+    task_running?: number
   }>) {
     const nextRuns: Record<string, WorkflowRunSummary[]> = {}
     const nextTotals: Record<string, number> = {}
+    const nextTaskStatus: WorkflowTaskStatus = {}
     for (const overview of overviews) {
       const items = [overview.latest_run, overview.running_run]
         .filter((run): run is WorkflowRunSummary => Boolean(run))
         .filter((run, index, list) => list.findIndex(item => item.run_id === run.run_id) === index)
       nextRuns[overview.workflow_key] = items
       nextTotals[overview.workflow_key] = overview.run_count
+      if (overview.task_aggregated_status) {
+        nextTaskStatus[overview.workflow_key] = {
+          status: overview.task_aggregated_status,
+          total: overview.task_total ?? 0,
+          completed: overview.task_completed ?? 0,
+          running: overview.task_running ?? 0,
+        }
+      }
     }
     workflowRuns.value = nextRuns
     workflowRunTotals.value = nextTotals
+    workflowTaskStatus.value = nextTaskStatus
     const runningEntry = overviews.find(item => item.running_run)
     if (runningEntry?.running_run) {
       testing.value = true
@@ -575,6 +598,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     progressRunId,
     workflowRuns,
     workflowRunTotals,
+    workflowTaskStatus,
     runsLoading,
     selectedRunId,
     runEvents,

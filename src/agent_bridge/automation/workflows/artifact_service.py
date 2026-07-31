@@ -322,9 +322,13 @@ class ArtifactService:
             task_key=task_key,
             task_version=None,
             include_history=True,
+            format="all",
             limit=200,
         )
 
+        # 两层分组：外层按 task_version（保留版本历史语义），内层按 run_id
+        # （展示同一 task_version 的多次执行）。这样同 task_version 多 run 时，
+        # 每个 run 都能展开查看，而不是被折叠成单个 current。
         versions: list[dict[str, Any]] = []
         by_version: dict[str, dict[str, Any]] = {}
         for item in items:
@@ -335,18 +339,33 @@ class ArtifactService:
                     "workflow_key": item["workflow_key"],
                     "task_key": item["task_key"],
                     "task_version": version,
-                    "is_current": item["is_current"],
-                    "run_id": item["run_id"],
+                    "is_current": False,
                     "updated_at": item["updated_at"],
-                    "artifacts": [],
+                    "runs": [],
+                    "_by_run": {},
                 }
                 by_version[version] = entry
                 versions.append(entry)
             entry["is_current"] = bool(entry["is_current"] or item["is_current"])
             if item["updated_at"] > entry["updated_at"]:
                 entry["updated_at"] = item["updated_at"]
-                entry["run_id"] = item["run_id"]
-            entry["artifacts"].append(
+            run_entry = entry["_by_run"].get(item["run_id"])
+            if run_entry is None:
+                run_entry = {
+                    "run_id": item["run_id"],
+                    "is_current": bool(item["is_current"]),
+                    "updated_at": item["updated_at"],
+                    "artifacts": [],
+                }
+                entry["_by_run"][item["run_id"]] = run_entry
+                entry["runs"].append(run_entry)
+            else:
+                run_entry["is_current"] = bool(
+                    run_entry["is_current"] or item["is_current"]
+                )
+                if item["updated_at"] > run_entry["updated_at"]:
+                    run_entry["updated_at"] = item["updated_at"]
+            run_entry["artifacts"].append(
                 {
                     "artifact_id": item["artifact_id"],
                     "run_id": item["run_id"],
@@ -360,5 +379,11 @@ class ArtifactService:
                     "updated_at": item["updated_at"],
                 }
             )
+
+        # 版本桶按最新更新时间倒序，run 桶按更新时间倒序；移除内部索引字段。
+        for entry in versions:
+            entry["runs"].sort(key=lambda run: run["updated_at"], reverse=True)
+            entry.pop("_by_run", None)
+        versions.sort(key=lambda entry: entry["updated_at"], reverse=True)
 
         return {"versions": versions[:bounded_limit]}

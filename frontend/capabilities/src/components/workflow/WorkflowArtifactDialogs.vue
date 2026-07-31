@@ -88,15 +88,20 @@ function updateOpen(open: boolean) {
         <div v-else-if="!history.length" class="py-8 text-center text-sm text-muted-foreground">暂无历史版本</div>
         <template v-else>
           <details v-for="version in history" :key="version.task_version" class="rounded-md border p-3" :open="version.is_current">
-            <summary class="cursor-pointer text-sm font-medium"><span class="font-mono">{{ version.task_version || 'default' }}</span><Badge v-if="version.is_current" variant="outline" class="ml-2">current</Badge><span class="ml-2 text-xs font-normal text-muted-foreground">{{ formatLocalDatetime(version.updated_at) }}</span></summary>
+            <summary class="cursor-pointer text-sm font-medium"><span class="font-mono">{{ version.task_version || 'default' }}</span><Badge v-if="version.is_current" variant="outline" class="ml-2">current</Badge><span class="ml-2 text-xs font-normal text-muted-foreground">{{ formatLocalDatetime(version.updated_at) }}</span><span v-if="version.runs.length > 1" class="ml-2 text-xs font-normal text-muted-foreground">· {{ version.runs.length }} 次执行</span></summary>
             <div class="mt-3 space-y-3">
-              <div v-for="item in version.artifacts" :key="item.artifact_id" class="space-y-2">
-                <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Badge variant="outline">{{ item.path }}</Badge><Badge variant="outline">{{ item.run_id }}</Badge><span>{{ formatLocalDatetime(item.updated_at) }}</span><Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge></div>
-                <div class="text-sm font-medium">{{ item.title }}</div>
-                <p v-if="item.summary" class="text-sm text-muted-foreground">{{ item.summary }}</p>
-                <iframe v-if="item.format === 'html'" :srcdoc="item.content" sandbox="allow-same-origin" class="min-h-[50vh] w-full rounded-lg border bg-card" :title="item.title || 'HTML 报告'" />
-                <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="renderMarkdown(item.content)"></div>
-              </div>
+              <details v-for="run in version.runs" :key="run.run_id" class="rounded-md border bg-muted/30 p-3" :open="run.is_current">
+                <summary class="cursor-pointer text-xs font-medium"><span class="font-mono">{{ run.run_id }}</span><Badge v-if="run.is_current" variant="outline" class="ml-2">current</Badge><span class="ml-2 font-normal text-muted-foreground">{{ formatLocalDatetime(run.updated_at) }}</span></summary>
+                <div class="mt-3 space-y-3">
+                  <div v-for="item in run.artifacts" :key="item.artifact_id" class="space-y-2">
+                    <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Badge variant="outline">{{ item.path }}</Badge><Badge variant="outline">{{ item.format }}</Badge><span>{{ formatLocalDatetime(item.updated_at) }}</span><Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge></div>
+                    <div class="text-sm font-medium">{{ item.title }}</div>
+                    <p v-if="item.summary" class="text-sm text-muted-foreground">{{ item.summary }}</p>
+                    <iframe v-if="item.format === 'html'" :srcdoc="item.content" sandbox="allow-same-origin" class="min-h-[50vh] w-full rounded-lg border bg-card" :title="item.title || 'HTML 报告'" />
+                    <div v-else class="prose prose-sm max-w-none rounded-md border bg-background p-4" v-html="renderMarkdown(item.content)"></div>
+                  </div>
+                </div>
+              </details>
             </div>
           </details>
         </template>
