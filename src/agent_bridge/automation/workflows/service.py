@@ -35,6 +35,7 @@ from agent_bridge.automation.workflows.revisions import (
     definition_payload,
     workflow_content_hash,
     workflow_revision_snapshot,
+    workflow_version_hash,
 )
 from agent_bridge.automation.workflows.validator import WorkflowValidator
 
@@ -105,7 +106,12 @@ class WorkflowService:
         next_status = WorkflowStatus(status).value
         next_type = WorkflowType(workflow_type).value
         graph_payload = graph.model_dump(mode="json")
+        # 执行语义口径（剥离 name/description/timeout/title）：喂给重跑/stale 判定。
         new_content_hash = workflow_content_hash(
+            graph_payload, name, description, profile_key, next_status, next_type
+        )
+        # 版本口径（含 name/description、节点保留展示与运行控制字段）：喂给版本号递增判定。
+        new_version_hash = workflow_version_hash(
             graph_payload, name, description, profile_key, next_status, next_type
         )
         with self.store.transaction():
@@ -124,7 +130,7 @@ class WorkflowService:
                         "工作流已在其他页面更新或目标标识已被占用，请刷新后重新编辑"
                     )
             previous_revisions = self.store.workflows.list_definition_revisions(workflow_key, limit=1)
-            previous_hash = previous_revisions[0]["content_hash"] if previous_revisions else None
+            previous_version_hash = previous_revisions[0]["version_hash"] if previous_revisions else None
             result = self.store.upsert_workflow_definition(
                 workflow_key=workflow_key,
                 name=name,
@@ -135,9 +141,9 @@ class WorkflowService:
                 workflow_type=next_type,
                 created_by=actor,
             )
-            # Archive a revision whenever execution semantics changed (or on
-            # the first save, including an upgraded legacy database).
-            content_changed = not previous_revisions or previous_hash != new_content_hash
+            # 版本口径判定：name/description/timeout/title 等展示或运行控制字段变更
+            # 也应产生新版本号（供版本历史与 diff），但不影响重跑。
+            content_changed = not previous_revisions or previous_version_hash != new_version_hash
             revision_no = previous_revisions[0]["revision_no"] if previous_revisions else 0
             if content_changed:
                 revision = self.store.workflows.create_definition_revision(
@@ -146,12 +152,15 @@ class WorkflowService:
                     snapshot=workflow_revision_snapshot(result),
                     actor=actor,
                     source=revision_source,
+                    version_hash=new_version_hash,
                 )
                 revision_no = revision["revision_no"]
+                # 重跑/stale 判定只用执行语义口径 hash，与版本号解耦。
                 self.store.workflows.mark_latest_task_stale_if_needed(
-                    workflow_key, revision_no, new_content_hash
+                    workflow_key, new_content_hash
                 )
         result["content_hash"] = new_content_hash
+        result["version_hash"] = new_version_hash
         result["revision_no"] = revision_no
         logger.info(
             "Workflow 定义已保存 workflow=%s profile=%s 状态=%s 类型=%s actor=%s",

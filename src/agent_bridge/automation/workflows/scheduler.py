@@ -735,11 +735,13 @@ class WorkflowScheduler:
         get_revision = getattr(repository, "get_definition_revision", None)
         if not callable(current_revision) or not callable(get_revision):
             return True
-        revision_no = run.get("workflow_revision_no")
-        if revision_no is None or int(revision_no) != int(current_revision(workflow_key)):
+        # 重跑护栏只用执行语义口径 hash 比较，不看 revision_no：版本号会随
+        # name/description 等展示字段递增，不应让正在跑的任务被判 mismatch 重跑。
+        current_no = current_revision(workflow_key)
+        current_revision_row = get_revision(workflow_key, int(current_no)) if current_no else None
+        if current_revision_row is None:
             return False
-        revision = get_revision(workflow_key, int(revision_no))
-        return revision is not None and revision.get("content_hash") == run.get("workflow_content_hash")
+        return current_revision_row.get("content_hash") == run.get("workflow_content_hash")
 
     def _release_revision_mismatch_task(self, workflow_key: str, run_id: str) -> None:
         repository = getattr(self._store, "workflows", None)

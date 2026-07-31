@@ -681,6 +681,7 @@ CREATE TABLE IF NOT EXISTS workflow_definition_revisions (
   workflow_key TEXT NOT NULL,
   revision_no INTEGER NOT NULL,
   content_hash TEXT NOT NULL,
+  version_hash TEXT NOT NULL DEFAULT '',
   snapshot_json TEXT NOT NULL,
   created_by TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'edit',

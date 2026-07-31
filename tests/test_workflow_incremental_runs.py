@@ -14,14 +14,14 @@ def _service(wm_paths):
     return service
 
 
-def _upsert_definition(service, *, name: str):
+def _upsert_definition(service, *, name: str, definition=None):
     return service.workflows.upsert_definition(
         actor="root",
         workflow_key="incremental-report",
         name=name,
         description="",
         profile_key="report-plane",
-        definition={"nodes": [], "edges": []},
+        definition=definition if definition is not None else {"nodes": [], "edges": []},
         status="active",
     )
 
@@ -138,7 +138,8 @@ def _seed_completed_baseline(
     return runtime
 
 
-def test_definition_change_stales_only_latest_completed_task_version(wm_paths):
+def test_definition_semantic_change_stales_only_latest_completed_task_version(wm_paths):
+    """真正改变执行语义（加节点）才标 stale；只改展示字段不标 stale。"""
     service = _service(wm_paths)
     revision_one = _upsert_definition(service, name="Incremental report v1")
 
@@ -152,10 +153,120 @@ def test_definition_change_stales_only_latest_completed_task_version(wm_paths):
     )
     _complete_task(service, run_id="run-v2", task_version="v2", revision=revision_one)
 
-    _upsert_definition(service, name="Incremental report v2")
+    # 加一个节点：改变执行语义，最新 completed 代表版本应标 stale，旧版本保持 completed。
+    get_task_node = {"id": "n1", "name": "N1", "type": "get_task", "position": {"x": 0, "y": 0}, "config": {}}
+    revision_two = _upsert_definition(
+        service,
+        name="Incremental report v1",
+        definition={"nodes": [get_task_node], "edges": []},
+    )
+    assert revision_two["revision_no"] > revision_one["revision_no"]
 
     assert service.store.get_workflow_task("incremental-report", "page:a", "v2")["status"] == "stale"
     assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "completed"
+
+
+def test_definition_presentation_change_does_not_stale_completed_task(wm_paths):
+    """改 name/description 产生新版本号，但不标 stale（不触发重跑）。"""
+    service = _service(wm_paths)
+    revision_one = _upsert_definition(service, name="Incremental report v1")
+
+    service.store.upsert_workflow_tasks(
+        "incremental-report", [{"task_key": "page:a", "task_version": "v1", "payload": {}}]
+    )
+    _complete_task(service, run_id="run-v1", task_version="v1", revision=revision_one)
+    assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "completed"
+
+    # 只改 name：版本号递增，但执行语义没变 → 不应标 stale。
+    revision_two = _upsert_definition(service, name="Incremental report v2")
+    assert revision_two["revision_no"] > revision_one["revision_no"]
+    assert revision_two["content_hash"] == revision_one["content_hash"]
+    assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "completed"
+
+
+def test_version_and_content_hash_differ_on_timeout_title_and_name():
+    """执行语义口径与版本口径对展示/运行控制字段的剥离差异。
+
+    timeout_seconds（agent/output）、title（output）、name（节点级）、工作流级
+    name/description：这些字段变更时，版本口径 hash 应不同（触发新 revision），
+    执行语义口径 hash 应相同（不触发重跑）。
+    """
+    from agent_bridge.automation.workflows.revisions import (
+        workflow_content_hash,
+        workflow_version_hash,
+    )
+
+    def args(graph, name="w", description=""):
+        return graph, name, description, "p1", "active", "operation"
+
+    base_node = {"id": "n1", "type": "agent", "name": "N1", "position": {"x": 0, "y": 0},
+                 "config": {"prompt": "p", "backend_key": "b", "timeout_seconds": 600}}
+    graph_base = {"nodes": [dict(base_node)], "edges": []}
+
+    # 改 agent timeout_seconds
+    graph_timeout = {"nodes": [{**base_node, "config": {**base_node["config"], "timeout_seconds": 120}}], "edges": []}
+    assert workflow_content_hash(*args(graph_base)) == workflow_content_hash(*args(graph_timeout))
+    assert workflow_version_hash(*args(graph_base)) != workflow_version_hash(*args(graph_timeout))
+
+    # 改工作流 name
+    assert workflow_content_hash(*args(graph_base, name="A")) == workflow_content_hash(*args(graph_base, name="B"))
+    assert workflow_version_hash(*args(graph_base, name="A")) != workflow_version_hash(*args(graph_base, name="B"))
+
+    # 改 description
+    assert workflow_content_hash(*args(graph_base, description="x")) == workflow_content_hash(*args(graph_base, description="y"))
+    assert workflow_version_hash(*args(graph_base, description="x")) != workflow_version_hash(*args(graph_base, description="y"))
+
+
+def test_agent_timeout_change_does_not_stale_completed_task_via_storage(wm_paths):
+    """端到端验证：改 get_task 图的行为不受 timeout 影响，且改 name 不 stale。
+
+    由于 agent/output 节点需要注册后端，这里用可校验的 get_task 图配合直接调用
+    mark_latest_task_stale_if_needed 验证：content_hash 相同时不标 stale。
+    """
+    service = _service(wm_paths)
+    revision_one = _upsert_definition(service, name="Report")
+
+    service.store.upsert_workflow_tasks(
+        "incremental-report", [{"task_key": "page:a", "task_version": "v1", "payload": {}}]
+    )
+    _complete_task(service, run_id="run-v1", task_version="v1", revision=revision_one)
+    assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "completed"
+
+    # 执行语义 hash 不变（仅改 name）→ 用相同 content_hash 调 stale 判定，不应改动任务。
+    marked = service.store.workflows.mark_latest_task_stale_if_needed(
+        "incremental-report", revision_one["content_hash"]
+    )
+    assert marked == 0
+    assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "completed"
+
+    # 执行语义 hash 变化 → 应标 stale。
+    marked2 = service.store.workflows.mark_latest_task_stale_if_needed(
+        "incremental-report", "different-execution-hash"
+    )
+    assert marked2 == 1
+    assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "stale"
+
+
+def test_version_hash_persisted_and_diff_reports_name_change(wm_paths):
+    """version_hash 持久化到 revision 行，diff 能看到 name 变更。"""
+    service = _service(wm_paths)
+    revision_one = _upsert_definition(service, name="Report A")
+
+    # 改 name 产生新 revision，且 version_hash 不同、content_hash 相同。
+    revision_two = _upsert_definition(service, name="Report B")
+    assert revision_two["revision_no"] == 2
+
+    stored = service.store.workflows.list_definition_revisions("incremental-report", limit=5)
+    assert stored[0]["version_hash"] != ""
+    assert stored[0]["version_hash"] != stored[1]["version_hash"]
+    assert stored[0]["content_hash"] == stored[1]["content_hash"]
+
+    # diff 应能反映 name 变化（snapshot 含 name）。
+    diff = service.workflows.diff_revisions(
+        actor="root", workflow_key="incremental-report", from_no=2, to_no=1
+    )
+    diff_text = diff["text"]["content"] if isinstance(diff["text"], dict) else diff["text"]
+    assert "Report A" in diff_text or "Report B" in diff_text
 
 
 def test_incremental_plan_selects_newest_compatible_completed_baseline(wm_paths):

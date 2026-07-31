@@ -57,7 +57,8 @@ def test_workflow_service_allows_stale_task_to_be_prioritized(wm_paths):
     assert result["execution_mode"] == "incremental"
 
 
-def test_workflow_agent_timeout_change_does_not_create_incremental_revision(wm_paths):
+def test_workflow_agent_timeout_change_creates_revision_without_rerun_semantics(wm_paths):
+    """改 agent timeout_seconds：产生新版本号（version_hash 变），但执行语义不变（content_hash 不变）。"""
     svc = _service(wm_paths)
     backend_key = svc.agents.coding_agents.default_backend
     definition = {
@@ -80,8 +81,10 @@ def test_workflow_agent_timeout_change_does_not_create_incremental_revision(wm_p
         profile_key="report-plane", definition=definition, status="active",
     )
 
-    assert second["revision_no"] == first["revision_no"]
+    # 版本口径变了 → 新 revision；执行语义口径不变 → 不触发重跑。
+    assert second["revision_no"] > first["revision_no"]
     assert second["content_hash"] == first["content_hash"]
+    assert second["version_hash"] != first["version_hash"]
 
 
 @pytest.mark.parametrize("change", [
@@ -90,7 +93,8 @@ def test_workflow_agent_timeout_change_does_not_create_incremental_revision(wm_p
     lambda payload: payload["definition"]["nodes"][0].update(name="改名后的 Agent 节点"),
     lambda payload: payload["definition"]["nodes"][1]["config"].update(title="改名后的输出标题"),
 ])
-def test_workflow_display_change_does_not_create_incremental_revision(wm_paths, change):
+def test_workflow_display_change_creates_revision_without_rerun_semantics(wm_paths, change):
+    """改展示字段（工作流名/描述、节点名、输出标题）：新版本号，但执行语义不变。"""
     svc = _service(wm_paths)
     backend_key = svc.agents.coding_agents.default_backend
     payload = {
@@ -126,8 +130,10 @@ def test_workflow_display_change_does_not_create_incremental_revision(wm_paths, 
     change(payload)
     second = svc.workflows.upsert_definition(actor="root", **payload)
 
-    assert second["revision_no"] == first["revision_no"]
+    # 版本口径变了 → 新 revision；执行语义口径不变 → 不触发重跑。
+    assert second["revision_no"] > first["revision_no"]
     assert second["content_hash"] == first["content_hash"]
+    assert second["version_hash"] != first["version_hash"]
     assert second["edit_version"] == first["edit_version"] + 1
 
 

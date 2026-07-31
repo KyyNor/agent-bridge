@@ -105,6 +105,7 @@ class WorkflowDefinitionsRepositoryMixin:
         snapshot: dict[str, Any],
         actor: str,
         source: str = "edit",
+        version_hash: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             return _revisions.create_revision(
@@ -117,8 +118,8 @@ class WorkflowDefinitionsRepositoryMixin:
                 actor=actor,
                 owner_table="workflow_definitions",
                 snapshot_label="workflow",
-                extra_columns=("source",),
-                extra_values=(source,),
+                extra_columns=("source", "version_hash"),
+                extra_values=(source, version_hash),
             )
 
     def list_definition_revisions(self, workflow_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -129,7 +130,7 @@ class WorkflowDefinitionsRepositoryMixin:
                 key_column="workflow_key",
                 key_value=workflow_key,
                 limit=limit,
-                extra_columns=("source",),
+                extra_columns=("source", "version_hash"),
             )
 
     def get_definition_revision(self, workflow_key: str, revision_no: int) -> dict[str, Any] | None:
@@ -141,7 +142,7 @@ class WorkflowDefinitionsRepositoryMixin:
                 key_value=workflow_key,
                 revision_no=revision_no,
                 snapshot_label="workflow",
-                extra_columns=("source",),
+                extra_columns=("source", "version_hash"),
             )
 
     def get_current_definition_revision_no(self, workflow_key: str) -> int:
@@ -162,14 +163,15 @@ class WorkflowDefinitionsRepositoryMixin:
     def mark_latest_task_stale_if_needed(
         self,
         workflow_key: str,
-        revision_no: int,
         content_hash: str,
     ) -> int:
         """Mark only the current completed version of each task stale.
 
         A task is stale when its most recent successful run was produced for a
-        different definition revision.  Older task versions and tasks that are
-        still pending/running/failed remain untouched.
+        different execution-semantics hash.  判定只用执行语义口径的 content_hash，
+        不看 revision_no：版本号会随 name/description 等展示字段变化而递增，但这类
+        变更不应触发重跑。Older task versions and tasks that are still
+        pending/running/failed remain untouched.
         """
         with self._connect() as conn:
             cursor = conn.execute(
@@ -197,30 +199,18 @@ class WorkflowDefinitionsRepositoryMixin:
                       AND successful.task_version = task.task_version
                       AND successful.status = 'completed'
                   )
-                  AND (
-                    COALESCE((
-                      SELECT successful.workflow_revision_no
-                      FROM workflow_runs AS successful
-                      WHERE successful.workflow_key = task.workflow_key
-                        AND successful.task_key = task.task_key
-                        AND successful.task_version = task.task_version
-                        AND successful.status = 'completed'
-                      ORDER BY successful.finished_at DESC, successful.id DESC
-                      LIMIT 1
-                    ), -1) != ?
-                    OR COALESCE((
-                      SELECT successful.workflow_content_hash
-                      FROM workflow_runs AS successful
-                      WHERE successful.workflow_key = task.workflow_key
-                        AND successful.task_key = task.task_key
-                        AND successful.task_version = task.task_version
-                        AND successful.status = 'completed'
-                      ORDER BY successful.finished_at DESC, successful.id DESC
-                      LIMIT 1
-                    ), '') != ?
-                  )
+                  AND COALESCE((
+                    SELECT successful.workflow_content_hash
+                    FROM workflow_runs AS successful
+                    WHERE successful.workflow_key = task.workflow_key
+                      AND successful.task_key = task.task_key
+                      AND successful.task_version = task.task_version
+                      AND successful.status = 'completed'
+                    ORDER BY successful.finished_at DESC, successful.id DESC
+                    LIMIT 1
+                  ), '') != ?
                 """,
-                (workflow_key, revision_no, content_hash),
+                (workflow_key, content_hash),
             )
             return cursor.rowcount
 

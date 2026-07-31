@@ -32,6 +32,7 @@ from agent_bridge.automation.workflows.revisions import (
     definition_payload,
     workflow_content_hash,
     workflow_revision_snapshot,
+    workflow_version_hash,
 )
 
 if TYPE_CHECKING:
@@ -82,8 +83,17 @@ class DefinitionImportService:
                     str(public.get("status") or WorkflowStatus.active.value),
                     str(public.get("workflow_type") or WorkflowType.operation.value),
                 )
+                version_hash = workflow_version_hash(
+                    public["definition"],
+                    str(public.get("name") or workflow_key),
+                    str(public.get("description") or ""),
+                    str(public.get("profile_key") or ""),
+                    str(public.get("status") or WorkflowStatus.active.value),
+                    str(public.get("workflow_type") or WorkflowType.operation.value),
+                )
                 latest = self.store.workflows.list_definition_revisions(workflow_key, limit=1)
-                if latest and latest[0].get("content_hash") == content_hash:
+                # 版本口径判定是否复用已有 revision（与 upsert_definition 的 content_changed 对齐）。
+                if latest and latest[0].get("version_hash") == version_hash:
                     self.store.workflows.set_current_definition_revision_no(
                         workflow_key, int(latest[0]["revision_no"])
                     )
@@ -97,6 +107,7 @@ class DefinitionImportService:
                         snapshot=workflow_revision_snapshot(public),
                         actor=actor,
                         source="edit",
+                        version_hash=version_hash,
                     )
             if revision is None:
                 raise NotFound("workflow revision not found")

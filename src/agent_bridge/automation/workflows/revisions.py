@@ -25,6 +25,20 @@ def _semantic_node_payload(node: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _full_node_payload(node: dict[str, Any]) -> dict[str, Any]:
+    """版本口径的节点载荷：仅剥离 position，保留 name/timeout_seconds/title。
+
+    与 :func:`_semantic_node_payload` 的差异在于保留展示与运行控制字段——这些
+    字段变更需要产生新版本号（供版本历史与 diff 记录），但不应触发重跑（重跑
+    判定使用 :func:`workflow_content_hash` 的执行语义口径）。
+    """
+    return {
+        key: value
+        for key, value in node.items()
+        if key != "position"
+    }
+
+
 def definition_payload(workflow: dict[str, Any]) -> dict[str, Any]:
     payload = dict(workflow)
     payload.pop("definition_json", None)
@@ -59,6 +73,47 @@ def workflow_content_hash(
     fingerprint = json.dumps(
         {
             "definition": execution_definition,
+            "profile_key": profile_key,
+            "status": status,
+            "workflow_type": workflow_type,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()
+
+
+def workflow_version_hash(
+    graph_payload: dict[str, Any],
+    name: str,
+    description: str,
+    profile_key: str,
+    status: str,
+    workflow_type: str,
+) -> str:
+    """版本口径指纹：含 name/description，节点保留展示与运行控制字段。
+
+    用于判定是否产生新 revision_no 与 diff。重跑/stale 判定不使用此指纹，
+    那由 :func:`workflow_content_hash`（执行语义口径）负责。
+    """
+    version_definition = {
+        "nodes": [
+            _full_node_payload(node)
+            for node in sorted(
+                graph_payload.get("nodes") or [],
+                key=lambda item: str(item.get("id") or ""),
+            )
+        ],
+        "edges": sorted(
+            graph_payload.get("edges") or [],
+            key=lambda item: str(item.get("id") or ""),
+        ),
+    }
+    fingerprint = json.dumps(
+        {
+            "definition": version_definition,
+            "name": name,
+            "description": description,
             "profile_key": profile_key,
             "status": status,
             "workflow_type": workflow_type,
