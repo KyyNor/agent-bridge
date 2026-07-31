@@ -556,8 +556,132 @@ def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
     assert history.status_code == 200, history.text
     assert [item["task_version"] for item in history.json()["versions"]] == ["v2", "v1"]
     assert history.json()["versions"][0]["is_current"] is True
-    assert history.json()["versions"][0]["artifacts"][0]["content"] == "# v2"
-    assert history.json()["versions"][1]["artifacts"][0]["content"] == "# v1"
+    # 两层结构：version -> runs -> artifacts；每个 version 各一次 run
+    assert [run["run_id"] for run in history.json()["versions"][0]["runs"]] == ["run_2"]
+    assert history.json()["versions"][0]["runs"][0]["artifacts"][0]["content"] == "# v2"
+    assert history.json()["versions"][1]["runs"][0]["artifacts"][0]["content"] == "# v1"
+
+
+def test_workflow_api_overview_aggregates_status_from_latest_task_version(wm_paths):
+    """workflow 状态基于每个 task_key 的代表版本（set_at 最新）聚合，而非最近 run。
+
+    场景：同 task_key 两个 task_version，空串版本 completed、有值版本 pending（且 set_at
+    更新），此时 workflow 状态应为 pending——代表版本未完成，旧 completed 版本被忽略。
+    """
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    # 旧版本（空串）先执行完成
+    svc.store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "", "type": "page", "payload": {}}],
+    )
+    svc.store.create_workflow_run(
+        run_id="run_1", workflow_key="page-report", profile_key="report-plane",
+        task_key="page:a", status="running", temp_dir="/tmp/run_1",
+    )
+    svc.store.lease_workflow_task("page-report", run_id="run_1", lease_seconds=7200)
+    assert svc.store.complete_workflow_task("page-report", "page:a", run_id="run_1") is True
+
+    # 新版本（有值）导入为 pending，set_at 更新，代表版本切到它
+    svc.store.upsert_workflow_tasks(
+        "page-report",
+        [{"task_key": "page:a", "task_version": "v2", "type": "page", "payload": {}}],
+    )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    overviews = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    assert overviews.status_code == 200, overviews.text
+    entry = next(item for item in overviews.json() if item["workflow_key"] == "page-report")
+    # 旧 "" 已 completed 但被忽略；代表版本 v2 仍 pending → 整体 pending
+    assert entry["task_aggregated_status"] == "pending"
+    assert entry["task_total"] == 1
+    assert entry["task_completed"] == 0
+
+    # 把代表版本也跑完成，整体才应转为 completed
+    svc.store.create_workflow_run(
+        run_id="run_2", workflow_key="page-report", profile_key="report-plane",
+        task_key="page:a", status="running", temp_dir="/tmp/run_2",
+    )
+    svc.store.lease_workflow_task("page-report", run_id="run_2", lease_seconds=7200)
+    assert svc.store.complete_workflow_task(
+        "page-report", "page:a", task_version="v2", run_id="run_2"
+    ) is True
+
+    overviews2 = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    entry2 = next(item for item in overviews2.json() if item["workflow_key"] == "page-report")
+    assert entry2["task_aggregated_status"] == "completed"
+    assert entry2["task_completed"] == 1
+
+
+def test_workflow_api_history_groups_same_task_version_runs_and_html(wm_paths):
+    """同 task_version 多次 run 的历史：两层分组（version -> run），且 html 产物也返回。"""
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    # 两次 run，task_version 都是空串（默认），每次一个 markdown + 一个 html
+    for run_id, body in (("run_1", "# first"), ("run_2", "# second")):
+        svc.workflows.save_artifact(
+            workflow_key="page-report",
+            profile_key="report-plane",
+            run_id=run_id,
+            task_key="page:a",
+            task_version="",
+            title=f"Page A {run_id}",
+            path="pages/page-a.md",
+            tags=[],
+            format="markdown",
+            summary=run_id,
+            content=body,
+            metadata={},
+        )
+        svc.workflows.save_artifact(
+            workflow_key="page-report",
+            profile_key="report-plane",
+            run_id=run_id,
+            task_key="page:a",
+            task_version="",
+            title=f"Report {run_id}",
+            path="out/report.html",
+            tags=[],
+            format="html",
+            summary=run_id,
+            content=f"<p>{body}</p>",
+            metadata={},
+        )
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    history = client.get(
+        "/workflow-artifacts/history?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert history.status_code == 200, history.text
+    versions = history.json()["versions"]
+    # 全是空串 task_version → 只有 1 个 version 桶（不会因重复 key 折叠）
+    assert len(versions) == 1
+    assert versions[0]["task_version"] == ""
+    runs = versions[0]["runs"]
+    # 两次 run 都展开为独立 run 桶，最新（run_2，is_current）在前
+    assert [run["run_id"] for run in runs] == ["run_2", "run_1"]
+    assert runs[0]["is_current"] is True
+    assert runs[1]["is_current"] is False
+    # 每个 run 桶含 markdown + html（验证 format 过滤已修复）
+    formats_new = sorted(a["format"] for a in runs[0]["artifacts"])
+    formats_old = sorted(a["format"] for a in runs[1]["artifacts"])
+    assert formats_new == ["html", "markdown"]
+    assert formats_old == ["html", "markdown"]
+    md_new = next(a for a in runs[0]["artifacts"] if a["format"] == "markdown")
+    assert md_new["content"] == "# second"
+    md_old = next(a for a in runs[1]["artifacts"] if a["format"] == "markdown")
+    assert md_old["content"] == "# first"
 
 
 def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):

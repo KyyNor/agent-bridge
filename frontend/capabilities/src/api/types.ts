@@ -305,7 +305,13 @@ export interface WorkflowArtifactHistoryVersion {
   task_key: string
   task_version: string
   is_current: boolean
+  updated_at: string
+  runs: WorkflowArtifactHistoryRun[]
+}
+
+export interface WorkflowArtifactHistoryRun {
   run_id: string
+  is_current: boolean
   updated_at: string
   artifacts: WorkflowArtifactHistoryItem[]
 }
@@ -390,6 +396,11 @@ export interface WorkflowRunOverview {
   run_count: number
   latest_run: WorkflowRunSummary | null
   running_run: WorkflowRunSummary | null
+  /** 基于 task 代表版本聚合的 workflow 状态（旧后端可能缺失，前端回退到 latest_run.status）。 */
+  task_aggregated_status?: string
+  task_total?: number
+  task_completed?: number
+  task_running?: number
 }
 
 export interface WorkflowNodeRun {
