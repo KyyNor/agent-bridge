@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { formatDuration } from '../../lib/time'
 
 const stats = ref<Record<string, unknown>[]>([])
 const loading = ref(false)
@@ -59,6 +60,15 @@ const columnLabels: Record<string, string> = {
 
 function callCount(s: Record<string, unknown>) {
   return Number(s.calls || 0)
+}
+
+// 耗时类列以秒展示（avg_duration_ms / max_duration_ms），其余原样输出
+function formatCell(col: string, value: unknown): string {
+  if (col.endsWith('_duration_ms')) {
+    const formatted = formatDuration(value == null ? null : Number(value))
+    return formatted || '—'
+  }
+  return (value as string | number | null) != null ? String(value) : '—'
 }
 
 const totalCount = computed(() => stats.value.reduce((sum, s) => sum + callCount(s), 0))
@@ -120,7 +130,7 @@ const pagedStats = computed(() => paginate(stats.value, page.value, pageSize.val
           </thead>
           <tbody>
             <tr v-for="(s, i) in pagedStats" :key="i" class="border-b border-border/60">
-              <td v-for="col in columns" :key="col" class="px-4 py-3 text-sm">{{ (s as Record<string, unknown>)[col] || '—' }}</td>
+              <td v-for="col in columns" :key="col" class="px-4 py-3 text-sm tabular-nums">{{ formatCell(col, (s as Record<string, unknown>)[col]) }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-3">
                   <div class="h-2 rounded-full bg-primary" :style="{ width: `${Math.max(8, (callCount(s) / maxCount) * 120)}px` }" />

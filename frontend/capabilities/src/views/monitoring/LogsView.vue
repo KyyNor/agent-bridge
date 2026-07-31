@@ -3,7 +3,7 @@ import { Search, RotateCw } from '@lucide/vue'
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { api } from '../../api/client'
 import type { ToolCallLog, ToolCallLogCounts } from '../../api/types'
-import { formatLocalDatetime } from '../../lib/time'
+import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -234,7 +234,7 @@ function entrypointLabel(entrypoint: string): string {
               </td>
               <td class="px-4 py-3 text-sm">{{ l.profile_key || '—' }}</td>
               <td :title="l.tool_name || ''" class="px-4 py-3 font-mono text-sm">{{ toolCallDisplayName(l) }}</td>
-              <td class="px-4 py-3 text-sm font-mono tabular-nums text-muted-foreground" :class="durationClass(l.duration_ms)">{{ l.duration_ms != null ? `${l.duration_ms}ms` : '—' }}</td>
+              <td class="px-4 py-3 text-sm font-mono tabular-nums text-muted-foreground" :class="durationClass(l.duration_ms)">{{ formatDuration(l.duration_ms) || '—' }}</td>
               <td class="px-4 py-3">
                 <StatusBadge :status="statusOf(l.status)" />
               </td>
@@ -268,7 +268,7 @@ function entrypointLabel(entrypoint: string): string {
             <div><span class="text-muted-foreground">调用者</span><div class="font-medium">{{ detailLog.actor }}</div></div>
             <div><span class="text-muted-foreground">入口</span><div class="font-medium">{{ entrypointLabel(detailLog.entrypoint) }}</div></div>
             <div><span class="text-muted-foreground">工具</span><div :title="detailLog.tool_name || ''" class="font-mono font-medium">{{ toolCallDisplayName(detailLog) }}</div></div>
-            <div><span class="text-muted-foreground">耗时</span><div class="font-medium tabular-nums">{{ detailLog.duration_ms != null ? `${detailLog.duration_ms}ms` : '—' }}</div></div>
+            <div><span class="text-muted-foreground">耗时</span><div class="font-medium tabular-nums">{{ formatDuration(detailLog.duration_ms) || '—' }}</div></div>
             <div><span class="text-muted-foreground">Profile</span><div class="font-medium">{{ detailLog.profile_key || '—' }}</div></div>
             <div>
               <span class="text-muted-foreground">来源</span>

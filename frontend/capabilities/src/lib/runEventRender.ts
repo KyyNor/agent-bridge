@@ -7,6 +7,7 @@
  * `agent_runtime/events.py`.
  */
 import type { WorkflowRunEvent } from '../api/types'
+import { formatDuration } from './time'
 
 /** Badge label for an event kind, accounting for status variants (failed/success). */
 export function eventKindLabel(event: WorkflowRunEvent): string {
@@ -59,7 +60,7 @@ export function eventMessage(event: WorkflowRunEvent): string {
   }
   if (event.kind === 'stage' && event.stage_name) {
     return event.duration_ms != null
-      ? `${event.stage_name} · ${event.duration_ms}ms`
+      ? `${event.stage_name} · ${formatDuration(event.duration_ms)}`
       : event.stage_name
   }
   return event.status || ''

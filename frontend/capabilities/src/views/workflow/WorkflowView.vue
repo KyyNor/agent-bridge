@@ -62,7 +62,7 @@ import { useWorkflowArtifacts } from '../../composables/useWorkflowArtifacts'
 import { useWorkflowDesigner } from '../../composables/useWorkflowDesigner'
 import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
 import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
-import { formatLocalDatetime } from '../../lib/time'
+import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 
 const WORKFLOW_RUN_CACHE_LIMIT = 50
@@ -245,6 +245,7 @@ const {
   progressRunId,
   workflowRuns,
   workflowRunTotals,
+  workflowTaskStatus,
   runsLoading,
   selectedRunId,
   runEvents,
@@ -326,16 +327,24 @@ const backendKeys = computed(() => deriveWorkflowBackendKeys(agentRuntimeConfig.
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
 const latestRun = computed(() => runs.value[0] || null)
+// workflow 整体状态：优先取 task 代表版本聚合状态，旧后端缺失时回退到最近 run 状态。
+const workflowStatus = computed(() => {
+  const key = selectedWorkflow.value?.workflow_key || ''
+  return workflowTaskStatus.value[key]?.status || latestRun.value?.status || ''
+})
 const latestRunTone = computed<'neutral' | 'ok' | 'err' | 'info'>(() => {
-  if (latestRun.value?.status === 'completed') return 'ok'
-  if (latestRun.value?.status === 'failed' || latestRun.value?.status === 'stopped') return 'err'
-  if (latestRun.value?.status === 'running') return 'info'
+  const status = workflowStatus.value || latestRun.value?.status
+  if (status === 'completed') return 'ok'
+  if (status === 'failed' || status === 'stopped') return 'err'
+  if (status === 'running') return 'info'
   return 'neutral'
 })
 const latestRunValue = computed(() => {
-  if (!latestRun.value) return '暂无运行'
-  const duration = formatRunDuration(latestRun.value.duration_ms)
-  return duration ? `${runStatusLabel(latestRun.value.status)} · ${duration}` : runStatusLabel(latestRun.value.status)
+  const status = workflowStatus.value
+  if (!status) return '暂无运行'
+  const duration = latestRun.value ? formatDuration(latestRun.value.duration_ms) : ''
+  const label = aggregatedStatusLabel(status)
+  return duration ? `${label} · ${duration}` : label
 })
 const hasAnyRunningRun = computed(() =>
   Object.values(workflowRuns.value).some(items => items.some(run => run.status === 'running')),
@@ -744,11 +753,14 @@ function runStatusLabel(status: string) {
   return map[status] || status
 }
 
-function formatRunDuration(durationMs: number | null | undefined) {
-  if (durationMs == null || durationMs < 0) return ''
-  if (durationMs < 1000) return `${durationMs}ms`
-  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`
-  return `${Math.floor(durationMs / 60_000)}m ${Math.round((durationMs % 60_000) / 1000)}s`
+/** task 代表版本聚合后的 workflow 状态文案。 */
+function aggregatedStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    running: '执行中',
+    completed: '已完成',
+    pending: '待处理',
+  }
+  return map[status] || runStatusLabel(status)
 }
 
 function runBadgeClass(status: string) {
@@ -1222,8 +1234,8 @@ async function confirmClearWorkflow() {
               <div class="space-y-4">
                 <Card size="sm" class="shadow-card">
                   <CardContent class="space-y-3">
-                    <div class="flex items-center justify-between gap-2"><h3 class="text-sm font-semibold">最近运行</h3><StatusBadge v-if="latestRun" :status="latestRun.status === 'completed' ? 'success' : latestRun.status === 'running' ? 'running' : latestRun.status === 'failed' || latestRun.status === 'stopped' ? 'error' : 'blocked'" :label="runStatusLabel(latestRun.status)" /></div>
-                    <template v-if="latestRun"><div class="font-mono text-xs text-muted-foreground">{{ latestRun.run_id }}</div><div class="grid grid-cols-2 gap-x-3 gap-y-2 text-xs"><span class="text-muted-foreground">开始时间</span><span class="text-right tabular-nums">{{ formatLocalDatetime(latestRun.started_at) }}</span><span class="text-muted-foreground">耗时</span><span class="text-right font-medium tabular-nums">{{ formatRunDuration(latestRun.duration_ms) || '—' }}</span></div><Button class="w-full" size="sm" variant="outline" @click="openProgress(selectedWorkflow, latestRun.run_id)">查看运行详情</Button></template>
+                    <div class="flex items-center justify-between gap-2"><h3 class="text-sm font-semibold">最近运行</h3><StatusBadge v-if="workflowStatus" :status="workflowStatus === 'completed' ? 'success' : workflowStatus === 'running' ? 'running' : workflowStatus === 'failed' || workflowStatus === 'stopped' ? 'error' : 'blocked'" :label="aggregatedStatusLabel(workflowStatus)" /></div>
+                    <template v-if="latestRun"><div class="font-mono text-xs text-muted-foreground">{{ latestRun.run_id }}</div><div class="grid grid-cols-2 gap-x-3 gap-y-2 text-xs"><span class="text-muted-foreground">开始时间</span><span class="text-right tabular-nums">{{ formatLocalDatetime(latestRun.started_at) }}</span><span class="text-muted-foreground">耗时</span><span class="text-right font-medium tabular-nums">{{ formatDuration(latestRun.duration_ms) || '—' }}</span></div><Button class="w-full" size="sm" variant="outline" @click="openProgress(selectedWorkflow, latestRun.run_id)">查看运行详情</Button></template>
                     <p v-else class="py-5 text-center text-sm text-muted-foreground">还没有运行记录</p>
                   </CardContent>
                 </Card>
@@ -1237,7 +1249,7 @@ async function confirmClearWorkflow() {
             </div>
             <div class="grid gap-4 xl:grid-cols-2">
               <Card size="sm" class="shadow-card"><CardContent><div class="mb-2 flex items-center justify-between"><div><h3 class="text-sm font-semibold">最新产物</h3><p class="mt-0.5 text-xs text-muted-foreground">最近更新的工作流输出</p></div><Button size="sm" variant="ghost" @click="selectDetailTab('artifacts')">查看全部</Button></div><div v-if="recentArtifacts.length" class="divide-y"><button v-for="item in recentArtifacts" :key="item.artifact_id" type="button" class="list-row-interactive flex w-full items-center justify-between gap-3 px-1 py-2.5 text-left" @click="openArtifact(item)"><div class="min-w-0"><div class="truncate text-sm font-medium">{{ item.title }}</div><div class="mt-0.5 truncate text-xs text-muted-foreground">{{ item.path }} · {{ formatLocalDatetime(item.updated_at) }}</div></div><Badge variant="outline" class="shrink-0">{{ item.format }}</Badge></button></div><p v-else class="py-5 text-center text-sm text-muted-foreground">暂无产物</p></CardContent></Card>
-              <Card size="sm" class="shadow-card"><CardContent><div class="mb-2"><h3 class="text-sm font-semibold">活动</h3><p class="mt-0.5 text-xs text-muted-foreground">最近运行与产物更新</p></div><div v-if="latestRun || recentArtifacts.length" class="divide-y"><button v-if="latestRun" type="button" class="list-row-interactive flex w-full items-start justify-between gap-3 px-1 py-2.5 text-left" @click="openProgress(selectedWorkflow, latestRun.run_id)"><div><div class="text-sm font-medium">工作流{{ runStatusLabel(latestRun.status) }}</div><div class="mt-0.5 font-mono text-xs text-muted-foreground">{{ latestRun.run_id }}</div></div><span class="shrink-0 text-xs text-muted-foreground">{{ formatLocalDatetime(latestRun.started_at) }}</span></button><div v-for="item in recentArtifacts.slice(0, 2)" :key="`activity:${item.artifact_id}`" class="flex items-start justify-between gap-3 px-1 py-2.5"><div><div class="text-sm font-medium">产物已更新</div><div class="mt-0.5 truncate text-xs text-muted-foreground">{{ item.path }}</div></div><span class="shrink-0 text-xs text-muted-foreground">{{ formatLocalDatetime(item.updated_at) }}</span></div></div><p v-else class="py-5 text-center text-sm text-muted-foreground">还没有活动记录</p></CardContent></Card>
+              <Card size="sm" class="shadow-card"><CardContent><div class="mb-2"><h3 class="text-sm font-semibold">活动</h3><p class="mt-0.5 text-xs text-muted-foreground">最近运行与产物更新</p></div><div v-if="latestRun || recentArtifacts.length" class="divide-y"><button v-if="latestRun" type="button" class="list-row-interactive flex w-full items-start justify-between gap-3 px-1 py-2.5 text-left" @click="openProgress(selectedWorkflow, latestRun.run_id)"><div><div class="text-sm font-medium">工作流{{ aggregatedStatusLabel(workflowStatus) }}</div><div class="mt-0.5 font-mono text-xs text-muted-foreground">{{ latestRun.run_id }}</div></div><span class="shrink-0 text-xs text-muted-foreground">{{ formatLocalDatetime(latestRun.started_at) }}</span></button><div v-for="item in recentArtifacts.slice(0, 2)" :key="`activity:${item.artifact_id}`" class="flex items-start justify-between gap-3 px-1 py-2.5"><div><div class="text-sm font-medium">产物已更新</div><div class="mt-0.5 truncate text-xs text-muted-foreground">{{ item.path }}</div></div><span class="shrink-0 text-xs text-muted-foreground">{{ formatLocalDatetime(item.updated_at) }}</span></div></div><p v-else class="py-5 text-center text-sm text-muted-foreground">还没有活动记录</p></CardContent></Card>
             </div>
           </div>
 

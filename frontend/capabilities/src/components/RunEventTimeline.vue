@@ -34,7 +34,7 @@ import {
 } from '../lib/runEventRender'
 import { renderMarkdown as renderMd } from '../lib/markdown'
 import { detectPayloadLanguage, preparePayloadPresentation, type PayloadLanguage } from '../lib/payloadPresentation'
-import { formatLocalDatetime } from '../lib/time'
+import { formatLocalDatetime, formatDuration } from '../lib/time'
 import type { WorkflowRunEvent } from '../api/types'
 
 const props = withDefaults(
@@ -208,7 +208,7 @@ function closePayload() {
             <span class="tl-kind">{{ eventKindLabel(entry.event) }}</span>
             <span v-if="showAgentName && entry.event.agent_name" class="tl-target">{{ entry.event.agent_name }}</span>
             <span v-if="entry.event.tool_name" class="tl-target"><b>{{ entry.event.tool_name }}</b></span>
-            <span v-if="entry.event.duration_ms != null" class="tl-duration">{{ entry.event.duration_ms }}ms</span>
+            <span v-if="entry.event.duration_ms != null" class="tl-duration">{{ formatDuration(entry.event.duration_ms) }}</span>
             <span v-if="entry.event.created_at" class="tl-time">{{ formatLocalDatetime(entry.event.created_at) }}</span>
           </div>
           <div v-if="renderEventMessage(entry.event)" class="tl-content">

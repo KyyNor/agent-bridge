@@ -15,7 +15,7 @@ import type {
   UASummary,
   UAStatus,
 } from '../../api/types'
-import { formatLocalDatetime } from '../../lib/time'
+import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -266,7 +266,7 @@ async function triggerAnalyze() {
   try {
     const result = await api.triggerUAAnalyze(repo.repo_key)
     if (result.success) {
-      uaAnalyzeSuccess.value = `分析完成：${result.node_count} 节点、${result.edge_count} 边，耗时 ${(result.duration_ms / 1000).toFixed(1)}s`
+      uaAnalyzeSuccess.value = `分析完成：${result.node_count} 节点、${result.edge_count} 边，耗时 ${formatDuration(result.duration_ms) || '—'}`
       await loadUAData()
     } else {
       uaAnalyzeError.value = result.error || '分析失败'

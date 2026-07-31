@@ -35,7 +35,7 @@ import {
   toScriptUpsertPayload,
   type ScriptEditableFields,
 } from '../../lib/scriptManagement'
-import { formatLocalDatetime } from '../../lib/time'
+import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
@@ -1221,7 +1221,7 @@ def main(envelope):
                 <StatusBadge :status="runDetail.status === 'success' ? 'success' : 'error'" />
                 <Badge variant="outline">{{ runDetail.run_type }}</Badge>
                 <span class="font-mono text-xs text-muted-foreground">{{ runDetail.run_id }}</span>
-                <span class="text-xs text-muted-foreground">{{ runDetail.duration_ms }} ms</span>
+                <span class="text-xs text-muted-foreground">{{ formatDuration(runDetail.duration_ms) || '—' }}</span>
                 <span v-if="runDetail.exit_code !== null" class="text-xs text-muted-foreground">exit {{ runDetail.exit_code }}</span>
               </div>
               <div v-if="runDetail.error_message" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
@@ -1274,7 +1274,7 @@ def main(envelope):
                 </div>
                 <div class="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                   <span>{{ run.run_type }}</span>
-                  <span>{{ run.duration_ms }} ms</span>
+                  <span>{{ formatDuration(run.duration_ms) || '—' }}</span>
                   <span v-if="run.exit_code !== null">exit {{ run.exit_code }}</span>
                 </div>
                 <div class="mt-1 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</div>

@@ -3,7 +3,7 @@ import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { Search, RotateCw, ArrowLeft } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { AgentRun, AgentRunCounts } from '../../api/types'
-import { formatLocalDatetime } from '../../lib/time'
+import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -325,7 +325,7 @@ function backendBadgeClass(backend: string | null | undefined): string {
         <div>
           <span class="text-muted-foreground">耗时</span>
           <div class="tabular-nums font-medium">
-            {{ detailRun.duration_ms != null ? `${detailRun.duration_ms}ms` : '—' }}
+            {{ formatDuration(detailRun.duration_ms) || '—' }}
           </div>
         </div>
         <div>
@@ -449,7 +449,7 @@ function backendBadgeClass(backend: string | null | undefined): string {
                 <span v-else>—</span>
               </td>
               <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">
-                {{ r.duration_ms != null ? `${r.duration_ms}ms` : '—' }}
+                {{ formatDuration(r.duration_ms) || '—' }}
               </td>
               <td class="px-4 py-3 text-sm tabular-nums text-muted-foreground">
                 {{ formatCost(r.cost_usd) }}
