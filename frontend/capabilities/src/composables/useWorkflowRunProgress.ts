@@ -17,6 +17,7 @@ type WorkflowTaskStatus = Record<string, {
   total: number
   completed: number
   running: number
+  failed: number
 }>
 import { useSubagentDetails } from './useSubagentDetails'
 import { alert } from './useConfirm'
@@ -137,6 +138,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     task_total?: number
     task_completed?: number
     task_running?: number
+    task_failed?: number
   }>) {
     const nextRuns: Record<string, WorkflowRunSummary[]> = {}
     const nextTotals: Record<string, number> = {}
@@ -153,6 +155,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
           total: overview.task_total ?? 0,
           completed: overview.task_completed ?? 0,
           running: overview.task_running ?? 0,
+          failed: overview.task_failed ?? 0,
         }
       }
     }

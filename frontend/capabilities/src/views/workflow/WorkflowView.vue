@@ -761,6 +761,7 @@ function aggregatedStatusLabel(status: string) {
     running: '执行中',
     completed: '已完成',
     pending: '待处理',
+    failed: '失败',
   }
   return map[status] || runStatusLabel(status)
 }

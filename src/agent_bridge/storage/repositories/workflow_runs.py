@@ -7,16 +7,29 @@ from typing import Any
 from .workflow_common import _json_dumps, _row_payload, _run_summary_from_prefixed_row
 
 
-def _aggregate_task_status(*, task_total: int, task_completed: int, task_running: int) -> str:
+def _aggregate_task_status(
+    *,
+    task_total: int,
+    task_completed: int,
+    task_running: int,
+    task_failed: int,
+) -> str:
     """把每个 task_key 代表版本的状态聚合成 workflow 级状态。
 
     - 有 running 代表版本 → ``running``
+    - 有 failed/abandoned 代表版本 → ``failed``（保留原始失败状态，不并入 pending）
     - 代表版本全部 completed → ``completed``
-    - 否则（存在 pending/stale/failed/abandoned）→ ``pending``
+    - 否则（存在 pending/stale）→ ``pending``
     - 无任务 → ``completed``（兜底，避免无任务工作流永远显示未完成）
+
+    优先级：running > failed > pending > completed。``running`` 优先于
+    ``failed`` 是因为进行中的任务可能后续完成；而 ``failed`` 优先于
+    ``pending``，让失败信号在列表上直接可见，不被未完成任务掩盖。
     """
     if task_running > 0:
         return "running"
+    if task_failed > 0:
+        return "failed"
     if task_total == 0:
         return "completed"
     if task_completed >= task_total:
@@ -132,8 +145,9 @@ class WorkflowRunsRepositoryMixin:
         """Return one latest/running summary per workflow for list pages.
 
         ``task_aggregated_status`` 基于每个 task_key 的代表版本（按 ``set_at DESC``
-        取最新，与 ``get_workflow_task`` 一致）聚合：只有所有代表版本都 completed
-        才算 completed，旧版本状态忽略。无任务的 workflow 兜底为 completed。
+        取最新，与 ``get_workflow_task`` 一致）聚合：有 failed/abandoned 代表版本
+        则整体 ``failed``（保留原始失败状态），否则全部 completed 才算 completed，
+        旧版本状态忽略。无任务的 workflow 兜底为 completed。
         """
         with self._connect() as conn:
             rows = conn.execute(
@@ -181,7 +195,8 @@ class WorkflowRunsRepositoryMixin:
                     workflow_key,
                     COUNT(*) AS task_total,
                     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS task_completed,
-                    SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS task_running
+                    SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS task_running,
+                    SUM(CASE WHEN status IN ('failed', 'abandoned') THEN 1 ELSE 0 END) AS task_failed
                   FROM task_reps
                   GROUP BY workflow_key
                 )
@@ -218,7 +233,8 @@ class WorkflowRunsRepositoryMixin:
                   running.duration_ms AS running_duration_ms,
                   COALESCE(task_agg.task_total, 0) AS task_total,
                   COALESCE(task_agg.task_completed, 0) AS task_completed,
-                  COALESCE(task_agg.task_running, 0) AS task_running
+                  COALESCE(task_agg.task_running, 0) AS task_running,
+                  COALESCE(task_agg.task_failed, 0) AS task_failed
                 FROM workflow_definitions w
                 LEFT JOIN latest
                   ON latest.workflow_key = w.workflow_key
@@ -240,6 +256,7 @@ class WorkflowRunsRepositoryMixin:
             task_total = int(item["task_total"] or 0)
             task_completed = int(item["task_completed"] or 0)
             task_running = int(item["task_running"] or 0)
+            task_failed = int(item["task_failed"] or 0)
             result.append(
                 {
                     "workflow_key": item["workflow_key"],
@@ -249,10 +266,12 @@ class WorkflowRunsRepositoryMixin:
                     "task_total": task_total,
                     "task_completed": task_completed,
                     "task_running": task_running,
+                    "task_failed": task_failed,
                     "task_aggregated_status": _aggregate_task_status(
                         task_total=task_total,
                         task_completed=task_completed,
                         task_running=task_running,
+                        task_failed=task_failed,
                     ),
                 }
             )

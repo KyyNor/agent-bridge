@@ -401,6 +401,7 @@ export interface WorkflowRunOverview {
   task_total?: number
   task_completed?: number
   task_running?: number
+  task_failed?: number
 }
 
 export interface WorkflowNodeRun {

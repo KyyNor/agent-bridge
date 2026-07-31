@@ -618,6 +618,59 @@ def test_workflow_api_overview_aggregates_status_from_latest_task_version(wm_pat
     assert entry2["task_completed"] == 1
 
 
+def test_workflow_api_overview_failed_task_surfaces_failed_aggregate(wm_paths):
+    """代表版本 failed 的 task 不应被并入 pending，整体聚合状态保留 failed 信号。
+
+    场景：一个 task 的代表版本执行失败（failed），另一个 pending。聚合状态应为
+    ``failed`` 而非 ``pending``，让列表直接看到失败信号；且 task_failed 计数透传。
+    running 优先于 failed：再让一个 task 进入 running，聚合应转为 running。
+    """
+    from agent_bridge.api.app import create_app
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
+    _seed_workflow(svc)
+    # 两个 task：a 会失败，b 保持 pending
+    svc.store.upsert_workflow_tasks(
+        "page-report",
+        [
+            {"task_key": "page:a", "task_version": "", "type": "page", "payload": {}},
+            {"task_key": "page:b", "task_version": "", "type": "page", "payload": {}},
+        ],
+    )
+    # 租约 page:a 并置为 failed
+    svc.store.create_workflow_run(
+        run_id="run_a", workflow_key="page-report", profile_key="report-plane",
+        task_key="page:a", status="running", temp_dir="/tmp/run_a",
+    )
+    svc.store.lease_workflow_task("page-report", run_id="run_a", lease_seconds=7200)
+    assert svc.store.fail_workflow_task_for_run("page-report", "run_a", "boom") is True
+
+    client = TestClient(create_app(wm_paths, {"root"}))
+    overviews = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    assert overviews.status_code == 200, overviews.text
+    entry = next(item for item in overviews.json() if item["workflow_key"] == "page-report")
+    # 代表版本 page:a failed、page:b pending → 整体 failed（不并入 pending）
+    assert entry["task_aggregated_status"] == "failed"
+    assert entry["task_failed"] == 1
+    assert entry["task_total"] == 2
+    assert entry["task_completed"] == 0
+
+    # running 优先于 failed：租约 page:b 让它进入 running，聚合转为 running
+    svc.store.create_workflow_run(
+        run_id="run_b", workflow_key="page-report", profile_key="report-plane",
+        task_key="page:b", status="running", temp_dir="/tmp/run_b",
+    )
+    svc.store.lease_workflow_task("page-report", run_id="run_b", lease_seconds=7200)
+    overviews2 = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    entry2 = next(item for item in overviews2.json() if item["workflow_key"] == "page-report")
+    assert entry2["task_aggregated_status"] == "running"
+    assert entry2["task_running"] == 1
+    assert entry2["task_failed"] == 1
+
+
 def test_workflow_api_history_groups_same_task_version_runs_and_html(wm_paths):
     """同 task_version 多次 run 的历史：两层分组（version -> run），且 html 产物也返回。"""
     from agent_bridge.api.app import create_app
