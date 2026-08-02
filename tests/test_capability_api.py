@@ -639,6 +639,7 @@ def test_frontend_knowledge_processing_config_page_has_sync_config() -> None:
     assert "grid-cols-[12rem_minmax(0,10rem)_1fr]" in source
 
 
+@pytest.mark.codegraph_cli
 def test_kb_repo_source_api_saves_config_and_syncs_filtered_files(wm_paths, tmp_path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

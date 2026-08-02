@@ -555,10 +555,6 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_tasks_pick
   ON workflow_tasks(workflow_key, status, lease_expires_at, id);
-CREATE INDEX IF NOT EXISTS idx_workflow_tasks_latest
-  ON workflow_tasks(workflow_key, task_key, set_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_workflow_tasks_version_status
-  ON workflow_tasks(workflow_key, task_version, status);
 CREATE TABLE IF NOT EXISTS workflow_task_imports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id TEXT NOT NULL UNIQUE,
