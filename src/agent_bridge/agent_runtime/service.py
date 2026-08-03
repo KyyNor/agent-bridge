@@ -23,7 +23,8 @@ from typing import Any, Callable
 from jsonschema import Draft7Validator
 
 from agent_bridge.agent_runtime.control import RunControlRegistry
-from agent_bridge.agent_runtime.events import event_record, write_event
+from agent_bridge.agent_runtime.events import event_record
+from agent_bridge.agent_runtime.live_events import LiveAgentRunEventHub
 from agent_bridge.agent_runtime.json_schema import normalize_draft7_schema
 from agent_bridge.agent_runtime.registry import CodingAgentRegistry, create_coding_agent_registry
 from agent_bridge.agent_runtime.support import (
@@ -106,7 +107,10 @@ class AgentService:
         self.mcp_url = mcp_url or DEFAULT_MCP_URL
         self.base_run_dir: Path = paths.run_dir / "agent-runs"
         self.control_registry = RunControlRegistry()
+        self.live_events = LiveAgentRunEventHub()
         self._client_run_key_lock = threading.Lock()
+        self._event_id_lock = threading.Lock()
+        self._next_event_ids: dict[str, int] = {}
 
     async def run(
         self,
@@ -252,7 +256,7 @@ class AgentService:
             self._record_cwd(run_key, work_dir)
             prepare_event = prepare_timer.finish()
             events.append(prepare_event)
-            self._append_live_event(work_dir, prepare_event)
+            self._append_live_event(run_key, work_dir, prepare_event)
             prepare_event_written = True
             backend_timer = StageTimer(
                 "backend.run", agent_name=effective_backend_key, source="agent_runtime"
@@ -276,12 +280,13 @@ class AgentService:
             if self.control_registry.is_stop_requested(run_key):
                 raise AgentRunStopped
             result_msg = await self._drain_agent_with_control(
-                coding_agent,
-                request,
-                work_dir,
-                events,
-                control.stop_requested,
-                timeout_seconds,
+                run_key=run_key,
+                coding_agent=coding_agent,
+                request=request,
+                work_dir=work_dir,
+                events=events,
+                stop_requested=control.stop_requested,
+                timeout=timeout_seconds,
             )
         except AgentRunStopped:
             backend_status = "stopped"
@@ -289,8 +294,8 @@ class AgentService:
             stopped_event = event_record("status", status="stopped", message=STOPPED_ERROR)
             error_event = event_record("error", status="stopped", message=STOPPED_ERROR)
             events.extend((stopped_event, error_event))
-            self._append_live_event(work_dir, stopped_event)
-            self._append_live_event(work_dir, error_event)
+            self._append_live_event(run_key, work_dir, stopped_event)
+            self._append_live_event(run_key, work_dir, error_event)
             logger.info("Agent run 已由用户停止 agent=%s", agent_name or "agent")
         except TimeoutError:
             backend_status = "timeout"
@@ -298,14 +303,14 @@ class AgentService:
             logger.warning("Agent run 超时 agent=%s 超时=%ss", agent_name or "agent", timeout_seconds)
             error_event = event_record("error", status="failed", message=error)
             events.append(error_event)
-            self._append_live_event(work_dir, error_event)
+            self._append_live_event(run_key, work_dir, error_event)
         except Exception as exc:
             backend_status = "failed"
             logger.error("Agent run 失败 agent=%s 原因=%s", agent_name or "agent", exc, exc_info=True)
             error = f"{type(exc).__name__}: {exc}"
             error_event = event_record("error", status="failed", message=error)
             events.append(error_event)
-            self._append_live_event(work_dir, error_event)
+            self._append_live_event(run_key, work_dir, error_event)
         finally:
             if not prepare_event_written:
                 prepare_event = prepare_timer.finish(
@@ -313,14 +318,14 @@ class AgentService:
                     message=error,
                 )
                 events.append(prepare_event)
-                self._append_live_event(work_dir, prepare_event)
+                self._append_live_event(run_key, work_dir, prepare_event)
             if backend_timer is not None:
                 backend_event = backend_timer.finish(
                     status=backend_status,
                     message=error,
                 )
                 events.append(backend_event)
-                self._append_live_event(work_dir, backend_event)
+                self._append_live_event(run_key, work_dir, backend_event)
 
         finalize_timer = StageTimer(
             "run.finalize", agent_name=effective_backend_key, source="agent_runtime"
@@ -339,13 +344,13 @@ class AgentService:
             message=result.error,
         )
         events.append(finalize_event)
-        self._append_live_event(work_dir, finalize_event)
+        self._append_live_event(run_key, work_dir, finalize_event)
         total_event = total_timer.finish(
             status="success" if result.ok else ("stopped" if result.stopped else "failed"),
             message=result.error,
         )
         events.append(total_event)
-        self._append_live_event(work_dir, total_event)
+        self._append_live_event(run_key, work_dir, total_event)
         logger.info(
             "Agent run 完成 agent=%s 成功=%s 耗时=%dms",
             agent_name or "agent",
@@ -360,6 +365,16 @@ class AgentService:
                 events=events,
             )
         finally:
+            terminal_status = "stopped" if result.stopped else ("completed" if result.ok else "failed")
+            self.live_events.publish_terminal(
+                run_key,
+                {
+                    "run_key": run_key,
+                    "status": terminal_status,
+                    "ok": result.ok,
+                    "error": result.error,
+                },
+            )
             self.control_registry.finish(run_key)
         return result
 
@@ -374,6 +389,7 @@ class AgentService:
 
     async def _drain_agent_with_control(
         self,
+        run_key: str,
         coding_agent: CodingAgent,
         request: CodingAgentRequest,
         work_dir: Path | None,
@@ -383,7 +399,7 @@ class AgentService:
     ) -> CodingAgentFinal | None:
         if stop_requested.is_set():
             raise AgentRunStopped
-        run_task = asyncio.create_task(self._drain_agent(coding_agent, request, work_dir, events))
+        run_task = asyncio.create_task(self._drain_agent(run_key, coding_agent, request, work_dir, events))
         stop_task = asyncio.create_task(_wait_for_thread_event(stop_requested))
         try:
             done, _ = await asyncio.wait(
@@ -412,6 +428,7 @@ class AgentService:
 
     async def _drain_agent(
         self,
+        run_key: str,
         coding_agent: CodingAgent,
         request: CodingAgentRequest,
         work_dir: Path | None,
@@ -426,15 +443,12 @@ class AgentService:
         # so progress polling can read it in real time, before the run finishes
         # and the full event list is flushed to the agent_runs row.
         raw_log = None
-        event_log = None
         timing = ToolTimingTracker()
         if work_dir is not None:
             try:
                 raw_log = (work_dir / "messages.jsonl").open("a", encoding="utf-8")
-                event_log = (work_dir / "events.jsonl").open("a", encoding="utf-8")
             except OSError:
                 raw_log = None
-                event_log = None
         run = None
         try:
             run = coding_agent.start(request)
@@ -447,9 +461,8 @@ class AgentService:
                     externalize_event_payloads(record, work_dir)
                     for record in normalized_events
                 ]
-                if event_log is not None:
-                    for record in normalized_events:
-                        write_event(event_log, record)
+                for record in normalized_events:
+                    self._append_live_event(run_key, work_dir, record)
                 events.extend(normalized_events)
                 if update.final is not None:
                     last = update.final
@@ -462,14 +475,11 @@ class AgentService:
                 externalize_event_payloads(record, work_dir)
                 for record in timing.close_open()
             ]
-            if event_log is not None:
-                for record in pending_events:
-                    write_event(event_log, record)
+            for record in pending_events:
+                self._append_live_event(run_key, work_dir, record)
             events.extend(pending_events)
             if raw_log is not None:
                 raw_log.close()
-            if event_log is not None:
-                event_log.close()
         return last
 
     def _build_result(
@@ -522,15 +532,32 @@ class AgentService:
         except Exception:
             logger.error("Agent run cwd 回填失败 run_key=%s", run_key, exc_info=True)
 
-    def _append_live_event(self, work_dir: Path | None, record: dict[str, Any]) -> None:
-        """Append a terminal event after the streaming loop has closed its file."""
+    def _append_live_event(self, run_key: str, work_dir: Path | None, record: dict[str, Any]) -> None:
+        """先写入运行 JSONL，再将新事件发布给本进程 SSE 订阅者。"""
         if work_dir is None:
             return
         try:
             with (work_dir / "events.jsonl").open("a", encoding="utf-8") as event_log:
-                write_event(event_log, record)
+                event_id = self._next_event_id(run_key, work_dir)
+                record["event_id"] = event_id
+                event_log.write(json.dumps(record, ensure_ascii=False) + "\n")
+                event_log.flush()
+            self.live_events.publish_event(run_key, record)
         except OSError:
             logger.error("Agent run 实时事件补写失败 work_dir=%s", work_dir, exc_info=True)
+
+    def _next_event_id(self, run_key: str, work_dir: Path) -> int:
+        with self._event_id_lock:
+            next_id = self._next_event_ids.get(run_key)
+            if next_id is None:
+                path = work_dir / "events.jsonl"
+                try:
+                    existing = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+                except OSError:
+                    existing = 0
+                next_id = existing + 1
+            self._next_event_ids[run_key] = next_id + 1
+            return next_id
 
     def _finish_run(
         self,

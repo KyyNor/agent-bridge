@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi.responses import StreamingResponse
 
 from agent_bridge.api.schemas import DesignAgentRequest
 from agent_bridge.agent_runtime.json_schema import DRAFT7_SCHEMA_URI
@@ -34,6 +36,45 @@ def _read_events_jsonl(path: Path) -> list[dict[str, Any]] | None:
         if isinstance(item, dict):
             events.append(item)
     return events
+
+
+def _live_or_persisted_events(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """读取运行中的 JSONL；终态时优先包含完整终态事件的 SQLite 副本。"""
+    cwd = row.get("cwd")
+    if cwd:
+        events = _read_events_jsonl(Path(str(cwd)) / "events.jsonl")
+        if events is not None:
+            persisted = row.get("events") or []
+            if row.get("status") != "running" and len(persisted) > len(events):
+                return persisted
+            return events
+    return row.get("events") or []
+
+
+def _event_id(record: dict[str, Any], fallback: int) -> int:
+    value = record.get("event_id")
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return fallback
+
+
+def _events_with_ids(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """为旧运行的无 id 事件按稳定顺序投影事件号。"""
+    normalized: list[dict[str, Any]] = []
+    for index, event in enumerate(events, start=1):
+        item = dict(event)
+        item["event_id"] = _event_id(item, index)
+        normalized.append(item)
+    return normalized
+
+
+def _sse_frame(event: str, payload: dict[str, Any], event_id: int | None = None) -> str:
+    lines: list[str] = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event}")
+    lines.append("data: " + json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    return "\n".join(lines) + "\n\n"
 
 
 def _normalize_agent_run_result(row: dict[str, Any]) -> dict[str, Any]:
@@ -244,15 +285,82 @@ def create_agent_runs_routes(service, actor):
         row = service.store.agent_runs.get(run_key)
         if row is None:
             raise NotFound("agent run not found")
-        cwd = row.get("cwd")
-        if cwd:
-            events = _read_events_jsonl(Path(str(cwd)) / "events.jsonl")
-            if events is not None:
-                persisted = row.get("events") or []
-                if row.get("status") != "running" and len(persisted) > len(events):
-                    return persisted
-                return events
-        return row.get("events") or []
+        return _live_or_persisted_events(row)
+
+    @router.get("/agent-runs/{run_key}/events/stream")
+    async def stream_agent_run_events(
+        run_key: str,
+        request: Request,
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+        current_actor: str = Depends(actor),
+    ) -> StreamingResponse:
+        """以 SSE 推送已写入 JSONL 的 Agent 事件，并支持断线重放。"""
+        row = service.store.agent_runs.get(run_key)
+        if row is None:
+            raise NotFound("agent run not found")
+        try:
+            cursor = max(0, int(last_event_id or "0"))
+        except ValueError:
+            cursor = 0
+        subscription = service.agents.live_events.subscribe(run_key)
+
+        async def generate():
+            latest_id = cursor
+            try:
+                # 先订阅再读取持久快照，避免快照与订阅之间的事件丢失；队列中的重复事件
+                # 会通过 event_id 被忽略。
+                current = service.store.agent_runs.get(run_key)
+                if current is None:
+                    yield _sse_frame("run_terminal", {"run_key": run_key, "status": "missing", "ok": False})
+                    return
+                for record in _events_with_ids(_live_or_persisted_events(current)):
+                    record_id = int(record["event_id"])
+                    if record_id <= latest_id:
+                        continue
+                    latest_id = record_id
+                    yield _sse_frame("agent_event", record, record_id)
+                if current.get("status") != "running":
+                    yield _sse_frame(
+                        "run_terminal",
+                        {
+                            "run_key": run_key,
+                            "status": current.get("status"),
+                            "ok": current.get("ok", False),
+                            "error": current.get("error"),
+                        },
+                    )
+                    return
+                while not await request.is_disconnected():
+                    try:
+                        message = await asyncio.wait_for(subscription.receive(), timeout=20)
+                    except TimeoutError:
+                        yield _sse_frame("heartbeat", {})
+                        continue
+                    if message.kind == "agent_event":
+                        record = dict(message.payload)
+                        record_id = _event_id(record, latest_id + 1)
+                        if record_id <= latest_id:
+                            continue
+                        record["event_id"] = record_id
+                        latest_id = record_id
+                        yield _sse_frame("agent_event", record, record_id)
+                    elif message.kind == "resync_required":
+                        yield _sse_frame("resync_required", message.payload)
+                        return
+                    elif message.kind == "run_terminal":
+                        yield _sse_frame("run_terminal", message.payload)
+                        return
+            finally:
+                service.agents.live_events.unsubscribe(subscription)
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.get("/agent-runs/{run_key}/payload")
     def get_agent_run_payload(

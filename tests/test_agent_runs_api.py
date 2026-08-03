@@ -611,3 +611,36 @@ def test_agent_run_finish_preserves_existing_model_when_not_replaced(wm_paths) -
     )
 
     assert svc.store.agent_runs.get("model_run")["model"] == "claude-sonnet-4-5"
+
+
+def test_agent_run_event_stream_replays_from_last_event_id_then_closes_terminal(wm_paths) -> None:
+    from agent_bridge.app.service import AgentBridgeService
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.store.agent_runs.create(
+        run_key="stream_done",
+        agent_name="workflow",
+        status="completed",
+        ok=True,
+        prompt="",
+        events=[
+            {"event_id": 1, "kind": "status", "status": "running"},
+            {"event_id": 2, "kind": "agent_message", "message": "one"},
+            {"event_id": 3, "kind": "stage", "stage_name": "run.total"},
+        ],
+    )
+
+    client = _client(wm_paths)
+    response = client.get(
+        "/agent-runs/stream_done/events/stream",
+        headers={"X-Agent-Bridge-User": "root", "Last-Event-ID": "1"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["x-accel-buffering"] == "no"
+    assert "id: 2\nevent: agent_event\ndata: {\"event_id\":2" in response.text
+    assert "id: 3\nevent: agent_event\ndata: {\"event_id\":3" in response.text
+    assert "event: run_terminal" in response.text
+    assert "id: 1\nevent: agent_event" not in response.text
