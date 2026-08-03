@@ -1,4 +1,4 @@
-import type { QueryClientConfig } from '@tanstack/vue-query'
+import { QueryClient, type QueryClientConfig } from '@tanstack/vue-query'
 
 /**
  * 服务端状态的统一默认策略。
@@ -19,6 +19,9 @@ export const queryClientConfig: QueryClientConfig = {
     },
   },
 }
+
+/** 应用与非组件 composable 共用的单例缓存客户端。 */
+export const queryClient = new QueryClient(queryClientConfig)
 
 /**
  * 所有服务端查询键从这里生成，确保筛选条件和资源身份始终参与缓存隔离。

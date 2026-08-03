@@ -529,7 +529,7 @@ export const api = {
     format?: string
     limit?: number
     offset?: number
-  } = {}) => {
+  } = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     if (params.profile_key) qs.set('profile_key', params.profile_key)
     if (params.workflow_key) qs.set('workflow_key', params.workflow_key)
@@ -545,26 +545,26 @@ export const api = {
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset != null) qs.set('offset', String(params.offset))
     ;(params.tags || []).forEach(tag => qs.append('tags', tag))
-    return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)
+    return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`, options)
   },
   getWorkflowArtifactHistory: (params: {
     profile_key?: string
     workflow_key: string
     task_key: string
     limit?: number
-  }) => {
+  }, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     if (params.profile_key) qs.set('profile_key', params.profile_key)
     qs.set('workflow_key', params.workflow_key)
     qs.set('task_key', params.task_key)
     if (params.limit) qs.set('limit', String(params.limit))
-    return get<WorkflowArtifactHistoryResult>(`/workflow-artifacts/history?${qs}`)
+    return get<WorkflowArtifactHistoryResult>(`/workflow-artifacts/history?${qs}`, options)
   },
-  getWorkflowArtifact: (artifactId: string, profileKey?: string) => {
+  getWorkflowArtifact: (artifactId: string, profileKey?: string, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     if (profileKey) qs.set('profile_key', profileKey)
     const tail = qs.toString() ? `?${qs}` : ''
-    return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`)
+    return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`, options)
   },
   executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string, executionMode: WorkflowExecutionMode = 'normal') => {
     const qs = new URLSearchParams()
@@ -583,7 +583,7 @@ export const api = {
       `/workflows/${workflowKey}/tasks/${encodeURIComponent(taskKey)}/reset${tail}`,
     )
   },
-  getWorkflowRun: (runId: string) => get<WorkflowRun>(`/workflow-runs/${runId}`),
+  getWorkflowRun: (runId: string, options?: ApiRequestOptions) => get<WorkflowRun>(`/workflow-runs/${runId}`, options),
   stopWorkflowRun: (runId: string) =>
     post<RunStopResponse>(`/workflow-runs/${encodeURIComponent(runId)}/stop`),
 

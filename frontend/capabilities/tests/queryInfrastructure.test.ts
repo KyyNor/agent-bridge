@@ -45,3 +45,15 @@ test('monitoring pages use query keys instead of local request tokens', () => {
   assert.match(agentRuns, /refetchInterval/)
   assert.doesNotMatch(agentRuns, /detailEventsPoll/)
 })
+
+test('workflow artifact and run readers share the query cache', () => {
+  const artifacts = source('composables/useWorkflowArtifacts.ts')
+  const progress = source('composables/useWorkflowRunProgress.ts')
+
+  assert.match(artifacts, /queryClient\.fetchQuery/)
+  assert.match(artifacts, /queryKeys\.workflowArtifacts/)
+  assert.match(artifacts, /cancelQueries/)
+  assert.doesNotMatch(artifacts, /requestToken/)
+  assert.match(progress, /queryKeys\.workflowRun/)
+  assert.match(progress, /invalidateQueries\(\{ queryKey: \['workflow-artifacts'\] \}\)/)
+})
