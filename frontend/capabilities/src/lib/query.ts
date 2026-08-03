@@ -48,4 +48,6 @@ export const queryKeys = {
   workflowRun: (runId: string) => ['workflow-runs', 'detail', runId] as const,
   workflowRunEvents: (runId: string) => ['workflow-runs', 'events', runId] as const,
   workflowRunLogs: (runId: string) => ['workflow-runs', 'logs', runId] as const,
+  knowledgeBases: () => ['knowledge-bases'] as const,
+  knowledgeBackends: () => ['knowledge-backends'] as const,
 }

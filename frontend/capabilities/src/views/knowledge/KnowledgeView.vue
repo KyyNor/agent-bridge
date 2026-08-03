@@ -23,6 +23,7 @@ import { confirm, alert } from '../../composables/useConfirm'
 import { useKnowledgeUploadQueue } from '../../composables/useKnowledgeUploadQueue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { navigateTo } from '../../lib/navigation'
+import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -235,12 +236,18 @@ watch(() => detailTab.value, () => {
   if (detailTab.value !== 'docs') selectedDocSlugs.value = new Set()
 })
 
-async function loadKbs() {
-  try { kbs.value = await api.listWikiKbs() } catch { kbs.value = [] }
+async function loadKbs(options: { fresh?: boolean } = {}) {
+  if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeBases() })
+  try {
+    kbs.value = await queryClient.fetchQuery({
+      queryKey: queryKeys.knowledgeBases(),
+      queryFn: ({ signal }) => api.listWikiKbs({ signal }),
+    })
+  } catch { kbs.value = [] }
 }
 
 async function refreshDetailKbSummary() {
-  await loadKbs()
+  await loadKbs({ fresh: true })
   if (!detailKb.value) return
   const latest = kbs.value.find(kb => kb.slug === detailKb.value?.slug)
   if (latest) detailKb.value = latest
@@ -256,14 +263,20 @@ async function deleteKb(kb: KnowledgeBaseSummary) {
   if (!ok) return
   try {
     await api.deleteKnowledgeBase(kb.slug)
-    await loadKbs()
+    await loadKbs({ fresh: true })
   } catch (e: any) {
     await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
   }
 }
 
-async function loadBackends() {
-  try { backends.value = await api.listBackends() } catch { backends.value = [] }
+async function loadBackends(options: { fresh?: boolean } = {}) {
+  if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeBackends() })
+  try {
+    backends.value = await queryClient.fetchQuery({
+      queryKey: queryKeys.knowledgeBackends(),
+      queryFn: ({ signal }) => api.listBackends({ signal }),
+    })
+  } catch { backends.value = [] }
 }
 
 async function createKb() {
@@ -282,7 +295,7 @@ async function createKb() {
     })
     showCreate.value = false
     createForm.value = { slug: '', name: '', description: '' }
-    await loadKbs()
+    await loadKbs({ fresh: true })
     const newKb = kbs.value.find(k => k.slug === slug)
     if (newKb) openDetail(newKb)
   } catch (e: any) {
@@ -721,7 +734,7 @@ function openPlaneDialog(k: KnowledgeBaseSummary) {
 async function updateKnowledgeDefaults(defaults: { default_backend_slug: string | null; default_agent_id: string | null }) {
   if (!detailKb.value) return
   detailKb.value = { ...detailKb.value, ...defaults }
-  await loadKbs()
+  await loadKbs({ fresh: true })
 }
 
 // 同步/任务 status → StatusBadge 语义状态
@@ -756,7 +769,7 @@ function syncBadgeLabel(status?: string | null) {
     <template v-if="mode === 'list'">
     <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="loadKbs()">
+      <Button variant="outline" size="lg" @click="loadKbs({ fresh: true })">
         <RotateCw :size="14" />
         刷新
       </Button>

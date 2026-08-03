@@ -680,7 +680,7 @@ export const api = {
     post<TestCloneResult>('/code-repo/test-clone', { git_url: gitUrl, auth_ref: authRef }),
   syncCodeRepo: (key: string) => post(`/code-repo/repositories/${key}/sync`),
   deleteCodeRepo: (key: string) => post<{ deleted: boolean }>(`/code-repo/repositories/${key}/delete`),
-  listWikiKbs: () => get<KnowledgeBaseSummary[]>('/builtin/wiki/kbs'),
+  listWikiKbs: (options?: ApiRequestOptions) => get<KnowledgeBaseSummary[]>('/builtin/wiki/kbs', options),
 
   // CodeGraph detail
   getCodeGraphStatus: () => get<CodeGraphStatus>('/code-repo/status'),
@@ -908,7 +908,7 @@ export const api = {
     post<{ answer: string; chunks: SearchResultChunk[]; session_id: string | null }>('/ask', data),
 
   // Backends
-  listBackends: () => get<BackendInfo[]>('/backends'),
+  listBackends: (options?: ApiRequestOptions) => get<BackendInfo[]>('/backends', options),
   createBackend: (data: { slug: string; backend_type: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>
     post<BackendInfo>('/backends', data),
   updateBackend: (slug: string, data: { backend_type?: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>

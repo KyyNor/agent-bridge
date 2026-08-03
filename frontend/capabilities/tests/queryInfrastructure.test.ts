@@ -57,3 +57,11 @@ test('workflow artifact and run readers share the query cache', () => {
   assert.match(progress, /queryKeys\.workflowRun/)
   assert.match(progress, /invalidateQueries\(\{ queryKey: \['workflow-artifacts'\] \}\)/)
 })
+
+test('knowledge catalog reads cache stable resources and invalidate after writes', () => {
+  const knowledge = source('views/knowledge/KnowledgeView.vue')
+
+  assert.match(knowledge, /queryKeys\.knowledgeBases/)
+  assert.match(knowledge, /queryKeys\.knowledgeBackends/)
+  assert.match(knowledge, /loadKbs\(\{ fresh: true \}\)/)
+})
