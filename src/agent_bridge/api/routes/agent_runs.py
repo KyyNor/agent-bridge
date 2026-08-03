@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,8 @@ from agent_bridge.agent_runtime.json_schema import DRAFT7_SCHEMA_URI
 from agent_bridge.agent_runtime.trace import read_payload
 from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.core.domain import ConflictError, NotFound, require_admin_user
+
+logger = logging.getLogger(__name__)
 
 
 def _read_events_jsonl(path: Path) -> list[dict[str, Any]] | None:
@@ -303,6 +306,7 @@ def create_agent_runs_routes(service, actor):
         except ValueError:
             cursor = 0
         subscription = service.agents.live_events.subscribe(run_key)
+        logger.info("Agent run SSE 订阅建立 run_key=%s last_event_id=%d", run_key, cursor)
 
         async def generate():
             latest_id = cursor
@@ -352,6 +356,7 @@ def create_agent_runs_routes(service, actor):
                         return
             finally:
                 service.agents.live_events.unsubscribe(subscription)
+                logger.info("Agent run SSE 订阅关闭 run_key=%s last_event_id=%d", run_key, latest_id)
 
         return StreamingResponse(
             generate(),

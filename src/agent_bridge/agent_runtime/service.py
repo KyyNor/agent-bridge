@@ -375,6 +375,8 @@ class AgentService:
                     "error": result.error,
                 },
             )
+            with self._event_id_lock:
+                self._next_event_ids.pop(run_key, None)
             self.control_registry.finish(run_key)
         return result
 
