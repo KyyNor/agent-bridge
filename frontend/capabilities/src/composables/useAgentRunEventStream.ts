@@ -101,10 +101,11 @@ export function useAgentRunEventStream() {
   async function consume(runKey: string, activeGeneration: number, handlers: AgentRunStreamHandlers) {
     let retryAttempt = 0
     while (activeGeneration === generation) {
-      controller = new AbortController()
+      const streamController = new AbortController()
+      controller = streamController
       let terminal = false
       try {
-        const response = await openAgentRunEventStream(runKey, lastEventId.value, controller.signal)
+        const response = await openAgentRunEventStream(runKey, lastEventId.value, streamController.signal)
         connected.value = true
         retryAttempt = 0
         await readSseFrames(response.body as ReadableStream<Uint8Array>, async frame => {
@@ -123,8 +124,11 @@ export function useAgentRunEventStream() {
         if (activeGeneration !== generation || isAbortError(error)) return
         handlers.onError?.(error instanceof Error ? error : new Error('Agent 事件流连接失败'))
       } finally {
-        connected.value = false
-        controller = null
+        // 旧连接在回调中触发重同步后，不得把新连接的控制器或连接状态清空。
+        if (controller === streamController) {
+          connected.value = false
+          controller = null
+        }
       }
       if (terminal || activeGeneration !== generation) return
       await new Promise(resolve => setTimeout(resolve, retryDelay(retryAttempt)))

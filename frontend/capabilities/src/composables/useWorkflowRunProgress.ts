@@ -20,6 +20,7 @@ type WorkflowTaskStatus = Record<string, {
   failed: number
 }>
 import { useSubagentDetails } from './useSubagentDetails'
+import { useAgentRunEventStream } from './useAgentRunEventStream'
 import { alert } from './useConfirm'
 import {
   buildAgentRunHash,
@@ -27,6 +28,7 @@ import {
   currentHash,
   navigateTo,
 } from '../lib/navigation'
+import { lastAgentRunEventId, mergeAgentRunEvent, normalizeAgentRunEvents } from '../lib/agentRunEvents'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误'
@@ -113,10 +115,12 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
   const runPageSize = ref(10)
   let testPoll: ReturnType<typeof setInterval> | null = null
   let progressAgentRunDetailRequest = 0
+  let streamedAgentRunKey = ''
 
   const progressSubagentDetailState = useSubagentDetails(
     (runKey, taskIdStr) => api.getAgentRunSubagentDetail(runKey, taskIdStr),
   )
+  const progressAgentEventStream = useAgentRunEventStream()
 
   const progressWorkflow = computed(() =>
     workflows.value.find(item => item.workflow_key === progressWorkflowKey.value) || selectedWorkflow.value,
@@ -280,12 +284,14 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
 
   function clearProgressAgentRunDetail() {
     progressAgentRunDetailRequest += 1
+    stopProgressAgentEventStream()
     progressAgentRunDetail.value = null
     progressAgentRunDetailLoading.value = false
     progressAgentRunDetailError.value = ''
   }
 
   function setProgressAgentRunKey(value: string) {
+    if (value !== progressAgentRunKey.value) stopProgressAgentEventStream()
     progressAgentRunKey.value = value
     progressAgentRunDetailError.value = ''
     if (!value) clearProgressAgentRunDetail()
@@ -306,6 +312,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
       if (requestId !== progressAgentRunDetailRequest || agentRunKey !== progressAgentRunKey.value) return
       progressAgentRunDetail.value = detail
       progressAgentRunDetailError.value = ''
+      ensureProgressAgentEventStream()
     } catch (error: unknown) {
       if (requestId !== progressAgentRunDetailRequest || agentRunKey !== progressAgentRunKey.value) return
       progressAgentRunDetailError.value = errorMessage(error)
@@ -351,7 +358,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     if (!options.quiet) logsLoading.value = true
     try {
       const events = await api.getAgentRunEvents(agentRunKey)
-      runEvents.value = events
+      runEvents.value = normalizeAgentRunEvents(events)
       progressDetailError.value = ''
       if (options.quiet) {
         await refreshProgressSubagentDetails(agentRunKey)
@@ -368,6 +375,49 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
 
   async function refreshProgressSubagentDetails(agentRunKey: string) {
     await progressSubagentDetailState.refreshLoaded(agentRunKey)
+  }
+
+  function selectedProgressAgentRun() {
+    return progressAgentRuns.value.find(run => run.run_key === progressAgentRunKey.value) || null
+  }
+
+  function stopProgressAgentEventStream() {
+    progressAgentEventStream.stop()
+    streamedAgentRunKey = ''
+  }
+
+  function ensureProgressAgentEventStream() {
+    const agentRunKey = progressAgentRunKey.value
+    const selected = selectedProgressAgentRun()
+    if (!agentRunKey || progressAgentRunDetail.value?.status !== 'running' || selected?.status !== 'running') {
+      if (streamedAgentRunKey) stopProgressAgentEventStream()
+      return
+    }
+    if (streamedAgentRunKey === agentRunKey) return
+    streamedAgentRunKey = agentRunKey
+    progressAgentEventStream.start(agentRunKey, lastAgentRunEventId(runEvents.value), {
+      onAgentEvent(event) {
+        if (progressAgentRunKey.value !== agentRunKey) return
+        runEvents.value = mergeAgentRunEvent(runEvents.value, event)
+      },
+      async onTerminal() {
+        if (progressAgentRunKey.value !== agentRunKey) return
+        const detail = await api.getAgentRun(agentRunKey)
+        progressAgentRunDetail.value = detail
+        progressAgentRuns.value = progressAgentRuns.value.map(run => run.run_key === agentRunKey ? detail : run)
+        streamedAgentRunKey = ''
+        await refreshProgressSubagentDetails(agentRunKey)
+      },
+      async onResyncRequired() {
+        if (progressAgentRunKey.value !== agentRunKey) return
+        await Promise.all([
+          loadProgressAgentEvents({ quiet: true }),
+          loadProgressAgentRunDetail({ quiet: true }),
+        ])
+        streamedAgentRunKey = ''
+        ensureProgressAgentEventStream()
+      },
+    })
   }
 
   async function selectProgressAgentRun(agentRunKey: string) {
@@ -465,9 +515,8 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
       progressRunDetail.value = run
       mergeWorkflowRun(run)
       // Refresh agent runs list (to pick up html reporter when it starts) and
-      // refresh events for the currently selected agent run.
+      // refresh its detail. The selected agent timeline is updated by SSE.
       await loadProgressAgentRuns({ quiet: true })
-      await loadProgressAgentEvents({ quiet: true })
       if (['completed', 'no_task', 'failed', 'stopped'].includes(run.status)) {
         stopTestPolling()
         testing.value = false
@@ -649,6 +698,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     openProgressArtifactDetail,
     openProgressArtifact,
     openProgressHtmlReport,
+    stopProgressAgentEventStream,
     stopTestPolling,
     pollTestRun,
     startTestPolling,
