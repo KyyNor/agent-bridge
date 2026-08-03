@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import type { Ref } from 'vue'
 import { api } from '../api/client'
 import type {
@@ -32,6 +32,8 @@ import {
 } from '../lib/workflowTasks'
 import { distinctActors, filterEventsByActor } from '../lib/workflowEvents'
 import { paginate } from '../lib/pagination'
+import { registerNavigationGuard } from '../lib/navigation'
+import { confirm } from './useConfirm'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误'
@@ -167,6 +169,29 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
   const batchRunDetailVisible = computed(() => (routeMode.value === 'tasks' || (routeMode.value === 'detail' && detailTab.value === 'tasks'))
     && !!batchCurrentRunId.value
     && (batchAction.value === 'run' || !!batchSummary.value))
+
+  const removeBatchNavigationGuard = registerNavigationGuard(() => {
+    if (!batchBusy.value) return true
+    return confirm({
+      title: '批量操作进行中',
+      description: '当前批量操作尚未完成，离开后页面队列会停止，已启动的任务可能继续在后台运行。确认离开？',
+      destructive: true,
+      confirmText: '离开',
+    })
+  })
+
+  function handleBeforeUnload(event: BeforeUnloadEvent) {
+    if (!batchBusy.value) return
+    event.preventDefault()
+    // 浏览器会使用自己的通用文案，不能可靠展示自定义提示文本。
+    event.returnValue = ''
+  }
+
+  if (typeof window !== 'undefined') window.addEventListener('beforeunload', handleBeforeUnload)
+  onUnmounted(() => {
+    removeBatchNavigationGuard()
+    if (typeof window !== 'undefined') window.removeEventListener('beforeunload', handleBeforeUnload)
+  })
 
   function taskWorkflowKey() {
     return taskWorkflow.value?.workflow_key || (routeMode.value === 'tasks' ? routeWorkflowKey.value : '')
