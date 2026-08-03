@@ -271,6 +271,19 @@ class WorkflowsFacadeMixin:
     def list_workflow_run_overviews(self) -> list[dict[str, Any]]:
         return self.workflows.list_workflow_run_overviews()
 
+    def list_completed_workflow_top(
+        self,
+        *,
+        period_start: str,
+        period_end: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        return self.workflows.list_completed_workflow_top(
+            period_start=period_start,
+            period_end=period_end,
+            limit=limit,
+        )
+
     def clear_workflow_execution_data(self, workflow_key: str) -> dict[str, int]:
         return self.workflows.clear_workflow_execution_data(workflow_key)
 

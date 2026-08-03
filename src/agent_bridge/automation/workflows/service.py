@@ -9,7 +9,7 @@ from typing import Any
 
 from agent_bridge.core.domain import ConflictError, NotFound, ValidationError, require_admin_user
 from agent_bridge.core.diff import text_diff, workflow_structured_diff
-from agent_bridge.core.timeutil import parse_utc, utc_iso, utc_now
+from agent_bridge.core.timeutil import local_now, parse_utc, utc_iso, utc_now
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.models import (
     WorkflowStatus,
@@ -38,6 +38,7 @@ from agent_bridge.automation.workflows.revisions import (
     workflow_version_hash,
 )
 from agent_bridge.automation.workflows.validator import WorkflowValidator
+from agent_bridge.automation.workflows.window import parse_hhmm, previous_window_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +283,30 @@ class WorkflowService:
     def list_run_overviews(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         return self.store.list_workflow_run_overviews()
+
+    def list_completed_workflow_top(self, actor: str, *, limit: int = 5) -> dict[str, Any]:
+        """返回上一个已结束工作流执行窗口内完成次数最多的工作流。"""
+        require_admin_user(actor, self.admins)
+        config = self.store.get_sync_config()
+        now = local_now()
+        period_start_local, period_end_local = previous_window_bounds(
+            now=now,
+            start=parse_hhmm(config.get("workflow_start_time")),
+            stop=parse_hhmm(config.get("workflow_stop_time")),
+        )
+        return {
+            "period_start": utc_iso(period_start_local),
+            "period_end": utc_iso(period_end_local),
+            "period_label": (
+                f"{period_start_local:%m-%d %H:%M} → "
+                f"{period_end_local:%m-%d %H:%M}"
+            ),
+            "items": self.store.list_completed_workflow_top(
+                period_start=utc_iso(period_start_local),
+                period_end=utc_iso(period_end_local),
+                limit=limit,
+            ),
+        }
 
     def list_tasks(
         self,

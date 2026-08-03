@@ -277,6 +277,36 @@ class WorkflowRunsRepositoryMixin:
             )
         return result
 
+    def list_completed_workflow_top(
+        self,
+        *,
+        period_start: str,
+        period_end: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """统计指定周期内完成次数最多的工作流。"""
+        bounded_limit = min(max(limit, 1), 20)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  r.workflow_key,
+                  COALESCE(w.name, r.workflow_key) AS workflow_name,
+                  COUNT(*) AS completed_count
+                FROM workflow_runs AS r
+                LEFT JOIN workflow_definitions AS w
+                  ON w.workflow_key = r.workflow_key
+                WHERE r.status = 'completed'
+                  AND datetime(r.finished_at) >= datetime(?)
+                  AND datetime(r.finished_at) < datetime(?)
+                GROUP BY r.workflow_key, COALESCE(w.name, r.workflow_key)
+                ORDER BY completed_count DESC, workflow_name COLLATE NOCASE ASC, r.workflow_key ASC
+                LIMIT ?
+                """,
+                (period_start, period_end, bounded_limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def list_completed_workflow_runs_for_task(
         self,
         workflow_key: str,

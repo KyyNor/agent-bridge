@@ -72,6 +72,7 @@ import type {
   WorkflowDraft,
   WorkflowRun,
   WorkflowRunOverview,
+  CompletedWorkflowTopResponse,
   WorkflowRunSummaryPage,
   WorkflowRunEvent,
   WorkflowRunLog,
@@ -461,6 +462,7 @@ export const api = {
     return get<WorkflowRun[]>(`/workflows/${key}/runs?${qs}`)
   },
   listWorkflowRunOverviews: () => get<WorkflowRunOverview[]>('/workflows/run-summaries'),
+  listCompletedWorkflowTop: () => get<CompletedWorkflowTopResponse>('/workflows/completed-top'),
   listWorkflowRunSummaries: (key: string, limit = 10, offset = 0) => {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
     return get<WorkflowRunSummaryPage>(`/workflows/${key}/runs/summary?${qs}`)

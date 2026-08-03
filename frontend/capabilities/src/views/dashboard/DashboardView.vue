@@ -2,7 +2,7 @@
 import { Server, Wrench, CheckCircle, XCircle, Plus, RotateCw } from '@lucide/vue'
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../../api/client'
-import type { McpService } from '../../api/types'
+import type { CompletedWorkflowTopItem, McpService } from '../../api/types'
 import { timeAgo } from '../../lib/time'
 import StatCard from '../../components/StatCard.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
@@ -13,12 +13,25 @@ const loading = ref(true)
 const enabledCount = computed(() => services.value.filter(s => s.status === 'enabled').length)
 const errorCount = computed(() => services.value.filter(s => s.status === 'error').length)
 const toolCount = ref<number | null>(null)
+const completedWorkflowTop = ref<CompletedWorkflowTopItem[]>([])
+const completedWorkflowTopPeriodLabel = ref('')
+const completedWorkflowTopLoading = ref(true)
 
 function goto(hash: string) {
   void navigateTo(hash)
 }
 
 onMounted(async () => {
+  const completedTopPromise = api.listCompletedWorkflowTop()
+    .then(result => {
+      completedWorkflowTop.value = result.items
+      completedWorkflowTopPeriodLabel.value = result.period_label
+    })
+    .catch(() => {
+      completedWorkflowTop.value = []
+      completedWorkflowTopPeriodLabel.value = ''
+    })
+    .finally(() => { completedWorkflowTopLoading.value = false })
   try {
     services.value = await api.listServices()
     const active = services.value.filter(s => s.status === 'enabled')
@@ -29,6 +42,7 @@ onMounted(async () => {
     toolCount.value = total
   } catch { /* empty state */ }
   loading.value = false
+  await completedTopPromise
 })
 
 // 语义状态圆点：颜色只走令牌派生（替代原 emerald/red/gray 裸色）
@@ -173,6 +187,40 @@ const disabledCount = computed(() => services.value.length - enabledCount.value 
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="rounded-lg border border-border bg-card shadow-card">
+      <div class="flex items-center justify-between border-b border-border px-5 py-4">
+        <div>
+          <h2 class="text-sm font-medium text-foreground">上一个运行周期完成 Top 5</h2>
+          <p class="mt-1 text-xs text-muted-foreground">
+            {{ completedWorkflowTopPeriodLabel ? `统计区间：${completedWorkflowTopPeriodLabel}` : '按上一个工作流执行窗口统计' }}
+          </p>
+        </div>
+        <button class="text-xs text-primary hover:underline" @click="goto('workflow')">查看工作流</button>
+      </div>
+      <div v-if="completedWorkflowTopLoading" class="px-5 py-8 text-center text-sm text-muted-foreground">加载中...</div>
+      <div v-else-if="completedWorkflowTop.length === 0" class="px-5 py-8 text-center text-sm text-muted-foreground">昨日暂无已完成的工作流</div>
+      <table v-else class="w-full">
+        <thead>
+          <tr class="border-b border-border text-left text-xs font-medium text-muted-foreground">
+            <th class="w-16 px-5 py-3">排名</th>
+            <th class="px-5 py-3">工作流名称</th>
+            <th class="w-40 px-5 py-3 text-right">完成数量</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="(item, index) in completedWorkflowTop"
+            :key="item.workflow_key"
+            class="border-b border-border/60 last:border-0"
+          >
+            <td class="px-5 py-3 text-sm tabular-nums text-muted-foreground">{{ index + 1 }}</td>
+            <td class="px-5 py-3 text-sm font-medium">{{ item.workflow_name }}</td>
+            <td class="px-5 py-3 text-right text-sm font-semibold tabular-nums">{{ item.completed_count }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </template>

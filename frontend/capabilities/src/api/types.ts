@@ -404,6 +404,19 @@ export interface WorkflowRunOverview {
   task_failed?: number
 }
 
+export interface CompletedWorkflowTopItem {
+  workflow_key: string
+  workflow_name: string
+  completed_count: number
+}
+
+export interface CompletedWorkflowTopResponse {
+  period_start: string
+  period_end: string
+  period_label: string
+  items: CompletedWorkflowTopItem[]
+}
+
 export interface WorkflowNodeRun {
   node_id: string
   node_type: WorkflowNodeType

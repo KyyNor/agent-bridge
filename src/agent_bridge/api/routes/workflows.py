@@ -28,6 +28,10 @@ def create_workflow_routes(service, actor):
     def list_workflow_run_overviews(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.workflows.list_run_overviews(current_actor)
 
+    @router.get("/workflows/completed-top")
+    def list_completed_workflow_top(current_actor: str = Depends(actor)) -> dict[str, Any]:
+        return service.workflows.list_completed_workflow_top(current_actor)
+
     @router.post("/workflows")
     def upsert_workflow(payload: WorkflowDefinitionRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.workflows.upsert_definition(actor=current_actor, **payload.model_dump())

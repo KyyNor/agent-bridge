@@ -21,6 +21,8 @@ from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
 from agent_bridge.automation.workflows.definition import WorkflowGraph
 from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
+from agent_bridge.automation.workflows.window import parse_hhmm as _parse_hhmm
+from agent_bridge.automation.workflows.window import window_anchor
 
 logger = logging.getLogger(__name__)
 
@@ -226,24 +228,7 @@ class WorkflowScheduler:
         (finished_today / in-flight slots) exactly once when a new window opens,
         including overnight windows that span midnight.
         """
-        # 调度窗口是本地墙上时间，比较时显式剔除 time 对象上的时区。
-        current = now.timetz().replace(tzinfo=None)
-        start = self._start_time
-        stop = self._stop_time
-        if start is None and stop is None:
-            return now.date()  # always-on: reset daily
-        if start is None:
-            return now.date() if current < stop else None
-        if stop is None:
-            return now.date() if current >= start else None
-        if start <= stop:
-            return now.date() if start <= current < stop else None
-        # Overnight window (start > stop): spans midnight.
-        if current >= start:
-            return now.date()
-        if current < stop:
-            return now.date() - timedelta(days=1)
-        return None
+        return window_anchor(now, self._start_time, self._stop_time)
 
     def tick(self) -> None:
         with self._lock:
@@ -847,13 +832,3 @@ class WorkflowScheduler:
             )
         except Exception:
             logger.exception("Workflow 校验失败日志写入失败 workflow=%s run=%s", workflow_key, run_id)
-
-
-def _parse_hhmm(value: Any) -> time | None:
-    if not value:
-        return None
-    try:
-        hour, minute = str(value).split(":", maxsplit=1)
-        return time(hour=int(hour), minute=int(minute))
-    except (TypeError, ValueError):
-        return None
