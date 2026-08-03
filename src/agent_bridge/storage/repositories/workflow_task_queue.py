@@ -270,8 +270,10 @@ class WorkflowTaskQueueRepositoryMixin:
         """Restore a task to a leasable state without triggering execution.
 
         Flips status to pending and clears the lease / completion / priority
-        fields. ``attempt_count`` and ``last_error`` are deliberately preserved
-        as an audit trail (a separate re-run does not erase retry history).
+        fields. ``attempt_count`` and ``last_error`` are preserved while the
+        task is waiting for retry; a successful retry clears ``last_error``
+        through ``complete_workflow_task``. Detailed historical errors remain
+        on the corresponding workflow run records.
         Returns whether a row was updated.
         """
         with self._connect() as conn:
@@ -325,6 +327,7 @@ class WorkflowTaskQueueRepositoryMixin:
                 """
                 UPDATE workflow_tasks
                 SET status = 'completed',
+                    last_error = NULL,
                     completed_at = CURRENT_TIMESTAMP,
                     lease_run_id = ?,
                     lease_origin_status = NULL,

@@ -311,6 +311,10 @@ def ensure_workflow_artifacts_fts(conn: sqlite3.Connection, *, force_rebuild: bo
 # 见 backfill_workflow_tasks_superseded：把同 task_key 下非最新 version 的未运行旧任务标为 superseded。
 WORKFLOW_TASKS_SUPERSEDED_BACKFILL_VERSION = "1"
 
+# 成功任务错误状态修复迁移版本号。
+# 见 backfill_completed_workflow_task_errors：清理历史上成功任务残留的 last_error。
+WORKFLOW_TASK_COMPLETED_ERROR_BACKFILL_VERSION = "1"
+
 
 def backfill_workflow_tasks_superseded(conn: sqlite3.Connection) -> None:
     """把存量中“同 task_key 多个 version 都在排队”的旧版本回填为 superseded。
@@ -369,4 +373,51 @@ def backfill_workflow_tasks_superseded(conn: sqlite3.Connection) -> None:
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """,
         (WORKFLOW_TASKS_SUPERSEDED_BACKFILL_VERSION,),
+    )
+
+
+def backfill_completed_workflow_task_errors(conn: sqlite3.Connection) -> None:
+    """清理历史上已成功任务残留的 ``last_error``。
+
+    ``last_error`` 现在表示当前任务状态的错误提示；运行历史中的错误仍保留在
+    ``workflow_runs.error`` 和对应运行日志中。因此只清理状态已经是 completed 的
+    任务，pending/failed/abandoned 仍保留最近一次失败原因供重试和排查使用。
+
+    幂等：通过 workflow_artifacts_fts_meta 表记录已执行的迁移版本号。
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_artifacts_fts_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+        """
+    )
+    applied = conn.execute(
+        "SELECT value FROM workflow_artifacts_fts_meta WHERE key = 'completed_task_error_backfill'"
+    ).fetchone()
+    if applied is not None and applied[0] == WORKFLOW_TASK_COMPLETED_ERROR_BACKFILL_VERSION:
+        return
+
+    cursor = conn.execute(
+        """
+        UPDATE workflow_tasks
+        SET last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'completed' AND last_error IS NOT NULL
+        """
+    )
+    affected = int(cursor.rowcount if cursor.rowcount is not None else 0)
+    if affected:
+        logger.info(
+            "工作流任务成功状态错误迁移 完成 状态=completed 影响行数=%s 阶段=completed_task_error_backfill",
+            affected,
+        )
+    conn.execute(
+        """
+        INSERT INTO workflow_artifacts_fts_meta(key, value)
+        VALUES ('completed_task_error_backfill', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (WORKFLOW_TASK_COMPLETED_ERROR_BACKFILL_VERSION,),
     )

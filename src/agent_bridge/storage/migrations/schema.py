@@ -7,6 +7,7 @@ from typing import Any
 
 from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEMA
 from agent_bridge.storage.migrations.workflows import (
+    backfill_completed_workflow_task_errors,
     backfill_workflow_tasks_superseded,
     ensure_workflow_artifacts_fts,
     rebuild_workflow_artifacts_if_needed,
@@ -156,6 +157,8 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
     )
     # task_version 演进模型：回填存量多 version 排队任务为 superseded（幂等）。
     backfill_workflow_tasks_superseded(conn)
+    # 成功任务不应在任务列表中继续展示历史失败原因（幂等）。
+    backfill_completed_workflow_task_errors(conn)
     store._ensure_columns(
         conn,
         "scripts",

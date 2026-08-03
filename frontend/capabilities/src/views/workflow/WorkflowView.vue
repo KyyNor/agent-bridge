@@ -1345,7 +1345,7 @@ async function confirmClearWorkflow() {
             吗？
           </p>
           <div class="rounded-md border bg-muted/30 px-3 py-2 text-xs leading-5">
-            重置后该任务会回到待处理状态，可被再次领取执行；不会立即触发执行，也不会改变其他任务的执行顺序。历史尝试次数和错误信息会保留。
+            重置后该任务会回到待处理状态，可被再次领取执行；不会立即触发执行，也不会改变其他任务的执行顺序。历史尝试次数会保留，成功重跑后当前错误提示会清除；失败 Run 仍可在运行记录中查看。
           </div>
         </div>
         <DialogFooter class="flex-wrap gap-2">

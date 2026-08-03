@@ -529,8 +529,9 @@ class WorkflowService:
 
         Clears status/lease/completion/priority so the task can be picked up by
         the next ``workflow_get_task`` call. Does not start a run and does not
-        change queue ordering. ``attempt_count`` and ``last_error`` are kept as
-        an audit trail.
+        change queue ordering. ``attempt_count`` and the pending failure reason
+        are kept while waiting for retry; a successful retry clears the task's
+        ``last_error``. Detailed historical errors remain on workflow runs.
         """
         require_admin_user(actor, self.admins)
         if self.store.get_workflow_definition(workflow_key) is None:

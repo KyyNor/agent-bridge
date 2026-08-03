@@ -312,6 +312,38 @@ def test_backfill_is_idempotent_across_schema_init(tmp_path: Path):
     assert before == after
 
 
+def test_backfill_clears_errors_from_historical_completed_tasks(tmp_path: Path):
+    """升级存量库时，已完成任务的旧错误提示被清理且迁移幂等。"""
+    from agent_bridge.storage.migrations.workflows import backfill_completed_workflow_task_errors
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "completed-error.db")
+    store.init_schema()
+    store.upsert_project_profile(profile_key="p", name="p", created_by="root")
+    store.upsert_workflow_definition(
+        workflow_key="w", name="w", description="", profile_key="p", status="active", created_by="root"
+    )
+    store.upsert_workflow_tasks("w", [{"task_key": "a", "task_version": "v1", "payload": {}}])
+
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE workflow_tasks SET status = 'completed', last_error = '历史失败' WHERE workflow_key = 'w'"
+        )
+        # init_schema 已在空库时写入迁移标记；删除它来模拟升级旧库。
+        conn.execute(
+            "DELETE FROM workflow_artifacts_fts_meta WHERE key = 'completed_task_error_backfill'"
+        )
+
+    store.init_schema()
+    task = store.get_workflow_task("w", "a", task_version="v1")
+    assert task["status"] == "completed"
+    assert task["last_error"] is None
+
+    with store.connect() as conn:
+        backfill_completed_workflow_task_errors(conn)
+    assert store.get_workflow_task("w", "a", task_version="v1")["last_error"] is None
+
+
 # ---------------------------------------------------------------------------
 # 跨版本禁止增量复用
 # ---------------------------------------------------------------------------

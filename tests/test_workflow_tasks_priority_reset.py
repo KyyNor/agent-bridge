@@ -229,6 +229,27 @@ def test_reset_preserves_attempt_count_and_last_error(store_abandoned):
     assert after["last_error"] == before["last_error"]
 
 
+def test_successful_retry_clears_last_error(store_abandoned):
+    """成功重试后，任务列表不应继续展示上一次失败原因。"""
+    store = store_abandoned
+    store.reset_workflow_task("w", "page:a")
+    store.create_workflow_run(
+        run_id="run_new",
+        workflow_key="w",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/run_new",
+    )
+    leased = store.lease_workflow_task("w", run_id="run_new", lease_seconds=7200)
+    assert leased is not None
+    assert store.complete_workflow_task("w", "page:a", run_id="run_new") is True
+
+    task = store.get_workflow_task("w", "page:a")
+    assert task["status"] == "completed"
+    assert task["last_error"] is None
+
+
 def test_reset_does_not_trigger_execution(store_abandoned):
     """Reset only flips status; it must not create or start a new run."""
     store = store_abandoned
