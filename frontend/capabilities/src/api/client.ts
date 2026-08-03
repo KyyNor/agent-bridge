@@ -593,15 +593,15 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => qs.set(k, String(v)))
     return get<ToolCallLog[]>(`/tool-call-logs?${qs}`)
   },
-  listLogsPage: (params: Record<string, string | number | boolean> = {}) => {
+  listLogsPage: (params: Record<string, string | number | boolean> = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     Object.entries({ ...params, paginated: true }).forEach(([k, v]) => qs.set(k, String(v)))
-    return get<ToolCallLogPage>(`/tool-call-logs?${qs}`)
+    return get<ToolCallLogPage>(`/tool-call-logs?${qs}`, options)
   },
-  getLog: (id: string) => get<ToolCallLog>(`/tool-call-logs/${id}`),
-  stats: (params: Record<string, string> = {}) => {
+  getLog: (id: string, options?: ApiRequestOptions) => get<ToolCallLog>(`/tool-call-logs/${id}`, options),
+  stats: (params: Record<string, string> = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams(params)
-    return get<ToolCallStats>(`/tool-call-stats?${qs}`)
+    return get<ToolCallStats>(`/tool-call-stats?${qs}`, options)
   },
 
   // Agent runs
@@ -610,22 +610,22 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => qs.set(k, String(v)))
     return get<AgentRun[]>(`/agent-runs?${qs}`)
   },
-  listAgentRunsPage: (params: Record<string, string | number | boolean> = {}) => {
+  listAgentRunsPage: (params: Record<string, string | number | boolean> = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     Object.entries({ ...params, paginated: true }).forEach(([k, v]) => qs.set(k, String(v)))
-    return get<AgentRunPage>(`/agent-runs?${qs}`)
+    return get<AgentRunPage>(`/agent-runs?${qs}`, options)
   },
-  getAgentRun: (runKey: string) => get<AgentRun>(`/agent-runs/${runKey}`),
+  getAgentRun: (runKey: string, options?: ApiRequestOptions) => get<AgentRun>(`/agent-runs/${runKey}`, options),
   stopAgentRun: (runKey: string) =>
     post<RunStopResponse>(`/agent-runs/${encodeURIComponent(runKey)}/stop`),
   /** Live event stream for an agent run (reads events.jsonl in real time,
    *  falls back to persisted DB events for historical runs). */
-  getAgentRunEvents: (runKey: string) => get<WorkflowRunEvent[]>(`/agent-runs/${runKey}/events`),
-  getAgentRunPayload: (runKey: string, ref: string) =>
-    getBlob(`/agent-runs/${encodeURIComponent(runKey)}/payload?ref=${encodeURIComponent(ref)}`),
-  getAgentRunSubagentDetail: (runKey: string, taskId: string) => {
+  getAgentRunEvents: (runKey: string, options?: ApiRequestOptions) => get<WorkflowRunEvent[]>(`/agent-runs/${runKey}/events`, options),
+  getAgentRunPayload: (runKey: string, ref: string, options?: ApiRequestOptions) =>
+    getBlob(`/agent-runs/${encodeURIComponent(runKey)}/payload?ref=${encodeURIComponent(ref)}`, options),
+  getAgentRunSubagentDetail: (runKey: string, taskId: string, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams({ task_id: taskId })
-    return get<WorkflowSubagentDetail>(`/agent-runs/${runKey}/subagent-detail?${qs}`)
+    return get<WorkflowSubagentDetail>(`/agent-runs/${runKey}/subagent-detail?${qs}`, options)
   },
   /** Fetch the single agent run (with full events) associated with a workflow run. */
   getAgentRunForWorkflowRun: async (workflowRunId: string): Promise<AgentRun | null> => {
