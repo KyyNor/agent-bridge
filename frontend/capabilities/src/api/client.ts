@@ -198,8 +198,12 @@ function formatHttpError(_status: number, raw: string): string {
   return detail || '请求失败，请稍后重试'
 }
 
-async function get<T>(url: string): Promise<T> {
-  const r = await fetch(url, { headers: headers(), cache: 'no-store' })
+export type ApiRequestOptions = {
+  signal?: AbortSignal
+}
+
+async function get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
+  const r = await fetch(url, { headers: headers(), cache: 'no-store', signal: options.signal })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
@@ -294,8 +298,8 @@ function postFormDataWithProgress<T>(
   })
 }
 
-async function getBlob(url: string): Promise<Blob> {
-  const r = await fetch(url, { headers: headers() })
+async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Blob> {
+  const r = await fetch(url, { headers: headers(), signal: options.signal })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.blob()
 }
