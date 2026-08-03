@@ -14,6 +14,7 @@ import ProfileDetailView from './ProfileDetailView.vue'
 import { confirm } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { navigateTo, registerNavigationGuard } from '../../lib/navigation'
+import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -57,14 +58,21 @@ const filterTabs = computed(() => [
   { key: 'disabled', label: '停用', count: profiles.value.filter(p => p.status !== 'active').length },
 ])
 
-onMounted(async () => {
+async function loadProfiles(options: { fresh?: boolean } = {}) {
+  if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.profiles() })
   try {
-    profiles.value = await api.listProfiles()
+    profiles.value = await queryClient.fetchQuery({
+      queryKey: queryKeys.profiles(),
+      queryFn: ({ signal }) => api.listProfiles({ signal }),
+    })
   } catch {
     profiles.value = []
-  } finally {
-    loading.value = false
   }
+}
+
+onMounted(async () => {
+  await loadProfiles()
+  loading.value = false
 })
 
 async function createProfile() {
@@ -83,7 +91,7 @@ async function createProfile() {
       expected_edit_token: '',
     })
     showAdd.value = false
-    profiles.value = await api.listProfiles()
+    await loadProfiles({ fresh: true })
   } catch (e: any) {
     formError.value = e.message || '创建失败'
   }
@@ -99,7 +107,7 @@ async function toggleStatus(profile: ProjectProfile) {
     status: latest.status === 'active' ? 'disabled' : 'active',
     expected_edit_token: latest.edit_token,
   })
-  profiles.value = await api.listProfiles()
+  await loadProfiles({ fresh: true })
 }
 
 function getProfileCommand(profile: ProjectProfile) {
@@ -139,7 +147,7 @@ async function requestListNavigation() {
 }
 
 async function handleDetailSaved() {
-  profiles.value = await api.listProfiles()
+  await loadProfiles({ fresh: true })
   void navigateTo('profiles', { replace: true })
 }
 </script>

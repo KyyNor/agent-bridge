@@ -52,4 +52,5 @@ export const queryKeys = {
   knowledgeBackends: () => ['knowledge-backends'] as const,
   mcpServices: () => ['capability-services', 'mcp'] as const,
   openApiServices: () => ['capability-services', 'openapi'] as const,
+  profiles: () => ['capability-profiles'] as const,
 }

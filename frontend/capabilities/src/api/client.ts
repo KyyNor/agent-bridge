@@ -367,7 +367,7 @@ export const api = {
   },
 
   // Profiles
-  listProfiles: () => get<ProjectProfile[]>('/capability-profiles'),
+  listProfiles: (options?: ApiRequestOptions) => get<ProjectProfile[]>('/capability-profiles', options),
   getProfile: (key: string) => get<ProjectProfile>(`/capability-profiles/${key}`),
   upsertProfile: (p: Partial<ProjectProfile> & { profile_key: string; name: string; expected_edit_token?: string | null }) =>
     post<ProjectProfile>('/capability-profiles', { status: 'active', ...p }),
