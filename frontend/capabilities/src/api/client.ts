@@ -672,7 +672,7 @@ export const api = {
     ),
 
   // Code Repos
-  listCodeRepos: () => get<CodeRepository[]>('/code-repo/repositories'),
+  listCodeRepos: (options?: ApiRequestOptions) => get<CodeRepository[]>('/code-repo/repositories', options),
   getCodeRepo: (key: string) => get<CodeRepository>(`/code-repo/repositories/${key}`),
   upsertCodeRepo: (r: Partial<CodeRepository> & { repo_key: string; name: string; git_url: string; expected_edit_token?: string | null }) =>
     post<CodeRepository>('/code-repo/repositories', { status: 'active', ...r }),
@@ -708,7 +708,7 @@ export const api = {
   touchDashboard: (repoKey: string) => post<{ ok: boolean }>(`/code-repo/repositories/${repoKey}/understand/dashboard/touch`),
 
   // Categories
-  listCategories: () => get<CodeRepoCategory[]>('/code-repo/categories'),
+  listCategories: (options?: ApiRequestOptions) => get<CodeRepoCategory[]>('/code-repo/categories', options),
   upsertCategory: (c: { category_key: string; name: string; description?: string; expected_edit_token?: string | null }) =>
     post<CodeRepoCategory>('/code-repo/categories', c),
   deleteCategory: (key: string) => post<{ ok: boolean }>(`/code-repo/categories/${key}/delete`),

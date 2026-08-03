@@ -53,4 +53,6 @@ export const queryKeys = {
   mcpServices: () => ['capability-services', 'mcp'] as const,
   openApiServices: () => ['capability-services', 'openapi'] as const,
   profiles: () => ['capability-profiles'] as const,
+  codeRepositories: () => ['code-repositories'] as const,
+  codeRepoCategories: () => ['code-repository-categories'] as const,
 }
