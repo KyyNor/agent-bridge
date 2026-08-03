@@ -306,7 +306,7 @@ async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Bl
 
 export const api = {
   // MCP Services
-  listServices: (summary = false) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`),
+  listServices: (summary = false, options?: ApiRequestOptions) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`, options),
   getService: (key: string) => get<McpService>(`/capabilities/mcp-services/${key}`),
   registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string; expected_edit_token?: string | null }) =>
     post<McpService>('/capabilities/mcp-services', s),
@@ -334,7 +334,7 @@ export const api = {
     ),
 
   // OpenAPI Services
-  listOpenApiServices: (summary = false) => get<OpenApiService[]>(`/capabilities/openapi-services${summary ? '?summary=true' : ''}`),
+  listOpenApiServices: (summary = false, options?: ApiRequestOptions) => get<OpenApiService[]>(`/capabilities/openapi-services${summary ? '?summary=true' : ''}`, options),
   getOpenApiService: (key: string) => get<OpenApiService>(`/capabilities/openapi-services/${key}`),
   registerOpenApiService: (s: Partial<OpenApiService> & { service_key: string; name: string; base_url: string; expected_edit_token?: string | null }) =>
     post<OpenApiService>('/capabilities/openapi-services', s),

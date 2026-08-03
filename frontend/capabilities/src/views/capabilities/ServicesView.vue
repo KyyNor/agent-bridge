@@ -35,6 +35,7 @@ import {
   toggleOperationSelection,
   type OpenApiImportState,
 } from './openapiImport'
+import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -115,9 +116,24 @@ function lastSyncAt(service: CapabilityServiceSource) {
   return service.source_type === 'openapi_service' ? service.last_imported_at : service.last_synced_at
 }
 
-async function loadServices() {
+async function loadServices(options: { fresh?: boolean } = {}) {
+  if (options.fresh) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.mcpServices() }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.openApiServices() }),
+    ])
+  }
   try {
-    const [mcp, openapi] = await Promise.all([api.listServices(true), api.listOpenApiServices(true)])
+    const [mcp, openapi] = await Promise.all([
+      queryClient.fetchQuery({
+        queryKey: queryKeys.mcpServices(),
+        queryFn: ({ signal }) => api.listServices(true, { signal }),
+      }),
+      queryClient.fetchQuery({
+        queryKey: queryKeys.openApiServices(),
+        queryFn: ({ signal }) => api.listOpenApiServices(true, { signal }),
+      }),
+    ])
     mcpServices.value = mcp
     openApiServices.value = openapi
     toolCounts.value = Object.fromEntries(
@@ -243,7 +259,7 @@ async function saveService() {
         expected_edit_token: expectedEditToken.value,
       })
     }
-    await loadServices()
+    await loadServices({ fresh: true })
     formBaseline.value = snapshotForm()
     goList()
   } catch (e: any) {
@@ -257,7 +273,7 @@ async function toggleStatus(svc: CapabilityServiceSource) {
   const newStatus = svc.status === 'enabled' ? 'disabled' : 'enabled'
   if (svc.source_type === 'openapi_service') await api.updateOpenApiServiceStatus(svc.service_key, newStatus)
   else await api.updateServiceStatus(svc.service_key, newStatus)
-  await loadServices()
+  await loadServices({ fresh: true })
 }
 
 async function deleteService(svc: CapabilityServiceSource) {
@@ -265,7 +281,7 @@ async function deleteService(svc: CapabilityServiceSource) {
   try {
     if (svc.source_type === 'openapi_service') await api.deleteOpenApiService(svc.service_key)
     else await api.deleteMcpService(svc.service_key)
-    await loadServices()
+    await loadServices({ fresh: true })
   } catch (e: any) {
     await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
   }
@@ -273,7 +289,7 @@ async function deleteService(svc: CapabilityServiceSource) {
 
 async function syncMcpTools(key: string) {
   await api.syncServiceTools(key)
-  await loadServices()
+  await loadServices({ fresh: true })
 }
 
 async function openImportDialog(service: OpenApiService) {
@@ -313,7 +329,7 @@ async function saveImportedOperations() {
       await api.upsertOpenApiTool(importService.value.service_key, payload.tool_name, payload)
     }
     showImport.value = false
-    await loadServices()
+    await loadServices({ fresh: true })
   } catch (e: any) {
     importError.value = e.message || '保存接口失败'
   } finally {

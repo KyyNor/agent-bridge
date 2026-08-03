@@ -50,4 +50,6 @@ export const queryKeys = {
   workflowRunLogs: (runId: string) => ['workflow-runs', 'logs', runId] as const,
   knowledgeBases: () => ['knowledge-bases'] as const,
   knowledgeBackends: () => ['knowledge-backends'] as const,
+  mcpServices: () => ['capability-services', 'mcp'] as const,
+  openApiServices: () => ['capability-services', 'openapi'] as const,
 }
