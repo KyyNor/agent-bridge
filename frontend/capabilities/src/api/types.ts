@@ -451,7 +451,7 @@ export interface WorkflowTask {
   created_at: string
   updated_at: string
   completed_at: string | null
-  /** 该任务是否已有产物（workflow_artifacts 表 EXISTS 派生）。 */
+  /** 该任务是否已有任一版本的产物（按 task_key 从 workflow_artifacts 聚合派生）。 */
   has_artifacts: boolean
 }
 

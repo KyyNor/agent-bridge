@@ -98,7 +98,6 @@ class WorkflowTaskQueueRepositoryMixin:
                     SELECT 1 FROM workflow_artifacts a
                     WHERE a.workflow_key = t.workflow_key
                       AND a.task_key = t.task_key
-                      AND a.task_version = t.task_version
                 ) AS has_artifacts
                 FROM workflow_tasks t
                 WHERE {' AND '.join(clauses)}

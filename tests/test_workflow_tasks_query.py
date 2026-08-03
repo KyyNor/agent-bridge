@@ -193,7 +193,7 @@ def test_list_tasks_combined_filter_and_sort(wm_paths):
 
 
 def test_list_tasks_carries_has_artifacts_flag(wm_paths):
-    """每行任务带 has_artifacts 派生字段，按 workflow_artifacts 是否存在判定。"""
+    """每行任务按 task_key 聚合所有版本的产物，带 has_artifacts 派生字段。"""
     from agent_bridge.storage.sqlite import SQLiteStore
 
     store = SQLiteStore(wm_paths.db_path)
@@ -223,15 +223,15 @@ def test_list_tasks_carries_has_artifacts_flag(wm_paths):
     assert by_key["page:gamma"]["has_artifacts"] is False
 
 
-def test_list_tasks_has_artifacts_scoped_by_task_version(wm_paths):
-    """has_artifacts 按 task_version 精确匹配，不同版本的产物不计入。"""
+def test_list_tasks_has_artifacts_includes_history_versions(wm_paths):
+    """当前任务版本没有产物时，历史版本产物仍应使任务归入有产物。"""
     from agent_bridge.storage.sqlite import SQLiteStore
 
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     _seed(store)
 
-    # 为 alpha 的 v2 写产物，但队列里仍是默认空版本（''）。
+    # 为 alpha 的历史 v2 写产物，但当前队列任务仍是默认空版本（''）。
     store.upsert_workflow_artifact(
         workflow_key="w",
         profile_key="report-plane",
@@ -250,4 +250,4 @@ def test_list_tasks_has_artifacts_scoped_by_task_version(wm_paths):
     tasks = store.list_workflow_tasks("w")
     alpha = next(t for t in tasks if t["task_key"] == "page:alpha")
     assert alpha["task_version"] == ""
-    assert alpha["has_artifacts"] is False
+    assert alpha["has_artifacts"] is True
