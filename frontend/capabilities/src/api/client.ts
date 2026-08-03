@@ -204,6 +204,27 @@ async function get<T>(url: string): Promise<T> {
   return r.json()
 }
 
+/** 使用 fetch 读取 SSE，保留管理端现有的身份 Header。 */
+export async function openAgentRunEventStream(
+  runKey: string,
+  lastEventId: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  const streamHeaders: Record<string, string> = {
+    ...headers(),
+    Accept: 'text/event-stream',
+  }
+  if (lastEventId > 0) streamHeaders['Last-Event-ID'] = String(lastEventId)
+  const response = await fetch(`/agent-runs/${encodeURIComponent(runKey)}/events/stream`, {
+    headers: streamHeaders,
+    cache: 'no-store',
+    signal,
+  })
+  if (!response.ok) throw new Error(formatHttpError(response.status, await response.text()))
+  if (!response.body) throw new Error('SSE 响应不包含可读取的数据流')
+  return response
+}
+
 async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
   const r = await fetch(url, {
     method: 'POST',
