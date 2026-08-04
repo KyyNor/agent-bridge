@@ -1270,6 +1270,41 @@ export interface RetrievalProbeLlmConfigUpdate {
   expected_edit_token?: string | null
 }
 
+export interface ModelEvaluationDataset {
+  key: string
+  label: string
+  description: string
+}
+
+export interface ModelEvaluationRuntimeStatus {
+  configured: boolean
+  executable: string | null
+  message: string
+  install_command?: string
+  configure_command?: string
+}
+
+export interface ModelEvaluationModel {
+  id: string
+  label: string
+}
+
+export interface ModelEvaluationRun {
+  run_id: string
+  model_name: string
+  base_url: string
+  datasets: string[]
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'abandoned'
+  progress_message: string
+  result: { rows?: Record<string, string>[]; summary_found?: boolean }
+  error: string | null
+  output_ref: string
+  created_by: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
 export interface SingleSchedulerStatus {
   running: boolean
   cron: string

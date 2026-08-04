@@ -39,6 +39,7 @@ const ToolDebugView = asyncView(() => import('./views/capabilities/ToolDebugView
 const CodeRepoView = asyncView(() => import('./views/knowledge/CodeRepoView.vue'))
 const KnowledgeView = asyncView(() => import('./views/knowledge/KnowledgeView.vue'))
 const KnowledgeProcessingConfigView = asyncView(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
+const ModelEvaluationView = asyncView(() => import('./views/system/ModelEvaluationView.vue'))
 const MemoryView = asyncView(() => import('./views/knowledge/MemoryView.vue'))
 const WorkflowView = asyncView(() => import('./views/workflow/WorkflowView.vue'))
 const SkillManagementView = asyncView(() => import('./views/system/SkillManagementView.vue'))
@@ -210,9 +211,10 @@ const navGroups: NavGroup[] = [
       ],
   },
   {
-    label: '系统配置',
+    label: '系统管理',
     items: [
-      { key: 'system-config', label: '系统配置', description: '配置调度计划、仓库分类和知识后端' },
+      { key: 'system-config', label: '系统管理', description: '配置调度计划、公共模型、仓库分类和知识后端' },
+      { key: 'model-evaluations', label: '模型评估', description: '选择 OpenAI 兼容模型并运行 OpenCompass 评测' },
       { key: 'skills', label: 'Skill 管理', description: '维护内置技能提示词' },
       { key: 'scripts', label: '脚本管理', description: '管理受控脚本并在线测试运行' },
     ],
@@ -243,6 +245,7 @@ const view = computed(() => activeNavKey.value)
           <KnowledgeView v-else-if="view === 'knowledge'" :route-key="subRoute" />
           <MemoryView v-else-if="view === 'memory'" :route-key="subRoute" />
           <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
+          <ModelEvaluationView v-else-if="view === 'model-evaluations'" />
           <SkillManagementView v-else-if="view === 'skills'" />
           <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
           <WorkflowView v-else-if="view === 'workflow'" :route-key="subRoute" />

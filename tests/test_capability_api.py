@@ -575,7 +575,7 @@ def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None
     assert "label: '资源管理'" not in source
     assert "key: 'knowledge', label: '文档知识'" in source
     assert "key: 'code-repos', label: '代码知识'" in source
-    assert "key: 'system-config', label: '系统配置'" in source
+    assert "key: 'system-config', label: '系统管理'" in source
     assert "KnowledgeProcessingConfigView" in source
     assert "CodeRepoView" in source
     assert "view === 'system-config'" in source
@@ -583,7 +583,7 @@ def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None
     assert "BuiltinsView" not in source
     assert "view === 'builtins'" not in source
     assert source.count("label: '知识管理'") == 1
-    assert source.index("label: '调用观测'") < source.index("label: '系统配置'")
+    assert source.index("label: '调用观测'") < source.index("label: '系统管理'")
 
 
 def test_frontend_knowledge_copy_uses_document_and_code_knowledge_names() -> None:

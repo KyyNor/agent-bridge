@@ -85,6 +85,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.memory.worker_service.stop_all_workers()
         except Exception:
             logger.warning("停止 claude-mem worker 失败", exc_info=True)
+        service.model_evaluations.stop_all()
         service.codegraph_scheduler.stop()
         service.understand_scheduler.stop()
         service.plugin_update_scheduler.stop()
@@ -137,6 +138,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.workflows.admins = reloaded
             service.skills.admins = reloaded
             service.scripts.admins = reloaded
+            service.model_evaluations._admins = reloaded
             service.memory.admins = reloaded
             service.plugin_update_scheduler._admins = reloaded
             return await call_next(request)
@@ -225,6 +227,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     from agent_bridge.api.routes.retrieval_probe import create_retrieval_probe_routes
     app.include_router(create_retrieval_probe_routes(service, actor))
+
+    from agent_bridge.api.routes.model_evaluations import create_model_evaluation_routes
+    app.include_router(create_model_evaluation_routes(service, actor))
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route

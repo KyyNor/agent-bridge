@@ -334,6 +334,13 @@ class RetrievalProbeLlmConfigRequest(BaseModel):
     expected_edit_token: str | None = None
 
 
+class ModelEvaluationStartRequest(BaseModel):
+    model_name: str = Field(min_length=1, max_length=512)
+    datasets: list[str] = Field(min_length=1, max_length=4)
+    base_url: str = Field(default="", max_length=2048)
+    api_key: str = Field(default="", max_length=4096)
+
+
 class AgentBackendConfigRequest(BaseModel):
     slug: str
     type: str

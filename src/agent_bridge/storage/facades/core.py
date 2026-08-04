@@ -8,6 +8,21 @@ from agent_bridge.storage.repositories import revisions as _revisions
 
 
 class CoreFacadeMixin:
+    def create_model_evaluation_run(self, **kwargs: Any) -> dict[str, Any]:
+        return self.model_evaluations.create_run(**kwargs)
+
+    def get_model_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
+        return self.model_evaluations.get_run(run_id)
+
+    def list_model_evaluation_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        return self.model_evaluations.list_runs(limit=limit)
+
+    def update_model_evaluation_run(self, run_id: str, **kwargs: Any) -> dict[str, Any] | None:
+        return self.model_evaluations.update_run(run_id, **kwargs)
+
+    def abandon_model_evaluation_runs(self) -> int:
+        return self.model_evaluations.abandon_active_runs()
+
     def get_retrieval_probe_llm_config(self) -> dict[str, Any]:
         return self.retrieval_probe_config.get_llm_config()
 

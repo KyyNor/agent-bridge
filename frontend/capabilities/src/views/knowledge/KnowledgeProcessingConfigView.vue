@@ -874,7 +874,7 @@ async function deleteBackend(slug: string) {
       <CardContent class="space-y-4 p-5">
         <div class="flex items-center justify-between gap-4">
           <div>
-            <div class="text-sm font-medium">全量探测关键词模型</div>
+            <div class="text-sm font-medium">公共模型配置</div>
             <div class="mt-1 text-xs text-muted-foreground">全局共用的小模型连接，用于把问题提炼为工作流产物检索短句</div>
           </div>
           <Button variant="outline" size="sm" @click="loadRetrievalProbeLlmConfig">刷新</Button>
@@ -886,7 +886,7 @@ async function deleteBackend(slug: string) {
             <Input v-model="retrievalProbeLlmForm.base_url" placeholder="http://127.0.0.1:8000/v1" class="font-mono text-xs" />
           </div>
           <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
-            <div class="text-sm">Model</div>
+            <div class="text-sm">全量探测关键词模型</div>
             <Input v-model="retrievalProbeLlmForm.model" placeholder="qwen2.5-3b-instruct" class="font-mono text-xs" />
           </div>
           <div class="grid grid-cols-[12rem_1fr] items-center gap-4">
