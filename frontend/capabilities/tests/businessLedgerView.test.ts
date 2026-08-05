@@ -16,12 +16,15 @@ test('业务台账有单一导航入口及其浏览页 API 契约', () => {
   assert.match(view, /编辑定义/)
 })
 
-test('业务台账首页以可点击列表行展示台账，而非卡片网格', () => {
+test('业务台账首页以表格列表展示台账，并提供行内操作', () => {
   const view = read('src/views/knowledge/BusinessLedgerView.vue')
-  assert.match(view, /list-row-interactive/)
+  assert.match(view, /<table v-if="ledgers\.length" class="w-full">/)
+  assert.match(view, /台账<\/th>/)
+  assert.match(view, /浏览<\/Button>/)
+  assert.match(view, /编辑<\/Button>/)
+  assert.match(view, /deleteLedgerItem\(item\)/)
   assert.match(view, /{{ item\.record_count }} 行/)
   assert.doesNotMatch(view, /grid gap-4 md:grid-cols-2 xl:grid-cols-3/)
-  assert.doesNotMatch(view, /<Card v-for="item in ledgers"/)
 })
 
 test('业务台账以可视字段列表编辑定义，不向用户暴露 JSON', () => {
