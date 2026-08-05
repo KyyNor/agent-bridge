@@ -13,7 +13,10 @@ const datasets = ref<ModelEvaluationDataset[]>([])
 const runs = ref<ModelEvaluationRun[]>([])
 const models = ref<ModelEvaluationModel[]>([])
 const runtime = ref<ModelEvaluationRuntimeStatus | null>(null)
-const form = ref({ base_url: '', api_key: '', model_name: '', datasets: ['demo_gsm8k_chat_gen'] as string[], max_samples: 64 })
+const form = ref({
+  base_url: '', api_key: '', model_name: '', datasets: ['demo_gsm8k_chat_gen'] as string[], max_samples: 64,
+  sampling_mode: 'head' as 'head' | 'random', sample_seed: 42,
+})
 const selectedRun = ref<ModelEvaluationRun | null>(null)
 const showRunDetail = ref(false)
 const loading = ref(true)
@@ -72,6 +75,10 @@ function toggleDataset(key: string, checked: boolean) {
 
 function statusLabel(status: ModelEvaluationRun['status']) {
   return ({ queued: '等待执行', running: '评估中', completed: '已完成', failed: '失败', abandoned: '已中断' } as const)[status]
+}
+
+function samplingModeLabel(mode: ModelEvaluationRun['sampling_mode']) {
+  return mode === 'random' ? '随机抽样' : '固定前 N 条'
 }
 
 function scoreSummary(run: ModelEvaluationRun) {
@@ -142,10 +149,14 @@ function openRunDetail(run: ModelEvaluationRun) {
               <span><span class="font-medium">{{ dataset.label }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ dataset.description }}</span></span>
             </label>
           </div>
-          <p class="text-xs text-muted-foreground">所有勾选的数据集统一从前往后最多运行此数量的题目；默认 64 题。</p>
+          <div class="flex flex-wrap items-end gap-3">
+            <label class="space-y-1 text-sm"><span>抽样方式</span><select v-model="form.sampling_mode" class="h-8 rounded-md border border-input bg-background px-2 text-sm"><option value="head">固定前 N 条</option><option value="random">随机抽样</option></select></label>
+            <label v-if="form.sampling_mode === 'random'" class="space-y-1 text-sm"><span>随机种子</span><Input v-model.number="form.sample_seed" type="number" min="0" max="2147483647" class="h-8 w-36" /></label>
+          </div>
+          <p class="text-xs text-muted-foreground">所有勾选的数据集统一最多运行此数量的题目；随机抽样使用固定种子，便于后续复跑与模型横向比较。</p>
         </div>
         <div class="flex items-center gap-3">
-          <Button @click="startEvaluation" :disabled="starting || !runtime?.configured || !form.model_name || !form.datasets.length || form.max_samples < 1 || form.max_samples > 1000">{{ starting ? '正在启动…' : '开始评估' }}</Button>
+          <Button @click="startEvaluation" :disabled="starting || !runtime?.configured || !form.model_name || !form.datasets.length || form.max_samples < 1 || form.max_samples > 1000 || form.sample_seed < 0 || form.sample_seed > 2147483647">{{ starting ? '正在启动…' : '开始评估' }}</Button>
           <span v-if="error" class="text-sm text-destructive">{{ error }}</span>
         </div>
       </CardContent>
@@ -168,6 +179,8 @@ function openRunDetail(run: ModelEvaluationRun) {
             <div><dt class="text-xs text-muted-foreground">状态</dt><dd class="mt-1"><StatusBadge :status="selectedRun.status === 'completed' ? 'enabled' : selectedRun.status === 'failed' ? 'error' : selectedRun.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(selectedRun.status)" /></dd></div>
             <div><dt class="text-xs text-muted-foreground">数据集</dt><dd class="mt-1">{{ selectedRun.datasets.join('、') }}</dd></div>
             <div><dt class="text-xs text-muted-foreground">每个数据集题数</dt><dd class="mt-1">{{ selectedRun.max_samples }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">抽样方式</dt><dd class="mt-1">{{ samplingModeLabel(selectedRun.sampling_mode) }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">随机种子</dt><dd class="mt-1">{{ selectedRun.sampling_mode === 'random' ? selectedRun.sample_seed : '—' }}</dd></div>
             <div><dt class="text-xs text-muted-foreground">开始时间</dt><dd class="mt-1">{{ selectedRun.started_at ? formatLocalDatetime(selectedRun.started_at) : '—' }}</dd></div>
             <div><dt class="text-xs text-muted-foreground">结束时间</dt><dd class="mt-1">{{ selectedRun.finished_at ? formatLocalDatetime(selectedRun.finished_at) : '—' }}</dd></div>
           </dl>
@@ -177,6 +190,10 @@ function openRunDetail(run: ModelEvaluationRun) {
             <p v-else-if="selectedRun.error" class="text-destructive">{{ selectedRun.error }}</p>
             <p v-else class="text-muted-foreground">{{ selectedRun.status === 'completed' ? '未找到汇总结果。' : selectedRun.progress_message }}</p>
           </div>
+          <details v-if="selectedRun.result.sample_manifests?.length" class="rounded-md border border-border p-3 text-xs">
+            <summary class="cursor-pointer font-medium">查看实际抽样题目索引</summary>
+            <div v-for="manifest in selectedRun.result.sample_manifests" :key="manifest.dataset" class="mt-3"><span class="font-medium">{{ manifest.dataset }}</span><span class="ml-2 text-muted-foreground">{{ manifest.mode === 'random' ? `seed ${manifest.seed}` : '固定顺序' }}</span><p class="mt-1 break-all text-muted-foreground">{{ manifest.source_indices.join(', ') }}</p></div>
+          </details>
         </div>
       </DialogContent>
     </Dialog>

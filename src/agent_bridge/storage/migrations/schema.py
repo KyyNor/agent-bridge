@@ -194,7 +194,11 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
     store._ensure_columns(
         conn,
         "model_evaluation_runs",
-        {"max_samples": "INTEGER NOT NULL DEFAULT 64"},
+        {
+            "max_samples": "INTEGER NOT NULL DEFAULT 64",
+            "sampling_mode": "TEXT NOT NULL DEFAULT 'head'",
+            "sample_seed": "INTEGER NOT NULL DEFAULT 42",
+        },
     )
     store._ensure_columns(conn, "backend_targets", {"backend_kb_id": "TEXT"})
     store._ensure_columns(

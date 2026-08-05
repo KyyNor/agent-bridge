@@ -47,7 +47,22 @@ def test_model_evaluation_config_limits_each_dataset_to_requested_samples() -> N
         20,
     )
     assert "datasets = gsm8k_datasets + math_datasets" in config
-    assert "dataset['reader_cfg']['test_range'] = '[0:20]'" in config
+    assert "class AgentBridgeSampleDatasetReader(DatasetReader):" in config
+    assert "dataset_base.DatasetReader = AgentBridgeSampleDatasetReader" in config
+    assert "sample_count=20, sample_mode=\"head\", sample_seed=42" in config
+    compile(config, "evaluation.py", "exec")
+
+
+def test_model_evaluation_config_supports_seeded_random_sampling() -> None:
+    config = ModelEvaluationService._render_config(
+        "example-model",
+        ["demo_gsm8k_chat_gen"],
+        20,
+        sampling_mode="random",
+        sample_seed=20260805,
+    )
+    assert "sample_count=20, sample_mode=\"random\", sample_seed=20260805" in config
+    assert "random.Random(f'{sample_seed}:{sample_dataset_key}')" in config
 
 
 @respx.mock

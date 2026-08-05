@@ -100,6 +100,8 @@ class ModelEvaluationService:
         model_name: str,
         datasets: list[str],
         max_samples: int = 64,
+        sampling_mode: str = "head",
+        sample_seed: int = 42,
         base_url: str = "",
         api_key: str = "",
     ) -> dict[str, Any]:
@@ -114,6 +116,10 @@ class ModelEvaluationService:
             raise ValidationError("请至少选择一个受支持的简单数据集")
         if not 1 <= max_samples <= 1000:
             raise ValidationError("每个数据集最多题数必须在 1 到 1000 之间")
+        if sampling_mode not in {"head", "random"}:
+            raise ValidationError("抽样方式仅支持固定前 N 条或随机抽样")
+        if not 0 <= sample_seed <= 2_147_483_647:
+            raise ValidationError("随机种子必须在 0 到 2147483647 之间")
         endpoint, key = self._resolve_connection(base_url=base_url, api_key=api_key)
         run_id = f"eval_{uuid.uuid4().hex}"
         work_dir = self._run_root / run_id
@@ -124,22 +130,36 @@ class ModelEvaluationService:
             base_url=endpoint,
             datasets=selected_datasets,
             max_samples=max_samples,
+            sampling_mode=sampling_mode,
+            sample_seed=sample_seed,
             work_dir=str(work_dir),
             created_by=actor,
         )
         thread = threading.Thread(
             target=self._run_opencompass,
-            args=(run_id, work_dir, cleaned_model, endpoint, key, selected_datasets, max_samples),
+            args=(
+                run_id,
+                work_dir,
+                cleaned_model,
+                endpoint,
+                key,
+                selected_datasets,
+                max_samples,
+                sampling_mode,
+                sample_seed,
+            ),
             name=f"model-evaluation-{run_id[-8:]}",
             daemon=True,
         )
         thread.start()
         logger.info(
-            "模型评估任务已创建 run_id=%s model=%s datasets=%s max_samples=%d",
+            "模型评估任务已创建 run_id=%s model=%s datasets=%s max_samples=%d sampling_mode=%s sample_seed=%d",
             run_id,
             cleaned_model,
             selected_datasets,
             max_samples,
+            sampling_mode,
+            sample_seed,
         )
         return self._public_run(run)
 
@@ -218,6 +238,8 @@ class ModelEvaluationService:
         api_key: str,
         datasets: list[str],
         max_samples: int,
+        sampling_mode: str,
+        sample_seed: int,
     ) -> None:
         self._store.update_model_evaluation_run(
             run_id, status="running", progress_message="正在准备 OpenCompass 配置", started=True
@@ -225,7 +247,10 @@ class ModelEvaluationService:
         try:
             executable = self._require_runner()
             config_path = work_dir / "evaluation.py"
-            config_path.write_text(self._render_config(model_name, datasets, max_samples), encoding="utf-8")
+            config_path.write_text(
+                self._render_config(model_name, datasets, max_samples, sampling_mode, sample_seed),
+                encoding="utf-8",
+            )
             log_path = work_dir / "opencompass.log"
             environment = os.environ.copy()
             environment["OPENAI_API_KEY"] = api_key
@@ -280,7 +305,13 @@ class ModelEvaluationService:
                 self._stopped_run_ids.discard(run_id)
 
     @staticmethod
-    def _render_config(model_name: str, datasets: list[str], max_samples: int) -> str:
+    def _render_config(
+        model_name: str,
+        datasets: list[str],
+        max_samples: int,
+        sampling_mode: str = "head",
+        sample_seed: int = 42,
+    ) -> str:
         imports = []
         dataset_names = []
         if "demo_gsm8k_chat_gen" in datasets:
@@ -291,14 +322,42 @@ class ModelEvaluationService:
             dataset_names.append("math_datasets")
         model_literal = json.dumps(model_name, ensure_ascii=False)
         return "\n".join([
+            "import json",
+            "import random",
+            "from pathlib import Path",
             "from mmengine.config import read_base",
             "from opencompass.models import OpenAI",
+            "from opencompass.openicl.icl_dataset_reader import DatasetReader",
+            "from opencompass.registry import ICL_DATASET_READERS",
+            "import opencompass.datasets.base as dataset_base",
+            "",
+            "@ICL_DATASET_READERS.register_module(force=True)",
+            "class AgentBridgeSampleDatasetReader(DatasetReader):",
+            "    def __init__(self, *args, sample_count=64, sample_mode='head', sample_seed=42, sample_dataset_key='', sample_manifest_path='', **kwargs):",
+            "        kwargs.pop('test_range', None)",
+            "        super().__init__(*args, test_range=None, **kwargs)",
+            "        source_indices = list(range(len(self.dataset['test'])))",
+            "        if sample_mode == 'random':",
+            "            random.Random(f'{sample_seed}:{sample_dataset_key}').shuffle(source_indices)",
+            "        selected_indices = source_indices[:sample_count]",
+            "        source_ids = [self.dataset['test'][index].get('idx', index) for index in selected_indices]",
+            "        self.dataset['test'] = self.dataset['test'].select(selected_indices)",
+            "        if sample_manifest_path:",
+            "            Path(sample_manifest_path).write_text(json.dumps(dict(dataset=sample_dataset_key, mode=sample_mode, seed=sample_seed, source_indices=selected_indices, source_ids=source_ids), ensure_ascii=False), encoding='utf-8')",
+            "",
+            "dataset_base.DatasetReader = AgentBridgeSampleDatasetReader",
             "",
             "with read_base():",
             *[f"    {line}" for line in imports],
             "",
             f"datasets = {' + '.join(dataset_names)}",
-            f"for dataset in datasets:\n    dataset['reader_cfg']['test_range'] = '[0:{max_samples}]'",
+            "for dataset in datasets:",
+            "    dataset['reader_cfg'].pop('test_range', None)",
+            "    dataset['reader_cfg'].update(dict(",
+            f"        sample_count={max_samples}, sample_mode={json.dumps(sampling_mode)}, sample_seed={sample_seed},",
+            "        sample_dataset_key=dataset['abbr'],",
+            "        sample_manifest_path=str(Path.cwd() / f\"sample-manifest-{dataset['abbr']}.json\"),",
+            "    ))",
             "api_meta_template = dict(round=[dict(role='HUMAN', api_role='HUMAN'), dict(role='BOT', api_role='BOT', generate=True)])",
             "models = [dict(",
             f"    abbr={model_literal}, type=OpenAI, path={model_literal}, key='ENV',",
@@ -322,4 +381,12 @@ class ModelEvaluationService:
                         rows.extend({key: value or "" for key, value in row.items()} for row in csv.DictReader(handle))
                 except (OSError, UnicodeError, csv.Error):
                     logger.warning("读取 OpenCompass 结果文件失败 path=%s", csv_path, exc_info=True)
-        return {"rows": rows, "summary_found": bool(rows)}
+        manifests: list[dict[str, Any]] = []
+        for manifest_path in output_dir.parent.glob("sample-manifest-*.json"):
+            try:
+                payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    manifests.append(payload)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                logger.warning("读取模型评估抽样清单失败 path=%s", manifest_path, exc_info=True)
+        return {"rows": rows, "summary_found": bool(rows), "sample_manifests": manifests}

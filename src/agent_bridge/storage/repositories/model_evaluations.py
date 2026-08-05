@@ -21,6 +21,8 @@ class ModelEvaluationRepository:
         base_url: str,
         datasets: list[str],
         max_samples: int,
+        sampling_mode: str,
+        sample_seed: int,
         work_dir: str,
         created_by: str,
     ) -> dict[str, Any]:
@@ -29,10 +31,10 @@ class ModelEvaluationRepository:
             conn.execute(
                 """
                 INSERT INTO model_evaluation_runs (
-                  run_id, model_name, base_url, datasets_json, max_samples, status, work_dir, created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)
+                  run_id, model_name, base_url, datasets_json, max_samples, sampling_mode, sample_seed, status, work_dir, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
                 """,
-                (run_id, model_name, base_url, json.dumps(datasets), max_samples, work_dir, created_by, now),
+                (run_id, model_name, base_url, json.dumps(datasets), max_samples, sampling_mode, sample_seed, work_dir, created_by, now),
             )
         return self.get_run(run_id) or {}
 

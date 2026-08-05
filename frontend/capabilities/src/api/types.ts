@@ -1314,9 +1314,11 @@ export interface ModelEvaluationRun {
   base_url: string
   datasets: string[]
   max_samples: number
+  sampling_mode: 'head' | 'random'
+  sample_seed: number
   status: 'queued' | 'running' | 'completed' | 'failed' | 'abandoned'
   progress_message: string
-  result: { rows?: Record<string, string>[]; summary_found?: boolean }
+  result: { rows?: Record<string, string>[]; summary_found?: boolean; sample_manifests?: { dataset: string; mode: 'head' | 'random'; seed: number; source_indices: number[]; source_ids: number[] }[] }
   error: string | null
   output_ref: string
   created_by: string
