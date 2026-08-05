@@ -99,6 +99,8 @@ import type {
   RevisionWithSnapshot,
   DiffResult,
   SyntaxCheckResult,
+  BusinessLedger,
+  BusinessLedgerRecords,
 } from './types'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
 
@@ -790,6 +792,20 @@ export const api = {
     if (toRevision != null) qs.set('to_revision', String(toRevision))
     return get<DiffResult>(`/scripts/${scriptKey}/diff?${qs}`)
   },
+
+  // Business ledgers
+  listBusinessLedgers: () => get<BusinessLedger[]>('/business-ledgers'),
+  getBusinessLedger: (ledgerKey: string) => get<BusinessLedger>(`/business-ledgers/${ledgerKey}`),
+  createBusinessLedger: (payload: Omit<BusinessLedger, 'record_count' | 'edit_token'> & { expected_edit_token?: string | null }) => post<BusinessLedger>('/business-ledgers', payload),
+  updateBusinessLedger: (ledgerKey: string, payload: Omit<BusinessLedger, 'ledger_key' | 'record_count' | 'edit_token'> & { expected_edit_token?: string | null }) => put<BusinessLedger>(`/business-ledgers/${ledgerKey}`, payload),
+  deleteBusinessLedger: (ledgerKey: string) => del<{ ledger_key: string; deleted: boolean }>(`/business-ledgers/${ledgerKey}`),
+  queryBusinessLedgerRecords: (ledgerKey: string, payload: Record<string, unknown> = {}) => post<BusinessLedgerRecords>(`/business-ledgers/${ledgerKey}/records/query`, payload),
+  addBusinessLedgerRecord: (ledgerKey: string, values: Record<string, unknown>) => post<{ record_id: string; values: Record<string, unknown> }>(`/business-ledgers/${ledgerKey}/records`, { values }),
+  updateBusinessLedgerRecord: (ledgerKey: string, recordId: string, values: Record<string, unknown>) => put<{ record_id: string; values: Record<string, unknown> }>(`/business-ledgers/${ledgerKey}/records/${recordId}`, { values }),
+  deleteBusinessLedgerRecord: (ledgerKey: string, recordId: string) => del<{ record_id: string; deleted: boolean }>(`/business-ledgers/${ledgerKey}/records/${recordId}`),
+  previewBusinessLedgerImport: (ledgerKey: string, file: File) => { const form = new FormData(); form.append('file', file); return postFormData<{ preview_id: string; rows: number; errors: Array<{ row: number; error: string }> }>(`/business-ledgers/${ledgerKey}/imports/xlsx/preview`, form) },
+  confirmBusinessLedgerImport: (ledgerKey: string, previewId: string) => post<{ imported: number }>(`/business-ledgers/${ledgerKey}/imports/xlsx/${previewId}/confirm`),
+  exportBusinessLedger: (ledgerKey: string) => getBlob(`/business-ledgers/${ledgerKey}/exports/xlsx`),
 
   // Knowledge Bases
   listKbs: () => get<KnowledgeBase[]>('/kbs'),

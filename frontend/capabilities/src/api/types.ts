@@ -1499,6 +1499,33 @@ export interface DiffResult {
   structured?: WorkflowStructuredDiff
 }
 
+export type BusinessLedgerFieldType = 'text' | 'number' | 'enum' | 'date' | 'datetime'
+export interface BusinessLedgerField {
+  field_key: string
+  name: string
+  field_type: BusinessLedgerFieldType
+  required: boolean
+  query_modes: string[]
+  sortable: boolean
+  agent_readable: boolean
+  enum_values: string[]
+}
+export interface BusinessLedger {
+  ledger_key: string
+  name: string
+  description: string
+  fields: BusinessLedgerField[]
+  record_count: number
+  edit_token?: string
+}
+export interface BusinessLedgerRecords {
+  ledger_key: string
+  total: number
+  limit: number
+  offset: number
+  items: Array<{ record_id: string; values: Record<string, unknown> }>
+}
+
 export type WorkflowImportTargetMode = 'auto' | 'new' | 'overwrite'
 
 export interface WorkflowImportPreview {

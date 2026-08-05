@@ -16,6 +16,7 @@ import {
   Activity,
   Bug,
   Brain,
+  TableProperties,
 } from '@lucide/vue'
 
 const props = defineProps<{ name: string }>()
@@ -37,6 +38,7 @@ const icon = computed(() => {
     stats: BarChart3,
     'agent-runs': Activity,
     memory: Brain,
+    'business-ledgers': TableProperties,
   }
   return map[props.name] ?? null
 })

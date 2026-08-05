@@ -40,6 +40,7 @@ const CodeRepoView = asyncView(() => import('./views/knowledge/CodeRepoView.vue'
 const KnowledgeView = asyncView(() => import('./views/knowledge/KnowledgeView.vue'))
 const KnowledgeProcessingConfigView = asyncView(() => import('./views/knowledge/KnowledgeProcessingConfigView.vue'))
 const MemoryView = asyncView(() => import('./views/knowledge/MemoryView.vue'))
+const BusinessLedgerView = asyncView(() => import('./views/knowledge/BusinessLedgerView.vue'))
 const WorkflowView = asyncView(() => import('./views/workflow/WorkflowView.vue'))
 const SkillManagementView = asyncView(() => import('./views/system/SkillManagementView.vue'))
 const ScriptsView = asyncView(() => import('./views/system/ScriptsView.vue'))
@@ -193,6 +194,7 @@ const navGroups: NavGroup[] = [
       { key: 'knowledge', label: '文档知识', description: '管理文档知识库和文档' },
       { key: 'code-repos', label: '代码知识', description: '管理代码仓库和知识图谱' },
       { key: 'memory', label: '记忆区块', description: '管理 profile 绑定的 claude-mem 记忆区块' },
+      { key: 'business-ledgers', label: '业务台账', description: '管理由 Excel 维护、可受控查询的业务数据' },
     ],
   },
   {
@@ -242,6 +244,7 @@ const view = computed(() => activeNavKey.value)
           <CodeRepoView v-else-if="view === 'code-repos'" :route-key="subRoute" />
           <KnowledgeView v-else-if="view === 'knowledge'" :route-key="subRoute" />
           <MemoryView v-else-if="view === 'memory'" :route-key="subRoute" />
+          <BusinessLedgerView v-else-if="view === 'business-ledgers'" :route-key="subRoute" />
           <KnowledgeProcessingConfigView v-else-if="view === 'system-config'" />
           <SkillManagementView v-else-if="view === 'skills'" />
           <ScriptsView v-else-if="view === 'scripts'" :route-key="subRoute" />
