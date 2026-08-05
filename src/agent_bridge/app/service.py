@@ -1390,7 +1390,8 @@ class AgentBridgeService:
         results: list[dict[str, Any]] = []
         for kb in kbs:
             try:
-                target = self._resolve_retrieval_target(kb, None)
+                _, strategy = self.resolve_retrieval_strategy(kb["slug"], profile_key)
+                target = self._resolve_retrieval_target(kb, strategy.backend_slug)
                 adapter = self._get_adapter(target["slug"])
                 chunks = adapter.retrieve(target["backend_kb_id"], question, top_k)
                 if chunks:
@@ -1408,8 +1409,9 @@ class AgentBridgeService:
                backend_slug: str | None = None,
                profile_key: str | None = None,
                top_k: int = 6) -> list[RetrievalResult]:
-        kb = self._require_kb_runtime_allowed(actor, kb_slug, profile_key)
-        target = self._resolve_retrieval_target(kb, backend_slug)
+        self._require_kb_runtime_allowed(actor, kb_slug, profile_key)
+        kb, strategy = self.resolve_retrieval_strategy(kb_slug, profile_key)
+        target = self._resolve_retrieval_target(kb, backend_slug or strategy.backend_slug)
         adapter = self._get_adapter(target["slug"])
         return adapter.retrieve(target["backend_kb_id"], question, top_k)
 

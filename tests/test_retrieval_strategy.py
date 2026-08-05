@@ -77,6 +77,56 @@ def test_resolve_strategy_no_defaults_uses_first_active(wm_paths, tmp_path):
     assert strategy.backend_slug in ("weknora", "ragflow")
 
 
+def test_search_uses_kb_default_backend(wm_paths, tmp_path, monkeypatch):
+    svc = _service(wm_paths, tmp_path)
+    kb = svc.create_kb("root", "test-kb", "Test", "")
+    svc.store.update_kb_defaults(kb["id"], default_backend_slug="weknora", default_agent_id=None)
+    resolved_backends: list[str | None] = []
+
+    class RecordingAdapter:
+        def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6):
+            return []
+
+    def resolve_target(kb: dict, backend_slug: str | None) -> dict:
+        resolved_backends.append(backend_slug)
+        return {"slug": backend_slug, "backend_kb_id": "remote-test-kb"}
+
+    monkeypatch.setattr(svc, "_resolve_retrieval_target", resolve_target)
+    monkeypatch.setattr(svc, "_get_adapter", lambda slug: RecordingAdapter())
+
+    svc.search("root", "test-kb", "查询")
+
+    assert resolved_backends == ["weknora"]
+
+
+def test_search_uses_profile_backend_override(wm_paths, tmp_path, monkeypatch):
+    svc = _service(wm_paths, tmp_path)
+    kb = svc.create_kb("root", "test-kb", "Test", "")
+    svc.store.update_kb_defaults(kb["id"], default_backend_slug="weknora", default_agent_id=None)
+    svc.governance.upsert_profile("root", "prof-a", "Profile A", "desc", "active")
+    svc.store.replace_resource_rule_profiles(
+        resource_type="wiki_kb", resource_key="test-kb",
+        profile_keys=["prof-a"],
+        overrides={"prof-a": {"retrieval_backend_slug": "ragflow", "retrieval_agent_id": None}},
+    )
+    resolved_backends: list[str | None] = []
+
+    class RecordingAdapter:
+        def retrieve(self, backend_kb_id: str, question: str, top_k: int = 6):
+            return []
+
+    def resolve_target(kb: dict, backend_slug: str | None) -> dict:
+        resolved_backends.append(backend_slug)
+        return {"slug": backend_slug, "backend_kb_id": "remote-test-kb"}
+
+    monkeypatch.setattr(svc, "_resolve_retrieval_target", resolve_target)
+    monkeypatch.setattr(svc, "_get_adapter", lambda slug: RecordingAdapter())
+
+    svc.search("root", "test-kb", "查询", profile_key="prof-a")
+
+    assert resolved_backends == ["ragflow"]
+
+
 def test_update_kb_defaults_via_service(wm_paths, tmp_path):
     svc = _service(wm_paths, tmp_path)
     svc.create_kb("root", "test-kb", "Test", "")
