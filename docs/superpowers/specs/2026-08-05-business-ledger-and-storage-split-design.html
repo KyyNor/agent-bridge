@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>业务台账与存储分库设计</title>
+  <style>
+    :root { color-scheme: light; --ink:#17212b; --muted:#5d6975; --line:#dfe5eb; --paper:#fff; --bg:#f4f7fa; --blue:#026fd7; --blue-soft:#eaf4ff; --green:#13795b; --amber:#9a6500; --red:#b33127; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; line-height:1.72; }
+    main { width:min(1080px,calc(100% - 40px)); margin:32px auto 64px; background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:48px 58px; box-shadow:0 12px 32px rgb(22 34 47 / 6%); }
+    h1,h2,h3 { line-height:1.28; letter-spacing:-.02em; } h1 { margin:0; font-size:32px; } h2 { margin:44px 0 14px; padding-top:4px; font-size:22px; border-top:1px solid var(--line); } h3 { margin:28px 0 8px; font-size:17px; }
+    p { margin:10px 0; } .lead { max-width:780px; color:var(--muted); font-size:16px; } .meta { display:flex; gap:10px; flex-wrap:wrap; margin:18px 0 4px; color:var(--muted); font-size:13px; } .tag { padding:3px 9px; border-radius:999px; background:var(--blue-soft); color:#075aa8; font-weight:600; }
+    .callout { margin:18px 0; padding:14px 16px; border-left:4px solid var(--blue); background:#f7fbff; border-radius:0 8px 8px 0; } .warn { border-left-color:var(--amber); background:#fffaf0; } .ok { border-left-color:var(--green); background:#f2fbf7; }
+    table { width:100%; border-collapse:collapse; margin:14px 0; font-size:14px; } th,td { border:1px solid var(--line); padding:10px 12px; vertical-align:top; text-align:left; } th { background:#f6f8fa; font-weight:650; } code,pre { font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; } code { padding:2px 5px; border-radius:4px; background:#f1f4f6; font-size:.92em; } pre { margin:14px 0; padding:15px; overflow:auto; border-radius:8px; background:#111a24; color:#e7eef5; font-size:12.5px; line-height:1.58; }
+    ul,ol { padding-left:24px; } li { margin:5px 0; } .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:14px 0; } .card { padding:15px; border:1px solid var(--line); border-radius:10px; background:#fff; } .card strong { display:block; margin-bottom:5px; } .card p { color:var(--muted); font-size:13px; }
+    .flow { display:flex; align-items:stretch; gap:8px; flex-wrap:wrap; margin:14px 0; } .flow span { flex:1 1 145px; padding:10px; border-radius:8px; background:#f4f7fa; text-align:center; font-size:13px; } .flow b { align-self:center; color:var(--blue); } .small { color:var(--muted); font-size:13px; } .status { color:var(--green); font-weight:650; }
+    @media (max-width:720px) { main { width:100%; margin:0; border:0; border-radius:0; padding:28px 20px; } .grid { grid-template-columns:1fr; } h1 { font-size:26px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>业务台账与存储分库设计</h1>
+    <p class="lead">为 Agent Bridge 增加由用户维护、受能力平面约束、可由 Agent 查询的轻量业务数据能力；同时将主业务、运行日志与业务台账数据拆分为独立 SQLite 文件。</p>
+    <div class="meta"><span class="tag">已确认设计</span><span>2026-08-05</span><span>范围：台账能力、MCP、三库迁移</span></div>
+  </header>
+
+  <h2>1. 决策摘要</h2>
+  <div class="grid">
+    <section class="card"><strong>产品名称：业务台账</strong><p>面向 Excel 维护的业务资产、系统、应用、规则等数据。技术实体保留 <code>ledger</code>/<code>dataset</code>，不混同 MySQL、Hive 等外部通用数据库。</p></section>
+    <section class="card"><strong>持久化 + 内存快照</strong><p>SQLite 是唯一持久化来源；服务启动后异步构建每个台账的只读数据帧快照，浏览和 MCP 查询均只读内存。</p></section>
+    <section class="card"><strong>一个顶级查询工具</strong><p>对 Agent 直接暴露 <code>query_business_ledger</code>，不再要求 service/tool_name/params 包装，也不暴露台账管理操作。</p></section>
+  </div>
+  <div class="callout ok">已确认边界：不设草稿状态；字段类型支持文本、数字、枚举、日期、日期时间，不提供布尔类型；一期不使用 FTS；定义完整版本化，记录不保存逐条历史版本。</div>
+
+  <h2>2. 目标与非目标</h2>
+  <table>
+    <thead><tr><th>目标</th><th>非目标</th></tr></thead>
+    <tbody>
+      <tr><td>让管理员维护中小规模的自定义业务台账，并按字段定义进行受控查询。</td><td>替代 MySQL、Hive、OLAP 或提供任意 SQL 查询。</td></tr>
+      <tr><td>让不同能力平面只能发现和查询其被授予的台账。</td><td>按记录或字段配置独立的 Profile 权限。授权粒度一期是台账；字段是否可返回由定义控制。</td></tr>
+      <tr><td>支持 Excel 为主的批量维护、预览、导入和导出。</td><td>实现多维表格、公式、协同编辑、视图编排或实时多人冲突解决。</td></tr>
+      <tr><td>保证最多 100 字段、50,000 行的单台账在内存中快速筛选。</td><td>保证所有 50 个台账同时达到上限时仍无内存压力；系统必须配置总缓存预算。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. 信息架构与管理界面</h2>
+  <p>侧边导航在“知识管理”分组只增加一个 <strong>业务台账</strong>入口。该入口是台账列表；不新增平铺的“浏览 / 编辑 / 导入”导航项。新建台账仍从列表页发起，后续操作通过台账浏览页进入。</p>
+  <div class="flow"><span>业务台账列表<br><small>新建、搜索、浏览</small></span><b>→</b><span>台账浏览页<br><small>筛选、分页、详情、行编辑</small></span><b>→</b><span>定义编辑 / Excel 导入 / JSON 导入导出<br><small>二级页面或对话框</small></span></div>
+  <p class="small">浏览页是单台账的操作中心：上方保留“编辑定义”“导入 Excel”“导出”“新增数据”等动作；列表页不堆叠这些二级功能。</p>
+
+  <h2>4. 数据定义</h2>
+  <h3>4.1 台账元数据</h3>
+  <ul>
+    <li><code>ledger_key</code>：全局唯一、创建后不可修改的 slug；是 Profile 授权和 MCP 查询身份。</li>
+    <li>名称、描述、状态、创建/更新时间、创建人、当前定义 revision、编辑并发 token。</li>
+    <li>字段清单与可选的业务唯一键。唯一键可为一个或多个字段，用于 Excel 导入时识别更新；未配置时导入只能新增。</li>
+  </ul>
+  <h3>4.2 字段定义</h3>
+  <table>
+    <thead><tr><th>字段</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>field_key</code></td><td>不可变机器标识。显示名称可以修改；Excel 优先按 field_key 匹配，显示名称只在唯一时作为回退。</td></tr>
+      <tr><td>类型</td><td><code>text</code>、<code>number</code>、<code>enum</code>、<code>date</code>、<code>datetime</code>。是/否等语义使用枚举配置。</td></tr>
+      <tr><td>约束</td><td>必填、枚举选项、默认值、显示顺序、唯一键成员。</td></tr>
+      <tr><td>查询/输出</td><td><code>query_modes</code>、<code>sortable</code>、<code>agent_readable</code>。未配置可查询的字段不得作为筛选、关键词或排序条件。</td></tr>
+    </tbody>
+  </table>
+  <p>日期统一保存为 <code>YYYY-MM-DD</code>；日期时间以 UTC ISO 8601 保存。导入层负责把 Excel 日期单元格和明确格式的文本转换为统一类型。</p>
+
+  <h2>5. 存储与内存快照</h2>
+  <h3>5.1 台账数据库</h3>
+  <p><code>agent-bridge-datasets.db</code> 保存定义与记录，不动态创建“每台账一张表”。核心表为：</p>
+  <ul>
+    <li><code>business_ledgers</code>：台账注册信息与当前定义 revision；</li>
+    <li><code>business_ledger_revisions</code>：不可变定义快照、content_hash、version_hash、差异与操作者；</li>
+    <li><code>business_ledger_records</code>：<code>ledger_key</code>、<code>record_id</code>、<code>values_json</code>、创建/更新时间与操作者；</li>
+    <li><code>business_ledger_imports</code>：预览 token、源文件、列映射、校验结果、导入摘要及确认状态。</li>
+  </ul>
+  <p>记录 JSON 保持数据模型简单、字段变更可控；由于查询不落 SQLite，不建立 EAV 索引或 FTS 索引。</p>
+  <h3>5.2 缓存生命周期</h3>
+  <div class="flow"><span>SQLite 读取<br>定义 + 记录</span><b>→</b><span>类型校验与规范化<br>构建 DataFrame</span><b>→</b><span>原子发布<br>不可变快照</span><b>→</b><span>浏览 / MCP<br>只读查询</span></div>
+  <ul>
+    <li>应用启动后启动后台加载任务，按受控并发依次加载所有 active 台账；服务不因加载而阻塞就绪。</li>
+    <li>未完成加载的台账查询返回 <code>ledger_loading</code>；不回退到 SQLite 查询，避免两条查询语义漂移。</li>
+    <li>新增、编辑、删除、Excel 导入和定义变更必须先完成持久化校验，再构建完整新快照，最后以一次引用替换发布。读请求只能看见旧快照或新快照。</li>
+    <li>一期选用 pandas，并在项目依赖中显式声明。数据量增长后可替换为 Polars；Service 接口不暴露 DataFrame 类型。</li>
+    <li>设置全局 <code>ledger_cache_max_bytes</code> 与每台账行/字段硬上限。超过预算时拒绝导入或启用台账，而不是让进程 OOM。</li>
+  </ul>
+  <div class="callout warn">50 个台账 × 50,000 行 × 100 个字段是理论上限而非可同时承诺的内存容量；缓存预算是避免“每个台账合法、整体失控”的必要护栏。</div>
+
+  <h2>6. 查询语义</h2>
+  <table>
+    <thead><tr><th>字段类型</th><th>允许操作</th><th>内存实现</th></tr></thead>
+    <tbody>
+      <tr><td>文本</td><td>exact、prefix、contains</td><td>字面匹配；contains 使用 <code>str.contains(..., regex=False, na=False)</code>，不解释为正则。</td></tr>
+      <tr><td>枚举</td><td>exact、in</td><td>规范化后的相等或集合匹配。</td></tr>
+      <tr><td>数字</td><td>exact、gt、gte、lt、lte、between</td><td>数值列比较。</td></tr>
+      <tr><td>日期 / 日期时间</td><td>exact、before、after、between</td><td>已规范化的时间列比较。</td></tr>
+    </tbody>
+  </table>
+  <p>一期多个字段条件仅支持 AND；每字段一个条件。关键词搜索仅作用于定义中同时允许 <code>contains</code> 与关键词检索的文本字段，语义为“任一允许字段包含关键词”。页面与 MCP 的过滤器共用同一个查询编译器。</p>
+
+  <h2>7. 顶级 MCP 工具与 Profile 权限</h2>
+  <h3>7.1 工具契约</h3>
+  <p>对 Agent 直接注册一个 request-scoped 顶级工具 <code>query_business_ledger</code>。它不通过通用 <code>execute</code> 提供，调用参数中也没有 service、tool_name 或 params 包装。</p>
+  <pre>{
+  "ledger_key": "asset_inventory",
+  "filters": {
+    "ip": {"op": "exact", "value": "10.0.0.8"},
+    "operating_system": {"op": "in", "values": ["Linux", "Windows"]},
+    "last_seen": {"op": "between", "from": "2026-08-01", "to": "2026-08-05"}
+  },
+  "keyword": "支付",
+  "sort": {"field": "last_seen", "direction": "desc"},
+  "limit": 50,
+  "offset": 0
+}</pre>
+  <p>公共参数位于工具顶层；动态业务字段保留在 <code>filters</code> 对象中。完全平铺为 <code>ip</code>、<code>name_like</code> 等参数会让不同台账的静态 JSON Schema 失真，也无法统一表达枚举集合和范围条件。</p>
+  <h3>7.2 Fail-closed 权限</h3>
+  <ul>
+    <li>新增资源类型 <code>business_ledger</code>，复用 <code>profile_resource_rules</code> 的显式 allow-list。</li>
+    <li>MCP 调用必须带 active Profile；无 Profile 时台账不可用。</li>
+    <li>生成 Profile 提示词时，仅注入已授权台账的 key、名称、描述、可查询字段、操作符和简短示例。定义或授权变化会失效该 Profile 的上下文缓存。</li>
+    <li>若 <code>ledger_key</code> 不存在或未获授权，统一返回 <code>ledger_not_available</code>，并仅返回当前 Profile 已授权的台账概要；绝不列出或确认其他台账。</li>
+    <li>执行时再次校验字段、操作符、排序与输出字段，不能因提示词遗漏或 Agent 伪造参数而绕过定义。</li>
+  </ul>
+  <p>台账定义和数据维护操作由 <code>BusinessLedgerService</code> 与管理员 API 承担。管理 MCP 的契约可提前设计，但一期不注册给 Agent，也不进入普通 Profile 的工具目录。</p>
+
+  <h2>8. Excel 与 JSON</h2>
+  <h3>8.1 Excel 维护</h3>
+  <ol>
+    <li>用户上传 xlsx，服务按 field_key 优先、唯一显示名称回退匹配列；</li>
+    <li>生成预览：未映射列、缺失必填字段、类型/枚举错误、唯一键冲突、将新增与更新的行数；</li>
+    <li>确认时重新核验定义 revision 和预览 token，任一变化则要求重新预览；</li>
+    <li>同一台账的整批写入使用一个 SQLite 事务；成功后构建并发布新缓存快照；</li>
+    <li>导出当前浏览筛选结果；包含 <code>__record_id</code> 以支持精确回写。</li>
+  </ol>
+  <h3>8.2 JSON 定义导入导出</h3>
+  <p>定义格式为 <code>agent-bridge.business-ledger</code>、<code>format_version: 1</code>。定义导入与数据导入分开；覆盖前必须有差异预览。删除字段、修改字段类型或唯一键属于破坏性变更：若存在记录则拒绝直接覆盖，必须采用显式转换、清空确认或新建台账。</p>
+
+  <h2>9. 版本与删除</h2>
+  <ul>
+    <li>每次定义变化产生 revision。<code>content_hash</code> 表达执行语义，<code>version_hash</code> 表达含展示字段的完整历史；恢复任一历史定义会产生新的 revision。</li>
+    <li>数据记录仅保存当前状态、创建/更新时间、操作者和导入批次，不做每次修改的全量版本副本。</li>
+    <li>删除台账先停用并从缓存撤下，使其立即对 MCP 不可见；管理员确认后删除记录、定义和相关 Profile 资源规则。跨库清理由可重试的补偿任务完成。</li>
+  </ul>
+
+  <h2>10. 三库拆分</h2>
+  <table>
+    <thead><tr><th>文件</th><th>内容</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td><code>data/agent-bridge.db</code></td><td>Profile、能力配置、知识、代码、记忆、工作流定义/任务/产物等主业务状态。</td><td>小而稳定，主业务备份和分析不再携带大量运行事件。</td></tr>
+      <tr><td><code>data/agent-bridge-logs.db</code></td><td>tool_call_logs、agent_runs、script_runs、workflow_run_logs。</td><td>高频追加、可按保留期清理的运行审计独立维护。</td></tr>
+      <tr><td><code>data/agent-bridge-datasets.db</code></td><td>业务台账的定义、版本、记录、导入批次。</td><td>Excel 数据与主业务隔离，可独立下载、备份、容量管理。</td></tr>
+    </tbody>
+  </table>
+  <p><code>workflow_runs</code>、<code>workflow_node_runs</code> 和 <code>workflow_artifacts</code> 一期留在主库：它们参与调度、增量复用和产物关联，跨库会显著弱化现有事务边界。</p>
+
+  <h2>11. 迁移策略</h2>
+  <ol>
+    <li>升级前停止服务并建立可恢复备份；不得在 WAL 状态下直接移动单个数据库文件。</li>
+    <li>首次启动发现旧 <code>wiki.db</code> 且新主库不存在时，通过 SQLite backup API 写入临时 <code>agent-bridge.db</code>，校验后原子切换。</li>
+    <li>创建日志库并按主键/唯一 ID 分批、幂等复制运行日志表；记录迁移状态、行数和完成标记。</li>
+    <li>日志库校验完成后才切换读写。旧表在明确维护步骤完成前保留，允许失败恢复和重复迁移。</li>
+    <li>管理员确认后清理主库旧日志表，并用显式维护命令执行 VACUUM；不在服务启动路径做长时间压缩。</li>
+    <li>新建台账库并初始化其独立 schema；所有库都使用 WAL、busy_timeout、幂等 schema migration 与独立连接上下文。</li>
+  </ol>
+  <div class="callout">现有 <code>SQLiteStore</code> 继续作为主库兼容门面；日志仓储改由独立 LogStore 连接，台账则由独立 BusinessLedgerStore/Service 承担。禁止通过 ATTACH 把三库伪装成单一事务。</div>
+
+  <h2>12. 实施阶段与验收</h2>
+  <table>
+    <thead><tr><th>阶段</th><th>交付</th><th>关键验收</th></tr></thead>
+    <tbody>
+      <tr><td>1. 存储基座</td><td>路径重命名、主/日志库拆分迁移、独立台账库和缓存生命周期。</td><td>旧 wiki.db 可幂等升级；日志迁移失败可恢复；主库不再新增运行审计行。</td></tr>
+      <tr><td>2. 台账管理</td><td>定义/记录 API、版本、唯一键、内存查询编译器。</td><td>100 字段、50,000 行上限；写入后快照原子替换；日期和数字范围正确。</td></tr>
+      <tr><td>3. 管理页面</td><td>列表页、浏览页、定义编辑、行编辑、Excel/JSON 预览导入导出。</td><td>导航仅一个台账入口；破坏性定义变更明确拒绝或二次确认。</td></tr>
+      <tr><td>4. MCP 与权限</td><td>顶级 query_business_ledger、Profile 上下文注入、资源规则接入。</td><td>未授权台账不可发现、不可查询、错误中不泄露；仅一个 Agent 查询工具。</td></tr>
+    </tbody>
+  </table>
+  <p class="status">本规格记录截至 2026-08-05 已确认的产品和技术决策。实施时应同步更新 README、CLAUDE、AGENTS、API 契约、前端类型与相关领域测试。</p>
+</main>
+</body>
+</html>
