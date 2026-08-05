@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import Response
 
 from agent_bridge.api.schemas import (
     BusinessLedgerQueryRequest,
@@ -65,5 +66,21 @@ def create_business_ledger_routes(service, actor):
     def delete_record(ledger_key: str, record_id: str, current_actor: str = Depends(actor)) -> dict:
         service.business_ledgers.delete_record(current_actor, ledger_key, record_id)
         return {"record_id": record_id, "deleted": True}
+
+    @router.post("/{ledger_key}/imports/xlsx/preview")
+    async def preview_xlsx_import(ledger_key: str, file: UploadFile = File(...), current_actor: str = Depends(actor)) -> dict:
+        return service.business_ledgers.preview_xlsx_import(current_actor, ledger_key, await file.read())
+
+    @router.post("/{ledger_key}/imports/xlsx/{preview_id}/confirm")
+    def confirm_xlsx_import(ledger_key: str, preview_id: str, current_actor: str = Depends(actor)) -> dict:
+        return service.business_ledgers.confirm_xlsx_import(current_actor, ledger_key, preview_id)
+
+    @router.get("/{ledger_key}/exports/xlsx")
+    def export_xlsx(ledger_key: str, current_actor: str = Depends(actor)) -> Response:
+        return Response(
+            service.business_ledgers.export_xlsx(current_actor, ledger_key),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{ledger_key}.xlsx"'},
+        )
 
     return router

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from io import BytesIO
 import json
 import sqlite3
 import threading
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from openpyxl import Workbook, load_workbook
 
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.core.editing import attach_edit_token, require_edit_token
@@ -72,6 +74,7 @@ class BusinessLedgerService:
         self.db_path = db_path
         self.admins = admins
         self._snapshots: dict[str, LedgerSnapshot] = {}
+        self._import_previews: dict[str, tuple[str, list[dict[str, Any]]]] = {}
         self._lock = threading.RLock()
 
     def _connect(self):
@@ -233,6 +236,67 @@ class BusinessLedgerService:
         if not changed:
             raise NotFound("台账记录不存在")
         self._replace_snapshot(ledger_key)
+
+    def preview_xlsx_import(self, actor: str, ledger_key: str, content: bytes) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        definition = self._get_definition_raw(ledger_key)
+        try:
+            workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+            sheet = workbook.active
+            rows = list(sheet.iter_rows(values_only=True))
+        except Exception as exc:
+            raise ValidationError("xlsx 文件无效") from exc
+        if not rows:
+            raise ValidationError("xlsx 文件为空")
+        headers = [str(value or "").strip() for value in rows[0]]
+        fields = {field["field_key"]: field for field in definition["fields"]}
+        names = {field["name"]: field["field_key"] for field in definition["fields"]}
+        mapped = [fields.get(header, fields.get(names.get(header, ""))) for header in headers]
+        unknown = [header for header, field in zip(headers, mapped) if header and field is None]
+        if unknown:
+            raise ValidationError(f"Excel 存在未匹配列：{unknown[0]}")
+        prepared: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        for row_no, values in enumerate(rows[1:], start=2):
+            if all(value is None for value in values):
+                continue
+            raw = {field["field_key"]: value for field, value in zip(mapped, values) if field is not None}
+            try:
+                prepared.append(self._normalize_values(definition, raw))
+            except ValidationError as exc:
+                errors.append({"row": row_no, "error": exc.message})
+        preview_id = uuid.uuid4().hex
+        self._import_previews[preview_id] = (ledger_key, prepared)
+        return {"preview_id": preview_id, "rows": len(prepared), "errors": errors, "columns": [field["field_key"] if field else None for field in mapped]}
+
+    def confirm_xlsx_import(self, actor: str, ledger_key: str, preview_id: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        prepared = self._import_previews.pop(preview_id, None)
+        if prepared is None or prepared[0] != ledger_key:
+            raise NotFound("导入预览不存在或已过期")
+        rows = prepared[1]
+        if self._record_count(ledger_key) + len(rows) > MAX_LEDGER_RECORDS:
+            raise ValidationError(f"导入后超过单台账 {MAX_LEDGER_RECORDS} 行上限")
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO business_ledger_records (ledger_key, record_id, values_json, created_by, updated_by) VALUES (?, ?, ?, ?, ?)",
+                [(ledger_key, uuid.uuid4().hex, json.dumps(values, ensure_ascii=False), actor, actor) for values in rows],
+            )
+        self._replace_snapshot(ledger_key)
+        return {"ledger_key": ledger_key, "imported": len(rows)}
+
+    def export_xlsx(self, actor: str, ledger_key: str) -> bytes:
+        require_admin_user(actor, self.admins)
+        snapshot = self._snapshot(ledger_key)
+        workbook = Workbook()
+        sheet = workbook.active
+        fields = snapshot.definition["fields"]
+        sheet.append([field["field_key"] for field in fields])
+        for _, row in snapshot.frame.iterrows():
+            sheet.append([self._json_value(row[field["field_key"]]) for field in fields])
+        output = BytesIO()
+        workbook.save(output)
+        return output.getvalue()
 
     def query(
         self,
