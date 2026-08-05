@@ -39,6 +39,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。主业务库为 `agent-bridge.db`，工具调用与 Agent 运行审计位于独立的 `agent-bridge-logs.db`；运行日志 repository 必须使用日志连接，不能重新写回主库。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
+业务台账使用独立的 `agent-bridge-ledgers.db`，定义与记录均以 SQLite 持久化；加载、筛选、排序和模糊匹配只针对 pandas 内存快照执行。每个台账上限为 100 字段、50,000 行；写入必须完整重建并原子替换快照，查询不得回退至 SQLite。
+
 `workflow_artifacts` 的标题、摘要、路径和正文通过 jieba 预分词与 SQLite FTS5 索引检索；中文查询词按 `AND` 组合，长度至少 3 的 ASCII 标识符使用 FTS5 前缀匹配，短 token 和带分隔符的路径/标识符使用字面匹配。Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。原始产物正文不被改写，分词副本单独维护并随 artifact 生命周期同步。
 
 领域失败抛 `AgentBridgeError` 子类，由 API 全局异常处理器转换为 HTTP 响应。重新分类错误时使用明确类型并 `raise ... from exc`，不要修改任意异常对象。

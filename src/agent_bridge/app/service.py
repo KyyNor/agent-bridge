@@ -58,6 +58,7 @@ from agent_bridge.automation.workflows.service import WorkflowService
 from agent_bridge.automation.workflows.handlers import WorkflowNodeHandlers
 from agent_bridge.automation.workflows.output_handler import OutputHandler
 from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
+from agent_bridge.business_ledger.service import BusinessLedgerService
 
 
 ALLOWED_EXTENSIONS = {
@@ -212,6 +213,8 @@ class AgentBridgeService:
             registry_provider=lambda: self.registry,
         )
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
+        self.business_ledgers = BusinessLedgerService(db_path=paths.ledger_db_path, admins=admins)
+        self.business_ledgers.init_schema()
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         agent_runtime_config = load_agent_runtime_config(paths)
         self.agents = AgentService(

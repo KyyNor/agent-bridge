@@ -201,6 +201,44 @@ class ExecuteCapabilityRequest(BaseModel):
     profile_key: str | None = None
 
 
+class BusinessLedgerFieldRequest(BaseModel):
+    field_key: str
+    name: str
+    field_type: Literal["text", "number", "enum", "date", "datetime"]
+    required: bool = False
+    query_modes: list[str] = Field(default_factory=list)
+    sortable: bool = False
+    agent_readable: bool = True
+    enum_values: list[str] = Field(default_factory=list)
+
+
+class BusinessLedgerRequest(BaseModel):
+    ledger_key: str
+    name: str
+    description: str = ""
+    fields: list[BusinessLedgerFieldRequest]
+    expected_edit_token: str | None = None
+
+
+class BusinessLedgerUpdateRequest(BaseModel):
+    name: str
+    description: str = ""
+    fields: list[BusinessLedgerFieldRequest]
+    expected_edit_token: str | None = None
+
+
+class BusinessLedgerRecordRequest(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
+class BusinessLedgerQueryRequest(BaseModel):
+    filters: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    keyword: str | None = None
+    sort: dict[str, str] | None = None
+    limit: int = Field(default=50, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+
 class ProjectProfileRequest(BaseModel):
     profile_key: str
     name: str

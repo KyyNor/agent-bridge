@@ -73,6 +73,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         service.plugin_update_scheduler.start()
         service.doc_sync_scheduler.start()
         service.workflow_scheduler.start()
+        asyncio.create_task(service.business_ledgers.load_all_async())
         logger.info(
             "调度器已启动 codegraph/understand/plugin_update/doc_sync/workflow"
         )
@@ -138,6 +139,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             service.skills.admins = reloaded
             service.scripts.admins = reloaded
             service.memory.admins = reloaded
+            service.business_ledgers.admins = reloaded
             service.plugin_update_scheduler._admins = reloaded
             return await call_next(request)
 
@@ -222,6 +224,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     from agent_bridge.api.routes.memory import create_memory_routes
     app.include_router(create_memory_routes(service, actor))
+
+    from agent_bridge.api.routes.business_ledgers import create_business_ledger_routes
+    app.include_router(create_business_ledger_routes(service, actor))
 
     from agent_bridge.api.routes.retrieval_probe import create_retrieval_probe_routes
     app.include_router(create_retrieval_probe_routes(service, actor))
