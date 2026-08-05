@@ -43,6 +43,8 @@ test('业务台账详情使用页内返回导航，数据编辑和导入使用�
   assert.match(view, /showImportDialog/)
   assert.match(view, /businessLedgerRecordFormValues/)
   assert.match(view, /选择 Excel 文件/)
+  assert.match(view, /下载模板/)
+  assert.match(view, /downloadBusinessLedgerTemplate/)
 })
 
 test('台账定义以可编辑字段列表呈现，而非字段卡片', () => {

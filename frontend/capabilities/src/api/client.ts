@@ -804,6 +804,7 @@ export const api = {
   updateBusinessLedgerRecord: (ledgerKey: string, recordId: string, values: Record<string, unknown>) => put<{ record_id: string; values: Record<string, unknown> }>(`/business-ledgers/${ledgerKey}/records/${recordId}`, { values }),
   deleteBusinessLedgerRecord: (ledgerKey: string, recordId: string) => del<{ record_id: string; deleted: boolean }>(`/business-ledgers/${ledgerKey}/records/${recordId}`),
   previewBusinessLedgerImport: (ledgerKey: string, file: File) => { const form = new FormData(); form.append('file', file); return postFormData<{ preview_id: string; rows: number; errors: Array<{ row: number; error: string }> }>(`/business-ledgers/${ledgerKey}/imports/xlsx/preview`, form) },
+  downloadBusinessLedgerTemplate: (ledgerKey: string) => getBlob(`/business-ledgers/${ledgerKey}/imports/xlsx/template`),
   confirmBusinessLedgerImport: (ledgerKey: string, previewId: string) => post<{ imported: number }>(`/business-ledgers/${ledgerKey}/imports/xlsx/${previewId}/confirm`),
   exportBusinessLedger: (ledgerKey: string) => getBlob(`/business-ledgers/${ledgerKey}/exports/xlsx`),
 

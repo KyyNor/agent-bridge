@@ -71,6 +71,14 @@ def create_business_ledger_routes(service, actor):
     async def preview_xlsx_import(ledger_key: str, file: UploadFile = File(...), current_actor: str = Depends(actor)) -> dict:
         return service.business_ledgers.preview_xlsx_import(current_actor, ledger_key, await file.read())
 
+    @router.get("/{ledger_key}/imports/xlsx/template")
+    def download_xlsx_import_template(ledger_key: str, current_actor: str = Depends(actor)) -> Response:
+        return Response(
+            service.business_ledgers.xlsx_import_template(current_actor, ledger_key),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{ledger_key}-template.xlsx"'},
+        )
+
     @router.post("/{ledger_key}/imports/xlsx/{preview_id}/confirm")
     def confirm_xlsx_import(ledger_key: str, preview_id: str, current_actor: str = Depends(actor)) -> dict:
         return service.business_ledgers.confirm_xlsx_import(current_actor, ledger_key, preview_id)

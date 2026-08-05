@@ -41,6 +41,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 业务台账使用独立的 `agent-bridge-ledgers.db`，定义与记录均以 SQLite 持久化；加载、筛选、排序和模糊匹配只针对 pandas 内存快照执行。所有字段默认精确匹配和可排序，文本字段仅额外配置是否允许字面包含检索，数字、日期与日期时间默认支持完整范围运算；多字段排序按传入顺序生效。每个台账上限为 100 字段、50,000 行；写入必须完整重建并原子替换快照，查询不得回退至 SQLite。
 
+业务台账 Excel 导入模板仅导出当前字段标识表头，绝不复用数据导出接口或泄露已有记录。
+
 业务台账是 `business_ledger` 内置能力来源，Agent 只获得顶级 `query_business_ledger` 读取工具；管理定义和数据的 API 不得注册到 Agent MCP。没有 Profile 或未显式绑定资源时必须 fail closed；拒绝访问时只能提示当前 Profile 已获授权的台账。
 
 `workflow_artifacts` 的标题、摘要、路径和正文通过 jieba 预分词与 SQLite FTS5 索引检索；中文查询词按 `AND` 组合，长度至少 3 的 ASCII 标识符使用 FTS5 前缀匹配，短 token 和带分隔符的路径/标识符使用字面匹配。Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。原始产物正文不被改写，分词副本单独维护并随 artifact 生命周期同步。

@@ -58,3 +58,10 @@ def test_business_ledger_excel_preview_confirm_and_export(wm_paths) -> None:
         exported = client.get("/business-ledgers/assets/exports/xlsx", headers=headers)
         assert exported.status_code == 200
         assert load_workbook(BytesIO(exported.content)).active.max_row == 2
+
+        template = client.get("/business-ledgers/assets/imports/xlsx/template", headers=headers)
+        assert template.status_code == 200
+        assert template.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        template_sheet = load_workbook(BytesIO(template.content)).active
+        assert template_sheet.max_row == 1
+        assert [cell.value for cell in template_sheet[1]] == ["name"]

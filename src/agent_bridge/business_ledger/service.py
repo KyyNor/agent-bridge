@@ -299,6 +299,16 @@ class BusinessLedgerService:
         workbook.save(output)
         return output.getvalue()
 
+    def xlsx_import_template(self, actor: str, ledger_key: str) -> bytes:
+        """生成仅包含字段标识表头的 Excel 导入模板。"""
+        require_admin_user(actor, self.admins)
+        definition = self._get_definition_raw(ledger_key)
+        workbook = Workbook()
+        workbook.active.append([field["field_key"] for field in definition["fields"]])
+        output = BytesIO()
+        workbook.save(output)
+        return output.getvalue()
+
     def query(
         self,
         ledger_key: str,
