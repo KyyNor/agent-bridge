@@ -53,6 +53,7 @@ from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.scripts.service import ScriptService
 from agent_bridge.system_config.skills.service import SkillService
 from agent_bridge.system_config.plugin_update_scheduler import PluginUpdateScheduler
+from agent_bridge.system_config.model_evaluation.service import ModelEvaluationService
 from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 from agent_bridge.automation.workflows.service import WorkflowService
 from agent_bridge.automation.workflows.handlers import WorkflowNodeHandlers
@@ -238,6 +239,7 @@ class AgentBridgeService:
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
+        self.model_evaluations = ModelEvaluationService(paths=paths, store=store, admins=admins)
         self.workflows = WorkflowService(
             store=store, admins=admins, agent_service=self.agents, skills=self.skills, scripts=self.scripts
         )
@@ -312,11 +314,12 @@ class AgentBridgeService:
                 "已恢复上一进程遗留的 CodeGraph 中断同步任务 count=%d",
                 recovered,
             )
+        service.model_evaluations.recover_interrupted_runs()
         migrate_toml_backends_to_db(paths, service.store)
         service.registry = create_registry_from_db(paths, service.store)
         logger.info(
             "AgentBridgeService 装配完成 子服务=governance/capabilities/agents/codegraph/"
-            "memory/retrieval_probe/workflows/skills/scripts 后端数=%d",
+            "memory/retrieval_probe/workflows/skills/scripts/model_evaluations 后端数=%d",
             len(service.registry.list_slugs()) if service.registry else 0,
         )
         return service

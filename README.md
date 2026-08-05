@@ -52,7 +52,20 @@ uv run agent-bridge server status
 uv run agent-bridge server stop
 ```
 
-短命令 `agb` 与 `agent-bridge` 等价。当前 CLI 根命令只有 `server`、`profile`、`memory`；知识库、工作流、Agent 和系统配置通过管理后台或 HTTP API 管理。
+短命令 `agb` 与 `agent-bridge` 等价。当前 CLI 根命令只有 `server`、`profile`、`memory`；知识库、工作流、Agent 和系统管理通过管理后台或 HTTP API 管理。
+
+## 模型评估运行时
+
+「系统管理 → 模型评估」使用 OpenCompass 的 OpenAI 兼容 API 适配器，第一版提供 GSM8K 与 MATH 两个小规模 Demo 数据集。评估模型的 URL 与 API Key 同时留空时，会复用「系统管理 → 公共模型配置」中的全量探测关键词模型连接；密钥仅传给评估子进程，不保存到 SQLite 或评估记录。
+
+OpenCompass 0.5.3 固定 `httpx==0.27.2`，而当前 PageIndex 运行时要求 `httpx>=0.28.1`，两者不能安全共装。因此它不是主仓库的可选依赖组：即使声明为 extra 或 uv dependency group，安装时仍会尝试解析到同一个环境并发生冲突。请使用独立 venv 或 Docker runner：
+
+```bash
+./scripts/install_model_evaluation_runner.sh /opt/agent-bridge-opencompass
+export AGENT_BRIDGE_OPENCOMPASS_BIN=/opt/agent-bridge-opencompass/bin/opencompass
+```
+
+将环境变量写入 Agent Bridge 的服务启动环境后重启服务。未配置 runner 时，模型评估 API 和页面会显示上述安装指引，且不会创建评估任务或影响 PageIndex。
 
 ## Profile 接入 Claude Code
 
@@ -84,7 +97,7 @@ uv run agent-bridge profile pins refresh safe-readonly
 ```
 
 `profile use` 会自动安装 Claude Code 普通 `async` 全量检索探测 Hook。CLI 只转发 Claude
-Code 的原始 Hook payload；服务端通过标准 `full-probe` Hook 使用系统配置的模型生成 0–8
+Code 的原始 Hook payload；服务端通过标准 `full-probe` Hook 使用系统管理的模型生成 0–8
 个业务检索短句，并按 Profile/session 结合最近 3 轮历史去重（最多缓存 12 轮、30 天滑动
 TTL），仅探测当前 Profile 的工作流产出物。模型未配置或调用失败时 Hook 保持
 静默，并将原始 prompt 与完整 Hook 请求/响应写入通用审计日志。监控页仅对
@@ -206,4 +219,4 @@ tests/                         # 后端测试
 
 ## 工作流自动调度并发
 
-系统配置页面可分别设置自动调度的全局并发数（默认 4）和单个工作流并发数（默认 2）。调度器按工作流轮转分配运行槽位，既不会超过全局上限，也不会让单个工作流占用超过自身上限的槽位。`workflow_max_runs` 仍表示每个调度窗口内的自动运行次数上限，与并发配置独立。
+系统管理页面可分别设置自动调度的全局并发数（默认 4）和单个工作流并发数（默认 2）。调度器按工作流轮转分配运行槽位，既不会超过全局上限，也不会让单个工作流占用超过自身上限的槽位。`workflow_max_runs` 仍表示每个调度窗口内的自动运行次数上限，与并发配置独立。

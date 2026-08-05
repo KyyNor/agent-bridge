@@ -7,6 +7,10 @@ import type {
   ClaudeMemConfigUpdate,
   RetrievalProbeLlmConfig,
   RetrievalProbeLlmConfigUpdate,
+  ModelEvaluationDataset,
+  ModelEvaluationRuntimeStatus,
+  ModelEvaluationModel,
+  ModelEvaluationRun,
   CodeGraphStatus,
   CodeGraphNode,
   CodeGraphExploreResult,
@@ -425,6 +429,13 @@ export const api = {
   getRetrievalProbeLlmConfig: () => get<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config'),
   saveRetrievalProbeLlmConfig: (config: RetrievalProbeLlmConfigUpdate) =>
     put<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config', config),
+  listModelEvaluationDatasets: () => get<ModelEvaluationDataset[]>('/model-evaluations/datasets'),
+  getModelEvaluationRuntime: () => get<ModelEvaluationRuntimeStatus>('/model-evaluations/runtime'),
+  listEvaluationModels: (connection: { base_url?: string; api_key?: string }) =>
+    post<ModelEvaluationModel[]>('/model-evaluations/models', connection),
+  listModelEvaluationRuns: () => get<ModelEvaluationRun[]>('/model-evaluations'),
+  startModelEvaluationRun: (payload: { model_name: string; datasets: string[]; base_url?: string; api_key?: string }) =>
+    post<ModelEvaluationRun>('/model-evaluations', payload),
 
   // Workflows
   listWorkflows: () => get<WorkflowDefinition[]>('/workflows'),

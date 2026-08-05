@@ -514,6 +514,23 @@ CREATE TABLE IF NOT EXISTS retrieval_probe_llm_config (
   model TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS model_evaluation_runs (
+  run_id TEXT PRIMARY KEY,
+  model_name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  datasets_json TEXT NOT NULL,
+  status TEXT NOT NULL,
+  progress_message TEXT NOT NULL DEFAULT '',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  error TEXT,
+  work_dir TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_model_evaluation_runs_created
+  ON model_evaluation_runs(created_at DESC);
 """
 
 WORKFLOW_SCHEMA = """
