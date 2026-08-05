@@ -104,7 +104,7 @@ def render_profile_markdown(summary: dict[str, Any], manual_notes: str) -> str:
             "- SQL、数据加工、ETL、报表口径等不在代码仓库里的逻辑，不要使用 `codegraph_explore`。",
             "- 使用 `search` 发现此 profile 可用的相关工具和资源。",
             "- 选择合适的服务与工具后，使用 `execute` 调用已允许的 MCP 工具。",
-            "- 使用知识库能力围绕连接的文档提问（`wiki_ask`）。",
+            "- 需要原始知识库片段时使用 `wiki_search`；需要基于知识库生成回答时使用 `wiki_ask`。",
             "- 高频能力也可能以 `pin_*` 工具的形式直接暴露。",
             "",
             "## 可用 MCP 服务（使用 `execute`、`search` 调用）",

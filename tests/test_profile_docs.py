@@ -59,7 +59,8 @@ def test_render_profile_markdown_includes_usage_resources_and_manual_notes(wm_pa
     assert "SQL、数据加工、ETL、报表口径等不在代码仓库里的逻辑，不要使用 `codegraph_explore`" in markdown
     assert "证据要求" not in markdown
     assert "列表中没有的资源视为当前不可用" not in markdown
-    assert "wiki_search" not in markdown
+    assert "wiki_search" in markdown
+    assert "wiki_ask" in markdown
     assert "search" in markdown
     assert "execute" in markdown
     assert "- MySQL (`mysql`)：Run SQL queries." in rendered["markdown"]

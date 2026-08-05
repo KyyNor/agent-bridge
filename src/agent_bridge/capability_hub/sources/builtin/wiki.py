@@ -14,7 +14,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-WIKI_SEARCH_ENABLED = False
+# 原始检索结果对 Agent 可用：用于在生成回答前检查来源、精确定位片段，
+# 并避免把仅需引用的任务强制走后端问答链路。
+WIKI_SEARCH_ENABLED = True
 
 
 class WikiBuiltinProvider:

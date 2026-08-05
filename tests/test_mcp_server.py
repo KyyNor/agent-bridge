@@ -181,9 +181,10 @@ def test_mcp_exposes_builtin_direct_tools_at_top_level():
     tools = asyncio.run(mcp.list_tools())
     tool_names = [tool.name for tool in tools]
 
-    assert "wiki_search" not in tool_names
+    assert "wiki_search" in tool_names
     assert "wiki_ask" in tool_names
     assert "codegraph_explore" in tool_names
+    assert tools[tool_names.index("wiki_search")].inputSchema["properties"]["kb"]["type"] == "string"
     assert tools[tool_names.index("codegraph_explore")].inputSchema["properties"]["repo"]["type"] == "string"
     assert tools[tool_names.index("codegraph_explore")].inputSchema["properties"]["query"]["description"] == "要在仓库内执行的查询内容。"
 
@@ -429,7 +430,7 @@ def test_mcp_search_with_default_service_initializes_schema(wm_paths):
             "name": "Wiki",
             "description": "内置知识库查询能力",
             "tags": ["builtin", "knowledge"],
-            "tool_count": 4,
+            "tool_count": 5,
             "status": "enabled",
             "resources": [],
         },

@@ -32,7 +32,7 @@ def test_metamcp_root_search_lists_wiki_builtin_with_allowed_kbs(wm_paths: Agent
 
     wiki = next(item for item in result["items"] if item["service"] == "wiki")
     assert wiki["kind"] == "builtin"
-    assert wiki["tool_count"] == 4
+    assert wiki["tool_count"] == 5
     assert wiki["resources"] == [{"resource_type": "wiki_kb", "resource_key": "frontend-docs", "name": "Frontend Docs"}]
 
 
@@ -71,7 +71,7 @@ def test_metamcp_wiki_path_lists_fixed_tools(wm_paths: AgentBridgePaths) -> None
 
     result = service.capabilities.search("root", "wiki", None, profile_key="safe-readonly")
 
-    assert [item["tool"] for item in result["items"]] == ["ask", "get_document", "list_kbs", "search_all"]
+    assert [item["tool"] for item in result["items"]] == ["ask", "get_document", "list_kbs", "search_all", "search"]
     assert result["items"][0]["service"] == "wiki"
     assert result["items"][0]["display_tool"] == "wiki.ask"
     schemas = {item["tool"]: item["input_schema"] for item in result["items"]}
@@ -129,22 +129,44 @@ def test_wiki_ask_does_not_block_event_loop(wm_paths: AgentBridgePaths, monkeypa
     assert asyncio.run(run_concurrent_tasks()) < 0.1
 
 
-def test_wiki_search_is_not_exposed_or_executable(wm_paths: AgentBridgePaths) -> None:
+def test_wiki_search_is_exposed_and_executes(wm_paths: AgentBridgePaths, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_bridge.capability_hub.sources.builtin.wiki import WIKI_SEARCH_ENABLED
 
-    assert WIKI_SEARCH_ENABLED is False
+    assert WIKI_SEARCH_ENABLED is True
     service = _service(wm_paths)
 
-    with pytest.raises(NotFound, match="tool not found"):
-        asyncio.run(
-            service.capabilities.execute(
-                "root",
-                "wiki",
-                "search",
-                {"kb": "frontend-docs", "question": "css"},
-                profile_key="safe-readonly",
-            )
+    def search(
+        actor: str,
+        kb_slug: str,
+        question: str,
+        *,
+        top_k: int = 6,
+        profile_key: str | None = None,
+    ) -> list[dict[str, object]]:
+        assert actor == "root"
+        assert kb_slug == "frontend-docs"
+        assert question == "css"
+        assert top_k == 3
+        assert profile_key == "safe-readonly"
+        return [{"chunk_id": "chunk-1", "content": "CSS"}]
+
+    monkeypatch.setattr(service, "search", search)
+
+    result = asyncio.run(
+        service.capabilities.execute(
+            "root",
+            "wiki",
+            "search",
+            {"kb": "frontend-docs", "question": "css", "top_k": 3},
+            profile_key="safe-readonly",
         )
+    )
+
+    assert result["success"] is True
+    assert result["result"] == {
+        "kb": "frontend-docs",
+        "results": [{"chunk_id": "chunk-1", "content": "CSS"}],
+    }
 
 
 def test_wiki_execute_blocks_unallowed_kb(wm_paths: AgentBridgePaths) -> None:
