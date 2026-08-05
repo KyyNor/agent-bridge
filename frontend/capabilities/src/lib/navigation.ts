@@ -1,5 +1,5 @@
 export function shouldShowPageHeader(activeNavKey: string, subRoute: string): boolean {
-  return !(['scripts', 'services', 'workflow', 'memory', 'knowledge', 'profiles', 'code-repos', 'agent-runs'].includes(activeNavKey) && Boolean(subRoute))
+  return !(['scripts', 'services', 'workflow', 'memory', 'knowledge', 'profiles', 'code-repos', 'business-ledgers', 'agent-runs'].includes(activeNavKey) && Boolean(subRoute))
 }
 
 export type NavigationGuard = (to: string, from: string) => boolean | Promise<boolean>
