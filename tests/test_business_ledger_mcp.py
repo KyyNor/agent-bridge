@@ -31,6 +31,7 @@ def test_business_ledger_is_profile_scoped_and_exposed_as_top_level_tool(wm_path
     tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
     assert "query_business_ledger" in tools
     assert set(tools["query_business_ledger"].inputSchema["properties"]) == {"ledger_key", "filters", "keyword", "sort", "limit", "offset"}
+    assert tools["query_business_ledger"].inputSchema["properties"]["sort"]["type"] == "array"
 
     _, result = asyncio.run(mcp.call_tool("query_business_ledger", {"ledger_key": "assets", "keyword": "资产"}))
     assert result["success"] is True

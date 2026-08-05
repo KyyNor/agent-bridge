@@ -53,7 +53,18 @@ class BusinessLedgerBuiltinProvider:
                         "ledger_key": {"type": "string", "description": "已授权业务台账标识。"},
                         "filters": {"type": "object", "default": {}, "description": "字段条件对象，格式为 field_key: {op, value/values/from/to}。"},
                         "keyword": {"type": "string", "description": "在已配置 contains 的文本字段中做字面包含检索。"},
-                        "sort": {"type": "object", "description": "可选排序，格式为 {field, direction}。"},
+                        "sort": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "field": {"type": "string"},
+                                    "direction": {"type": "string", "enum": ["asc", "desc"], "default": "asc"},
+                                },
+                                "required": ["field"],
+                            },
+                            "description": "可选多字段排序，按数组顺序依次生效，格式为 [{field, direction}]。",
+                        },
                         "limit": {"type": "integer", "default": 50, "description": "返回行数，1-100。"},
                         "offset": {"type": "integer", "default": 0, "description": "分页偏移量。"},
                     },
@@ -90,7 +101,7 @@ class BusinessLedgerBuiltinProvider:
             ledger_key,
             filters=filters,
             keyword=str(arguments.get("keyword") or "").strip() or None,
-            sort=arguments.get("sort") if isinstance(arguments.get("sort"), dict) else None,
+            sort=arguments.get("sort") if isinstance(arguments.get("sort"), (dict, list)) else None,
             limit=int(arguments.get("limit") or 50),
             offset=int(arguments.get("offset") or 0),
             agent_visible_only=True,

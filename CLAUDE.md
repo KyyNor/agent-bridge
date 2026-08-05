@@ -39,7 +39,7 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。主业务库为 `agent-bridge.db`，工具调用与 Agent 运行审计位于独立的 `agent-bridge-logs.db`；运行日志 repository 必须使用日志连接，不能重新写回主库。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
-业务台账使用独立的 `agent-bridge-ledgers.db`，定义与记录均以 SQLite 持久化；加载、筛选、排序和模糊匹配只针对 pandas 内存快照执行。每个台账上限为 100 字段、50,000 行；写入必须完整重建并原子替换快照，查询不得回退至 SQLite。
+业务台账使用独立的 `agent-bridge-ledgers.db`，定义与记录均以 SQLite 持久化；加载、筛选、排序和模糊匹配只针对 pandas 内存快照执行。所有字段默认精确匹配和可排序，文本字段仅额外配置是否允许字面包含检索，数字、日期与日期时间默认支持完整范围运算；多字段排序按传入顺序生效。每个台账上限为 100 字段、50,000 行；写入必须完整重建并原子替换快照，查询不得回退至 SQLite。
 
 业务台账是 `business_ledger` 内置能力来源，Agent 只获得顶级 `query_business_ledger` 读取工具；管理定义和数据的 API 不得注册到 Agent MCP。没有 Profile 或未显式绑定资源时必须 fail closed；拒绝访问时只能提示当前 Profile 已获授权的台账。
 

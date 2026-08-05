@@ -24,8 +24,9 @@ MAX_LEDGER_RECORDS = 50_000
 FIELD_TYPES = {"text", "number", "enum", "date", "datetime"}
 TEXT_OPS = {"exact", "prefix", "contains"}
 NUMBER_OPS = {"exact", "gt", "gte", "lt", "lte", "between"}
-DATE_OPS = {"exact", "before", "after", "between"}
+DATE_OPS = {"exact", "gt", "gte", "lt", "lte", "between", "before", "after"}
 ENUM_OPS = {"exact", "in"}
+RANGE_OPS = ["exact", "gt", "gte", "lt", "lte", "between"]
 
 
 LEDGER_SCHEMA = """
@@ -304,7 +305,7 @@ class BusinessLedgerService:
         *,
         filters: dict[str, dict[str, Any]] | None = None,
         keyword: str | None = None,
-        sort: dict[str, str] | None = None,
+        sort: list[dict[str, str]] | dict[str, str] | None = None,
         limit: int = 50,
         offset: int = 0,
         agent_visible_only: bool = False,
@@ -331,12 +332,24 @@ class BusinessLedgerService:
                 keyword_mask |= frame[field_key].fillna("").astype(str).str.contains(str(keyword), regex=False, na=False)
             mask &= keyword_mask
         filtered = frame.loc[mask]
-        if sort:
-            sort_field = str(sort.get("field") or "")
-            field = fields.get(sort_field)
-            if field is None or not field.get("sortable"):
-                raise ValidationError(f"字段不可排序：{sort_field}")
-            filtered = filtered.sort_values(sort_field, ascending=str(sort.get("direction", "asc")).lower() != "desc", kind="stable")
+        sort_items = [sort] if isinstance(sort, dict) else sort or []
+        if not isinstance(sort_items, list):
+            raise ValidationError("sort 必须是排序条件列表")
+        if sort_items:
+            sort_fields: list[str] = []
+            ascending: list[bool] = []
+            for item in sort_items:
+                if not isinstance(item, dict):
+                    raise ValidationError("排序条件格式无效")
+                sort_field = str(item.get("field") or "")
+                if sort_field not in fields:
+                    raise ValidationError(f"字段不存在：{sort_field}")
+                direction = str(item.get("direction", "asc")).lower()
+                if direction not in {"asc", "desc"}:
+                    raise ValidationError(f"排序方向无效：{direction}")
+                sort_fields.append(sort_field)
+                ascending.append(direction == "asc")
+            filtered = filtered.sort_values(sort_fields, ascending=ascending, kind="stable")
         bounded_limit = min(max(int(limit), 1), 100)
         bounded_offset = max(int(offset), 0)
         visible_fields = [field["field_key"] for field in definition["fields"] if not agent_visible_only or field["agent_readable"]]
@@ -415,9 +428,14 @@ class BusinessLedgerService:
         if field_type not in FIELD_TYPES:
             raise ValidationError(f"不支持的字段类型：{field_type}")
         valid_ops = TEXT_OPS if field_type == "text" else NUMBER_OPS if field_type == "number" else ENUM_OPS if field_type == "enum" else DATE_OPS
-        query_modes = [str(item) for item in field.get("query_modes", [])]
-        if any(item not in valid_ops for item in query_modes):
+        requested_modes = [str(item) for item in field.get("query_modes", [])]
+        if any(item not in valid_ops for item in requested_modes):
             raise ValidationError(f"字段查询方式不匹配：{key}")
+        # 精确匹配、数值与时间范围、以及排序均为字段类型的默认能力；唯一
+        # 可由用户配置的是文本字段是否允许字面包含检索。
+        query_modes = ["exact", "contains"] if field_type == "text" and "contains" in requested_modes else ["exact"]
+        if field_type in {"number", "date", "datetime"}:
+            query_modes = list(RANGE_OPS)
         enum_values = [str(item) for item in field.get("enum_values", [])]
         if field_type == "enum" and not enum_values:
             raise ValidationError(f"枚举字段必须设置选项：{key}")
@@ -427,7 +445,7 @@ class BusinessLedgerService:
             "field_type": field_type,
             "required": bool(field.get("required", False)),
             "query_modes": query_modes,
-            "sortable": bool(field.get("sortable", False)),
+            "sortable": True,
             "agent_readable": bool(field.get("agent_readable", True)),
             "enum_values": enum_values,
         }
@@ -489,6 +507,9 @@ class BusinessLedgerService:
 
     def _definition_row(self, row: sqlite3.Row) -> dict[str, Any]:
         payload = json.loads(row["definition_json"])
+        # 兼容早期把查询和排序写成逐字段开关的定义。读取时统一换算为当前规则，
+        # 避免升级后旧台账仍保留已经废弃的能力配置。
+        payload["fields"] = [self._normalize_field(field) for field in payload.get("fields", [])]
         return {**dict(row), **payload}
 
     def _records_raw(self, ledger_key: str) -> list[sqlite3.Row]:

@@ -231,10 +231,15 @@ class BusinessLedgerRecordRequest(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
 
+class BusinessLedgerSortRequest(BaseModel):
+    field: str
+    direction: Literal["asc", "desc"] = "asc"
+
+
 class BusinessLedgerQueryRequest(BaseModel):
     filters: dict[str, dict[str, Any]] = Field(default_factory=dict)
     keyword: str | None = None
-    sort: dict[str, str] | None = None
+    sort: list[BusinessLedgerSortRequest] | BusinessLedgerSortRequest | None = None
     limit: int = Field(default=50, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 

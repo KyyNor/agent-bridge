@@ -19,7 +19,7 @@ def test_business_ledger_management_api(wm_paths) -> None:
                 "name": "资产台账",
                 "fields": [
                     {"field_key": "name", "name": "名称", "field_type": "text", "query_modes": ["contains"]},
-                    {"field_key": "cost", "name": "成本", "field_type": "number", "query_modes": ["between"]},
+                    {"field_key": "cost", "name": "成本", "field_type": "number"},
                 ],
             },
         )
@@ -33,6 +33,13 @@ def test_business_ledger_management_api(wm_paths) -> None:
         )
         assert found.status_code == 200
         assert found.json()["total"] == 1
+
+        ordered = client.post(
+            "/business-ledgers/assets/records/query",
+            headers=headers,
+            json={"sort": [{"field": "cost", "direction": "desc"}, {"field": "name", "direction": "asc"}]},
+        )
+        assert ordered.status_code == 200
 
 
 def test_business_ledger_excel_preview_confirm_and_export(wm_paths) -> None:
