@@ -15,3 +15,11 @@ test('业务台账有单一导航入口及其浏览页 API 契约', () => {
   assert.match(view, /预览导入/)
   assert.match(view, /编辑定义/)
 })
+
+test('业务台账以可视字段卡片编辑定义，不向用户暴露 JSON', () => {
+  const view = read('src/views/knowledge/BusinessLedgerView.vue')
+  assert.match(view, /添加字段/)
+  assert.match(view, /字段标识/)
+  assert.match(view, /允许查询/)
+  assert.doesNotMatch(view, /字段定义（JSON）/)
+})

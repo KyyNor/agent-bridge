@@ -21,7 +21,9 @@ const loading = ref(true)
 const error = ref('')
 const showDefinition = ref(false)
 const definitionMode = ref<'create' | 'edit'>('create')
-const definition = ref({ ledger_key: '', name: '', description: '', fields: '[\n  {"field_key":"name","name":"名称","field_type":"text","query_modes":["contains"],"agent_readable":true}\n]' })
+type LedgerDefinition = { ledger_key: string; name: string; description: string; fields: BusinessLedgerField[] }
+function newField(): BusinessLedgerField { return { field_key: '', name: '', field_type: 'text', required: false, query_modes: ['contains'], sortable: false, agent_readable: true, enum_values: [] } }
+const definition = ref<LedgerDefinition>({ ledger_key: '', name: '', description: '', fields: [newField()] })
 const recordValues = ref<Record<string, any>>({})
 const editingRecordId = ref<string | null>(null)
 const keyword = ref('')
@@ -46,11 +48,18 @@ async function load() {
   loading.value = false
 }
 async function loadRecords() { if (ledgerKey.value) records.value = await api.queryBusinessLedgerRecords(ledgerKey.value, { keyword: keyword.value || undefined }) }
-function openCreate() { definitionMode.value = 'create'; definition.value = { ledger_key: '', name: '', description: '', fields: definition.value.fields }; showDefinition.value = true }
-function openEdit() { if (!ledger.value) return; definitionMode.value = 'edit'; definition.value = { ledger_key: ledger.value.ledger_key, name: ledger.value.name, description: ledger.value.description, fields: JSON.stringify(ledger.value.fields, null, 2) }; showDefinition.value = true }
+function copyFields(fields: BusinessLedgerField[]) { return fields.map(field => ({ ...field, query_modes: [...field.query_modes], enum_values: [...field.enum_values] })) }
+function openCreate() { definitionMode.value = 'create'; definition.value = { ledger_key: '', name: '', description: '', fields: [newField()] }; showDefinition.value = true }
+function openEdit() { if (!ledger.value) return; definitionMode.value = 'edit'; definition.value = { ledger_key: ledger.value.ledger_key, name: ledger.value.name, description: ledger.value.description, fields: copyFields(ledger.value.fields) }; showDefinition.value = true }
+function addField() { definition.value.fields.push(newField()) }
+function removeField(index: number) { if (definition.value.fields.length > 1) definition.value.fields.splice(index, 1) }
+function queryModesFor(field: BusinessLedgerField) { return field.field_type === 'text' ? [['exact', '精确匹配'], ['prefix', '前缀匹配'], ['contains', '模糊包含']] : field.field_type === 'number' ? [['exact', '等于'], ['gt', '大于'], ['gte', '大于等于'], ['lt', '小于'], ['lte', '小于等于'], ['between', '范围']] : field.field_type === 'enum' ? [['exact', '精确匹配'], ['in', '多选匹配']] : [['exact', '精确匹配'], ['before', '早于'], ['after', '晚于'], ['between', '范围']] }
+function changeFieldType(field: BusinessLedgerField, value: string) { field.field_type = value as BusinessLedgerField['field_type']; field.query_modes = field.field_type === 'text' ? ['contains'] : []; if (field.field_type !== 'enum') field.enum_values = [] }
+function toggleQueryMode(field: BusinessLedgerField, mode: string) { const index = field.query_modes.indexOf(mode); if (index >= 0) field.query_modes.splice(index, 1); else field.query_modes.push(mode) }
+function updateEnumValues(field: BusinessLedgerField, value: string) { field.enum_values = value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean) }
 async function saveDefinition() {
   try {
-    const fields = JSON.parse(definition.value.fields) as BusinessLedgerField[]
+    const fields = copyFields(definition.value.fields)
     if (definitionMode.value === 'create') await api.createBusinessLedger({ ledger_key: definition.value.ledger_key, name: definition.value.name, description: definition.value.description, fields })
     else await api.updateBusinessLedger(definition.value.ledger_key, { name: definition.value.name, description: definition.value.description, fields, expected_edit_token: ledger.value?.edit_token })
     showDefinition.value = false
@@ -113,6 +122,36 @@ watch(() => props.routeKey, load)
     <Card><CardContent class="p-5"><h2 class="font-medium">{{ editingRecordId ? '编辑数据' : ledger.name }}</h2><p class="mt-1 text-sm text-muted-foreground">{{ editingRecordId ? '修改后保存即可更新该条记录。' : (ledger.description || '暂无描述') }}</p><div class="mt-4 grid gap-3 md:grid-cols-3"><label v-for="field in ledger.fields" :key="field.field_key" class="text-sm"><span class="mb-1 block text-muted-foreground">{{ field.name }}</span><select v-if="field.field_type === 'enum'" v-model="recordValues[field.field_key]" class="h-9 w-full rounded-md border border-input bg-background px-2"><option value="">请选择</option><option v-for="value in field.enum_values" :key="value">{{ value }}</option></select><Input v-else v-model="recordValues[field.field_key]" :type="field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : field.field_type === 'datetime' ? 'datetime-local' : 'text'" /></label></div><div class="mt-4 flex gap-2"><Button @click="saveRecord"><Plus :size="15" />{{ editingRecordId ? '保存修改' : '新增数据' }}</Button><Button v-if="editingRecordId" variant="outline" @click="resetRecordForm">取消</Button></div></CardContent></Card>
     <Card class="mt-5"><CardContent class="p-5"><div class="flex flex-wrap items-end gap-3"><label class="text-sm">关键词<Input v-model="keyword" class="mt-1" @keyup.enter="loadRecords" /></label><Button variant="outline" @click="loadRecords">查询</Button><label class="text-sm">Excel 导入<input class="mt-1 block text-xs" type="file" accept=".xlsx" @change="chooseFile" /></label><Button variant="outline" :disabled="!importFile" @click="previewImport"><FileUp :size="15" />预览导入</Button><Button variant="outline" @click="exportLedger"><Download :size="15" />导出 Excel</Button></div><div v-if="importPreview" class="mt-3 rounded-md bg-muted p-3 text-sm">将导入 {{ importPreview.rows }} 行；错误 {{ importPreview.errors.length }} 行。<Button class="ml-3" size="sm" @click="confirmImport">确认导入</Button></div><div class="mt-5 overflow-x-auto"><table class="w-full text-sm"><thead><tr class="border-b text-left text-muted-foreground"><th class="p-2">#</th><th v-for="field in ledger.fields" :key="field.field_key" class="p-2">{{ field.name }}</th><th class="p-2" /></tr></thead><tbody><tr v-for="row in records?.items" :key="row.record_id" class="border-b"><td class="p-2 font-mono text-xs">{{ row.record_id.slice(0, 8) }}</td><td v-for="field in ledger.fields" :key="field.field_key" class="p-2">{{ row.values[field.field_key] ?? '—' }}</td><td class="p-2"><div class="flex gap-1"><Button size="sm" variant="ghost" @click="editRecord(row)"><Pencil :size="14" /></Button><Button size="sm" variant="ghost" @click="deleteRecord(row.record_id)"><Trash2 :size="14" /></Button></div></td></tr></tbody></table></div></CardContent></Card>
   </template>
-  <Dialog v-model:open="showDefinition"><DialogContent class="max-w-2xl"><DialogHeader><DialogTitle>{{ definitionMode === 'create' ? '新建业务台账' : '编辑台账定义' }}</DialogTitle></DialogHeader><div class="grid gap-3"><label class="text-sm">标识<Input v-model="definition.ledger_key" :disabled="definitionMode === 'edit'" /></label><label class="text-sm">名称<Input v-model="definition.name" /></label><label class="text-sm">描述<Input v-model="definition.description" /></label><label class="text-sm">字段定义（JSON）<textarea v-model="definition.fields" class="mt-1 min-h-56 w-full rounded-md border border-input bg-background p-3 font-mono text-xs" /></label></div><DialogFooter><Button @click="saveDefinition">保存</Button></DialogFooter></DialogContent></Dialog>
+  <Dialog v-model:open="showDefinition">
+    <DialogContent class="max-h-[90vh] max-w-4xl overflow-y-auto">
+      <DialogHeader><DialogTitle>{{ definitionMode === 'create' ? '新建业务台账' : '编辑台账定义' }}</DialogTitle></DialogHeader>
+      <div class="grid gap-3 md:grid-cols-2">
+        <label class="text-sm">标识<Input v-model="definition.ledger_key" :disabled="definitionMode === 'edit'" placeholder="例如 asset_inventory" /></label>
+        <label class="text-sm">名称<Input v-model="definition.name" placeholder="例如 资产台账" /></label>
+        <label class="text-sm md:col-span-2">描述<Input v-model="definition.description" placeholder="说明这份台账包含什么数据" /></label>
+      </div>
+      <section class="mt-5">
+        <div class="mb-3 flex items-center justify-between"><div><h3 class="text-sm font-medium">字段定义</h3><p class="mt-1 text-xs text-muted-foreground">配置数据录入、浏览和 Agent 查询的字段规则。</p></div><Button size="sm" variant="outline" @click="addField"><Plus :size="14" />添加字段</Button></div>
+        <div class="space-y-3">
+          <Card v-for="(field, index) in definition.fields" :key="index" class="border-border/80">
+            <CardContent class="p-4">
+              <div class="mb-3 flex items-center justify-between"><span class="text-sm font-medium">字段 {{ index + 1 }}</span><Button size="sm" variant="ghost" :disabled="definition.fields.length === 1" title="删除字段" @click="removeField(index)"><Trash2 :size="14" /></Button></div>
+              <div class="grid gap-3 md:grid-cols-3">
+                <label class="text-sm">字段名称<Input v-model="field.name" placeholder="例如 IP 地址" /></label>
+                <label class="text-sm">字段标识<Input v-model="field.field_key" placeholder="例如 ip_address" /></label>
+                <label class="text-sm">字段类型<select :value="field.field_type" class="mt-1 h-9 w-full rounded-md border border-input bg-background px-2" @change="changeFieldType(field, ($event.target as HTMLSelectElement).value)"><option value="text">文本</option><option value="number">数字</option><option value="enum">枚举</option><option value="date">日期</option><option value="datetime">日期时间</option></select></label>
+              </div>
+              <label v-if="field.field_type === 'enum'" class="mt-3 block text-sm">枚举选项<Input :value="field.enum_values.join(', ')" placeholder="用逗号分隔，例如 Linux, Windows" @input="updateEnumValues(field, ($event.target as HTMLInputElement).value)" /></label>
+              <div class="mt-3 grid gap-3 md:grid-cols-[180px_1fr]">
+                <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm"><label class="flex items-center gap-2"><input v-model="field.required" type="checkbox" class="size-4 rounded" />必填</label><label class="flex items-center gap-2"><input v-model="field.sortable" type="checkbox" class="size-4 rounded" />允许排序</label><label class="flex items-center gap-2"><input v-model="field.agent_readable" type="checkbox" class="size-4 rounded" />允许 Agent 返回</label></div>
+                <div><span class="mb-1 block text-sm">允许查询</span><div class="flex flex-wrap gap-x-4 gap-y-2"><label v-for="option in queryModesFor(field)" :key="option[0]" class="flex items-center gap-2 text-sm"><input type="checkbox" :checked="field.query_modes.includes(option[0])" class="size-4 rounded" @change="toggleQueryMode(field, option[0])" />{{ option[1] }}</label></div></div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+      <DialogFooter><Button variant="outline" @click="showDefinition = false">取消</Button><Button @click="saveDefinition">保存</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>
   <Dialog v-model:open="showPlaneDialog"><DialogContent class="sm:max-w-[420px]"><DialogHeader><DialogTitle>{{ ledger?.name || '' }} — 归属能力平面</DialogTitle></DialogHeader><div class="space-y-2"><p class="text-xs text-muted-foreground">只有选中的能力平面可以发现并查询此业务台账。</p><div v-if="!allProfiles.length" class="py-6 text-center text-sm text-muted-foreground">暂无能力平面</div><div v-else class="max-h-[320px] space-y-1 overflow-y-auto rounded-lg border border-border p-1"><label v-for="profile in allProfiles" :key="profile.profile_key" class="list-row-interactive flex cursor-pointer items-center gap-3 rounded-md px-3 py-2"><input type="checkbox" :checked="pendingProfileKeys.includes(profile.profile_key)" class="size-4 rounded" @change="togglePlaneProfile(profile.profile_key)" /><div class="min-w-0 flex-1"><div class="truncate text-sm font-medium">{{ profile.name || profile.profile_key }}</div><div class="text-xs text-muted-foreground">{{ profile.profile_key }}</div></div></label></div></div><DialogFooter><Button variant="outline" @click="showPlaneDialog = false">取消</Button><Button :disabled="planeSaving" @click="savePlaneProfiles">{{ planeSaving ? '保存中...' : '确认' }}</Button></DialogFooter></DialogContent></Dialog>
 </template>
