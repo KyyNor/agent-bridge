@@ -590,6 +590,27 @@ def test_backend_list_requires_admin(wm_paths) -> None:
     assert response.status_code == 403
 
 
+def test_backend_create_and_update_forward_edit_token(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    created = client.post(
+        "/backends",
+        json={"slug": "mock-backend", "backend_type": "mock", "expected_edit_token": None},
+        headers=headers,
+    )
+    assert created.status_code == 200
+
+    updated = client.put(
+        "/backends/mock-backend",
+        json={"timeout": 90, "expected_edit_token": created.json()["edit_token"]},
+        headers=headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["timeout"] == 90
+
+
 def test_frontend_stats_view_uses_calls_field_from_backend() -> None:
     source = Path("frontend/capabilities/src/views/monitoring/StatsView.vue").read_text(encoding="utf-8")
 

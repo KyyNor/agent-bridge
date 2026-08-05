@@ -1609,34 +1609,38 @@ class AgentBridgeService:
     def add_backend(self, actor: str, slug: str, backend_type: str, base_url: str | None = None,
                     api_key: str | None = None, timeout: int = 120,
                     embedding_model_id: str | None = None, summary_model_id: str | None = None,
-                    rerank_model_id: str | None = None) -> dict[str, Any]:
+                    rerank_model_id: str | None = None,
+                    expected_edit_token: str | None = None) -> dict[str, Any]:
         return self.docs_knowledge.add_backend(
-            actor,
-            slug,
-            backend_type,
-            base_url,
-            api_key,
-            timeout,
-            embedding_model_id,
-            summary_model_id,
-            rerank_model_id,
+            actor=actor,
+            slug=slug,
+            backend_type=backend_type,
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+            embedding_model_id=embedding_model_id,
+            summary_model_id=summary_model_id,
+            rerank_model_id=rerank_model_id,
+            expected_edit_token=expected_edit_token,
         )
 
     def update_backend(self, actor: str, slug: str, backend_type: str | None = None,
                        base_url: str | None = None, api_key: str | None = None,
                        timeout: int | None = None, embedding_model_id: str | None = None,
                        summary_model_id: str | None = None,
-                       rerank_model_id: str | None = None) -> dict[str, Any]:
+                       rerank_model_id: str | None = None,
+                       expected_edit_token: str | None = None) -> dict[str, Any]:
         return self.docs_knowledge.update_backend(
-            actor,
-            slug,
-            backend_type,
-            base_url,
-            api_key,
-            timeout,
-            embedding_model_id,
-            summary_model_id,
-            rerank_model_id,
+            actor=actor,
+            slug=slug,
+            backend_type=backend_type,
+            base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+            embedding_model_id=embedding_model_id,
+            summary_model_id=summary_model_id,
+            rerank_model_id=rerank_model_id,
+            expected_edit_token=expected_edit_token,
         )
 
     def remove_backend(self, actor: str, slug: str) -> dict[str, str]:
