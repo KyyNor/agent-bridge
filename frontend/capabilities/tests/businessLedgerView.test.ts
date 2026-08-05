@@ -33,3 +33,17 @@ test('业务台账的新建与定义编辑使用二级页面，不使用弹窗',
   assert.match(editor, /返回业务台账/)
   assert.doesNotMatch(editor, /Dialog/)
 })
+
+test('业务台账详情使用页内返回导航，数据编辑和导入使用弹窗', () => {
+  const view = read('src/views/knowledge/BusinessLedgerView.vue')
+  assert.match(view, /返回业务台账/)
+  assert.match(view, /showRecordDialog/)
+  assert.match(view, /showImportDialog/)
+})
+
+test('台账定义以可编辑字段列表呈现，而非字段卡片', () => {
+  const editor = read('src/views/knowledge/BusinessLedgerDefinitionView.vue')
+  assert.match(editor, /<table/)
+  assert.match(editor, /v-for="\(field, index\) in definition\.fields"/)
+  assert.doesNotMatch(editor, /<Card v-for/)
+})
