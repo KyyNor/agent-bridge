@@ -41,6 +41,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 业务台账使用独立的 `agent-bridge-ledgers.db`，定义与记录均以 SQLite 持久化；加载、筛选、排序和模糊匹配只针对 pandas 内存快照执行。每个台账上限为 100 字段、50,000 行；写入必须完整重建并原子替换快照，查询不得回退至 SQLite。
 
+业务台账是 `business_ledger` 内置能力来源，Agent 只获得顶级 `query_business_ledger` 读取工具；管理定义和数据的 API 不得注册到 Agent MCP。没有 Profile 或未显式绑定资源时必须 fail closed；拒绝访问时只能提示当前 Profile 已获授权的台账。
+
 `workflow_artifacts` 的标题、摘要、路径和正文通过 jieba 预分词与 SQLite FTS5 索引检索；中文查询词按 `AND` 组合，长度至少 3 的 ASCII 标识符使用 FTS5 前缀匹配，短 token 和带分隔符的路径/标识符使用字面匹配。Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。原始产物正文不被改写，分词副本单独维护并随 artifact 生命周期同步。
 
 领域失败抛 `AgentBridgeError` 子类，由 API 全局异常处理器转换为 HTTP 响应。重新分类错误时使用明确类型并 `raise ... from exc`，不要修改任意异常对象。

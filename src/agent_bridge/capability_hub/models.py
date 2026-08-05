@@ -46,6 +46,7 @@ class ProfileRuleEffect(str, Enum):
 class ProfileResourceType(str, Enum):
     wiki_kb = "wiki_kb"
     code_repo = "code_repo"
+    business_ledger = "business_ledger"
 
 
 class CallLogStatus(str, Enum):

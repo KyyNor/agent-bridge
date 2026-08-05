@@ -90,6 +90,7 @@ def render_profile_markdown(summary: dict[str, Any], manual_notes: str) -> str:
     services = _named_items(summary.get("services") or [], key_field="service_key")
     repositories = _named_items(summary.get("code_repositories") or [], key_field="repo_key")
     knowledge_bases = _named_items(summary.get("knowledge_bases") or [], key_field="slug")
+    business_ledgers = summary.get("business_ledgers") or []
     notes = manual_notes.strip() or "暂无手动备注。"
 
     return "\n".join(
@@ -118,6 +119,13 @@ def render_profile_markdown(summary: dict[str, Any], manual_notes: str) -> str:
             "",
             "*_暂无。_*" if not knowledge_bases else "\n".join(knowledge_bases),
             "",
+            "## 可用业务台账",
+            "",
+            "使用顶级工具 `query_business_ledger` 查询；只可使用下列台账和字段。"
+            if business_ledgers
+            else "*_暂无。_*",
+            *(_business_ledger_items(business_ledgers) if business_ledgers else []),
+            "",
             "## 手动备注",
             "",
             notes,
@@ -136,4 +144,20 @@ def _named_items(items: list[dict[str, Any]], *, key_field: str) -> list[str]:
             continue
         suffix = f"：{description}" if description else ""
         rendered.append(f"- {name} (`{key}`){suffix}")
+    return rendered
+
+
+def _business_ledger_items(items: list[dict[str, Any]]) -> list[str]:
+    rendered: list[str] = []
+    for item in items:
+        key = str(item.get("ledger_key") or "").strip()
+        if not key:
+            continue
+        name = str(item.get("name") or key).strip()
+        description = " ".join(str(item.get("description") or "").split())
+        suffix = f"：{description}" if description else ""
+        rendered.append(f"- {name} (`{key}`){suffix}")
+        for field in item.get("fields") or []:
+            modes = "/".join(str(mode) for mode in field.get("query_modes") or []) or "仅返回"
+            rendered.append(f"  - `{field.get('field_key')}`（{field.get('name')}，{field.get('field_type')}，{modes}）")
     return rendered

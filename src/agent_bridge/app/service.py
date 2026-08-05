@@ -212,9 +212,10 @@ class AgentBridgeService:
             admins=admins,
             registry_provider=lambda: self.registry,
         )
-        self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.business_ledgers = BusinessLedgerService(db_path=paths.ledger_db_path, admins=admins)
         self.business_ledgers.init_schema()
+        self.governance = CapabilityGovernanceService(store=store, admins=admins)
+        self.governance.business_ledgers = self.business_ledgers
         self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
         agent_runtime_config = load_agent_runtime_config(paths)
         self.agents = AgentService(
@@ -281,6 +282,7 @@ class AgentBridgeService:
             base_run_dir=paths.run_dir / "workflow-runs",
         )
         from agent_bridge.capability_hub.sources.builtin.codegraph import CodeGraphBuiltinProvider
+        from agent_bridge.capability_hub.sources.builtin.business_ledger import BusinessLedgerBuiltinProvider
         from agent_bridge.capability_hub.sources.builtin.memory import MemoryBuiltinProvider
         from agent_bridge.capability_hub.sources.builtin.platform import PlatformBuiltinProvider
         from agent_bridge.capability_hub.sources.builtin.wiki import WikiBuiltinProvider
@@ -289,6 +291,7 @@ class AgentBridgeService:
         self.capabilities.register_builtin_provider(WikiBuiltinProvider(self))
         self.capabilities.register_builtin_provider(CodeGraphBuiltinProvider(self.codegraph, self.governance))
         self.capabilities.register_builtin_provider(MemoryBuiltinProvider(self))
+        self.capabilities.register_builtin_provider(BusinessLedgerBuiltinProvider(self))
 
     @classmethod
     def create(cls, paths: AgentBridgePaths, admins: set[str]) -> "AgentBridgeService":

@@ -324,6 +324,11 @@ class CapabilityGovernanceService:
             for rule in resource_rules
             if rule["resource_type"] == ProfileResourceType.wiki_kb.value
         }
+        allowed_ledger_keys = {
+            rule["resource_key"]
+            for rule in resource_rules
+            if rule["resource_type"] == ProfileResourceType.business_ledger.value
+        }
         repositories = [
             {
                 "repo_key": repository["repo_key"],
@@ -342,6 +347,8 @@ class CapabilityGovernanceService:
             for kb in self.store.list_kbs()
             if kb["slug"] in allowed_kb_slugs
         ]
+        ledger_service = getattr(self, "business_ledgers", None)
+        business_ledgers = ledger_service.ledger_contexts(sorted(allowed_ledger_keys)) if ledger_service is not None else []
 
         cache = self.store.get_profile_doc_cache(profile_key) or {}
         manual_notes = str(cache.get("manual_notes") or "")
@@ -351,6 +358,7 @@ class CapabilityGovernanceService:
             "services": allowed_services,
             "code_repositories": repositories,
             "knowledge_bases": knowledge_bases,
+            "business_ledgers": business_ledgers,
         }
         markdown = render_profile_doc_markdown(summary, manual_notes)
         auto_summary_hash = stable_hash(summary)

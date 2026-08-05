@@ -107,6 +107,32 @@ class BusinessLedgerService:
             }
         return [self._payload(item, record_count=counts.get(item["ledger_key"], 0)) for item in definitions]
 
+    def ledger_contexts(self, ledger_keys: list[str]) -> list[dict[str, Any]]:
+        """返回可安全注入 Profile 的台账说明，不要求管理权限。"""
+        allowed = set(ledger_keys)
+        return [
+            {
+                "ledger_key": item["ledger_key"],
+                "name": item["name"],
+                "description": item["description"],
+                "fields": [
+                    {
+                        "field_key": field["field_key"],
+                        "name": field["name"],
+                        "field_type": field["field_type"],
+                        "query_modes": field["query_modes"],
+                    }
+                    for field in item["fields"]
+                    if field["query_modes"] or field["agent_readable"]
+                ],
+            }
+            for item in self._list_definitions_raw()
+            if item["ledger_key"] in allowed
+        ]
+
+    def ledger_keys(self) -> list[str]:
+        return [item["ledger_key"] for item in self._list_definitions_raw()]
+
     def get_ledger(self, actor: str, ledger_key: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         ledger = self._get_definition_raw(ledger_key)

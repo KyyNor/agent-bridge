@@ -31,6 +31,7 @@ DIRECT_BUILTIN_TOOLS = [
     {"name": "memory_search", "service_key": "memory", "tool_name": "search"},
     {"name": "memory_timeline", "service_key": "memory", "tool_name": "timeline"},
     {"name": "memory_get", "service_key": "memory", "tool_name": "get"},
+    {"name": "query_business_ledger", "service_key": "business_ledger", "tool_name": "query"},
 ]
 if WIKI_SEARCH_ENABLED:
     DIRECT_BUILTIN_TOOLS.insert(0, {"name": "wiki_search", "service_key": "wiki", "tool_name": "search"})
