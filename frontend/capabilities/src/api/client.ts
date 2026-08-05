@@ -56,6 +56,7 @@ import type {
   DesignAgentResponse,
   WorkflowDesignResult,
   ScriptDesignResult,
+  BusinessLedgerDesignResult,
   UAStatus,
   UASummary,
   UAAvailability,
@@ -649,6 +650,8 @@ export const api = {
     post<DesignAgentResponse<WorkflowDesignResult>>('/agent-runs/design/workflow', body),
   designScript: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown>; profile_key?: string }) =>
     post<DesignAgentResponse<ScriptDesignResult>>('/agent-runs/design/script', body),
+  designBusinessLedger: (body: { run_key: string; mode: 'create' | 'modify'; prompt: string; current?: Record<string, unknown> }) =>
+    post<DesignAgentResponse<BusinessLedgerDesignResult>>('/agent-runs/design/business-ledger', body),
 
   // Catalog
   catalog: (profileKey?: string, query?: string) => {

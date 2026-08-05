@@ -35,6 +35,7 @@ test('业务台账以可视字段列表编辑定义，不向用户暴露 JSON', 
   assert.doesNotMatch(editor, /允许排序/)
   assert.doesNotMatch(editor, /精确匹配/)
   assert.doesNotMatch(editor, /字段定义（JSON）/)
+  assert.match(editor, /AI 设计/)
 })
 
 test('业务台账的新建与定义编辑使用二级页面，不使用弹窗', () => {

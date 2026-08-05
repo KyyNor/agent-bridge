@@ -828,6 +828,25 @@ export interface ScriptDesignResult {
   }
 }
 
+export interface BusinessLedgerDesignResult {
+  summary: string
+  notes?: string[]
+  ledger: {
+    ledger_key: string
+    name: string
+    description: string
+    fields: Array<{
+      field_key: string
+      name: string
+      field_type: BusinessLedgerFieldType
+      required: boolean
+      fuzzy_match: boolean
+      agent_readable: boolean
+      enum_values: string[]
+    }>
+  }
+}
+
 export interface DesignAgentResponse<T> {
   ok: boolean
   error: string | null

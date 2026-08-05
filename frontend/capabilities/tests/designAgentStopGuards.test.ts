@@ -32,3 +32,17 @@ test('工作流设计器 protects each design request with a run key and immedia
   assert.match(drawer, /立即停止/)
   assert.match(drawer, /busy \|\| !draft/)
 })
+
+test('业务台账设计器 protects each design request and only adopts a returned definition', () => {
+  const content = readFileSync(new URL('../src/composables/useBusinessLedgerDesigner.ts', import.meta.url), 'utf8')
+  const view = source('knowledge/BusinessLedgerDefinitionView.vue')
+  const drawer = readFileSync(new URL('../src/components/business-ledger/BusinessLedgerDesignerDrawer.vue', import.meta.url), 'utf8')
+
+  assert.match(content, /const designRunKey = ref\(''\)/)
+  assert.match(content, /api\.designBusinessLedger/)
+  assert.match(content, /api\.stopAgentRun\(runKey\)/)
+  assert.match(content, /designRunKey\.value !== runKey \|\| designStopRequested\.value\) return/)
+  assert.match(view, /<BusinessLedgerDesignerDrawer/)
+  assert.match(view, /businessLedgerFieldsFromDesign/)
+  assert.match(drawer, /采纳并保存/)
+})
