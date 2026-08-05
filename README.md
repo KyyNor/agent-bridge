@@ -17,6 +17,8 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 管理服务端 Python 脚本、Skill、同步调度和插件更新。
 - 在 `/admin/capabilities` 提供管理后台，在 `/mcp` 提供 MetaMCP 入口。
 
+「系统管理 → 顶层 MCP 工具」可查看所有可配置的 `/mcp` 顶层工具（`search` 和 `execute` 两个固定入口除外），并临时关闭其中任意工具。关闭会立即使该工具不再出现在 MCP tools/list 和能力目录中，且通过通用 `execute` 调用其对应内置能力同样会被拒绝；重新启用即可恢复。
+
 ## 环境要求
 
 - Python 3.11+

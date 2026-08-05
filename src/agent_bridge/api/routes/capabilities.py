@@ -20,6 +20,18 @@ from agent_bridge.api.schemas import (
 def create_capability_routes(service, actor, catalog_sources):
     router = APIRouter()
 
+    @router.get("/capabilities/top-level-mcp-tools")
+    def list_top_level_mcp_tools(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return service.capabilities.list_top_level_mcp_tools(current_actor)
+
+    @router.post("/capabilities/top-level-mcp-tools/{tool_name}/status")
+    def update_top_level_mcp_tool_status(
+        tool_name: str,
+        payload: UpdateMcpServiceStatusRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.capabilities.set_top_level_mcp_tool_status(current_actor, tool_name, payload.status)
+
     @router.post("/capabilities/mcp-services")
     def register_mcp_service(payload: RegisterMcpServiceRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.capabilities.register_service(

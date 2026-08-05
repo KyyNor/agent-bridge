@@ -96,6 +96,34 @@ def test_mcp_service_registration_api(wm_paths) -> None:
     assert "headers" not in summary.json()[0]
 
 
+def test_top_level_mcp_tool_status_api(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+    headers = {"X-Agent-Bridge-User": "root"}
+
+    listed = client.get("/capabilities/top-level-mcp-tools", headers=headers)
+    assert listed.status_code == 200
+    names = {item["name"] for item in listed.json()}
+    assert {"memory_search", "artifacts_search"}.issubset(names)
+    assert "search" not in names
+    assert "execute" not in names
+
+    disabled = client.post(
+        "/capabilities/top-level-mcp-tools/memory_search/status",
+        json={"status": "disabled"},
+        headers=headers,
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["status"] == "disabled"
+
+    forbidden = client.post(
+        "/capabilities/top-level-mcp-tools/memory_search/status",
+        json={"status": "disabled"},
+        headers={"X-Agent-Bridge-User": "alice"},
+    )
+    assert forbidden.status_code == 403
+
+
 def test_mcp_service_registration_requires_admin(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

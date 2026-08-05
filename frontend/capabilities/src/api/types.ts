@@ -28,6 +28,18 @@ export interface McpTool {
   status: string
 }
 
+export interface TopLevelMcpTool {
+  name: string
+  title: string
+  description: string
+  kind: 'artifacts' | 'direct_builtin' | 'workflow'
+  service_key: string | null
+  tool_name: string | null
+  status: 'enabled' | 'disabled'
+  updated_by: string | null
+  updated_at: string | null
+}
+
 export interface OpenApiService {
   source_type?: 'openapi_service'
   service_key: string

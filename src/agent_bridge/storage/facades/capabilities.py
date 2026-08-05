@@ -6,6 +6,12 @@ from typing import Any
 
 
 class CapabilitiesFacadeMixin:
+    def list_metamcp_tool_settings(self) -> list[dict[str, Any]]:
+        return self.capabilities.list_metamcp_tool_settings()
+
+    def upsert_metamcp_tool_status(self, tool_name: str, status: str, updated_by: str) -> dict[str, Any]:
+        return self.capabilities.upsert_metamcp_tool_status(tool_name, status, updated_by)
+
     def create_mcp_service(
         self,
         *,

@@ -18,24 +18,12 @@ from pydantic import Field
 
 from agent_bridge.core.config import default_user
 from agent_bridge.app.service import AgentBridgeService
-from agent_bridge.capability_hub.sources.builtin.wiki import WIKI_SEARCH_ENABLED
+from agent_bridge.capability_hub.gateway.top_level_tools import top_level_mcp_tools
 
 logger = logging.getLogger("agent_bridge.mcp")
 
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 _request_workflow_context: ContextVar[dict[str, Any] | None] = ContextVar("_request_workflow_context", default=None)
-
-DIRECT_BUILTIN_TOOLS = [
-    {"name": "wiki_ask", "service_key": "wiki", "tool_name": "ask"},
-    {"name": "codegraph_explore", "service_key": "codegraph", "tool_name": "codegraph_explore"},
-    {"name": "memory_search", "service_key": "memory", "tool_name": "search"},
-    {"name": "memory_timeline", "service_key": "memory", "tool_name": "timeline"},
-    {"name": "memory_get", "service_key": "memory", "tool_name": "get"},
-    {"name": "query_business_ledger", "service_key": "business_ledger", "tool_name": "query"},
-]
-if WIKI_SEARCH_ENABLED:
-    DIRECT_BUILTIN_TOOLS.insert(0, {"name": "wiki_search", "service_key": "wiki", "tool_name": "search"})
-
 
 def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:
     value_type = definition.get("type")
@@ -199,7 +187,6 @@ def create_mcp_server(
             )
             raise
 
-    @mcp.tool(description="搜索当前 profile 的工作流产物。需要全文时，将结果的完整 path 作为 path 重新调用。")
     def artifacts_search(
         query: str = Field(default="", description="检索关键词。"),
         path: str = Field(default="", description="产物路径前缀；传入完整路径时返回正文。"),
@@ -218,16 +205,13 @@ def create_mcp_server(
                 "path": path,
                 "limit": limit,
             },
-            handler=lambda: service.workflows.search_artifacts(
+            handler=lambda: _search_artifacts_if_enabled(
+                bridge_service,
                 actor=default_user(),
                 profile_key=active_profile,
                 query=query,
-                tags=[],
                 path=path,
-                workflow_key=None,
-                include_history=False,
                 limit=limit,
-                trusted_profile_context=True,
             ),
         )
         for item in result.get("items", []):
@@ -247,6 +231,9 @@ def create_mcp_server(
             result["hint"] = "结果默认只含摘要；将完整 path 作为 path 重新调用可获取正文。"
         return result
 
+    if bridge_service.capabilities.is_top_level_mcp_tool_enabled("artifacts_search"):
+        mcp.tool(description="搜索当前 profile 的工作流产物。需要全文时，将结果的完整 path 作为 path 重新调用。")(artifacts_search)
+
     active_workflow_context = workflow_context or _request_workflow_context.get()
     if _has_complete_workflow_context(active_workflow_context):
         logger.info(
@@ -255,7 +242,6 @@ def create_mcp_server(
             active_workflow_context.get("run_id"),
         )
 
-        @mcp.tool(description="领取当前工作流运行中的一个待处理任务。")
         def workflow_get_task() -> dict[str, Any]:
             active_profile = _request_profile.get() or profile_key
             current = _request_workflow_context.get() or active_workflow_context or {}
@@ -269,14 +255,14 @@ def create_mcp_server(
                 source_key="workflow",
                 tool_name="workflow_get_task",
                 request={"workflow_key": workflow_key, "run_id": run_id},
-                handler=lambda: service.workflows.get_task_for_agent(
-                    profile_key=active_profile,
-                    workflow_key=workflow_key,
-                    run_id=run_id,
+                handler=lambda: _workflow_get_task_if_enabled(
+                    bridge_service, active_profile, workflow_key, run_id
                 ),
             )
 
-        @mcp.tool(description="创建或刷新当前工作流的待处理任务。")
+        if bridge_service.capabilities.is_top_level_mcp_tool_enabled("workflow_get_task"):
+            mcp.tool(description="领取当前工作流运行中的一个待处理任务。")(workflow_get_task)
+
         def workflow_set_task(
             tasks: Annotated[list[dict[str, Any]], Field(description="要写入工作流队列的任务列表。")]
         ) -> dict[str, Any]:
@@ -292,15 +278,14 @@ def create_mcp_server(
                 source_key="workflow",
                 tool_name="workflow_set_task",
                 request={"workflow_key": workflow_key, "run_id": run_id, "tasks": tasks},
-                handler=lambda: service.workflows.set_tasks_for_agent(
-                    profile_key=active_profile,
-                    workflow_key=workflow_key,
-                    run_id=run_id,
-                    tasks=tasks,
+                handler=lambda: _workflow_set_task_if_enabled(
+                    bridge_service, active_profile, workflow_key, run_id, tasks
                 ),
             )
 
-        @mcp.tool(description="追加一条当前工作流运行日志。")
+        if bridge_service.capabilities.is_top_level_mcp_tool_enabled("workflow_set_task"):
+            mcp.tool(description="创建或刷新当前工作流的待处理任务。")(workflow_set_task)
+
         def workflow_run_log(
             level: str = Field(default="info", description="日志级别，如 info、warning 或 error。"),
             stage: str = Field(default="", description="日志所属阶段标识。"),
@@ -328,8 +313,9 @@ def create_mcp_server(
                     "message": message,
                     "payload": payload or {},
                 },
-                handler=lambda: _append_workflow_run_log(
+                handler=lambda: _append_workflow_run_log_if_enabled(
                     service=service,
+                    bridge_service=bridge_service,
                     profile_key=active_profile,
                     workflow_key=workflow_key,
                     run_id=run_id,
@@ -341,22 +327,27 @@ def create_mcp_server(
                 ),
             )
 
+        if bridge_service.capabilities.is_top_level_mcp_tool_enabled("workflow_run_log"):
+            mcp.tool(description="追加一条当前工作流运行日志。")(workflow_run_log)
+
     def register_direct_builtin_tools() -> None:
         providers = getattr(service.capabilities, "builtin_providers", {})
         registered_names = {"search", "execute", "artifacts_search"}
-        for direct_spec in DIRECT_BUILTIN_TOOLS:
-            name = direct_spec["name"]
+        for direct_spec in (spec for spec in top_level_mcp_tools() if spec.kind == "direct_builtin"):
+            name = direct_spec.name
             if name in registered_names:
                 continue
             registered_names.add(name)
-            provider = providers.get(direct_spec["service_key"]) if isinstance(providers, dict) else None
+            if not bridge_service.capabilities.is_top_level_mcp_tool_enabled(name):
+                continue
+            provider = providers.get(direct_spec.service_key) if isinstance(providers, dict) else None
             if provider is None:
                 continue
             builtin_tools = {
                 tool.tool: tool
                 for tool in provider.list_tools(default_user(), profile_key)
             }
-            builtin_tool = builtin_tools.get(direct_spec["tool_name"])
+            builtin_tool = builtin_tools.get(direct_spec.tool_name)
             if builtin_tool is None:
                 continue
             invalid_parameter_names = _invalid_json_schema_property_names(builtin_tool.input_schema)
@@ -368,13 +359,13 @@ def create_mcp_server(
                 )
                 continue
 
-            async def direct_builtin_tool(_spec: dict[str, str] = direct_spec, **kwargs: Any) -> dict[str, Any]:
+            async def direct_builtin_tool(_spec: Any = direct_spec, **kwargs: Any) -> dict[str, Any]:
                 active_profile = _request_profile.get() or profile_key
                 current_workflow_context = _request_workflow_context.get() or active_workflow_context
                 return await service.capabilities.execute(
                     actor=default_user(),
-                    service=_spec["service_key"],
-                    tool_name=_spec["tool_name"],
+                    service=_spec.service_key,
+                    tool_name=_spec.tool_name,
                     params=kwargs,
                     profile_key=active_profile,
                     workflow_context=current_workflow_context,
@@ -454,6 +445,63 @@ def _append_workflow_run_log(
         payload=payload,
     )
     return {"ok": True}
+
+
+def _search_artifacts_if_enabled(
+    bridge_service: AgentBridgeService,
+    *,
+    actor: str,
+    profile_key: str | None,
+    query: str,
+    path: str,
+    limit: int,
+) -> dict[str, Any]:
+    bridge_service.capabilities.require_top_level_mcp_tool_enabled("artifacts_search")
+    return bridge_service.workflows.search_artifacts(
+        actor=actor,
+        profile_key=profile_key,
+        query=query,
+        tags=[],
+        path=path,
+        workflow_key=None,
+        include_history=False,
+        limit=limit,
+        trusted_profile_context=True,
+    )
+
+
+def _workflow_get_task_if_enabled(
+    bridge_service: AgentBridgeService,
+    profile_key: str | None,
+    workflow_key: str,
+    run_id: str,
+) -> dict[str, Any]:
+    bridge_service.capabilities.require_top_level_mcp_tool_enabled("workflow_get_task")
+    return bridge_service.workflows.get_task_for_agent(
+        profile_key=profile_key, workflow_key=workflow_key, run_id=run_id
+    )
+
+
+def _workflow_set_task_if_enabled(
+    bridge_service: AgentBridgeService,
+    profile_key: str | None,
+    workflow_key: str,
+    run_id: str,
+    tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    bridge_service.capabilities.require_top_level_mcp_tool_enabled("workflow_set_task")
+    return bridge_service.workflows.set_tasks_for_agent(
+        profile_key=profile_key, workflow_key=workflow_key, run_id=run_id, tasks=tasks
+    )
+
+
+def _append_workflow_run_log_if_enabled(
+    *,
+    bridge_service: AgentBridgeService,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    bridge_service.capabilities.require_top_level_mcp_tool_enabled("workflow_run_log")
+    return _append_workflow_run_log(**kwargs)
 
 
 def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:

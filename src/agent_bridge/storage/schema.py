@@ -188,6 +188,12 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (service_key, tool_name)
 );
+CREATE TABLE IF NOT EXISTS metamcp_tool_settings (
+  tool_name TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'enabled',
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS openapi_services (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   service_key TEXT NOT NULL UNIQUE,

@@ -2,7 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { CronExpressionParser } from 'cron-parser'
 import { api } from '../../api/client'
-import type { AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, RetrievalProbeLlmConfig, SchedulerStatus } from '../../api/types'
+import type { AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, RetrievalProbeLlmConfig, SchedulerStatus, TopLevelMcpTool } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -13,6 +13,10 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import { confirm } from '../../composables/useConfirm'
 
 const loading = ref(true)
+
+const topLevelMcpTools = ref<TopLevelMcpTool[]>([])
+const topLevelMcpToolsError = ref('')
+const topLevelMcpToolsUpdating = ref<string | null>(null)
 
 // Sync config
 const syncConfig = ref<KnowledgeSyncConfig>({
@@ -90,12 +94,35 @@ const isPageIndex = computed(() => backendForm.value.backend_type === 'pageindex
 const supportsModelConfig = computed(() => isWeknora.value || isPageIndex.value)
 
 onMounted(async () => {
-  await Promise.all([loadSyncConfig(), loadClaudeMemConfig(), loadRetrievalProbeLlmConfig(), loadAgentRuntimeConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
+  await Promise.all([loadSyncConfig(), loadTopLevelMcpTools(), loadClaudeMemConfig(), loadRetrievalProbeLlmConfig(), loadAgentRuntimeConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
   loading.value = false
 })
 
 async function loadSyncConfig() {
   try { syncConfig.value = await api.getSyncConfig() } catch { /* ignore */ }
+}
+
+async function loadTopLevelMcpTools() {
+  try {
+    topLevelMcpTools.value = await api.listTopLevelMcpTools()
+    topLevelMcpToolsError.value = ''
+  } catch (e: any) {
+    topLevelMcpToolsError.value = e.message || '无法加载顶层 MCP 工具'
+  }
+}
+
+async function toggleTopLevelMcpTool(tool: TopLevelMcpTool) {
+  const nextStatus = tool.status === 'enabled' ? 'disabled' : 'enabled'
+  topLevelMcpToolsUpdating.value = tool.name
+  try {
+    const saved = await api.updateTopLevelMcpToolStatus(tool.name, nextStatus)
+    const index = topLevelMcpTools.value.findIndex(item => item.name === tool.name)
+    if (index >= 0) topLevelMcpTools.value[index] = saved
+    topLevelMcpToolsError.value = ''
+  } catch (e: any) {
+    topLevelMcpToolsError.value = e.message || '更新顶层 MCP 工具状态失败'
+  }
+  topLevelMcpToolsUpdating.value = null
 }
 
 async function loadClaudeMemConfig() {
@@ -497,6 +524,50 @@ async function deleteBackend(slug: string) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
+    <Card>
+      <CardContent class="space-y-4 p-5">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-sm font-medium">顶层 MCP 工具</div>
+            <div class="mt-1 text-xs text-muted-foreground">管理 /mcp 对外直接提供的工具。固定入口 <code>search</code> 和 <code>execute</code> 始终保留；关闭后工具不会出现在 tools/list 或能力目录中，也无法调用。</div>
+          </div>
+          <Button variant="outline" size="sm" @click="loadTopLevelMcpTools" :disabled="topLevelMcpToolsUpdating !== null">刷新</Button>
+        </div>
+        <div v-if="topLevelMcpToolsError" class="rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ topLevelMcpToolsError }}</div>
+        <div v-else-if="topLevelMcpTools.length === 0" class="py-4 text-center text-sm text-muted-foreground">暂无可配置的顶层 MCP 工具</div>
+        <div v-else class="overflow-hidden rounded-md border border-border">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-border bg-muted/30">
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">工具</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">说明</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">状态</th>
+                <th class="px-3 py-2 text-right text-xs font-medium text-muted-foreground">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="tool in topLevelMcpTools" :key="tool.name" class="border-b border-border/60 last:border-b-0">
+                <td class="px-3 py-2 align-top">
+                  <div class="font-mono text-sm">{{ tool.name }}</div>
+                  <div class="mt-0.5 text-xs text-muted-foreground">{{ tool.title }}</div>
+                </td>
+                <td class="max-w-xl px-3 py-2 text-xs text-muted-foreground">{{ tool.description }}</td>
+                <td class="px-3 py-2"><StatusBadge :status="tool.status" :label="tool.status === 'enabled' ? '已启用' : '已关闭'" /></td>
+                <td class="px-3 py-2 text-right">
+                  <Button
+                    :variant="tool.status === 'enabled' ? 'outline' : 'default'"
+                    size="sm"
+                    :disabled="topLevelMcpToolsUpdating === tool.name"
+                    @click="toggleTopLevelMcpTool(tool)"
+                  >{{ topLevelMcpToolsUpdating === tool.name ? '更新中...' : tool.status === 'enabled' ? '临时关闭' : '重新启用' }}</Button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+
     <!-- 定时任务管理 -->
     <Card>
       <CardContent class="space-y-4 p-5">

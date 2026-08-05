@@ -33,6 +33,7 @@ import type {
   OpenApiTool,
   McpService,
   McpTool,
+  TopLevelMcpTool,
   CapabilityToolPage,
   ProjectProfile,
   ProfileDocRender,
@@ -310,6 +311,9 @@ async function getBlob(url: string): Promise<Blob> {
 
 export const api = {
   // MCP Services
+  listTopLevelMcpTools: () => get<TopLevelMcpTool[]>('/capabilities/top-level-mcp-tools'),
+  updateTopLevelMcpToolStatus: (name: string, status: 'enabled' | 'disabled') =>
+    post<TopLevelMcpTool>(`/capabilities/top-level-mcp-tools/${name}/status`, { status }),
   listServices: (summary = false) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`),
   getService: (key: string) => get<McpService>(`/capabilities/mcp-services/${key}`),
   registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string; expected_edit_token?: string | null }) =>

@@ -191,6 +191,16 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
 
 
 def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS metamcp_tool_settings (
+          tool_name TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'enabled',
+          updated_by TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     store._ensure_columns(
         conn,
         "model_evaluation_runs",

@@ -84,7 +84,11 @@ class BuiltinSourceAdapter:
     def root_items(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for provider in self.service.builtin_providers.values():
-            tools = provider.list_tools(actor, profile_key)
+            tools = [
+                tool
+                for tool in provider.list_tools(actor, profile_key)
+                if self.service.is_capability_tool_enabled(provider.source_key, tool.tool)
+            ]
             if not tools:
                 continue
             items.append(
@@ -103,11 +107,19 @@ class BuiltinSourceAdapter:
 
     def search_items(self, actor: str, source_key: str, profile_key: str | None) -> list[dict[str, Any]]:
         provider = self.service.builtin_providers[source_key]
-        return [self.service._builtin_tool_search_item(source_key, tool) for tool in provider.list_tools(actor, profile_key)]
+        return [
+            self.service._builtin_tool_search_item(source_key, tool)
+            for tool in provider.list_tools(actor, profile_key)
+            if self.service.is_capability_tool_enabled(source_key, tool.tool)
+        ]
 
     def tool_names(self, actor: str, source_key: str, profile_key: str | None) -> list[str]:
         provider = self.service.builtin_providers[source_key]
-        return [tool.tool for tool in provider.list_tools(actor, profile_key)]
+        return [
+            tool.tool
+            for tool in provider.list_tools(actor, profile_key)
+            if self.service.is_capability_tool_enabled(source_key, tool.tool)
+        ]
 
     async def execute(
         self,
@@ -118,6 +130,7 @@ class BuiltinSourceAdapter:
         profile_key: str | None,
         workflow_context: dict[str, Any] | None,
     ) -> SourceExecution:
+        self.service.require_capability_tool_enabled(source_key, tool_name)
         provider = self.service.builtin_providers[source_key]
         resource = provider.resource_from_arguments(tool_name, params)
         logger.debug("能力分发 builtin service=%s tool=%s", source_key, tool_name)

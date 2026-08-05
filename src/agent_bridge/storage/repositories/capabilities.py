@@ -14,6 +14,37 @@ class CapabilitiesRepository:
         self._db_path = db_path
         self._connect = connect
 
+    # -- MetaMCP top-level tool settings --
+
+    def list_metamcp_tool_settings(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT tool_name, status, updated_by, updated_at FROM metamcp_tool_settings ORDER BY tool_name"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def upsert_metamcp_tool_status(self, tool_name: str, status: str, updated_by: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO metamcp_tool_settings (tool_name, status, updated_by)
+                VALUES (?, ?, ?)
+                ON CONFLICT(tool_name) DO UPDATE SET
+                  status = excluded.status,
+                  updated_by = excluded.updated_by,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (tool_name, status, updated_by),
+            )
+            row = conn.execute(
+                "SELECT tool_name, status, updated_by, updated_at FROM metamcp_tool_settings WHERE tool_name = ?",
+                (tool_name,),
+            ).fetchone()
+            setting = row_to_dict(row)
+            if setting is None:
+                raise KeyError(f"metamcp tool setting not found: {tool_name}")
+            return setting
+
     def create_mcp_service(
         self,
         *,

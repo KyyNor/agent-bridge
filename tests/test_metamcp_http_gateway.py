@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from agent_bridge.capability_hub.models import ProfileResourceType, ProfileRuleEffect, SourceType, ToolType
 from agent_bridge.capability_hub.gateway.metamcp import _request_profile, create_mcp_server
 from agent_bridge.app.service import AgentBridgeService
+from agent_bridge.core.domain import ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -171,3 +174,31 @@ def test_mcp_exposes_profile_pinned_tools(wm_paths) -> None:
 
     pinned_tool = next(tool for tool in tools if tool.name == "pin_mysql_query_users")
     assert pinned_tool.inputSchema["properties"]["q"]["type"] == "string"
+
+
+def test_disabled_top_level_mcp_tool_is_hidden_from_directory_and_cannot_execute(wm_paths) -> None:
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+
+    tools = svc.capabilities.list_top_level_mcp_tools("root")
+    assert "search" not in {tool["name"] for tool in tools}
+    assert "execute" not in {tool["name"] for tool in tools}
+    assert next(tool for tool in tools if tool["name"] == "memory_search")["status"] == "enabled"
+
+    svc.capabilities.set_top_level_mcp_tool_status("root", "memory_search", "disabled")
+    mcp = create_mcp_server(svc)
+    exposed_tools = asyncio.run(mcp.list_tools())
+    assert "memory_search" not in {tool.name for tool in exposed_tools}
+
+    _, directory = asyncio.run(mcp.call_tool("search", {"path": "memory"}))
+    assert "search" not in {item["tool"] for item in directory["items"]}
+
+    with pytest.raises(ValidationError, match="memory_search"):
+        asyncio.run(
+            svc.capabilities.execute(
+                actor="root",
+                service="memory",
+                tool_name="search",
+                params={"query": "anything"},
+            )
+        )

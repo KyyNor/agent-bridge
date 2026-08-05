@@ -33,6 +33,11 @@ from agent_bridge.capability_hub.sources.adapters import (
     McpSourceAdapter,
     OpenApiSourceAdapter,
 )
+from agent_bridge.capability_hub.gateway.top_level_tools import (
+    top_level_mcp_tools,
+    top_level_tool_by_name,
+    top_level_tool_for_capability,
+)
 from agent_bridge.core.defaults import DEFAULT_MCP_TIMEOUT_SECONDS
 from agent_bridge.storage.sqlite import SQLiteStore
 
@@ -203,6 +208,65 @@ class CapabilityService:
 
     def register_builtin_provider(self, provider: BuiltinCapabilityProvider) -> None:
         self.builtin_providers[provider.source_key] = provider
+
+    def list_top_level_mcp_tools(self, actor: str) -> list[dict[str, Any]]:
+        """列出可在系统管理中临时关闭的 MetaMCP 顶层工具。"""
+
+        require_admin_user(actor, self.admins)
+        settings = {item["tool_name"]: item for item in self.store.list_metamcp_tool_settings()}
+        return [
+            {
+                "name": spec.name,
+                "title": spec.title,
+                "description": spec.description,
+                "kind": spec.kind,
+                "service_key": spec.service_key,
+                "tool_name": spec.tool_name,
+                "status": settings.get(spec.name, {}).get("status", McpServiceStatus.enabled.value),
+                "updated_by": settings.get(spec.name, {}).get("updated_by"),
+                "updated_at": settings.get(spec.name, {}).get("updated_at"),
+            }
+            for spec in top_level_mcp_tools()
+        ]
+
+    def set_top_level_mcp_tool_status(self, actor: str, tool_name: str, status: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        if top_level_tool_by_name(tool_name) is None:
+            raise NotFound("top-level MCP tool not found")
+        if status not in {McpServiceStatus.enabled.value, McpServiceStatus.disabled.value}:
+            raise ValidationError("invalid top-level MCP tool status")
+        self.store.upsert_metamcp_tool_status(tool_name, status, actor)
+        logger.info("顶层 MCP 工具状态已更新 tool=%s status=%s actor=%s", tool_name, status, actor)
+        return next(item for item in self.list_top_level_mcp_tools(actor) if item["name"] == tool_name)
+
+    def is_top_level_mcp_tool_enabled(self, tool_name: str) -> bool:
+        settings = {item["tool_name"]: item["status"] for item in self.store.list_metamcp_tool_settings()}
+        return settings.get(tool_name, McpServiceStatus.enabled.value) == McpServiceStatus.enabled.value
+
+    def is_capability_tool_enabled(self, service_key: str, tool_name: str) -> bool:
+        top_level_name = top_level_tool_for_capability(service_key, tool_name)
+        return top_level_name is None or self.is_top_level_mcp_tool_enabled(top_level_name)
+
+    def require_capability_tool_enabled(self, service_key: str, tool_name: str) -> None:
+        top_level_name = top_level_tool_for_capability(service_key, tool_name)
+        if top_level_name is None or self.is_top_level_mcp_tool_enabled(top_level_name):
+            return
+        raise mark_builtin_failure(
+            ValidationError(f"顶层 MCP 工具已临时关闭：{top_level_name}"),
+            stage=FailureStage.capability_registry.value,
+            owner=FailureOwner.policy.value,
+            error_type="top_level_mcp_tool_disabled",
+        )
+
+    def require_top_level_mcp_tool_enabled(self, tool_name: str) -> None:
+        if self.is_top_level_mcp_tool_enabled(tool_name):
+            return
+        raise mark_builtin_failure(
+            ValidationError(f"顶层 MCP 工具已临时关闭：{tool_name}"),
+            stage=FailureStage.capability_registry.value,
+            owner=FailureOwner.policy.value,
+            error_type="top_level_mcp_tool_disabled",
+        )
 
     def invoke_logged_tool(
         self,
