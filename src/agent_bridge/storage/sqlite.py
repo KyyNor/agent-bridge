@@ -9,17 +9,22 @@ from pathlib import Path
 from typing import Iterator
 
 from agent_bridge.storage.migrations.schema import apply_followup_schema, apply_initial_schema
+from agent_bridge.storage.migrations.runtime_logs import apply_runtime_log_schema
 from agent_bridge.storage.store_facade import SQLiteStoreFacade
 
 
 class SQLiteStore(SQLiteStoreFacade):
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, log_db_path: Path | None = None) -> None:
         self.db_path = db_path
+        self.log_db_path = log_db_path or db_path
         self._runtime_log_retention_days = 180
         self._last_runtime_log_prune_monotonic: float | None = None
         self._runtime_log_prune_interval_seconds = 3600.0
         self._active_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
             f"sqlite_store_connection_{id(self)}", default=None
+        )
+        self._active_log_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
+            f"sqlite_store_log_connection_{id(self)}", default=None
         )
 
         from agent_bridge.storage.repositories.agent_runs import AgentRunsRepository
@@ -36,22 +41,34 @@ class SQLiteStore(SQLiteStoreFacade):
         self.folders = FolderRepository(db_path, self.connect)
         self.knowledge = KnowledgeRepository(db_path, self.connect, self.folders)
         self.capabilities = CapabilitiesRepository(db_path, self.connect)
-        self.governance = GovernanceRepository(db_path, self.connect)
+        self.governance = GovernanceRepository(
+            db_path,
+            self.connect,
+            log_connect=self.log_connect,
+            log_metadata_schema="main_db" if self.log_db_path != self.db_path else None,
+        )
         self.memory = MemoryRepository(db_path, self.connect)
         self.codegraph = CodeGraphRepository(db_path, self.connect)
         self.workflows = WorkflowsRepository(db_path, self.connect)
         self.scripts = ScriptsRepository(db_path, self.connect)
         self.retrieval_probe_config = RetrievalProbeConfigRepository(db_path, self.connect)
-        self.agent_runs = AgentRunsRepository(db_path, self.connect, prune_callback=self.maybe_prune_runtime_logs)
+        self.agent_runs = AgentRunsRepository(self.log_db_path, self.log_connect, prune_callback=self.maybe_prune_runtime_logs)
 
-    def _open_connection(self) -> sqlite3.Connection:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+    @staticmethod
+    def _open_connection_at(db_path: Path) -> sqlite3.Connection:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
+
+    def _open_connection(self) -> sqlite3.Connection:
+        return self._open_connection_at(self.db_path)
+
+    def _open_log_connection(self) -> sqlite3.Connection:
+        return self._open_connection_at(self.log_db_path)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -92,10 +109,69 @@ class SQLiteStore(SQLiteStoreFacade):
             self._active_connection.reset(token)
             conn.close()
 
+    @contextmanager
+    def log_connect(self) -> Iterator[sqlite3.Connection]:
+        active = self._active_log_connection.get()
+        if active is not None:
+            yield active
+            return
+
+        conn = self._open_log_connection()
+        if self.log_db_path != self.db_path:
+            conn.execute("ATTACH DATABASE ? AS main_db", (str(self.db_path),))
+        token = self._active_log_connection.set(conn)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._active_log_connection.reset(token)
+            conn.close()
+
     def init_schema(self) -> None:
         with self.connect() as conn:
             apply_initial_schema(self, conn)
         self.migrate_phase2()
+        if self.log_db_path != self.db_path:
+            with self.log_connect() as conn:
+                apply_runtime_log_schema(conn)
+            self._migrate_runtime_logs_from_main()
+
+    def _migrate_runtime_logs_from_main(self) -> None:
+        """把旧单库的高频审计记录幂等搬迁到独立日志库。
+
+        完成复制并确认后才删除主库来源记录；发生中断时因唯一键约束可安全重试。
+        """
+        log_tables = ("tool_call_logs", "agent_runs")
+        with self.connect() as main_conn:
+            source_rows = {
+                table: [dict(row) for row in main_conn.execute(f"SELECT * FROM {table}").fetchall()]
+                for table in log_tables
+            }
+            if not any(source_rows.values()):
+                return
+            with self.log_connect() as log_conn:
+                for table, rows in source_rows.items():
+                    if not rows:
+                        continue
+                    columns = tuple(rows[0])
+                    placeholders = ", ".join("?" for _ in columns)
+                    quoted_columns = ", ".join(columns)
+                    log_conn.executemany(
+                        f"INSERT OR IGNORE INTO {table} ({quoted_columns}) VALUES ({placeholders})",
+                        [tuple(row[column] for column in columns) for row in rows],
+                    )
+                for table, rows in source_rows.items():
+                    if not rows:
+                        continue
+                    copied = log_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    if copied < len(rows):
+                        raise RuntimeError(f"运行日志迁移校验失败：{table}")
+            for table, rows in source_rows.items():
+                if rows:
+                    main_conn.execute(f"DELETE FROM {table}")
 
     def migrate_phase2(self) -> None:
         with self.connect() as conn:

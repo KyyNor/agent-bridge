@@ -95,7 +95,7 @@ def test_save_sync_config_updates_retention_and_prunes_immediately(wm_paths) -> 
         events=[],
     )
     old_created_at = (datetime.now(UTC) - timedelta(days=31)).strftime("%Y-%m-%d %H:%M:%S")
-    with service.store.connect() as conn:
+    with service.store.log_connect() as conn:
         conn.execute("UPDATE tool_call_logs SET created_at = ? WHERE log_id = ?", (old_created_at, old_log["log_id"]))
         conn.execute("UPDATE agent_runs SET created_at = ? WHERE run_key = ?", (old_created_at, old_run["run_key"]))
 

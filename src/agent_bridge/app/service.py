@@ -28,6 +28,7 @@ from agent_bridge.core.config import (
     AgentRuntimeConfig,
     ensure_directories,
     load_agent_runtime_config,
+    migrate_legacy_database_filename,
     migrate_toml_backends_to_db,
     save_agent_runtime_config,
 )
@@ -290,9 +291,11 @@ class AgentBridgeService:
     def create(cls, paths: AgentBridgePaths, admins: set[str]) -> "AgentBridgeService":
         """工厂入口：装配全部子服务，恢复中断的 CodeGraph 同步，迁移并重建后端 registry。"""
         logger.info("AgentBridgeService 开始装配 root=%s admins=%s", paths.root, sorted(admins))
+        if migrate_legacy_database_filename(paths):
+            logger.info("主数据库文件名已从 wiki.db 迁移至 agent-bridge.db")
         service = cls(
             paths=paths,
-            store=SQLiteStore(paths.db_path),
+            store=SQLiteStore(paths.db_path, paths.log_db_path),
             archive=ArchiveStorage(paths.archive_dir),
             admins=admins,
         )

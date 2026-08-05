@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,8 @@ class AgentBridgePaths:
     logs_dir: Path
     run_dir: Path
     db_path: Path
+    log_db_path: Path
+    ledger_db_path: Path
     archive_dir: Path
     mock_backend_dir: Path
     server_config_path: Path
@@ -46,7 +49,9 @@ class AgentBridgePaths:
             data_dir=root / "data",
             logs_dir=root / "logs",
             run_dir=root / "run",
-            db_path=root / "data" / "wiki.db",
+            db_path=root / "data" / "agent-bridge.db",
+            log_db_path=root / "data" / "agent-bridge-logs.db",
+            ledger_db_path=root / "data" / "agent-bridge-ledgers.db",
             archive_dir=root / "data" / "archive",
             mock_backend_dir=root / "data" / "backend" / "mock",
             server_config_path=root / "config" / "server.toml",
@@ -142,6 +147,29 @@ def ensure_directories(paths: AgentBridgePaths) -> None:
         paths.run_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def migrate_legacy_database_filename(paths: AgentBridgePaths) -> bool:
+    """把历史 ``wiki.db`` 安全复制为新的主库文件名。
+
+    SQLite backup 会包含仍处于 WAL 中的已提交内容，不能用普通文件移动替代。
+    保留旧文件作为升级回退副本；服务只使用新的 ``agent-bridge.db``。
+    """
+    legacy_path = paths.data_dir / "wiki.db"
+    if paths.db_path.exists() or not legacy_path.exists():
+        return False
+    paths.data_dir.mkdir(parents=True, exist_ok=True)
+    temporary_path = paths.db_path.with_suffix(".db.migrating")
+    temporary_path.unlink(missing_ok=True)
+    source = sqlite3.connect(legacy_path)
+    target = sqlite3.connect(temporary_path)
+    try:
+        source.backup(target)
+    finally:
+        target.close()
+        source.close()
+    temporary_path.replace(paths.db_path)
+    return True
 
 
 def load_server_config(paths: AgentBridgePaths) -> ServerConfig:

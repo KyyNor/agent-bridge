@@ -37,7 +37,7 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `AgentBridgeService` 是装配根和兼容门面。FastAPI 路由调用应用/领域 service，领域 service 使用 repositories 或 adapter。不要继续把具体知识后端、工作流或脚本业务堆入门面。
 
-`SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
+`SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。主业务库为 `agent-bridge.db`，工具调用与 Agent 运行审计位于独立的 `agent-bridge-logs.db`；运行日志 repository 必须使用日志连接，不能重新写回主库。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
 `workflow_artifacts` 的标题、摘要、路径和正文通过 jieba 预分词与 SQLite FTS5 索引检索；中文查询词按 `AND` 组合，长度至少 3 的 ASCII 标识符使用 FTS5 前缀匹配，短 token 和带分隔符的路径/标识符使用字面匹配。Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。原始产物正文不被改写，分词副本单独维护并随 artifact 生命周期同步。
 

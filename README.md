@@ -138,9 +138,9 @@ CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或�
 └── run/
 ```
 
-服务配置位于 `config/server.toml`，数据库和运行数据位于 `data/`。日志默认写入 `logs/agent-bridge.log`。
+服务配置位于 `config/server.toml`，数据库和运行数据位于 `data/`。主业务库为 `data/agent-bridge.db`，高频工具调用与 Agent 运行审计独立保存到 `data/agent-bridge-logs.db`；升级时会安全复制历史 `wiki.db` 到新的主库文件名。日志默认写入 `logs/agent-bridge.log`。
 
-Agent 运行记录采用 SQLite 与运行目录混合存储：`data/wiki.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
+Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
 
 工作流 Agent 的 JSON 输出 Schema 按 JSON Schema Draft 07 校验和传递给 Coding Agent。已有
 Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft 07 的 `definitions`；

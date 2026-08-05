@@ -17,9 +17,15 @@ _TOOL_CALL_LOG_SUMMARY_COLUMNS = """
 
 
 class GovernanceRepository:
-    def __init__(self, db_path, connect):
+    def __init__(self, db_path, connect, *, log_connect=None, log_metadata_schema: str | None = None):
         self._db_path = db_path
         self._connect = connect
+        self._log_connect = log_connect or connect
+        self._log_metadata_schema = log_metadata_schema
+
+    @property
+    def _log_mcp_tools_table(self) -> str:
+        return f"{self._log_metadata_schema}.mcp_tools" if self._log_metadata_schema else "mcp_tools"
 
     def _migrate_tool_call_logs_nullable_profile(self, conn: sqlite3.Connection) -> None:
         columns = conn.execute("PRAGMA table_info(tool_call_logs)").fetchall()
@@ -460,7 +466,7 @@ class GovernanceRepository:
     ) -> dict[str, Any]:
         request_value = {} if request is None else request
         response_value = {} if response is None else response
-        with self._connect() as conn:
+        with self._log_connect() as conn:
             conn.execute(
                 """
                 INSERT INTO tool_call_logs (
@@ -552,7 +558,7 @@ class GovernanceRepository:
         )
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         params.extend([limit, offset])
-        with self._connect() as conn:
+        with self._log_connect() as conn:
             rows = conn.execute(
                 f"""
                 SELECT *
@@ -621,7 +627,7 @@ class GovernanceRepository:
         )
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         base_where_clause = f"WHERE {' AND '.join(base_filters)}" if base_filters else ""
-        with self._connect() as conn:
+        with self._log_connect() as conn:
             total = conn.execute(
                 f"SELECT COUNT(*) AS total FROM tool_call_logs {where_clause}",
                 params,
@@ -780,8 +786,8 @@ class GovernanceRepository:
             params.append(created_to)
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         join_clause = (
-            """
-                LEFT JOIN mcp_tools
+            f"""
+                LEFT JOIN {self._log_mcp_tools_table} mcp_tools
                   ON mcp_tools.service_key = tool_call_logs.source_key
                  AND mcp_tools.tool_name = tool_call_logs.tool_name
                  AND tool_call_logs.source_type = 'mcp_service'
@@ -789,7 +795,7 @@ class GovernanceRepository:
             if "tool_type" in dimensions
             else ""
         )
-        with self._connect() as conn:
+        with self._log_connect() as conn:
             rows = conn.execute(
                 f"""
                 SELECT
@@ -811,15 +817,15 @@ class GovernanceRepository:
             return [dict(row) for row in rows]
 
     def aggregate_pin_group_usage(self, *, profile_key: str, created_from: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._log_connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                   logs.source_key AS service_key,
                   tools.tool_type AS tool_type,
                   COUNT(*) AS calls
                 FROM tool_call_logs logs
-                JOIN mcp_tools tools
+                JOIN {self._log_mcp_tools_table} tools
                   ON tools.service_key = logs.source_key
                  AND tools.tool_name = logs.tool_name
                 WHERE logs.profile_key = ?
@@ -835,7 +841,7 @@ class GovernanceRepository:
             return [dict(row) for row in rows]
 
     def get_tool_call_log(self, log_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._log_connect() as conn:
             row = conn.execute(
                 "SELECT * FROM tool_call_logs WHERE log_id = ?",
                 (log_id,),
@@ -843,7 +849,7 @@ class GovernanceRepository:
             return row_to_dict(row)
 
     def purge_tool_call_logs_before(self, cutoff_created_at: str) -> int:
-        with self._connect() as conn:
+        with self._log_connect() as conn:
             cursor = conn.execute(
                 "DELETE FROM tool_call_logs WHERE created_at < ?",
                 (cutoff_created_at,),
