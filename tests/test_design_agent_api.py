@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from jsonschema import Draft7Validator
 
-from agent_bridge.api.routes.agent_runs import SCRIPT_DESIGN_SCHEMA, WORKFLOW_DESIGN_SCHEMA
+from agent_bridge.api.routes.agent_runs import BUSINESS_LEDGER_DESIGN_SCHEMA, SCRIPT_DESIGN_SCHEMA, WORKFLOW_DESIGN_SCHEMA
 
 
 def _workflow_definition() -> dict[str, object]:
@@ -127,6 +127,87 @@ def test_workflow_design_schema_requires_complete_envelope() -> None:
     }
 
     assert any(error.validator == "required" and "notes" in error.message for error in validator.iter_errors(result))
+
+
+def test_business_ledger_design_agent_uses_design_business_ledger_skill(wm_paths) -> None:
+    client = _client(wm_paths)
+    svc = client.app.state.agent_bridge_service
+    captured: dict[str, object] = {}
+
+    async def fake_run(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            ok=True,
+            error=None,
+            run_key=None,
+            result={
+                "summary": "created",
+                "notes": ["文本名称支持模糊匹配"],
+                "ledger": {
+                    "ledger_key": "asset_inventory",
+                    "name": "资产台账",
+                    "description": "维护系统资产",
+                    "fields": [
+                        {
+                            "field_key": "name",
+                            "name": "名称",
+                            "field_type": "text",
+                            "required": True,
+                            "fuzzy_match": True,
+                            "agent_readable": True,
+                            "enum_values": [],
+                        }
+                    ],
+                },
+            },
+        )
+
+    svc.agents.run = fake_run
+    response = client.post(
+        "/agent-runs/design/business-ledger",
+        headers={"X-Agent-Bridge-User": "root"},
+        json={
+            "mode": "create",
+            "prompt": "创建一份系统资产台账",
+            "run_key": "design_business_ledger_fixed",
+            "current": {"fields": []},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["ledger"]["ledger_key"] == "asset_inventory"
+    assert captured["agent_name"] == "design_business_ledger"
+    assert captured["run_key"] == "design_business_ledger_fixed"
+    assert "design_business_ledger 内容" in str(captured["prompt"])
+    assert "business ledger definition" in str(captured["prompt"])
+
+
+def test_business_ledger_design_schema_accepts_complete_definition() -> None:
+    validator = Draft7Validator(BUSINESS_LEDGER_DESIGN_SCHEMA)
+    result = {
+        "summary": "created",
+        "notes": ["按 Excel 维护"],
+        "ledger": {
+            "ledger_key": "asset_inventory",
+            "name": "资产台账",
+            "description": "维护系统资产",
+            "fields": [
+                {
+                    "field_key": "name",
+                    "name": "名称",
+                    "field_type": "text",
+                    "required": True,
+                    "fuzzy_match": True,
+                    "agent_readable": True,
+                    "enum_values": [],
+                }
+            ],
+        },
+    }
+
+    assert list(validator.iter_errors(result)) == []
+    invalid = {**result, "ledger": {**result["ledger"], "fields": []}}
+    assert list(validator.iter_errors(invalid))
 
 
 def test_workflow_design_schema_rejects_legacy_workflow_js() -> None:

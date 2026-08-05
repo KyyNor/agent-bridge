@@ -25,6 +25,12 @@ class SkillService:
         self.admins = admins
         defaults = Path(__file__).parent / "defaults"
         self._definitions = {
+            "design_business_ledger": SkillDefinition(
+                skill_name="design_business_ledger",
+                name="Design Business Ledger",
+                description="设计 Agent Bridge 业务台账定义的提示词。",
+                default_path=defaults / "design_business_ledger.md",
+            ),
             "design_script": SkillDefinition(
                 skill_name="design_script",
                 name="Design Script",

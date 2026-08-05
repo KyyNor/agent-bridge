@@ -179,6 +179,46 @@ SCRIPT_DESIGN_SCHEMA: dict[str, Any] = {
     },
 }
 
+BUSINESS_LEDGER_DESIGN_SCHEMA: dict[str, Any] = {
+    "$schema": DRAFT7_SCHEMA_URI,
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["summary", "notes", "ledger"],
+    "properties": {
+        "summary": {"type": "string"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "ledger": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["ledger_key", "name", "description", "fields"],
+            "properties": {
+                "ledger_key": {"type": "string", "pattern": "^[a-z0-9_-]{1,80}$"},
+                "name": {"type": "string", "minLength": 1},
+                "description": {"type": "string"},
+                "fields": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["field_key", "name", "field_type", "required", "fuzzy_match", "agent_readable", "enum_values"],
+                        "properties": {
+                            "field_key": {"type": "string", "pattern": "^[a-z0-9_-]{1,80}$"},
+                            "name": {"type": "string", "minLength": 1},
+                            "field_type": {"type": "string", "enum": ["text", "number", "enum", "date", "datetime"]},
+                            "required": {"type": "boolean"},
+                            "fuzzy_match": {"type": "boolean"},
+                            "agent_readable": {"type": "boolean"},
+                            "enum_values": {"type": "array", "items": {"type": "string"}, "uniqueItems": True},
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
 def create_agent_runs_routes(service, actor):
     router = APIRouter()
 
@@ -357,6 +397,29 @@ def create_agent_runs_routes(service, actor):
             agent_name="design_script",
             profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
             output_schema=SCRIPT_DESIGN_SCHEMA,
+            actor=current_actor,
+            run_key=payload.run_key,
+            timeout=900,
+        )
+        return _design_response(service, result)
+
+    @router.post("/agent-runs/design/business-ledger")
+    async def design_business_ledger(
+        payload: DesignAgentRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        require_admin_user(current_actor, service.admins)
+        result = await service.agents.run(
+            prompt=_design_prompt(
+                kind="business ledger",
+                skill_name="design_business_ledger",
+                skill_prompt=service.skills.get_skill(current_actor, "design_business_ledger")["prompt"],
+                payload=payload,
+                expected_artifact="business ledger definition",
+            ),
+            agent_name="design_business_ledger",
+            profile=payload.profile_key or _str_or_none(payload.current.get("profile_key")),
+            output_schema=BUSINESS_LEDGER_DESIGN_SCHEMA,
             actor=current_actor,
             run_key=payload.run_key,
             timeout=900,

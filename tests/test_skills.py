@@ -56,6 +56,18 @@ def test_design_script_skill_preserves_and_documents_output_schema(wm_paths):
     assert "不得清空已有 output_schema" in prompt
 
 
+def test_design_business_ledger_skill_describes_supported_field_rules(wm_paths):
+    from agent_bridge.app.service import AgentBridgeService
+
+    service = AgentBridgeService.create(wm_paths, {"root"})
+
+    prompt = service.skills.get_skill("root", "design_business_ledger")["prompt"]
+
+    assert "fuzzy_match" in prompt
+    assert "50,000" in prompt
+    assert "布尔" in prompt
+
+
 def test_list_skills_includes_design_script(wm_paths):
     from agent_bridge.app.service import AgentBridgeService
 
@@ -64,6 +76,7 @@ def test_list_skills_includes_design_script(wm_paths):
     skills = svc.skills.list_skills("root")
 
     assert [item["skill_name"] for item in skills] == [
+        "design_business_ledger",
         "design_html_report",
         "design_script",
         "design_workflow",
