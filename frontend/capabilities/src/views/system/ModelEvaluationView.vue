@@ -6,6 +6,7 @@ import { formatLocalDatetime } from '../../lib/time'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Input } from '../../components/ui/input'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import StatusBadge from '../../components/StatusBadge.vue'
 
 const datasets = ref<ModelEvaluationDataset[]>([])
@@ -13,6 +14,8 @@ const runs = ref<ModelEvaluationRun[]>([])
 const models = ref<ModelEvaluationModel[]>([])
 const runtime = ref<ModelEvaluationRuntimeStatus | null>(null)
 const form = ref({ base_url: '', api_key: '', model_name: '', datasets: ['demo_gsm8k_chat_gen'] as string[], max_samples: 64 })
+const selectedRun = ref<ModelEvaluationRun | null>(null)
+const showRunDetail = ref(false)
 const loading = ref(true)
 const loadingModels = ref(false)
 const starting = ref(false)
@@ -72,9 +75,18 @@ function statusLabel(status: ModelEvaluationRun['status']) {
 }
 
 function scoreSummary(run: ModelEvaluationRun) {
-  const row = run.result.rows?.[0]
-  if (!row) return run.status === 'completed' ? '未找到汇总 CSV' : '—'
-  return Object.entries(row).filter(([key]) => !/model|dataset/i.test(key)).slice(0, 3).map(([key, value]) => `${key}: ${value}`).join(' · ') || '已生成结果'
+  const rows = run.result.rows
+  if (!rows?.length) return run.status === 'completed' ? '未找到汇总 CSV' : '—'
+  return rows.map(row => `${row.dataset || '数据集'}: ${scoreForRow(row)}`).join(' · ')
+}
+
+function scoreForRow(row: Record<string, string>) {
+  return Object.entries(row).find(([key]) => !['dataset', 'version', 'metric', 'mode'].includes(key))?.[1] || '—'
+}
+
+function openRunDetail(run: ModelEvaluationRun) {
+  selectedRun.value = run
+  showRunDetail.value = true
 }
 </script>
 
@@ -143,8 +155,30 @@ function scoreSummary(run: ModelEvaluationRun) {
       <CardContent class="p-5">
         <div class="mb-4 flex items-center justify-between"><div><div class="text-base font-medium">评估记录</div><p class="mt-1 text-sm text-muted-foreground">完成后自动读取 OpenCompass 生成的汇总结果。</p></div><Button size="sm" variant="outline" @click="loadRuns">刷新</Button></div>
         <div v-if="!runs.length" class="py-10 text-center text-sm text-muted-foreground">尚未发起模型评估。</div>
-        <div v-else class="overflow-x-auto"><table class="w-full min-w-[820px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">模型</th><th class="px-3 py-2">数据集</th><th class="px-3 py-2">每集题数</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">结果</th><th class="px-3 py-2">创建时间</th></tr></thead><tbody><tr v-for="run in runs" :key="run.run_id" class="border-b border-border/70"><td class="px-3 py-3 font-mono text-xs">{{ run.model_name }}</td><td class="px-3 py-3 text-xs">{{ run.datasets.join('、') }}</td><td class="px-3 py-3 text-xs">{{ run.max_samples }}</td><td class="px-3 py-3"><StatusBadge :status="run.status === 'completed' ? 'enabled' : run.status === 'failed' ? 'error' : run.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(run.status)" /><div v-if="run.error" class="mt-1 max-w-xs text-xs text-destructive">{{ run.error }}</div><div v-else-if="run.status !== 'completed'" class="mt-1 text-xs text-muted-foreground">{{ run.progress_message }}</div></td><td class="max-w-sm px-3 py-3 text-xs text-muted-foreground">{{ scoreSummary(run) }}</td><td class="px-3 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</td></tr></tbody></table></div>
+        <div v-else class="overflow-x-auto"><table class="w-full min-w-[900px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">模型</th><th class="px-3 py-2">数据集</th><th class="px-3 py-2">每集题数</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">结果</th><th class="px-3 py-2">创建时间</th><th class="px-3 py-2"></th></tr></thead><tbody><tr v-for="run in runs" :key="run.run_id" class="border-b border-border/70"><td class="px-3 py-3 font-mono text-xs">{{ run.model_name }}</td><td class="px-3 py-3 text-xs">{{ run.datasets.join('、') }}</td><td class="px-3 py-3 text-xs">{{ run.max_samples }}</td><td class="px-3 py-3"><StatusBadge :status="run.status === 'completed' ? 'enabled' : run.status === 'failed' ? 'error' : run.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(run.status)" /><div v-if="run.error" class="mt-1 max-w-xs text-xs text-destructive">{{ run.error }}</div><div v-else-if="run.status !== 'completed'" class="mt-1 text-xs text-muted-foreground">{{ run.progress_message }}</div></td><td class="max-w-sm px-3 py-3 text-xs text-muted-foreground">{{ scoreSummary(run) }}</td><td class="px-3 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</td><td class="px-3 py-3 text-right"><Button size="sm" variant="outline" @click="openRunDetail(run)">查看详情</Button></td></tr></tbody></table></div>
       </CardContent>
     </Card>
+
+    <Dialog v-model:open="showRunDetail">
+      <DialogContent class="w-[min(720px,calc(100vw-2rem))] sm:max-w-[720px]">
+        <DialogHeader><DialogTitle>模型评估详情</DialogTitle></DialogHeader>
+        <div v-if="selectedRun" class="space-y-5 text-sm">
+          <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <div><dt class="text-xs text-muted-foreground">模型</dt><dd class="mt-1 font-mono text-xs">{{ selectedRun.model_name }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">状态</dt><dd class="mt-1"><StatusBadge :status="selectedRun.status === 'completed' ? 'enabled' : selectedRun.status === 'failed' ? 'error' : selectedRun.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(selectedRun.status)" /></dd></div>
+            <div><dt class="text-xs text-muted-foreground">数据集</dt><dd class="mt-1">{{ selectedRun.datasets.join('、') }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">每个数据集题数</dt><dd class="mt-1">{{ selectedRun.max_samples }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">开始时间</dt><dd class="mt-1">{{ selectedRun.started_at ? formatLocalDatetime(selectedRun.started_at) : '—' }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">结束时间</dt><dd class="mt-1">{{ selectedRun.finished_at ? formatLocalDatetime(selectedRun.finished_at) : '—' }}</dd></div>
+          </dl>
+          <div>
+            <div class="mb-2 font-medium">评估结果</div>
+            <div v-if="selectedRun.result.rows?.length" class="overflow-x-auto rounded-md border border-border"><table class="w-full text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">数据集</th><th class="px-3 py-2">指标</th><th class="px-3 py-2">分数</th></tr></thead><tbody><tr v-for="row in selectedRun.result.rows" :key="`${row.dataset}-${row.metric}`" class="border-b border-border/70 last:border-0"><td class="px-3 py-2">{{ row.dataset }}</td><td class="px-3 py-2">{{ row.metric || '—' }}</td><td class="px-3 py-2 font-medium">{{ scoreForRow(row) }}</td></tr></tbody></table></div>
+            <p v-else-if="selectedRun.error" class="text-destructive">{{ selectedRun.error }}</p>
+            <p v-else class="text-muted-foreground">{{ selectedRun.status === 'completed' ? '未找到汇总结果。' : selectedRun.progress_message }}</p>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
