@@ -135,23 +135,30 @@ function openRunDetail(run: ModelEvaluationRun) {
           </label>
           <Button variant="outline" @click="loadModels" :disabled="loadingModels">{{ loadingModels ? '获取中…' : '获取模型列表' }}</Button>
         </div>
-        <div class="space-y-2">
-          <div class="flex flex-wrap items-end justify-between gap-3">
-            <div class="text-sm">简单数据集</div>
-            <label class="space-y-1 text-sm">
+        <div class="space-y-3">
+          <div class="text-sm font-medium">评估设置</div>
+          <div class="flex flex-wrap gap-x-6 gap-y-4 rounded-md border border-border bg-muted/20 p-4">
+            <label class="space-y-2 text-sm">
               <span>每个数据集最多题数</span>
-              <Input v-model.number="form.max_samples" type="number" min="1" max="1000" class="h-8 w-32" />
+              <Input v-model.number="form.max_samples" type="number" min="1" max="1000" class="w-36" />
+            </label>
+            <label class="space-y-2 text-sm">
+              <span>抽样方式</span>
+              <select v-model="form.sampling_mode" class="h-9 min-w-32 rounded-md border border-input bg-background px-3 text-sm"><option value="head">固定前 N 条</option><option value="random">随机抽样</option></select>
+            </label>
+            <label v-if="form.sampling_mode === 'random'" class="space-y-2 text-sm">
+              <span>随机种子</span>
+              <Input v-model.number="form.sample_seed" type="number" min="0" max="2147483647" class="w-40" />
             </label>
           </div>
+        </div>
+        <div class="space-y-3">
+          <div class="text-sm font-medium">简单数据集</div>
           <div class="grid gap-2 md:grid-cols-2">
             <label v-for="dataset in datasets" :key="dataset.key" class="flex cursor-pointer gap-3 rounded-md border border-border p-3 text-sm">
               <input type="checkbox" class="mt-1 h-4 w-4" :checked="form.datasets.includes(dataset.key)" @change="toggleDataset(dataset.key, ($event.target as HTMLInputElement).checked)" />
               <span><span class="font-medium">{{ dataset.label }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ dataset.description }}</span></span>
             </label>
-          </div>
-          <div class="flex flex-wrap items-end gap-3">
-            <label class="space-y-1 text-sm"><span>抽样方式</span><select v-model="form.sampling_mode" class="h-8 rounded-md border border-input bg-background px-2 text-sm"><option value="head">固定前 N 条</option><option value="random">随机抽样</option></select></label>
-            <label v-if="form.sampling_mode === 'random'" class="space-y-1 text-sm"><span>随机种子</span><Input v-model.number="form.sample_seed" type="number" min="0" max="2147483647" class="h-8 w-36" /></label>
           </div>
           <p class="text-xs text-muted-foreground">所有勾选的数据集统一最多运行此数量的题目；随机抽样使用固定种子，便于后续复跑与模型横向比较。</p>
         </div>
