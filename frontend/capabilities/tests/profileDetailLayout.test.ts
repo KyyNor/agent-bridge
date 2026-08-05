@@ -19,3 +19,15 @@ test('profiles routes provide a dedicated detail component', () => {
   assert.match(detailSource, />取消</)
   assert.match(detailSource, /确认/)
 })
+
+test('Profile resources use searchable multi-selects and include business ledgers', () => {
+  const multiSelect = readFileSync(resolve(root, 'src/components/SearchableMultiSelect.vue'), 'utf8')
+
+  assert.match(detailSource, /api\.listBusinessLedgers\(\)/)
+  assert.match(detailSource, /allBusinessLedgers/)
+  assert.match(detailSource, /允许访问的业务台账/)
+  assert.equal((detailSource.match(/<SearchableMultiSelect\s/g) || []).length, 4)
+  assert.match(multiSelect, /搜索选项/)
+  assert.match(multiSelect, /role="listbox"/)
+  assert.match(multiSelect, /emit\('update:modelValue'/)
+})

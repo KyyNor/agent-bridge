@@ -14,11 +14,13 @@ import type {
   CatalogSource,
   KnowledgeBaseSummary,
   CodeRepository,
+  BusinessLedger,
 } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import StatusBadge from '../../components/StatusBadge.vue'
+import SearchableMultiSelect, { type SearchableMultiSelectOption } from '../../components/SearchableMultiSelect.vue'
 import { profileConfigDraftKey, type ProfileConfigDraft } from './profileConfigSnapshot'
 
 const props = defineProps<{
@@ -43,6 +45,7 @@ const pendingResources = ref<ProfileResourceRule[]>([])
 const allServices = ref<CatalogSource[]>([])
 const allKbs = ref<KnowledgeBaseSummary[]>([])
 const allRepos = ref<CodeRepository[]>([])
+const allBusinessLedgers = ref<BusinessLedger[]>([])
 const allMemoryBlocks = ref<MemoryBlock[]>([])
 const profileMemory = ref<ProfileMemoryBinding | null>(null)
 const pendingMemoryBlock = ref('')
@@ -73,6 +76,30 @@ const pinToolTypes = ['overview', 'search', 'detail']
 const allowedServices = computed(() =>
   allServices.value.filter(svc => isServiceAllowed(svc.source_key))
 )
+
+const serviceOptions = computed<SearchableMultiSelectOption[]>(() => allServices.value.map(svc => ({
+  value: svc.source_key,
+  label: svc.name || svc.source_key,
+  description: `${svc.source_key} · ${svc.source_type === 'openapi_service' ? 'OpenAPI' : 'MCP'}`,
+})))
+const knowledgeOptions = computed<SearchableMultiSelectOption[]>(() => allKbs.value.map(kb => ({
+  value: kb.slug,
+  label: kb.name,
+  description: `${kb.slug} · ${kb.document_count} 文档`,
+})))
+const repositoryOptions = computed<SearchableMultiSelectOption[]>(() => allRepos.value.map(repo => ({
+  value: repo.repo_key,
+  label: repo.name,
+  description: repo.repo_key,
+})))
+const businessLedgerOptions = computed<SearchableMultiSelectOption[]>(() => allBusinessLedgers.value.map(ledger => ({
+  value: ledger.ledger_key,
+  label: ledger.name,
+  description: ledger.description || ledger.ledger_key,
+})))
+const allowedServiceKeys = computed(() => allServices.value
+  .filter(svc => isServiceAllowed(svc.source_key))
+  .map(svc => svc.source_key))
 
 const activeMemoryBlocks = computed(() =>
   allMemoryBlocks.value.filter(block => block.status === 'active')
@@ -171,6 +198,7 @@ function resetConfigState() {
   allServices.value = []
   allKbs.value = []
   allRepos.value = []
+  allBusinessLedgers.value = []
   allMemoryBlocks.value = []
   profileMemory.value = null
   pendingMemoryBlock.value = ''
@@ -201,16 +229,18 @@ async function loadProfile(profileKey: string) {
   }
 
   try {
-    const [catalog, kbs, repos, full] = await Promise.all([
+    const [catalog, kbs, repos, businessLedgers, full] = await Promise.all([
       api.catalog(),
       api.listWikiKbs(),
       api.listCodeRepos(),
+      api.listBusinessLedgers(),
       api.getProfile(profileKey),
     ])
     if (configProfile.value?.profile_key !== profileKey) return
     allServices.value = catalog.sources
     allKbs.value = kbs
     allRepos.value = repos
+    allBusinessLedgers.value = businessLedgers
     configProfile.value = full
     rulesEditToken.value = full.rules_edit_token
     resourcesEditToken.value = full.resources_edit_token
@@ -344,14 +374,16 @@ function isServiceAllowed(key: string) {
   return pendingRules.value.some(r => r.source_key === key && r.effect === 'allow')
 }
 
-function toggleServiceAllow(source: CatalogSource) {
-  const key = source.source_key
-  if (isServiceAllowed(key)) {
-    pendingRules.value = pendingRules.value.filter(r => !(r.source_key === key && r.effect === 'allow'))
-    pendingPins.value = pendingPins.value.filter(pin => pin.service_key !== key)
-  } else {
-    pendingRules.value = [...pendingRules.value, { source_type: source.source_type, source_key: key, effect: 'allow' as const }]
-  }
+function updateAllowedServices(keys: string[]) {
+  const selectedKeys = new Set(keys)
+  const knownKeys = new Set(allServices.value.map(item => item.source_key))
+  pendingRules.value = [
+    ...pendingRules.value.filter(rule => rule.effect !== 'allow' || !knownKeys.has(rule.source_key)),
+    ...allServices.value
+      .filter(source => selectedKeys.has(source.source_key))
+      .map(source => ({ source_type: source.source_type, source_key: source.source_key, effect: 'allow' as const })),
+  ]
+  pendingPins.value = pendingPins.value.filter(pin => !knownKeys.has(pin.service_key) || selectedKeys.has(pin.service_key))
 }
 
 function typeLabel(type: string) {
@@ -381,16 +413,20 @@ function toggleManualPin(serviceKey: string, toolType: string) {
   }
 }
 
-function isResourceAllowed(type: string, key: string) {
-  return pendingResources.value.some(r => r.resource_type === type && r.resource_key === key)
+function allowedResourceKeys(type: string, knownKeys: string[]) {
+  const known = new Set(knownKeys)
+  return pendingResources.value
+    .filter(rule => rule.resource_type === type && known.has(rule.resource_key))
+    .map(rule => rule.resource_key)
 }
 
-function toggleResource(type: string, key: string) {
-  if (isResourceAllowed(type, key)) {
-    pendingResources.value = pendingResources.value.filter(r => !(r.resource_type === type && r.resource_key === key))
-  } else {
-    pendingResources.value = [...pendingResources.value, { resource_type: type, resource_key: key }]
-  }
+function updateAllowedResources(type: string, keys: string[], knownKeys: string[]) {
+  const known = new Set(knownKeys)
+  const selected = new Set(keys)
+  pendingResources.value = [
+    ...pendingResources.value.filter(rule => rule.resource_type !== type || !known.has(rule.resource_key)),
+    ...knownKeys.filter(key => selected.has(key)).map(resource_key => ({ resource_type: type, resource_key })),
+  ]
 }
 
 async function saveConfig() {
@@ -584,26 +620,14 @@ async function refreshProfileDoc(raiseError = false) {
           <div v-if="allServices.length === 0" class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
             暂无已注册的服务，请先在能力接入中添加服务
           </div>
-          <div v-else class="max-h-[240px] space-y-1 overflow-y-auto">
-            <label
-              v-for="svc in allServices" :key="`${svc.source_type}:${svc.source_key}`"
-              class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
-            >
-              <input
-                type="checkbox"
-                :checked="isServiceAllowed(svc.source_key)"
-                @change="toggleServiceAllow(svc)"
-                class="h-4 w-4 rounded border-input text-primary focus:ring-primary"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="break-all text-sm font-medium">{{ svc.name || svc.source_key }}</div>
-                <div class="break-all text-xs text-muted-foreground">{{ svc.source_key }} · {{ svc.source_type === 'openapi_service' ? 'OpenAPI' : 'MCP' }}</div>
-              </div>
-              <StatusBadge v-if="svc.status === 'enabled'" status="enabled" />
-              <StatusBadge v-else-if="svc.status === 'error'" status="error" label="异常" />
-              <StatusBadge v-else status="disabled" />
-            </label>
-          </div>
+          <SearchableMultiSelect
+            v-else
+            :model-value="allowedServiceKeys"
+            :options="serviceOptions"
+            placeholder="选择允许访问的服务"
+            search-placeholder="搜索服务"
+            @update:model-value="updateAllowedServices"
+          />
         </div>
 
         <!-- KB Resources -->
@@ -612,23 +636,14 @@ async function refreshProfileDoc(raiseError = false) {
           <div v-if="allKbs.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
             暂无文档知识，请先在文档知识中添加
           </div>
-          <div v-else class="max-h-[200px] space-y-1 overflow-y-auto">
-            <label
-              v-for="kb in allKbs" :key="kb.slug"
-              class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
-            >
-              <input
-                type="checkbox"
-                :checked="isResourceAllowed('wiki_kb', kb.slug)"
-                @change="toggleResource('wiki_kb', kb.slug)"
-                class="h-4 w-4 rounded border-input text-primary focus:ring-primary"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="break-all text-sm font-medium">{{ kb.name }}</div>
-                <div class="break-all text-xs text-muted-foreground">{{ kb.slug }} · {{ kb.document_count }} 文档</div>
-              </div>
-            </label>
-          </div>
+          <SearchableMultiSelect
+            v-else
+            :model-value="allowedResourceKeys('wiki_kb', allKbs.map(item => item.slug))"
+            :options="knowledgeOptions"
+            placeholder="选择允许访问的文档知识"
+            search-placeholder="搜索文档知识"
+            @update:model-value="updateAllowedResources('wiki_kb', $event, allKbs.map(item => item.slug))"
+          />
         </div>
 
         <!-- Code Repo Resources -->
@@ -637,23 +652,30 @@ async function refreshProfileDoc(raiseError = false) {
           <div v-if="allRepos.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
             暂无代码仓库，请先在代码知识中添加
           </div>
-          <div v-else class="max-h-[200px] space-y-1 overflow-y-auto">
-            <label
-              v-for="repo in allRepos" :key="repo.repo_key"
-              class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-secondary"
-            >
-              <input
-                type="checkbox"
-                :checked="isResourceAllowed('code_repo', repo.repo_key)"
-                @change="toggleResource('code_repo', repo.repo_key)"
-                class="h-4 w-4 rounded border-input text-primary focus:ring-primary"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="break-all text-sm font-medium">{{ repo.name }}</div>
-                <div class="break-all text-xs text-muted-foreground">{{ repo.repo_key }}</div>
-              </div>
-            </label>
+          <SearchableMultiSelect
+            v-else
+            :model-value="allowedResourceKeys('code_repo', allRepos.map(item => item.repo_key))"
+            :options="repositoryOptions"
+            placeholder="选择允许访问的代码仓库"
+            search-placeholder="搜索代码仓库"
+            @update:model-value="updateAllowedResources('code_repo', $event, allRepos.map(item => item.repo_key))"
+          />
+        </div>
+
+        <!-- Business Ledger Resources -->
+        <div>
+          <div class="mb-2 text-sm font-medium">允许访问的业务台账</div>
+          <div v-if="allBusinessLedgers.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
+            暂无业务台账，请先在业务台账中添加
           </div>
+          <SearchableMultiSelect
+            v-else
+            :model-value="allowedResourceKeys('business_ledger', allBusinessLedgers.map(item => item.ledger_key))"
+            :options="businessLedgerOptions"
+            placeholder="选择允许访问的业务台账"
+            search-placeholder="搜索业务台账"
+            @update:model-value="updateAllowedResources('business_ledger', $event, allBusinessLedgers.map(item => item.ledger_key))"
+          />
         </div>
 
         <!-- Advanced Options -->
