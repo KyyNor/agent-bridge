@@ -99,6 +99,7 @@ class ModelEvaluationService:
         *,
         model_name: str,
         datasets: list[str],
+        max_samples: int = 64,
         base_url: str = "",
         api_key: str = "",
     ) -> dict[str, Any]:
@@ -111,6 +112,8 @@ class ModelEvaluationService:
         unsupported = set(selected_datasets) - set(DATASETS)
         if not selected_datasets or unsupported:
             raise ValidationError("请至少选择一个受支持的简单数据集")
+        if not 1 <= max_samples <= 1000:
+            raise ValidationError("每个数据集最多题数必须在 1 到 1000 之间")
         endpoint, key = self._resolve_connection(base_url=base_url, api_key=api_key)
         run_id = f"eval_{uuid.uuid4().hex}"
         work_dir = self._run_root / run_id
@@ -120,17 +123,24 @@ class ModelEvaluationService:
             model_name=cleaned_model,
             base_url=endpoint,
             datasets=selected_datasets,
+            max_samples=max_samples,
             work_dir=str(work_dir),
             created_by=actor,
         )
         thread = threading.Thread(
             target=self._run_opencompass,
-            args=(run_id, work_dir, cleaned_model, endpoint, key, selected_datasets),
+            args=(run_id, work_dir, cleaned_model, endpoint, key, selected_datasets, max_samples),
             name=f"model-evaluation-{run_id[-8:]}",
             daemon=True,
         )
         thread.start()
-        logger.info("模型评估任务已创建 run_id=%s model=%s datasets=%s", run_id, cleaned_model, selected_datasets)
+        logger.info(
+            "模型评估任务已创建 run_id=%s model=%s datasets=%s max_samples=%d",
+            run_id,
+            cleaned_model,
+            selected_datasets,
+            max_samples,
+        )
         return self._public_run(run)
 
     def recover_interrupted_runs(self) -> int:
@@ -207,6 +217,7 @@ class ModelEvaluationService:
         base_url: str,
         api_key: str,
         datasets: list[str],
+        max_samples: int,
     ) -> None:
         self._store.update_model_evaluation_run(
             run_id, status="running", progress_message="正在准备 OpenCompass 配置", started=True
@@ -214,7 +225,7 @@ class ModelEvaluationService:
         try:
             executable = self._require_runner()
             config_path = work_dir / "evaluation.py"
-            config_path.write_text(self._render_config(model_name, datasets), encoding="utf-8")
+            config_path.write_text(self._render_config(model_name, datasets, max_samples), encoding="utf-8")
             log_path = work_dir / "opencompass.log"
             environment = os.environ.copy()
             environment["OPENAI_API_KEY"] = api_key
@@ -269,7 +280,7 @@ class ModelEvaluationService:
                 self._stopped_run_ids.discard(run_id)
 
     @staticmethod
-    def _render_config(model_name: str, datasets: list[str]) -> str:
+    def _render_config(model_name: str, datasets: list[str], max_samples: int) -> str:
         imports = []
         dataset_names = []
         if "demo_gsm8k_chat_gen" in datasets:
@@ -287,6 +298,7 @@ class ModelEvaluationService:
             *[f"    {line}" for line in imports],
             "",
             f"datasets = {' + '.join(dataset_names)}",
+            f"for dataset in datasets:\n    dataset['reader_cfg']['test_range'] = '[0:{max_samples}]'",
             "api_meta_template = dict(round=[dict(role='HUMAN', api_role='HUMAN'), dict(role='BOT', api_role='BOT', generate=True)])",
             "models = [dict(",
             f"    abbr={model_literal}, type=OpenAI, path={model_literal}, key='ENV',",

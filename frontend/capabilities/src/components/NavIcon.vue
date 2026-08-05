@@ -17,6 +17,7 @@ import {
   Bug,
   Brain,
   TableProperties,
+  ChartNoAxesCombined,
 } from '@lucide/vue'
 
 const props = defineProps<{ name: string }>()
@@ -39,6 +40,7 @@ const icon = computed(() => {
     'agent-runs': Activity,
     memory: Brain,
     'business-ledgers': TableProperties,
+    'model-evaluations': ChartNoAxesCombined,
   }
   return map[props.name] ?? null
 })

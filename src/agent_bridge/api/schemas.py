@@ -380,6 +380,7 @@ class RetrievalProbeLlmConfigRequest(BaseModel):
 class ModelEvaluationStartRequest(BaseModel):
     model_name: str = Field(min_length=1, max_length=512)
     datasets: list[str] = Field(min_length=1, max_length=4)
+    max_samples: int = Field(default=64, ge=1, le=1000)
     base_url: str = Field(default="", max_length=2048)
     api_key: str = Field(default="", max_length=4096)
 

@@ -434,7 +434,7 @@ export const api = {
   listEvaluationModels: (connection: { base_url?: string; api_key?: string }) =>
     post<ModelEvaluationModel[]>('/model-evaluations/models', connection),
   listModelEvaluationRuns: () => get<ModelEvaluationRun[]>('/model-evaluations'),
-  startModelEvaluationRun: (payload: { model_name: string; datasets: string[]; base_url?: string; api_key?: string }) =>
+  startModelEvaluationRun: (payload: { model_name: string; datasets: string[]; max_samples: number; base_url?: string; api_key?: string }) =>
     post<ModelEvaluationRun>('/model-evaluations', payload),
 
   // Workflows

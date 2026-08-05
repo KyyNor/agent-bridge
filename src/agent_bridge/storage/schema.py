@@ -519,6 +519,7 @@ CREATE TABLE IF NOT EXISTS model_evaluation_runs (
   model_name TEXT NOT NULL,
   base_url TEXT NOT NULL,
   datasets_json TEXT NOT NULL,
+  max_samples INTEGER NOT NULL DEFAULT 64,
   status TEXT NOT NULL,
   progress_message TEXT NOT NULL DEFAULT '',
   result_json TEXT NOT NULL DEFAULT '{}',

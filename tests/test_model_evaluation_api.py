@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from agent_bridge.api.app import create_app
+from agent_bridge.system_config.model_evaluation.service import ModelEvaluationService
 
 
 def test_model_evaluation_runtime_reports_independent_runner_requirement(wm_paths, monkeypatch) -> None:
@@ -30,6 +31,23 @@ def test_model_evaluation_runtime_reports_independent_runner_requirement(wm_path
         )
         assert started.status_code == 400
         assert "评估运行时未配置" in started.json()["detail"]
+
+        invalid_samples = client.post(
+            "/model-evaluations",
+            headers=headers,
+            json={"model_name": "example", "datasets": ["demo_gsm8k_chat_gen"], "max_samples": 0},
+        )
+        assert invalid_samples.status_code == 422
+
+
+def test_model_evaluation_config_limits_each_dataset_to_requested_samples() -> None:
+    config = ModelEvaluationService._render_config(
+        "example-model",
+        ["demo_gsm8k_chat_gen", "demo_math_chat_gen"],
+        20,
+    )
+    assert "datasets = gsm8k_datasets + math_datasets" in config
+    assert "dataset['reader_cfg']['test_range'] = '[0:20]'" in config
 
 
 @respx.mock

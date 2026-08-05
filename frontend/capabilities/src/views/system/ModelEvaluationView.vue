@@ -12,7 +12,7 @@ const datasets = ref<ModelEvaluationDataset[]>([])
 const runs = ref<ModelEvaluationRun[]>([])
 const models = ref<ModelEvaluationModel[]>([])
 const runtime = ref<ModelEvaluationRuntimeStatus | null>(null)
-const form = ref({ base_url: '', api_key: '', model_name: '', datasets: ['demo_gsm8k_chat_gen'] as string[] })
+const form = ref({ base_url: '', api_key: '', model_name: '', datasets: ['demo_gsm8k_chat_gen'] as string[], max_samples: 64 })
 const loading = ref(true)
 const loadingModels = ref(false)
 const starting = ref(false)
@@ -117,16 +117,23 @@ function scoreSummary(run: ModelEvaluationRun) {
           <Button variant="outline" @click="loadModels" :disabled="loadingModels">{{ loadingModels ? '获取中…' : '获取模型列表' }}</Button>
         </div>
         <div class="space-y-2">
-          <div class="text-sm">简单数据集</div>
+          <div class="flex flex-wrap items-end justify-between gap-3">
+            <div class="text-sm">简单数据集</div>
+            <label class="space-y-1 text-sm">
+              <span>每个数据集最多题数</span>
+              <Input v-model.number="form.max_samples" type="number" min="1" max="1000" class="h-8 w-32" />
+            </label>
+          </div>
           <div class="grid gap-2 md:grid-cols-2">
             <label v-for="dataset in datasets" :key="dataset.key" class="flex cursor-pointer gap-3 rounded-md border border-border p-3 text-sm">
               <input type="checkbox" class="mt-1 h-4 w-4" :checked="form.datasets.includes(dataset.key)" @change="toggleDataset(dataset.key, ($event.target as HTMLInputElement).checked)" />
               <span><span class="font-medium">{{ dataset.label }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ dataset.description }}</span></span>
             </label>
           </div>
+          <p class="text-xs text-muted-foreground">所有勾选的数据集统一从前往后最多运行此数量的题目；默认 64 题。</p>
         </div>
         <div class="flex items-center gap-3">
-          <Button @click="startEvaluation" :disabled="starting || !runtime?.configured || !form.model_name || !form.datasets.length">{{ starting ? '正在启动…' : '开始评估' }}</Button>
+          <Button @click="startEvaluation" :disabled="starting || !runtime?.configured || !form.model_name || !form.datasets.length || form.max_samples < 1 || form.max_samples > 1000">{{ starting ? '正在启动…' : '开始评估' }}</Button>
           <span v-if="error" class="text-sm text-destructive">{{ error }}</span>
         </div>
       </CardContent>
@@ -136,7 +143,7 @@ function scoreSummary(run: ModelEvaluationRun) {
       <CardContent class="p-5">
         <div class="mb-4 flex items-center justify-between"><div><div class="text-base font-medium">评估记录</div><p class="mt-1 text-sm text-muted-foreground">完成后自动读取 OpenCompass 生成的汇总结果。</p></div><Button size="sm" variant="outline" @click="loadRuns">刷新</Button></div>
         <div v-if="!runs.length" class="py-10 text-center text-sm text-muted-foreground">尚未发起模型评估。</div>
-        <div v-else class="overflow-x-auto"><table class="w-full min-w-[760px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">模型</th><th class="px-3 py-2">数据集</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">结果</th><th class="px-3 py-2">创建时间</th></tr></thead><tbody><tr v-for="run in runs" :key="run.run_id" class="border-b border-border/70"><td class="px-3 py-3 font-mono text-xs">{{ run.model_name }}</td><td class="px-3 py-3 text-xs">{{ run.datasets.join('、') }}</td><td class="px-3 py-3"><StatusBadge :status="run.status === 'completed' ? 'enabled' : run.status === 'failed' ? 'error' : run.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(run.status)" /><div v-if="run.error" class="mt-1 max-w-xs text-xs text-destructive">{{ run.error }}</div><div v-else-if="run.status !== 'completed'" class="mt-1 text-xs text-muted-foreground">{{ run.progress_message }}</div></td><td class="max-w-sm px-3 py-3 text-xs text-muted-foreground">{{ scoreSummary(run) }}</td><td class="px-3 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</td></tr></tbody></table></div>
+        <div v-else class="overflow-x-auto"><table class="w-full min-w-[820px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">模型</th><th class="px-3 py-2">数据集</th><th class="px-3 py-2">每集题数</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">结果</th><th class="px-3 py-2">创建时间</th></tr></thead><tbody><tr v-for="run in runs" :key="run.run_id" class="border-b border-border/70"><td class="px-3 py-3 font-mono text-xs">{{ run.model_name }}</td><td class="px-3 py-3 text-xs">{{ run.datasets.join('、') }}</td><td class="px-3 py-3 text-xs">{{ run.max_samples }}</td><td class="px-3 py-3"><StatusBadge :status="run.status === 'completed' ? 'enabled' : run.status === 'failed' ? 'error' : run.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(run.status)" /><div v-if="run.error" class="mt-1 max-w-xs text-xs text-destructive">{{ run.error }}</div><div v-else-if="run.status !== 'completed'" class="mt-1 text-xs text-muted-foreground">{{ run.progress_message }}</div></td><td class="max-w-sm px-3 py-3 text-xs text-muted-foreground">{{ scoreSummary(run) }}</td><td class="px-3 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</td></tr></tbody></table></div>
       </CardContent>
     </Card>
   </div>

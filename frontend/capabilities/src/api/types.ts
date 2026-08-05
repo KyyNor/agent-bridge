@@ -1313,6 +1313,7 @@ export interface ModelEvaluationRun {
   model_name: string
   base_url: string
   datasets: string[]
+  max_samples: number
   status: 'queued' | 'running' | 'completed' | 'failed' | 'abandoned'
   progress_message: string
   result: { rows?: Record<string, string>[]; summary_found?: boolean }
