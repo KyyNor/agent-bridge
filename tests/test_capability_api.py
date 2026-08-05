@@ -736,7 +736,7 @@ def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
 def test_tool_call_log_api_filters_by_failure_classification(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    store = SQLiteStore(wm_paths.db_path)
+    store = SQLiteStore(wm_paths.db_path, wm_paths.log_db_path)
     store.init_schema()
     store.create_tool_call_log(
         log_id="call_failed_upstream",
@@ -782,7 +782,7 @@ def test_tool_call_log_api_filters_by_failure_classification(wm_paths) -> None:
 def test_tool_call_log_api_paginates_search_and_status_counts(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    store = SQLiteStore(wm_paths.db_path)
+    store = SQLiteStore(wm_paths.db_path, wm_paths.log_db_path)
     store.init_schema()
     for index, status in enumerate(("success", "error", "blocked")):
         store.create_tool_call_log(
@@ -823,7 +823,7 @@ def test_tool_call_log_api_paginates_search_and_status_counts(wm_paths) -> None:
 def test_tool_call_log_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    store = SQLiteStore(wm_paths.db_path)
+    store = SQLiteStore(wm_paths.db_path, wm_paths.log_db_path)
     store.init_schema()
     for index in range(205):
         store.create_tool_call_log(
@@ -862,7 +862,7 @@ def test_tool_call_log_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:
 def test_tool_call_stats_api_groups_by_dimensions(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    store = SQLiteStore(wm_paths.db_path)
+    store = SQLiteStore(wm_paths.db_path, wm_paths.log_db_path)
     store.init_schema()
     store.create_tool_call_log(
         log_id="call_stats_api",
@@ -898,7 +898,7 @@ def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
         json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    store = SQLiteStore(wm_paths.db_path)
+    store = SQLiteStore(wm_paths.db_path, wm_paths.log_db_path)
     store.upsert_mcp_tool(
         service_key="mysql",
         tool_name="query_sql",
