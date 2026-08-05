@@ -30,4 +30,5 @@ test('Profile resources use searchable multi-selects and include business ledger
   assert.match(multiSelect, /搜索选项/)
   assert.match(multiSelect, /role="listbox"/)
   assert.match(multiSelect, /emit\('update:modelValue'/)
+  assert.match(multiSelect, /absolute z-30 mt-1 w-full overflow-hidden rounded-md border border-border bg-popover/)
 })

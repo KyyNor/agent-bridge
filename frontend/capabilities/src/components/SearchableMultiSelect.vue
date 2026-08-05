@@ -79,7 +79,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOnOutside
       <span class="min-w-0 truncate text-left" :class="{ 'text-muted-foreground': !modelValue?.length }">{{ triggerLabel }}</span>
       <ChevronsUpDown :size="15" class="shrink-0 text-muted-foreground" />
     </Button>
-    <div v-if="open" class="cn-menu-translucent absolute z-30 mt-1 w-full overflow-hidden rounded-md border border-border shadow-md">
+    <div v-if="open" class="absolute z-30 mt-1 w-full overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
       <div class="border-b border-border p-2">
         <Input v-model="keyword" :placeholder="searchPlaceholder" autofocus @keydown.esc="toggleOpen" />
       </div>
