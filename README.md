@@ -89,6 +89,8 @@ uv run agent-bridge profile use safe-readonly \
 它不会把完整 profile 正文或绝对文件路径复制进 CLAUDE.md。动态 profile 与
 memory 上下文由服务端维护，并通过 `SessionStart` Hook 注入。
 
+`profile use` 安装的全量检索探测 Hook 会在 `UserPromptSubmit` 同步执行：它在本轮等待至多 20 秒，将命中的资源提示作为当前轮 `additionalContext` 返回；没有命中或失败时不影响正常对话。
+
 常用 Profile 命令：
 
 ```bash

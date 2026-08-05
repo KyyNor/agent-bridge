@@ -96,7 +96,9 @@ Memory 与文档/代码知识平级，但由 Claude Code hooks 实时写入。cl
 服务端使用系统配置的 OpenAI Chat 小模型提取 0–8 个短句，并按 Profile/session 结合最近 3 轮
 历史去重（最多缓存 12 轮、30 天滑动 TTL），仅检索 current 工作流产出物；
 抽取失败不得回退 Jieba 短词检索。服务端负责生成标准 `additionalContext` 输出并写入通用
-Hook 审计（审计保留原始 prompt）。`profile use` 会自动、幂等安装该 Hook，并保留用户已有 Hook。
+Hook 审计（审计保留原始 prompt）。`profile use` 会自动、幂等安装该 Hook，并保留用户已有 Hook；
+全量探测的 `UserPromptSubmit` Hook 必须保持同步（`async: false`），以便将
+`additionalContext` 注入当前轮，不能改为后台异步执行。
 `CLAUDE.md` 托管块只补充
 `<system-reminder>` 是系统补充信息的语义说明。
 

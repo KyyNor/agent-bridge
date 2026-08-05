@@ -222,7 +222,9 @@ def _install_profile_hooks(
                         server_url=server_url,
                         timeout=RETRIEVAL_PROBE_TIMEOUT_SECONDS,
                     ),
-                    "async": True,
+                    # 全量探测结果需要在本次 UserPromptSubmit 中作为上下文返回；
+                    # 后台 Hook 无法把 additionalContext 注入当前轮对话。
+                    "async": False,
                     "timeout": RETRIEVAL_PROBE_COMMAND_TIMEOUT_SECONDS,
                 }
             ]
