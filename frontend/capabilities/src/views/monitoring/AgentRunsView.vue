@@ -25,6 +25,8 @@ import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
 import type { WorkflowRunEvent } from '../../api/types'
 import { buildAgentRunHash, navigateTo, parseSubRoute, routeReturnTo } from '../../lib/navigation'
 import { useSubagentDetails } from '../../composables/useSubagentDetails'
+import { useAgentRunEventStream } from '../../composables/useAgentRunEventStream'
+import { lastAgentRunEventId, mergeAgentRunEvent, normalizeAgentRunEvents } from '../../lib/agentRunEvents'
 
 const props = defineProps<{ routeKey?: string }>()
 
@@ -46,7 +48,6 @@ const detailError = ref('')
 const detailEvents = ref<WorkflowRunEvent[]>([])
 const payloads = ref<Record<string, string>>({})
 const payloadErrors = ref<Record<string, string>>({})
-let detailEventsPoll: ReturnType<typeof setInterval> | null = null
 let listRequestToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
@@ -54,6 +55,7 @@ let searchDebounce: ReturnType<typeof setTimeout> | null = null
 const subagentDetailState = useSubagentDetails(
   (runKey, taskId) => api.getAgentRunSubagentDetail(runKey, taskId),
 )
+const detailEventStream = useAgentRunEventStream()
 
 async function ensureSubagentDetail(taskId: string) {
   await subagentDetailState.ensure(activeRunKey.value, taskId)
@@ -84,7 +86,7 @@ onMounted(() => {
   if (activeRunKey.value) loadDetail(activeRunKey.value)
 })
 
-onUnmounted(() => stopDetailEventsPolling())
+onUnmounted(() => stopDetailEventStream())
 
 function baseRunParams(): Record<string, string | number | boolean> {
   const params: Record<string, string | number | boolean> = {
@@ -167,7 +169,7 @@ function backToList() {
   detailEvents.value = []
   payloads.value = {}
   payloadErrors.value = {}
-  stopDetailEventsPolling()
+  stopDetailEventStream()
   void navigateTo(returnToRoute.value || 'agent-runs', { replace: true })
 }
 
@@ -176,12 +178,12 @@ async function loadDetail(runKey: string) {
   detailError.value = ''
   payloads.value = {}
   payloadErrors.value = {}
-  stopDetailEventsPolling()
+  stopDetailEventStream()
   try {
     detailRun.value = await api.getAgentRun(runKey)
     await loadDetailEvents(runKey)
     if (detailRun.value?.status === 'running') {
-      detailEventsPoll = setInterval(() => loadDetailEvents(runKey, { quiet: true }), 1500)
+      startDetailEventStream(runKey)
     }
   } catch (e: unknown) {
     detailRun.value = null
@@ -204,28 +206,37 @@ async function loadPayload(ref: string) {
   }
 }
 
-async function loadDetailEvents(runKey: string, options: { quiet?: boolean } = {}) {
+async function loadDetailEvents(runKey: string) {
   try {
-    detailEvents.value = await api.getAgentRunEvents(runKey)
-    if (options.quiet) await subagentDetailState.refreshLoaded(runKey)
-    if (detailRun.value?.run_key === runKey && detailRun.value.status === 'running') {
-      const refreshed = await api.getAgentRun(runKey)
-      detailRun.value = refreshed
-      if (refreshed.status !== 'running') stopDetailEventsPolling()
-    }
+    detailEvents.value = normalizeAgentRunEvents(await api.getAgentRunEvents(runKey))
   } catch (e: unknown) {
-    if (!options.quiet) {
-      detailEvents.value = []
-      detailError.value = e instanceof Error ? e.message : '事件流加载失败'
-    }
+    detailEvents.value = []
+    detailError.value = e instanceof Error ? e.message : '事件流加载失败'
   }
 }
 
-function stopDetailEventsPolling() {
-  if (detailEventsPoll) {
-    clearInterval(detailEventsPoll)
-    detailEventsPoll = null
-  }
+function startDetailEventStream(runKey: string) {
+  detailEventStream.start(runKey, lastAgentRunEventId(detailEvents.value), {
+    onAgentEvent(event) {
+      if (detailRun.value?.run_key !== runKey) return
+      detailEvents.value = mergeAgentRunEvent(detailEvents.value, event)
+    },
+    async onTerminal() {
+      if (detailRun.value?.run_key !== runKey) return
+      detailRun.value = await api.getAgentRun(runKey)
+      await subagentDetailState.refreshLoaded(runKey)
+    },
+    async onResyncRequired() {
+      if (detailRun.value?.run_key !== runKey) return
+      await loadDetailEvents(runKey)
+      detailRun.value = await api.getAgentRun(runKey)
+      if (detailRun.value.status === 'running') startDetailEventStream(runKey)
+    },
+  })
+}
+
+function stopDetailEventStream() {
+  detailEventStream.stop()
 }
 
 // React to sub-route changes (browser back/forward, manual hash edit).
@@ -240,7 +251,7 @@ watch(activeRunKey, (key) => {
     detailRun.value = null
     detailEvents.value = []
     detailError.value = ''
-    stopDetailEventsPolling()
+    stopDetailEventStream()
   }
 })
 

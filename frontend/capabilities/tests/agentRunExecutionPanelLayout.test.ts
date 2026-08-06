@@ -43,6 +43,19 @@ test('workflow detail follows the selected Agent tab when loading prompt and res
   }
 })
 
+test('running agent timelines use the shared SSE stream instead of a 1.5 second event poll', () => {
+  const agentRuns = readSource('views/monitoring/AgentRunsView.vue')
+  const progress = readSource('composables/useWorkflowRunProgress.ts')
+
+  assert.match(agentRuns, /useAgentRunEventStream/)
+  assert.doesNotMatch(agentRuns, /detailEventsPoll/)
+  assert.match(progress, /useAgentRunEventStream/)
+  assert.match(progress, /stopProgressAgentEventStream/)
+  const pollTestRun = progress.match(/async function pollTestRun\(\)[\s\S]*?\n  }\n\n  function startTestPolling/)
+  assert.ok(pollTestRun)
+  assert.doesNotMatch(pollTestRun[0], /loadProgressAgentEvents/)
+})
+
 test('expanded task logs cache and display their main Agent detail', () => {
   const tasks = readSource('composables/useWorkflowTasks.ts')
   const workflow = readSource('views/workflow/WorkflowView.vue')

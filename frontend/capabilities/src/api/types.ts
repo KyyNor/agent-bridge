@@ -549,6 +549,8 @@ export interface WorkflowClearResult {
 }
 
 export interface WorkflowRunEvent {
+  /** Per-agent-run monotonic id used for SSE replay and UI deduplication. */
+  event_id?: number
   created_at?: string
   agent_name?: string
   source?: string
