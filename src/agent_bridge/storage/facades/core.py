@@ -23,6 +23,18 @@ class CoreFacadeMixin:
     def abandon_model_evaluation_runs(self) -> int:
         return self.model_evaluations.abandon_active_runs()
 
+    def create_model_evaluation_execution(self, **kwargs: Any) -> dict[str, Any]:
+        return self.model_evaluations.create_execution(**kwargs)
+
+    def get_model_evaluation_execution(self, execution_id: str) -> dict[str, Any] | None:
+        return self.model_evaluations.get_execution(execution_id)
+
+    def list_model_evaluation_executions(self, run_id: str) -> list[dict[str, Any]]:
+        return self.model_evaluations.list_executions(run_id)
+
+    def update_model_evaluation_execution(self, execution_id: str, **kwargs: Any) -> dict[str, Any] | None:
+        return self.model_evaluations.update_execution(execution_id, **kwargs)
+
     def get_retrieval_probe_llm_config(self) -> dict[str, Any]:
         return self.retrieval_probe_config.get_llm_config()
 

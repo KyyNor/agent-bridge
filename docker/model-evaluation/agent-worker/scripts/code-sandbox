@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""在无网络、受限 Docker 容器中执行一个 HumanEval 或 MBPP case。"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+def clean_code(text: str) -> str:
+    match = re.search(r"```(?:python)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    return (match.group(1) if match else text).strip()
+
+
+def program_for(case: dict[str, Any]) -> str:
+    completion = clean_code(str(case.get("completion", "")))
+    if case["dataset"] == "humaneval":
+        return "\n".join((str(case.get("prompt", "")), completion, str(case.get("test", "")), f"check({case.get('entry_point', '')})"))
+    tests = "\n".join(str(test) for test in case.get("test_list", []))
+    return "\n".join((completion, tests))
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: code-sandbox CASE.json RESULT.json")
+    case = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    source = Path("/tmp/case.py")
+    source.write_text(program_for(case), encoding="utf-8")
+    try:
+        process = subprocess.run([sys.executable, str(source)], capture_output=True, text=True, timeout=12, check=False)
+        passed = process.returncode == 0
+        result: dict[str, Any] = {"dataset": case["dataset"], "source_index": case["source_index"], "case_id": case["case_id"], "passed": passed, "stdout": process.stdout[-8000:], "stderr": process.stderr[-8000:]}
+    except subprocess.TimeoutExpired as exc:
+        result = {"dataset": case["dataset"], "source_index": case["source_index"], "case_id": case["case_id"], "passed": False, "stdout": (exc.stdout or "")[-8000:], "stderr": "执行超时"}
+    Path(sys.argv[2]).write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

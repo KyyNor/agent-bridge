@@ -216,7 +216,7 @@ const navGroups: NavGroup[] = [
     label: '系统管理',
     items: [
       { key: 'system-config', label: '系统管理', description: '配置调度计划、公共模型、仓库分类和知识后端' },
-      { key: 'model-evaluations', label: '模型评估', description: '选择 OpenAI 兼容模型并运行 OpenCompass 评测' },
+      { key: 'model-evaluations', label: '模型评估', description: '以 Docker 隔离执行通用、数学、指令、代码和 Agent 评测' },
       { key: 'skills', label: 'Skill 管理', description: '维护内置技能提示词' },
       { key: 'scripts', label: '脚本管理', description: '管理受控脚本并在线测试运行' },
     ],

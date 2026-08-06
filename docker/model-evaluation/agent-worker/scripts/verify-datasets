@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+test -f /opt/agent-bridge-data/swebench/swebench-manifest.json || {
+  echo "缺少 SWE-bench 元数据 manifest：swebench-manifest.json" >&2
+  exit 1
+}

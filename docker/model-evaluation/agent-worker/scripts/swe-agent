@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""通过 JSONL 工具桥运行最小化 SWE-bench 修复 Agent。"""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+import re
+import sys
+import time
+import urllib.request
+import uuid
+from pathlib import Path
+from typing import Any
+
+
+MAX_TURNS = 30
+
+
+def model_completion(messages: list[dict[str, str]], *, model: str, base_url: str, api_key: str) -> str:
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/chat/completions",
+        data=json.dumps({"model": model, "messages": messages, "temperature": 0}).encode(),
+        headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {api_key}"} if api_key else {})},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=240) as response:  # noqa: S310 - endpoint is admin configured
+        payload = json.loads(response.read().decode())
+    return str(payload["choices"][0]["message"]["content"])
+
+
+def parse_action(text: str) -> dict[str, Any] | None:
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    candidates = [fenced.group(1)] if fenced else [text]
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate.strip())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("type") in {"command", "finish"}:
+            return payload
+    return None
+
+
+def append_request(path: Path, *, action: str, instance_id: str, **payload: Any) -> str:
+    request_id = uuid.uuid4().hex
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"request_id": request_id, "type": action, "instance_id": instance_id, **payload}, ensure_ascii=False) + "\n")
+    return request_id
+
+
+def wait_result(path: Path, request_id: str, *, timeout_seconds: int = 660) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict) and payload.get("request_id") == request_id:
+                    return payload
+        time.sleep(0.1)
+    return {"request_id": request_id, "ok": False, "error": "等待 Agent Bridge 工具桥超时"}
+
+
+def select_tasks(tasks: list[dict[str, Any]], *, limit: int, mode: str, seed: int) -> list[tuple[int, dict[str, Any]]]:
+    indices = list(range(len(tasks)))
+    if mode == "random":
+        random.Random(f"{seed}:swebench_lite").shuffle(indices)
+    return [(index, tasks[index]) for index in indices[:limit]]
+
+
+def run_task(task: dict[str, Any], *, source_index: int, request: dict[str, Any], request_path: Path, result_path: Path) -> dict[str, Any]:
+    instance_id = str(task["instance_id"])
+    start_id = append_request(request_path, action="start_task", instance_id=instance_id, task=task)
+    started = wait_result(result_path, start_id)
+    if not started.get("ok"):
+        return {"instance_id": instance_id, "source_index": source_index, "resolved": False, "error": started.get("error", "无法启动 testbed")}
+    messages = [
+        {
+            "role": "system",
+            "content": "你是软件修复 Agent。每轮只能输出一个 JSON 对象：{\"type\":\"command\",\"command\":\"...\"} 用于在当前仓库执行 shell 命令；完成修改后输出 {\"type\":\"finish\"}。不要使用 Markdown。",
+        },
+        {"role": "user", "content": f"请修复以下 Issue：\n\n{task.get('problem_statement', '')}"},
+    ]
+    final: dict[str, Any] = {"resolved": False, "error": "达到最大 Agent 轮数"}
+    try:
+        for _ in range(MAX_TURNS):
+            answer = model_completion(messages, model=request["model_name"], base_url=request["base_url"], api_key=os.environ.get("OPENAI_API_KEY", ""))
+            action = parse_action(answer)
+            if action is None:
+                messages.extend(({"role": "assistant", "content": answer}, {"role": "user", "content": "输出必须是合法 JSON 工具动作。"}))
+                continue
+            if action["type"] == "finish":
+                final_id = append_request(request_path, action="finalize_task", instance_id=instance_id, test_command=str(task.get("test_command", "")))
+                final = wait_result(result_path, final_id, timeout_seconds=720)
+                break
+            tool_id = append_request(request_path, action="command", instance_id=instance_id, command=str(action.get("command", "")))
+            tool_result = wait_result(result_path, tool_id)
+            messages.extend((
+                {"role": "assistant", "content": answer},
+                {"role": "user", "content": f"命令结果：\nstdout:\n{tool_result.get('stdout', '')}\nstderr:\n{tool_result.get('stderr', '')}\nreturn_code: {tool_result.get('return_code', '')}"},
+            ))
+    finally:
+        stop_id = append_request(request_path, action="stop_task", instance_id=instance_id)
+        wait_result(result_path, stop_id, timeout_seconds=30)
+    return {"instance_id": instance_id, "source_index": source_index, "resolved": bool(final.get("resolved")), "patch": final.get("patch", ""), "test": final.get("test", {}), "error": final.get("error")}
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: swe-agent REQUEST.json RESULT.json")
+    request = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    manifest_path = Path(os.environ["AGENT_BRIDGE_SWE_DATA_ROOT"]) / "swebench-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tasks = manifest.get("tasks") if isinstance(manifest, dict) else None
+    if not isinstance(tasks, list) or not tasks:
+        Path(sys.argv[2]).write_text(json.dumps({"error": "SWE-bench manifest 未包含 tasks"}, ensure_ascii=False), encoding="utf-8")
+        return 1
+    request_path = Path(str(request["tool_request_path"]).replace("/workspace", ".", 1))
+    result_path = Path(str(request["tool_result_path"]).replace("/workspace", ".", 1))
+    request_path.touch(exist_ok=True)
+    selected = select_tasks(tasks, limit=int(request["max_tasks"]), mode=request["sampling_mode"], seed=int(request["sample_seed"]))
+    cases = [run_task(task, source_index=index, request=request, request_path=request_path, result_path=result_path) for index, task in selected]
+    resolved = sum(1 for case in cases if case["resolved"])
+    total = len(cases)
+    result = {
+        "rows": [{"dataset": "swebench_lite", "metric": "resolved_rate", "score": f"{(resolved / total * 100) if total else 0:.2f}"}],
+        "summary_found": True,
+        "sample_manifests": [{"dataset": "swebench_lite", "mode": request["sampling_mode"], "seed": request["sample_seed"], "source_indices": [case["source_index"] for case in cases], "source_ids": [case["instance_id"] for case in cases]}],
+        "cases": cases,
+        "dataset_manifest": manifest.get("version", ""),
+    }
+    Path(sys.argv[2]).write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
