@@ -91,6 +91,8 @@ uv run agent-bridge profile use safe-readonly \
 
 `profile use` 还会安装一个 Claude Code `SessionEnd` Hook。每次会话结束时，它会对 Agent Bridge 实际管理的 MCP、Hook 和 `CLAUDE.md` 说明块计算配置 hash；只有生成结果变化时才更新，用户自己的 MCP server、Hook 和文档内容会保留。代码升级后无需手动修改版本号；首次接入某个 project 或 user scope 仍需执行一次 `profile use` 安装该 Hook。
 
+执行 `profile unuse` 会列出当前项目和用户级已接入的 Profile，交互选择一个后卸载对应范围的 Agent Bridge MCP、托管 Hook 和说明块；用户自己的 MCP server、Hook 与文档内容会保留。非交互场景可使用 `--scope project|user --yes`。
+
 它不会把完整 profile 正文或绝对文件路径复制进 CLAUDE.md。动态 profile 与
 memory 上下文由服务端维护，并通过 `SessionStart` Hook 注入。
 
@@ -103,6 +105,7 @@ uv run agent-bridge profile list
 uv run agent-bridge profile show safe-readonly
 uv run agent-bridge profile config --scope project
 uv run agent-bridge profile sync safe-readonly --scope project
+uv run agent-bridge profile unuse
 uv run agent-bridge profile pins refresh safe-readonly
 ```
 

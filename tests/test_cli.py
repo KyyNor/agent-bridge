@@ -561,6 +561,88 @@ def test_profile_sync_updates_managed_config_and_is_idempotent(monkeypatch, tmp_
     assert (tmp_path / "CLAUDE.md").read_bytes() == before["claude"]
 
 
+def test_profile_unuse_lists_both_scopes_and_preserves_user_config(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+    project_settings = tmp_path / ".claude" / "settings.local.json"
+    project_settings.parent.mkdir(parents=True)
+    user_hook = {"type": "command", "command": "echo project-user-hook"}
+    project_settings.write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [user_hook]}]}}),
+        encoding="utf-8",
+    )
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"existing": {"command": "node"}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "CLAUDE.md").write_text("keep project guidance\n", encoding="utf-8")
+
+    project_use = runner.invoke(
+        app,
+        [
+            "profile",
+            "use",
+            "project-profile",
+            "--scope",
+            "project",
+            "--yes",
+        ],
+    )
+    user_use = runner.invoke(
+        app,
+        ["profile", "use", "user-profile", "--scope", "user"],
+    )
+    assert project_use.exit_code == 0
+    assert user_use.exit_code == 0
+
+    selected = {}
+
+    class Prompt:
+        def ask(self):
+            return "project"
+
+    def fake_select(message, choices):
+        selected["message"] = message
+        selected["choices"] = choices
+        return Prompt()
+
+    monkeypatch.setattr("agent_bridge.cli.app._stdin_is_interactive", lambda: True)
+    monkeypatch.setattr("questionary.select", fake_select)
+    result = runner.invoke(app, ["profile", "unuse"], input="y\n")
+
+    assert result.exit_code == 0
+    assert "当前项目" in result.stdout
+    assert "用户级" in result.stdout
+    assert selected["message"] == "选择要卸载的 Profile"
+    assert [choice["value"] for choice in selected["choices"]] == ["project", "user"]
+
+    project_config = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    assert project_config["mcpServers"] == {"existing": {"command": "node"}}
+    project_hooks = json.loads(project_settings.read_text(encoding="utf-8"))
+    assert project_hooks["hooks"]["Stop"] == [{"hooks": [user_hook]}]
+    project_claude = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "keep project guidance" in project_claude
+    assert "agent-bridge:profile-pointer" not in project_claude
+
+    user_config = json.loads((home / ".mcp.json").read_text(encoding="utf-8"))
+    assert user_config["mcpServers"]["agent-bridge"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "user-profile"
+    assert (home / ".claude" / "settings.json").exists()
+    assert "agent-bridge-profile-sync" in (home / ".claude" / "settings.json").read_text(encoding="utf-8")
+    assert "agent-bridge:profile-pointer" in (home / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+
+
+def test_profile_unuse_requires_scope_in_noninteractive_mode(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["profile", "use", "safe", "--scope", "project", "--yes"])
+    monkeypatch.setattr("agent_bridge.cli.app._stdin_is_interactive", lambda: False)
+
+    result = runner.invoke(app, ["profile", "unuse"])
+
+    assert result.exit_code == 1
+    assert "非交互模式下必须指定 scope" in result.stderr
+
+
 def test_profile_use_writes_user_scope_guidance_without_profile_pointer(
     monkeypatch,
     tmp_path: Path,

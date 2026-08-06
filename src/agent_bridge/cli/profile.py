@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -12,6 +13,7 @@ from agent_bridge.capability_hub.profiles.docs import (
     POINTER_START,
     SYSTEM_REMINDER_GUIDANCE,
     pointer_block,
+    remove_agent_bridge_blocks,
     replace_agent_bridge_block,
     stable_hash,
 )
@@ -33,6 +35,26 @@ AGENT_BRIDGE_HOOK_MARKERS = (
 RETRIEVAL_PROBE_TIMEOUT_SECONDS = 20
 RETRIEVAL_PROBE_COMMAND_TIMEOUT_SECONDS = 25
 PROFILE_SYNC_HOOK_TIMEOUT_SECONDS = 5
+
+
+@dataclass(frozen=True)
+class _ProfileInstallation:
+    scope: str
+    profile_keys: tuple[str, ...]
+    components: tuple[str, ...]
+
+    @property
+    def profile_label(self) -> str:
+        if not self.profile_keys:
+            return "未知 Profile"
+        if len(self.profile_keys) == 1:
+            return self.profile_keys[0]
+        return f"Profile 不一致：{' / '.join(self.profile_keys)}"
+
+    @property
+    def choice_label(self) -> str:
+        scope_label = "当前项目" if self.scope == "project" else "用户级"
+        return f"{scope_label} | {self.profile_label} | {'、'.join(self.components)}"
 
 CLAUDE_MEM_COMPATIBLE_HOOKS = {
     "Setup": [
@@ -350,13 +372,8 @@ def _profile_sync_projection(
     }
 
 
-def _profile_sync(
-    *,
-    profile: str,
-    url: str,
-    scope: str,
-) -> list[Path]:
-    from agent_bridge.cli.app import _claude_config_path, _load_json_file
+def _profile_scope_paths(scope: str) -> tuple[Path, Path, Path]:
+    from agent_bridge.cli.app import _claude_config_path
 
     config_path = _claude_config_path(scope)
     settings_path = _claude_settings_path(scope)
@@ -365,6 +382,187 @@ def _profile_sync(
         if scope == "project"
         else Path.home() / ".claude" / "CLAUDE.md"
     )
+    return config_path, settings_path, claude_path
+
+
+def _profile_key_from_mcp_config(config: dict[str, Any]) -> str | None:
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict):
+        return None
+    server = servers.get("agent-bridge")
+    if not isinstance(server, dict):
+        return None
+    headers = server.get("headers")
+    if not isinstance(headers, dict):
+        return None
+    profile = str(headers.get("X-Agent-Bridge-MetaMCP-Profile") or "").strip()
+    return profile or None
+
+
+def _profile_key_from_managed_command(command: str) -> str | None:
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if "--profile" in argv:
+        index = argv.index("--profile") + 1
+        if index < len(argv) and argv[index].strip():
+            return argv[index].strip()
+    if AGENT_BRIDGE_PROFILE_SYNC_HOOK_MARKER in command and len(argv) > 3:
+        if argv[0:3] == ["agent-bridge", "profile", "sync"]:
+            return argv[3].strip() or None
+    return None
+
+
+def _profile_keys_from_managed_hooks(settings: dict[str, Any]) -> set[str]:
+    raw_hooks = settings.get("hooks")
+    if not isinstance(raw_hooks, dict):
+        return set()
+    profiles: set[str] = set()
+    for entries in raw_hooks.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for hook in entry["hooks"]:
+                if not isinstance(hook, dict):
+                    continue
+                command = str(hook.get("command") or "")
+                if not any(marker in command for marker in AGENT_BRIDGE_HOOK_MARKERS):
+                    continue
+                profile = _profile_key_from_managed_command(command)
+                if profile:
+                    profiles.add(profile)
+    return profiles
+
+
+def _discover_profile_installations() -> list[_ProfileInstallation]:
+    from agent_bridge.cli.app import _load_json_file
+
+    installations: list[_ProfileInstallation] = []
+    for scope in ("project", "user"):
+        config_path, settings_path, claude_path = _profile_scope_paths(scope)
+        config = _load_json_file(config_path)
+        settings = _load_claude_settings(settings_path)
+        guidance = claude_path.read_text(encoding="utf-8") if claude_path.exists() else ""
+        servers = config.get("mcpServers")
+        has_mcp = isinstance(servers, dict) and any(
+            name in servers for name in ("agent-bridge", "agent-capability-hub")
+        )
+        has_hooks = bool(_managed_hooks_projection(settings))
+        has_guidance = bool(_managed_guidance_projection(guidance))
+        if not (has_mcp or has_hooks or has_guidance):
+            continue
+        profiles = set(_profile_keys_from_managed_hooks(settings))
+        mcp_profile = _profile_key_from_mcp_config(config)
+        if mcp_profile:
+            profiles.add(mcp_profile)
+        components = tuple(
+            component
+            for component, present in (
+                ("MCP", has_mcp),
+                ("Hook", has_hooks),
+                ("CLAUDE.md 说明块", has_guidance),
+            )
+            if present
+        )
+        installations.append(
+            _ProfileInstallation(
+                scope=scope,
+                profile_keys=tuple(sorted(profiles)),
+                components=components,
+            )
+        )
+    return installations
+
+
+def _profile_uninstall(scope: str) -> list[Path]:
+    from agent_bridge.cli.app import _load_json_file
+
+    config_path, settings_path, claude_path = _profile_scope_paths(scope)
+    existing_config = _load_json_file(config_path)
+    existing_settings = _load_claude_settings(settings_path)
+    existing_guidance = claude_path.read_text(encoding="utf-8") if claude_path.exists() else ""
+    changed: list[Path] = []
+
+    updated_config = dict(existing_config)
+    servers = updated_config.get("mcpServers")
+    if isinstance(servers, dict):
+        updated_servers = dict(servers)
+        updated_servers.pop("agent-bridge", None)
+        updated_servers.pop("agent-capability-hub", None)
+        if updated_servers:
+            updated_config["mcpServers"] = updated_servers
+        else:
+            updated_config.pop("mcpServers", None)
+    if stable_hash(_managed_mcp_projection(existing_config)) != stable_hash(
+        _managed_mcp_projection(updated_config)
+    ):
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(updated_config, ensure_ascii=False, indent=2), encoding="utf-8")
+        changed.append(config_path)
+
+    updated_settings = _strip_agent_bridge_hooks(existing_settings)
+    if stable_hash(_managed_hooks_projection(existing_settings)) != stable_hash(
+        _managed_hooks_projection(updated_settings)
+    ):
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps(updated_settings, ensure_ascii=False, indent=2), encoding="utf-8")
+        changed.append(settings_path)
+
+    updated_guidance = remove_agent_bridge_blocks(existing_guidance)
+    if stable_hash(_managed_guidance_projection(existing_guidance)) != stable_hash(
+        _managed_guidance_projection(updated_guidance)
+    ):
+        claude_path.parent.mkdir(parents=True, exist_ok=True)
+        claude_path.write_text(updated_guidance, encoding="utf-8")
+        changed.append(claude_path)
+    return changed
+
+
+def _select_profile_installation(
+    installations: list[_ProfileInstallation],
+    scope: str | None,
+) -> _ProfileInstallation | None:
+    if scope is not None:
+        if scope not in {"project", "user"}:
+            raise ValueError("scope 必须是 project 或 user")
+        selected = [installation for installation in installations if installation.scope == scope]
+        if not selected:
+            raise RuntimeError(f"{scope} 范围没有可卸载的 Profile")
+        return selected[0]
+
+    from agent_bridge.cli.app import _stdin_is_interactive
+
+    if not _stdin_is_interactive():
+        raise ValueError("非交互模式下必须指定 scope")
+    import questionary
+
+    selected_scope = questionary.select(
+        "选择要卸载的 Profile",
+        choices=[
+            {"name": installation.choice_label, "value": installation.scope}
+            for installation in installations
+        ],
+    ).ask()
+    if selected_scope is None:
+        return None
+    return next(
+        (installation for installation in installations if installation.scope == selected_scope),
+        None,
+    )
+
+
+def _profile_sync(
+    *,
+    profile: str,
+    url: str,
+    scope: str,
+) -> list[Path]:
+    from agent_bridge.cli.app import _load_json_file
+
+    config_path, settings_path, claude_path = _profile_scope_paths(scope)
     existing_config = _load_json_file(config_path)
     existing_settings = _load_claude_settings(settings_path)
     existing_guidance = claude_path.read_text(encoding="utf-8") if claude_path.exists() else ""
@@ -518,6 +716,41 @@ def profile_sync(
         typer.echo(f"已同步 {len(changed)} 个配置文件")
     else:
         typer.echo("Profile 配置已是最新")
+
+
+@profile_app.command("unuse")
+def profile_unuse(
+    scope: Annotated[str | None, typer.Option("--scope", help="配置范围: project 或 user")] = None,
+    yes: Annotated[bool, typer.Option("--yes", help="跳过卸载确认")] = False,
+) -> None:
+    """交互选择并卸载当前项目或用户级 Profile 配置。"""
+    try:
+        installations = _discover_profile_installations()
+        if not installations:
+            typer.echo("当前目录和用户级没有可卸载的 Profile")
+            return
+        if scope is None:
+            typer.echo("可卸载的 Profile：")
+            for installation in installations:
+                typer.echo(f"- {installation.choice_label}")
+        selected = _select_profile_installation(installations, scope)
+        if selected is None:
+            typer.echo("已取消")
+            return
+        if not yes and not typer.confirm(
+            f"确认卸载 {selected.choice_label}？",
+            default=False,
+        ):
+            typer.echo("已取消")
+            return
+        changed = _profile_uninstall(selected.scope)
+    except (OSError, ValueError, RuntimeError) as exc:
+        typer.echo(f"卸载错误: {exc}", err=True)
+        raise typer.Exit(1) from None
+
+    typer.echo(f"已卸载: {selected.choice_label}")
+    for changed_path in changed:
+        typer.echo(f"已更新: {changed_path}")
 
 
 @pins_app.command("refresh")

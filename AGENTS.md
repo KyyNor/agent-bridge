@@ -28,6 +28,7 @@
 - Coding Agent 的结构化输出 JSON Schema 统一按 Draft 07 传递和校验；历史 2020-12 的 `$defs` 与本地 `$ref` 仅可无损改写为 `definitions`，其余无法等价转换的专属关键字必须明确拒绝，不得静默弱化校验。
 - `profile use` 写入的 Agent Bridge HTTP MCP 配置使用 `timeout: 300000`（毫秒），将 Claude Code 远程 MCP 工具调用上限固定为 300 秒；该值与 Weknora 后端 HTTP 超时分开管理。
 - `profile use` 安装 Claude Code `SessionEnd` 配置同步 Hook；同步对实际生成的 Agent Bridge MCP、托管 Hook 和说明块计算 hash，仅在结果变化时更新，不引入 schema/version 文件，并保留用户自有配置。
+- `profile unuse` 必须同时扫描当前项目和 user scope，交互选择卸载目标；卸载只删除对应范围的 Agent Bridge MCP、托管 Hook 和说明块，必须保留用户自有配置。
 
 ## 时间处理规范
 

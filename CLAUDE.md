@@ -71,6 +71,8 @@ MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped �
 
 `profile use` 同时安装 `SessionEnd` 配置同步 Hook。Hook 对实际生成的 Agent Bridge MCP、托管 Hook 和 `CLAUDE.md` 说明块计算 hash，仅在 hash 变化时写入；用户自有配置不参与托管投影，也不使用额外的 schema/version 文件。`profile sync` 是同一同步逻辑的手动入口。
 
+`profile unuse` 交互列出当前项目和用户级已接入的 Profile，选择后只删除对应范围的 Agent Bridge MCP、托管 Hook 和说明块，保留用户自有配置；脚本调用使用 `--scope project|user --yes`。
+
 顶层 MetaMCP 工具（除固定的 `search`、`execute` 外）由 `gateway/top_level_tools.py` 维护单一目录，并可在系统管理中临时关闭。注册 tools/list、能力目录检索和对应内置能力执行必须共用该状态；不得只从 tools/list 隐藏而保留通用 `execute` 绕过路径。Profile pin 属于 Profile 配置，不纳入全局顶层工具开关。
 
 ## 文档知识后端

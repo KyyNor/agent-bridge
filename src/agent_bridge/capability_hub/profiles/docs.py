@@ -34,14 +34,9 @@ def profile_pointer_block(profile_path: str | Path) -> str:
     )
 
 
-def replace_agent_bridge_block(path: Path, block: str) -> None:
-    """Idempotently replace the agent-bridge pointer block in a markdown file.
-
-    Any existing block between ``POINTER_START`` and ``POINTER_END`` is removed
-    first, then the new block is appended after the surviving content.
-    """
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    lines = existing.splitlines(keepends=True)
+def remove_agent_bridge_blocks(content: str) -> str:
+    """移除内容中的所有 Agent Bridge 托管块，保留其余文本。"""
+    lines = content.splitlines(keepends=True)
     kept: list[str] = []
     in_block = False
     for line in lines:
@@ -54,8 +49,17 @@ def replace_agent_bridge_block(path: Path, block: str) -> None:
                 in_block = False
             continue
         kept.append(line)
+    return "".join(kept)
 
-    prefix = "".join(kept)
+
+def replace_agent_bridge_block(path: Path, block: str) -> None:
+    """Idempotently replace the agent-bridge pointer block in a markdown file.
+
+    Any existing block between ``POINTER_START`` and ``POINTER_END`` is removed
+    first, then the new block is appended after the surviving content.
+    """
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    prefix = remove_agent_bridge_blocks(existing)
     if prefix and not prefix.endswith("\n"):
         prefix += "\n"
     if prefix and not prefix.endswith("\n\n"):
