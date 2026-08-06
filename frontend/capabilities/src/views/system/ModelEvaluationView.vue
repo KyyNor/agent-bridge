@@ -14,7 +14,7 @@ const runs = ref<ModelEvaluationRun[]>([])
 const models = ref<ModelEvaluationModel[]>([])
 const runtime = ref<ModelEvaluationRuntimeStatus | null>(null)
 const form = ref({
-  base_url: '', api_key: '', model_name: '', datasets: ['demo_gsm8k_chat_gen'] as string[], max_samples: 64,
+  base_url: '', api_key: '', model_name: '', datasets: ['gsm8k_chat_gen'] as string[], max_samples: 64,
   sampling_mode: 'head' as 'head' | 'random', sample_seed: 42,
 })
 const selectedRun = ref<ModelEvaluationRun | null>(null)
@@ -26,6 +26,15 @@ const error = ref('')
 let refreshTimer: number | undefined
 
 const activeRunExists = computed(() => runs.value.some(run => run.status === 'queued' || run.status === 'running'))
+const datasetGroups = computed(() => {
+  const grouped = new Map<string, ModelEvaluationDataset[]>()
+  for (const dataset of datasets.value) {
+    const current = grouped.get(dataset.dimension) || []
+    current.push(dataset)
+    grouped.set(dataset.dimension, current)
+  }
+  return [...grouped.entries()].map(([key, items]) => ({ key, label: items[0]?.dimension_label || key, items }))
+})
 
 onMounted(async () => {
   await Promise.all([loadDatasets(), loadRuns(), loadRuntime()])
@@ -74,7 +83,11 @@ function toggleDataset(key: string, checked: boolean) {
 }
 
 function statusLabel(status: ModelEvaluationRun['status']) {
-  return ({ queued: '等待执行', running: '评估中', completed: '已完成', failed: '失败', abandoned: '已中断' } as const)[status]
+  return ({ queued: '等待执行', running: '评估中', completed: '已完成', completed_with_warnings: '部分完成', failed: '失败', abandoned: '已中断' } as const)[status]
+}
+
+function statusTone(status: ModelEvaluationRun['status']) {
+  return status === 'completed' ? 'enabled' : status === 'completed_with_warnings' ? 'blocked' : status === 'failed' ? 'error' : status === 'abandoned' ? 'disabled' : 'running'
 }
 
 function samplingModeLabel(mode: ModelEvaluationRun['sampling_mode']) {
@@ -103,16 +116,21 @@ function openRunDetail(run: ModelEvaluationRun) {
     <Card v-if="runtime && !runtime.configured" class="border-warning/40 bg-warning-soft/30">
       <CardContent class="space-y-2 p-5 text-sm">
         <div class="font-medium text-warning-soft-fg">{{ runtime.message }}</div>
-        <p class="text-muted-foreground">请在部署机为评估单独创建 venv 或 Docker runner，再设置环境变量并重启服务：</p>
-        <code v-if="runtime.install_command" class="block rounded bg-background/80 p-2 text-xs">{{ runtime.install_command }}</code>
-        <code v-if="runtime.configure_command" class="block rounded bg-background/80 p-2 text-xs">{{ runtime.configure_command }}</code>
+        <p class="text-muted-foreground">模型评估仅支持本地 Docker。请启动 Docker daemon，并导入下列指定镜像后重启服务。</p>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div v-for="(image, key) in runtime.images" :key="key" class="rounded border border-border bg-background/70 p-2 text-xs">
+            <div class="font-medium">{{ key === 'opencompass' ? 'OpenCompass runner' : 'Agent worker' }}</div>
+            <div class="mt-1 break-all font-mono text-muted-foreground">{{ image.image }}</div>
+            <div class="mt-1" :class="image.available ? 'text-success' : 'text-destructive'">{{ image.available ? '已就绪' : '缺失' }}</div>
+          </div>
+        </div>
       </CardContent>
     </Card>
     <Card>
       <CardContent class="space-y-5 p-5">
         <div>
           <div class="text-base font-medium">发起模型评估</div>
-          <p class="mt-1 text-sm text-muted-foreground">通过 OpenCompass 对 OpenAI 兼容接口中的模型进行小规模基准评测。</p>
+          <p class="mt-1 text-sm text-muted-foreground">通过本地 Docker 的隔离评估器，对 OpenAI 兼容模型进行可复现的五维能力评测。</p>
         </div>
         <div class="grid gap-4 md:grid-cols-2">
           <label class="space-y-2 text-sm">
@@ -153,14 +171,19 @@ function openRunDetail(run: ModelEvaluationRun) {
           </div>
         </div>
         <div class="space-y-3">
-          <div class="text-sm font-medium">简单数据集</div>
-          <div class="grid gap-2 md:grid-cols-2">
-            <label v-for="dataset in datasets" :key="dataset.key" class="flex cursor-pointer gap-3 rounded-md border border-border p-3 text-sm">
-              <input type="checkbox" class="mt-1 h-4 w-4" :checked="form.datasets.includes(dataset.key)" @change="toggleDataset(dataset.key, ($event.target as HTMLInputElement).checked)" />
-              <span><span class="font-medium">{{ dataset.label }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ dataset.description }}</span></span>
-            </label>
+          <div class="text-sm font-medium">评估数据集</div>
+          <div class="space-y-4">
+            <section v-for="group in datasetGroups" :key="group.key" class="space-y-2">
+              <div class="text-xs font-medium text-muted-foreground">{{ group.label }}</div>
+              <div class="grid gap-2 md:grid-cols-2">
+                <label v-for="dataset in group.items" :key="dataset.key" class="flex cursor-pointer gap-3 rounded-md border border-border p-3 text-sm">
+                  <input type="checkbox" class="mt-1 h-4 w-4" :checked="form.datasets.includes(dataset.key)" @change="toggleDataset(dataset.key, ($event.target as HTMLInputElement).checked)" />
+                  <span><span class="font-medium">{{ dataset.label }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ dataset.description }}</span><span class="mt-1 block text-[11px] text-muted-foreground">指标：{{ dataset.metric }} · {{ dataset.runner === 'swebench' ? '独立 Agent testbed' : dataset.runner === 'code' ? '无网络代码沙箱' : 'OpenCompass runner' }}</span></span>
+                </label>
+              </div>
+            </section>
           </div>
-          <p class="text-xs text-muted-foreground">所有勾选的数据集统一最多运行此数量的题目；随机抽样使用固定种子，便于后续复跑与模型横向比较。</p>
+          <p class="text-xs text-muted-foreground">所有勾选的数据集统一最多运行此数量的题目；SWE-bench 中对应最多任务数。随机抽样使用固定种子，便于后续复跑与模型横向比较。</p>
         </div>
         <div class="flex items-center gap-3">
           <Button @click="startEvaluation" :disabled="starting || !runtime?.configured || !form.model_name || !form.datasets.length || form.max_samples < 1 || form.max_samples > 1000 || form.sample_seed < 0 || form.sample_seed > 2147483647">{{ starting ? '正在启动…' : '开始评估' }}</Button>
@@ -171,9 +194,9 @@ function openRunDetail(run: ModelEvaluationRun) {
 
     <Card>
       <CardContent class="p-5">
-        <div class="mb-4 flex items-center justify-between"><div><div class="text-base font-medium">评估记录</div><p class="mt-1 text-sm text-muted-foreground">完成后自动读取 OpenCompass 生成的汇总结果。</p></div><Button size="sm" variant="outline" @click="loadRuns">刷新</Button></div>
+        <div class="mb-4 flex items-center justify-between"><div><div class="text-base font-medium">评估记录</div><p class="mt-1 text-sm text-muted-foreground">每项能力使用独立 Docker runner；详情中可查看子执行、镜像与实际抽样题目。</p></div><Button size="sm" variant="outline" @click="loadRuns">刷新</Button></div>
         <div v-if="!runs.length" class="py-10 text-center text-sm text-muted-foreground">尚未发起模型评估。</div>
-        <div v-else class="overflow-x-auto"><table class="w-full min-w-[900px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">模型</th><th class="px-3 py-2">数据集</th><th class="px-3 py-2">每集题数</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">结果</th><th class="px-3 py-2">创建时间</th><th class="px-3 py-2"></th></tr></thead><tbody><tr v-for="run in runs" :key="run.run_id" class="border-b border-border/70"><td class="px-3 py-3 font-mono text-xs">{{ run.model_name }}</td><td class="px-3 py-3 text-xs">{{ run.datasets.join('、') }}</td><td class="px-3 py-3 text-xs">{{ run.max_samples }}</td><td class="px-3 py-3"><StatusBadge :status="run.status === 'completed' ? 'enabled' : run.status === 'failed' ? 'error' : run.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(run.status)" /><div v-if="run.error" class="mt-1 max-w-xs text-xs text-destructive">{{ run.error }}</div><div v-else-if="run.status !== 'completed'" class="mt-1 text-xs text-muted-foreground">{{ run.progress_message }}</div></td><td class="max-w-sm px-3 py-3 text-xs text-muted-foreground">{{ scoreSummary(run) }}</td><td class="px-3 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</td><td class="px-3 py-3 text-right"><Button size="sm" variant="outline" @click="openRunDetail(run)">查看详情</Button></td></tr></tbody></table></div>
+        <div v-else class="overflow-x-auto"><table class="w-full min-w-[900px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">模型</th><th class="px-3 py-2">数据集</th><th class="px-3 py-2">每集题数</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">结果</th><th class="px-3 py-2">创建时间</th><th class="px-3 py-2"></th></tr></thead><tbody><tr v-for="run in runs" :key="run.run_id" class="border-b border-border/70"><td class="px-3 py-3 font-mono text-xs">{{ run.model_name }}</td><td class="px-3 py-3 text-xs">{{ run.datasets.join('、') }}</td><td class="px-3 py-3 text-xs">{{ run.max_samples }}</td><td class="px-3 py-3"><StatusBadge :status="statusTone(run.status)" :label="statusLabel(run.status)" /><div v-if="run.error" class="mt-1 max-w-xs text-xs text-destructive">{{ run.error }}</div><div v-else-if="run.status !== 'completed'" class="mt-1 text-xs text-muted-foreground">{{ run.progress_message }}</div></td><td class="max-w-sm px-3 py-3 text-xs text-muted-foreground">{{ scoreSummary(run) }}</td><td class="px-3 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</td><td class="px-3 py-3 text-right"><Button size="sm" variant="outline" @click="openRunDetail(run)">查看详情</Button></td></tr></tbody></table></div>
       </CardContent>
     </Card>
 
@@ -183,7 +206,7 @@ function openRunDetail(run: ModelEvaluationRun) {
         <div v-if="selectedRun" class="space-y-5 text-sm">
           <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2">
             <div><dt class="text-xs text-muted-foreground">模型</dt><dd class="mt-1 font-mono text-xs">{{ selectedRun.model_name }}</dd></div>
-            <div><dt class="text-xs text-muted-foreground">状态</dt><dd class="mt-1"><StatusBadge :status="selectedRun.status === 'completed' ? 'enabled' : selectedRun.status === 'failed' ? 'error' : selectedRun.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(selectedRun.status)" /></dd></div>
+            <div><dt class="text-xs text-muted-foreground">状态</dt><dd class="mt-1"><StatusBadge :status="statusTone(selectedRun.status)" :label="statusLabel(selectedRun.status)" /></dd></div>
             <div><dt class="text-xs text-muted-foreground">数据集</dt><dd class="mt-1">{{ selectedRun.datasets.join('、') }}</dd></div>
             <div><dt class="text-xs text-muted-foreground">每个数据集题数</dt><dd class="mt-1">{{ selectedRun.max_samples }}</dd></div>
             <div><dt class="text-xs text-muted-foreground">抽样方式</dt><dd class="mt-1">{{ samplingModeLabel(selectedRun.sampling_mode) }}</dd></div>
@@ -196,6 +219,18 @@ function openRunDetail(run: ModelEvaluationRun) {
             <div v-if="selectedRun.result.rows?.length" class="overflow-x-auto rounded-md border border-border"><table class="w-full text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">数据集</th><th class="px-3 py-2">指标</th><th class="px-3 py-2">分数</th></tr></thead><tbody><tr v-for="row in selectedRun.result.rows" :key="`${row.dataset}-${row.metric}`" class="border-b border-border/70 last:border-0"><td class="px-3 py-2">{{ row.dataset }}</td><td class="px-3 py-2">{{ row.metric || '—' }}</td><td class="px-3 py-2 font-medium">{{ scoreForRow(row) }}</td></tr></tbody></table></div>
             <p v-else-if="selectedRun.error" class="text-destructive">{{ selectedRun.error }}</p>
             <p v-else class="text-muted-foreground">{{ selectedRun.status === 'completed' ? '未找到汇总结果。' : selectedRun.progress_message }}</p>
+          </div>
+          <div v-if="selectedRun.executions.length">
+            <div class="mb-2 font-medium">子执行</div>
+            <div class="space-y-2">
+              <div v-for="execution in selectedRun.executions" :key="execution.execution_id" class="rounded-md border border-border p-3 text-xs">
+                <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ execution.datasets.join('、') }}</span><StatusBadge :status="execution.status === 'completed' ? 'enabled' : execution.status === 'failed' ? 'error' : execution.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(execution.status)" /></div>
+                <div class="mt-1 text-muted-foreground">runner：{{ execution.runner_key }} · 镜像：<span class="font-mono">{{ execution.image }}</span></div>
+                <div v-if="execution.container_id" class="mt-1 break-all font-mono text-muted-foreground">container：{{ execution.container_id }}</div>
+                <div v-if="execution.error" class="mt-1 text-destructive">{{ execution.error }}</div>
+                <div v-else-if="execution.status !== 'completed'" class="mt-1 text-muted-foreground">{{ execution.progress_message }}</div>
+              </div>
+            </div>
           </div>
           <details v-if="selectedRun.result.sample_manifests?.length" class="rounded-md border border-border p-3 text-xs">
             <summary class="cursor-pointer font-medium">查看实际抽样题目索引</summary>

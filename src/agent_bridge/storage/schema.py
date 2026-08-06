@@ -525,6 +525,7 @@ CREATE TABLE IF NOT EXISTS model_evaluation_runs (
   run_id TEXT PRIMARY KEY,
   model_name TEXT NOT NULL,
   base_url TEXT NOT NULL,
+  runtime TEXT NOT NULL DEFAULT 'docker',
   datasets_json TEXT NOT NULL,
   max_samples INTEGER NOT NULL DEFAULT 64,
   sampling_mode TEXT NOT NULL DEFAULT 'head',
@@ -541,6 +542,24 @@ CREATE TABLE IF NOT EXISTS model_evaluation_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_model_evaluation_runs_created
   ON model_evaluation_runs(created_at DESC);
+CREATE TABLE IF NOT EXISTS model_evaluation_executions (
+  execution_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES model_evaluation_runs(run_id) ON DELETE CASCADE,
+  runner_key TEXT NOT NULL,
+  datasets_json TEXT NOT NULL,
+  image TEXT NOT NULL,
+  container_id TEXT,
+  status TEXT NOT NULL,
+  progress_message TEXT NOT NULL DEFAULT '',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  error TEXT,
+  work_dir TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_model_evaluation_executions_run
+  ON model_evaluation_executions(run_id, created_at ASC);
 """
 
 WORKFLOW_SCHEMA = """

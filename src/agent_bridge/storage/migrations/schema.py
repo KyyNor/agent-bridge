@@ -208,7 +208,34 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "max_samples": "INTEGER NOT NULL DEFAULT 64",
             "sampling_mode": "TEXT NOT NULL DEFAULT 'head'",
             "sample_seed": "INTEGER NOT NULL DEFAULT 42",
+            "runtime": "TEXT NOT NULL DEFAULT 'docker'",
         },
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS model_evaluation_executions (
+          execution_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES model_evaluation_runs(run_id) ON DELETE CASCADE,
+          runner_key TEXT NOT NULL,
+          datasets_json TEXT NOT NULL,
+          image TEXT NOT NULL,
+          container_id TEXT,
+          status TEXT NOT NULL,
+          progress_message TEXT NOT NULL DEFAULT '',
+          result_json TEXT NOT NULL DEFAULT '{}',
+          error TEXT,
+          work_dir TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          finished_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_model_evaluation_executions_run
+        ON model_evaluation_executions(run_id, created_at ASC)
+        """
     )
     store._ensure_columns(conn, "backend_targets", {"backend_kb_id": "TEXT"})
     store._ensure_columns(

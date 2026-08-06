@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -eu
+
+test -f /opt/opencompass-data/dataset-manifest.json
+test -f /opt/agent-bridge-data/code/humaneval.jsonl
+test -f /opt/agent-bridge-data/code/mbpp.jsonl
+
+test -d /opt/opencompass-data/data/ceval/formal_ceval || { echo "缺少 C-Eval：data/ceval/formal_ceval" >&2; exit 1; }
+test -d /opt/opencompass-data/data/mmlu_pro || { echo "缺少 MMLU-Pro：data/mmlu_pro" >&2; exit 1; }
+test -d /opt/opencompass-data/data/gsm8k || { echo "缺少 GSM8K：data/gsm8k" >&2; exit 1; }
+test -f /opt/opencompass-data/data/ifeval/input_data.jsonl || { echo "缺少 IFEval：data/ifeval/input_data.jsonl" >&2; exit 1; }

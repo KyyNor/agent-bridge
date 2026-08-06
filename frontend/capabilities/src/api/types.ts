@@ -1306,14 +1306,19 @@ export interface ModelEvaluationDataset {
   key: string
   label: string
   description: string
+  dimension: 'general_knowledge' | 'math' | 'instruction_following' | 'code' | 'agent'
+  dimension_label: string
+  runner: 'opencompass' | 'code' | 'swebench'
+  metric: string
+  default_max_samples: number
 }
 
 export interface ModelEvaluationRuntimeStatus {
   configured: boolean
-  executable: string | null
+  runtime: 'docker'
   message: string
-  install_command?: string
-  configure_command?: string
+  docker: { available: boolean; version?: string; message: string }
+  images: Record<string, { image: string; available: boolean }>
 }
 
 export interface ModelEvaluationModel {
@@ -1329,12 +1334,30 @@ export interface ModelEvaluationRun {
   max_samples: number
   sampling_mode: 'head' | 'random'
   sample_seed: number
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'abandoned'
+  runtime: 'docker'
+  status: 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'abandoned'
   progress_message: string
-  result: { rows?: Record<string, string>[]; summary_found?: boolean; sample_manifests?: { dataset: string; mode: 'head' | 'random'; seed: number; source_indices: number[]; source_ids: number[] }[] }
+  result: { rows?: Record<string, string>[]; summary_found?: boolean; sample_manifests?: { dataset: string; mode: 'head' | 'random'; seed: number; source_indices: number[]; source_ids: Array<number | string> }[] }
+  executions: ModelEvaluationExecution[]
   error: string | null
   output_ref: string
   created_by: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface ModelEvaluationExecution {
+  execution_id: string
+  run_id: string
+  runner_key: 'opencompass' | 'code' | 'swebench'
+  datasets: string[]
+  image: string
+  container_id: string | null
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'abandoned'
+  progress_message: string
+  result: { rows?: Record<string, string>[]; sample_manifests?: { dataset: string; mode: 'head' | 'random'; seed: number; source_indices: number[]; source_ids: Array<number | string> }[] }
+  error: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null

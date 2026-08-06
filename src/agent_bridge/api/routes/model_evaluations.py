@@ -19,7 +19,7 @@ def create_model_evaluation_routes(service, actor):
     router = APIRouter(prefix="/model-evaluations")
 
     @router.get("/datasets")
-    def list_datasets(current_actor: str = Depends(actor)) -> list[dict[str, str]]:
+    def list_datasets(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.model_evaluations.list_datasets(current_actor)
 
     @router.get("/runtime")
