@@ -10,6 +10,7 @@ import httpx
 import typer
 
 from agent_bridge.client import AgentBridgeClient
+from agent_bridge.core.defaults import DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS
 from agent_bridge.server_runtime.server_process import server_status, start_server, stop_server
 
 app = typer.Typer(
@@ -96,6 +97,7 @@ def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> di
         "type": "http",
         "url": url,
         "headers": {"X-Agent-Bridge-MetaMCP-Profile": profile},
+        "timeout": DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS,
     }
     config["mcpServers"] = servers
     return config

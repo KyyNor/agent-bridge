@@ -87,6 +87,8 @@ uv run agent-bridge profile use safe-readonly \
 - 项目 `CLAUDE.md` 或用户 `~/.claude/CLAUDE.md` 中由 Agent Bridge 管理的
   `<system-reminder>` 语义说明块。
 
+写入的 `agent-bridge` MCP server 默认设置 300 秒工具调用超时（`timeout: 300000`，单位为毫秒），用于覆盖 Claude Code 远程 HTTP MCP 的短请求超时。AgentService 为受管 Agent 生成的临时 MCP 配置也使用同一设置。
+
 它不会把完整 profile 正文或绝对文件路径复制进 CLAUDE.md。动态 profile 与
 memory 上下文由服务端维护，并通过 `SessionStart` Hook 注入。
 

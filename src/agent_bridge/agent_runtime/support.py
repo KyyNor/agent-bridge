@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from agent_bridge.core.defaults import DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS
+
 
 def build_agent_bridge_server_config(
     url: str,
@@ -39,6 +41,7 @@ def build_agent_bridge_server_config(
                 "type": "http",
                 "url": url,
                 "headers": headers,
+                "timeout": DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS,
             }
         }
     }

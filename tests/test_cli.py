@@ -216,7 +216,9 @@ def test_profile_use_writes_project_config(monkeypatch, tmp_path: Path) -> None:
     config = tmp_path / ".mcp.json"
     assert result.exit_code == 0
     assert config.exists()
+    data = json.loads(config.read_text(encoding="utf-8"))
     assert "safe-readonly" in config.read_text(encoding="utf-8")
+    assert data["mcpServers"]["agent-bridge"]["timeout"] == 300_000
 
 
 def test_profile_use_preserves_existing_servers(monkeypatch, tmp_path: Path) -> None:

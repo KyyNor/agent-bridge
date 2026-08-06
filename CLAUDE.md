@@ -67,6 +67,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 MetaMCP `/mcp` 每个请求按 profile/workflow 上下文创建 request-scoped 工具集，底层 transport 使用 stateless 模式。不要缓存包含动态工具注册的 server 实例，避免跨请求上下文泄漏。
 
+`profile use` 写入的 Agent Bridge HTTP MCP server 必须携带 300 秒工具调用超时（`timeout: 300000`，单位为毫秒），避免 Claude Code 远程 MCP 的默认短请求超时截断长耗时知识库问答。
+
 顶层 MetaMCP 工具（除固定的 `search`、`execute` 外）由 `gateway/top_level_tools.py` 维护单一目录，并可在系统管理中临时关闭。注册 tools/list、能力目录检索和对应内置能力执行必须共用该状态；不得只从 tools/list 隐藏而保留通用 `execute` 绕过路径。Profile pin 属于 Profile 配置，不纳入全局顶层工具开关。
 
 ## 文档知识后端

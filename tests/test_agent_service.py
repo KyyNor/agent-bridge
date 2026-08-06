@@ -52,6 +52,7 @@ def test_build_server_config_profile_only_has_profile_header() -> None:
     headers = config["mcpServers"]["agent-bridge"]["headers"]
     assert headers == {"X-Agent-Bridge-MetaMCP-Profile": "abc"}
     assert config["mcpServers"]["agent-bridge"]["url"] == "http://x/mcp"
+    assert config["mcpServers"]["agent-bridge"]["timeout"] == 300_000
 
 
 def test_build_server_config_workflow_requires_both_key_and_run_id() -> None:
