@@ -27,6 +27,7 @@
 - `task_key` 是工作流任务的唯一身份，`task_version` 是版本演进线。同 `task_key` 出现新 `task_version` 时，尚未运行或无需继续重试的旧版本（`pending`/`stale`/`failed`/`abandoned`）必须由下发入口（`_apply_workflow_tasks`，`workflow_set_task` 单发/批量与 Excel 导入共用）统一标为 `superseded`，调度器永不领取；`running` 旧版本让它跑完、`completed` 旧版本保留为历史产物。跨版本禁止增量复用：`select_baseline` 的 `task_version` 硬等值不得放宽，新版本首次执行必须全量。存量“同 task_key 多 version 排队”数据由 `backfill_workflow_tasks_superseded` 启动迁移幂等回填。
 - Coding Agent 的结构化输出 JSON Schema 统一按 Draft 07 传递和校验；历史 2020-12 的 `$defs` 与本地 `$ref` 仅可无损改写为 `definitions`，其余无法等价转换的专属关键字必须明确拒绝，不得静默弱化校验。
 - `profile use` 写入的 Agent Bridge HTTP MCP 配置使用 `timeout: 300000`（毫秒），将 Claude Code 远程 MCP 工具调用上限固定为 300 秒；该值与 Weknora 后端 HTTP 超时分开管理。
+- `profile use` 安装 Claude Code `SessionEnd` 配置同步 Hook；同步对实际生成的 Agent Bridge MCP、托管 Hook 和说明块计算 hash，仅在结果变化时更新，不引入 schema/version 文件，并保留用户自有配置。
 
 ## 时间处理规范
 

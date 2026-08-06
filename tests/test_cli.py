@@ -299,7 +299,15 @@ def test_profile_use_installs_claude_mem_compatible_hooks(monkeypatch, tmp_path:
     assert hooks["PostToolUse"][0]["matcher"] == "*"
     assert hooks["PreToolUse"][0]["matcher"] == "Read"
     assert hooks["Stop"][0]["hooks"][0]["timeout"] == 120
-    assert "SessionEnd" not in hooks
+    assert len(hooks["SessionEnd"]) == 1
+    session_end_hook = hooks["SessionEnd"][0]["hooks"][0]
+    assert session_end_hook["timeout"] == 5
+    assert session_end_hook["command"].startswith("agent-bridge profile sync safe-readonly")
+    session_end_argv = shlex.split(session_end_hook["command"])
+    assert session_end_argv[0:4] == ["agent-bridge", "profile", "sync", "safe-readonly"]
+    assert session_end_argv[session_end_argv.index("--scope") + 1] == "project"
+    assert "--quiet" in session_end_argv
+    assert session_end_argv[session_end_argv.index("--agent-bridge-hook-id") + 1] == "agent-bridge-profile-sync"
     probe_entries = [
         entry
         for entry in hooks["UserPromptSubmit"]
@@ -469,7 +477,88 @@ def test_profile_use_removes_managed_session_end_hook_and_preserves_user_hook(
 
     assert result.exit_code == 0
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert settings["hooks"]["SessionEnd"] == [{"hooks": [user_hook]}]
+    session_end_entries = settings["hooks"]["SessionEnd"]
+    assert session_end_entries[0] == {"hooks": [user_hook]}
+    assert len(session_end_entries) == 2
+    assert "agent-bridge-profile-sync" in session_end_entries[1]["hooks"][0]["command"]
+
+
+def test_profile_sync_updates_managed_config_and_is_idempotent(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    settings_path = tmp_path / ".claude" / "settings.local.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo user"}]}]}}),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / ".mcp.json"
+    config_path.write_text(
+        json.dumps({"mcpServers": {"existing": {"command": "node"}}}),
+        encoding="utf-8",
+    )
+
+    first = runner.invoke(
+        app,
+        [
+            "profile",
+            "use",
+            "safe-readonly",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:8765/mcp",
+            "--yes",
+        ],
+    )
+    assert first.exit_code == 0
+
+    changed = runner.invoke(
+        app,
+        [
+            "profile",
+            "sync",
+            "safe-readonly",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:9876/mcp",
+        ],
+    )
+    assert changed.exit_code == 0
+    assert "已同步" in changed.stdout
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["mcpServers"]["existing"] == {"command": "node"}
+    assert config["mcpServers"]["agent-bridge"]["url"] == "http://127.0.0.1:9876/mcp"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert settings["hooks"]["Stop"][0]["hooks"] == [{"type": "command", "command": "echo user"}]
+    assert any(
+        "http://127.0.0.1:9876" in hook["command"]
+        for entry in settings["hooks"]["SessionEnd"]
+        for hook in entry["hooks"]
+    )
+
+    before = {
+        "config": config_path.read_bytes(),
+        "settings": settings_path.read_bytes(),
+        "claude": (tmp_path / "CLAUDE.md").read_bytes(),
+    }
+    unchanged = runner.invoke(
+        app,
+        [
+            "profile",
+            "sync",
+            "safe-readonly",
+            "--scope",
+            "project",
+            "--url",
+            "http://127.0.0.1:9876/mcp",
+        ],
+    )
+    assert unchanged.exit_code == 0
+    assert unchanged.stdout.strip() == "Profile 配置已是最新"
+    assert config_path.read_bytes() == before["config"]
+    assert settings_path.read_bytes() == before["settings"]
+    assert (tmp_path / "CLAUDE.md").read_bytes() == before["claude"]
 
 
 def test_profile_use_writes_user_scope_guidance_without_profile_pointer(

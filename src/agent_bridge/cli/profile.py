@@ -8,9 +8,12 @@ from typing import Annotated, Any
 import typer
 
 from agent_bridge.capability_hub.profiles.docs import (
+    POINTER_END,
+    POINTER_START,
     SYSTEM_REMINDER_GUIDANCE,
     pointer_block,
     replace_agent_bridge_block,
+    stable_hash,
 )
 from agent_bridge.cli.profile_hooks import profile_hook_app
 
@@ -21,12 +24,15 @@ profile_app.add_typer(profile_hook_app, name="hook")
 
 AGENT_BRIDGE_MEMORY_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-memory"
 AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-retrieval-probe"
+AGENT_BRIDGE_PROFILE_SYNC_HOOK_MARKER = "--agent-bridge-hook-id agent-bridge-profile-sync"
 AGENT_BRIDGE_HOOK_MARKERS = (
     AGENT_BRIDGE_MEMORY_HOOK_MARKER,
     AGENT_BRIDGE_RETRIEVAL_HOOK_MARKER,
+    AGENT_BRIDGE_PROFILE_SYNC_HOOK_MARKER,
 )
 RETRIEVAL_PROBE_TIMEOUT_SECONDS = 20
 RETRIEVAL_PROBE_COMMAND_TIMEOUT_SECONDS = 25
+PROFILE_SYNC_HOOK_TIMEOUT_SECONDS = 5
 
 CLAUDE_MEM_COMPATIBLE_HOOKS = {
     "Setup": [
@@ -121,6 +127,28 @@ def _agent_bridge_retrieval_hook_command(
     return " ".join(shlex.quote(part) for part in parts)
 
 
+def _agent_bridge_profile_sync_hook_command(
+    *,
+    profile: str,
+    url: str,
+    scope: str,
+) -> str:
+    parts = [
+        "agent-bridge",
+        "profile",
+        "sync",
+        profile,
+        "--url",
+        url,
+        "--scope",
+        scope,
+        "--quiet",
+        "--agent-bridge-hook-id",
+        "agent-bridge-profile-sync",
+    ]
+    return " ".join(shlex.quote(part) for part in parts)
+
+
 def _load_claude_settings(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -176,6 +204,7 @@ def _install_profile_hooks(
     profile: str,
     server_url: str,
     scope: str,
+    mcp_url: str,
 ) -> dict[str, Any]:
     copied = _strip_agent_bridge_hooks(settings)
     hooks = copied.get("hooks")
@@ -231,46 +260,150 @@ def _install_profile_hooks(
         }
     )
     hooks["UserPromptSubmit"] = prompt_entries
+    session_end_entries = list(hooks.get("SessionEnd") or [])
+    session_end_entries.append(
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "shell": "bash",
+                    "command": _agent_bridge_profile_sync_hook_command(
+                        profile=profile,
+                        url=mcp_url,
+                        scope=scope,
+                    ),
+                    "timeout": PROFILE_SYNC_HOOK_TIMEOUT_SECONDS,
+                }
+            ]
+        }
+    )
+    hooks["SessionEnd"] = session_end_entries
     copied["hooks"] = hooks
     return copied
 
 
-def _write_profile_hooks(
-    scope: str,
+def _managed_mcp_projection(config: dict[str, Any]) -> dict[str, Any]:
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+    return {
+        "agent-bridge": servers.get("agent-bridge"),
+        "agent-capability-hub": servers.get("agent-capability-hub"),
+    }
+
+
+def _managed_hooks_projection(settings: dict[str, Any]) -> dict[str, Any]:
+    raw_hooks = settings.get("hooks")
+    if not isinstance(raw_hooks, dict):
+        return {}
+    projection: dict[str, Any] = {}
+    for event, entries in raw_hooks.items():
+        if not isinstance(entries, list):
+            continue
+        managed_entries = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            managed_hooks = [
+                hook
+                for hook in entry["hooks"]
+                if isinstance(hook, dict)
+                and any(marker in str(hook.get("command") or "") for marker in AGENT_BRIDGE_HOOK_MARKERS)
+            ]
+            if not managed_hooks:
+                continue
+            managed_entry: dict[str, Any] = {"hooks": managed_hooks}
+            if "matcher" in entry:
+                managed_entry["matcher"] = entry["matcher"]
+            managed_entries.append(managed_entry)
+        if managed_entries:
+            projection[event] = managed_entries
+    return projection
+
+
+def _managed_guidance_projection(content: str) -> list[str]:
+    blocks: list[str] = []
+    cursor = 0
+    while True:
+        start = content.find(POINTER_START, cursor)
+        if start < 0:
+            break
+        end = content.find(POINTER_END, start + len(POINTER_START))
+        if end < 0:
+            blocks.append(content[start:].strip())
+            break
+        end += len(POINTER_END)
+        blocks.append(content[start:end].strip())
+        cursor = end
+    return blocks
+
+
+def _profile_sync_projection(
+    config: dict[str, Any],
+    settings: dict[str, Any],
+    guidance: str,
+) -> dict[str, Any]:
+    return {
+        "mcp": _managed_mcp_projection(config),
+        "hooks": _managed_hooks_projection(settings),
+        "guidance": _managed_guidance_projection(guidance),
+    }
+
+
+def _profile_sync(
     *,
     profile: str,
-    server_url: str,
-    enabled: bool,
-) -> Path:
+    url: str,
+    scope: str,
+) -> list[Path]:
+    from agent_bridge.cli.app import _claude_config_path, _load_json_file
+
+    config_path = _claude_config_path(scope)
     settings_path = _claude_settings_path(scope)
-    settings = _load_claude_settings(settings_path)
-    updated = (
-        _install_profile_hooks(
-            settings,
-            profile=profile,
-            server_url=server_url,
-            scope=scope,
+    claude_path = (
+        Path.cwd() / "CLAUDE.md"
+        if scope == "project"
+        else Path.home() / ".claude" / "CLAUDE.md"
+    )
+    existing_config = _load_json_file(config_path)
+    existing_settings = _load_claude_settings(settings_path)
+    existing_guidance = claude_path.read_text(encoding="utf-8") if claude_path.exists() else ""
+
+    from agent_bridge.cli.app import _with_metamcp_config, _server_url_from_mcp_url
+
+    desired_config = _with_metamcp_config(existing_config, url, profile)
+    desired_settings = _install_profile_hooks(
+        existing_settings,
+        profile=profile,
+        server_url=_server_url_from_mcp_url(url),
+        scope=scope,
+        mcp_url=url,
+    )
+    desired_guidance = pointer_block(SYSTEM_REMINDER_GUIDANCE)
+    current_projection = _profile_sync_projection(existing_config, existing_settings, existing_guidance)
+    desired_projection = _profile_sync_projection(desired_config, desired_settings, desired_guidance)
+    changed: list[Path] = []
+
+    if stable_hash(current_projection["mcp"]) != stable_hash(desired_projection["mcp"]):
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            json.dumps(desired_config, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
-        if enabled
-        else _strip_agent_bridge_hooks(settings)
-    )
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
-    return settings_path
+        changed.append(config_path)
 
+    if stable_hash(current_projection["hooks"]) != stable_hash(desired_projection["hooks"]):
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(desired_settings, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        changed.append(settings_path)
 
-def _write_claude_profile_guidance(scope: str) -> Path:
-    if scope == "project":
-        claude_path = Path.cwd() / "CLAUDE.md"
-    elif scope == "user":
-        claude_path = Path.home() / ".claude" / "CLAUDE.md"
-    else:
-        raise ValueError("scope 必须是 project 或 user")
-    replace_agent_bridge_block(
-        claude_path,
-        pointer_block(SYSTEM_REMINDER_GUIDANCE),
-    )
-    return claude_path
+    if stable_hash(current_projection["guidance"]) != stable_hash(desired_projection["guidance"]):
+        replace_agent_bridge_block(claude_path, desired_guidance)
+        changed.append(claude_path)
+    return changed
 
 
 @profile_app.command("create")
@@ -343,8 +476,6 @@ def profile_use(
         _confirm_overwrite,
         _load_json_file,
         _resolve_metamcp_scope,
-        _server_url_from_mcp_url,
-        _with_metamcp_config,
     )
 
     try:
@@ -352,24 +483,41 @@ def profile_use(
         path = _claude_config_path(resolved_scope)
         existing = _load_json_file(path)
         _confirm_overwrite(existing, yes)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(_with_metamcp_config(existing, url, profile), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        hooks_path = _write_profile_hooks(
-            resolved_scope,
+        changed = _profile_sync(
             profile=profile,
-            server_url=_server_url_from_mcp_url(url),
-            enabled=True,
+            url=url,
+            scope=resolved_scope,
         )
-        claude_path = _write_claude_profile_guidance(resolved_scope)
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"配置错误: {exc}", err=True)
         raise typer.Exit(1) from None
     typer.echo(f"已写入: {path}")
-    typer.echo(f"已写入: {hooks_path}")
-    typer.echo(f"已写入: {claude_path}")
+    for changed_path in changed:
+        if changed_path != path:
+            typer.echo(f"已写入: {changed_path}")
+
+
+@profile_app.command("sync")
+def profile_sync(
+    profile: Annotated[str, typer.Argument(help="要同步的 Profile 标识")],
+    url: Annotated[str, typer.Option("--url", help="Agent Bridge MCP 地址")] = "http://127.0.0.1:8765/mcp",
+    scope: Annotated[str, typer.Option("--scope", help="配置范围: project 或 user")] = "project",
+    quiet: Annotated[bool, typer.Option("--quiet", hidden=True)] = False,
+    hook_id: Annotated[str, typer.Option("--agent-bridge-hook-id", hidden=True)] = "",
+) -> None:
+    """按当前代码生成结果幂等同步 Profile 的 MCP、Hook 和说明配置。"""
+    del hook_id
+    try:
+        changed = _profile_sync(profile=profile, url=url, scope=scope)
+    except (OSError, ValueError, RuntimeError) as exc:
+        typer.echo(f"配置同步失败: {exc}", err=True)
+        raise typer.Exit(1) from None
+    if quiet:
+        return
+    if changed:
+        typer.echo(f"已同步 {len(changed)} 个配置文件")
+    else:
+        typer.echo("Profile 配置已是最新")
 
 
 @pins_app.command("refresh")
