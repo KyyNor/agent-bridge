@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TanStack Query 前端渐进式改造计划</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; background: #f6f8fb; }
+    body { max-width: 960px; margin: 0 auto; padding: 42px 24px 64px; line-height: 1.65; }
+    article { background: #fff; border: 1px solid #dce3ee; border-radius: 16px; padding: 36px; box-shadow: 0 10px 30px rgba(23, 32, 51, .06); }
+    h1 { margin: 0 0 8px; font-size: 30px; line-height: 1.2; }
+    h2 { margin: 34px 0 12px; padding-top: 4px; border-top: 1px solid #e8edf4; font-size: 21px; }
+    h3 { margin: 24px 0 8px; font-size: 16px; }
+    p, li { color: #334155; }
+    .lede { color: #536277; font-size: 17px; }
+    .decision { border-left: 4px solid #2563eb; padding: 12px 16px; background: #eff6ff; color: #1e3a5f; border-radius: 0 8px 8px 0; }
+    code { padding: 2px 5px; border-radius: 4px; background: #f1f5f9; color: #0f3f74; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+    th, td { padding: 10px; text-align: left; vertical-align: top; border: 1px solid #dce3ee; }
+    th { background: #f8fafc; color: #1e293b; }
+    .tag { display: inline-block; margin-right: 6px; padding: 2px 7px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: 12px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <article>
+    <h1>TanStack Query 前端渐进式改造计划</h1>
+    <p class="lede">范围：<code>frontend/capabilities</code> 的服务端读取、缓存、失效与运行态轮询。计划不改变 API 契约、工作流业务语义或编辑器本地状态模型。</p>
+
+    <p class="decision"><strong>决策：</strong>引入 <code>@tanstack/vue-query</code>，但只作为 server state 层。先完成观测与运行态页面，再迁移工作流和知识管理的读取路径；表单草稿、Vue Flow 画布、上传进度和弹窗仍由现有 Vue composable 管理。</p>
+
+    <h2>现状与目标</h2>
+    <ul>
+      <li><code>src/api/client.ts</code> 约 920 行，集中封装了大量接口，但 GET 请求均为 <code>cache: 'no-store'</code>，无客户端查询缓存与取消语义。</li>
+      <li>日志、Agent Run、工作流产物等页面各自维护 <code>loading</code>、错误回退、请求 token 和定时器。典型位置包括 <code>LogsView.vue</code>、<code>AgentRunsView.vue</code>、<code>useWorkflowArtifacts.ts</code> 和 <code>useWorkflowRunProgress.ts</code>。</li>
+      <li>目标是消除重复的异步读取样板代码，做到按 query key 去重、在路由返回时复用短时缓存、写入后精确失效，以及只对运行中任务条件轮询。</li>
+    </ul>
+
+    <h2>边界与非目标</h2>
+    <table>
+      <thead><tr><th>纳入</th><th>不纳入</th></tr></thead>
+      <tbody>
+        <tr><td>GET 查询、详情按需加载、分页/筛选、运行状态轮询、写后失效</td><td>后端 API 路由、数据模型、工作流调度和 SSE 协议改造</td></tr>
+        <tr><td>读取请求的 <code>AbortSignal</code> 透传</td><td>Vue Flow 节点、表单草稿、上传百分比、导航离开守卫和确认弹窗的状态迁移</td></tr>
+        <tr><td>保留手动“刷新”按钮，改为 <code>refetch</code></td><td>通过 Query 隐藏写操作失败、或对所有 mutation 做乐观更新</td></tr>
+      </tbody>
+    </table>
+
+    <h2>阶段 0：基础设施</h2>
+    <ol>
+      <li>新增 <code>@tanstack/vue-query</code> 依赖，在 <code>src/main.ts</code> 安装单例 <code>VueQueryPlugin</code> 和 <code>QueryClient</code>。</li>
+      <li>新增 <code>src/lib/query.ts</code>：统一 query key 工厂、客户端默认项和可复用的错误提示转换。key 必须以资源域开头并包含会影响结果的全部参数，例如 <code>['agent-runs', 'list', filters]</code> 与 <code>['workflow-runs', runId, 'events']</code>。</li>
+      <li>全局采用保守默认：<code>staleTime: 15_000</code>、<code>gcTime: 300_000</code>、<code>retry: false</code>、<code>refetchOnWindowFocus: false</code>。稳定配置类数据按 query 覆盖到 60 秒；运行中资源自行开启条件轮询。</li>
+      <li>为 <code>api/client.ts</code> 底层读取方法增加可选 <code>signal</code>，并在首批查询接口透传 TanStack 提供的 signal。保持现有调用兼容，mutation 不自动重试。</li>
+    </ol>
+
+    <h2>阶段 1：优先迁移观测与运行态页面</h2>
+    <table>
+      <thead><tr><th>范围</th><th>改造方式</th><th>失效/轮询策略</th></tr></thead>
+      <tbody>
+        <tr><td><code>LogsView.vue</code></td><td>筛选和分页仍用 <code>ref</code>；防抖后的搜索词进入 query key；列表和详情分别使用 <code>useQuery</code>。</td><td>手动刷新调用 <code>refetch</code>；不在焦点恢复时自动刷新，避免覆盖用户筛选体验。</td></tr>
+        <tr><td><code>StatsView.vue</code></td><td>维度作为 query key 的一部分，删除手工 <code>loading</code> 与 <code>loadStats</code>。</td><td>维度切换自然形成新缓存项；手动刷新只刷新当前维度。</td></tr>
+        <tr><td><code>AgentRunsView.vue</code></td><td>列表、单次运行、事件、payload、子 Agent 详情拆成独立查询；删除列表请求 token。</td><td>仅当详情状态为 <code>running</code> 时，每 1.5 秒刷新运行和事件；结束后停止。停止运行 mutation 成功后失效该运行、事件和列表。</td></tr>
+      </tbody>
+    </table>
+
+    <h2>阶段 2：工作流读取层</h2>
+    <ol>
+      <li>先在 <code>useWorkflowArtifacts.ts</code> 中迁移产物搜索、详情和历史；查询 key 必须覆盖 profile、workflow、搜索词、路径、格式、页码和页大小。</li>
+      <li>在 <code>useWorkflowRunProgress.ts</code> 迁移运行概览、运行详情、日志、事件和 Agent Run 关联信息。保留现有进度视图选择状态、批量队列和路由跳转。</li>
+      <li><code>runWorkflow</code>、<code>stopWorkflowRun</code>、任务执行/重置成功后，精确失效 <code>workflow-runs</code>、当前 run、事件、关联 Agent Run 和产物列表；不以“全局刷新”替代失效。</li>
+      <li>暂不整体迁移 2,000 余行的 <code>WorkflowView.vue</code>。仅让它消费 composable 暴露的 query 状态，待阶段 2 稳定后再评估其余静态资源读取。</li>
+    </ol>
+
+    <h2>阶段 3：稳定配置与知识管理页面</h2>
+    <ul>
+      <li>迁移服务、Profile、脚本、Skill、后端、代码仓库和知识库列表/详情等读取路径。配置写入成功后失效所属列表和详情，不采用普遍乐观更新。</li>
+      <li>知识库目录/浏览结果的 key 必须包含 <code>kbSlug</code>、目录与压缩包上下文；文档上传仍保留 <code>useKnowledgeUploadQueue</code>，完成后只失效当前知识库的相关目录、文档和同步状态。</li>
+      <li>Dashboard 的“服务后逐项加载工具数”属于 API 聚合问题，不将 Query 作为 N+1 的替代方案；单独评估是否增加摘要字段或聚合接口。</li>
+    </ul>
+
+    <h2>测试与验收</h2>
+    <ol>
+      <li>为 query key 工厂、条件轮询判定和 mutation 失效范围补充单元测试；用 mock API 验证切换筛选时旧响应不会覆盖新数据。</li>
+      <li>为首批三个页面补充组件行为测试：首次加载、错误、手动刷新、分页/搜索、防抖、详情打开以及运行结束后停止轮询。</li>
+      <li>验证路由往返：短时返回复用缓存；显式刷新和成功 mutation 后始终读取新数据；离开页面后 observer 停止，未完成请求可被取消。</li>
+      <li>每阶段运行 <code>cd frontend/capabilities &amp;&amp; npm run check</code>。阶段 2 完成后再运行相关后端/API 测试，确保前端未改变 API 语义。</li>
+    </ol>
+
+    <h2>实施顺序与提交策略</h2>
+    <p><span class="tag">提交 1</span>依赖、QueryClient、key 工厂与读取 signal 兼容层。<br>
+      <span class="tag">提交 2</span>Logs、Stats、Agent Runs 迁移及测试。<br>
+      <span class="tag">提交 3</span>工作流产物与运行进度迁移及测试。<br>
+      <span class="tag">提交 4+</span>按领域迁移稳定配置和知识管理读取路径。</p>
+    <p>每个提交独立可运行；若阶段 1 的刷新、筛选或轮询行为不满足验收，停止扩展迁移并先修复基础设施。</p>
+  </article>
+</body>
+</html>

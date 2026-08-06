@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Search, RotateCw } from '@lucide/vue'
-import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
+import { onUnmounted, ref, computed } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 import { api } from '../../api/client'
 import type { ToolCallLog, ToolCallLogCounts } from '../../api/types'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
@@ -19,22 +20,19 @@ import { countToolCallTabs } from '../../lib/filterTabs'
 import { extractLogMarkdownPreview } from '../../lib/logMarkdownPreview'
 import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
 import { toolCallDisplayName } from '../../lib/toolCallDisplay'
+import { queryKeys } from '../../lib/query'
 
-const logs = ref<ToolCallLog[]>([])
-const logTotal = ref(0)
-const logCounts = ref<ToolCallLogCounts>({ all: 0, success: 0, failed: 0, running: 0, error: 0, blocked: 0 })
-const loading = ref(false)
 const statusFilter = ref('')
 const sourceFilter = ref('__all__')
 const search = ref('')
+const debouncedSearch = ref('')
 const page = ref(1)
 const pageSize = ref(100)
 
 const showDetail = ref(false)
-const detailLog = ref<ToolCallLog | null>(null)
-const detailLoading = ref(false)
+const selectedLog = ref<ToolCallLog | null>(null)
+const selectedLogId = ref('')
 const previewOpen = ref(false)
-let listRequestToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
 function todayRange() {
@@ -54,7 +52,6 @@ function formatDate(d: Date) {
 const dateFrom = ref(formatDate(new Date(Date.now() - 86400000)))
 const dateTo = ref(formatDate(new Date()))
 
-onMounted(() => loadLogData())
 onUnmounted(() => {
   if (searchDebounce) clearTimeout(searchDebounce)
 })
@@ -67,70 +64,59 @@ function baseParams(): Record<string, string | number> {
   if (sourceFilter.value !== '__all__') params.source_type = sourceFilter.value
   if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
   if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
-  if (search.value.trim()) params.search = search.value.trim()
+  if (debouncedSearch.value) params.search = debouncedSearch.value
   return params
 }
 
-async function loadLogData() {
-  const token = ++listRequestToken
-  loading.value = true
+const logParams = computed(() => {
   const params = baseParams()
   if (statusFilter.value) params.status = statusFilter.value
-  try {
-    const pageResult = await api.listLogsPage(params)
-    if (token !== listRequestToken) return
-    logCounts.value = pageResult.counts
-    logs.value = pageResult.items
-    logTotal.value = pageResult.total
-  } catch {
-    if (token !== listRequestToken) return
-    logs.value = []
-    logTotal.value = 0
-    logCounts.value = { all: 0, success: 0, failed: 0, running: 0, error: 0, blocked: 0 }
-  } finally {
-    if (token === listRequestToken) loading.value = false
-  }
-}
+  return params
+})
+
+const logListQuery = useQuery({
+  queryKey: computed(() => queryKeys.toolCallLogs(logParams.value)),
+  queryFn: ({ signal }) => api.listLogsPage(logParams.value, { signal }),
+})
+
+const detailQuery = useQuery({
+  queryKey: computed(() => queryKeys.toolCallLog(selectedLogId.value)),
+  queryFn: ({ signal }) => api.getLog(selectedLogId.value, { signal }),
+  enabled: computed(() => showDetail.value && Boolean(selectedLogId.value)),
+})
+
+const emptyCounts: ToolCallLogCounts = { all: 0, success: 0, failed: 0, running: 0, error: 0, blocked: 0 }
+const logs = computed(() => logListQuery.data.value?.items || [])
+const logTotal = computed(() => logListQuery.data.value?.total || 0)
+const logCounts = computed(() => logListQuery.data.value?.counts || emptyCounts)
+const loading = computed(() => logListQuery.isLoading.value)
+const detailLog = computed(() => detailQuery.data.value || selectedLog.value)
+const detailLoading = computed(() => detailQuery.isLoading.value)
 
 function applyFilter(status: string) {
   statusFilter.value = status
-  const wasFirstPage = page.value === 1
   page.value = 1
-  if (wasFirstPage) loadLogData()
 }
 
 function applyDateFilter() {
-  const wasFirstPage = page.value === 1
   page.value = 1
-  if (wasFirstPage) loadLogData()
 }
 
 function applySourceFilter() {
-  const wasFirstPage = page.value === 1
   page.value = 1
-  if (wasFirstPage) loadLogData()
 }
 
 function scheduleSearch() {
   page.value = 1
   if (searchDebounce) clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => loadLogData(), 250)
+  searchDebounce = setTimeout(() => { debouncedSearch.value = search.value.trim() }, 250)
 }
 
-watch([page, pageSize], () => {
-  if (searchDebounce) clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => loadLogData(), 0)
-})
-
-async function openDetail(log: ToolCallLog) {
-  detailLog.value = log
+function openDetail(log: ToolCallLog) {
+  selectedLog.value = log
+  selectedLogId.value = log.log_id
   showDetail.value = true
   previewOpen.value = false
-  detailLoading.value = true
-  try {
-    detailLog.value = await api.getLog(log.log_id)
-  } catch { /* use list data as fallback */ }
-  detailLoading.value = false
 }
 
 const displayLogs = computed(() => logs.value)
@@ -177,7 +163,7 @@ function entrypointLabel(entrypoint: string): string {
   <div v-else class="space-y-5">
     <!-- 页头操作：刷新进 #ph-actions（LogsView 无 primary 主操作） -->
     <Teleport to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="loadLogData">
+      <Button variant="outline" size="lg" @click="logListQuery.refetch()">
         <RotateCw :size="14" />
         刷新
       </Button>

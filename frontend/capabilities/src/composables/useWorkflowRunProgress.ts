@@ -29,6 +29,7 @@ import {
   navigateTo,
 } from '../lib/navigation'
 import { lastAgentRunEventId, mergeAgentRunEvent, normalizeAgentRunEvents } from '../lib/agentRunEvents'
+import { queryClient, queryKeys } from '../lib/query'
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '未知错误'
@@ -132,6 +133,14 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
   const progressFinished = computed(() =>
     !!progressRun.value && ['completed', 'no_task', 'failed', 'stopped'].includes(progressRun.value.status),
   )
+
+  async function fetchWorkflowRun(runId: string, options: { fresh?: boolean } = {}) {
+    return queryClient.fetchQuery({
+      queryKey: queryKeys.workflowRun(runId),
+      queryFn: ({ signal }) => api.getWorkflowRun(runId, { signal }),
+      ...(options.fresh ? { staleTime: 0 } : {}),
+    })
+  }
 
   function applyRunOverviews(overviews: Array<{
     workflow_key: string
@@ -449,7 +458,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     if (progressRunArtifacts.value[runId]) return
     progressArtifactsLoading.value = true
     try {
-      const result = await api.searchWorkflowArtifacts({
+      const params = {
         workflow_key: workflowKey,
         run_id: runId,
         // 编排收尾失败时，当前 run 仍可能有有效的部分产物；精确 run_id
@@ -458,6 +467,10 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
         full: false,
         format: 'all',
         limit: 20,
+      }
+      const result = await queryClient.fetchQuery({
+        queryKey: queryKeys.workflowArtifacts(params),
+        queryFn: ({ signal }) => api.searchWorkflowArtifacts(params, { signal }),
       })
       progressRunArtifacts.value = { ...progressRunArtifacts.value, [runId]: result.items }
     } catch (e: unknown) {
@@ -470,10 +483,11 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
 
   async function openProgressArtifactDetail(artifact: WorkflowArtifact) {
     try {
-      const detail = await api.getWorkflowArtifact(
-        artifact.artifact_id,
-        selectedWorkflow.value?.profile_key || formProfileKey() || undefined,
-      )
+      const profileKey = selectedWorkflow.value?.profile_key || formProfileKey() || undefined
+      const detail = await queryClient.fetchQuery({
+        queryKey: queryKeys.workflowArtifact(artifact.artifact_id, profileKey),
+        queryFn: ({ signal }) => api.getWorkflowArtifact(artifact.artifact_id, profileKey, { signal }),
+      })
       openArtifactFullscreen(detail)
     } catch (e: unknown) {
       setArtifactError(errorMessage(e))
@@ -511,7 +525,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     const runId = testingRunId.value
     if (!runId) return
     try {
-      const run = await api.getWorkflowRun(runId)
+      const run = await fetchWorkflowRun(runId, { fresh: true })
       progressRunDetail.value = run
       mergeWorkflowRun(run)
       // Refresh agent runs list (to pick up html reporter when it starts) and
@@ -524,6 +538,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
         const workflowKey = progressWorkflowKey.value || run.workflow_key
         await loadRuns(workflowKey)
         if (run.status === 'completed' || run.status === 'no_task') {
+          await queryClient.invalidateQueries({ queryKey: ['workflow-artifacts'] })
           await searchArtifacts()
         }
       }
@@ -549,6 +564,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
       // The API normalizes the scheduler response to `run_status`; a run id is
       // the stable signal that the progress page can load and poll.
       if (res.run_id) {
+        await queryClient.invalidateQueries({ queryKey: ['workflow-runs'] })
         testingRunId.value = res.run_id
         progressWorkflowKey.value = wf.workflow_key
         progressRunId.value = res.run_id
@@ -584,7 +600,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     progressRunId.value = run.run_id
     selectedRunId.value = run.run_id
     setProgressAgentRunKey('')
-    progressRunDetail.value = await api.getWorkflowRun(run.run_id)
+    progressRunDetail.value = await fetchWorkflowRun(run.run_id)
     await loadProgressAgentRuns()
     await loadProgressAgentEvents()
     if (run.status === 'running') {
@@ -599,7 +615,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     await loadProgressAgentRuns()
     await loadProgressAgentEvents()
     if (progressRunId.value) {
-      const detail = await api.getWorkflowRun(progressRunId.value)
+      const detail = await fetchWorkflowRun(progressRunId.value, { fresh: true })
       progressRunDetail.value = detail
       mergeWorkflowRun(detail)
       selectedRunId.value = progressRunId.value
@@ -631,7 +647,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
     setProgressAgentRunKey('')
     await loadRuns(workflow.workflow_key, { preserveSelectedRun: true })
     if (runId) {
-      const detail = await api.getWorkflowRun(runId)
+      const detail = await fetchWorkflowRun(runId)
       progressRunDetail.value = detail
       mergeWorkflowRun(detail)
       selectedRunId.value = runId

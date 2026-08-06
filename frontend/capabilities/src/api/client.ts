@@ -207,8 +207,12 @@ function formatHttpError(_status: number, raw: string): string {
   return detail || '请求失败，请稍后重试'
 }
 
-async function get<T>(url: string): Promise<T> {
-  const r = await fetch(url, { headers: headers(), cache: 'no-store' })
+export type ApiRequestOptions = {
+  signal?: AbortSignal
+}
+
+async function get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
+  const r = await fetch(url, { headers: headers(), cache: 'no-store', signal: options.signal })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
@@ -324,8 +328,8 @@ function postFormDataWithProgress<T>(
   })
 }
 
-async function getBlob(url: string): Promise<Blob> {
-  const r = await fetch(url, { headers: headers() })
+async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Blob> {
+  const r = await fetch(url, { headers: headers(), signal: options.signal })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.blob()
 }
@@ -335,7 +339,7 @@ export const api = {
   listTopLevelMcpTools: () => get<TopLevelMcpTool[]>('/capabilities/top-level-mcp-tools'),
   updateTopLevelMcpToolStatus: (name: string, status: 'enabled' | 'disabled') =>
     post<TopLevelMcpTool>(`/capabilities/top-level-mcp-tools/${name}/status`, { status }),
-  listServices: (summary = false) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`),
+  listServices: (summary = false, options?: ApiRequestOptions) => get<McpService[]>(`/capabilities/mcp-services${summary ? '?summary=true' : ''}`, options),
   getService: (key: string) => get<McpService>(`/capabilities/mcp-services/${key}`),
   registerService: (s: Partial<McpService> & { service_key: string; name: string; endpoint_url: string; expected_edit_token?: string | null }) =>
     post<McpService>('/capabilities/mcp-services', s),
@@ -363,7 +367,7 @@ export const api = {
     ),
 
   // OpenAPI Services
-  listOpenApiServices: (summary = false) => get<OpenApiService[]>(`/capabilities/openapi-services${summary ? '?summary=true' : ''}`),
+  listOpenApiServices: (summary = false, options?: ApiRequestOptions) => get<OpenApiService[]>(`/capabilities/openapi-services${summary ? '?summary=true' : ''}`, options),
   getOpenApiService: (key: string) => get<OpenApiService>(`/capabilities/openapi-services/${key}`),
   registerOpenApiService: (s: Partial<OpenApiService> & { service_key: string; name: string; base_url: string; expected_edit_token?: string | null }) =>
     post<OpenApiService>('/capabilities/openapi-services', s),
@@ -396,7 +400,7 @@ export const api = {
   },
 
   // Profiles
-  listProfiles: () => get<ProjectProfile[]>('/capability-profiles'),
+  listProfiles: (options?: ApiRequestOptions) => get<ProjectProfile[]>('/capability-profiles', options),
   getProfile: (key: string) => get<ProjectProfile>(`/capability-profiles/${key}`),
   upsertProfile: (p: Partial<ProjectProfile> & { profile_key: string; name: string; expected_edit_token?: string | null }) =>
     post<ProjectProfile>('/capability-profiles', { status: 'active', ...p }),
@@ -566,7 +570,7 @@ export const api = {
     format?: string
     limit?: number
     offset?: number
-  } = {}) => {
+  } = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     if (params.profile_key) qs.set('profile_key', params.profile_key)
     if (params.workflow_key) qs.set('workflow_key', params.workflow_key)
@@ -582,26 +586,26 @@ export const api = {
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset != null) qs.set('offset', String(params.offset))
     ;(params.tags || []).forEach(tag => qs.append('tags', tag))
-    return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`)
+    return get<WorkflowArtifactSearchResult>(`/workflow-artifacts?${qs}`, options)
   },
   getWorkflowArtifactHistory: (params: {
     profile_key?: string
     workflow_key: string
     task_key: string
     limit?: number
-  }) => {
+  }, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     if (params.profile_key) qs.set('profile_key', params.profile_key)
     qs.set('workflow_key', params.workflow_key)
     qs.set('task_key', params.task_key)
     if (params.limit) qs.set('limit', String(params.limit))
-    return get<WorkflowArtifactHistoryResult>(`/workflow-artifacts/history?${qs}`)
+    return get<WorkflowArtifactHistoryResult>(`/workflow-artifacts/history?${qs}`, options)
   },
-  getWorkflowArtifact: (artifactId: string, profileKey?: string) => {
+  getWorkflowArtifact: (artifactId: string, profileKey?: string, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     if (profileKey) qs.set('profile_key', profileKey)
     const tail = qs.toString() ? `?${qs}` : ''
-    return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`)
+    return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`, options)
   },
   executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string, executionMode: WorkflowExecutionMode = 'normal') => {
     const qs = new URLSearchParams()
@@ -620,7 +624,7 @@ export const api = {
       `/workflows/${workflowKey}/tasks/${encodeURIComponent(taskKey)}/reset${tail}`,
     )
   },
-  getWorkflowRun: (runId: string) => get<WorkflowRun>(`/workflow-runs/${runId}`),
+  getWorkflowRun: (runId: string, options?: ApiRequestOptions) => get<WorkflowRun>(`/workflow-runs/${runId}`, options),
   stopWorkflowRun: (runId: string) =>
     post<RunStopResponse>(`/workflow-runs/${encodeURIComponent(runId)}/stop`),
 
@@ -630,15 +634,15 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => qs.set(k, String(v)))
     return get<ToolCallLog[]>(`/tool-call-logs?${qs}`)
   },
-  listLogsPage: (params: Record<string, string | number | boolean> = {}) => {
+  listLogsPage: (params: Record<string, string | number | boolean> = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     Object.entries({ ...params, paginated: true }).forEach(([k, v]) => qs.set(k, String(v)))
-    return get<ToolCallLogPage>(`/tool-call-logs?${qs}`)
+    return get<ToolCallLogPage>(`/tool-call-logs?${qs}`, options)
   },
-  getLog: (id: string) => get<ToolCallLog>(`/tool-call-logs/${id}`),
-  stats: (params: Record<string, string> = {}) => {
+  getLog: (id: string, options?: ApiRequestOptions) => get<ToolCallLog>(`/tool-call-logs/${id}`, options),
+  stats: (params: Record<string, string> = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams(params)
-    return get<ToolCallStats>(`/tool-call-stats?${qs}`)
+    return get<ToolCallStats>(`/tool-call-stats?${qs}`, options)
   },
 
   // Agent runs
@@ -647,22 +651,22 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => qs.set(k, String(v)))
     return get<AgentRun[]>(`/agent-runs?${qs}`)
   },
-  listAgentRunsPage: (params: Record<string, string | number | boolean> = {}) => {
+  listAgentRunsPage: (params: Record<string, string | number | boolean> = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams()
     Object.entries({ ...params, paginated: true }).forEach(([k, v]) => qs.set(k, String(v)))
-    return get<AgentRunPage>(`/agent-runs?${qs}`)
+    return get<AgentRunPage>(`/agent-runs?${qs}`, options)
   },
-  getAgentRun: (runKey: string) => get<AgentRun>(`/agent-runs/${runKey}`),
+  getAgentRun: (runKey: string, options?: ApiRequestOptions) => get<AgentRun>(`/agent-runs/${runKey}`, options),
   stopAgentRun: (runKey: string) =>
     post<RunStopResponse>(`/agent-runs/${encodeURIComponent(runKey)}/stop`),
   /** Live event stream for an agent run (reads events.jsonl in real time,
    *  falls back to persisted DB events for historical runs). */
-  getAgentRunEvents: (runKey: string) => get<WorkflowRunEvent[]>(`/agent-runs/${runKey}/events`),
-  getAgentRunPayload: (runKey: string, ref: string) =>
-    getBlob(`/agent-runs/${encodeURIComponent(runKey)}/payload?ref=${encodeURIComponent(ref)}`),
-  getAgentRunSubagentDetail: (runKey: string, taskId: string) => {
+  getAgentRunEvents: (runKey: string, options?: ApiRequestOptions) => get<WorkflowRunEvent[]>(`/agent-runs/${runKey}/events`, options),
+  getAgentRunPayload: (runKey: string, ref: string, options?: ApiRequestOptions) =>
+    getBlob(`/agent-runs/${encodeURIComponent(runKey)}/payload?ref=${encodeURIComponent(ref)}`, options),
+  getAgentRunSubagentDetail: (runKey: string, taskId: string, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams({ task_id: taskId })
-    return get<WorkflowSubagentDetail>(`/agent-runs/${runKey}/subagent-detail?${qs}`)
+    return get<WorkflowSubagentDetail>(`/agent-runs/${runKey}/subagent-detail?${qs}`, options)
   },
   /** Fetch the single agent run (with full events) associated with a workflow run. */
   getAgentRunForWorkflowRun: async (workflowRunId: string): Promise<AgentRun | null> => {
@@ -711,7 +715,7 @@ export const api = {
     ),
 
   // Code Repos
-  listCodeRepos: () => get<CodeRepository[]>('/code-repo/repositories'),
+  listCodeRepos: (options?: ApiRequestOptions) => get<CodeRepository[]>('/code-repo/repositories', options),
   getCodeRepo: (key: string) => get<CodeRepository>(`/code-repo/repositories/${key}`),
   upsertCodeRepo: (r: Partial<CodeRepository> & { repo_key: string; name: string; git_url: string; expected_edit_token?: string | null }) =>
     post<CodeRepository>('/code-repo/repositories', { status: 'active', ...r }),
@@ -719,7 +723,7 @@ export const api = {
     post<TestCloneResult>('/code-repo/test-clone', { git_url: gitUrl, auth_ref: authRef }),
   syncCodeRepo: (key: string) => post(`/code-repo/repositories/${key}/sync`),
   deleteCodeRepo: (key: string) => post<{ deleted: boolean }>(`/code-repo/repositories/${key}/delete`),
-  listWikiKbs: () => get<KnowledgeBaseSummary[]>('/builtin/wiki/kbs'),
+  listWikiKbs: (options?: ApiRequestOptions) => get<KnowledgeBaseSummary[]>('/builtin/wiki/kbs', options),
 
   // CodeGraph detail
   getCodeGraphStatus: () => get<CodeGraphStatus>('/code-repo/status'),
@@ -747,7 +751,7 @@ export const api = {
   touchDashboard: (repoKey: string) => post<{ ok: boolean }>(`/code-repo/repositories/${repoKey}/understand/dashboard/touch`),
 
   // Categories
-  listCategories: () => get<CodeRepoCategory[]>('/code-repo/categories'),
+  listCategories: (options?: ApiRequestOptions) => get<CodeRepoCategory[]>('/code-repo/categories', options),
   upsertCategory: (c: { category_key: string; name: string; description?: string; expected_edit_token?: string | null }) =>
     post<CodeRepoCategory>('/code-repo/categories', c),
   deleteCategory: (key: string) => post<{ ok: boolean }>(`/code-repo/categories/${key}/delete`),
@@ -962,7 +966,7 @@ export const api = {
     post<{ answer: string; chunks: SearchResultChunk[]; session_id: string | null }>('/ask', data),
 
   // Backends
-  listBackends: () => get<BackendInfo[]>('/backends'),
+  listBackends: (options?: ApiRequestOptions) => get<BackendInfo[]>('/backends', options),
   createBackend: (data: { slug: string; backend_type: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>
     post<BackendInfo>('/backends', data),
   updateBackend: (slug: string, data: { backend_type?: string; base_url?: string | null; api_key?: string | null; timeout?: number; embedding_model_id?: string | null; summary_model_id?: string | null; rerank_model_id?: string | null; expected_edit_token?: string | null }) =>

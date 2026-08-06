@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
+import { onUnmounted, ref, computed, watch } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 import { Search, RotateCw, ArrowLeft } from '@lucide/vue'
 import { api } from '../../api/client'
-import type { AgentRun, AgentRunCounts } from '../../api/types'
+import type { AgentRun, AgentRunCounts, WorkflowRunEvent } from '../../api/types'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -22,33 +23,26 @@ import {
 } from '../../lib/agentRunStatus'
 import { countAgentRunTabs } from '../../lib/filterTabs'
 import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
-import type { WorkflowRunEvent } from '../../api/types'
 import { buildAgentRunHash, navigateTo, parseSubRoute, routeReturnTo } from '../../lib/navigation'
 import { useSubagentDetails } from '../../composables/useSubagentDetails'
 import { useAgentRunEventStream } from '../../composables/useAgentRunEventStream'
 import { lastAgentRunEventId, mergeAgentRunEvent, normalizeAgentRunEvents } from '../../lib/agentRunEvents'
+import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey?: string }>()
 
-const runs = ref<AgentRun[]>([])
-const runTotal = ref(0)
-const runCounts = ref<AgentRunCounts>({ all: 0, success: 0, failed: 0, running: 0, stopped: 0 })
-const loading = ref(false)
 const okFilter = ref<AgentRunFilter>('')
 const search = ref('')
+const debouncedSearch = ref('')
 const page = ref(1)
 const pageSize = ref(50)
 
 // Detail (sub-route) state. When routeKey is set we show a detail panel instead
 // of the list — enabling deep links (#agent-runs/{runKey}) aligned with how the
 // workflow view handles its sub-routes.
-const detailRun = ref<AgentRun | null>(null)
-const detailLoading = ref(false)
-const detailError = ref('')
-const detailEvents = ref<WorkflowRunEvent[]>([])
+const selectedRun = ref<AgentRun | null>(null)
 const payloads = ref<Record<string, string>>({})
 const payloadErrors = ref<Record<string, string>>({})
-let listRequestToken = 0
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
 // 子 Agent 详情仅在展开时加载；状态管理与 Workflow 页面共用。
@@ -56,6 +50,7 @@ const subagentDetailState = useSubagentDetails(
   (runKey, taskId) => api.getAgentRunSubagentDetail(runKey, taskId),
 )
 const detailEventStream = useAgentRunEventStream()
+let streamedRunKey = ''
 
 async function ensureSubagentDetail(taskId: string) {
   await subagentDetailState.ensure(activeRunKey.value, taskId)
@@ -81,13 +76,6 @@ function formatDate(d: Date) {
 const dateFrom = ref(formatDate(new Date(Date.now() - 86400000 * 3)))
 const dateTo = ref(formatDate(new Date()))
 
-onMounted(() => {
-  loadRunData()
-  if (activeRunKey.value) loadDetail(activeRunKey.value)
-})
-
-onUnmounted(() => stopDetailEventStream())
-
 function baseRunParams(): Record<string, string | number | boolean> {
   const params: Record<string, string | number | boolean> = {
     limit: pageSize.value,
@@ -95,7 +83,7 @@ function baseRunParams(): Record<string, string | number | boolean> {
   }
   if (dateFrom.value) params.created_from = `${dateFrom.value} 00:00:00`
   if (dateTo.value) params.created_to = `${dateTo.value} 23:59:59`
-  if (search.value.trim()) params.search = search.value.trim()
+  if (debouncedSearch.value) params.search = debouncedSearch.value
   return params
 }
 
@@ -107,92 +95,76 @@ function addActiveRunFilter(params: Record<string, string | number | boolean>) {
   return params
 }
 
-async function loadRunData() {
-  const token = ++listRequestToken
-  loading.value = true
+const runParams = computed(() => {
   const params = baseRunParams()
   addActiveRunFilter(params)
-  try {
-    const pageResult = await api.listAgentRunsPage(params)
-    if (token !== listRequestToken) return
-    runCounts.value = pageResult.counts
-    runs.value = pageResult.items
-    runTotal.value = pageResult.total
-  } catch {
-    if (token !== listRequestToken) return
-    runCounts.value = { all: 0, success: 0, failed: 0, running: 0, stopped: 0 }
-    runs.value = []
-    runTotal.value = 0
-  } finally {
-    if (token === listRequestToken) loading.value = false
-  }
-}
+  return params
+})
+
+const runListQuery = useQuery({
+  queryKey: computed(() => queryKeys.agentRuns(runParams.value)),
+  queryFn: ({ signal }) => api.listAgentRunsPage(runParams.value, { signal }),
+})
+
+const detailQuery = useQuery({
+  queryKey: computed(() => queryKeys.agentRun(activeRunKey.value)),
+  queryFn: ({ signal }) => api.getAgentRun(activeRunKey.value, { signal }),
+  enabled: computed(() => Boolean(activeRunKey.value)),
+  refetchInterval: query => query.state.data?.status === 'running' ? 1_500 : false,
+})
+
+const detailEventsQuery = useQuery({
+  queryKey: computed(() => queryKeys.agentRunEvents(activeRunKey.value)),
+  queryFn: ({ signal }) => api.getAgentRunEvents(activeRunKey.value, { signal }),
+  enabled: computed(() => Boolean(activeRunKey.value)),
+  refetchInterval: computed(() => detailQuery.data.value?.status === 'running' ? 1_500 : false),
+})
+
+const emptyCounts: AgentRunCounts = { all: 0, success: 0, failed: 0, running: 0, stopped: 0 }
+const runs = computed(() => runListQuery.data.value?.items || [])
+const runTotal = computed(() => runListQuery.data.value?.total || 0)
+const runCounts = computed(() => runListQuery.data.value?.counts || emptyCounts)
+const loading = computed(() => runListQuery.isLoading.value)
+const detailRun = computed(() => detailQuery.data.value || selectedRun.value)
+const detailLoading = computed(() => detailQuery.isLoading.value)
+const detailEvents = computed<WorkflowRunEvent[]>(() => detailEventsQuery.data.value || [])
+const detailError = computed(() => {
+  const error = detailQuery.error.value || detailEventsQuery.error.value
+  return error instanceof Error ? error.message : error ? '运行详情加载失败' : ''
+})
 
 function applyOkFilter(key: string) {
   okFilter.value = key as AgentRunFilter
-  const wasFirstPage = page.value === 1
   page.value = 1
-  if (wasFirstPage) loadRunData()
 }
 
 function applyDateFilter() {
-  const wasFirstPage = page.value === 1
   page.value = 1
-  if (wasFirstPage) loadRunData()
 }
 
 function scheduleSearch() {
   page.value = 1
   if (searchDebounce) clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => loadRunData(), 250)
+  searchDebounce = setTimeout(() => { debouncedSearch.value = search.value.trim() }, 250)
 }
-
-watch([page, pageSize], () => {
-  if (searchDebounce) clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => loadRunData(), 0)
-})
 
 onUnmounted(() => {
   if (searchDebounce) clearTimeout(searchDebounce)
+  stopDetailEventStream()
 })
 
-/** Open a run's detail as a sub-route (deep-linkable). */
 function openDetail(run: AgentRun) {
-  detailRun.value = run
-  detailError.value = ''
+  selectedRun.value = run
   void navigateTo(buildAgentRunHash(run.run_key, returnToRoute.value))
 }
 
 function backToList() {
-  detailRun.value = null
-  detailError.value = ''
-  detailEvents.value = []
+  selectedRun.value = null
   payloads.value = {}
   payloadErrors.value = {}
   stopDetailEventStream()
   void navigateTo(returnToRoute.value || 'agent-runs', { replace: true })
 }
-
-async function loadDetail(runKey: string) {
-  detailLoading.value = true
-  detailError.value = ''
-  payloads.value = {}
-  payloadErrors.value = {}
-  stopDetailEventStream()
-  try {
-    detailRun.value = await api.getAgentRun(runKey)
-    await loadDetailEvents(runKey)
-    if (detailRun.value?.status === 'running') {
-      startDetailEventStream(runKey)
-    }
-  } catch (e: unknown) {
-    detailRun.value = null
-    detailEvents.value = []
-    detailError.value = e instanceof Error ? e.message : '加载失败'
-  }
-  detailLoading.value = false
-}
-
 async function loadPayload(ref: string) {
   if (!ref || payloads.value[ref] !== undefined) return
   try {
@@ -206,52 +178,64 @@ async function loadPayload(ref: string) {
   }
 }
 
-async function loadDetailEvents(runKey: string) {
-  try {
-    detailEvents.value = normalizeAgentRunEvents(await api.getAgentRunEvents(runKey))
-  } catch (e: unknown) {
-    detailEvents.value = []
-    detailError.value = e instanceof Error ? e.message : '事件流加载失败'
-  }
+function stopDetailEventStream() {
+  detailEventStream.stop()
+  streamedRunKey = ''
 }
 
-function startDetailEventStream(runKey: string) {
+function ensureDetailEventStream() {
+  const runKey = activeRunKey.value
+  const detail = detailQuery.data.value
+  if (!runKey || detail?.run_key !== runKey || detail.status !== 'running') {
+    if (streamedRunKey) stopDetailEventStream()
+    return
+  }
+  if (streamedRunKey === runKey) return
+  streamedRunKey = runKey
   detailEventStream.start(runKey, lastAgentRunEventId(detailEvents.value), {
     onAgentEvent(event) {
-      if (detailRun.value?.run_key !== runKey) return
-      detailEvents.value = mergeAgentRunEvent(detailEvents.value, event)
+      if (activeRunKey.value !== runKey) return
+      queryClient.setQueryData<WorkflowRunEvent[]>(
+        queryKeys.agentRunEvents(runKey),
+        events => mergeAgentRunEvent(normalizeAgentRunEvents(events || []), event),
+      )
     },
     async onTerminal() {
-      if (detailRun.value?.run_key !== runKey) return
-      detailRun.value = await api.getAgentRun(runKey)
+      if (activeRunKey.value !== runKey) return
+      const detail = await api.getAgentRun(runKey)
+      if (activeRunKey.value !== runKey) return
+      queryClient.setQueryData(queryKeys.agentRun(runKey), detail)
+      await queryClient.invalidateQueries({ queryKey: ['agent-runs', 'list'] })
+      streamedRunKey = ''
       await subagentDetailState.refreshLoaded(runKey)
     },
     async onResyncRequired() {
-      if (detailRun.value?.run_key !== runKey) return
-      await loadDetailEvents(runKey)
-      detailRun.value = await api.getAgentRun(runKey)
-      if (detailRun.value.status === 'running') startDetailEventStream(runKey)
+      if (activeRunKey.value !== runKey) return
+      const [detail, events] = await Promise.all([
+        api.getAgentRun(runKey),
+        api.getAgentRunEvents(runKey),
+      ])
+      if (activeRunKey.value !== runKey) return
+      queryClient.setQueryData(queryKeys.agentRun(runKey), detail)
+      queryClient.setQueryData(queryKeys.agentRunEvents(runKey), normalizeAgentRunEvents(events))
+      streamedRunKey = ''
+      ensureDetailEventStream()
     },
   })
 }
 
-function stopDetailEventStream() {
-  detailEventStream.stop()
-}
+watch(activeRunKey, key => {
+  stopDetailEventStream()
+  selectedRun.value = key ? runs.value.find(run => run.run_key === key) || null : null
+  payloads.value = {}
+  payloadErrors.value = {}
+})
 
-// React to sub-route changes (browser back/forward, manual hash edit).
-watch(activeRunKey, (key) => {
-  if (key) {
-    // If the list already has a summary row, show it immediately while loading.
-    if (!detailRun.value || detailRun.value.run_key !== key) {
-      detailRun.value = runs.value.find(r => r.run_key === key) || null
-    }
-    loadDetail(key)
-  } else {
-    detailRun.value = null
-    detailEvents.value = []
-    detailError.value = ''
-    stopDetailEventStream()
+watch(() => detailQuery.data.value, () => ensureDetailEventStream(), { immediate: true })
+
+watch(detailEvents, () => {
+  if (activeRunKey.value && detailRun.value?.status === 'running') {
+    void subagentDetailState.refreshLoaded(activeRunKey.value)
   }
 })
 
@@ -397,7 +381,7 @@ function backendBadgeClass(backend: string | null | undefined): string {
   <div v-else class="space-y-5">
     <!-- 页头操作：刷新进 #ph-actions（仅列表态） -->
     <Teleport v-if="!activeRunKey" to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="loadRunData">
+      <Button variant="outline" size="lg" @click="runListQuery.refetch()">
         <RotateCw :size="14" />
         刷新
       </Button>
