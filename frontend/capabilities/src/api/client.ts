@@ -458,11 +458,11 @@ export const api = {
   getRetrievalProbeLlmConfig: () => get<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config'),
   saveRetrievalProbeLlmConfig: (config: RetrievalProbeLlmConfigUpdate) =>
     put<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config', config),
-  listModelEvaluationDatasets: () => get<ModelEvaluationDataset[]>('/model-evaluations/datasets'),
-  getModelEvaluationRuntime: () => get<ModelEvaluationRuntimeStatus>('/model-evaluations/runtime'),
+  listModelEvaluationDatasets: (options?: ApiRequestOptions) => get<ModelEvaluationDataset[]>('/model-evaluations/datasets', options),
+  getModelEvaluationRuntime: (options?: ApiRequestOptions) => get<ModelEvaluationRuntimeStatus>('/model-evaluations/runtime', options),
   listEvaluationModels: (connection: { base_url?: string; api_key?: string }) =>
     post<ModelEvaluationModel[]>('/model-evaluations/models', connection),
-  listModelEvaluationRuns: () => get<ModelEvaluationRun[]>('/model-evaluations'),
+  listModelEvaluationRuns: (options?: ApiRequestOptions) => get<ModelEvaluationRun[]>('/model-evaluations', options),
   startModelEvaluationRun: (payload: { model_name: string; datasets: string[]; max_samples: number; sampling_mode: 'head' | 'random'; sample_seed: number; base_url?: string; api_key?: string }) =>
     post<ModelEvaluationRun>('/model-evaluations', payload),
 

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 import { api } from '../../api/client'
-import type { ModelEvaluationDataset, ModelEvaluationModel, ModelEvaluationRun, ModelEvaluationRuntimeStatus } from '../../api/types'
+import type { ModelEvaluationDataset, ModelEvaluationModel, ModelEvaluationRun } from '../../api/types'
+import { queryClient, queryKeys } from '../../lib/query'
 import { formatLocalDatetime } from '../../lib/time'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -9,23 +11,45 @@ import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import StatusBadge from '../../components/StatusBadge.vue'
 
-const datasets = ref<ModelEvaluationDataset[]>([])
-const runs = ref<ModelEvaluationRun[]>([])
 const models = ref<ModelEvaluationModel[]>([])
-const runtime = ref<ModelEvaluationRuntimeStatus | null>(null)
 const form = ref({
   base_url: '', api_key: '', model_name: '', datasets: ['gsm8k_chat_gen'] as string[], max_samples: 64,
   sampling_mode: 'head' as 'head' | 'random', sample_seed: 42,
 })
 const selectedRun = ref<ModelEvaluationRun | null>(null)
 const showRunDetail = ref(false)
-const loading = ref(true)
 const loadingModels = ref(false)
 const starting = ref(false)
-const error = ref('')
-let refreshTimer: number | undefined
+const actionError = ref('')
 
-const activeRunExists = computed(() => runs.value.some(run => run.status === 'queued' || run.status === 'running'))
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message || fallback : fallback
+}
+
+const datasetsQuery = useQuery({
+  queryKey: queryKeys.modelEvaluationDatasets(),
+  queryFn: ({ signal }) => api.listModelEvaluationDatasets({ signal }),
+  staleTime: 60_000,
+})
+const runtimeQuery = useQuery({
+  queryKey: queryKeys.modelEvaluationRuntime(),
+  queryFn: ({ signal }) => api.getModelEvaluationRuntime({ signal }),
+})
+const runsQuery = useQuery({
+  queryKey: queryKeys.modelEvaluationRuns(),
+  queryFn: ({ signal }) => api.listModelEvaluationRuns({ signal }),
+  refetchInterval: query => query.state.data?.some(run => run.status === 'queued' || run.status === 'running') ? 4_000 : false,
+})
+
+const datasets = computed(() => datasetsQuery.data.value || [])
+const runs = computed(() => runsQuery.data.value || [])
+const runtime = computed(() => runtimeQuery.data.value || null)
+const loading = computed(() => datasetsQuery.isLoading.value || runtimeQuery.isLoading.value || runsQuery.isLoading.value)
+const error = computed(() => {
+  if (actionError.value) return actionError.value
+  const queryError = datasetsQuery.error.value || runtimeQuery.error.value || runsQuery.error.value
+  return queryError ? errorMessage(queryError, '加载模型评估失败') : ''
+})
 const datasetGroups = computed(() => {
   const grouped = new Map<string, ModelEvaluationDataset[]>()
   for (const dataset of datasets.value) {
@@ -36,44 +60,29 @@ const datasetGroups = computed(() => {
   return [...grouped.entries()].map(([key, items]) => ({ key, label: items[0]?.dimension_label || key, items }))
 })
 
-onMounted(async () => {
-  await Promise.all([loadDatasets(), loadRuns(), loadRuntime()])
-  loading.value = false
-  refreshTimer = window.setInterval(() => { if (activeRunExists.value) void loadRuns() }, 4_000)
-})
-
-onUnmounted(() => { if (refreshTimer !== undefined) window.clearInterval(refreshTimer) })
-
-async function loadDatasets() {
-  try { datasets.value = await api.listModelEvaluationDatasets() } catch (e: any) { error.value = e.message || '无法加载可用数据集' }
-}
-
-async function loadRuns() {
-  try { runs.value = await api.listModelEvaluationRuns() } catch (e: any) { error.value = e.message || '无法加载评估记录' }
-}
-
-async function loadRuntime() {
-  try { runtime.value = await api.getModelEvaluationRuntime() } catch (e: any) { error.value = e.message || '无法获取评估运行时状态' }
+function refreshRuns() {
+  actionError.value = ''
+  void runsQuery.refetch()
 }
 
 async function loadModels() {
   loadingModels.value = true
-  error.value = ''
+  actionError.value = ''
   try {
     models.value = await api.listEvaluationModels({ base_url: form.value.base_url, api_key: form.value.api_key })
     if (!models.value.some(item => item.id === form.value.model_name)) form.value.model_name = models.value[0]?.id || ''
-    if (!models.value.length) error.value = '接口未返回可用模型'
-  } catch (e: any) { error.value = e.message || '获取模型列表失败' } finally { loadingModels.value = false }
+    if (!models.value.length) actionError.value = '接口未返回可用模型'
+  } catch (error: unknown) { actionError.value = errorMessage(error, '获取模型列表失败') } finally { loadingModels.value = false }
 }
 
 async function startEvaluation() {
   starting.value = true
-  error.value = ''
+  actionError.value = ''
   try {
     await api.startModelEvaluationRun({ ...form.value })
     form.value.api_key = ''
-    await loadRuns()
-  } catch (e: any) { error.value = e.message || '启动评估失败' } finally { starting.value = false }
+    await queryClient.invalidateQueries({ queryKey: queryKeys.modelEvaluationRuns() })
+  } catch (error: unknown) { actionError.value = errorMessage(error, '启动评估失败') } finally { starting.value = false }
 }
 
 function toggleDataset(key: string, checked: boolean) {
@@ -194,7 +203,7 @@ function openRunDetail(run: ModelEvaluationRun) {
 
     <Card>
       <CardContent class="p-5">
-        <div class="mb-4 flex items-center justify-between"><div><div class="text-base font-medium">评估记录</div><p class="mt-1 text-sm text-muted-foreground">每项能力使用独立 Docker runner；详情中可查看子执行、镜像与实际抽样题目。</p></div><Button size="sm" variant="outline" @click="loadRuns">刷新</Button></div>
+        <div class="mb-4 flex items-center justify-between"><div><div class="text-base font-medium">评估记录</div><p class="mt-1 text-sm text-muted-foreground">每项能力使用独立 Docker runner；详情中可查看子执行、镜像与实际抽样题目。</p></div><Button size="sm" variant="outline" @click="refreshRuns">刷新</Button></div>
         <div v-if="!runs.length" class="py-10 text-center text-sm text-muted-foreground">尚未发起模型评估。</div>
         <div v-else class="overflow-x-auto"><table class="w-full min-w-[900px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">模型</th><th class="px-3 py-2">数据集</th><th class="px-3 py-2">每集题数</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">结果</th><th class="px-3 py-2">创建时间</th><th class="px-3 py-2"></th></tr></thead><tbody><tr v-for="run in runs" :key="run.run_id" class="border-b border-border/70"><td class="px-3 py-3 font-mono text-xs">{{ run.model_name }}</td><td class="px-3 py-3 text-xs">{{ run.datasets.join('、') }}</td><td class="px-3 py-3 text-xs">{{ run.max_samples }}</td><td class="px-3 py-3"><StatusBadge :status="statusTone(run.status)" :label="statusLabel(run.status)" /><div v-if="run.error" class="mt-1 max-w-xs text-xs text-destructive">{{ run.error }}</div><div v-else-if="run.status !== 'completed'" class="mt-1 text-xs text-muted-foreground">{{ run.progress_message }}</div></td><td class="max-w-sm px-3 py-3 text-xs text-muted-foreground">{{ scoreSummary(run) }}</td><td class="px-3 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(run.created_at) }}</td><td class="px-3 py-3 text-right"><Button size="sm" variant="outline" @click="openRunDetail(run)">查看详情</Button></td></tr></tbody></table></div>
       </CardContent>

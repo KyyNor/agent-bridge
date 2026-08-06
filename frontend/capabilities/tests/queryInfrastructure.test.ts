@@ -46,6 +46,16 @@ test('monitoring pages use query keys instead of local request tokens', () => {
   assert.doesNotMatch(agentRuns, /detailEventsPoll/)
 })
 
+test('model evaluation only polls while an evaluation is active', () => {
+  const evaluations = source('views/system/ModelEvaluationView.vue')
+
+  assert.match(evaluations, /queryKeys\.modelEvaluationRuns/)
+  assert.match(evaluations, /refetchInterval/)
+  assert.match(evaluations, /run\.status === 'queued' \|\| run\.status === 'running'/)
+  assert.doesNotMatch(evaluations, /setInterval/)
+  assert.doesNotMatch(evaluations, /refreshTimer/)
+})
+
 test('workflow artifact and run readers share the query cache', () => {
   const artifacts = source('composables/useWorkflowArtifacts.ts')
   const progress = source('composables/useWorkflowRunProgress.ts')
