@@ -356,6 +356,7 @@ class KnowledgeSyncConfigRequest(BaseModel):
     log_retention_days: int = Field(default=180, ge=1)
     mcp_timeout_seconds: int = 150
     understand_timeout_minutes: int = 120
+    artifact_search_cache_ttl_hours: int = Field(default=8, ge=1, le=168)
     expected_edit_token: str | None = None
 
 

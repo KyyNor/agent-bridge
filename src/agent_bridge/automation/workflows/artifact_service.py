@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agent_bridge.core.cache import DEFAULT_CACHE_TTL_SECONDS, DiskCacheStore
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
 from agent_bridge.automation.workflows.models import WorkflowArtifactFormat
 
@@ -38,12 +40,20 @@ class ArtifactService:
         store: "SQLiteStore",
         admins: set[str],
         workflow_service: Any = None,
+        cache_dir: Path | str | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
         # 反向引用 WorkflowService，用于校验运行上下文等编排能力。可选以便
         # 在隔离测试中单独使用本服务。
         self.workflow_service = workflow_service
+        if cache_dir is None:
+            cache_dir = Path(store.db_path).parent / "artifact-search-cache"
+        self._search_cache = DiskCacheStore(
+            cache_dir,
+            namespace="workflow-artifact-search",
+            default_expire=DEFAULT_CACHE_TTL_SECONDS,
+        )
 
     def save_artifact(
         self,
@@ -224,6 +234,29 @@ class ArtifactService:
             raise ValidationError("limit must be positive")
         bounded_limit = min(limit, 50)
         bounded_offset = max(offset, 0)
+        cache_ttl_hours = self._search_cache_ttl_hours()
+        cache_key = {
+            "version": 1,
+            "ttl_hours": cache_ttl_hours,
+            "profile_key": profile_key,
+            "query": query,
+            "tags": sorted(str(tag) for tag in tags),
+            "path": path,
+            "workflow_key": workflow_key,
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+            "task_key": task_key,
+            "task_version": task_version,
+            "run_id": run_id,
+            "include_history": include_history,
+            "full": full,
+            "format": format,
+            "paginated": paginated,
+            "path_match": path_match,
+        }
+        cached = self._search_cache.get(cache_key)
+        if isinstance(cached, dict):
+            return cached
         if paginated:
             page = self.store.workflows.search_workflow_artifacts_page(
                 profile_key=profile_key,
@@ -290,7 +323,15 @@ class ArtifactService:
                     "offset": page["offset"],
                 }
             )
+        self._search_cache.set(cache_key, result, expire=cache_ttl_hours * 60 * 60)
         return result
+
+    def _search_cache_ttl_hours(self) -> int:
+        config = self.store.get_sync_config()
+        try:
+            return max(1, int(config.get("artifact_search_cache_ttl_hours") or 8))
+        except (TypeError, ValueError):
+            return 8
 
     def list_artifact_history(
         self,

@@ -114,6 +114,40 @@ def test_search_artifacts_full_default_false_keeps_snippet_behaviour(wm_paths):
     assert "snippet" in result["items"][0]
 
 
+def test_search_artifacts_uses_disk_cache_and_new_ttl_takes_effect(wm_paths, monkeypatch):
+    svc = _service(wm_paths)
+    _seed_artifact(svc, run_id="run_1", task_version="v1", title="A", content="# full body v1")
+
+    original_search = svc.store.search_workflow_artifacts
+    calls = 0
+
+    def counted_search(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_search(*args, **kwargs)
+
+    monkeypatch.setattr(svc.store, "search_workflow_artifacts", counted_search)
+    kwargs = {
+        "actor": "root",
+        "profile_key": "report-plane",
+        "query": None,
+        "tags": [],
+        "path": None,
+        "workflow_key": "w",
+        "task_key": "page:a",
+        "include_history": False,
+        "limit": 10,
+    }
+
+    svc.workflows.search_artifacts(**kwargs)
+    svc.workflows.search_artifacts(**kwargs)
+    assert calls == 1
+
+    svc.store.save_sync_config(code_sync_cron="0 * * * *", artifact_search_cache_ttl_hours=2)
+    svc.workflows.search_artifacts(**kwargs)
+    assert calls == 2
+
+
 def test_running_artifacts_do_not_replace_current_until_run_completes(wm_paths):
     svc = _service(wm_paths)
     _seed_artifact(svc, run_id="run_1", task_version="v1", title="A v1", content="# full body v1")

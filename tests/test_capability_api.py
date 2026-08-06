@@ -1189,6 +1189,23 @@ def test_sync_config_api_round_trips_log_retention_days(wm_paths) -> None:
     assert loaded.json()["log_retention_days"] == 90
 
 
+def test_sync_config_api_round_trips_artifact_search_cache_ttl(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    saved = client.post(
+        "/sync-config",
+        json={"code_sync_cron": "0 * * * *", "artifact_search_cache_ttl_hours": 12},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    loaded = client.get("/sync-config", headers={"X-Agent-Bridge-User": "root"})
+
+    assert saved.status_code == 200
+    assert saved.json()["artifact_search_cache_ttl_hours"] == 12
+    assert loaded.status_code == 200
+    assert loaded.json()["artifact_search_cache_ttl_hours"] == 12
+
+
 def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths) -> None:
     repo = _git_repo(tmp_path / "repo")
     app = create_app(paths=wm_paths, admins={"root"})

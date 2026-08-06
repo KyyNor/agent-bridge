@@ -511,6 +511,7 @@ CREATE TABLE IF NOT EXISTS knowledge_sync_config (
   log_retention_days INTEGER NOT NULL DEFAULT 180,
   mcp_timeout_seconds INTEGER NOT NULL DEFAULT 150,
   understand_timeout_minutes INTEGER NOT NULL DEFAULT 120,
+  artifact_search_cache_ttl_hours INTEGER NOT NULL DEFAULT 8,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS retrieval_probe_llm_config (

@@ -241,7 +241,12 @@ class AgentBridgeService:
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
         self.model_evaluations = ModelEvaluationService(paths=paths, store=store, admins=admins)
         self.workflows = WorkflowService(
-            store=store, admins=admins, agent_service=self.agents, skills=self.skills, scripts=self.scripts
+            store=store,
+            admins=admins,
+            agent_service=self.agents,
+            skills=self.skills,
+            scripts=self.scripts,
+            artifact_search_cache_dir=paths.artifact_search_cache_dir,
         )
         self.workflow_output_handler = OutputHandler(
             agent_service=self.agents, skill_service=self.skills, workflow_service=self.workflows
@@ -1141,6 +1146,7 @@ class AgentBridgeService:
         log_retention_days: int = 180,
         mcp_timeout_seconds: int = DEFAULT_MCP_TIMEOUT_SECONDS,
         understand_timeout_minutes: int = 120,
+        artifact_search_cache_ttl_hours: int = 8,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
@@ -1170,6 +1176,7 @@ class AgentBridgeService:
             log_retention_days=log_retention_days,
             mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
+            artifact_search_cache_ttl_hours=artifact_search_cache_ttl_hours,
         )
         self.store.set_runtime_log_retention_days(log_retention_days)
         deleted_logs = self.store.prune_runtime_logs(force=True)

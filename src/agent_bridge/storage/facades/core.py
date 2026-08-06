@@ -209,6 +209,7 @@ class CoreFacadeMixin:
         log_retention_days: int = 180,
         mcp_timeout_seconds: int = 150,
         understand_timeout_minutes: int = 120,
+        artifact_search_cache_ttl_hours: int = 8,
     ) -> dict[str, Any]:
         return self.codegraph.save_sync_config(
             code_sync_cron=code_sync_cron,
@@ -228,4 +229,5 @@ class CoreFacadeMixin:
             log_retention_days=log_retention_days,
             mcp_timeout_seconds=mcp_timeout_seconds,
             understand_timeout_minutes=understand_timeout_minutes,
+            artifact_search_cache_ttl_hours=artifact_search_cache_ttl_hours,
         )

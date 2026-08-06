@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from agent_bridge.core.domain import ConflictError, NotFound, ValidationError, require_admin_user
@@ -54,6 +55,7 @@ class WorkflowService:
         agent_service: Any = None,
         skills: Any = None,
         scripts: Any = None,
+        artifact_search_cache_dir: Path | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
@@ -69,7 +71,12 @@ class WorkflowService:
             skills=skills,
             scripts=scripts,
         )
-        self._artifacts = ArtifactService(store=store, admins=admins, workflow_service=self)
+        self._artifacts = ArtifactService(
+            store=store,
+            admins=admins,
+            workflow_service=self,
+            cache_dir=artifact_search_cache_dir,
+        )
         self._imports = DefinitionImportService(
             store=store, admins=admins, validator=self.validator,
             upsert_definition=self.upsert_definition,

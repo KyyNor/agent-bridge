@@ -1227,6 +1227,7 @@ export interface KnowledgeSyncConfig {
   log_retention_days: number
   mcp_timeout_seconds: number
   understand_timeout_minutes: number
+  artifact_search_cache_ttl_hours: number
   edit_token?: string
 }
 

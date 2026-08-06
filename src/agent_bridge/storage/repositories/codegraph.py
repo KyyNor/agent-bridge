@@ -15,7 +15,7 @@ SYNC_CONFIG_COLUMNS = (
     "workflow_start_time, workflow_stop_time, workflow_max_runs, "
     "workflow_max_concurrent_runs, workflow_max_concurrent_runs_per_workflow, "
     "workflow_max_runtime_minutes, workflow_task_rerun_days, log_retention_days, "
-    "mcp_timeout_seconds, understand_timeout_minutes"
+    "mcp_timeout_seconds, understand_timeout_minutes, artifact_search_cache_ttl_hours"
 )
 
 SYNC_CONFIG_DEFAULTS: dict[str, Any] = {
@@ -36,6 +36,7 @@ SYNC_CONFIG_DEFAULTS: dict[str, Any] = {
     "log_retention_days": 180,
     "mcp_timeout_seconds": DEFAULT_MCP_TIMEOUT_SECONDS,
     "understand_timeout_minutes": 120,
+    "artifact_search_cache_ttl_hours": 8,
 }
 
 
@@ -67,6 +68,7 @@ def resolve_sync_config(row: sqlite3.Row | None) -> dict[str, Any]:
         "log_retention_days": int(row[14]) if len(row) > 14 and row[14] is not None else 180,
         "mcp_timeout_seconds": int(row[15]) if len(row) > 15 and row[15] is not None else DEFAULT_MCP_TIMEOUT_SECONDS,
         "understand_timeout_minutes": int(row[16]) if len(row) > 16 and row[16] is not None else 120,
+        "artifact_search_cache_ttl_hours": int(row[17]) if len(row) > 17 and row[17] is not None else 8,
     }
 
 
@@ -332,12 +334,13 @@ class CodeGraphRepository:
         log_retention_days: int = 180,
         mcp_timeout_seconds: int = DEFAULT_MCP_TIMEOUT_SECONDS,
         understand_timeout_minutes: int = 120,
+        artifact_search_cache_ttl_hours: int = 8,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, ua_plugin_update_cron, claude_mem_git_url, claude_mem_plugin_update_cron, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_concurrent_runs, workflow_max_concurrent_runs_per_workflow, workflow_max_runtime_minutes, workflow_task_rerun_days, log_retention_days, mcp_timeout_seconds, understand_timeout_minutes)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO knowledge_sync_config (id, code_sync_cron, ua_git_url, ua_plugin_update_cron, claude_mem_git_url, claude_mem_plugin_update_cron, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_concurrent_runs, workflow_max_concurrent_runs_per_workflow, workflow_max_runtime_minutes, workflow_task_rerun_days, log_retention_days, mcp_timeout_seconds, understand_timeout_minutes, artifact_search_cache_ttl_hours)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   code_sync_cron = excluded.code_sync_cron,
                   ua_git_url = excluded.ua_git_url,
@@ -356,9 +359,10 @@ class CodeGraphRepository:
                   log_retention_days = excluded.log_retention_days,
                   mcp_timeout_seconds = excluded.mcp_timeout_seconds,
                   understand_timeout_minutes = excluded.understand_timeout_minutes,
+                  artifact_search_cache_ttl_hours = excluded.artifact_search_cache_ttl_hours,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (code_sync_cron, ua_git_url, ua_plugin_update_cron, claude_mem_git_url, claude_mem_plugin_update_cron, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_concurrent_runs, workflow_max_concurrent_runs_per_workflow, workflow_max_runtime_minutes, workflow_task_rerun_days, log_retention_days, mcp_timeout_seconds, understand_timeout_minutes),
+                (code_sync_cron, ua_git_url, ua_plugin_update_cron, claude_mem_git_url, claude_mem_plugin_update_cron, understand_cron, doc_sync_cron, workflow_start_time, workflow_stop_time, workflow_max_runs, workflow_max_concurrent_runs, workflow_max_concurrent_runs_per_workflow, workflow_max_runtime_minutes, workflow_task_rerun_days, log_retention_days, mcp_timeout_seconds, understand_timeout_minutes, artifact_search_cache_ttl_hours),
             )
             return {
                 "code_sync_cron": code_sync_cron,
@@ -378,4 +382,5 @@ class CodeGraphRepository:
                 "log_retention_days": log_retention_days,
                 "mcp_timeout_seconds": mcp_timeout_seconds,
                 "understand_timeout_minutes": understand_timeout_minutes,
+                "artifact_search_cache_ttl_hours": artifact_search_cache_ttl_hours,
             }

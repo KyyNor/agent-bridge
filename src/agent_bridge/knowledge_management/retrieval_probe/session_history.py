@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from diskcache import Cache
+from agent_bridge.core.cache import DiskCacheStore
 
 
 SESSION_HISTORY_RETAINED_ROUNDS = 12
@@ -31,7 +31,11 @@ class ProbeSessionHistoryStoreProtocol(Protocol):
 class ProbeSessionHistoryStore:
     def __init__(self, cache_dir) -> None:
         self.cache_dir = cache_dir
-        self._cache = Cache(str(cache_dir))
+        self._cache = DiskCacheStore(
+            cache_dir,
+            namespace="probe-session",
+            default_expire=SESSION_HISTORY_TTL_SECONDS,
+        )
 
     def recent(self, profile_key: str, session_id: str, limit: int) -> tuple[ProbeHistoryEntry, ...]:
         if not session_id or limit < 1:

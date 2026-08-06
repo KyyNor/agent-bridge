@@ -48,6 +48,7 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 业务台账是 `business_ledger` 内置能力来源，Agent 只获得顶级 `query_business_ledger` 读取工具；管理定义和数据的 API 不得注册到 Agent MCP。没有 Profile 或未显式绑定资源时必须 fail closed；拒绝访问时只能提示当前 Profile 已获授权的台账。
 
 `workflow_artifacts` 的标题、摘要、路径和正文通过 jieba 预分词与 SQLite FTS5 索引检索；中文查询词按 `AND` 组合，长度至少 3 的 ASCII 标识符使用 FTS5 前缀匹配，短 token 和带分隔符的路径/标识符使用字面匹配。Profile、current/history、标签、格式和路径前缀仍由普通表条件过滤。原始产物正文不被改写，分词副本单独维护并随 artifact 生命周期同步。
+`artifacts_search` 结果通过公共 `DiskCacheStore` 做磁盘缓存，TTL 默认 8 小时，由系统配置中的 `artifact_search_cache_ttl_hours` 控制；检索请求每次读取当前配置，修改后立即生效。当前版本暂不因新产物或 current 状态变化主动清理检索缓存。
 
 领域失败抛 `AgentBridgeError` 子类，由 API 全局异常处理器转换为 HTTP 响应。重新分类错误时使用明确类型并 `raise ... from exc`，不要修改任意异常对象。
 

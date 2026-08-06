@@ -295,6 +295,7 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "log_retention_days": "INTEGER NOT NULL DEFAULT 180",
             "mcp_timeout_seconds": "INTEGER NOT NULL DEFAULT 150",
             "understand_timeout_minutes": "INTEGER NOT NULL DEFAULT 120",
+            "artifact_search_cache_ttl_hours": "INTEGER NOT NULL DEFAULT 8",
         },
     )
     # Workflow scheduling moved from a single global cron to a daily

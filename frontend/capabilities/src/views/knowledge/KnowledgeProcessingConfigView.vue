@@ -37,6 +37,7 @@ const syncConfig = ref<KnowledgeSyncConfig>({
   log_retention_days: 180,
   mcp_timeout_seconds: 150,
   understand_timeout_minutes: 120,
+  artifact_search_cache_ttl_hours: 8,
 })
 const configSaving = ref(false)
 const cronError = ref('')
@@ -231,6 +232,11 @@ const mcpTimeoutValid = computed(() =>
 const understandTimeoutValid = computed(() =>
   Number.isInteger(syncConfig.value.understand_timeout_minutes) && syncConfig.value.understand_timeout_minutes > 0,
 )
+const artifactSearchCacheTtlValid = computed(() =>
+  Number.isInteger(syncConfig.value.artifact_search_cache_ttl_hours)
+  && syncConfig.value.artifact_search_cache_ttl_hours >= 1
+  && syncConfig.value.artifact_search_cache_ttl_hours <= 168,
+)
 const cronValid = computed(() =>
   codeSyncNextRuns.value !== null
   && understandNextRuns.value !== null
@@ -245,7 +251,8 @@ const cronValid = computed(() =>
   && workflowRuntimeValid.value
   && logRetentionValid.value
   && mcpTimeoutValid.value
-  && understandTimeoutValid.value,
+  && understandTimeoutValid.value
+  && artifactSearchCacheTtlValid.value,
 )
 const runCountText = computed(() => {
   const wf = schedulerStatus.value?.workflow
@@ -608,6 +615,12 @@ async function deleteBackend(slug: string) {
           <Input v-model.number="syncConfig.understand_timeout_minutes" type="number" min="1" placeholder="120" class="w-32 font-mono text-sm" />
           <span v-if="understandTimeoutValid" class="text-xs text-muted-foreground">单次 Understand Anything 分析的墙钟上限，超时即终止（默认 120）</span>
           <span v-else class="text-xs text-destructive">请输入正整数</span>
+        </div>
+        <div class="grid grid-cols-[12rem_minmax(0,auto)_1fr] items-center gap-4">
+          <div class="text-sm shrink-0 whitespace-nowrap">产物检索缓存 <span class="text-xs text-muted-foreground">(小时)</span></div>
+          <Input v-model.number="syncConfig.artifact_search_cache_ttl_hours" type="number" min="1" max="168" placeholder="8" class="w-32 font-mono text-sm" />
+          <span v-if="artifactSearchCacheTtlValid" class="text-xs text-muted-foreground">artifacts_search 结果的默认缓存时长，保存后立即按新时长生效（默认 8）</span>
+          <span v-else class="text-xs text-destructive">请输入 1～168 之间的整数</span>
         </div>
         <div class="grid grid-cols-[12rem_minmax(0,10rem)_1fr] items-center gap-4">
           <div class="text-sm shrink-0 whitespace-nowrap">知识同步 <span class="text-xs text-muted-foreground">(文档知识同步)</span></div>
