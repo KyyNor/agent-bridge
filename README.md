@@ -59,16 +59,23 @@ uv run agent-bridge server stop
 
 ## 模型评估运行时
 
-「系统管理 → 模型评估」使用 OpenCompass 的 OpenAI 兼容 API 适配器，第一版提供 GSM8K 与 MATH 两个小规模 Demo 数据集。页面可设置“每个数据集最多题数”（默认 64、范围 1–1000），并选择固定前 N 条或带 seed 的随机抽样；所有勾选数据集按相同上限执行。题数、抽样方式、seed 以及实际抽样索引会随评估记录保存，以便换模型时复跑同一批题。评估模型的 URL 与 API Key 同时留空时，会复用「系统管理 → 公共模型配置」中的全量探测关键词模型连接；密钥仅传给评估子进程，不保存到 SQLite 或评估记录。
+「系统管理 → 模型评估」只支持本地 Docker，不会向 Agent Bridge 主 Python 环境安装 OpenCompass。评估按五个能力维度组织：通用知识（C-Eval、MMLU-Pro）、数学（GSM8K）、指令遵循（IFEval）、代码（HumanEval、MBPP）和 Agent（SWE-bench Lite）。页面可设置“每个数据集最多题数”（默认 64、范围 1–1000），并选择固定前 N 条或带 seed 的随机抽样；所有勾选数据集按相同上限执行，SWE-bench 中对应最多任务数。
 
-OpenCompass 0.5.3 固定 `httpx==0.27.2`，而当前 PageIndex 运行时要求 `httpx>=0.28.1`，两者不能安全共装。因此它不是主仓库的可选依赖组：即使声明为 extra 或 uv dependency group，安装时仍会尝试解析到同一个环境并发生冲突。请使用独立 venv 或 Docker runner：
+部署机需要预先构建或导入两份镜像，数据集在构建时打入镜像，运行时不下载、不挂载 OpenCompass cache：
 
 ```bash
-./scripts/install_model_evaluation_runner.sh /opt/agent-bridge-opencompass
-export AGENT_BRIDGE_OPENCOMPASS_BIN=/opt/agent-bridge-opencompass/bin/opencompass
+docker build -t agent-bridge-opencompass-runner:latest docker/model-evaluation/opencompass
+docker build -t agent-bridge-agent-worker:latest docker/model-evaluation/agent-worker
+
+export AGENT_BRIDGE_EVAL_OPENCOMPASS_IMAGE=agent-bridge-opencompass-runner:latest
+export AGENT_BRIDGE_EVAL_AGENT_WORKER_IMAGE=agent-bridge-agent-worker:latest
 ```
 
-将环境变量写入 Agent Bridge 的服务启动环境后重启服务。未配置 runner 时，模型评估 API 和页面会显示上述安装指引，且不会创建评估任务或影响 PageIndex。
+镜像构建前需按 [docker/model-evaluation/README.md](docker/model-evaluation/README.md) 放入固定版本的数据集及 manifest。SWE-bench 的 task metadata 随 `agent-worker` 镜像构建；各 task 对应的 testbed 镜像也必须提前导入本机 Docker。Docker daemon 或任一指定镜像缺失时，模型评估功能会直接显示为不可用，不创建任务。
+
+普通题集在一次性 `opencompass-runner` 容器中执行；HumanEval/MBPP 的每个 case 会启动无网络、无 API Key 的独立代码沙箱；SWE-bench 按任务启动独立 testbed。API Key 只作为容器运行时环境变量传递，不保存到 SQLite、运行请求文件或日志。
+
+若公共模型配置的 Base URL 指向宿主机的 `localhost`，容器默认会改用 `host.docker.internal`；Linux 部署可通过 `AGENT_BRIDGE_EVAL_DOCKER_HOST` 指向可从容器访问的宿主机地址或网关。没有可访问的 Docker 环境或指定镜像时，不存在 venv/CLI 后备，评估功能直接不可用。
 
 ## Profile 接入 Claude Code
 
@@ -174,7 +181,7 @@ CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或�
 
 能力平面通过 `business_ledger` 资源规则显式授权业务台账。获授权的 Agent 使用顶级 MCP 工具 `query_business_ledger` 查询；所有字段默认支持精确匹配和排序，文本字段可额外开启字面包含检索，数字、日期与日期时间字段默认支持大于、小于、大于等于、小于等于和范围筛选。排序可按多个字段依次传入；台账、字段和查询方式自动注入 Profile，上下文外的台账不可发现也不可查询。
 
-Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
+Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流以保留 `X-Agent-Bridge-User` Header，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
 
 工作流 Agent 的 JSON 输出 Schema 按 JSON Schema Draft 07 校验和传递给 Coding Agent。已有
 Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft 07 的 `definitions`；

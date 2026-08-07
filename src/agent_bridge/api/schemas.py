@@ -380,7 +380,7 @@ class RetrievalProbeLlmConfigRequest(BaseModel):
 
 class ModelEvaluationStartRequest(BaseModel):
     model_name: str = Field(min_length=1, max_length=512)
-    datasets: list[str] = Field(min_length=1, max_length=4)
+    datasets: list[str] = Field(min_length=1, max_length=7)
     max_samples: int = Field(default=64, ge=1, le=1000)
     sampling_mode: Literal["head", "random"] = "head"
     sample_seed: int = Field(default=42, ge=0, le=2_147_483_647)

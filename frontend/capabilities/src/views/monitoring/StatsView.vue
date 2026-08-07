@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RotateCw } from '@lucide/vue'
-import { onMounted, ref, computed } from 'vue'
+import { ref, computed } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 import { api } from '../../api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -8,9 +9,8 @@ import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { formatDuration } from '../../lib/time'
+import { queryKeys } from '../../lib/query'
 
-const stats = ref<Record<string, unknown>[]>([])
-const loading = ref(false)
 const dimension = ref('profile_key,source_key,tool_name')
 const page = ref(1)
 const pageSize = ref(10)
@@ -23,21 +23,17 @@ const dimensions = [
   { key: 'profile_key', label: '按 Profile' },
 ]
 
-onMounted(() => loadStats())
+const statsQuery = useQuery({
+  queryKey: computed(() => queryKeys.toolCallStats(dimension.value)),
+  queryFn: ({ signal }) => api.stats({ dimensions: dimension.value }, { signal }),
+})
 
-async function loadStats() {
-  loading.value = true
-  try {
-    const r = await api.stats({ dimensions: dimension.value })
-    stats.value = r.items || []
-  } catch { stats.value = [] }
-  loading.value = false
-}
+const stats = computed(() => statsQuery.data.value?.items || [])
+const loading = computed(() => statsQuery.isLoading.value)
 
 function applyDimension(key: string) {
   dimension.value = key
   page.value = 1
-  loadStats()
 }
 
 const columns = computed(() => {
@@ -109,7 +105,7 @@ const pagedStats = computed(() => paginate(stats.value, page.value, pageSize.val
 
     <!-- 页头操作：刷新进全局 PageHeader 的 #ph-actions -->
     <Teleport to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="loadStats">
+      <Button variant="outline" size="lg" @click="statsQuery.refetch()">
         <RotateCw :size="14" />
         刷新
       </Button>

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { effectScope } from 'vue'
 
 import { api } from '../src/api/client.ts'
 import { useWorkflowArtifacts } from '../src/composables/useWorkflowArtifacts.ts'
+import { queryClient } from '../src/lib/query.ts'
 import { artifactFormatLabel, artifactFormatOptions } from '../src/lib/workflowArtifactFormats.ts'
 
 test('artifact format options use clear document labels', () => {
@@ -22,9 +24,11 @@ test('changing artifact format restarts from the first page and searches that fo
     params.push(current)
     return { items: [], total: 0 }
   }
+  const scope = effectScope()
 
   try {
-    const artifacts = useWorkflowArtifacts(() => ({ profileKey: 'profile', workflowKey: 'workflow' }))
+    const artifacts = scope.run(() => useWorkflowArtifacts(() => ({ profileKey: 'profile', workflowKey: 'workflow' })))
+    assert.ok(artifacts)
     artifacts.artifactPage.value = 3
 
     await artifacts.setArtifactFormat('html')
@@ -32,6 +36,8 @@ test('changing artifact format restarts from the first page and searches that fo
     assert.equal(artifacts.artifactPage.value, 1)
     assert.deepEqual(params.at(-1), { profile_key: 'profile', workflow_key: 'workflow', query: undefined, path_match: undefined, format: 'html', limit: 50, offset: 0 })
   } finally {
+    scope.stop()
+    queryClient.clear()
     api.searchWorkflowArtifacts = originalSearch
   }
 })

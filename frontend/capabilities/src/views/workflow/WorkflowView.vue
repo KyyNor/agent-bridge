@@ -292,6 +292,7 @@ const {
   openProgressArtifactDetail,
   openProgressArtifact,
   openProgressHtmlReport,
+  stopProgressAgentEventStream,
   stopTestPolling,
   pollTestRun,
   startTestPolling,
@@ -517,6 +518,7 @@ watch(
 
 onUnmounted(() => {
   stopTestPolling()
+  stopProgressAgentEventStream()
   cancelBatchQueue()
   closeWorkflowImport()
 })

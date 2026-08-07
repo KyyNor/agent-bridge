@@ -237,6 +237,7 @@ def test_run_delegates_to_injected_coding_agent(wm_paths) -> None:
     assert captured["request"].prompt == "x"
     assert "FakeMessage" in (Path(res.run_dir) / "messages.jsonl").read_text(encoding="utf-8")
     detail = service.store.agent_runs.get(res.run_key)
+    assert all(isinstance(event.get("event_id"), int) for event in detail["events"])
     message_event = next(event for event in detail["events"] if event["kind"] == "agent_message")
     assert message_event["message"] == "adapter says hi"
     assert {event["stage_name"] for event in detail["events"] if event["kind"] == "stage"} >= {

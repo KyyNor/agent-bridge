@@ -15,6 +15,7 @@ import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { confirm, alert } from '../../composables/useConfirm'
 import CodeRepoDetailView from './CodeRepoDetailView.vue'
 import { navigateTo } from '../../lib/navigation'
+import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
@@ -62,12 +63,24 @@ onMounted(async () => {
   loading.value = false
 })
 
-async function loadRepos() {
-  try { repos.value = await api.listCodeRepos() } catch { repos.value = [] }
+async function loadRepos(options: { fresh?: boolean } = {}) {
+  if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.codeRepositories() })
+  try {
+    repos.value = await queryClient.fetchQuery({
+      queryKey: queryKeys.codeRepositories(),
+      queryFn: ({ signal }) => api.listCodeRepos({ signal }),
+    })
+  } catch { repos.value = [] }
 }
 
-async function loadCategories() {
-  try { categories.value = await api.listCategories() } catch { categories.value = [] }
+async function loadCategories(options: { fresh?: boolean } = {}) {
+  if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.codeRepoCategories() })
+  try {
+    categories.value = await queryClient.fetchQuery({
+      queryKey: queryKeys.codeRepoCategories(),
+      queryFn: ({ signal }) => api.listCategories({ signal }),
+    })
+  } catch { categories.value = [] }
 }
 
 async function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
@@ -138,7 +151,7 @@ async function saveRepo() {
     const saved = await api.upsertCodeRepo(payload)
     repoExpectedEditToken.value = saved.edit_token ?? null
     showRepoForm.value = false
-    await loadRepos()
+    await loadRepos({ fresh: true })
   } catch (e: any) {
     repoError.value = e.message || '保存失败'
   }
@@ -170,7 +183,7 @@ async function syncRepo(key: string) {
   syncingKey.value = key
   try {
     await api.syncCodeRepo(key)
-    await loadRepos()
+    await loadRepos({ fresh: true })
   } catch { /* ignore */ }
   syncingKey.value = ''
 }
@@ -179,7 +192,7 @@ async function deleteRepo(r: CodeRepository) {
   if (!await confirm({ title: '删除代码知识库', description: `确定删除代码知识库「${r.name}」？将清除本地代码镜像、索引与知识图谱产物，且不可恢复。`, destructive: true, confirmText: '删除' })) return
   try {
     await api.deleteCodeRepo(r.repo_key)
-    await loadRepos()
+    await loadRepos({ fresh: true })
   } catch (e: any) {
     await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
   }
@@ -266,7 +279,7 @@ function categoryName(key: string) {
   <div v-else class="space-y-5">
     <!-- 页头操作：刷新 + 添加仓库进 #ph-actions（仅列表态） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="loadRepos()">
+      <Button variant="outline" size="lg" @click="loadRepos({ fresh: true })">
         <RotateCw :size="14" />
         刷新
       </Button>

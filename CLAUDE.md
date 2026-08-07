@@ -136,6 +136,14 @@ Agent run 由 `adapters/opencode_server.py` 启动一个独立 server，等待�
 负责长内容外置。结构化输出使用 OpenCode 的 `format.type=json_schema`，从
 `StructuredOutput` tool part 的 `state.input` 提取。
 
+Agent run 的 `events.jsonl` 是可重放事实来源。`AgentService` 必须先将带单 run 递增
+`event_id` 的事件 flush 到该文件，再交给进程内发布器分发给
+`GET /agent-runs/{run_key}/events/stream`；不得让 SSE 路由轮询或自行写文件。连接以
+`Last-Event-ID` 重放，慢订阅者发送 `resync_required` 交由客户端调用 REST 快照恢复。当前
+server runtime 为单 uvicorn worker，进程内 hub 只适用于此模型；多 worker/多实例部署必须
+在启用前更换为跨进程 broker 或共享日志实现。前端用 fetch 流携带
+`X-Agent-Bridge-User`，不用无法附加该 Header 的原生 `EventSource`。
+
 所有 Coding Agent 的结构化输出 Schema 统一按 JSON Schema Draft 07 传递和校验。历史
 2020-12 Schema 中可无损转换的 `$defs` 和本地 `$ref` 会在 agent runtime 边界改写为
 `definitions`；`unevaluatedProperties`、`prefixItems` 等无法无损转换的关键字必须明确拒绝，
