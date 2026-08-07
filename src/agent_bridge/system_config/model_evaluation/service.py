@@ -37,6 +37,12 @@ class ModelEvaluationService:
         self._store = store
         self._admins = admins
         self._run_root = paths.run_dir / "model-evaluations"
+        manifest_override = os.environ.get("AGENT_BRIDGE_EVAL_SWEBENCH_MANIFEST", "").strip()
+        self._swebench_manifest_path = (
+            Path(manifest_override).expanduser()
+            if manifest_override
+            else paths.data_dir / "model-evaluation" / "swebench-manifest.json"
+        )
         self._runtime = runtime or DockerCliRuntime()
         self._process_lock = threading.Lock()
         self._active_containers: dict[str, ContainerHandle] = {}
@@ -266,6 +272,7 @@ class ModelEvaluationService:
                     sample_seed=sample_seed,
                     opencompass_image=images["opencompass"],
                     agent_worker_image=images["agent_worker"],
+                    swebench_manifest_path=self._swebench_manifest_path,
                 )
                 runner = RUNNERS[runner_key]
 

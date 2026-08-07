@@ -23,6 +23,7 @@ class ExecutionRequest:
     sample_seed: int
     opencompass_image: str
     agent_worker_image: str
+    swebench_manifest_path: Path
 
 
 ContainerReporter = Callable[[ContainerHandle], None]

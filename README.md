@@ -61,7 +61,7 @@ uv run agent-bridge server stop
 
 「系统管理 → 模型评估」只支持本地 Docker，不会向 Agent Bridge 主 Python 环境安装 OpenCompass。评估按五个能力维度组织：通用知识（C-Eval、MMLU-Pro）、数学（GSM8K）、指令遵循（IFEval）、代码（HumanEval、MBPP）和 Agent（SWE-bench Lite）。页面可设置“每个数据集最多题数”（默认 64、范围 1–1000），并选择固定前 N 条或带 seed 的随机抽样；所有勾选数据集按相同上限执行，SWE-bench 中对应最多任务数。
 
-部署机需要预先构建或导入两份镜像，数据集在构建时打入镜像，运行时不下载、不挂载 OpenCompass cache：
+部署机需要预先构建或导入两份镜像。OpenCompass、HumanEval 与 MBPP 数据在构建时打入镜像，运行时不下载、不挂载 OpenCompass cache：
 
 ```bash
 docker build -t agent-bridge-opencompass-runner:latest docker/model-evaluation/opencompass
@@ -71,7 +71,7 @@ export AGENT_BRIDGE_EVAL_OPENCOMPASS_IMAGE=agent-bridge-opencompass-runner:lates
 export AGENT_BRIDGE_EVAL_AGENT_WORKER_IMAGE=agent-bridge-agent-worker:latest
 ```
 
-镜像构建前需按 [docker/model-evaluation/README.md](docker/model-evaluation/README.md) 放入固定版本的数据集及 manifest。SWE-bench 的 task metadata 随 `agent-worker` 镜像构建；各 task 对应的 testbed 镜像也必须提前导入本机 Docker。Docker daemon 或任一指定镜像缺失时，模型评估功能会直接显示为不可用，不创建任务。
+镜像构建前需按 [docker/model-evaluation/README.md](docker/model-evaluation/README.md) 放入固定版本的 OpenCompass、HumanEval 与 MBPP 数据。SWE-bench manifest 默认从 `AGENT_BRIDGE_ROOT/data/model-evaluation/swebench-manifest.json` 以只读方式挂入 `agent-worker`；也可通过 `AGENT_BRIDGE_EVAL_SWEBENCH_MANIFEST` 指定宿主机绝对路径。修改 manifest 无需重编 worker 镜像。各 task 对应的 testbed 镜像仍须提前导入本机 Docker。Docker daemon 或任一指定镜像缺失时，模型评估功能会直接显示为不可用，不创建任务。
 
 普通题集在一次性 `opencompass-runner` 容器中执行；HumanEval/MBPP 的每个 case 会启动无网络、无 API Key 的独立代码沙箱；SWE-bench 按任务启动独立 testbed。API Key 只作为容器运行时环境变量传递，不保存到 SQLite、运行请求文件或日志。
 

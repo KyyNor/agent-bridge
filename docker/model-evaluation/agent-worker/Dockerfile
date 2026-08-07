@@ -9,14 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN useradd --create-home --uid 10001 evaluator \
     && mkdir -p /opt/agent-bridge-data/swebench
 
-# SWE-bench 元数据和 testbed 映射在构建前放入 datasets/swebench/。
-COPY datasets/swebench/ /opt/agent-bridge-data/swebench/
+# SWE-bench 元数据在运行时以只读 bind mount 挂载到 /opt/agent-bridge-data/swebench/。
 COPY scripts/code-sandbox /usr/local/bin/code-sandbox
 COPY scripts/swe-agent /usr/local/bin/swe-agent
-COPY scripts/verify-datasets /usr/local/bin/verify-agent-worker-datasets
 
-RUN chmod 0555 /usr/local/bin/code-sandbox /usr/local/bin/swe-agent /usr/local/bin/verify-agent-worker-datasets \
-    && /usr/local/bin/verify-agent-worker-datasets \
+RUN chmod 0555 /usr/local/bin/code-sandbox /usr/local/bin/swe-agent \
     && chown -R evaluator:evaluator /opt/agent-bridge-data
 
 USER evaluator

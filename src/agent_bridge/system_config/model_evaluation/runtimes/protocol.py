@@ -8,6 +8,15 @@ from typing import Mapping, Protocol
 
 
 @dataclass(frozen=True)
+class BindMount:
+    """评估容器需要的宿主机 bind mount。"""
+
+    source: Path
+    target: str
+    read_only: bool = False
+
+
+@dataclass(frozen=True)
 class ContainerSpec:
     image: str
     command: tuple[str, ...]
@@ -23,6 +32,7 @@ class ContainerSpec:
     cpus: float | None = None
     mount_workspace: bool = True
     container_workdir: str = "/workspace"
+    bind_mounts: tuple[BindMount, ...] = ()
 
 
 @dataclass(frozen=True)

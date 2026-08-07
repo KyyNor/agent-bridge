@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_bridge.system_config.model_evaluation.runtimes import ContainerHandle, ContainerRuntime, ContainerSpec
+from agent_bridge.system_config.model_evaluation.runtimes import BindMount, ContainerHandle, ContainerRuntime, ContainerSpec
 
 from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter
 
@@ -16,6 +16,13 @@ class SWEbenchRunner:
     key = "swebench"
 
     def execute(self, request: ExecutionRequest, runtime: ContainerRuntime, *, report_container: ContainerReporter, report_progress: ProgressReporter) -> dict[str, Any]:
+        manifest_path = request.swebench_manifest_path
+        if not manifest_path.is_file():
+            raise RuntimeError(
+                "SWE-bench manifest 未就绪："
+                f"{manifest_path}。请放置 swebench-manifest.json，或设置 AGENT_BRIDGE_EVAL_SWEBENCH_MANIFEST。"
+            )
+        request.work_dir.mkdir(parents=True, exist_ok=True)
         request_path = request.work_dir / "request.json"
         request_path.write_text(json.dumps({
             "model_name": request.model_name,
@@ -33,6 +40,13 @@ class SWEbenchRunner:
             work_dir=request.work_dir,
             labels=_labels(request, "swe-agent"),
             environment={"OPENAI_API_KEY": request.api_key, "OPENAI_BASE_URL": request.base_url},
+            bind_mounts=(
+                BindMount(
+                    source=manifest_path,
+                    target="/opt/agent-bridge-data/swebench/swebench-manifest.json",
+                    read_only=True,
+                ),
+            ),
         )
         report_progress("SWE-bench Agent 正在执行；将按任务启动隔离 testbed")
         agent_handle = runtime.run(spec, log_path=request.work_dir / "runner.log")

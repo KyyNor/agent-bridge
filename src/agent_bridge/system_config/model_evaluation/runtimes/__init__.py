@@ -1,4 +1,4 @@
 from .docker import DockerCliRuntime
-from .protocol import ContainerHandle, ContainerRuntime, ContainerSpec
+from .protocol import BindMount, ContainerHandle, ContainerRuntime, ContainerSpec
 
-__all__ = ["ContainerHandle", "ContainerRuntime", "ContainerSpec", "DockerCliRuntime"]
+__all__ = ["BindMount", "ContainerHandle", "ContainerRuntime", "ContainerSpec", "DockerCliRuntime"]

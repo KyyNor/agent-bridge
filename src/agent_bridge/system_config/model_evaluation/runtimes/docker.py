@@ -59,6 +59,11 @@ class DockerCliRuntime(ContainerRuntime):
             command.extend(["--label", f"{key}={value}"])
         if spec.mount_workspace:
             command.extend(["--mount", f"type=bind,src={spec.work_dir},dst=/workspace"])
+        for mount in spec.bind_mounts:
+            options = f"type=bind,src={mount.source},dst={mount.target}"
+            if mount.read_only:
+                options += ",readonly"
+            command.extend(["--mount", options])
         command.extend(["--workdir", spec.container_workdir, "--network", spec.network])
         if spec.read_only:
             command.append("--read-only")

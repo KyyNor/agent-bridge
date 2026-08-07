@@ -5,7 +5,7 @@ Agent Bridge 维护两份镜像：
 - `opencompass-runner`：C-Eval、MMLU-Pro、GSM8K、IFEval，以及 HumanEval/MBPP 的代码生成；
 - `agent-worker`：无网络代码沙箱和 SWE-bench Agent 协议入口。
 
-不在运行时下载数据。构建前应将经过版本校验的数据放入各 Dockerfile 旁的 `datasets/` 目录，并写入 manifest；Dockerfile 会在构建期校验，缺少数据时直接失败。
+不在运行时下载数据。OpenCompass、HumanEval 和 MBPP 数据应在构建前放入对应 Dockerfile 旁的 `datasets/` 目录，Dockerfile 会在构建期校验，缺少数据时直接失败。SWE-bench manifest 不随 `agent-worker` 构建，而是在运行时以只读 bind mount 提供。
 
 ```text
 opencompass/datasets/
@@ -20,7 +20,7 @@ opencompass/datasets/
    ├─ humaneval.jsonl
    └─ mbpp.jsonl
 
-agent-worker/datasets/swebench/
+AGENT_BRIDGE_ROOT/data/model-evaluation/
 └─ swebench-manifest.json
 ```
 
@@ -39,7 +39,7 @@ agent-worker/datasets/swebench/
 }
 ```
 
-SWE-bench 的 task metadata 随 `agent-worker` 镜像构建；每个任务的 testbed 镜像应提前 `docker load` 到部署机。Agent worker 通过 JSONL 向主服务请求启动 testbed、执行命令和最终测试，镜像本身不持有 Docker Socket。
+SWE-bench 的 task metadata 默认从 `AGENT_BRIDGE_ROOT/data/model-evaluation/swebench-manifest.json` 读取，服务会在启动 `agent-worker` 时把该文件以只读方式挂入容器。可设置 `AGENT_BRIDGE_EVAL_SWEBENCH_MANIFEST=/srv/agent-bridge/swebench-manifest.json` 覆盖默认位置。更新 manifest 不需要重编 `agent-worker` 镜像，但只影响后续新发起的评测。每个任务的 testbed 镜像应提前 `docker load` 到部署机。Agent worker 通过 JSONL 向主服务请求启动 testbed、执行命令和最终测试，镜像本身不持有 Docker Socket。
 
 ```bash
 docker build -t agent-bridge-opencompass-runner:latest docker/model-evaluation/opencompass

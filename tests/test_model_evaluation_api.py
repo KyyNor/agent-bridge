@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
 import respx
 from fastapi.testclient import TestClient
 from httpx import Response
 
 from agent_bridge.api.app import create_app
 from agent_bridge.storage.sqlite import SQLiteStore
+from agent_bridge.system_config.model_evaluation.runners.protocol import ExecutionRequest
+from agent_bridge.system_config.model_evaluation.runners.swebench import SWEbenchRunner
+from agent_bridge.system_config.model_evaluation.runtimes import BindMount, ContainerHandle, ContainerSpec, DockerCliRuntime
 from agent_bridge.system_config.model_evaluation.service import ModelEvaluationService
 
 
@@ -125,3 +132,115 @@ def test_model_evaluation_persists_runner_executions(wm_paths) -> None:
     assert executions[0]["datasets"] == ["humaneval"]
     assert executions[0]["container_id"] == "container-123"
     assert executions[0]["result"]["rows"][0]["metric"] == "pass@1"
+
+
+class _FinishedSWEbenchRuntime:
+    def __init__(self) -> None:
+        self.spec: ContainerSpec | None = None
+
+    def run(self, spec: ContainerSpec, *, log_path: Path) -> ContainerHandle:
+        self.spec = spec
+        (spec.work_dir / "result.json").write_text(
+            json.dumps({"rows": [], "summary_found": False, "sample_manifests": [], "cases": []}), encoding="utf-8"
+        )
+        return ContainerHandle(container_id="worker-1", image=spec.image, command=spec.command)
+
+    def poll(self, handle: ContainerHandle) -> int | None:
+        return 0
+
+    def wait(self, handle: ContainerHandle) -> int:
+        return 0
+
+    def stop(self, handle: ContainerHandle) -> None:
+        pass
+
+
+def _swebench_request(work_dir: Path, manifest_path: Path) -> ExecutionRequest:
+    return ExecutionRequest(
+        run_id="run-1",
+        execution_id="execution-1",
+        work_dir=work_dir,
+        model_name="demo",
+        base_url="http://host.docker.internal/v1",
+        api_key="key",
+        datasets=("swebench_lite",),
+        max_samples=1,
+        sampling_mode="head",
+        sample_seed=42,
+        opencompass_image="opencompass:latest",
+        agent_worker_image="worker:latest",
+        swebench_manifest_path=manifest_path,
+    )
+
+
+def test_swebench_runner_requires_runtime_manifest(tmp_path: Path) -> None:
+    runtime = _FinishedSWEbenchRuntime()
+    with pytest.raises(RuntimeError, match="SWE-bench manifest 未就绪"):
+        SWEbenchRunner().execute(
+            _swebench_request(tmp_path / "work", tmp_path / "missing.json"),
+            runtime,  # type: ignore[arg-type]
+            report_container=lambda _handle: None,
+            report_progress=lambda _message: None,
+        )
+    assert runtime.spec is None
+
+
+def test_swebench_runner_mounts_runtime_manifest_read_only(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "swebench-manifest.json"
+    manifest_path.write_text('{"version":"test","tasks":[{"instance_id":"case-1"}]}', encoding="utf-8")
+    runtime = _FinishedSWEbenchRuntime()
+
+    result = SWEbenchRunner().execute(
+        _swebench_request(tmp_path / "work", manifest_path),
+        runtime,  # type: ignore[arg-type]
+        report_container=lambda _handle: None,
+        report_progress=lambda _message: None,
+    )
+
+    assert result["summary_found"] is False
+    assert runtime.spec is not None
+    assert runtime.spec.bind_mounts == (
+        BindMount(
+            source=manifest_path,
+            target="/opt/agent-bridge-data/swebench/swebench-manifest.json",
+            read_only=True,
+        ),
+    )
+
+
+def test_docker_runtime_passes_read_only_bind_mount(tmp_path: Path, monkeypatch) -> None:
+    runtime = DockerCliRuntime(docker_bin="docker")
+    commands: list[list[str]] = []
+
+    class _Process:
+        def poll(self) -> None:
+            return None
+
+    def fake_popen(command: list[str], **kwargs: object) -> _Process:
+        commands.append(command)
+        return _Process()
+
+    monkeypatch.setattr("agent_bridge.system_config.model_evaluation.runtimes.docker.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(runtime, "_wait_for_cidfile", lambda cidfile, process: "container-1")
+    manifest_path = tmp_path / "swebench-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    runtime.run(
+        ContainerSpec(
+            image="worker:latest",
+            command=("swe-agent",),
+            work_dir=tmp_path / "work",
+            labels={},
+            bind_mounts=(BindMount(manifest_path, "/opt/manifest.json", read_only=True),),
+        ),
+        log_path=tmp_path / "runner.log",
+    )
+
+    command = commands[0]
+    assert command[:4] == ["docker", "run", "--rm", "--cidfile"]
+    assert Path(command[4]).parent == tmp_path / "work"
+    assert command[5:] == [
+        "--mount", f"type=bind,src={tmp_path / 'work'},dst=/workspace",
+        "--mount", f"type=bind,src={manifest_path},dst=/opt/manifest.json,readonly",
+        "--workdir", "/workspace", "--network", "bridge", "worker:latest", "swe-agent",
+    ]
