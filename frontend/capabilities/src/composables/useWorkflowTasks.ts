@@ -44,6 +44,8 @@ function errorMessage(error: unknown) {
 export interface BatchRunDetailHook {
   /** Maps a workflow run_id to its agent_runs.run_key for subagent-detail lookups. */
   runIdToAgentRunKey: Ref<Record<string, string>>
+  /** Refreshes the workflow-level running/task aggregate after a batch item ends. */
+  loadRunOverviews(): Promise<void>
   loadProgressAgentRuns(): Promise<void>
   loadProgressAgentEvents(options?: { quiet?: boolean }): Promise<void>
   setProgressWorkflowKey(value: string): void
@@ -637,7 +639,10 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
       selectedTaskIds.value = result.stopped
         ? new Set(result.remaining.map(taskId))
         : new Set()
-      if (token === batchToken && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
+      if (token === batchToken && taskWorkflow.value) {
+        await loadTasks(taskWorkflow.value.workflow_key)
+        await batchRunDetail.loadRunOverviews()
+      }
     } finally {
       if (token === batchToken) batchAction.value = ''
     }
@@ -700,7 +705,10 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
       selectedTaskIds.value = result.stopped
         ? new Set(result.remaining.map(taskId))
         : new Set()
-      if (token === batchToken && taskWorkflow.value) await loadTasks(taskWorkflow.value.workflow_key)
+      if (token === batchToken && taskWorkflow.value) {
+        await loadTasks(taskWorkflow.value.workflow_key)
+        await batchRunDetail.loadRunOverviews()
+      }
     } finally {
       if (token === batchToken || batchStopRequested.value) {
         batchAction.value = ''

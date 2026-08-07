@@ -313,6 +313,19 @@ class AgentBridgeService:
             admins=admins,
         )
         service.store.init_schema()
+        recovered_workflows = service.store.recover_interrupted_workflow_runs()
+        if recovered_workflows["runs"]:
+            recovered_agent_runs = service.store.agent_runs.recover_interrupted_workflow_runs(
+                recovered_workflows["run_ids"]
+            )
+            logger.warning(
+                "已恢复上一进程遗留的工作流执行 runs=%d nodes=%d tasks=%d agent_runs=%d run_ids=%s",
+                recovered_workflows["runs"],
+                recovered_workflows["nodes"],
+                recovered_workflows["tasks"],
+                recovered_agent_runs,
+                recovered_workflows["run_ids"],
+            )
         recovered = service.codegraph.recover_interrupted_sync_runs()
         if recovered:
             logger.warning(

@@ -15,7 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from agent_bridge.core.domain import ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
-from agent_bridge.core.timeutil import local_now
+from agent_bridge.core.timeutil import local_now, utc_iso
 from agent_bridge.agent_runtime.service import STOPPED_ERROR
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
@@ -82,6 +82,7 @@ class WorkflowScheduler:
 
     def start(self) -> None:
         self._load_window()
+        self._restore_window_state()
         self._ensure_scheduler()
         self._refresh_jobs()
         self._scheduler.start()
@@ -99,6 +100,7 @@ class WorkflowScheduler:
 
     def refresh(self) -> None:
         self._load_window()
+        self._restore_window_state()
         self._ensure_scheduler()
         if not self._scheduler.running:
             self._scheduler.start()
@@ -149,6 +151,47 @@ class WorkflowScheduler:
             1,
             int(config.get("workflow_max_concurrent_runs_per_workflow") or 2),
         )
+
+    def _window_bounds(self, anchor: date, now: datetime) -> tuple[datetime, datetime]:
+        tzinfo = now.tzinfo
+        start = datetime.combine(anchor, self._start_time or time.min, tzinfo=tzinfo)
+        if self._stop_time is None:
+            end = datetime.combine(anchor + timedelta(days=1), time.min, tzinfo=tzinfo)
+        else:
+            end = datetime.combine(anchor, self._stop_time, tzinfo=tzinfo)
+            if end <= start:
+                end += timedelta(days=1)
+        return start, end
+
+    def _restore_window_state(self) -> None:
+        """从数据库恢复当前窗口的自动调度计数。"""
+        now = local_now()
+        anchor = self._window_anchor(now)
+        self.finished_today.clear()
+        self.run_counts.clear()
+        self._window_marker = anchor
+        if anchor is None:
+            return
+        list_runs = getattr(self._store, "list_workflow_runs_in_window", None)
+        if not callable(list_runs):
+            return
+        start, end = self._window_bounds(anchor, now)
+        for run in list_runs(started_at=utc_iso(start), finished_before=utc_iso(end)):
+            plan = run.get("execution_plan") or {}
+            if plan.get("trigger") != "scheduled":
+                continue
+            workflow_key = str(run.get("workflow_key") or "")
+            if not workflow_key:
+                continue
+            self.run_counts[workflow_key] = self.run_counts.get(workflow_key, 0) + 1
+            if run.get("status") == "no_task" or (
+                run.get("status") == "completed"
+                and not any(
+                    node.get("type") == "get_task"
+                    for node in (run.get("definition_snapshot") or {}).get("nodes", [])
+                )
+            ):
+                self.finished_today.add(workflow_key)
 
     def _refresh_jobs(self) -> None:
         if not self._scheduler:
@@ -284,7 +327,7 @@ class WorkflowScheduler:
                 )
                 thread = threading.Thread(
                     target=self._run_and_release,
-                    args=(workflow_key, None, None, None, True, definition_snapshot),
+                    args=(workflow_key, None, None, None, True, definition_snapshot, None, True),
                     daemon=True,
                 )
                 thread.start()
@@ -298,6 +341,7 @@ class WorkflowScheduler:
         resources_validated: bool = False,
         validated_definition: dict[str, Any] | None = None,
         plan: Any | None = None,
+        scheduled: bool = False,
     ) -> None:
         try:
             self.run_one_workflow(
@@ -308,6 +352,7 @@ class WorkflowScheduler:
                 resources_validated=resources_validated,
                 validated_definition=validated_definition,
                 plan=plan,
+                scheduled=scheduled,
             )
         except Exception:
             logger.exception("Workflow 执行异常 workflow=%s", workflow_key)
@@ -470,6 +515,7 @@ class WorkflowScheduler:
         resources_validated: bool = False,
         validated_definition: dict[str, Any] | None = None,
         plan: Any | None = None,
+        scheduled: bool = False,
     ) -> dict[str, Any]:
         """执行单个 workflow run 的完整生命周期：建 run 行 -> 跑 agent -> 解析 result -> 入库。
 
@@ -542,7 +588,10 @@ class WorkflowScheduler:
                 workflow_content_hash=getattr(plan, "workflow_content_hash", None),
                 task_version=str(getattr(plan, "task_version", "") or ""),
                 execution_mode=str(getattr(plan, "mode", "normal")),
-                execution_plan=self._plan_payload(plan),
+                execution_plan=self._plan_payload(
+                    plan,
+                    trigger="scheduled" if scheduled else None,
+                ),
                 source_run_id=getattr(plan, "baseline_run_id", None),
             )
             run = None
@@ -691,11 +740,15 @@ class WorkflowScheduler:
             definition=definition,
         )
 
-    def _plan_payload(self, plan: Any | None) -> dict[str, Any]:
+    def _plan_payload(self, plan: Any | None, *, trigger: str | None = None) -> dict[str, Any]:
         if plan is None:
-            return {}
-        payload = getattr(self._service, "incremental_plan_payload", None)
-        return payload(plan) if callable(payload) else {}
+            payload: dict[str, Any] = {}
+        else:
+            payload_builder = getattr(self._service, "incremental_plan_payload", None)
+            payload = payload_builder(plan) if callable(payload_builder) else {}
+        if trigger:
+            payload = {**payload, "trigger": trigger}
+        return payload
 
     def _plan_from_run(self, run: dict[str, Any]) -> Any | None:
         payload = run.get("execution_plan")

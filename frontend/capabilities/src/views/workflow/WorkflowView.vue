@@ -473,6 +473,7 @@ const {
   openTaskArtifactFullscreen,
   batchRunDetail: {
     runIdToAgentRunKey,
+    loadRunOverviews,
     loadProgressAgentRuns,
     loadProgressAgentEvents,
     setProgressWorkflowKey: (value: string) => { progressWorkflowKey.value = value },

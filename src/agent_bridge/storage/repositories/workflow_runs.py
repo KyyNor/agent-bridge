@@ -141,6 +141,29 @@ class WorkflowRunsRepositoryMixin:
             "offset": bounded_offset,
         }
 
+    def list_workflow_runs_in_window(
+        self,
+        *,
+        started_at: str,
+        finished_before: str,
+    ) -> list[dict[str, Any]]:
+        """返回指定执行窗口内创建的工作流运行记录。
+
+        调度器的窗口计数本来只保存在进程内存中。启动时通过这组记录恢复
+        计数，避免服务重启后把同一窗口当成全新窗口再次调度。
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM workflow_runs
+                WHERE datetime(started_at) >= datetime(?)
+                  AND datetime(started_at) < datetime(?)
+                ORDER BY started_at ASC, id ASC
+                """,
+                (started_at, finished_before),
+            ).fetchall()
+            return [item for row in rows if (item := _row_payload(row)) is not None]
+
     def list_workflow_run_overviews(self) -> list[dict[str, Any]]:
         """Return one latest/running summary per workflow for list pages.
 
@@ -430,6 +453,79 @@ class WorkflowRunsRepositoryMixin:
             if result is None:
                 raise KeyError(f"workflow run not found: {run_id}")
             return result
+
+    def recover_interrupted_workflow_runs(
+        self,
+        *,
+        error_message: str = "服务重启导致工作流执行中断",
+    ) -> dict[str, Any]:
+        """回收上一进程遗留的工作流运行和任务租约。
+
+        工作流执行线程不跨进程存活，因此启动阶段所有持久化的 ``running``
+        运行都已经失去执行者。该操作必须幂等，并在同一事务中结束运行、
+        标记正在执行的节点、释放精确任务租约，避免概览和任务队列各自停留
+        在不同状态。
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT run_id FROM workflow_runs WHERE status = 'running'"
+            ).fetchall()
+            run_ids = [str(row["run_id"]) for row in rows]
+            if not run_ids:
+                return {"run_ids": [], "runs": 0, "nodes": 0, "tasks": 0}
+
+            placeholders = ", ".join("?" for _ in run_ids)
+            parameters = [error_message, *run_ids]
+            node_cursor = conn.execute(
+                f"""
+                UPDATE workflow_node_runs
+                SET status = 'failed',
+                    error = COALESCE(error, ?),
+                    finished_at = CURRENT_TIMESTAMP
+                WHERE run_id IN ({placeholders})
+                  AND status = 'running'
+                """,
+                parameters,
+            )
+            task_cursor = conn.execute(
+                f"""
+                UPDATE workflow_tasks
+                SET status = COALESCE(NULLIF(lease_origin_status, ''), 'pending'),
+                    lease_run_id = NULL,
+                    lease_expires_at = NULL,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'running'
+                  AND lease_run_id IN ({placeholders})
+                """,
+                parameters,
+            )
+            run_cursor = conn.execute(
+                f"""
+                UPDATE workflow_runs
+                SET status = 'failed',
+                    exit_code = 1,
+                    error = COALESCE(error, ?),
+                    duration_ms = COALESCE(
+                      duration_ms,
+                      MAX(0, CAST(
+                        (julianday(CURRENT_TIMESTAMP) - julianday(started_at)) * 86400000
+                        AS INTEGER
+                      ))
+                    ),
+                    finished_at = CURRENT_TIMESTAMP
+                WHERE status = 'running'
+                  AND run_id IN ({placeholders})
+                """,
+                parameters,
+            )
+            return {
+                "run_ids": run_ids,
+                "runs": int(run_cursor.rowcount),
+                "nodes": int(node_cursor.rowcount),
+                "tasks": int(task_cursor.rowcount),
+            }
 
     def create_workflow_node_runs(self, run_id: str, nodes: list[dict[str, Any]]) -> None:
         with self._connect() as conn:

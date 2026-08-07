@@ -473,6 +473,10 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
         testing.value = false
         testingRunId.value = ''
         const workflowKey = progressWorkflowKey.value || run.workflow_key
+        // loadRuns only refreshes the detail list. The overview header and the
+        // workflow list badge use the task aggregate/running_run projection, so
+        // refresh that projection before restoring the full run list.
+        await loadRunOverviews()
         await loadRuns(workflowKey)
         if (run.status === 'completed' || run.status === 'no_task') {
           await searchArtifacts()

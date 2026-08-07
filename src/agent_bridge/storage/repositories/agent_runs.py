@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.storage.types import row_to_dict
 
 
@@ -127,6 +128,39 @@ class AgentRunsRepository:
                 ),
             )
             return bool(cursor.rowcount)
+
+    def recover_interrupted_workflow_runs(
+        self,
+        workflow_run_ids: list[str],
+        *,
+        error_message: str = "服务重启导致工作流中的 Agent 执行中断",
+    ) -> int:
+        """结束上一进程遗留的工作流 Agent 运行记录。"""
+        if not workflow_run_ids:
+            return 0
+        finished_at = utc_iso()
+        placeholders = ", ".join("?" for _ in workflow_run_ids)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE agent_runs
+                SET ok = 0,
+                    status = 'failed',
+                    error = COALESCE(error, ?),
+                    duration_ms = COALESCE(
+                      duration_ms,
+                      MAX(0, CAST(
+                        (julianday(?) - julianday(COALESCE(started_at, created_at))) * 86400000
+                        AS INTEGER
+                      ))
+                    ),
+                    finished_at = COALESCE(finished_at, ?)
+                WHERE status = 'running'
+                  AND workflow_run_id IN ({placeholders})
+                """,
+                [error_message, finished_at, finished_at, *workflow_run_ids],
+            )
+            return int(cursor.rowcount)
 
     def get(self, run_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:

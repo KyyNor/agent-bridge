@@ -267,6 +267,17 @@ class WorkflowsFacadeMixin:
     def list_workflow_runs(self, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
         return self.workflows.list_workflow_runs(workflow_key, limit=limit)
 
+    def list_workflow_runs_in_window(
+        self,
+        *,
+        started_at: str,
+        finished_before: str,
+    ) -> list[dict[str, Any]]:
+        return self.workflows.list_workflow_runs_in_window(
+            started_at=started_at,
+            finished_before=finished_before,
+        )
+
     def list_workflow_run_summaries(
         self,
         workflow_key: str,
@@ -282,6 +293,9 @@ class WorkflowsFacadeMixin:
 
     def list_workflow_run_overviews(self) -> list[dict[str, Any]]:
         return self.workflows.list_workflow_run_overviews()
+
+    def recover_interrupted_workflow_runs(self) -> dict[str, Any]:
+        return self.workflows.recover_interrupted_workflow_runs()
 
     def list_completed_workflow_top(
         self,
