@@ -12,8 +12,11 @@ from typing import Any
 
 
 def clean_code(text: str) -> str:
-    match = re.search(r"```(?:python)?\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    return (match.group(1) if match else text).strip()
+    # HumanEval completion 是拼接到已有函数声明后的函数体，首行缩进不可丢失。
+    # 代码块围栏后的换行属于围栏格式，不应连同下一行的函数体缩进一起吞掉。
+    match = re.search(r"```(?:python)?(?:[ \t]*\r?\n)?(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    code = match.group(1) if match else text
+    return code.strip("\r\n").rstrip()
 
 
 def program_for(case: dict[str, Any]) -> str:
