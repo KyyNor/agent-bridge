@@ -24,12 +24,43 @@ class LiveAgentRunMessage:
 class LiveAgentRunSubscription:
     """单个 SSE 连接的有界消息队列。"""
 
-    def __init__(self, run_key: str, queue: asyncio.Queue[LiveAgentRunMessage]) -> None:
+    def __init__(
+        self,
+        run_key: str,
+        queue: asyncio.Queue[LiveAgentRunMessage],
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
         self.run_key = run_key
         self._queue = queue
+        self._loop = loop
 
     async def receive(self) -> LiveAgentRunMessage:
         return await self._queue.get()
+
+    def publish(self, message: LiveAgentRunMessage) -> None:
+        """从任意线程把消息调度到订阅者所属事件循环。"""
+        self._loop.call_soon_threadsafe(self._put_nowait, message)
+
+    def _put_nowait(self, message: LiveAgentRunMessage) -> None:
+        try:
+            self._queue.put_nowait(message)
+        except asyncio.QueueFull:
+            # 不再继续积压旧事件。客户端拿到此信号后会走 REST 快照再重连。
+            self._replace_with_resync()
+
+    def _replace_with_resync(self) -> None:
+        try:
+            while True:
+                self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            self._queue.put_nowait(
+                LiveAgentRunMessage("resync_required", {"reason": "subscriber_queue_overflow"})
+            )
+        except asyncio.QueueFull:
+            # 队列刚被清空，理论上不会到这里；保留防御分支以免发布路径抛异常。
+            pass
 
 
 class LiveAgentRunEventHub:
@@ -37,22 +68,23 @@ class LiveAgentRunEventHub:
 
     def __init__(self, max_queue_size: int = 256) -> None:
         self._max_queue_size = max_queue_size
-        self._subscribers: dict[str, set[asyncio.Queue[LiveAgentRunMessage]]] = {}
+        self._subscribers: dict[str, set[LiveAgentRunSubscription]] = {}
         self._lock = threading.Lock()
 
     def subscribe(self, run_key: str) -> LiveAgentRunSubscription:
         queue: asyncio.Queue[LiveAgentRunMessage] = asyncio.Queue(maxsize=self._max_queue_size)
+        subscription = LiveAgentRunSubscription(run_key, queue, asyncio.get_running_loop())
         with self._lock:
-            self._subscribers.setdefault(run_key, set()).add(queue)
-        return LiveAgentRunSubscription(run_key, queue)
+            self._subscribers.setdefault(run_key, set()).add(subscription)
+        return subscription
 
     def unsubscribe(self, subscription: LiveAgentRunSubscription) -> None:
         with self._lock:
-            queues = self._subscribers.get(subscription.run_key)
-            if queues is None:
+            subscriptions = self._subscribers.get(subscription.run_key)
+            if subscriptions is None:
                 return
-            queues.discard(subscription._queue)
-            if not queues:
+            subscriptions.discard(subscription)
+            if not subscriptions:
                 self._subscribers.pop(subscription.run_key, None)
 
     def publish_event(self, run_key: str, event: dict[str, Any]) -> None:
@@ -63,23 +95,13 @@ class LiveAgentRunEventHub:
 
     def _publish(self, run_key: str, message: LiveAgentRunMessage) -> None:
         with self._lock:
-            queues = list(self._subscribers.get(run_key, ()))
-        for queue in queues:
+            subscriptions = list(self._subscribers.get(run_key, ()))
+        stale_subscriptions: list[LiveAgentRunSubscription] = []
+        for subscription in subscriptions:
             try:
-                queue.put_nowait(message)
-            except asyncio.QueueFull:
-                # 不再继续积压旧事件。客户端拿到此信号后会走 REST 快照再重连。
-                self._replace_with_resync(queue)
-
-    @staticmethod
-    def _replace_with_resync(queue: asyncio.Queue[LiveAgentRunMessage]) -> None:
-        try:
-            while True:
-                queue.get_nowait()
-        except asyncio.QueueEmpty:
-            pass
-        try:
-            queue.put_nowait(LiveAgentRunMessage("resync_required", {"reason": "subscriber_queue_overflow"}))
-        except asyncio.QueueFull:
-            # 队列刚被清空，理论上不会到这里；保留防御分支以免发布路径抛异常。
-            pass
+                subscription.publish(message)
+            except RuntimeError:
+                # 事件循环已关闭的订阅不会再消费消息，及时从 hub 中移除。
+                stale_subscriptions.append(subscription)
+        for subscription in stale_subscriptions:
+            self.unsubscribe(subscription)

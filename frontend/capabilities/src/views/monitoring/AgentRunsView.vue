@@ -117,7 +117,6 @@ const detailEventsQuery = useQuery({
   queryKey: computed(() => queryKeys.agentRunEvents(activeRunKey.value)),
   queryFn: ({ signal }) => api.getAgentRunEvents(activeRunKey.value, { signal }),
   enabled: computed(() => Boolean(activeRunKey.value)),
-  refetchInterval: computed(() => detailQuery.data.value?.status === 'running' ? 1_500 : false),
 })
 
 const emptyCounts: AgentRunCounts = { all: 0, success: 0, failed: 0, running: 0, stopped: 0 }

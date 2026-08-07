@@ -1336,7 +1336,7 @@ def test_search_no_retrieval_backend(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "frontend-docs", "Frontend Docs", "")
     service.registry = None
-    with pytest.raises(NotFound, match="no.*backend"):
+    with pytest.raises(NotFound, match="backend 'mock' is not configured or unavailable"):
         service.search("root", "frontend-docs", "hello")
 
 

@@ -49,6 +49,9 @@ test('running agent timelines use the shared SSE stream instead of a 1.5 second 
 
   assert.match(agentRuns, /useAgentRunEventStream/)
   assert.doesNotMatch(agentRuns, /detailEventsPoll/)
+  const eventQuery = agentRuns.match(/const detailEventsQuery = useQuery\(\{[\s\S]*?\n\}\)/)
+  assert.ok(eventQuery)
+  assert.doesNotMatch(eventQuery[0], /refetchInterval/)
   assert.match(progress, /useAgentRunEventStream/)
   assert.match(progress, /stopProgressAgentEventStream/)
   const pollTestRun = progress.match(/async function pollTestRun\(\)[\s\S]*?\n  }\n\n  function startTestPolling/)

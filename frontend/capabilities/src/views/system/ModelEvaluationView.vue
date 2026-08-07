@@ -16,7 +16,7 @@ const form = ref({
   base_url: '', api_key: '', model_name: '', datasets: ['gsm8k_chat_gen'] as string[], max_samples: 64,
   sampling_mode: 'head' as 'head' | 'random', sample_seed: 42,
 })
-const selectedRun = ref<ModelEvaluationRun | null>(null)
+const selectedRunId = ref('')
 const showRunDetail = ref(false)
 const loadingModels = ref(false)
 const starting = ref(false)
@@ -43,6 +43,7 @@ const runsQuery = useQuery({
 
 const datasets = computed(() => datasetsQuery.data.value || [])
 const runs = computed(() => runsQuery.data.value || [])
+const selectedRun = computed(() => runs.value.find(run => run.run_id === selectedRunId.value) || null)
 const runtime = computed(() => runtimeQuery.data.value || null)
 const loading = computed(() => datasetsQuery.isLoading.value || runtimeQuery.isLoading.value || runsQuery.isLoading.value)
 const error = computed(() => {
@@ -114,7 +115,7 @@ function scoreForRow(row: Record<string, string>) {
 }
 
 function openRunDetail(run: ModelEvaluationRun) {
-  selectedRun.value = run
+  selectedRunId.value = run.run_id
   showRunDetail.value = true
 }
 </script>

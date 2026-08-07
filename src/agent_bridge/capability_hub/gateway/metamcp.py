@@ -25,6 +25,14 @@ logger = logging.getLogger("agent_bridge.mcp")
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 _request_workflow_context: ContextVar[dict[str, Any] | None] = ContextVar("_request_workflow_context", default=None)
 
+
+def _is_top_level_mcp_tool_enabled(bridge_service: Any, tool_name: str) -> bool:
+    """兼容未实现工具开关的旧门面；缺少配置能力时沿用默认启用语义。"""
+    capabilities = getattr(bridge_service, "capabilities", None)
+    checker = getattr(capabilities, "is_top_level_mcp_tool_enabled", None)
+    return bool(checker(tool_name)) if callable(checker) else True
+
+
 def _annotation_from_json_schema(definition: dict[str, Any]) -> Any:
     value_type = definition.get("type")
     if isinstance(value_type, list):
@@ -231,7 +239,7 @@ def create_mcp_server(
             result["hint"] = "结果默认只含摘要；将完整 path 作为 path 重新调用可获取正文。"
         return result
 
-    if bridge_service.capabilities.is_top_level_mcp_tool_enabled("artifacts_search"):
+    if _is_top_level_mcp_tool_enabled(bridge_service, "artifacts_search"):
         mcp.tool(description="搜索当前 profile 的工作流产物。需要全文时，将结果的完整 path 作为 path 重新调用。")(artifacts_search)
 
     active_workflow_context = workflow_context or _request_workflow_context.get()
@@ -260,7 +268,7 @@ def create_mcp_server(
                 ),
             )
 
-        if bridge_service.capabilities.is_top_level_mcp_tool_enabled("workflow_get_task"):
+        if _is_top_level_mcp_tool_enabled(bridge_service, "workflow_get_task"):
             mcp.tool(description="领取当前工作流运行中的一个待处理任务。")(workflow_get_task)
 
         def workflow_set_task(
@@ -283,7 +291,7 @@ def create_mcp_server(
                 ),
             )
 
-        if bridge_service.capabilities.is_top_level_mcp_tool_enabled("workflow_set_task"):
+        if _is_top_level_mcp_tool_enabled(bridge_service, "workflow_set_task"):
             mcp.tool(description="创建或刷新当前工作流的待处理任务。")(workflow_set_task)
 
         def workflow_run_log(
@@ -327,7 +335,7 @@ def create_mcp_server(
                 ),
             )
 
-        if bridge_service.capabilities.is_top_level_mcp_tool_enabled("workflow_run_log"):
+        if _is_top_level_mcp_tool_enabled(bridge_service, "workflow_run_log"):
             mcp.tool(description="追加一条当前工作流运行日志。")(workflow_run_log)
 
     def register_direct_builtin_tools() -> None:
@@ -338,7 +346,7 @@ def create_mcp_server(
             if name in registered_names:
                 continue
             registered_names.add(name)
-            if not bridge_service.capabilities.is_top_level_mcp_tool_enabled(name):
+            if not _is_top_level_mcp_tool_enabled(bridge_service, name):
                 continue
             provider = providers.get(direct_spec.service_key) if isinstance(providers, dict) else None
             if provider is None:

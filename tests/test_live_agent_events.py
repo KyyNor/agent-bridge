@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 from agent_bridge.agent_runtime.live_events import LiveAgentRunEventHub
 
@@ -38,3 +39,29 @@ def test_live_event_hub_marks_slow_subscriber_for_resync() -> None:
         hub.unsubscribe(subscription)
 
     asyncio.run(check())
+
+
+def test_live_event_hub_publishes_from_worker_thread() -> None:
+    async def check() -> None:
+        hub = LiveAgentRunEventHub()
+        subscription = hub.subscribe("run_1")
+        errors: list[BaseException] = []
+
+        def publish() -> None:
+            try:
+                hub.publish_event("run_1", {"event_id": 1})
+            except BaseException as exc:  # pragma: no cover - 断言后台线程不得泄漏异常
+                errors.append(exc)
+
+        thread = threading.Thread(target=publish)
+        thread.start()
+        thread.join()
+
+        message = await asyncio.wait_for(subscription.receive(), timeout=1)
+
+        assert errors == []
+        assert message.kind == "agent_event"
+        assert message.payload["event_id"] == 1
+        hub.unsubscribe(subscription)
+
+    asyncio.run(check(), debug=True)
