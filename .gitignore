@@ -21,3 +21,7 @@ frontend/**/dist/
 frontend/**/*.tsbuildinfo
 
 src/agent_bridge/static/
+
+# 本地构建 OpenCompass 评测镜像所需的公开数据与校验 manifest。
+# 文件体积较大，按部署机单独准备，不能提交到仓库。
+docker/model-evaluation/opencompass/datasets/
