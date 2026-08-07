@@ -158,6 +158,8 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 `agent` 与 `output` 节点的 `timeout_seconds` 是 1–86400 秒的运行控制参数，默认 600 秒；它不属于节点产物语义，单独调整超时不得使节点或下游失去复用资格。工作流名称、描述、节点显示名称和 Output 节点配置标题是展示字段，调整它们同样不得改变增量复用或触发重跑。版本判定走双口径：执行语义口径（`content_hash`，剥离 name/description/timeout/title 等字段）喂重跑与 stale 判定，单独调整这些字段时必须稳定不变；版本历史口径（`version_hash`，含这些字段）喂版本号递增与 diff，会随之变更并产生新 `revision_no`——这是版本记录而非增量版本，版本号递增本身不触发重跑。
 
+保存工作流支持 `task_refresh_policy=auto|defer`。`auto` 保持现有行为，将受影响的最新完成任务标记为 `stale`；`defer` 只保存 revision，不改变任务队列。延期后的完成任务通过派生字段 `needs_refresh` 标识，后续由显式任务刷新操作转入 `stale`。不要通过修改 `content_hash` 隐藏执行语义变化；运行中的任务仍受运行快照与版本不一致护栏保护。
+
 工作流编辑使用与版本号分离的 `edit_version` 乐观锁。前端进入编辑路由时必须重新读取详情，保存时传回 `expected_edit_version`；版本不一致返回 `409`，不得以旧标签页内容覆盖当前定义。不要用 `revision_no` 替代该并发令牌：展示字段修改会通过 `version_hash` 递增 `revision_no`，但那是版本记录口径，`edit_version` 才是并发保护令牌，两者职责不同。
 
 除工作流外，可编辑管理资源统一通过 `agent_bridge.core.editing` 生成不透明 `edit_token`。读取接口返回令牌，写接口接受可选的 `expected_edit_token`；新建表单用空字符串表示“读取时资源不存在”，旧客户端未传令牌时保持兼容。令牌快照只包含该编辑域的可写字段，必须包含被脱敏的秘密原值以发现其他页面对秘密的修改，但不得把原值返回客户端。进入独立编辑页或打开列表编辑弹窗时应重新读取服务端详情；冲突统一抛出 `ConflictError`（HTTP `409`），不得静默覆盖。

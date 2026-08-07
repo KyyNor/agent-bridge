@@ -106,6 +106,7 @@ class WorkflowDefinitionsRepositoryMixin:
         actor: str,
         source: str = "edit",
         version_hash: str = "",
+        task_refresh_policy: str = "auto",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             return _revisions.create_revision(
@@ -118,8 +119,8 @@ class WorkflowDefinitionsRepositoryMixin:
                 actor=actor,
                 owner_table="workflow_definitions",
                 snapshot_label="workflow",
-                extra_columns=("source", "version_hash"),
-                extra_values=(source, version_hash),
+                extra_columns=("source", "version_hash", "task_refresh_policy"),
+                extra_values=(source, version_hash, task_refresh_policy),
             )
 
     def list_definition_revisions(self, workflow_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -130,7 +131,7 @@ class WorkflowDefinitionsRepositoryMixin:
                 key_column="workflow_key",
                 key_value=workflow_key,
                 limit=limit,
-                extra_columns=("source", "version_hash"),
+                extra_columns=("source", "version_hash", "task_refresh_policy"),
             )
 
     def get_definition_revision(self, workflow_key: str, revision_no: int) -> dict[str, Any] | None:
@@ -142,7 +143,7 @@ class WorkflowDefinitionsRepositoryMixin:
                 key_value=workflow_key,
                 revision_no=revision_no,
                 snapshot_label="workflow",
-                extra_columns=("source", "version_hash"),
+                extra_columns=("source", "version_hash", "task_refresh_policy"),
             )
 
     def get_current_definition_revision_no(self, workflow_key: str) -> int:
@@ -173,45 +174,71 @@ class WorkflowDefinitionsRepositoryMixin:
         变更不应触发重跑。Older task versions and tasks that are still
         pending/running/failed remain untouched.
         """
+        return self.mark_tasks_stale_for_refresh(workflow_key, content_hash)
+
+    def mark_tasks_stale_for_refresh(
+        self,
+        workflow_key: str,
+        content_hash: str,
+        task_refs: list[tuple[str, str]] | None = None,
+    ) -> int:
+        """把当前任务版本放入增量刷新队列。
+
+        ``task_refs=None`` 保持保存工作流时的全量行为；传入任务引用时只处理
+        指定的当前版本。旧版本、非 completed 任务和已经匹配当前语义 hash 的
+        任务均保持不变。
+        """
+        if task_refs is not None and not task_refs:
+            return 0
+        target_sql = ""
+        params: list[Any] = [workflow_key]
+        if task_refs is not None:
+            target_sql = " AND (" + " OR ".join(
+                "(task.task_key = ? AND task.task_version = ?)" for _ in task_refs
+            ) + ")"
+            for task_key, task_version in task_refs:
+                params.extend((task_key, task_version))
+        params.append(content_hash)
+        query = """
+            UPDATE workflow_tasks AS task
+            SET status = 'stale',
+                completed_at = NULL,
+                priority_flag = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE task.workflow_key = ?
+        """
+        query += target_sql
+        query += """
+              AND task.status = 'completed'
+              AND NOT EXISTS (
+                SELECT 1 FROM workflow_tasks AS newer
+                WHERE newer.workflow_key = task.workflow_key
+                  AND newer.task_key = task.task_key
+                  AND (
+                    newer.set_at > task.set_at
+                    OR (newer.set_at = task.set_at AND newer.id > task.id)
+                  )
+              )
+              AND EXISTS (
+                SELECT 1 FROM workflow_runs AS successful
+                WHERE successful.workflow_key = task.workflow_key
+                  AND successful.task_key = task.task_key
+                  AND successful.task_version = task.task_version
+                  AND successful.status = 'completed'
+              )
+              AND COALESCE((
+                SELECT successful.workflow_content_hash
+                FROM workflow_runs AS successful
+                WHERE successful.workflow_key = task.workflow_key
+                  AND successful.task_key = task.task_key
+                  AND successful.task_version = task.task_version
+                  AND successful.status = 'completed'
+                ORDER BY successful.finished_at DESC, successful.id DESC
+                LIMIT 1
+              ), '') != ?
+        """
         with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE workflow_tasks AS task
-                SET status = 'stale',
-                    completed_at = NULL,
-                    priority_flag = NULL,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE task.workflow_key = ?
-                  AND task.status = 'completed'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM workflow_tasks AS newer
-                    WHERE newer.workflow_key = task.workflow_key
-                      AND newer.task_key = task.task_key
-                      AND (
-                        newer.set_at > task.set_at
-                        OR (newer.set_at = task.set_at AND newer.id > task.id)
-                      )
-                  )
-                  AND EXISTS (
-                    SELECT 1 FROM workflow_runs AS successful
-                    WHERE successful.workflow_key = task.workflow_key
-                      AND successful.task_key = task.task_key
-                      AND successful.task_version = task.task_version
-                      AND successful.status = 'completed'
-                  )
-                  AND COALESCE((
-                    SELECT successful.workflow_content_hash
-                    FROM workflow_runs AS successful
-                    WHERE successful.workflow_key = task.workflow_key
-                      AND successful.task_key = task.task_key
-                      AND successful.task_version = task.task_version
-                      AND successful.status = 'completed'
-                    ORDER BY successful.finished_at DESC, successful.id DESC
-                    LIMIT 1
-                  ), '') != ?
-                """,
-                (workflow_key, content_hash),
-            )
+            cursor = conn.execute(query, params)
             return cursor.rowcount
 
     def create_workflow_definition_import(

@@ -98,7 +98,43 @@ class WorkflowTaskQueueRepositoryMixin:
                     SELECT 1 FROM workflow_artifacts a
                     WHERE a.workflow_key = t.workflow_key
                       AND a.task_key = t.task_key
-                ) AS has_artifacts
+                ) AS has_artifacts,
+                CASE WHEN t.status = 'completed'
+                  AND EXISTS (
+                    SELECT 1 FROM workflow_runs successful
+                    WHERE successful.workflow_key = t.workflow_key
+                      AND successful.task_key = t.task_key
+                      AND successful.task_version = t.task_version
+                      AND successful.status = 'completed'
+                  )
+                  AND COALESCE((
+                    SELECT successful.workflow_content_hash
+                    FROM workflow_runs successful
+                    WHERE successful.workflow_key = t.workflow_key
+                      AND successful.task_key = t.task_key
+                      AND successful.task_version = t.task_version
+                      AND successful.status = 'completed'
+                    ORDER BY successful.finished_at DESC, successful.id DESC
+                    LIMIT 1
+                  ), '') != COALESCE((
+                    SELECT revision.content_hash
+                    FROM workflow_definitions definition
+                    JOIN workflow_definition_revisions revision
+                      ON revision.workflow_key = definition.workflow_key
+                     AND revision.revision_no = definition.current_revision_no
+                    WHERE definition.workflow_key = t.workflow_key
+                  ), '')
+                  THEN 1 ELSE 0 END AS needs_refresh,
+                (
+                  SELECT successful.workflow_revision_no
+                  FROM workflow_runs successful
+                  WHERE successful.workflow_key = t.workflow_key
+                    AND successful.task_key = t.task_key
+                    AND successful.task_version = t.task_version
+                    AND successful.status = 'completed'
+                  ORDER BY successful.finished_at DESC, successful.id DESC
+                  LIMIT 1
+                ) AS last_completed_revision_no
                 FROM workflow_tasks t
                 WHERE {' AND '.join(clauses)}
                 ORDER BY {order_by}

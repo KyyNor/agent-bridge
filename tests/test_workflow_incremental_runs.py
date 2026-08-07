@@ -14,8 +14,8 @@ def _service(wm_paths):
     return service
 
 
-def _upsert_definition(service, *, name: str, definition=None):
-    return service.workflows.upsert_definition(
+def _upsert_definition(service, *, name: str, definition=None, **overrides):
+    payload = dict(
         actor="root",
         workflow_key="incremental-report",
         name=name,
@@ -24,6 +24,8 @@ def _upsert_definition(service, *, name: str, definition=None):
         definition=definition if definition is not None else {"nodes": [], "edges": []},
         status="active",
     )
+    payload.update(overrides)
+    return service.workflows.upsert_definition(**payload)
 
 
 def _complete_task(service, *, run_id: str, task_version: str, revision: dict):
@@ -183,6 +185,39 @@ def test_definition_presentation_change_does_not_stale_completed_task(wm_paths):
     assert revision_two["content_hash"] == revision_one["content_hash"]
     assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "completed"
 
+
+def test_definition_semantic_change_can_defer_task_refresh_until_explicit_request(wm_paths):
+    service = _service(wm_paths)
+    revision_one = _upsert_definition(service, name="Incremental report v1")
+    service.store.upsert_workflow_tasks(
+        "incremental-report", [{"task_key": "page:a", "task_version": "v1", "payload": {}}]
+    )
+    _complete_task(service, run_id="run-v1", task_version="v1", revision=revision_one)
+
+    get_task_node = {"id": "n1", "name": "N1", "type": "get_task", "position": {"x": 0, "y": 0}, "config": {}}
+    revision_two = _upsert_definition(
+        service,
+        name="Incremental report v2",
+        definition={"nodes": [get_task_node], "edges": []},
+        task_refresh_policy="defer",
+    )
+
+    task = service.store.get_workflow_task("incremental-report", "page:a", "v1")
+    assert task["status"] == "completed"
+    listed = service.store.list_workflow_tasks("incremental-report")
+    assert listed[0]["needs_refresh"] is True
+    assert listed[0]["last_completed_revision_no"] == revision_one["revision_no"]
+    assert service.workflows.get_revision("root", "incremental-report", revision_two["revision_no"])["task_refresh_policy"] == "defer"
+
+    prepared = service.workflows.execute_task(
+        actor="root",
+        workflow_key="incremental-report",
+        task_key="page:a",
+        task_version="v1",
+        execution_mode="incremental",
+    )
+    assert prepared["execution_mode"] == "incremental"
+    assert service.store.get_workflow_task("incremental-report", "page:a", "v1")["status"] == "stale"
 
 def test_version_and_content_hash_differ_on_timeout_title_and_name():
     """执行语义口径与版本口径对展示/运行控制字段的剥离差异。

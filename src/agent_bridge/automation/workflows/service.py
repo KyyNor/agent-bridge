@@ -44,6 +44,7 @@ from agent_bridge.automation.workflows.window import parse_hhmm, previous_window
 logger = logging.getLogger(__name__)
 
 WORKFLOW_REVISION_SOURCES = frozenset({"edit", "import", "restore"})
+WORKFLOW_TASK_REFRESH_POLICIES = frozenset({"auto", "defer"})
 
 
 class WorkflowService:
@@ -95,10 +96,13 @@ class WorkflowService:
         definition: dict[str, Any] | WorkflowGraph | None = None,
         revision_source: str = "edit",
         expected_edit_version: int | None = None,
+        task_refresh_policy: str = "auto",
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         if revision_source not in WORKFLOW_REVISION_SOURCES:
             raise ValidationError(f"unsupported workflow revision source: {revision_source}")
+        if task_refresh_policy not in WORKFLOW_TASK_REFRESH_POLICIES:
+            raise ValidationError(f"unsupported workflow task refresh policy: {task_refresh_policy}")
         graph = self.validator.require_valid(
             actor=actor,
             workflow={
@@ -153,6 +157,7 @@ class WorkflowService:
             # 也应产生新版本号（供版本历史与 diff），但不影响重跑。
             content_changed = not previous_revisions or previous_version_hash != new_version_hash
             revision_no = previous_revisions[0]["revision_no"] if previous_revisions else 0
+            tasks_marked_stale = 0
             if content_changed:
                 revision = self.store.workflows.create_definition_revision(
                     workflow_key=workflow_key,
@@ -161,15 +166,19 @@ class WorkflowService:
                     actor=actor,
                     source=revision_source,
                     version_hash=new_version_hash,
+                    task_refresh_policy=task_refresh_policy,
                 )
                 revision_no = revision["revision_no"]
-                # 重跑/stale 判定只用执行语义口径 hash，与版本号解耦。
-                self.store.workflows.mark_latest_task_stale_if_needed(
-                    workflow_key, new_content_hash
-                )
+                if task_refresh_policy == "auto":
+                    # 重跑/stale 判定只用执行语义口径 hash，与版本号解耦。
+                    tasks_marked_stale = self.store.workflows.mark_latest_task_stale_if_needed(
+                        workflow_key, new_content_hash
+                    )
         result["content_hash"] = new_content_hash
         result["version_hash"] = new_version_hash
         result["revision_no"] = revision_no
+        result["task_refresh_policy"] = task_refresh_policy
+        result["tasks_marked_stale"] = tasks_marked_stale
         logger.info(
             "Workflow 定义已保存 workflow=%s profile=%s 状态=%s 类型=%s actor=%s",
             workflow_key,
@@ -332,6 +341,54 @@ class WorkflowService:
             "tasks": self.store.list_workflow_tasks(
                 workflow_key, status=status, type=type, search=search, sort=sort
             )
+        }
+
+    def refresh_tasks(
+        self,
+        *,
+        actor: str,
+        workflow_key: str,
+        tasks: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """显式将当前工作流中选定的完成任务放入增量刷新队列。"""
+        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None:
+            raise NotFound("workflow not found")
+        revision_no = self.store.workflows.get_current_definition_revision_no(workflow_key)
+        revision = (
+            self.store.workflows.get_definition_revision(workflow_key, revision_no)
+            if revision_no > 0
+            else None
+        )
+        content_hash = str((revision or {}).get("content_hash") or "")
+        if not content_hash:
+            raise ValidationError("workflow has no executable definition revision")
+        refs = None
+        if tasks is not None:
+            refs = [
+                (str(item.get("task_key") or ""), str(item.get("task_version") or ""))
+                for item in tasks
+            ]
+            if any(not task_key for task_key, _ in refs):
+                raise ValidationError("task_key is required")
+        marked = self.store.workflows.mark_tasks_stale_for_refresh(
+            workflow_key,
+            content_hash,
+            task_refs=refs,
+        )
+        logger.info(
+            "Workflow 任务已请求增量刷新 workflow=%s revision=%s requested=%s marked=%s actor=%s",
+            workflow_key,
+            revision_no,
+            len(refs) if refs is not None else "all",
+            marked,
+            actor,
+        )
+        return {
+            "workflow_key": workflow_key,
+            "revision_no": revision_no,
+            "requested": len(refs) if refs is not None else None,
+            "marked_stale": marked,
         }
 
     def preview_task_import(
@@ -515,21 +572,40 @@ class WorkflowService:
             task_status=task.get("status"), requested_mode=execution_mode
         )
         if task.get("status") == "completed":
-            if execution_mode != "force_full":
+            if execution_mode == "incremental":
+                revision_no = self.store.workflows.get_current_definition_revision_no(workflow_key)
+                revision = self.store.workflows.get_definition_revision(workflow_key, revision_no)
+                content_hash = str((revision or {}).get("content_hash") or "")
+                marked = self.store.workflows.mark_tasks_stale_for_refresh(
+                    workflow_key,
+                    content_hash,
+                    task_refs=[(task_key, str(task.get("task_version") or ""))],
+                ) if content_hash else 0
+                if not marked:
+                    raise ValidationError(
+                        "completed task does not need incremental refresh; use execution_mode=force_full"
+                    )
+                task = self.store.get_workflow_task(
+                    workflow_key, task_key, task_version=str(task.get("task_version") or "")
+                )
+                if task is None:
+                    raise NotFound("workflow task not found")
+            elif execution_mode != "force_full":
                 # Keep the historical validation response for callers that do
                 # not explicitly opt into a full rerun. The UI sends
                 # force_full for completed tasks with existing output.
                 raise ValidationError("completed task requires execution_mode=force_full")
-            resolved_task_version = str(task.get("task_version") or "")
-            if not self.store.reset_workflow_task(
-                workflow_key, task_key, task_version=resolved_task_version
-            ):
-                raise NotFound("workflow task not found")
-            task = self.store.get_workflow_task(
-                workflow_key, task_key, task_version=resolved_task_version
-            )
-            if task is None:
-                raise NotFound("workflow task not found")
+            elif execution_mode == "force_full":
+                resolved_task_version = str(task.get("task_version") or "")
+                if not self.store.reset_workflow_task(
+                    workflow_key, task_key, task_version=resolved_task_version
+                ):
+                    raise NotFound("workflow task not found")
+                task = self.store.get_workflow_task(
+                    workflow_key, task_key, task_version=resolved_task_version
+                )
+                if task is None:
+                    raise NotFound("workflow task not found")
         if not self._is_leasable(task):
             raise ValidationError("task is not currently executable; reset it first")
         resolved_task_version = str(task.get("task_version") or "")

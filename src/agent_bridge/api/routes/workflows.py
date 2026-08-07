@@ -11,6 +11,7 @@ from agent_bridge.api.schemas import (
     WorkflowImportConfirmRequest,
     WorkflowRunRequest,
     WorkflowRunPreviewRequest,
+    WorkflowTaskRefreshRequest,
     WorkflowTaskImportConfirmRequest,
     WorkflowValidationRequest,
 )
@@ -356,6 +357,19 @@ def create_workflow_routes(service, actor):
             execution_mode=flagged["execution_mode"],
         )
         return {**flagged, **service.workflows.workflow_run_start_payload(started)}
+
+    @router.post("/workflows/{workflow_key}/tasks/refresh")
+    def refresh_tasks(
+        workflow_key: str,
+        payload: WorkflowTaskRefreshRequest | None = None,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        items = payload.tasks if payload is not None else None
+        return service.workflows.refresh_tasks(
+            actor=current_actor,
+            workflow_key=workflow_key,
+            tasks=[item.model_dump() for item in items] if items is not None else None,
+        )
 
     @router.post("/workflows/{workflow_key}/tasks/{task_key:path}/reset")
     def reset_task(

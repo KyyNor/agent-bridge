@@ -143,6 +143,7 @@ const {
   selectWorkflowEdge,
   setConfigDrawerOpen,
   setConfigDrawerMode,
+  taskRefreshPolicy,
   setNodeSchemaValidity,
   replaceNode,
   replaceEdge,
@@ -379,6 +380,7 @@ const {
   taskArtifactError,
   taskActionLoading,
   taskActionError,
+  refreshingTasks,
   taskPreviews,
   taskPreviewLoading,
   resetTarget,
@@ -406,6 +408,7 @@ const {
   filteredTasks,
   pagedTasks,
   selectedTasks,
+  refreshableSelectedTasks,
   allVisibleTasksSelected,
   someVisibleTasksSelected,
   batchBusy,
@@ -435,6 +438,9 @@ const {
   taskActionKey,
   isTaskActionLoading,
   executeTask,
+  canRefreshTask,
+  refreshTask,
+  refreshSelectedTasks,
   openResetConfirm,
   closeResetConfirm,
   confirmResetTask,
@@ -1416,6 +1422,8 @@ async function confirmClearWorkflow() {
             :all-visible-selected="allVisibleTasksSelected"
             :some-visible-selected="someVisibleTasksSelected"
             :selected-count="selectedTasks.length"
+            :refreshable-selected-count="refreshableSelectedTasks.length"
+            :refreshing-tasks="refreshingTasks"
             :batch-busy="batchBusy"
             :batch-action="batchAction"
             :batch-current="batchProgress.current"
@@ -1435,6 +1443,7 @@ async function confirmClearWorkflow() {
             @select-visible="setVisibleTasksSelectedFromEvent"
             @reset-selected="resetSelectedTasks"
             @run-selected="runSelectedTasks"
+            @refresh-selected="refreshSelectedTasks"
             @stop-batch="stopBatchRun"
             @download-template="downloadTaskImportTemplate"
             @import="openTaskImport"
@@ -1557,6 +1566,7 @@ async function confirmClearWorkflow() {
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="font-mono text-sm font-medium text-foreground">{{ task.task_key }}</span>
                     <Badge variant="outline" :class="taskBadgeClass(task.status)">{{ taskStatusLabel(task.status) }}</Badge>
+                    <Badge v-if="task.needs_refresh" variant="outline" class="bg-warning-soft text-warning-soft-fg">当前版本未刷新</Badge>
                     <Badge v-if="task.priority_flag" variant="outline" class="bg-accent text-accent-foreground">优先执行</Badge>
                     <Badge v-if="task.type" variant="outline">{{ task.type }}</Badge>
                     <Badge v-if="task.task_version" variant="outline">{{ task.task_version }}</Badge>
@@ -1582,7 +1592,17 @@ async function confirmClearWorkflow() {
                     :disabled="batchBusy || isTaskActionLoading(task)"
                     @click="executeTask(task)"
                   >
-                    {{ isTaskActionLoading(task) ? '执行中' : task.status === 'completed' ? '全量运行' : task.status === 'stale' ? '增量运行' : '执行' }}
+                    {{ isTaskActionLoading(task) ? '执行中' : task.needs_refresh || task.status === 'stale' ? '增量运行' : task.status === 'completed' ? '全量运行' : '执行' }}
+                  </Button>
+                  <Button
+                    v-if="canRefreshTask(task)"
+                    variant="ghost"
+                    size="sm"
+                    class="h-8 text-xs text-primary"
+                    :disabled="batchBusy || isTaskActionLoading(task)"
+                    @click="refreshTask(task)"
+                  >
+                    {{ isTaskActionLoading(task) ? '安排中' : '安排增量' }}
                   </Button>
                   <Button
                     v-if="canPreviewTask(task)"
@@ -1869,6 +1889,15 @@ async function confirmClearWorkflow() {
               <Play class="mr-1.5 h-4 w-4" />
               测试运行
             </Button>
+            <Select v-model="taskRefreshPolicy" :disabled="saving">
+              <SelectTrigger class="h-8 w-[210px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">保存并安排增量刷新</SelectItem>
+                <SelectItem value="defer">仅保存，暂不刷新任务</SelectItem>
+              </SelectContent>
+            </Select>
             <Button :disabled="saving" size="sm" @click="saveWorkflow">
               <Save class="mr-1.5 h-4 w-4" />
               {{ saving ? '保存中' : '保存' }}

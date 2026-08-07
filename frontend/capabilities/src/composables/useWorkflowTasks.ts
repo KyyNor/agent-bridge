@@ -111,6 +111,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
   const taskArtifactError = ref('')
   const taskActionLoading = ref<Set<string>>(new Set())
   const taskActionError = ref('')
+  const refreshingTasks = ref(false)
   const taskPreviews = ref<Record<string, WorkflowExecutionPlan>>({})
   const taskPreviewLoading = ref<Set<string>>(new Set())
   const resetTarget = ref<WorkflowTask | null>(null)
@@ -150,6 +151,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
   )
   const pagedTasks = computed(() => paginate(filteredTasks.value, taskPage.value, taskPageSize.value))
   const selectedTasks = computed(() => filteredTasks.value.filter(task => selectedTaskIds.value.has(taskId(task))))
+  const refreshableSelectedTasks = computed(() => selectedTasks.value.filter(task => task.needs_refresh))
   const allVisibleTasksSelected = computed(() =>
     pagedTasks.value.length > 0 && pagedTasks.value.every(task => selectedTaskIds.value.has(taskId(task))),
   )
@@ -394,9 +396,9 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
   // ===== Single task execution / reset / preview =====
 
   function taskExecutionMode(task: WorkflowTask): WorkflowExecutionMode {
-    // Preview requests use execution_mode: 'incremental' for stale tasks and
-    // execution_mode: 'force_full' for completed tasks with existing output.
-    if (task.status === 'stale') return 'incremental'
+    // Preview requests use incremental mode for stale/deferred tasks and
+    // force_full only for completed tasks whose result matches the definition.
+    if (task.status === 'stale' || task.needs_refresh) return 'incremental'
     if (canForceRun(task)) return 'force_full'
     return 'normal'
   }
@@ -418,7 +420,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
       const plan = await api.previewWorkflowRun(task.workflow_key, {
         task_key: task.task_key,
         task_version: task.task_version || undefined,
-        execution_mode: task.status === 'stale' ? 'incremental' : task.status === 'completed' ? 'force_full' : 'normal',
+        execution_mode: task.status === 'stale' || task.needs_refresh ? 'incremental' : task.status === 'completed' ? 'force_full' : 'normal',
       })
       taskPreviews.value = { ...taskPreviews.value, [key]: plan }
     } catch (e: unknown) {
@@ -467,6 +469,48 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
       taskActionLoading.value = done
     }
     return undefined
+  }
+
+  function canRefreshTask(task: WorkflowTask): boolean {
+    return task.status === 'completed' && task.needs_refresh
+  }
+
+  async function refreshTask(task: WorkflowTask) {
+    if (!canRefreshTask(task) || batchBusy.value || isTaskActionLoading(task)) return
+    const key = taskActionKey(task)
+    const loading = new Set(taskActionLoading.value)
+    loading.add(key)
+    taskActionLoading.value = loading
+    taskActionError.value = ''
+    try {
+      await api.refreshWorkflowTasks(task.workflow_key, [{ task_key: task.task_key, task_version: task.task_version || '' }])
+      await loadTasks(task.workflow_key)
+    } catch (e: unknown) {
+      taskActionError.value = errorMessage(e)
+    } finally {
+      const done = new Set(taskActionLoading.value)
+      done.delete(key)
+      taskActionLoading.value = done
+    }
+  }
+
+  async function refreshSelectedTasks() {
+    if (batchBusy.value || refreshingTasks.value || !refreshableSelectedTasks.value.length) return
+    const selected = [...refreshableSelectedTasks.value]
+    refreshingTasks.value = true
+    taskActionError.value = ''
+    try {
+      await api.refreshWorkflowTasks(
+        selected[0].workflow_key,
+        selected.map(task => ({ task_key: task.task_key, task_version: task.task_version || '' })),
+      )
+      selectedTaskIds.value = new Set()
+      await loadTasks(selected[0].workflow_key)
+    } catch (e: unknown) {
+      taskActionError.value = errorMessage(e)
+    } finally {
+      refreshingTasks.value = false
+    }
   }
 
   function openResetConfirm(task: WorkflowTask) {
@@ -855,6 +899,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     taskArtifactError,
     taskActionLoading,
     taskActionError,
+    refreshingTasks,
     taskPreviews,
     taskPreviewLoading,
     resetTarget,
@@ -883,6 +928,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     filteredTasks,
     pagedTasks,
     selectedTasks,
+    refreshableSelectedTasks,
     allVisibleTasksSelected,
     someVisibleTasksSelected,
     batchBusy,
@@ -915,6 +961,9 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     taskActionKey,
     isTaskActionLoading,
     executeTask,
+    canRefreshTask,
+    refreshTask,
+    refreshSelectedTasks,
     openResetConfirm,
     closeResetConfirm,
     confirmResetTask,

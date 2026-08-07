@@ -712,6 +712,7 @@ CREATE TABLE IF NOT EXISTS workflow_definition_revisions (
   snapshot_json TEXT NOT NULL,
   created_by TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'edit',
+  task_refresh_policy TEXT NOT NULL DEFAULT 'auto',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (workflow_key, revision_no)
 );

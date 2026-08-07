@@ -120,6 +120,18 @@ class WorkflowsFacadeMixin:
             sort=sort,
         )
 
+    def mark_tasks_stale_for_refresh(
+        self,
+        workflow_key: str,
+        content_hash: str,
+        task_refs: list[tuple[str, str]] | None = None,
+    ) -> int:
+        return self.workflows.mark_tasks_stale_for_refresh(
+            workflow_key,
+            content_hash,
+            task_refs=task_refs,
+        )
+
     def lease_workflow_task(
         self,
         workflow_key: str,

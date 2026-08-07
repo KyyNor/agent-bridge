@@ -21,6 +21,10 @@ function task(taskKey: string, status = 'pending'): WorkflowTask {
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     completed_at: null,
+    priority_flag: null,
+    has_artifacts: false,
+    needs_refresh: false,
+    last_completed_revision_no: null,
   }
 }
 

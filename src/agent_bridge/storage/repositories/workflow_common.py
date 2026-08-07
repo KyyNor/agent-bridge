@@ -41,6 +41,8 @@ def _row_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
         item["reuse_allowed"] = bool(item["reuse_allowed"])
     if "has_artifacts" in item:
         item["has_artifacts"] = bool(item["has_artifacts"])
+    if "needs_refresh" in item:
+        item["needs_refresh"] = bool(item["needs_refresh"])
     for source, target, default in [
         ("payload_json", "payload", {}),
         ("tags_json", "tags", []),

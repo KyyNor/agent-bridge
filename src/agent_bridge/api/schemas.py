@@ -414,6 +414,19 @@ class WorkflowDefinitionRequest(BaseModel):
     # 0 表示客户端确认目标尚不存在；正整数用于并发编辑的乐观锁。
     # 省略时兼容旧客户端，由服务端继续执行原有 upsert 语义。
     expected_edit_version: int | None = Field(default=None, ge=0)
+    # 执行语义发生变化时，决定是否立即把已有完成任务放入刷新队列。
+    task_refresh_policy: Literal["auto", "defer"] = "auto"
+
+
+class WorkflowTaskRefreshItem(BaseModel):
+    task_key: str = Field(min_length=1, max_length=1024)
+    task_version: str = Field(default="", max_length=512)
+
+
+class WorkflowTaskRefreshRequest(BaseModel):
+    """显式请求将任务放入当前工作流版本的增量刷新队列。"""
+
+    tasks: list[WorkflowTaskRefreshItem] | None = Field(default=None, max_length=500)
 
 
 class WorkflowTaskImportConfirmRequest(BaseModel):

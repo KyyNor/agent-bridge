@@ -24,6 +24,7 @@
 - 工作流产物的文本检索使用 jieba 预分词与 SQLite FTS5；结构化范围条件（Profile、current/history、标签、格式和路径前缀）必须继续在 `workflow_artifacts` 主表上过滤。中文查询按分词后的关键词组合匹配，长度至少 3 的 ASCII 标识符支持前缀匹配，短 token 和带分隔符的路径/标识符保持字面匹配。
 - `artifacts_search` 的结果使用公共 `DiskCacheStore` 磁盘缓存，`artifact_search_cache_ttl_hours` 默认 8 小时并可由系统配置页面调整；当前不要求因新产物写入主动失效缓存。
 - 工作流 `agent` 与 `output` 节点的 `timeout_seconds` 仅为运行控制参数；工作流名称/描述、节点显示名称和 Output 配置标题均为展示字段。调整这些字段不能改变增量复用判定或触发下游重跑。版本判定走双口径：执行语义口径（`content_hash`，剥离 name/description/timeout/title）喂重跑与 stale 判定，必须稳定不变；版本历史口径（`version_hash`，含这些字段）喂版本号递增与 diff，会随之变更并产生新 `revision_no`，但版本号递增本身不触发重跑。不要用 `revision_no` 作为并发/复用令牌，并发控制用独立的 `edit_version`。
+- 工作流保存支持 `task_refresh_policy=auto|defer`：`auto` 将受影响的最新完成任务标记为 `stale`，`defer` 只创建新 revision、不改变任务队列；延期结果保持 `completed` 并通过派生的 `needs_refresh` 标记，后续必须经显式刷新操作才进入增量队列。不得通过伪造 `content_hash` 隐藏执行语义变化，运行中的任务仍受版本快照护栏保护。
 - `task_key` 是工作流任务的唯一身份，`task_version` 是版本演进线。同 `task_key` 出现新 `task_version` 时，尚未运行或无需继续重试的旧版本（`pending`/`stale`/`failed`/`abandoned`）必须由下发入口（`_apply_workflow_tasks`，`workflow_set_task` 单发/批量与 Excel 导入共用）统一标为 `superseded`，调度器永不领取；`running` 旧版本让它跑完、`completed` 旧版本保留为历史产物。跨版本禁止增量复用：`select_baseline` 的 `task_version` 硬等值不得放宽，新版本首次执行必须全量。存量“同 task_key 多 version 排队”数据由 `backfill_workflow_tasks_superseded` 启动迁移幂等回填。
 - Coding Agent 的结构化输出 JSON Schema 统一按 Draft 07 传递和校验；历史 2020-12 的 `$defs` 与本地 `$ref` 仅可无损改写为 `definitions`，其余无法等价转换的专属关键字必须明确拒绝，不得静默弱化校验。
 - `profile use` 写入的 Agent Bridge HTTP MCP 配置使用 `timeout: 300000`（毫秒），将 Claude Code 远程 MCP 工具调用上限固定为 300 秒；该值与 Weknora 后端 HTTP 超时分开管理。

@@ -18,6 +18,8 @@ defineProps<{
   allVisibleSelected: boolean
   someVisibleSelected: boolean
   selectedCount: number
+  refreshableSelectedCount: number
+  refreshingTasks: boolean
   batchBusy: boolean
   batchAction: 'reset' | 'run' | ''
   batchCurrent: number
@@ -31,7 +33,7 @@ defineProps<{
 
 const emit = defineEmits([
   'update:searchInput', 'update:status', 'update:type', 'update:hasArtifacts', 'update:sort',
-  'search', 'resetFilters', 'selectVisible', 'resetSelected', 'runSelected',
+  'search', 'resetFilters', 'selectVisible', 'resetSelected', 'runSelected', 'refreshSelected',
   'stopBatch', 'downloadTemplate', 'import', 'refresh',
 ])
 </script>
@@ -61,6 +63,7 @@ const emit = defineEmits([
       <span v-if="selectedCount" class="text-xs text-primary">已选 {{ selectedCount }}</span>
       <Button v-if="selectedCount" variant="outline" size="sm" class="h-8 text-xs text-warning" :disabled="batchBusy" @click="emit('resetSelected')">{{ batchAction === 'reset' ? `重置中 ${batchCurrent}/${batchTotal}` : '批量重置' }}</Button>
       <Button v-if="selectedCount" variant="outline" size="sm" class="h-8 text-xs text-primary" :disabled="batchBusy" @click="emit('runSelected')">{{ batchAction === 'run' ? `运行中 ${batchCurrent}/${batchTotal}` : '批量运行' }}</Button>
+      <Button v-if="refreshableSelectedCount" variant="outline" size="sm" class="h-8 text-xs text-primary" :disabled="batchBusy || refreshingTasks" @click="emit('refreshSelected')">{{ refreshingTasks ? '安排中' : `安排增量（${refreshableSelectedCount}）` }}</Button>
       <Button v-if="batchAction === 'run'" variant="outline" size="sm" class="h-8 text-xs text-destructive" :disabled="stopRequested" @click="emit('stopBatch')">{{ stopRequested ? '停止中' : '停止批量' }}</Button>
       <span class="text-xs text-muted-foreground">{{ filteredCount }} / {{ totalCount }}</span>
       <Button variant="outline" size="sm" class="h-8 text-xs" :disabled="!hasWorkflow || batchBusy" @click="emit('downloadTemplate')">下载模板</Button>

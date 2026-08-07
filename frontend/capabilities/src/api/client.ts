@@ -88,6 +88,8 @@ import type {
   WorkflowTasksResult,
   WorkflowTaskListParams,
   WorkflowTaskImportPreview,
+  WorkflowTaskRefreshPolicy,
+  WorkflowTaskRefreshResult,
   WorkflowTaskImportResult,
   WorkflowImportPreview,
   WorkflowImportResult,
@@ -494,6 +496,10 @@ export const api = {
     const tail = qs.toString() ? `?${qs}` : ''
     return get<WorkflowTasksResult>(`/workflows/${key}/tasks${tail}`)
   },
+  refreshWorkflowTasks: (
+    key: string,
+    tasks?: Array<{ task_key: string; task_version?: string }>,
+  ) => post<WorkflowTaskRefreshResult>(`/workflows/${key}/tasks/refresh`, tasks ? { tasks } : {}),
   downloadWorkflowTaskTemplate: (workflowKey: string) =>
     getBlob(`/workflows/${workflowKey}/tasks/import/template`),
   previewWorkflowTaskImport: (workflowKey: string, file: File) => {
@@ -518,6 +524,7 @@ export const api = {
     profile_key: string
     definition: WorkflowGraph
     expected_edit_version?: number | null
+    task_refresh_policy?: WorkflowTaskRefreshPolicy
   }) => post<WorkflowDefinition>('/workflows', { status: 'active', ...w }),
   runWorkflow: (
     key: string,

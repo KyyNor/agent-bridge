@@ -124,3 +124,42 @@ def test_reset_endpoint_requires_admin(wm_paths):
     svc.store.upsert_workflow_tasks("w", [{"task_key": "page:a", "payload": {}}])
     resp = client.post("/workflows/w/tasks/page:a/reset", headers={"X-Agent-Bridge-User": "intruder"})
     assert resp.status_code == 403, resp.text
+
+
+def test_refresh_endpoint_marks_only_requested_completed_task(wm_paths):
+    svc, client = _client(wm_paths)
+    svc.store.upsert_workflow_tasks(
+        "w",
+        [
+            {"task_key": "page:a", "task_version": "v1", "payload": {}},
+            {"task_key": "page:b", "task_version": "v1", "payload": {}},
+        ],
+    )
+    svc.store.create_workflow_run(
+        run_id="run_a",
+        workflow_key="w",
+        profile_key="report-plane",
+        task_key="page:a",
+        task_version="v1",
+        status="running",
+        temp_dir="",
+        workflow_content_hash="old-hash",
+    )
+    svc.store.lease_workflow_task_by_key(
+        "w", "page:a", task_version="v1", run_id="run_a", lease_seconds=7200
+    )
+    assert svc.store.complete_workflow_task("w", "page:a", task_version="v1", run_id="run_a")
+    svc.store.finish_workflow_run(
+        "run_a", status="completed", exit_code=0, error=None, duration_ms=0
+    )
+
+    response = client.post(
+        "/workflows/w/tasks/refresh",
+        headers=H,
+        json={"tasks": [{"task_key": "page:a", "task_version": "v1"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["marked_stale"] == 1
+    assert svc.store.get_workflow_task("w", "page:a", "v1")["status"] == "stale"
+    assert svc.store.get_workflow_task("w", "page:b", "v1")["status"] == "pending"

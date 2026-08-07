@@ -240,7 +240,11 @@ export interface WorkflowDefinition {
   edit_version: number
   revision_no?: number
   content_hash?: string
+  task_refresh_policy?: WorkflowTaskRefreshPolicy
+  tasks_marked_stale?: number
 }
+
+export type WorkflowTaskRefreshPolicy = 'auto' | 'defer'
 
 export interface SkillPrompt {
   skill_name: string
@@ -478,6 +482,16 @@ export interface WorkflowTask {
   completed_at: string | null
   /** 该任务是否已有任一版本的产物（按 task_key 从 workflow_artifacts 聚合派生）。 */
   has_artifacts: boolean
+  /** 最新完成结果是否来自当前工作流执行语义之前的版本。 */
+  needs_refresh: boolean
+  last_completed_revision_no: number | null
+}
+
+export interface WorkflowTaskRefreshResult {
+  workflow_key: string
+  revision_no: number
+  requested: number | null
+  marked_stale: number
 }
 
 export interface WorkflowTasksResult {
@@ -1500,6 +1514,7 @@ export interface Revision {
   created_by: string
   created_at: string
   source?: WorkflowRevisionSource
+  task_refresh_policy?: WorkflowTaskRefreshPolicy
   is_current?: boolean
 }
 
