@@ -20,7 +20,7 @@ from agent_bridge.core.editing import attach_edit_token, require_edit_token
 
 
 MAX_LEDGER_FIELDS = 100
-MAX_LEDGER_RECORDS = 50_000
+MAX_LEDGER_RECORDS = 200_000
 FIELD_TYPES = {"text", "number", "enum", "date", "datetime"}
 TEXT_OPS = {"exact", "prefix", "contains"}
 NUMBER_OPS = {"exact", "gt", "gte", "lt", "lte", "between"}

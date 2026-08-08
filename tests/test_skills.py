@@ -64,7 +64,7 @@ def test_design_business_ledger_skill_describes_supported_field_rules(wm_paths):
     prompt = service.skills.get_skill("root", "design_business_ledger")["prompt"]
 
     assert "fuzzy_match" in prompt
-    assert "50,000" in prompt
+    assert "200,000" in prompt
     assert "布尔" in prompt
 
 
