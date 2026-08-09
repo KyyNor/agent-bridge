@@ -59,7 +59,7 @@ uv run agent-bridge server stop
 
 ## 模型评估运行时
 
-「系统管理 → 模型评估」只支持本地 Docker，不会向 Agent Bridge 主 Python 环境安装 OpenCompass。评估按五个能力维度组织：通用知识（C-Eval、MMLU-Pro）、数学（GSM8K）、指令遵循（IFEval）、代码（HumanEval、MBPP）和 Agent（SWE-bench Lite）。页面可设置“每个数据集最多题数”（默认 64、范围 1–1000），并选择固定前 N 条或带 seed 的随机抽样；所有勾选数据集按相同上限执行，SWE-bench 中对应最多任务数。
+「系统管理 → 模型评估」只支持本地 Docker，不会向 Agent Bridge 主 Python 环境安装 OpenCompass。评估按五个能力维度组织：通用知识（C-Eval、MMLU-Pro）、数学（GSM8K）、指令遵循（IFEval）、代码（HumanEval、MBPP）和 Agent（SWE-bench Lite）。页面可设置“每个数据集最多题数”（默认 64、范围 1–1000），并选择固定前 N 条或带 seed 的随机抽样；所有勾选数据集按相同上限执行，SWE-bench 中对应最多任务数。评估详情提供五维雷达图：同维度的已选测试集按百分比分数等权平均，未选维度或未产生有效分数的已选测试集均按 0 分计。
 
 部署机需要预先构建或导入两份镜像。OpenCompass、HumanEval 与 MBPP 数据在构建时打入镜像，运行时不下载、不挂载 OpenCompass cache：
 

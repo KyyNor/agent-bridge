@@ -10,6 +10,8 @@ import { Card, CardContent } from '../../components/ui/card'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import StatusBadge from '../../components/StatusBadge.vue'
+import EvaluationRadarChart from '../../components/EvaluationRadarChart.vue'
+import { modelEvaluationRadarScores } from '../../lib/modelEvaluationRadar'
 
 const models = ref<ModelEvaluationModel[]>([])
 const form = ref({
@@ -45,6 +47,7 @@ const datasets = computed(() => datasetsQuery.data.value || [])
 const runs = computed(() => runsQuery.data.value || [])
 const selectedRun = computed(() => runs.value.find(run => run.run_id === selectedRunId.value) || null)
 const runtime = computed(() => runtimeQuery.data.value || null)
+const selectedRadarScores = computed(() => selectedRun.value ? modelEvaluationRadarScores(selectedRun.value, datasets.value) : [])
 const loading = computed(() => datasetsQuery.isLoading.value || runtimeQuery.isLoading.value || runsQuery.isLoading.value)
 const error = computed(() => {
   if (actionError.value) return actionError.value
@@ -230,6 +233,7 @@ function openRunDetail(run: ModelEvaluationRun) {
             <p v-else-if="selectedRun.error" class="text-destructive">{{ selectedRun.error }}</p>
             <p v-else class="text-muted-foreground">{{ selectedRun.status === 'completed' ? '未找到汇总结果。' : selectedRun.progress_message }}</p>
           </div>
+          <EvaluationRadarChart v-if="selectedRun.result.rows?.length" :scores="selectedRadarScores" />
           <div v-if="selectedRun.executions.length">
             <div class="mb-2 font-medium">子执行</div>
             <div class="space-y-2">
