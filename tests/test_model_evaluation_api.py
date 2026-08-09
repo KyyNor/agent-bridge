@@ -10,6 +10,7 @@ from httpx import Response
 
 from agent_bridge.api.app import create_app
 from agent_bridge.storage.sqlite import SQLiteStore
+from agent_bridge.system_config.model_evaluation.runners.opencompass import OpenCompassRunner
 from agent_bridge.system_config.model_evaluation.runners.protocol import ExecutionRequest
 from agent_bridge.system_config.model_evaluation.runners.swebench import SWEbenchRunner
 from agent_bridge.system_config.model_evaluation.runtimes import BindMount, ContainerHandle, ContainerSpec, DockerCliRuntime
@@ -56,8 +57,7 @@ def test_model_evaluation_config_limits_dataset_group_to_requested_samples() -> 
         20,
     )
     assert "dataset_groups = [('ceval_gen', 'ceval_datasets'), ('mmlu_pro_gen', 'mmlu_pro_datasets')" in config
-    assert "class AgentBridgeSampleDatasetReader(DatasetReader):" in config
-    assert "dataset_base.DatasetReader = AgentBridgeSampleDatasetReader" in config
+    assert "class AgentBridgeSampleDatasetReader" not in config
     assert "base_count, remainder = divmod(20, len(group_datasets))" in config
     assert "sample_count=sample_count, sample_mode=\"head\", sample_seed=42" in config
     compile(config, "evaluation.py", "exec")
@@ -73,7 +73,8 @@ def test_model_evaluation_config_supports_seeded_random_sampling() -> None:
     )
     assert "sample_count=sample_count, sample_mode=\"random\", sample_seed=20260805" in config
     assert "base_count, remainder = divmod(20, len(group_datasets))" in config
-    assert "random.Random(f'{sample_seed}:{sample_dataset_key}')" in config
+    assert "__import__('random').Random(f'20260805:{group_key}:allocation')" in config
+    assert "random.Random(f'{sample_seed}:{sample_dataset_key}')" in OpenCompassRunner.render_sitecustomize()
 
 
 @respx.mock
@@ -132,6 +133,63 @@ def test_model_evaluation_persists_runner_executions(wm_paths) -> None:
     assert executions[0]["datasets"] == ["humaneval"]
     assert executions[0]["container_id"] == "container-123"
     assert executions[0]["result"]["rows"][0]["metric"] == "pass@1"
+
+
+class _FinishedOpenCompassRuntime:
+    def __init__(self) -> None:
+        self.spec: ContainerSpec | None = None
+
+    def run(self, spec: ContainerSpec, *, log_path: Path) -> ContainerHandle:
+        self.spec = spec
+        assert (spec.work_dir / "evaluation.py").is_file()
+        assert (spec.work_dir / "sitecustomize.py").is_file()
+        summary_dir = spec.work_dir / "output" / "summary"
+        summary_dir.mkdir(parents=True)
+        (summary_dir / "summary.csv").write_text("dataset,accuracy\ngsm8k,100.00\n", encoding="utf-8")
+        return ContainerHandle(container_id="opencompass-1", image=spec.image, command=spec.command)
+
+    def poll(self, handle: ContainerHandle) -> int | None:
+        return 0
+
+    def wait(self, handle: ContainerHandle) -> int:
+        return 0
+
+    def stop(self, handle: ContainerHandle) -> None:
+        pass
+
+
+def test_opencompass_runner_creates_work_dir_before_writing_config(tmp_path: Path) -> None:
+    work_dir = tmp_path / "missing" / "opencompass"
+    request = ExecutionRequest(
+        run_id="run-1",
+        execution_id="execution-1",
+        work_dir=work_dir,
+        model_name="demo",
+        base_url="https://llm.example/v1",
+        api_key="key",
+        datasets=("gsm8k_chat_gen",),
+        max_samples=1,
+        sampling_mode="head",
+        sample_seed=42,
+        opencompass_image="opencompass:latest",
+        agent_worker_image="worker:latest",
+        swebench_manifest_path=tmp_path / "swebench-manifest.json",
+    )
+    runtime = _FinishedOpenCompassRuntime()
+
+    result = OpenCompassRunner().execute(
+        request,
+        runtime,  # type: ignore[arg-type]
+        report_container=lambda _handle: None,
+        report_progress=lambda _message: None,
+    )
+
+    assert (work_dir / "evaluation.py").is_file()
+    assert (work_dir / "sitecustomize.py").is_file()
+    assert runtime.spec is not None
+    assert runtime.spec.command[:2] == ("opencompass", "/workspace/evaluation.py")
+    assert runtime.spec.environment["PYTHONPATH"] == "/workspace"
+    assert result["rows"] == [{"dataset": "gsm8k", "accuracy": "100.00"}]
 
 
 class _FinishedSWEbenchRuntime:

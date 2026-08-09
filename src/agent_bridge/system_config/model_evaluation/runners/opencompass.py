@@ -25,17 +25,24 @@ class OpenCompassRunner:
 
     def execute(self, request: ExecutionRequest, runtime: ContainerRuntime, *, report_container: ContainerReporter, report_progress: ProgressReporter) -> dict[str, Any]:
         report_progress("正在准备 OpenCompass 配置")
+        request.work_dir.mkdir(parents=True, exist_ok=True)
         config_path = request.work_dir / "evaluation.py"
         config_path.write_text(
             self.render_config(request.model_name, request.datasets, request.max_samples, request.sampling_mode, request.sample_seed),
             encoding="utf-8",
         )
+        sitecustomize_path = request.work_dir / "sitecustomize.py"
+        sitecustomize_path.write_text(self.render_sitecustomize(), encoding="utf-8")
         spec = ContainerSpec(
             image=request.opencompass_image,
             command=("opencompass", "/workspace/evaluation.py", "-w", "/workspace/output"),
             work_dir=request.work_dir,
             labels=_labels(request),
-            environment={"OPENAI_API_KEY": request.api_key, "OPENAI_BASE_URL": request.base_url},
+            environment={
+                "OPENAI_API_KEY": request.api_key,
+                "OPENAI_BASE_URL": request.base_url,
+                "PYTHONPATH": "/workspace",
+            },
         )
         report_progress("OpenCompass 正在执行推理与评分")
         handle = runtime.run(spec, log_path=request.work_dir / "runner.log")
@@ -55,30 +62,8 @@ class OpenCompassRunner:
             dataset_names.append((key, variable))
         model_literal = json.dumps(model_name, ensure_ascii=False)
         return "\n".join([
-            "import json",
-            "import random",
-            "from pathlib import Path",
             "from mmengine.config import read_base",
             "from opencompass.models import OpenAI",
-            "from opencompass.openicl.icl_dataset_reader import DatasetReader",
-            "from opencompass.registry import ICL_DATASET_READERS",
-            "import opencompass.datasets.base as dataset_base",
-            "",
-            "@ICL_DATASET_READERS.register_module(force=True)",
-            "class AgentBridgeSampleDatasetReader(DatasetReader):",
-            "    def __init__(self, *args, sample_count=64, sample_mode='head', sample_seed=42, sample_dataset_key='', sample_manifest_path='', **kwargs):",
-            "        kwargs.pop('test_range', None)",
-            "        super().__init__(*args, test_range=None, **kwargs)",
-            "        source_indices = list(range(len(self.dataset['test'])))",
-            "        if sample_mode == 'random':",
-            "            random.Random(f'{sample_seed}:{sample_dataset_key}').shuffle(source_indices)",
-            "        selected_indices = source_indices[:sample_count]",
-            "        source_ids = [self.dataset['test'][index].get('idx', index) for index in selected_indices]",
-            "        self.dataset['test'] = self.dataset['test'].select(selected_indices)",
-            "        if sample_manifest_path:",
-            "            Path(sample_manifest_path).write_text(json.dumps(dict(dataset=sample_dataset_key, mode=sample_mode, seed=sample_seed, source_indices=selected_indices, source_ids=source_ids), ensure_ascii=False), encoding='utf-8')",
-            "",
-            "dataset_base.DatasetReader = AgentBridgeSampleDatasetReader",
             "",
             "with read_base():",
             *[f"    {line}" for line in imports],
@@ -89,7 +74,7 @@ class OpenCompassRunner:
             "    group_datasets = globals()[group_variable]",
             "    allocation_order = list(range(len(group_datasets)))",
             "    if " + repr(sampling_mode) + " == 'random':",
-            f"        random.Random(f'{sample_seed}:{{group_key}}:allocation').shuffle(allocation_order)",
+            f"        __import__('random').Random(f'{sample_seed}:{{group_key}}:allocation').shuffle(allocation_order)",
             f"    base_count, remainder = divmod({max_samples}, len(group_datasets))",
             "    allocation = [base_count] * len(group_datasets)",
             "    for allocation_index in allocation_order[:remainder]:",
@@ -102,7 +87,7 @@ class OpenCompassRunner:
             "        dataset['reader_cfg'].update(dict(",
             f"            sample_count=sample_count, sample_mode={json.dumps(sampling_mode)}, sample_seed={sample_seed},",
             "            sample_dataset_key=f'{group_key}:{dataset[\"abbr\"]}',",
-            "            sample_manifest_path=str(Path.cwd() / f\"sample-manifest-{dataset['abbr']}.json\"),",
+            "            sample_manifest_path=f\"sample-manifest-{dataset['abbr']}.json\",",
             "        ))",
             "        datasets.append(dataset)",
             "api_meta_template = dict(round=[dict(role='HUMAN', api_role='HUMAN'), dict(role='BOT', api_role='BOT', generate=True)])",
@@ -113,6 +98,39 @@ class OpenCompassRunner:
             ")]",
             "",
         ])
+
+    @staticmethod
+    def render_sitecustomize() -> str:
+        """让 OpenCompass 及其子进程在解析配置前安装抽样 Reader。"""
+        return """import json
+import random
+from pathlib import Path
+
+from opencompass.openicl.icl_dataset_reader import DatasetReader
+import opencompass.datasets.base as dataset_base
+
+
+class AgentBridgeSampleDatasetReader(DatasetReader):
+    def __init__(self, *args, sample_count=64, sample_mode='head', sample_seed=42,
+                 sample_dataset_key='', sample_manifest_path='', **kwargs):
+        kwargs.pop('test_range', None)
+        super().__init__(*args, test_range=None, **kwargs)
+        source_indices = list(range(len(self.dataset['test'])))
+        if sample_mode == 'random':
+            random.Random(f'{sample_seed}:{sample_dataset_key}').shuffle(source_indices)
+        selected_indices = source_indices[:sample_count]
+        source_ids = [self.dataset['test'][index].get('idx', index) for index in selected_indices]
+        self.dataset['test'] = self.dataset['test'].select(selected_indices)
+        if sample_manifest_path:
+            Path(sample_manifest_path).write_text(
+                json.dumps(dict(dataset=sample_dataset_key, mode=sample_mode, seed=sample_seed,
+                                source_indices=selected_indices, source_ids=source_ids), ensure_ascii=False),
+                encoding='utf-8',
+            )
+
+
+dataset_base.DatasetReader = AgentBridgeSampleDatasetReader
+"""
 
 
 def _labels(request: ExecutionRequest) -> dict[str, str]:
