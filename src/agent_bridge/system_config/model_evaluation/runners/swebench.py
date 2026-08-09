@@ -11,6 +11,9 @@ from agent_bridge.system_config.model_evaluation.runtimes import BindMount, Cont
 
 from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter
 
+SWE_COMMAND_TIMEOUT_SECONDS = 180
+SWE_FINAL_TEST_TIMEOUT_SECONDS = 900
+
 
 class SWEbenchRunner:
     key = "swebench"
@@ -134,11 +137,11 @@ class SWEbenchRunner:
             command = str(tool_request.get("command") or "")
             if not command:
                 return {"request_id": request_id, "ok": False, "error": "command 不能为空"}
-            output = runtime.exec(handle, command, timeout_seconds=120)
+            output = runtime.exec(handle, command, timeout_seconds=SWE_COMMAND_TIMEOUT_SECONDS)
             return {"request_id": request_id, "ok": True, **output}
         if action == "finalize_task":
             test_command = str(tool_request.get("test_command") or "")
-            test_result = runtime.exec(handle, test_command, timeout_seconds=600) if test_command else {"return_code": 1, "stderr": "任务未提供 test_command"}
+            test_result = runtime.exec(handle, test_command, timeout_seconds=SWE_FINAL_TEST_TIMEOUT_SECONDS) if test_command else {"return_code": 1, "stderr": "任务未提供 test_command"}
             patch_result = runtime.exec(handle, "git diff --binary", timeout_seconds=30)
             resolved = test_result.get("return_code") == 0 and bool(str(patch_result.get("stdout") or "").strip())
             return {

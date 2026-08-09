@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import Any
 
 
-MAX_TURNS = 30
+MAX_TURNS = 40
+MODEL_COMPLETION_TIMEOUT_SECONDS = 360
+TOOL_RESULT_TIMEOUT_SECONDS = 780
+FINALIZE_RESULT_TIMEOUT_SECONDS = 1_020
 
 
 def model_completion(messages: list[dict[str, str]], *, model: str, base_url: str, api_key: str) -> str:
@@ -25,7 +28,7 @@ def model_completion(messages: list[dict[str, str]], *, model: str, base_url: st
         headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {api_key}"} if api_key else {})},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=240) as response:  # noqa: S310 - endpoint is admin configured
+    with urllib.request.urlopen(request, timeout=MODEL_COMPLETION_TIMEOUT_SECONDS) as response:  # noqa: S310 - endpoint is admin configured
         payload = json.loads(response.read().decode())
     return str(payload["choices"][0]["message"]["content"])
 
@@ -50,7 +53,7 @@ def append_request(path: Path, *, action: str, instance_id: str, **payload: Any)
     return request_id
 
 
-def wait_result(path: Path, request_id: str, *, timeout_seconds: int = 660) -> dict[str, Any]:
+def wait_result(path: Path, request_id: str, *, timeout_seconds: int = TOOL_RESULT_TIMEOUT_SECONDS) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         if path.exists():
@@ -95,7 +98,7 @@ def run_task(task: dict[str, Any], *, source_index: int, request: dict[str, Any]
                 continue
             if action["type"] == "finish":
                 final_id = append_request(request_path, action="finalize_task", instance_id=instance_id, test_command=str(task.get("test_command", "")))
-                final = wait_result(result_path, final_id, timeout_seconds=720)
+                final = wait_result(result_path, final_id, timeout_seconds=FINALIZE_RESULT_TIMEOUT_SECONDS)
                 break
             tool_id = append_request(request_path, action="command", instance_id=instance_id, command=str(action.get("command", "")))
             tool_result = wait_result(result_path, tool_id)

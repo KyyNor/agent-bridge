@@ -73,7 +73,7 @@ export AGENT_BRIDGE_EVAL_AGENT_WORKER_IMAGE=agent-bridge-agent-worker:latest
 
 镜像构建前需按 [docker/model-evaluation/README.md](docker/model-evaluation/README.md) 放入固定版本的 OpenCompass、HumanEval 与 MBPP 数据。SWE-bench manifest 默认从 `AGENT_BRIDGE_ROOT/data/model-evaluation/swebench-manifest.json` 以只读方式挂入 `agent-worker`；也可通过 `AGENT_BRIDGE_EVAL_SWEBENCH_MANIFEST` 指定宿主机绝对路径。修改 manifest 无需重编 worker 镜像。各 task 对应的 testbed 镜像仍须提前导入本机 Docker。Docker daemon 或任一指定镜像缺失时，模型评估功能会直接显示为不可用，不创建任务。
 
-普通题集在一次性 `opencompass-runner` 容器中执行；HumanEval/MBPP 的每个 case 会启动无网络、无 API Key 的独立代码沙箱；SWE-bench 按任务启动独立 testbed。API Key 只作为容器运行时环境变量传递，不保存到 SQLite、运行请求文件或日志。
+普通题集在一次性 `opencompass-runner` 容器中执行；HumanEval/MBPP 的每个 case 会启动无网络、无 API Key 的独立代码沙箱；SWE-bench 按任务启动独立 testbed。SWE Agent 单次模型请求最多 6 分钟、最多 40 轮，单条命令最多 3 分钟、最终验收最多 15 分钟；当前不设置单题总时长上限。API Key 只作为容器运行时环境变量传递，不保存到 SQLite、运行请求文件或日志。
 
 若公共模型配置的 Base URL 指向宿主机的 `localhost`，容器默认会改用 `host.docker.internal`；Linux 部署可通过 `AGENT_BRIDGE_EVAL_DOCKER_HOST` 指向可从容器访问的宿主机地址或网关。没有可访问的 Docker 环境或指定镜像时，不存在 venv/CLI 后备，评估功能直接不可用。
 
