@@ -10,6 +10,7 @@ from httpx import Response
 
 from agent_bridge.api.app import create_app
 from agent_bridge.storage.sqlite import SQLiteStore
+from agent_bridge.system_config.model_evaluation.runners.code import CodeRunner
 from agent_bridge.system_config.model_evaluation.runners.opencompass import OpenCompassRunner
 from agent_bridge.system_config.model_evaluation.runners.protocol import ExecutionRequest
 from agent_bridge.system_config.model_evaluation.runners.swebench import SWEbenchRunner
@@ -190,6 +191,59 @@ def test_opencompass_runner_creates_work_dir_before_writing_config(tmp_path: Pat
     assert runtime.spec.command[:2] == ("opencompass", "/workspace/evaluation.py")
     assert runtime.spec.environment["PYTHONPATH"] == "/workspace"
     assert result["rows"] == [{"dataset": "gsm8k", "accuracy": "100.00"}]
+
+
+class _FinishedCodeRuntime:
+    def __init__(self) -> None:
+        self.spec: ContainerSpec | None = None
+
+    def run(self, spec: ContainerSpec, *, log_path: Path) -> ContainerHandle:
+        self.spec = spec
+        assert (spec.work_dir / "request.json").is_file()
+        (spec.work_dir / "generated-cases.json").write_text('{"cases": []}', encoding="utf-8")
+        return ContainerHandle(container_id="code-1", image=spec.image, command=spec.command)
+
+    def poll(self, handle: ContainerHandle) -> int | None:
+        return 0
+
+    def wait(self, handle: ContainerHandle) -> int:
+        return 0
+
+    def stop(self, handle: ContainerHandle) -> None:
+        pass
+
+
+def test_code_runner_creates_work_dir_before_writing_request(tmp_path: Path) -> None:
+    work_dir = tmp_path / "missing" / "code"
+    request = ExecutionRequest(
+        run_id="run-1",
+        execution_id="execution-1",
+        work_dir=work_dir,
+        model_name="demo",
+        base_url="https://llm.example/v1",
+        api_key="key",
+        datasets=("humaneval", "mbpp"),
+        max_samples=1,
+        sampling_mode="head",
+        sample_seed=42,
+        opencompass_image="opencompass:latest",
+        agent_worker_image="worker:latest",
+        swebench_manifest_path=tmp_path / "swebench-manifest.json",
+    )
+    runtime = _FinishedCodeRuntime()
+
+    result = CodeRunner().execute(
+        request,
+        runtime,  # type: ignore[arg-type]
+        report_container=lambda _handle: None,
+        report_progress=lambda _message: None,
+    )
+
+    assert (work_dir / "request.json").is_file()
+    assert result["rows"] == [
+        {"dataset": "humaneval", "metric": "pass@1", "score": "0.00"},
+        {"dataset": "mbpp", "metric": "pass@1", "score": "0.00"},
+    ]
 
 
 class _FinishedSWEbenchRuntime:

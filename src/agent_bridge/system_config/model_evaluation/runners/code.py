@@ -15,6 +15,7 @@ class CodeRunner:
     key = "code"
 
     def execute(self, request: ExecutionRequest, runtime: ContainerRuntime, *, report_container: ContainerReporter, report_progress: ProgressReporter) -> dict[str, Any]:
+        request.work_dir.mkdir(parents=True, exist_ok=True)
         request_path = request.work_dir / "request.json"
         request_path.write_text(json.dumps(_request_payload(request), ensure_ascii=False), encoding="utf-8")
         generator = ContainerSpec(
