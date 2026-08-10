@@ -2,7 +2,7 @@
 import { Search, Plus, RotateCw, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api/client'
-import type { CodeRepoCategory, CodeRepository, ProjectProfile, TestCloneResult } from '../../api/types'
+import type { CodeRepoCategory, CodeRepository, ProjectProfile, ResourceVisibility, TestCloneResult } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -33,7 +33,9 @@ const categories = ref<CodeRepoCategory[]>([])
 // Repo form dialog
 const showRepoForm = ref(false)
 const repoFormMode = ref<'add' | 'edit'>('add')
-const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false })
+const repoForm = ref<{ repo_key: string; name: string; git_url: string; branch: string; description: string; category_key: string; auto_understand: boolean; visibility: ResourceVisibility }>({
+  repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false, visibility: 'group',
+})
 const repoSaving = ref(false)
 const repoError = ref('')
 const repoExpectedEditToken = ref<string | null>('')
@@ -108,11 +110,12 @@ async function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
       description: r.description || '',
       category_key: r.category_key || '__none__',
       auto_understand: Boolean(r.auto_understand),
+      visibility: r.visibility,
     }
     editingHasAuth.value = r.has_auth_ref || false
   } else {
     repoExpectedEditToken.value = ''
-    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false }
+    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false, visibility: 'group' }
   }
   showRepoForm.value = true
 }
@@ -143,6 +146,7 @@ async function saveRepo() {
       description: repoForm.value.description,
       category_key: repoForm.value.category_key === '__none__' ? '' : repoForm.value.category_key,
       auto_understand: repoForm.value.auto_understand,
+      visibility: repoForm.value.visibility,
       expected_edit_token: repoExpectedEditToken.value,
     }
     if (authRef || repoFormMode.value === 'add') {
@@ -319,6 +323,7 @@ function categoryName(key: string) {
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Git URL</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">分支</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">范围</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">最近同步</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
@@ -339,6 +344,13 @@ function categoryName(key: string) {
                 <Badge v-if="r.status === 'active'" variant="secondary" class="bg-success-soft text-success-soft-fg">正常</Badge>
                 <Badge v-else-if="r.status === 'error'" variant="destructive">异常</Badge>
                 <Badge v-else variant="secondary">{{ r.status }}</Badge>
+              </td>
+              <td class="px-4 py-3">
+                <Badge v-if="r.visibility === 'shared'" variant="secondary">共享</Badge>
+                <div v-else>
+                  <Badge variant="outline">组内</Badge>
+                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ r.owner_group_key }}</div>
+                </div>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(r.last_synced_at) }}</td>
               <td class="px-4 py-3">
@@ -451,6 +463,17 @@ function categoryName(key: string) {
           <div class="space-y-2">
             <label class="text-sm font-medium">描述</label>
             <Input v-model="repoForm.description" placeholder="项目代码仓库" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="repoForm.visibility">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">仅本小组</SelectItem>
+                <SelectItem value="shared">共享给所有小组</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可使用，维护仍只允许归属小组。</p>
           </div>
           <div class="flex items-center gap-2">
             <input type="checkbox" v-model="repoForm.auto_understand" class="size-4 rounded-sm border-border" id="repo-auto-understand" />

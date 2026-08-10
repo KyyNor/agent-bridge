@@ -32,14 +32,14 @@ test('upload API types include the zip summary response', () => {
   assert.match(client, /postFormDataWithProgress<DocumentDetail \| DocumentUploadSummary>\('\/docs'/)
 })
 
-test('document upload API exposes typed XHR progress and preserves complete server error details', () => {
+test('document upload API exposes typed XHR progress, uses session cookie, and preserves complete server error details', () => {
   const types = readFileSync(resolve(root, 'src/api/types.ts'), 'utf-8')
   const client = readFileSync(resolve(root, 'src/api/client.ts'), 'utf-8')
   assert.match(types, /export type UploadProgressCallback = \(loaded: number, total: number\) => void/)
   assert.match(client, /function postFormDataWithProgress<T>/)
   assert.match(client, /new XMLHttpRequest\(\)/)
   assert.match(client, /xhr\.upload\.onprogress = event => onProgress\?\.\(event\.loaded, event\.total\)/)
-  assert.match(client, /setRequestHeader\('X-Agent-Bridge-User'/)
+  assert.doesNotMatch(client, /setRequestHeader\('X-Agent-Bridge-User'/)
   assert.match(client, /JSON\.parse\(xhr\.responseText\)/)
   assert.match(client, /detail/)
   assert.match(client, /xhr\.responseText/)

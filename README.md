@@ -192,7 +192,7 @@ Agent Bridge CLI 和由 CLI 启动的 MCP/Agent 调用使用当前 Linux 用户�
 
 能力平面通过 `business_ledger` 资源规则显式授权业务台账。获授权的 Agent 使用顶级 MCP 工具 `query_business_ledger` 查询；所有字段默认支持精确匹配和排序，文本字段可额外开启字面包含检索，数字、日期与日期时间字段默认支持大于、小于、大于等于、小于等于和范围筛选。排序可按多个字段依次传入；台账、字段和查询方式自动注入 Profile，上下文外的台账不可发现也不可查询。
 
-Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流以保留 `X-Agent-Bridge-User` Header，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
+Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流沿用同源会话 Cookie，并通过 `Last-Event-ID` 请求头续传，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
 
 工作流 Agent 的 JSON 输出 Schema 按 JSON Schema Draft 07 校验和传递给 Coding Agent。已有
 Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft 07 的 `definitions`；
@@ -206,7 +206,7 @@ Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft
 
 其他管理页采用统一的 `edit_token` 乐观并发协议。代码仓库、分类、知识后端、知识库默认检索配置、能力服务、Profile 配置、脚本和 Skill 在进入编辑时会读取最新详情；保存时传回 `expected_edit_token`。系统级配置页也会携带加载时取得的令牌。若另一个标签页已先保存，服务端返回 `409`，当前页面保留草稿并提示刷新，不会用历史数据覆盖新配置。令牌是服务端根据可编辑字段生成的不透明摘要，不包含或暴露 API Key、认证头等秘密。
 
-当前部署模型是内部可信 VM：请求身份来自 `X-Agent-Bridge-User`，不提供互联网级认证。部署方必须限制监听地址、网络访问和反向代理边界。
+当前部署模型是内部可信 VM，不提供互联网级认证。浏览器身份来自总账户系统换取的会话 Cookie；CLI、MCP 与 Agent 进程身份来自受信的 Linux 用户名 Header。部署方必须限制监听地址、网络访问和反向代理边界，并禁止外部请求直接进入 CLI Header 信任通道。
 
 ## 目录概览
 

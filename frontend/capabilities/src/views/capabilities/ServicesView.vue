@@ -409,6 +409,17 @@ const toolTypeOptions = [
             <label class="text-sm font-medium">请求 Header</label>
             <textarea v-model="mcpForm.headers" placeholder='{"Authorization":"Bearer token"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
           </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="mcpForm.visibility">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">仅本小组</SelectItem>
+                <SelectItem value="shared">共享给所有小组</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可调用，修改和删除仍只允许归属小组。</p>
+          </div>
         </template>
 
         <template v-else>
@@ -451,6 +462,17 @@ const toolTypeOptions = [
           <div class="space-y-2">
             <label class="text-sm font-medium">标签</label>
             <Input v-model="openApiForm.tags" placeholder="业务, 查询" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="openApiForm.visibility">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">仅本小组</SelectItem>
+                <SelectItem value="shared">共享给所有小组</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可调用，修改和删除仍只允许归属小组。</p>
           </div>
         </template>
       </CardContent>
@@ -497,6 +519,7 @@ const toolTypeOptions = [
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">类型</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">连接地址</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">范围</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具数</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">最近同步</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">操作</th>
@@ -516,6 +539,13 @@ const toolTypeOptions = [
                 <StatusBadge v-if="s.status === 'enabled'" status="enabled" />
                 <StatusBadge v-else-if="s.status === 'error'" status="error" label="连接失败" />
                 <StatusBadge v-else status="disabled" />
+              </td>
+              <td class="px-4 py-3">
+                <Badge v-if="s.visibility === 'shared'" variant="secondary">共享</Badge>
+                <div v-else>
+                  <Badge variant="outline">组内</Badge>
+                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ s.owner_group_key }}</div>
+                </div>
               </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ toolCounts[serviceCountKey(s)] ?? '...' }}</td>
               <td class="px-4 py-3 text-xs text-muted-foreground">{{ timeAgo(lastSyncAt(s)) }}</td>

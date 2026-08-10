@@ -1,4 +1,37 @@
-export interface McpService {
+export type ResourceVisibility = 'group' | 'shared'
+
+export interface ResourceScopeFields {
+  owner_group_key: string
+  visibility: ResourceVisibility
+}
+
+export interface AccessActorContext {
+  user_id: string
+  group_key: string | null
+  group_name: string | null
+  is_maintenance_admin: boolean
+}
+
+export interface AccessGroup {
+  group_key: string
+  name: string
+  description: string
+  status: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface UserGroupMembership {
+  user_id: string
+  group_key: string
+  group_name: string
+  updated_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface McpService extends ResourceScopeFields {
   service_key: string
   name: string
   endpoint_url: string
@@ -40,7 +73,7 @@ export interface TopLevelMcpTool {
   updated_at: string | null
 }
 
-export interface OpenApiService {
+export interface OpenApiService extends ResourceScopeFields {
   source_type?: 'openapi_service'
   service_key: string
   name: string
@@ -883,7 +916,7 @@ export interface DesignAgentResponse<T> {
   agent_run?: AgentRun | null
 }
 
-export interface CodeRepository {
+export interface CodeRepository extends ResourceScopeFields {
   repo_key: string
   name: string
   git_url: string
@@ -928,7 +961,7 @@ export interface TestCloneResult {
   message: string
 }
 
-export interface KnowledgeBaseSummary {
+export interface KnowledgeBaseSummary extends ResourceScopeFields {
   id: number
   slug: string
   name: string
@@ -946,7 +979,7 @@ export interface KnowledgeBaseSummary {
   sync_failed_count: number
 }
 
-export interface KnowledgeBase {
+export interface KnowledgeBase extends ResourceScopeFields {
   id: number
   slug: string
   name: string

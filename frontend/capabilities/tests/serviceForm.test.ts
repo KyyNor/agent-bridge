@@ -48,6 +48,7 @@ test('buildServicePayload omits headers when editing and headers field is blank'
     endpoint_url: 'https://mysql.example.test/mcp',
     description: 'Reports',
     tags: ['database', 'reporting'],
+    visibility: 'group',
   })
 })
 
@@ -69,6 +70,7 @@ test('buildServicePayload includes headers when provided', () => {
     endpoint_url: 'https://mysql.example.test/mcp',
     description: '',
     tags: [],
+    visibility: 'group',
     headers: { Authorization: 'Bearer token' },
   })
 })
@@ -87,6 +89,8 @@ test('serviceToForm keeps redacted headers out of the editable secret field', ()
     updated_at: '2026-06-18T00:00:00Z',
     last_synced_at: null,
     last_error: null,
+    owner_group_key: 'data-team',
+    visibility: 'shared',
   })
 
   assert.equal(form.headers, '')
@@ -127,6 +131,7 @@ test('buildOpenApiServicePayload preserves blank secrets while editing', () => {
     spec_content: '',
     description: 'Pet API',
     tags: ['pets', 'demo'],
+    visibility: 'group',
   })
 })
 
@@ -151,6 +156,7 @@ test('buildOpenApiServicePayload includes auth and headers when provided', () =>
     spec_content: '',
     description: '',
     tags: [],
+    visibility: 'group',
     auth_config: { type: 'api_key', header: 'X-API-Key', value: 'secret' },
     headers: { Accept: 'application/json' },
   })

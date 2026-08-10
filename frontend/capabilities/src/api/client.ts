@@ -109,12 +109,12 @@ import type {
   SyntaxCheckResult,
   BusinessLedger,
   BusinessLedgerRecords,
+  AccessActorContext,
+  AccessGroup,
+  UserGroupMembership,
+  ResourceVisibility,
 } from './types'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
-
-const DEFAULT_USER = typeof window === 'undefined'
-  ? 'root'
-  : (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
 
 export function workflowValidationIssuesFor(
   issues: WorkflowValidationIssue[],
@@ -159,7 +159,7 @@ export function finishWorkflowValidationRun(guard: WorkflowValidationRunGuard, t
 }
 
 function headers(): Record<string, string> {
-  return { 'X-Agent-Bridge-User': DEFAULT_USER }
+  return {}
 }
 
 function formatValidationIssue(value: unknown): string {
@@ -219,7 +219,7 @@ async function get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> 
   return r.json()
 }
 
-/** 使用 fetch 读取 SSE，保留管理端现有的身份 Header。 */
+/** 使用 fetch 读取 SSE，沿用同源会话 Cookie 并支持 Last-Event-ID 断线续传。 */
 export async function openAgentRunEventStream(
   runKey: string,
   lastEventId: number,
@@ -309,7 +309,6 @@ function postFormDataWithProgress<T>(
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', url)
-    xhr.setRequestHeader('X-Agent-Bridge-User', DEFAULT_USER)
     xhr.upload.onprogress = event => onProgress?.(event.loaded, event.total)
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -337,6 +336,17 @@ async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Bl
 }
 
 export const api = {
+  // 当前身份与小组映射
+  getAccessContext: () => get<AccessActorContext>('/access/me'),
+  listAccessGroups: () => get<AccessGroup[]>('/access/groups'),
+  upsertAccessGroup: (group: Pick<AccessGroup, 'group_key' | 'name' | 'description'>) =>
+    post<AccessGroup>('/access/groups', group),
+  listGroupMemberships: () => get<UserGroupMembership[]>('/access/memberships'),
+  setUserGroup: (membership: { user_id: string; group_key: string }) =>
+    put<UserGroupMembership>('/access/memberships', membership),
+  deleteUserGroup: (userId: string) =>
+    del<{ deleted: boolean }>(`/access/memberships/${encodeURIComponent(userId)}`),
+
   // MCP Services
   listTopLevelMcpTools: () => get<TopLevelMcpTool[]>('/capabilities/top-level-mcp-tools'),
   updateTopLevelMcpToolStatus: (name: string, status: 'enabled' | 'disabled') =>
@@ -860,7 +870,7 @@ export const api = {
 
   // Knowledge Bases
   listKbs: () => get<KnowledgeBase[]>('/kbs'),
-  createKb: (data: { slug: string; name: string; description?: string }) =>
+  createKb: (data: { slug: string; name: string; description?: string; visibility: ResourceVisibility }) =>
     post<KnowledgeBase>('/kbs', data),
   updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null; expected_edit_token?: string | null }) =>
     put<KnowledgeBase>(`/kbs/${kbSlug}/defaults`, data),

@@ -1,4 +1,4 @@
-import type { McpService, OpenApiService } from '../../api/types'
+import type { McpService, OpenApiService, ResourceVisibility } from '../../api/types'
 
 export type ServiceFormMode = 'create' | 'edit'
 export type ServiceSourceType = 'mcp_service' | 'openapi_service'
@@ -10,6 +10,7 @@ export interface ServiceForm {
   description: string
   tags: string
   headers: string
+  visibility: ResourceVisibility
 }
 
 export interface ServicePayload {
@@ -19,6 +20,7 @@ export interface ServicePayload {
   description: string
   tags: string[]
   headers?: Record<string, unknown>
+  visibility: ResourceVisibility
 }
 
 export interface OpenApiServiceForm {
@@ -31,6 +33,7 @@ export interface OpenApiServiceForm {
   headers: string
   description: string
   tags: string
+  visibility: ResourceVisibility
 }
 
 export interface OpenApiServicePayload {
@@ -43,6 +46,7 @@ export interface OpenApiServicePayload {
   tags: string[]
   auth_config?: Record<string, unknown>
   headers?: Record<string, unknown>
+  visibility: ResourceVisibility
 }
 
 export function defaultServiceForm(): ServiceForm {
@@ -53,6 +57,7 @@ export function defaultServiceForm(): ServiceForm {
     description: '',
     tags: '',
     headers: '',
+    visibility: 'group',
   }
 }
 
@@ -67,6 +72,7 @@ export function defaultOpenApiServiceForm(): OpenApiServiceForm {
     headers: '',
     description: '',
     tags: '',
+    visibility: 'group',
   }
 }
 
@@ -78,6 +84,7 @@ export function serviceToForm(service: McpService): ServiceForm {
     description: service.description || '',
     tags: service.tags.join(', '),
     headers: '',
+    visibility: service.visibility,
   }
 }
 
@@ -92,6 +99,7 @@ export function openApiServiceToForm(service: OpenApiService): OpenApiServiceFor
     headers: '',
     description: service.description || '',
     tags: service.tags.join(', '),
+    visibility: service.visibility,
   }
 }
 
@@ -124,6 +132,7 @@ export function buildServicePayload(form: ServiceForm, mode: ServiceFormMode): S
     endpoint_url: form.endpoint_url.trim(),
     description: form.description.trim(),
     tags: form.tags.split(',').map(tag => tag.trim()).filter(Boolean),
+    visibility: form.visibility,
   }
   const headers = parseHeadersJson(form.headers)
   if (headers !== undefined || mode === 'create') {
@@ -141,6 +150,7 @@ export function buildOpenApiServicePayload(form: OpenApiServiceForm, mode: Servi
     spec_content: form.spec_content.trim(),
     description: form.description.trim(),
     tags: form.tags.split(',').map(tag => tag.trim()).filter(Boolean),
+    visibility: form.visibility,
   }
   const authConfig = parseJsonObject(form.auth_config, '认证配置')
   const headers = parseHeadersJson(form.headers)

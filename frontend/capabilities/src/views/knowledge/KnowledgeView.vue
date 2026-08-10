@@ -2,13 +2,14 @@
 import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, ArrowLeft } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendInfo, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse } from '../../api/types'
+import type { KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendInfo, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse, ResourceVisibility } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import PaginationBar from '../../components/PaginationBar.vue'
 import FolderTree from '../../components/knowledge/FolderTree.vue'
@@ -35,7 +36,7 @@ const page = ref(1)
 const pageSize = ref(10)
 const loading = ref(true)
 const showCreate = ref(false)
-const createForm = ref({ slug: '', name: '', description: '' })
+const createForm = ref<{ slug: string; name: string; description: string; visibility: ResourceVisibility }>({ slug: '', name: '', description: '', visibility: 'group' })
 const createSaving = ref(false)
 const createError = ref('')
 
@@ -292,9 +293,10 @@ async function createKb() {
       slug,
       name: createForm.value.name,
       description: createForm.value.description || undefined,
+      visibility: createForm.value.visibility,
     })
     showCreate.value = false
-    createForm.value = { slug: '', name: '', description: '' }
+    createForm.value = { slug: '', name: '', description: '', visibility: 'group' }
     await loadKbs({ fresh: true })
     const newKb = kbs.value.find(k => k.slug === slug)
     if (newKb) openDetail(newKb)
@@ -788,6 +790,7 @@ function syncBadgeLabel(status?: string | null) {
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">名称</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标识</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">范围</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">文档数</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">同步失败</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
@@ -800,6 +803,13 @@ function syncBadgeLabel(status?: string | null) {
                 <div class="text-xs text-muted-foreground">{{ k.description }}</div>
               </td>
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ k.slug }}</td>
+              <td class="px-4 py-3">
+                <Badge v-if="k.visibility === 'shared'" variant="secondary">共享</Badge>
+                <div v-else>
+                  <Badge variant="outline">组内</Badge>
+                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ k.owner_group_key }}</div>
+                </div>
+              </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ k.document_count }}</td>
               <td class="px-4 py-3 tabular-nums text-sm">
                 <Badge v-if="k.sync_failed_count > 0" variant="destructive">{{ k.sync_failed_count }}</Badge>
@@ -1071,6 +1081,13 @@ function syncBadgeLabel(status?: string | null) {
           <div class="space-y-2">
             <label class="text-sm font-medium">描述</label>
             <Input v-model="createForm.description" placeholder="文档知识描述" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="createForm.visibility"><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+              <SelectItem value="group">仅本小组</SelectItem><SelectItem value="shared">共享给所有小组</SelectItem>
+            </SelectContent></Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可使用，维护仍只允许归属小组。</p>
           </div>
         </form>
         <DialogFooter>

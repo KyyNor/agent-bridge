@@ -213,49 +213,50 @@ def test_capability_static_assets_are_served(wm_paths) -> None:
 def test_capability_admin_page_is_chinese_control_console(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "智能中枢" in html
+    assert "AGENT_BRIDGE_DEFAULT_USER" not in html
 
 def test_capability_static_assets_use_chinese_labels(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "智能中枢" in html
 
 def test_capability_admin_page_uses_modal_service_form_and_no_refresh_buttons(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert 'id="app"' in html
 
 def test_capability_admin_page_has_phase2_views_and_modals(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert 'id="app"' in html
 
 def test_capability_static_assets_support_phase2_interactions(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "script" in html
 
 def test_capability_static_assets_support_query_route_state(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "html" in html
 
 def test_capability_admin_page_has_profile_dialog_and_tool_filters(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "智能中枢" in html
 
 def test_capability_static_assets_render_filterable_tool_table_and_two_column_modal(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert 'id="app"' in html
 
 def test_mcp_service_status_and_tools_api(wm_paths) -> None:

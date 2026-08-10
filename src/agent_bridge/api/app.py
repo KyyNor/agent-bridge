@@ -16,7 +16,6 @@ from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDas
 from agent_bridge.access_control.identity import RequestIdentityResolver
 from agent_bridge.core.config import (
     AgentBridgePaths,
-    default_user,
     load_identity_config,
     load_logging_config,
     load_server_config,
@@ -284,6 +283,6 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     @app.get("/admin/capabilities", response_class=HTMLResponse)
     def capability_admin() -> HTMLResponse:
-        return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")
+        return HTMLResponse(content=capability_admin_page(), media_type="text/html")
 
     return app

@@ -34,11 +34,11 @@ test('SSE parser preserves chunked, CRLF, id and multiline data frames', async (
   ])
 })
 
-test('agent event stream opens with the existing user header and resumable event id', () => {
+test('agent event stream uses session cookie and a resumable event id', () => {
   const client = readFileSync(resolve(root, 'src/api/client.ts'), 'utf8')
   const stream = readFileSync(resolve(root, 'src/composables/useAgentRunEventStream.ts'), 'utf8')
 
-  assert.match(client, /'X-Agent-Bridge-User'/)
+  assert.doesNotMatch(client, /'X-Agent-Bridge-User'/)
   assert.match(client, /'Last-Event-ID'/)
   assert.match(client, /Accept: 'text\/event-stream'/)
   assert.match(stream, /AbortController/)
