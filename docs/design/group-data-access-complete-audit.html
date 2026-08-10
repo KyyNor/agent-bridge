@@ -107,11 +107,11 @@
     <div class="grid">
       <article class="card policy shared">
         <h3>可共享小组资源</h3>
-        <p>知识库、MCP 服务、OpenAPI 服务、代码仓库。创建时归属一个组，可明确切换为共享；共享只开放读取和使用，修改权仍属于归属组。</p>
+        <p>知识库、MCP 服务、OpenAPI 服务、代码仓库、业务台账，以及单独发布的工作流产物。创建时归属一个组，可明确切换为共享；共享只开放读取和使用，修改权仍属于归属组。</p>
       </article>
       <article class="card policy group">
         <h3>不可共享小组数据</h3>
-        <p>Profile、业务台账、记忆块、工作流、用户脚本。它们始终只对归属组可见，子表、版本、记录和关联配置继承根数据归属。</p>
+        <p>Profile、记忆块、工作流定义/任务/运行过程、用户脚本。它们始终只对归属组可见，子表、版本、记录和关联配置继承根数据归属。</p>
       </article>
       <article class="card policy run">
         <h3>运行数据与日志</h3>
@@ -128,7 +128,7 @@
       <li>调用者来自统一账户系统用户 ID；CLI 以当前 Linux 用户名作为同一 Actor。</li>
       <li>普通用户未映射到数据组时，只能读取共享资源，不能创建小组数据或产生可持久化运行。</li>
       <li>创建小组资源时固化 <code>owner_group_key</code>；用户换组不迁移历史数据。</li>
-      <li>只有四类白名单根资源允许 <code>visibility=shared</code>，其余资源不得暴露共享开关。</li>
+      <li>共享白名单为知识库、MCP、OpenAPI、代码仓库、业务台账和工作流产物；其余资源不得暴露共享开关。</li>
       <li>共享资源所有已识别用户可读、可用于组装和运行，但只有归属组可修改、删除和改变共享状态。</li>
       <li>维护管理员是排障和迁移旁路，不改变资源真实归属，也不让管理员发起的派生运行错误归入管理员组。</li>
       <li>子记录不单独选择归属或共享状态，必须从根资源或运行快照继承。</li>
@@ -183,8 +183,8 @@
           </tr>
           <tr>
             <td>业务台账</td><td>Ledger、revisions、records、导入预览与导出</td>
-            <td><span class="tag done">组内根数据</span></td><td>禁止</td><td><span class="tag missing">未覆盖</span></td>
-            <td>Ledger 增加归属，列表/详情/修改/查询/导入导出按组；Profile 注入台账上下文时再次校验同组。</td>
+            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag missing">未覆盖</span></td>
+            <td>Ledger 增加归属和显式共享；列表/详情/修改/导入按归属组，跨组可查询和导出共享台账；Profile 可关联同组或共享台账。</td>
           </tr>
           <tr>
             <td>记忆</td><td>Memory block、Profile binding、observations、timeline、dashboard</td>
@@ -193,8 +193,8 @@
           </tr>
           <tr>
             <td>工作流</td><td>Definition、revisions、tasks、imports、runs、node runs、logs、artifacts</td>
-            <td><span class="tag done">组内根数据 + 运行数据</span></td><td>禁止</td><td><span class="tag missing">未覆盖</span></td>
-            <td>定义由小组维护；版本、任务和导入继承定义；运行在下发时快照定义归属，调度器使用系统执行上下文但不能改写归属；运行详情、日志和产物按组。</td>
+            <td><span class="tag done">组内根数据 + 运行数据</span> <span class="tag share-tag">可共享产物</span></td><td>仅产物允许</td><td><span class="tag missing">未覆盖</span></td>
+            <td>定义由小组维护；版本、任务、运行过程和日志保持组内。运行在下发时快照定义归属；产物逐项继承归属并可显式共享，跨组只能检索、读取和复用共享产物。</td>
           </tr>
           <tr>
             <td>脚本</td><td>Script、revision、run</td>
@@ -241,7 +241,7 @@
       <li><strong>后台调度身份：</strong>定时同步和工作流调度可以由系统进程执行，但运行归属要继承根资源，不能落到 scheduler/admin 所属组。系统执行上下文与数据归属必须分开表达。</li>
       <li><strong>共享资源日志：</strong>A 组共享 MCP，B 组调用后生成的工具日志属于 B 组；A 组拥有资源并不意味着可以查看 B 组的提示、参数和结果。</li>
       <li><strong>聚合与导出：</strong>统计、计数、导出、搜索建议和批量接口与普通列表同样可能泄露数据，必须在 SQL 层带组条件，不能取全量后再由前端隐藏。</li>
-      <li><strong>历史数据默认共享：</strong>现有迁移把无法判定的四类旧资源设为共享，这不符合“明确标记为共享”。应在合并前改为按创建者映射归组；无法判定的进入维护态。</li>
+      <li><strong>历史数据默认共享：</strong>现有迁移把无法判定的旧资源设为共享，这不符合“明确标记为共享”。应在合并前改为按创建者映射归组；无法判定的进入维护态。业务台账和工作流产物也遵循显式共享，不自动扩大范围。</li>
     </ol>
   </section>
 
@@ -268,7 +268,7 @@
     <h2>五、历史数据迁移规则</h2>
     <ol>
       <li>先按 <code>created_by</code> / <code>actor</code> 查当前用户-组映射；可解析的根资源归入对应组，默认 <code>visibility=group</code>。</li>
-      <li>知识库、MCP、OpenAPI、代码仓库只有已有明确共享证据时才设为 <code>shared</code>；不能为了迁移方便自动共享。</li>
+      <li>知识库、MCP、OpenAPI、代码仓库、业务台账和工作流产物只有已有明确共享证据时才设为 <code>shared</code>；不能为了迁移方便自动共享。</li>
       <li>根资源的子表通过外键或关联继承，不为每条子记录猜测创建人。</li>
       <li>工具日志可按已有 <code>actor</code> 回填组；Agent 历史运行没有 Actor，不能根据 Profile 猜测，应标记为仅维护管理员可见。</li>
       <li>工作流、脚本及其运行可优先从根定义继承；无根或关系损坏的数据进入未归属维护队列。</li>
@@ -282,10 +282,10 @@
     <p class="muted">后续继续在 <code>codex/group-data-access</code> worktree 内实施。每个节点单独提交；3–5 个节点集中做一次领域测试和 review，最终执行全量 Python 与前端验证。</p>
     <div class="commit"><strong>纠偏 1 · 权限模型与迁移基线</strong><br>扩展资源类型 registry 和共享白名单；修正旧资源默认共享；增加未归属状态、资源转组/修复能力；补充文档单组归属不变量。</div>
     <div class="commit"><strong>纠偏 2 · Profile 与跨资源关联</strong><br>Profile 改为组内根数据；运行前校验；Profile-resource、Profile-memory、KB-repository 等关联执行双边访问检查。</div>
-    <div class="commit"><strong>纠偏 3 · 业务台账与记忆</strong><br>根表归属、列表/详情/查询/导入导出按组；Profile 注入校验；封堵 Memory Dashboard 代理。</div>
-    <div class="commit"><strong>纠偏 4 · 工作流、脚本与模型评估</strong><br>区分用户脚本和系统脚本；定义、版本、任务、运行与产物建立归属继承；调度器显式传递系统执行上下文与业务归属。</div>
+    <div class="commit"><strong>纠偏 3 · 业务台账与记忆</strong><br>业务台账接入归属和显式共享，跨组只读/查询；记忆保持组内；Profile 注入校验；封堵 Memory Dashboard 代理。</div>
+    <div class="commit"><strong>纠偏 4 · 工作流、脚本与模型评估</strong><br>区分用户脚本和系统脚本；定义、版本、任务与运行建立归属继承；工作流产物支持逐项显式共享；调度器显式传递系统执行上下文与业务归属。</div>
     <div class="commit"><strong>纠偏 5 · 工具日志与 Agent 运行</strong><br>运行表固化组；工具日志、统计、Agent 列表/详情/events/SSE/payload/subagent/stop 统一范围检查；清理存储层全局读取入口。</div>
-    <div class="commit"><strong>纠偏 6 · 前端管理与代理入口收口</strong><br>仅四类资源显示共享开关；增加组归属/未归属修复界面；页面不做鉴权路由；检查 Dashboard、下载、导出、SSE 等非普通 JSON 入口。</div>
+    <div class="commit"><strong>纠偏 6 · 前端管理与代理入口收口</strong><br>仅共享白名单资源显示共享开关；增加组归属/未归属修复界面；页面不做鉴权路由；检查 Dashboard、下载、导出、SSE 等非普通 JSON 入口。</div>
     <div class="commit"><strong>纠偏 7 · 全域回归与迁移验收</strong><br>覆盖同组读写、跨组拒绝、共享只读、管理员旁路、未映射用户、CLI Linux 用户、后台调度继承、用户换组历史不迁移；运行全量测试与前端检查。</div>
   </section>
 
@@ -295,7 +295,7 @@
     <ul>
       <li>任何列表、详情、搜索、统计、导出、下载、事件流和代理入口都无法读取其他组非共享数据。</li>
       <li>任何创建、修改、删除、绑定、运行和停止操作都在服务端完成组范围校验。</li>
-      <li>四类共享资源可跨组读取/使用但不能跨组修改，其他业务数据不存在共享路径。</li>
+      <li>共享白名单资源可跨组读取/使用但不能跨组修改；工作流共享范围只落在产物，不扩散到定义、任务、运行日志和 Agent 事件。</li>
       <li>所有运行数据可追溯到固化的归属组，后台调度和共享资源调用不会错归属。</li>
       <li>历史数据没有因无法判断归属而被扩大可见范围，未归属数据有明确维护流程。</li>
       <li>Web、CLI、MCP 使用同一身份解析与策略服务，前端不承担安全职责。</li>
