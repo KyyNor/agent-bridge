@@ -239,6 +239,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     from agent_bridge.api.routes.health import router as health_router
     app.include_router(health_router)
 
+    from agent_bridge.api.routes.access_control import create_access_control_routes
+    app.include_router(create_access_control_routes(service, actor))
+
     from agent_bridge.api.routes.knowledge import create_knowledge_routes
     app.include_router(create_knowledge_routes(service, actor, save_upload, upload_filename))
 

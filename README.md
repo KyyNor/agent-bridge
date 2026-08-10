@@ -180,6 +180,8 @@ Agent Bridge CLI 和由 CLI 启动的 MCP/Agent 调用使用当前 Linux 用户�
 `X-Agent-Bridge-User` Header 传给后端；该 Header 入口可用
 `identity.allow_cli_header = false` 关闭。无 Cookie 且无受信 Header 的请求返回 401。
 
+系统在业务库维护“用户 ID → 单一小组”映射。普通用户只能修改本小组资源；同组用户可以互相读取和修改。资源可标记为 `shared`，此时其他小组只能读取和使用，不能修改、删除或变更共享状态。管理员可通过 `/access/groups` 和 `/access/memberships` 接口维护映射，并保留跨组故障处理旁路。升级前已有的知识库、MCP、OpenAPI 和代码仓库默认迁移为共享资源。
+
 业务台账保存于 `data/agent-bridge-ledgers.db`。每个台账最多 100 个字段、200,000 行记录；服务启动后异步构建内存快照，管理读写和后续的受控查询均使用同一份完整快照。
 
 业务台账的 Excel 导入窗口可下载当前字段定义生成的空白 `.xlsx` 模板；模板只包含字段标识表头，不会携带台账中的已有数据。

@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from agent_bridge.agent_runtime.service import AgentService
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
+from agent_bridge.access_control.service import AccessControlService
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.knowledge_management.docs_knowledge.ingest import DocumentIngestService
 from agent_bridge.knowledge_management.docs_knowledge.repo_sync import GitRepoSyncService
@@ -194,6 +195,7 @@ class AgentBridgeService:
         self.store = store
         self.archive = archive
         self.admins = admins
+        self.access = AccessControlService(store.access_control, admins)
         self.registry: BackendRegistry | None = None
         # 领域服务在所有 collaborator 就位后装配。门面通过注入的回调暴露
         # 必要的 monkeypatch 点（如 _archive_files）和编排能力（如 sync）。
@@ -313,6 +315,7 @@ class AgentBridgeService:
             admins=admins,
         )
         service.store.init_schema()
+        service.access.bootstrap_admin_memberships()
         recovered_workflows = service.store.recover_interrupted_workflow_runs()
         if recovered_workflows["runs"]:
             recovered_agent_runs = service.store.agent_runs.recover_interrupted_workflow_runs(
@@ -345,6 +348,7 @@ class AgentBridgeService:
     def init_system(self) -> None:
         ensure_directories(self.paths)
         self.store.init_schema()
+        self.access.bootstrap_admin_memberships()
 
     def validate_workflow_draft(self, *, actor: str, workflow: dict[str, Any]) -> dict[str, Any]:
         result = self.workflows.validator.validate(actor=actor, workflow=workflow)

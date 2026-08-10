@@ -197,6 +197,48 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
 def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS access_groups (
+          group_key TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'active',
+          created_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_group_memberships (
+          user_id TEXT PRIMARY KEY,
+          group_key TEXT NOT NULL REFERENCES access_groups(group_key),
+          updated_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_user_group_memberships_group
+        ON user_group_memberships(group_key, user_id)
+        """
+    )
+    scoped_tables = ("knowledge_bases", "mcp_services", "openapi_services", "code_repositories")
+    for table in scoped_tables:
+        store._ensure_columns(
+            conn,
+            table,
+            {
+                "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+                "visibility": "TEXT NOT NULL DEFAULT 'shared'",
+            },
+        )
+    store._ensure_columns(conn, "code_repositories", {"created_by": "TEXT NOT NULL DEFAULT ''"})
+
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS metamcp_tool_settings (
           tool_name TEXT PRIMARY KEY,
           status TEXT NOT NULL DEFAULT 'enabled',

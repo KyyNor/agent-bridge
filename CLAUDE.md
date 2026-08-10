@@ -38,6 +38,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `AgentBridgeService` 是装配根和兼容门面。FastAPI 路由调用应用/领域 service，领域 service 使用 repositories 或 adapter。不要继续把具体知识后端、工作流或脚本业务堆入门面。
 
+数据权限采用单小组归属模型：`user_group_memberships` 将稳定用户 ID 映射到一个小组；受保护资源保存 `owner_group_key` 和 `visibility=group|shared`。读取规则是同组或共享，写入规则始终是同组；`admins` 仅作为维护旁路。存量资源迁移为 `shared`，避免升级后突然不可用。资源访问必须进入 `AccessControlService` 与资源 adapter，不在 API 路由或前端复制判断。
+
 `SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。主业务库为 `agent-bridge.db`，工具调用与 Agent 运行审计位于独立的 `agent-bridge-logs.db`；运行日志 repository 必须使用日志连接，不能重新写回主库。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
 业务台账使用独立的 `agent-bridge-ledgers.db`，定义与记录均以 SQLite 持久化；加载、筛选、排序和模糊匹配只针对 pandas 内存快照执行。所有字段默认精确匹配和可排序，文本字段仅额外配置是否允许字面包含检索，数字、日期与日期时间默认支持完整范围运算；多字段排序按传入顺序生效。每个台账上限为 100 字段、200,000 行；写入必须完整重建并原子替换快照，查询不得回退至 SQLite。

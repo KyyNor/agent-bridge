@@ -28,6 +28,7 @@ class SQLiteStore(SQLiteStoreFacade):
         )
 
         from agent_bridge.storage.repositories.agent_runs import AgentRunsRepository
+        from agent_bridge.storage.repositories.access_control import AccessControlRepository
         from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
         from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
         from agent_bridge.storage.repositories.governance import GovernanceRepository
@@ -39,6 +40,7 @@ class SQLiteStore(SQLiteStoreFacade):
         from agent_bridge.storage.repositories.model_evaluations import ModelEvaluationRepository
         from agent_bridge.storage.repositories.workflows import WorkflowsRepository
 
+        self.access_control = AccessControlRepository(db_path, self.connect)
         self.folders = FolderRepository(db_path, self.connect)
         self.knowledge = KnowledgeRepository(db_path, self.connect, self.folders)
         self.capabilities = CapabilitiesRepository(db_path, self.connect)

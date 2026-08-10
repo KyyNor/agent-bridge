@@ -23,3 +23,7 @@ _Avoid_: 私有资源、个人资源
 **共享资源（Shared Resource）**:
 所有已识别调用者均可读取和使用、但仍仅由资源归属组修改的业务资源。
 _Avoid_: 公共资源、全局资源
+
+**维护管理员（Maintenance Admin）**:
+由 `server.toml` 的 `admins` 指定、用于故障处理和存量迁移的维护旁路身份。
+_Avoid_: 超级用户、业务管理员

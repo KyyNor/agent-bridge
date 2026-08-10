@@ -2,6 +2,24 @@ from __future__ import annotations
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS access_groups (
+  group_key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS user_group_memberships (
+  user_id TEXT PRIMARY KEY,
+  group_key TEXT NOT NULL REFERENCES access_groups(group_key),
+  updated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_user_group_memberships_group
+  ON user_group_memberships(group_key, user_id);
 CREATE TABLE IF NOT EXISTS knowledge_bases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   slug TEXT NOT NULL UNIQUE,
@@ -9,6 +27,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
   description TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
   default_backend_slug TEXT,
   default_agent_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -168,6 +188,8 @@ CREATE TABLE IF NOT EXISTS mcp_services (
   tags_json TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'enabled',
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_synced_at TEXT,
@@ -207,6 +229,8 @@ CREATE TABLE IF NOT EXISTS openapi_services (
   tags_json TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'enabled',
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_imported_at TEXT,
@@ -453,6 +477,9 @@ CREATE TABLE IF NOT EXISTS code_repositories (
   sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
   auto_understand INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
+  created_by TEXT NOT NULL DEFAULT '',
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
   local_path TEXT,
   last_commit TEXT,
   last_synced_at TEXT,

@@ -11,6 +11,17 @@ class CreateMemoryBlockRequest(BaseModel):
     description: str = ""
 
 
+class UpsertAccessGroupRequest(BaseModel):
+    group_key: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=2000)
+
+
+class SetUserGroupRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=255)
+    group_key: str = Field(min_length=1, max_length=64)
+
+
 class UpdateMemoryBlockStatusRequest(BaseModel):
     status: str
 
