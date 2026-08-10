@@ -231,6 +231,7 @@ class BusinessLedgerRequest(BaseModel):
     name: str
     description: str = ""
     fields: list[BusinessLedgerFieldRequest]
+    visibility: Literal["group", "shared"] = "group"
     expected_edit_token: str | None = None
 
 
@@ -238,6 +239,7 @@ class BusinessLedgerUpdateRequest(BaseModel):
     name: str
     description: str = ""
     fields: list[BusinessLedgerFieldRequest]
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 

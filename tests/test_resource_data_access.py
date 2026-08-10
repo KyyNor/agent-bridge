@@ -180,3 +180,102 @@ def test_mcp_execution_checks_data_scope_before_transport(wm_paths) -> None:
         asyncio.run(service.execute("bob", "team-mcp", "search", {}))
     assert asyncio.run(service.execute("bob", "shared-mcp", "search", {}))["success"]
     assert asyncio.run(service.execute("carol", "team-mcp", "search", {}))["success"]
+
+
+def test_profiles_ledgers_and_memory_follow_group_scope(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    carol = {"X-Agent-Bridge-User": "carol"}
+
+    profile_payload = {
+        "profile_key": "team-a-profile",
+        "name": "A 组能力平面",
+        "description": "",
+        "status": "active",
+    }
+    assert client.post("/capability-profiles", headers=alice, json=profile_payload).status_code == 200
+    assert [item["profile_key"] for item in client.get("/capability-profiles", headers=carol).json()] == [
+        "team-a-profile"
+    ]
+    assert client.get("/capability-profiles", headers=bob).json() == []
+    assert client.get("/capability-profiles/team-a-profile", headers=bob).status_code == 403
+
+    fields = [
+        {
+            "field_key": "name",
+            "name": "名称",
+            "field_type": "text",
+            "query_modes": ["contains"],
+        }
+    ]
+    for ledger_key, visibility in (("team-ledger", "group"), ("shared-ledger", "shared")):
+        assert client.post(
+            "/business-ledgers",
+            headers=alice,
+            json={
+                "ledger_key": ledger_key,
+                "name": ledger_key,
+                "fields": fields,
+                "visibility": visibility,
+            },
+        ).status_code == 200
+    assert client.post(
+        "/business-ledgers/shared-ledger/records",
+        headers=alice,
+        json={"values": {"name": "可共享记录"}},
+    ).status_code == 200
+    assert [item["ledger_key"] for item in client.get("/business-ledgers", headers=bob).json()] == [
+        "shared-ledger"
+    ]
+    assert client.get("/business-ledgers/team-ledger", headers=bob).status_code == 403
+    assert client.post(
+        "/business-ledgers/shared-ledger/records/query",
+        headers=bob,
+        json={"filters": {}, "limit": 10, "offset": 0},
+    ).status_code == 200
+    assert client.post(
+        "/business-ledgers/shared-ledger/records",
+        headers=bob,
+        json={"values": {"name": "禁止跨组写入"}},
+    ).status_code == 403
+    assert client.post(
+        "/capability-profiles",
+        headers=bob,
+        json={
+            "profile_key": "team-b-profile",
+            "name": "B 组能力平面",
+            "description": "",
+            "status": "active",
+        },
+    ).status_code == 200
+    assert client.put(
+        "/capability-profiles/team-b-profile/resources",
+        headers=bob,
+        json={
+            "resources": [
+                {"resource_type": "business_ledger", "resource_key": "shared-ledger"}
+            ]
+        },
+    ).status_code == 200
+    assert client.put(
+        "/capability-profiles/team-b-profile/resources",
+        headers=bob,
+        json={
+            "resources": [
+                {"resource_type": "business_ledger", "resource_key": "team-ledger"}
+            ]
+        },
+    ).status_code == 403
+
+    assert client.post(
+        "/memory/blocks",
+        headers=alice,
+        json={"block_key": "team-a-memory", "name": "A 组记忆", "description": ""},
+    ).status_code == 200
+    assert [item["block_key"] for item in client.get("/memory/blocks", headers=carol).json()] == [
+        "team-a-memory"
+    ]
+    assert client.get("/memory/blocks", headers=bob).json() == []
+    assert client.get("/memory/blocks/team-a-memory", headers=bob).status_code == 403

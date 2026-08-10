@@ -103,19 +103,23 @@ class GovernanceRepository:
         description: str = "",
         status: str = "active",
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO project_profiles (profile_key, name, description, status, created_by)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO project_profiles (
+                  profile_key, name, description, status, created_by, owner_group_key, visibility
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(profile_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
                   status = excluded.status,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (profile_key, name, description, status, created_by),
+                (profile_key, name, description, status, created_by, owner_group_key, visibility),
             )
             row = conn.execute(
                 "SELECT * FROM project_profiles WHERE profile_key = ?",

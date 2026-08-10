@@ -24,14 +24,16 @@ class BusinessLedgerBuiltinProvider:
     def _visible_contexts(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
         if profile_key is None:
             return []
-        all_contexts = self.service.business_ledgers.ledger_contexts(self.service.business_ledgers.ledger_keys())
+        all_contexts = self.service.business_ledgers.ledger_contexts(
+            self.service.business_ledgers.ledger_keys(), actor=actor
+        )
         visible = self.service.governance.filter_resource_keys(
             actor=actor,
             profile_key=profile_key,
             resource_type=ProfileResourceType.business_ledger.value,
             resource_keys=[item["ledger_key"] for item in all_contexts],
         )
-        return self.service.business_ledgers.ledger_contexts(visible)
+        return self.service.business_ledgers.ledger_contexts(visible, actor=actor)
 
     def list_resources(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
         return [
@@ -99,6 +101,7 @@ class BusinessLedgerBuiltinProvider:
             raise ValidationError("filters must be an object")
         return self.service.business_ledgers.query(
             ledger_key,
+            actor=actor,
             filters=filters,
             keyword=str(arguments.get("keyword") or "").strip() or None,
             sort=arguments.get("sort") if isinstance(arguments.get("sort"), (dict, list)) else None,

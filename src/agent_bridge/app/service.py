@@ -13,7 +13,10 @@ from typing import Any, Callable
 from agent_bridge.agent_runtime.service import AgentService
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
 from agent_bridge.access_control.service import AccessControlService, ResourceScope
-from agent_bridge.access_control.resources import create_scoped_resource_registry
+from agent_bridge.access_control.resources import (
+    BusinessLedgerAccessAdapter,
+    create_scoped_resource_registry,
+)
 from agent_bridge.access_control.resources import ScopedResourceType
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.knowledge_management.docs_knowledge.ingest import DocumentIngestService
@@ -221,9 +224,18 @@ class AgentBridgeService:
             admins=admins,
             registry_provider=lambda: self.registry,
         )
-        self.business_ledgers = BusinessLedgerService(db_path=paths.ledger_db_path, admins=admins)
+        self.business_ledgers = BusinessLedgerService(
+            db_path=paths.ledger_db_path,
+            admins=admins,
+            access=self.access,
+        )
         self.business_ledgers.init_schema()
-        self.governance = CapabilityGovernanceService(store=store, admins=admins)
+        self.access.resources.register(BusinessLedgerAccessAdapter(self.business_ledgers))
+        self.governance = CapabilityGovernanceService(
+            store=store,
+            admins=admins,
+            access=self.access,
+        )
         self.governance.business_ledgers = self.business_ledgers
         self.capabilities = CapabilityService(
             store=store,
@@ -280,7 +292,13 @@ class AgentBridgeService:
             handlers=self.workflow_handlers,
             validate_structure_on_run=False,
         )
-        self.memory = MemoryService(paths=paths, store=store, admins=admins, governance_service=self.governance)
+        self.memory = MemoryService(
+            paths=paths,
+            store=store,
+            admins=admins,
+            governance_service=self.governance,
+            access=self.access,
+        )
         from agent_bridge.knowledge_management.retrieval_probe.adapters import (
             ArtifactProbeAdapter,
         )
@@ -333,6 +351,8 @@ class AgentBridgeService:
         )
         service.store.init_schema()
         service.access.bootstrap_admin_memberships()
+        service.store.migrate_phase2()
+        service.business_ledgers.init_schema()
         recovered_workflows = service.store.recover_interrupted_workflow_runs()
         if recovered_workflows["runs"]:
             recovered_agent_runs = service.store.agent_runs.recover_interrupted_workflow_runs(
@@ -366,6 +386,8 @@ class AgentBridgeService:
         ensure_directories(self.paths)
         self.store.init_schema()
         self.access.bootstrap_admin_memberships()
+        self.store.migrate_phase2()
+        self.business_ledgers.init_schema()
 
     def validate_workflow_draft(self, *, actor: str, workflow: dict[str, Any]) -> dict[str, Any]:
         result = self.workflows.validator.validate(actor=actor, workflow=workflow)

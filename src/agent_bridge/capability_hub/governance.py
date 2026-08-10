@@ -19,6 +19,8 @@ from agent_bridge.capability_hub.models import (
     ProfileRuleEffect,
     SourceType,
 )
+from agent_bridge.access_control.resources import ScopedResourceType
+from agent_bridge.access_control.service import AccessControlService, ResourceScope
 from agent_bridge.capability_hub.profiles.pins import (
     PINNABLE_TOOL_TYPES,
     PinnedGroup,
@@ -49,9 +51,16 @@ def monotonic_ms() -> int:
 
 
 class CapabilityGovernanceService:
-    def __init__(self, *, store: SQLiteStore, admins: set[str]) -> None:
+    def __init__(
+        self,
+        *,
+        store: SQLiteStore,
+        admins: set[str],
+        access: AccessControlService | None = None,
+    ) -> None:
         self.store = store
         self.admins = admins
+        self.access = access
 
     def upsert_profile(
         self,
@@ -63,10 +72,24 @@ class CapabilityGovernanceService:
         *,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         if status not in VALID_PROFILE_STATUSES:
             raise ValidationError("invalid profile status")
         current = self.store.get_project_profile(profile_key)
+        if current is None:
+            scope = (
+                self.access.new_resource_scope(
+                    actor=actor,
+                    visibility="group",
+                    resource_type=ScopedResourceType.capability_profile,
+                )
+                if self.access is not None
+                else ResourceScope.from_record({})
+            )
+            if self.access is None:
+                require_admin_user(actor, self.admins)
+        else:
+            self._require_profile_write(actor, profile_key)
+            scope = ResourceScope.from_record(current)
         require_edit_token(
             expected_edit_token,
             self._profile_edit_snapshot(current),
@@ -80,21 +103,28 @@ class CapabilityGovernanceService:
             description=description,
             status=status,
             created_by=actor,
+            owner_group_key=scope.owner_group_key,
+            visibility=scope.visibility.value,
         )
         return attach_edit_token(saved, self._profile_edit_snapshot(saved))
 
     def list_profiles(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+            profiles = self.store.list_project_profiles()
+        else:
+            profiles = self.access.visible_resources(
+                actor=actor, resource_type=ScopedResourceType.capability_profile
+            )
         return [
             attach_edit_token(profile, self._profile_edit_snapshot(profile))
-            for profile in self.store.list_project_profiles()
+            for profile in profiles
         ]
 
     def get_profile(self, actor: str, profile_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        profile = self.store.get_project_profile(profile_key)
-        if profile is None:
-            raise NotFound("profile not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        profile = self._require_profile_read(actor, profile_key)
         rules = self.store.list_profile_source_rules(profile_key)
         resource_rules = self.store.list_profile_resource_rules(profile_key)
         return {
@@ -113,9 +143,7 @@ class CapabilityGovernanceService:
         *,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise NotFound("profile not found")
+        self._require_profile_write(actor, profile_key)
         current_rules = self.store.list_profile_source_rules(profile_key)
         require_edit_token(
             expected_edit_token,
@@ -124,7 +152,7 @@ class CapabilityGovernanceService:
             resource_key=profile_key,
             actor=actor,
         )
-        normalized = [self._validate_rule(rule) for rule in rules]
+        normalized = [self._validate_rule(rule, actor=actor) for rule in rules]
         self.store.replace_profile_source_rules(profile_key, normalized)
         self.store.clear_profile_pin_auto_cache(profile_key)
         return self.get_profile(actor, profile_key)
@@ -137,9 +165,7 @@ class CapabilityGovernanceService:
         *,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise NotFound("profile not found")
+        self._require_profile_write(actor, profile_key)
         current_rules = self.store.list_profile_resource_rules(profile_key)
         require_edit_token(
             expected_edit_token,
@@ -148,7 +174,7 @@ class CapabilityGovernanceService:
             resource_key=profile_key,
             actor=actor,
         )
-        normalized = [self._validate_resource_rule(rule) for rule in rules]
+        normalized = [self._validate_resource_rule(rule, actor=actor) for rule in rules]
         self.store.replace_profile_resource_rules(profile_key, normalized)
         return self.get_profile(actor, profile_key)
 
@@ -160,9 +186,7 @@ class CapabilityGovernanceService:
         *,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise NotFound("profile not found")
+        self._require_profile_write(actor, profile_key)
 
         require_edit_token(
             expected_edit_token,
@@ -181,7 +205,13 @@ class CapabilityGovernanceService:
                 raise ValidationError("tool_type is required")
             if tool_type not in PINNABLE_TOOL_TYPES:
                 raise ValidationError("tool_type is not pinnable")
-            if self.store.get_mcp_service(service_key) is None:
+            if self.access is not None:
+                self.access.require_resource_read(
+                    actor=actor,
+                    resource_type=ScopedResourceType.mcp_service,
+                    resource_key=service_key,
+                )
+            elif self.store.get_mcp_service(service_key) is None:
                 raise NotFound("service not found")
             normalized.append(
                 {
@@ -207,9 +237,7 @@ class CapabilityGovernanceService:
         count: int | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise NotFound("profile not found")
+        self._require_profile_write(actor, profile_key)
 
         require_edit_token(
             expected_edit_token,
@@ -254,9 +282,7 @@ class CapabilityGovernanceService:
         return self.profile_pin_preview(actor, profile_key)
 
     def refresh_profile_pin_cache(self, actor: str, profile_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise NotFound("profile not found")
+        self._require_profile_write(actor, profile_key)
         self.store.clear_profile_pin_auto_cache(profile_key)
         return self.profile_pin_preview(actor, profile_key)
 
@@ -268,9 +294,7 @@ class CapabilityGovernanceService:
         *,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise NotFound("profile not found")
+        self._require_profile_write(actor, profile_key)
         cache = self.store.get_profile_doc_cache(profile_key) or {}
         require_edit_token(
             expected_edit_token,
@@ -285,9 +309,7 @@ class CapabilityGovernanceService:
     def render_profile_markdown(self, actor: str, profile_key: str) -> dict[str, Any]:
         # 只读渲染：用于 SessionStart hook / agent 运行时给任意用户注入 profile 指导，
         # 无副作用，不要求全局 admin。写操作（manual notes / pin refresh）各自有校验。
-        profile = self.store.get_project_profile(profile_key)
-        if profile is None:
-            raise NotFound("profile not found")
+        profile = self._require_profile_read(actor, profile_key)
 
         services = [
             service
@@ -337,6 +359,12 @@ class CapabilityGovernanceService:
             }
             for repository in self.store.list_code_repositories()
             if repository["repo_key"] in allowed_repo_keys
+            and (
+                self.access is None
+                or self.access.can_read(
+                    actor=actor, scope=ResourceScope.from_record(repository)
+                )
+            )
         ]
         knowledge_bases = [
             {
@@ -346,9 +374,17 @@ class CapabilityGovernanceService:
             }
             for kb in self.store.list_kbs()
             if kb["slug"] in allowed_kb_slugs
+            and (
+                self.access is None
+                or self.access.can_read(actor=actor, scope=ResourceScope.from_record(kb))
+            )
         ]
         ledger_service = getattr(self, "business_ledgers", None)
-        business_ledgers = ledger_service.ledger_contexts(sorted(allowed_ledger_keys)) if ledger_service is not None else []
+        business_ledgers = (
+            ledger_service.ledger_contexts(sorted(allowed_ledger_keys), actor=actor)
+            if ledger_service is not None
+            else []
+        )
 
         cache = self.store.get_profile_doc_cache(profile_key) or {}
         manual_notes = str(cache.get("manual_notes") or "")
@@ -378,9 +414,7 @@ class CapabilityGovernanceService:
         )
 
     def profile_pin_preview(self, actor: str, profile_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_project_profile(profile_key) is None:
-            raise NotFound("profile not found")
+        self._require_profile_read(actor, profile_key)
 
         services = [
             service
@@ -608,9 +642,7 @@ class CapabilityGovernanceService:
         if profile_key is None:
             return source_keys
 
-        profile = self.store.get_project_profile(profile_key)
-        if profile is None:
-            raise NotFound("profile not found")
+        profile = self._require_profile_read(actor, profile_key)
         if profile.get("status") != "active":
             raise ValidationError("profile is disabled")
 
@@ -684,9 +716,7 @@ class CapabilityGovernanceService:
         if profile_key is None:
             return resource_keys
 
-        profile = self.store.get_project_profile(profile_key)
-        if profile is None:
-            raise NotFound("profile not found")
+        profile = self._require_profile_read(actor, profile_key)
         if profile.get("status") != "active":
             raise ValidationError("profile is disabled")
 
@@ -706,7 +736,20 @@ class CapabilityGovernanceService:
                 blocked,
                 "不在 allow 列表",
             )
-        return [resource_key for resource_key in resource_keys if resource_key in allow]
+        visible = [resource_key for resource_key in resource_keys if resource_key in allow]
+        if self.access is None:
+            return visible
+        scoped_type = {
+            ProfileResourceType.wiki_kb.value: ScopedResourceType.knowledge_base,
+            ProfileResourceType.code_repo.value: ScopedResourceType.code_repository,
+            ProfileResourceType.business_ledger.value: ScopedResourceType.business_ledger,
+        }[normalized_resource_type]
+        result = []
+        for resource_key in visible:
+            record = self.access.get_resource(scoped_type, resource_key)
+            if self.access.can_read(actor=actor, scope=ResourceScope.from_record(record)):
+                result.append(resource_key)
+        return result
 
     def is_resource_allowed(
         self,
@@ -725,11 +768,12 @@ class CapabilityGovernanceService:
     def get_resource_profiles(
         self, actor: str, resource_type: str, resource_key: str
     ) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
         normalized_type = self._validate_resource_type(resource_type)
-        return self.store.list_resource_rule_profiles(
+        self._require_profile_resource_read(actor, normalized_type, resource_key)
+        rows = self.store.list_resource_rule_profiles(
             resource_type=normalized_type, resource_key=resource_key
         )
+        return [row for row in rows if self._can_read_profile(actor, str(row["profile_key"]))]
 
     def set_resource_profiles(
         self,
@@ -739,16 +783,31 @@ class CapabilityGovernanceService:
         profile_keys: list[str],
         overrides: dict[str, dict[str, str | None]] | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         normalized_type = self._validate_resource_type(resource_type)
+        self._require_profile_resource_read(actor, normalized_type, resource_key)
+        existing = self.store.list_resource_rule_profiles(
+            resource_type=normalized_type, resource_key=resource_key
+        )
+        preserved = [
+            row for row in existing
+            if not self._can_write_profile(actor, str(row["profile_key"]))
+        ]
         for pk in profile_keys:
-            if self.store.get_project_profile(pk) is None:
-                raise NotFound(f"profile not found: {pk}")
+            self._require_profile_write(actor, pk)
+        merged_profile_keys = [str(row["profile_key"]) for row in preserved] + profile_keys
+        merged_overrides = {
+            str(row["profile_key"]): {
+                "retrieval_backend_slug": row.get("retrieval_backend_slug"),
+                "retrieval_agent_id": row.get("retrieval_agent_id"),
+            }
+            for row in preserved
+        }
+        merged_overrides.update(overrides or {})
         self.store.replace_resource_rule_profiles(
             resource_type=normalized_type,
             resource_key=resource_key,
-            profile_keys=profile_keys,
-            overrides=overrides,
+            profile_keys=merged_profile_keys,
+            overrides=merged_overrides,
         )
         return {
             "resource_type": normalized_type,
@@ -888,7 +947,7 @@ class CapabilityGovernanceService:
             raise ValidationError(str(exc)) from exc
         return {"dimensions": dimensions, "bucket": bucket, "items": items}
 
-    def _validate_rule(self, rule: dict[str, str]) -> dict[str, str]:
+    def _validate_rule(self, rule: dict[str, str], *, actor: str) -> dict[str, str]:
         source_type = self._validate_source_type(rule.get("source_type"))
 
         try:
@@ -900,16 +959,87 @@ class CapabilityGovernanceService:
         if not source_key:
             raise ValidationError("source_key is required")
 
+        if self.access is not None and source_type in {
+            SourceType.mcp_service.value,
+            SourceType.openapi_service.value,
+        }:
+            self.access.require_resource_read(
+                actor=actor,
+                resource_type=(
+                    ScopedResourceType.mcp_service
+                    if source_type == SourceType.mcp_service.value
+                    else ScopedResourceType.openapi_service
+                ),
+                resource_key=source_key,
+            )
+
         return {"source_type": source_type, "source_key": source_key, "effect": effect}
 
-    def _validate_resource_rule(self, rule: dict[str, Any]) -> dict[str, str]:
+    def _validate_resource_rule(self, rule: dict[str, Any], *, actor: str) -> dict[str, str]:
         resource_type = self._validate_resource_type(rule.get("resource_type"))
 
         resource_key = str(rule.get("resource_key") or "").strip()
         if not resource_key:
             raise ValidationError("resource_key is required")
 
+        self._require_profile_resource_read(actor, resource_type, resource_key)
+
         return {"resource_type": resource_type, "resource_key": resource_key}
+
+    def _require_profile_read(self, actor: str, profile_key: str) -> dict[str, Any]:
+        if self.access is not None:
+            return self.access.require_resource_read(
+                actor=actor,
+                resource_type=ScopedResourceType.capability_profile,
+                resource_key=profile_key,
+            )
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None:
+            raise NotFound("profile not found")
+        return profile
+
+    def _require_profile_write(self, actor: str, profile_key: str) -> dict[str, Any]:
+        if self.access is not None:
+            return self.access.require_resource_write(
+                actor=actor,
+                resource_type=ScopedResourceType.capability_profile,
+                resource_key=profile_key,
+            )
+        require_admin_user(actor, self.admins)
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None:
+            raise NotFound("profile not found")
+        return profile
+
+    def _can_read_profile(self, actor: str, profile_key: str) -> bool:
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None:
+            return False
+        return self.access is None or self.access.can_read(
+            actor=actor, scope=ResourceScope.from_record(profile)
+        )
+
+    def _can_write_profile(self, actor: str, profile_key: str) -> bool:
+        profile = self.store.get_project_profile(profile_key)
+        if profile is None:
+            return False
+        if self.access is None:
+            return actor in self.admins
+        return self.access.can_write(actor=actor, scope=ResourceScope.from_record(profile))
+
+    def _require_profile_resource_read(
+        self, actor: str, resource_type: str, resource_key: str
+    ) -> dict[str, Any] | None:
+        if self.access is None:
+            return None
+        scoped_type = {
+            ProfileResourceType.wiki_kb.value: ScopedResourceType.knowledge_base,
+            ProfileResourceType.code_repo.value: ScopedResourceType.code_repository,
+            ProfileResourceType.business_ledger.value: ScopedResourceType.business_ledger,
+        }[resource_type]
+        return self.access.require_resource_read(
+            actor=actor, resource_type=scoped_type, resource_key=resource_key
+        )
 
     def _validate_source_type(self, source_type: str | None) -> str:
         try:

@@ -18,8 +18,18 @@ class GovernanceFacadeMixin:
         description: str = "",
         status: str = "active",
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
-        return self.governance.upsert_project_profile(profile_key=profile_key, name=name, description=description, status=status, created_by=created_by)
+        return self.governance.upsert_project_profile(
+            profile_key=profile_key,
+            name=name,
+            description=description,
+            status=status,
+            created_by=created_by,
+            owner_group_key=owner_group_key,
+            visibility=visibility,
+        )
 
     def get_project_profile(self, profile_key: str) -> dict[str, Any] | None:
         return self.governance.get_project_profile(profile_key=profile_key)

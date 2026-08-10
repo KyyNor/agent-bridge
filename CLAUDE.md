@@ -38,9 +38,9 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `AgentBridgeService` 是装配根和兼容门面。FastAPI 路由调用应用/领域 service，领域 service 使用 repositories 或 adapter。不要继续把具体知识后端、工作流或脚本业务堆入门面。
 
-数据权限采用单小组归属模型：`user_group_memberships` 将稳定用户 ID 映射到一个小组；受保护资源保存 `owner_group_key` 和 `visibility=group|shared`。读取规则是同组或共享，写入规则始终是同组；`admins` 仅作为维护旁路。存量资源迁移为 `shared`，避免升级后突然不可用。资源访问必须进入 `AccessControlService` 与资源 adapter，不在 API 路由或前端复制判断。
+数据权限采用单小组归属模型：`user_group_memberships` 将稳定用户 ID 映射到一个小组；受保护资源保存 `owner_group_key` 和 `visibility=group|shared`。读取规则是同组或共享，写入规则始终是同组；`admins` 仅作为维护旁路。存量资源优先按创建者映射归组，无法确认归属时保持组内范围并进入维护修复，不得自动共享。资源访问必须进入 `AccessControlService` 与资源 adapter，不在 API 路由或前端复制判断。
 
-知识库、MCP/OpenAPI 与代码仓库分别通过 `ScopedResourceAdapter` 注册到资源 registry。列表、详情和执行都必须走同一访问服务；Profile 来源/资源规则只能在小组可见集合上继续收窄，不能扩大集合。子资源（文档、工具、CodeGraph 文件与符号）继承父资源范围，不重复保存小组字段。
+知识库、MCP/OpenAPI、代码仓库、业务台账与工作流产物属于共享白名单，并通过 `ScopedResourceAdapter` 注册到资源 registry；Profile、记忆和工作流定义保持组内。列表、详情和执行都必须走同一访问服务；Profile 来源/资源规则只能引用同组资源或显式共享资源。子资源（工具、CodeGraph 文件与符号）继承父资源范围；文档固化单一归属组，禁止跨组知识库混合挂载。
 
 `SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。主业务库为 `agent-bridge.db`，工具调用与 Agent 运行审计位于独立的 `agent-bridge-logs.db`；运行日志 repository 必须使用日志连接，不能重新写回主库。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 

@@ -201,6 +201,19 @@ class ModelEvaluationRunAccessAdapter:
         return self.store.list_model_evaluation_runs(limit=100)
 
 
+class BusinessLedgerAccessAdapter:
+    resource_type = ScopedResourceType.business_ledger
+
+    def __init__(self, service) -> None:
+        self.service = service
+
+    def get(self, resource_key: str) -> dict[str, Any] | None:
+        return self.service.get_definition(resource_key)
+
+    def list(self) -> list[dict[str, Any]]:
+        return self.service.list_definitions()
+
+
 def create_scoped_resource_registry(store) -> ScopedResourceRegistry:
     return ScopedResourceRegistry(
         [
