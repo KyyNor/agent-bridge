@@ -42,6 +42,8 @@ class WorkflowArtifactsRepositoryMixin:
         task_version: str = "",
         producer_node_id: str | None = None,
         producer_node_fingerprint: str | None = None,
+        owner_group_key: str | None = None,
+        visibility: str = "group",
     ) -> dict[str, Any]:
         content_hash = _content_hash(content)
         with self._connect() as conn:
@@ -50,6 +52,12 @@ class WorkflowArtifactsRepositoryMixin:
                 (run_id,),
             ).fetchone()
             run_status = str(run_row["status"]) if run_row is not None else "completed"
+            if owner_group_key is None:
+                scope_row = conn.execute(
+                    "SELECT owner_group_key FROM workflow_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                owner_group_key = str(scope_row["owner_group_key"] or "") if scope_row else ""
             is_current = 1 if run_status == "completed" else 0
             if is_current:
                 conn.execute(
@@ -76,9 +84,10 @@ class WorkflowArtifactsRepositoryMixin:
                   artifact_id, workflow_key, profile_key, run_id, task_key, task_version,
                   is_current, reuse_allowed, invalid_reason, producer_node_id,
                   producer_node_fingerprint, title, path,
-                  tags_json, format, summary, content, content_hash, metadata_json
+                  tags_json, format, summary, content, content_hash, metadata_json,
+                  owner_group_key, visibility
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workflow_key, task_key, task_version, run_id, path) DO UPDATE SET
                   profile_key = excluded.profile_key,
                   run_id = excluded.run_id,
@@ -96,6 +105,8 @@ class WorkflowArtifactsRepositoryMixin:
                   content = excluded.content,
                   content_hash = excluded.content_hash,
                   metadata_json = excluded.metadata_json,
+                  owner_group_key = excluded.owner_group_key,
+                  visibility = excluded.visibility,
                   updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -118,6 +129,8 @@ class WorkflowArtifactsRepositoryMixin:
                     content,
                     content_hash,
                     _json_dumps(metadata),
+                    owner_group_key,
+                    visibility,
                 ),
             )
             result = _row_payload(
@@ -228,6 +241,9 @@ class WorkflowArtifactsRepositoryMixin:
         include_history: bool = False,
         format: str | None = None,
         path_match: str | None = None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
+        include_shared_for_profile: bool = False,
     ) -> list[dict[str, Any]]:
         clauses, params = self._artifact_search_filters(
             profile_key=profile_key,
@@ -241,6 +257,9 @@ class WorkflowArtifactsRepositoryMixin:
             include_history=include_history,
             format=format,
             path_match=path_match,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
+            include_shared_for_profile=include_shared_for_profile,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         from_sql, order_by = self._artifact_search_source(query)
@@ -272,6 +291,9 @@ class WorkflowArtifactsRepositoryMixin:
         include_history: bool = False,
         format: str | None = None,
         path_match: str | None = None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
+        include_shared_for_profile: bool = False,
     ) -> dict[str, Any]:
         clauses, params = self._artifact_search_filters(
             profile_key=profile_key,
@@ -285,6 +307,9 @@ class WorkflowArtifactsRepositoryMixin:
             include_history=include_history,
             format=format,
             path_match=path_match,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
+            include_shared_for_profile=include_shared_for_profile,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         bounded_limit = min(max(limit, 1), 50)
@@ -326,13 +351,26 @@ class WorkflowArtifactsRepositoryMixin:
         include_history: bool,
         format: str | None,
         path_match: str | None = None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
+        include_shared_for_profile: bool = False,
     ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if not include_history:
             clauses.append("a.is_current = 1")
+        if enforce_scope:
+            if viewer_group_key:
+                clauses.append("(a.owner_group_key = ? OR a.visibility = 'shared')")
+                params.append(viewer_group_key)
+            else:
+                clauses.append("a.visibility = 'shared'")
         if profile_key:
-            clauses.append("a.profile_key = ?")
+            clauses.append(
+                "(a.profile_key = ? OR a.visibility = 'shared')"
+                if include_shared_for_profile
+                else "a.profile_key = ?"
+            )
             params.append(profile_key)
         if workflow_key:
             clauses.append("a.workflow_key = ?")

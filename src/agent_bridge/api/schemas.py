@@ -260,6 +260,10 @@ class BusinessLedgerQueryRequest(BaseModel):
     offset: int = Field(default=0, ge=0)
 
 
+class WorkflowArtifactVisibilityRequest(BaseModel):
+    visibility: Literal["group", "shared"]
+
+
 class ProjectProfileRequest(BaseModel):
     profile_key: str
     name: str

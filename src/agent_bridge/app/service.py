@@ -278,6 +278,7 @@ class AgentBridgeService:
             skills=self.skills,
             scripts=self.scripts,
             artifact_search_cache_dir=paths.artifact_search_cache_dir,
+            access=self.access,
         )
         self.workflow_output_handler = OutputHandler(
             agent_service=self.agents, skill_service=self.skills, workflow_service=self.workflows

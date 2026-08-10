@@ -26,6 +26,7 @@ class WorkflowDefinitionsRepositoryMixin:
         profile_key: str,
         status: str,
         created_by: str,
+        owner_group_key: str = "",
         workflow_type: str = "operation",
         definition: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -33,9 +34,10 @@ class WorkflowDefinitionsRepositoryMixin:
             conn.execute(
                 """
                 INSERT INTO workflow_definitions (
-                  workflow_key, name, description, profile_key, definition_json, status, workflow_type, created_by
+                  workflow_key, name, description, profile_key, definition_json, status,
+                  workflow_type, created_by, owner_group_key, visibility
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'group')
                 ON CONFLICT(workflow_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
@@ -55,6 +57,7 @@ class WorkflowDefinitionsRepositoryMixin:
                     status,
                     workflow_type,
                     created_by,
+                    owner_group_key,
                 ),
             )
             row = conn.execute(
@@ -88,7 +91,8 @@ class WorkflowDefinitionsRepositoryMixin:
             rows = conn.execute(
                 """
                 SELECT workflow_key, name, description, profile_key, status,
-                       workflow_type, edit_version, created_by, created_at, updated_at
+                       workflow_type, edit_version, created_by, owner_group_key,
+                       visibility, created_at, updated_at
                 FROM workflow_definitions
                 ORDER BY workflow_key
                 """

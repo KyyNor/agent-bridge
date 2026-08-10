@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agent_bridge.access_control.resources import ScopedResourceType
+from agent_bridge.access_control.service import AccessControlService, ResourceScope, ResourceVisibility
 from agent_bridge.core.cache import DEFAULT_CACHE_TTL_SECONDS, DiskCacheStore
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError
 from agent_bridge.automation.workflows.models import WorkflowArtifactFormat
@@ -41,12 +43,14 @@ class ArtifactService:
         admins: set[str],
         workflow_service: Any = None,
         cache_dir: Path | str | None = None,
+        access: AccessControlService | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
         # 反向引用 WorkflowService，用于校验运行上下文等编排能力。可选以便
         # 在隔离测试中单独使用本服务。
         self.workflow_service = workflow_service
+        self.access = access
         if cache_dir is None:
             cache_dir = Path(store.db_path).parent / "artifact-search-cache"
         self._search_cache = DiskCacheStore(
@@ -104,6 +108,8 @@ class ArtifactService:
             metadata=artifact_metadata,
             producer_node_id=producer_node_id,
             producer_node_fingerprint=producer_node_fingerprint,
+            owner_group_key=str(workflow.get("owner_group_key") or ""),
+            visibility="group",
         )
         if producer_node_id is not None:
             self.store.associate_workflow_run_artifacts(
@@ -173,7 +179,17 @@ class ArtifactService:
         item = self.store.get_workflow_artifact(artifact_id)
         if item is None:
             raise NotFound("workflow artifact not found")
-        if actor not in self.admins:
+        if self.access is not None:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(item))
+            if profile_key:
+                self.access.require_resource_read(
+                    actor=actor,
+                    resource_type=ScopedResourceType.capability_profile,
+                    resource_key=profile_key,
+                )
+                if item["profile_key"] != profile_key and item.get("visibility") != "shared":
+                    raise NotFound("workflow artifact not found")
+        elif actor not in self.admins:
             if not profile_key:
                 raise AccessDenied("capability profile is required")
             if not trusted_profile_context:
@@ -197,7 +213,36 @@ class ArtifactService:
             "metadata": item["metadata"],
             "created_at": item["created_at"],
             "updated_at": item["updated_at"],
+            "owner_group_key": item.get("owner_group_key") or "",
+            "visibility": item.get("visibility") or "group",
         }
+
+    def set_visibility(self, *, actor: str, artifact_id: str, visibility: str) -> dict[str, Any]:
+        item = self.store.get_workflow_artifact(artifact_id)
+        if item is None:
+            raise NotFound("workflow artifact not found")
+        if self.access is None:
+            if actor not in self.admins:
+                raise AccessDenied("admin access required")
+        else:
+            self.access.require_write(actor=actor, scope=ResourceScope.from_record(item))
+            self.access.new_resource_scope(
+                actor=actor,
+                visibility=visibility,
+                resource_type=ScopedResourceType.workflow_artifact,
+            )
+        try:
+            resolved = ResourceVisibility(visibility).value
+        except ValueError as exc:
+            raise ValidationError("资源可见范围必须是 group 或 shared") from exc
+        with self.store.connect() as conn:
+            conn.execute(
+                "UPDATE workflow_artifacts SET visibility = ?, updated_at = CURRENT_TIMESTAMP WHERE artifact_id = ?",
+                (resolved, artifact_id),
+            )
+        # 可见范围变化会直接改变检索结果，旧缓存不能继续跨组返回产物。
+        self._search_cache.clear()
+        return self.get_artifact(actor=actor, artifact_id=artifact_id)
 
     def search_artifacts(
         self,
@@ -220,9 +265,11 @@ class ArtifactService:
         paginated: bool = False,
         path_match: str | None = None,
     ) -> dict[str, Any]:
-        if actor not in self.admins and not profile_key:
+        enforce_scope = self.access is not None and actor not in self.admins
+        viewer_group_key = self.access.actor_group_key(actor) if enforce_scope and self.access else None
+        if self.access is None and actor not in self.admins and not profile_key:
             raise AccessDenied("capability profile is required")
-        if actor not in self.admins and profile_key and not trusted_profile_context:
+        if self.access is None and actor not in self.admins and profile_key and not trusted_profile_context:
             raise AccessDenied("profile context is not trusted")
         if profile_key:
             profile = self.store.get_project_profile(profile_key)
@@ -230,6 +277,8 @@ class ArtifactService:
                 raise NotFound("profile not found")
             if profile.get("status") != "active":
                 raise ValidationError("profile is disabled")
+            if self.access is not None:
+                self.access.require_read(actor=actor, scope=ResourceScope.from_record(profile))
         if limit < 1:
             raise ValidationError("limit must be positive")
         bounded_limit = min(limit, 50)
@@ -253,6 +302,8 @@ class ArtifactService:
             "format": format,
             "paginated": paginated,
             "path_match": path_match,
+            "viewer_group_key": viewer_group_key,
+            "enforce_scope": enforce_scope,
         }
         cached = self._search_cache.get(cache_key)
         if isinstance(cached, dict):
@@ -272,6 +323,9 @@ class ArtifactService:
                 offset=bounded_offset,
                 format=format,
                 path_match=path_match,
+                viewer_group_key=viewer_group_key,
+                enforce_scope=enforce_scope,
+                include_shared_for_profile=enforce_scope,
             )
             items = page["items"]
         else:
@@ -288,6 +342,9 @@ class ArtifactService:
                 limit=bounded_limit,
                 format=format,
                 path_match=path_match,
+                viewer_group_key=viewer_group_key,
+                enforce_scope=enforce_scope,
+                include_shared_for_profile=enforce_scope,
             )
         def _entry(item: dict[str, Any]) -> dict[str, Any]:
             entry = {
@@ -306,6 +363,8 @@ class ArtifactService:
                 "snippet": _snippet(item["content"], query),
                 "created_at": item["created_at"],
                 "updated_at": item["updated_at"],
+                "owner_group_key": item.get("owner_group_key") or "",
+                "visibility": item.get("visibility") or "group",
             }
             # Return the full body when explicitly requested (feature: view a
             # task's outputs from the progress page) or on an exact-path lookup
@@ -343,10 +402,16 @@ class ArtifactService:
         limit: int,
         trusted_profile_context: bool = False,
     ) -> dict[str, Any]:
-        if actor not in self.admins and not profile_key:
+        if self.access is None and actor not in self.admins and not profile_key:
             raise AccessDenied("capability profile is required")
-        if actor not in self.admins and profile_key and not trusted_profile_context:
+        if self.access is None and actor not in self.admins and profile_key and not trusted_profile_context:
             raise AccessDenied("profile context is not trusted")
+        if self.access is not None and profile_key:
+            self.access.require_resource_read(
+                actor=actor,
+                resource_type=ScopedResourceType.capability_profile,
+                resource_key=profile_key,
+            )
         if not workflow_key:
             raise ValidationError("workflow_key is required")
         if not task_key:
@@ -354,6 +419,8 @@ class ArtifactService:
         if limit < 1:
             raise ValidationError("limit must be positive")
         bounded_limit = min(limit, 50)
+        enforce_scope = self.access is not None and actor not in self.admins
+        viewer_group_key = self.access.actor_group_key(actor) if enforce_scope and self.access else None
         items = self.store.search_workflow_artifacts(
             profile_key=profile_key,
             query=None,
@@ -365,6 +432,9 @@ class ArtifactService:
             include_history=True,
             format="all",
             limit=200,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
+            include_shared_for_profile=enforce_scope,
         )
 
         # 两层分组：外层按 task_version（保留版本历史语义），内层按 run_id
@@ -382,6 +452,8 @@ class ArtifactService:
                     "task_version": version,
                     "is_current": False,
                     "updated_at": item["updated_at"],
+                    "owner_group_key": item.get("owner_group_key") or "",
+                    "visibility": item.get("visibility") or "group",
                     "runs": [],
                     "_by_run": {},
                 }

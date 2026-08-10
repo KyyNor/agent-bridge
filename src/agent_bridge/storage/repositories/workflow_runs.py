@@ -55,17 +55,24 @@ class WorkflowRunsRepositoryMixin:
         execution_mode: str = "normal",
         execution_plan: dict[str, Any] | list[Any] | None = None,
         source_run_id: str | None = None,
+        owner_group_key: str | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
+            if owner_group_key is None:
+                definition = conn.execute(
+                    "SELECT owner_group_key FROM workflow_definitions WHERE workflow_key = ?",
+                    (workflow_key,),
+                ).fetchone()
+                owner_group_key = str(definition["owner_group_key"] or "") if definition else ""
             conn.execute(
                 """
                 INSERT INTO workflow_runs (
                   run_id, workflow_key, profile_key, task_key, status, temp_dir,
                   definition_snapshot_json, input_json, workflow_revision_no,
                   workflow_content_hash, task_version, execution_mode,
-                  execution_plan_json, source_run_id
+                  execution_plan_json, source_run_id, owner_group_key
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id, workflow_key, profile_key, task_key, status, temp_dir,
@@ -77,6 +84,7 @@ class WorkflowRunsRepositoryMixin:
                     execution_mode,
                     _json_dumps(execution_plan or {}),
                     source_run_id,
+                    owner_group_key,
                 ),
             )
             result = _row_payload(

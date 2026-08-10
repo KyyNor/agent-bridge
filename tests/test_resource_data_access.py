@@ -279,3 +279,75 @@ def test_profiles_ledgers_and_memory_follow_group_scope(wm_paths) -> None:
     ]
     assert client.get("/memory/blocks", headers=bob).json() == []
     assert client.get("/memory/blocks/team-a-memory", headers=bob).status_code == 403
+
+
+def test_workflow_definition_is_group_only_and_artifact_can_be_shared(wm_paths) -> None:
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+
+    assert client.post(
+        "/capability-profiles",
+        headers=alice,
+        json={
+            "profile_key": "team-a-workflow",
+            "name": "A 组工作流能力平面",
+            "description": "",
+            "status": "active",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/workflows",
+        headers=alice,
+        json={
+            "workflow_key": "team-a-report",
+            "name": "A 组报告",
+            "description": "",
+            "profile_key": "team-a-workflow",
+            "definition": {"nodes": [], "edges": []},
+            "status": "active",
+        },
+    ).status_code == 200
+
+    assert [item["workflow_key"] for item in client.get("/workflows", headers=alice).json()] == [
+        "team-a-report"
+    ]
+    assert client.get("/workflows", headers=bob).json() == []
+    assert client.get("/workflows/team-a-report", headers=bob).status_code == 403
+
+    artifact = app.state.agent_bridge_service.workflows.save_artifact(
+        workflow_key="team-a-report",
+        profile_key="team-a-workflow",
+        run_id="run-team-a",
+        task_key="report:one",
+        title="A 组报告产物",
+        path="reports/team-a.md",
+        tags=["report"],
+        format="markdown",
+        summary="只在共享后跨组可见",
+        content="# A 组报告",
+        metadata={},
+    )
+    artifact_id = artifact["artifact_id"]
+
+    assert client.get(f"/workflow-artifacts/{artifact_id}", headers=bob).status_code == 403
+    assert client.get("/workflow-artifacts", headers=bob).json()["items"] == []
+    assert client.put(
+        f"/workflow-artifacts/{artifact_id}/visibility",
+        headers=alice,
+        json={"visibility": "shared"},
+    ).status_code == 200
+
+    shared = client.get(f"/workflow-artifacts/{artifact_id}", headers=bob)
+    assert shared.status_code == 200
+    assert shared.json()["visibility"] == "shared"
+    assert [item["artifact_id"] for item in client.get(
+        "/workflow-artifacts", headers=bob
+    ).json()["items"]] == [artifact_id]
+    assert client.put(
+        f"/workflow-artifacts/{artifact_id}/visibility",
+        headers=bob,
+        json={"visibility": "group"},
+    ).status_code == 403

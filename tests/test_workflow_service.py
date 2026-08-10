@@ -405,7 +405,9 @@ def test_workflow_service_search_returns_full_content_only_for_exact_path(wm_pat
     assert "snippet" in prefix["items"][0]
 
 
-def test_workflow_service_allows_non_admin_profile_artifact_search(wm_paths):
+def test_workflow_service_rejects_unmapped_non_admin_private_artifact_search(wm_paths):
+    from agent_bridge.core.domain import AccessDenied
+
     svc = _service(wm_paths)
     svc.workflows.upsert_definition(
         actor="root",
@@ -430,39 +432,34 @@ def test_workflow_service_allows_non_admin_profile_artifact_search(wm_paths):
         metadata={"page_key": "page-a"},
     )
 
-    results = svc.workflows.search_artifacts(
-        actor="alice",
-        profile_key="report-plane",
-        query="finance_orders",
-        tags=[],
-        path=None,
-        workflow_key=None,
-        limit=10,
-        trusted_profile_context=True,
-    )
-
-    assert [item["title"] for item in results["items"]] == ["Page A Report"]
-
-
-def test_workflow_service_rejects_non_admin_untrusted_artifact_search(wm_paths):
-    from agent_bridge.core.domain import AccessDenied
-
-    svc = _service(wm_paths)
-
-    try:
+    with pytest.raises(AccessDenied, match="其他小组"):
         svc.workflows.search_artifacts(
             actor="alice",
-            profile_key=None,
-            query="anything",
+            profile_key="report-plane",
+            query="finance_orders",
             tags=[],
             path=None,
             workflow_key=None,
             limit=10,
+            trusted_profile_context=True,
         )
-    except AccessDenied as exc:
-        assert "capability profile is required" in exc.message
-    else:
-        raise AssertionError("non-admin artifact search without profile should fail")
+
+
+def test_workflow_service_scopes_non_admin_artifact_search_without_profile(wm_paths):
+    from agent_bridge.core.domain import AccessDenied
+
+    svc = _service(wm_paths)
+
+    result = svc.workflows.search_artifacts(
+        actor="alice",
+        profile_key=None,
+        query="anything",
+        tags=[],
+        path=None,
+        workflow_key=None,
+        limit=10,
+    )
+    assert result == {"items": []}
 
     try:
         svc.workflows.search_artifacts(
@@ -475,9 +472,9 @@ def test_workflow_service_rejects_non_admin_untrusted_artifact_search(wm_paths):
             limit=10,
         )
     except AccessDenied as exc:
-        assert "profile context is not trusted" in exc.message
+        assert "其他小组" in exc.message
     else:
-        raise AssertionError("non-admin untrusted artifact search with profile should fail")
+        raise AssertionError("non-admin cross-group artifact search should fail")
 
 
 def test_workflow_service_artifact_search_applies_tags_before_limit(wm_paths):
