@@ -144,7 +144,7 @@ class CoreFacadeMixin:
         status: str,
         created_by: str = "",
         owner_group_key: str = "",
-        visibility: str = "shared",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         return self.codegraph.upsert_code_repository(repo_key=repo_key, name=name, git_url=git_url, branch=branch, auth_ref=auth_ref, description=description, tags=tags, category_key=category_key, sync_interval_minutes=sync_interval_minutes, auto_understand=auto_understand, status=status, created_by=created_by, owner_group_key=owner_group_key, visibility=visibility)
 

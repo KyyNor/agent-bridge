@@ -14,7 +14,7 @@ class KnowledgeFacadeMixin:
         description: str,
         created_by: str,
         owner_group_key: str = "",
-        visibility: str = "shared",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         return self.knowledge.create_kb(
             slug=slug,

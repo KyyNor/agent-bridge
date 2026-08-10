@@ -47,7 +47,7 @@ class KnowledgeRepository:
         description: str,
         created_by: str,
         owner_group_key: str = "",
-        visibility: str = "shared",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(

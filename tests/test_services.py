@@ -1381,6 +1381,11 @@ def test_ask_requires_capability_profile_for_non_admin(wm_paths, tmp_path: Path,
     monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, ""))
 
     service.governance.upsert_profile("root", "safe", "Safe", "", "active")
+    service.access.set_user_group(
+        actor="root",
+        user_id="alice",
+        group_key=service.access.maintenance_group_key,
+    )
 
     with pytest.raises(AccessDenied, match="capability profile is required"):
         service.ask("alice", "frontend-docs", "what is X?")

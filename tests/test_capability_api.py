@@ -380,6 +380,14 @@ def test_profile_resource_rules_api(wm_paths) -> None:
         json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
         headers={"X-Agent-Bridge-User": "root"},
     )
+    app.state.agent_bridge_service.store.create_kb(
+        "frontend-docs",
+        "Frontend Docs",
+        "",
+        "root",
+        owner_group_key=app.state.agent_bridge_service.access.maintenance_group_key,
+        visibility="group",
+    )
 
     saved = client.put(
         "/capability-profiles/safe-readonly/resources",

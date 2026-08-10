@@ -23,7 +23,7 @@ class CapabilitiesFacadeMixin:
         tags: list[str],
         created_by: str,
         owner_group_key: str = "",
-        visibility: str = "shared",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         return self.capabilities.create_mcp_service(service_key=service_key, name=name, endpoint_url=endpoint_url, headers=headers, description=description, tags=tags, created_by=created_by, owner_group_key=owner_group_key, visibility=visibility)
 
@@ -119,7 +119,7 @@ class CapabilitiesFacadeMixin:
         tags: list[str],
         created_by: str,
         owner_group_key: str = "",
-        visibility: str = "shared",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         return self.capabilities.create_openapi_service(
             service_key=service_key,

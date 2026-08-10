@@ -101,7 +101,7 @@ class CodeGraphRepository:
         status: str,
         created_by: str = "",
         owner_group_key: str = "",
-        visibility: str = "shared",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
