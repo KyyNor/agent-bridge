@@ -287,6 +287,7 @@
     <div class="commit"><strong>纠偏 5 · 工具日志与 Agent 运行</strong><br>运行表固化组；工具日志、统计、Agent 列表/详情/events/SSE/payload/subagent/stop 统一范围检查；清理存储层全局读取入口。</div>
     <div class="commit"><strong>纠偏 6 · 前端管理与代理入口收口</strong><br>仅共享白名单资源显示共享开关；增加组归属/未归属修复界面；页面不做鉴权路由；检查 Dashboard、下载、导出、SSE 等非普通 JSON 入口。</div>
     <div class="commit"><strong>纠偏 7 · 全域回归与迁移验收</strong><br>覆盖同组读写、跨组拒绝、共享只读、管理员旁路、未映射用户、CLI Linux 用户、后台调度继承、用户换组历史不迁移；运行全量测试与前端检查。</div>
+    <div class="alert"><strong>最终验证：</strong><code>./scripts/test.sh full -q</code> 通过 1324 项 Python 测试；前端通过 246 项测试、Vue/TypeScript 类型检查和 Vite 生产构建。Ruff 与变更空白检查通过。</div>
   </section>
 
   <section>
