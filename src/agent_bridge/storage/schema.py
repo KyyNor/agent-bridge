@@ -20,6 +20,14 @@ CREATE TABLE IF NOT EXISTS user_group_memberships (
 );
 CREATE INDEX IF NOT EXISTS idx_user_group_memberships_group
   ON user_group_memberships(group_key, user_id);
+CREATE TABLE IF NOT EXISTS admin_access_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  password_hash TEXT NOT NULL,
+  session_secret TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS knowledge_bases (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   slug TEXT NOT NULL UNIQUE,

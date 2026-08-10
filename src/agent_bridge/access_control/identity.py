@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, Literal
 
 import jwt
@@ -9,7 +10,7 @@ from fastapi import Request
 from agent_bridge.core.domain import AuthenticationRequired, ValidationError
 
 
-IdentitySource = Literal["web_sso", "linux_cli", "system"]
+IdentitySource = Literal["web_sso", "linux_cli", "password_admin", "system"]
 
 
 @dataclass(frozen=True)
@@ -39,10 +40,33 @@ class RequestIdentityResolver:
 
     cli_header = "X-Agent-Bridge-User"
 
-    def __init__(self, config: IdentityConfig) -> None:
+    def __init__(
+        self,
+        config: IdentityConfig,
+        *,
+        admin_access=None,
+        admin_actor_provider: Callable[[], str | None] | None = None,
+    ) -> None:
         self.config = config
+        self.admin_access = admin_access
+        self.admin_actor_provider = admin_actor_provider
 
     def resolve(self, request: Request) -> ActorIdentity:
+        if self.admin_access is not None:
+            admin_token = request.cookies.get(self.admin_access.cookie_name, "").strip()
+            subject = self.admin_access.decode_session(admin_token)
+            if subject:
+                admin_actor = self.admin_actor_provider() if self.admin_actor_provider else None
+                if not admin_actor:
+                    raise AuthenticationRequired("Agent Bridge 尚未配置维护管理员")
+                return ActorIdentity(
+                    user_id=admin_actor,
+                    user_name=f"{subject}（管理员）",
+                    source="password_admin",
+                )
+        return self.resolve_base(request)
+
+    def resolve_base(self, request: Request) -> ActorIdentity:
         token = request.cookies.get(self.config.cookie_name, "").strip()
         if token:
             return self.decode_sso_token(token)

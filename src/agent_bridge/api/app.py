@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
 from agent_bridge.access_control.identity import RequestIdentityResolver
+from agent_bridge.access_control.admin_access import AdminAccessService
+from agent_bridge.api.schemas import AdminLoginRequest, ChangeAdminPasswordRequest
 from agent_bridge.core.config import (
     AgentBridgePaths,
     load_identity_config,
@@ -36,7 +38,16 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     setup_logging(resolved_paths, config=load_logging_config(resolved_paths))
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = AgentBridgeService.create(resolved_paths, resolved_admins)
-    identity_resolver = RequestIdentityResolver(load_identity_config(resolved_paths))
+    admin_access = AdminAccessService(service.store.access_control, service.access.admins)
+
+    def password_admin_actor() -> str | None:
+        return sorted(service.access.admins)[0] if service.access.admins else None
+
+    identity_resolver = RequestIdentityResolver(
+        load_identity_config(resolved_paths),
+        admin_access=admin_access,
+        admin_actor_provider=password_admin_actor,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -138,6 +149,51 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     def actor(current_identity=Depends(identity)) -> str:
         return current_identity.user_id
 
+    @app.get("/auth/admin/status")
+    def admin_status(request: Request) -> dict[str, Any]:
+        token = request.cookies.get(admin_access.cookie_name, "").strip()
+        return admin_access.status(token)
+
+    @app.post("/auth/admin/session")
+    def create_admin_session(request: Request, payload: AdminLoginRequest) -> JSONResponse:
+        try:
+            subject_user_id = identity_resolver.resolve_base(request).user_id
+        except AgentBridgeError:
+            subject_user_id = "anonymous"
+        result = admin_access.login(
+            password=payload.password,
+            subject_user_id=subject_user_id,
+        )
+        token = str(result.pop("session_token"))
+        response = JSONResponse(content=result)
+        response.set_cookie(
+            admin_access.cookie_name,
+            token,
+            max_age=12 * 60 * 60,
+            httponly=True,
+            secure=identity_resolver.config.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.delete("/auth/admin/session")
+    def delete_admin_session() -> JSONResponse:
+        response = JSONResponse(content={"active": False})
+        response.delete_cookie(admin_access.cookie_name, path="/")
+        return response
+
+    @app.put("/auth/admin/password")
+    def change_admin_password(
+        payload: ChangeAdminPasswordRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, bool]:
+        return admin_access.change_password(
+            actor=current_actor,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+
     @app.get("/auth/sso/callback")
     def sso_callback(
         token: str = Query(min_length=1),
@@ -161,6 +217,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     def logout() -> RedirectResponse:
         response = RedirectResponse(url="/admin/capabilities", status_code=303)
         response.delete_cookie(identity_resolver.config.cookie_name, path="/")
+        response.delete_cookie(admin_access.cookie_name, path="/")
         return response
 
     @app.exception_handler(AgentBridgeError)
@@ -183,6 +240,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
             if reloaded != service.access.admins:
                 service.access.admins = reloaded
                 service.access.bootstrap_admin_memberships()
+            admin_access.admins = reloaded
             service.admins = reloaded
             service.capabilities.admins = reloaded
             service.governance.admins = reloaded

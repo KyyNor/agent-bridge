@@ -225,6 +225,18 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         ON user_group_memberships(group_key, user_id)
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_access_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          password_hash TEXT NOT NULL,
+          session_secret TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     scoped_tables = ("knowledge_bases", "mcp_services", "openapi_services", "code_repositories")
     for table in scoped_tables:
         store._ensure_columns(

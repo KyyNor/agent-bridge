@@ -115,3 +115,49 @@ class AccessControlRepository:
                 "DELETE FROM user_group_memberships WHERE user_id = ?", (user_id,)
             )
             return cursor.rowcount > 0
+
+    def get_admin_access_config(self) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM admin_access_config WHERE id = 1"
+            ).fetchone()
+            return row_to_dict(row)
+
+    def initialize_admin_access(
+        self,
+        *,
+        password_hash: str,
+        session_secret: str,
+        actor: str,
+    ) -> bool:
+        """仅在尚未设置时初始化；并发请求中只有一个调用者会成功。"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO admin_access_config (
+                  id, password_hash, session_secret, updated_by
+                ) VALUES (1, ?, ?, ?)
+                """,
+                (password_hash, session_secret, actor),
+            )
+            return cursor.rowcount > 0
+
+    def update_admin_access(
+        self,
+        *,
+        password_hash: str,
+        session_secret: str,
+        actor: str,
+    ) -> None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE admin_access_config
+                SET password_hash = ?, session_secret = ?, updated_by = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+                """,
+                (password_hash, session_secret, actor),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError("admin access config not found")
