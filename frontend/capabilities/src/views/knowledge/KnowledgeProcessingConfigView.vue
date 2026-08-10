@@ -2,7 +2,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { CronExpressionParser } from 'cron-parser'
 import { api } from '../../api/client'
-import type { AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, RetrievalProbeLlmConfig, SchedulerStatus, TopLevelMcpTool } from '../../api/types'
+import type { AdminAccessStatus, AgentRuntimeConfig, BackendInfo, ClaudeMemConfig, CodeRepoCategory, KnowledgeSyncConfig, RetrievalProbeLlmConfig, SchedulerStatus, TopLevelMcpTool } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
@@ -10,9 +10,14 @@ import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Badge } from '../../components/ui/badge'
 import StatusBadge from '../../components/StatusBadge.vue'
-import { confirm } from '../../composables/useConfirm'
+import { alert, confirm } from '../../composables/useConfirm'
 
 const loading = ref(true)
+
+const adminAccessStatus = ref<AdminAccessStatus | null>(null)
+const adminPasswordForm = ref({ current_password: '', new_password: '', confirm_password: '' })
+const adminPasswordSaving = ref(false)
+const adminPasswordError = ref('')
 
 const topLevelMcpTools = ref<TopLevelMcpTool[]>([])
 const topLevelMcpToolsError = ref('')
@@ -95,9 +100,37 @@ const isPageIndex = computed(() => backendForm.value.backend_type === 'pageindex
 const supportsModelConfig = computed(() => isWeknora.value || isPageIndex.value)
 
 onMounted(async () => {
-  await Promise.all([loadSyncConfig(), loadTopLevelMcpTools(), loadClaudeMemConfig(), loadRetrievalProbeLlmConfig(), loadAgentRuntimeConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
+  await Promise.all([loadAdminAccessStatus(), loadSyncConfig(), loadTopLevelMcpTools(), loadClaudeMemConfig(), loadRetrievalProbeLlmConfig(), loadAgentRuntimeConfig(), loadCategories(), loadSchedulerStatus(), loadBackends()])
   loading.value = false
 })
+
+async function loadAdminAccessStatus() {
+  try { adminAccessStatus.value = await api.getAdminAccessStatus() } catch { adminAccessStatus.value = null }
+}
+
+async function changeAdminPassword() {
+  adminPasswordError.value = ''
+  const form = adminPasswordForm.value
+  if (form.new_password.length < 8) {
+    adminPasswordError.value = '新密码至少需要 8 个字符'
+    return
+  }
+  if (form.new_password !== form.confirm_password) {
+    adminPasswordError.value = '两次输入的新密码不一致'
+    return
+  }
+  adminPasswordSaving.value = true
+  try {
+    await api.changeAdminPassword(form.current_password, form.new_password)
+    adminPasswordForm.value = { current_password: '', new_password: '', confirm_password: '' }
+    await alert({ title: '管理员密码已更新', description: '旧的管理员会话已失效，请使用新密码重新进入管理员模式。' })
+    window.location.reload()
+  } catch (e: any) {
+    adminPasswordError.value = e.message || '修改管理员密码失败'
+  } finally {
+    adminPasswordSaving.value = false
+  }
+}
 
 async function loadSyncConfig() {
   try { syncConfig.value = await api.getSyncConfig() } catch { /* ignore */ }
@@ -531,6 +564,25 @@ async function deleteBackend(slug: string) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
+    <Card>
+      <CardContent class="space-y-4 p-5">
+        <div>
+          <div class="text-sm font-medium">管理员访问密码</div>
+          <div class="mt-1 text-xs text-muted-foreground">用于从普通用户或裸访问切换到管理员模式。修改后所有已签发的管理员会话会立即失效。</div>
+        </div>
+        <div v-if="adminAccessStatus && !adminAccessStatus.configured" class="rounded-md border border-border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+          管理员密码尚未设置，请先使用左下角“切换管理员”入口完成首次设置。
+        </div>
+        <form v-else class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" @submit.prevent="changeAdminPassword">
+          <Input v-model="adminPasswordForm.current_password" type="password" autocomplete="current-password" placeholder="当前管理员密码" />
+          <Input v-model="adminPasswordForm.new_password" type="password" autocomplete="new-password" placeholder="新密码（至少 8 个字符）" />
+          <Input v-model="adminPasswordForm.confirm_password" type="password" autocomplete="new-password" placeholder="确认新密码" />
+          <Button type="submit" :disabled="adminPasswordSaving">{{ adminPasswordSaving ? '修改中...' : '修改密码' }}</Button>
+        </form>
+        <div v-if="adminPasswordError" class="text-xs text-destructive">{{ adminPasswordError }}</div>
+      </CardContent>
+    </Card>
+
     <Card>
       <CardContent class="space-y-4 p-5">
         <div class="flex items-start justify-between gap-4">

@@ -12,6 +12,13 @@ export interface AccessActorContext {
   is_maintenance_admin: boolean
 }
 
+export interface AdminAccessStatus {
+  configured: boolean
+  active: boolean
+  initialized?: boolean
+  subject_user_id: string | null
+}
+
 export interface AccessGroup {
   group_key: string
   name: string

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { defineAsyncComponent, ref, computed, onUnmounted, type Component } from 'vue'
 import AppShell from './components/AppShell.vue'
+import AdminAccessControl from './components/AdminAccessControl.vue'
 import type { NavGroup } from './components/AppShell.vue'
 import AppErrorBoundary from './components/AppErrorBoundary.vue'
 import AsyncViewError from './components/AsyncViewError.vue'
@@ -231,6 +232,7 @@ const view = computed(() => activeNavKey.value)
 
 <template>
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
+    <template #footer><AdminAccessControl /></template>
     <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll">
       <!-- Page Header（标题取自导航配置；操作/筛选由各视图 Teleport 进 #ph-actions / #ph-filters） -->
       <PageHeader

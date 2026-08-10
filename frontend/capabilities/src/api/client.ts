@@ -110,6 +110,7 @@ import type {
   BusinessLedger,
   BusinessLedgerRecords,
   AccessActorContext,
+  AdminAccessStatus,
   AccessGroup,
   UserGroupMembership,
   ResourceVisibility,
@@ -336,6 +337,17 @@ async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Bl
 }
 
 export const api = {
+  // 管理员密码与浏览器提权会话
+  getAdminAccessStatus: () => get<AdminAccessStatus>('/auth/admin/status'),
+  createAdminSession: (password: string) =>
+    post<AdminAccessStatus>('/auth/admin/session', { password }),
+  deleteAdminSession: () => del<{ active: boolean }>('/auth/admin/session'),
+  changeAdminPassword: (currentPassword: string, newPassword: string) =>
+    put<{ updated: boolean }>('/auth/admin/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+
   // 当前身份与小组映射
   getAccessContext: () => get<AccessActorContext>('/access/me'),
   listAccessGroups: () => get<AccessGroup[]>('/access/groups'),
