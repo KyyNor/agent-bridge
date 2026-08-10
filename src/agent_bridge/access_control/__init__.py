@@ -8,11 +8,12 @@ from agent_bridge.access_control.service import (
     ResourceScope,
     ResourceVisibility,
 )
-from agent_bridge.access_control.resources import ScopedResourceType
+from agent_bridge.access_control.resources import SHAREABLE_RESOURCE_TYPES, ScopedResourceType
 
 __all__ = [
     "AccessControlService",
     "ResourceScope",
     "ResourceVisibility",
     "ScopedResourceType",
+    "SHAREABLE_RESOURCE_TYPES",
 ]

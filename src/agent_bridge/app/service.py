@@ -913,6 +913,8 @@ class AgentBridgeService:
     ) -> dict[str, Any]:
         kb = self._require_kb_admin_visible(actor, kb_slug)
         doc = self._require_doc_admin_visible(actor, doc_slug)
+        if str(doc.get("owner_group_key") or "") != str(kb.get("owner_group_key") or ""):
+            raise ValidationError("文档不能挂载到其他数据组的知识库")
         if self.store.get_folder(kb["id"], folder_id) is None:
             raise NotFound("folder not found")
         current_placement = self.store.get_document_placement(doc["id"], kb["id"])
@@ -933,6 +935,8 @@ class AgentBridgeService:
     ) -> dict[str, Any]:
         kb = self._require_kb_admin_visible(actor, kb_slug)
         doc = self._require_doc_admin_visible(actor, doc_slug)
+        if str(doc.get("owner_group_key") or "") != str(kb.get("owner_group_key") or ""):
+            raise ValidationError("文档不能挂载到其他数据组的知识库")
         if self.store.get_folder(kb["id"], folder_id) is None:
             raise NotFound("folder not found")
         existing = self.store.get_document_placement(doc["id"], kb["id"])
@@ -1150,8 +1154,11 @@ class AgentBridgeService:
         include_suffixes: list[str],
     ) -> dict[str, Any]:
         kb = self._require_kb_admin_visible(actor, kb_slug)
-        if self.store.get_code_repository(repo_key) is None:
-            raise NotFound("code repository not found")
+        self.access.require_resource_read(
+            actor=actor,
+            resource_type=ScopedResourceType.code_repository,
+            resource_key=repo_key,
+        )
         suffixes = self._normalize_repo_source_suffixes(include_suffixes)
         return self.store.upsert_kb_repo_source(kb["id"], repo_key, suffixes)
 
@@ -1745,11 +1752,12 @@ class AgentBridgeService:
         doc = self.store.get_document_by_slug(doc_slug)
         if doc is None:
             raise NotFound("document not found")
-        placements = self.store.get_document_kbs(doc["id"], active_only=True)
-        if not placements and actor not in self.admins:
-            raise AccessDenied("文档尚未归属可写知识库")
-        for kb in placements:
-            self._require_kb_admin_visible(actor, str(kb["slug"]))
+        self.access.require_write(
+            actor=actor,
+            scope=ResourceScope.from_record(
+                {"owner_group_key": doc.get("owner_group_key"), "visibility": "group"}
+            ),
+        )
         return doc
 
     def _require_doc_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:

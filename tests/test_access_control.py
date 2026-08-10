@@ -53,7 +53,28 @@ def test_user_without_group_can_read_shared_but_cannot_create(wm_paths) -> None:
         access.new_resource_scope(actor="carol", visibility="group")
 
 
-def test_access_schema_defaults_existing_compatible_resources_to_shared(wm_paths) -> None:
+def test_only_shareable_resource_types_accept_shared_visibility(wm_paths) -> None:
+    import pytest
+
+    from agent_bridge.access_control.resources import ScopedResourceType
+    from agent_bridge.core.domain import ValidationError
+
+    _, access = _access_service(wm_paths)
+    shared = access.new_resource_scope(
+        actor="alice",
+        visibility="shared",
+        resource_type=ScopedResourceType.business_ledger,
+    )
+    assert shared.visibility is ResourceVisibility.shared
+    with pytest.raises(ValidationError, match="不允许共享"):
+        access.new_resource_scope(
+            actor="alice",
+            visibility="shared",
+            resource_type=ScopedResourceType.capability_profile,
+        )
+
+
+def test_access_schema_keeps_unassigned_legacy_resources_private(wm_paths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     store.init_schema()
@@ -70,7 +91,7 @@ def test_access_schema_defaults_existing_compatible_resources_to_shared(wm_paths
             for name in ("knowledge_bases", "mcp_services", "openapi_services", "code_repositories")
         }
 
-    assert dict(row) == {"owner_group_key": "", "visibility": "shared"}
+    assert dict(row) == {"owner_group_key": "", "visibility": "group"}
     assert all({"owner_group_key", "visibility"} <= columns for columns in tables.values())
     assert "created_by" in tables["code_repositories"]
 

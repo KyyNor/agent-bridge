@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
   owner_group_key TEXT NOT NULL DEFAULT '',
-  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility IN ('group', 'shared')),
   default_backend_slug TEXT,
   default_agent_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS documents (
   slug TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
   owner_user TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
   current_version_id INTEGER,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -189,7 +190,7 @@ CREATE TABLE IF NOT EXISTS mcp_services (
   status TEXT NOT NULL DEFAULT 'enabled',
   created_by TEXT NOT NULL,
   owner_group_key TEXT NOT NULL DEFAULT '',
-  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility IN ('group', 'shared')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_synced_at TEXT,
@@ -230,7 +231,7 @@ CREATE TABLE IF NOT EXISTS openapi_services (
   status TEXT NOT NULL DEFAULT 'enabled',
   created_by TEXT NOT NULL,
   owner_group_key TEXT NOT NULL DEFAULT '',
-  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility IN ('group', 'shared')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_imported_at TEXT,
@@ -263,6 +264,8 @@ CREATE TABLE IF NOT EXISTS project_profiles (
   description TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility = 'group'),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -329,6 +332,8 @@ CREATE TABLE IF NOT EXISTS memory_blocks (
   worker_base_url TEXT,
   last_health_json TEXT NOT NULL DEFAULT '{}',
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility = 'group'),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -345,6 +350,7 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   log_id TEXT NOT NULL UNIQUE,
   actor TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
   profile_key TEXT,
   entrypoint TEXT NOT NULL,
   source_type TEXT,
@@ -370,6 +376,8 @@ CREATE INDEX IF NOT EXISTS idx_tool_call_logs_source ON tool_call_logs(source_ty
 CREATE TABLE IF NOT EXISTS agent_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_key TEXT NOT NULL UNIQUE,
+  actor TEXT NOT NULL DEFAULT '',
+  owner_group_key TEXT NOT NULL DEFAULT '',
   agent_name TEXT NOT NULL,
   backend_key TEXT,
   profile_key TEXT,
@@ -417,6 +425,8 @@ CREATE TABLE IF NOT EXISTS scripts (
   output_schema_json TEXT,
   created_by TEXT NOT NULL,
   updated_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility = 'group'),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -434,6 +444,7 @@ CREATE TABLE IF NOT EXISTS script_runs (
   error_message TEXT,
   duration_ms INTEGER NOT NULL DEFAULT 0,
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_script_runs_script ON script_runs(script_key, created_at DESC);
@@ -479,7 +490,7 @@ CREATE TABLE IF NOT EXISTS code_repositories (
   status TEXT NOT NULL DEFAULT 'active',
   created_by TEXT NOT NULL DEFAULT '',
   owner_group_key TEXT NOT NULL DEFAULT '',
-  visibility TEXT NOT NULL DEFAULT 'shared' CHECK (visibility IN ('group', 'shared')),
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility IN ('group', 'shared')),
   local_path TEXT,
   last_commit TEXT,
   last_synced_at TEXT,
@@ -563,6 +574,7 @@ CREATE TABLE IF NOT EXISTS model_evaluation_runs (
   error TEXT,
   work_dir TEXT NOT NULL,
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   started_at TEXT,
   finished_at TEXT
@@ -601,6 +613,8 @@ CREATE TABLE IF NOT EXISTS workflow_definitions (
   workflow_type TEXT NOT NULL DEFAULT 'operation',
   edit_version INTEGER NOT NULL DEFAULT 1,
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility = 'group'),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -668,7 +682,8 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   error TEXT,
   started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   finished_at TEXT,
-  duration_ms INTEGER
+  duration_ms INTEGER,
+  owner_group_key TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_key, started_at DESC);
 
@@ -742,6 +757,8 @@ CREATE TABLE IF NOT EXISTS workflow_artifacts (
   content TEXT NOT NULL DEFAULT '',
   content_hash TEXT NOT NULL,
   metadata_json TEXT NOT NULL DEFAULT '{}',
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility IN ('group', 'shared')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (workflow_key, task_key, task_version, run_id, path)

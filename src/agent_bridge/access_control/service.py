@@ -27,7 +27,7 @@ class ResourceScope:
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> "ResourceScope":
         try:
-            visibility = ResourceVisibility(str(record.get("visibility") or "shared"))
+            visibility = ResourceVisibility(str(record.get("visibility") or "group"))
         except ValueError as exc:
             raise ValidationError("资源可见范围无效") from exc
         return cls(
@@ -122,12 +122,22 @@ class AccessControlService:
         }
 
     def new_resource_scope(
-        self, *, actor: str, visibility: ResourceVisibility | str
+        self,
+        *,
+        actor: str,
+        visibility: ResourceVisibility | str,
+        resource_type: ScopedResourceType | str | None = None,
     ) -> ResourceScope:
         try:
             resolved_visibility = ResourceVisibility(visibility)
         except ValueError as exc:
             raise ValidationError("资源可见范围必须是 group 或 shared") from exc
+        if (
+            resolved_visibility is ResourceVisibility.shared
+            and resource_type is not None
+            and not self.resources.is_shareable(resource_type)
+        ):
+            raise ValidationError("该类数据不允许共享")
         membership = self.repository.get_membership(actor)
         if membership is None:
             raise AccessDenied("当前用户尚未分配小组，不能新建资源")
@@ -135,6 +145,26 @@ class AccessControlService:
             owner_group_key=str(membership["group_key"]),
             visibility=resolved_visibility,
         )
+
+    def actor_group_key(self, actor: str, *, required: bool = False) -> str | None:
+        membership = self.repository.get_membership(actor)
+        if membership is None:
+            if required:
+                raise AccessDenied("当前用户尚未分配小组，不能执行该操作")
+            return None
+        return str(membership["group_key"])
+
+    @staticmethod
+    def group_scope(
+        *,
+        owner_group_key: str,
+        visibility: ResourceVisibility | str = ResourceVisibility.group,
+    ) -> ResourceScope:
+        try:
+            resolved_visibility = ResourceVisibility(visibility)
+        except ValueError as exc:
+            raise ValidationError("资源可见范围必须是 group 或 shared") from exc
+        return ResourceScope(owner_group_key=owner_group_key, visibility=resolved_visibility)
 
     def can_read(self, *, actor: str, scope: ResourceScope) -> bool:
         if actor in self.admins or scope.visibility is ResourceVisibility.shared:

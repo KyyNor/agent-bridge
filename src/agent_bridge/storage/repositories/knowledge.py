@@ -170,13 +170,14 @@ class KnowledgeRepository:
         slug: str,
         title: str,
         owner_user: str,
+        owner_group_key: str = "",
         source_type: str = "manual",
         source_repo_key: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO documents (slug, title, owner_user, source_type, source_repo_key) VALUES (?, ?, ?, ?, ?)",
-                (slug, title, owner_user, source_type, source_repo_key),
+                "INSERT INTO documents (slug, title, owner_user, owner_group_key, source_type, source_repo_key) VALUES (?, ?, ?, ?, ?, ?)",
+                (slug, title, owner_user, owner_group_key, source_type, source_repo_key),
             )
             row = conn.execute("SELECT * FROM documents WHERE id = ?", (cursor.lastrowid,)).fetchone()
             document = row_to_dict(row)

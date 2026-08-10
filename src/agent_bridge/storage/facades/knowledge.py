@@ -186,11 +186,12 @@ class KnowledgeFacadeMixin:
         slug: str,
         title: str,
         owner_user: str,
+        owner_group_key: str = "",
         source_type: str = "manual",
         source_repo_key: str = "",
     ) -> dict[str, Any]:
         return self.knowledge.create_document(
-            slug=slug, title=title, owner_user=owner_user,
+            slug=slug, title=title, owner_user=owner_user, owner_group_key=owner_group_key,
             source_type=source_type, source_repo_key=source_repo_key,
         )
 

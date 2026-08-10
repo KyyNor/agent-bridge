@@ -232,10 +232,114 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             table,
             {
                 "owner_group_key": "TEXT NOT NULL DEFAULT ''",
-                "visibility": "TEXT NOT NULL DEFAULT 'shared'",
+                "visibility": "TEXT NOT NULL DEFAULT 'group'",
             },
         )
     store._ensure_columns(conn, "code_repositories", {"created_by": "TEXT NOT NULL DEFAULT ''"})
+    for table in scoped_tables:
+        conn.execute(
+            f"""
+            UPDATE {table}
+            SET owner_group_key = COALESCE(
+                  (SELECT membership.group_key
+                   FROM user_group_memberships membership
+                   WHERE membership.user_id = {table}.created_by),
+                  ''
+                ),
+                visibility = 'group'
+            WHERE owner_group_key = ''
+            """
+        )
+
+    scoped_columns = {
+        "project_profiles": {
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+            "visibility": "TEXT NOT NULL DEFAULT 'group'",
+        },
+        "memory_blocks": {
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+            "visibility": "TEXT NOT NULL DEFAULT 'group'",
+        },
+        "workflow_definitions": {
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+            "visibility": "TEXT NOT NULL DEFAULT 'group'",
+        },
+        "workflow_artifacts": {
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+            "visibility": "TEXT NOT NULL DEFAULT 'group'",
+        },
+        "scripts": {
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+            "visibility": "TEXT NOT NULL DEFAULT 'group'",
+        },
+    }
+    for table, columns in scoped_columns.items():
+        store._ensure_columns(conn, table, columns)
+    for table in ("project_profiles", "memory_blocks", "workflow_definitions", "scripts"):
+        conn.execute(
+            f"""
+            UPDATE {table}
+            SET owner_group_key = COALESCE(
+              (SELECT membership.group_key
+               FROM user_group_memberships membership
+               WHERE membership.user_id = {table}.created_by),
+              ''
+            ), visibility = 'group'
+            WHERE owner_group_key = ''
+            """
+        )
+
+    store._ensure_columns(conn, "documents", {"owner_group_key": "TEXT NOT NULL DEFAULT ''"})
+    conn.execute(
+        """
+        UPDATE documents
+        SET owner_group_key = COALESCE(
+          (SELECT membership.group_key
+           FROM user_group_memberships membership
+           WHERE membership.user_id = documents.owner_user),
+          ''
+        )
+        WHERE owner_group_key = ''
+        """
+    )
+    store._ensure_columns(conn, "workflow_runs", {"owner_group_key": "TEXT NOT NULL DEFAULT ''"})
+    conn.execute(
+        """
+        UPDATE workflow_runs
+        SET owner_group_key = COALESCE(
+          (SELECT definition.owner_group_key
+           FROM workflow_definitions definition
+           WHERE definition.workflow_key = workflow_runs.workflow_key),
+          ''
+        )
+        WHERE owner_group_key = ''
+        """
+    )
+    conn.execute(
+        """
+        UPDATE workflow_artifacts
+        SET owner_group_key = COALESCE(
+          (SELECT run.owner_group_key FROM workflow_runs run
+           WHERE run.run_id = workflow_artifacts.run_id),
+          (SELECT definition.owner_group_key FROM workflow_definitions definition
+           WHERE definition.workflow_key = workflow_artifacts.workflow_key),
+          ''
+        ), visibility = 'group'
+        WHERE owner_group_key = ''
+        """
+    )
+    store._ensure_columns(conn, "script_runs", {"owner_group_key": "TEXT NOT NULL DEFAULT ''"})
+    conn.execute(
+        """
+        UPDATE script_runs
+        SET owner_group_key = COALESCE(
+          (SELECT script.owner_group_key FROM scripts script
+           WHERE script.script_key = script_runs.script_key),
+          ''
+        )
+        WHERE owner_group_key = ''
+        """
+    )
 
     conn.execute(
         """
@@ -255,7 +359,20 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "sampling_mode": "TEXT NOT NULL DEFAULT 'head'",
             "sample_seed": "INTEGER NOT NULL DEFAULT 42",
             "runtime": "TEXT NOT NULL DEFAULT 'docker'",
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
         },
+    )
+    conn.execute(
+        """
+        UPDATE model_evaluation_runs
+        SET owner_group_key = COALESCE(
+          (SELECT membership.group_key
+           FROM user_group_memberships membership
+           WHERE membership.user_id = model_evaluation_runs.created_by),
+          ''
+        )
+        WHERE owner_group_key = ''
+        """
     )
     conn.execute(
         """
@@ -323,6 +440,7 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         conn,
         "tool_call_logs",
         {
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
             "failure_stage": "TEXT",
             "failure_owner": "TEXT",
             "error_type": "TEXT",
@@ -331,6 +449,34 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
             "request_summary_json": "TEXT NOT NULL DEFAULT '{}'",
             "response_summary_json": "TEXT NOT NULL DEFAULT '{}'",
         },
+    )
+    store._ensure_columns(
+        conn,
+        "agent_runs",
+        {
+            "actor": "TEXT NOT NULL DEFAULT ''",
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    conn.execute(
+        """
+        UPDATE tool_call_logs
+        SET owner_group_key = COALESCE(
+          (SELECT membership.group_key
+           FROM user_group_memberships membership
+           WHERE membership.user_id = tool_call_logs.actor),
+          ''
+        )
+        WHERE owner_group_key = ''
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_owner_group "
+        "ON tool_call_logs(owner_group_key, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_owner_group "
+        "ON agent_runs(owner_group_key, created_at DESC)"
     )
     store._ensure_columns(
         conn,
