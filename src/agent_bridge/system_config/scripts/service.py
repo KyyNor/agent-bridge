@@ -14,6 +14,8 @@ from uuid import uuid4
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from agent_bridge.access_control.resources import ScopedResourceType
+from agent_bridge.access_control.service import AccessControlService, ResourceScope
 from agent_bridge.automation.workflows.validation import WORKFLOW_VALIDATION_INPUT_SCHEMA
 from agent_bridge.core.config import AgentBridgePaths, load_server_config
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
@@ -52,10 +54,18 @@ class BuiltInScriptDefinition:
 
 
 class ScriptService:
-    def __init__(self, *, paths: AgentBridgePaths, store: SQLiteStore, admins: set[str]) -> None:
+    def __init__(
+        self,
+        *,
+        paths: AgentBridgePaths,
+        store: SQLiteStore,
+        admins: set[str],
+        access: AccessControlService | None = None,
+    ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
+        self.access = access
         self.base_run_dir = paths.run_dir / "scripts"
         defaults = Path(__file__).parent / "defaults"
         self._builtins = {
@@ -88,15 +98,17 @@ class ScriptService:
         }
 
     def list_scripts(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        scripts = {script["script_key"]: self._with_script_source(script) for script in self.store.scripts.list_scripts()}
+        scripts = {
+            script["script_key"]: self._with_script_source(script)
+            for script in self.store.scripts.list_scripts()
+            if self._can_read_script(actor, script)
+        }
         for script_key, definition in self._builtins.items():
             scripts.setdefault(script_key, self._default_script(definition))
         return [self._script_payload(scripts[key], include_code=False) for key in sorted(scripts)]
 
     def get_script(self, actor: str, script_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        return self._script_payload(self._require_script(script_key), include_code=True)
+        return self._script_payload(self._require_script_read(actor, script_key), include_code=True)
 
     def upsert_script(
         self,
@@ -114,14 +126,36 @@ class ScriptService:
         output_schema: dict[str, Any] | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
         builtin = self._builtins.get(normalized_key)
+        existing = self.store.scripts.get_script(normalized_key)
+        if builtin is not None:
+            require_admin_user(actor, self.admins)
+            owner_group_key = str((existing or {}).get("owner_group_key") or "")
+        elif existing is not None:
+            self._require_script_write(actor, normalized_key)
+            owner_group_key = str(existing.get("owner_group_key") or "")
+        elif self.access is not None:
+            owner_group_key = self.access.new_resource_scope(
+                actor=actor,
+                visibility="group",
+                resource_type=ScopedResourceType.user_script,
+            ).owner_group_key
+        else:
+            require_admin_user(actor, self.admins)
+            owner_group_key = ""
         normalized_language = language.strip().lower()
         if normalized_language != "python":
             raise ValidationError("only python scripts are supported")
         normalized_status = self._validate_status(status)
         normalized_owner_type, normalized_owner_key = self._validate_owner(owner_type, owner_key)
+        owner_group_key = self._validate_owner_access(
+            actor,
+            normalized_owner_type,
+            normalized_owner_key,
+            owner_group_key,
+            adopt_owner_group=existing is None and builtin is None,
+        )
         if builtin is not None:
             if normalized_status != "active":
                 raise ValidationError("cannot disable built-in script")
@@ -178,6 +212,7 @@ class ScriptService:
                 owner_key=normalized_owner_key,
                 content_hash=new_content_hash,
                 actor=actor,
+                owner_group_key=owner_group_key,
             )
             # Archive a revision whenever execution semantics changed (or on
             # the first save, including an upgraded legacy database).
@@ -195,10 +230,10 @@ class ScriptService:
         return self._script_payload(script, include_code=True)
 
     def delete_script(self, actor: str, script_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
         if normalized_key in self._builtins:
             raise ValidationError("cannot delete built-in script")
+        self._require_script_write(actor, normalized_key)
         if self.store.scripts.has_script_runs(normalized_key):
             raise ValidationError("脚本已有运行历史，请改为 disabled，不能删除")
         deleted = self.store.scripts.delete_script(normalized_key)
@@ -256,7 +291,7 @@ class ScriptService:
         profile_key: str | None = None,
         workflow_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_script_read(actor, script_key)
         return self.run_script(
             actor=actor,
             script_key=script_key,
@@ -280,7 +315,7 @@ class ScriptService:
     ) -> dict[str, Any]:
         if run_type not in RUN_TYPES:
             raise ValidationError("invalid script run type")
-        script = self._require_script(self._validate_script_key(script_key))
+        script = self._require_script_read(actor, self._validate_script_key(script_key))
         if script["status"] != "active":
             raise ValidationError("script is disabled")
         if script["language"] != "python":
@@ -366,6 +401,7 @@ class ScriptService:
             error_message=error_message,
             duration_ms=process.duration_ms,
             actor=actor,
+            owner_group_key=self._run_owner_group(actor, script),
         )
         payload = self._run_payload(run, include_logs=True)
         if status != "success":
@@ -373,24 +409,41 @@ class ScriptService:
         return payload
 
     def list_runs(self, actor: str, script_key: str, *, limit: int = 20) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        self._require_script(script_key)
+        self._require_script_read(actor, script_key)
         bounded = min(max(limit, 1), 50)
-        return {"runs": [self._run_payload(run, include_logs=False) for run in self.store.scripts.list_script_runs(script_key, limit=bounded)]}
+        enforce_scope = self.access is not None and actor not in self.admins
+        viewer_group_key = (
+            self.access.actor_group_key(actor, required=True)
+            if enforce_scope and self.access is not None
+            else None
+        )
+        return {
+            "runs": [
+                self._run_payload(run, include_logs=False)
+                for run in self.store.scripts.list_script_runs(
+                    script_key,
+                    limit=bounded,
+                    viewer_group_key=viewer_group_key,
+                    enforce_scope=enforce_scope,
+                )
+            ]
+        }
 
     def get_run(self, actor: str, run_id: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         run = self.store.scripts.get_script_run(run_id)
         if run is None:
             raise NotFound("script run not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(run))
         return self._run_payload(run, include_logs=True)
 
     # --- versioning & diff -----------------------------------------------
 
     def list_revisions(self, actor: str, script_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
-        self._require_script(normalized_key)
+        self._require_script_read(actor, normalized_key)
         revisions = self.store.scripts.list_revisions(normalized_key, limit=limit)
         current = self.store.scripts.get_current_revision_no(normalized_key)
         for rev in revisions:
@@ -398,8 +451,8 @@ class ScriptService:
         return revisions
 
     def get_revision(self, actor: str, script_key: str, revision_no: int) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
+        self._require_script_read(actor, normalized_key)
         revision = self.store.scripts.get_revision(normalized_key, revision_no)
         if revision is None:
             raise NotFound("script revision not found")
@@ -410,8 +463,8 @@ class ScriptService:
     def diff_revisions(
         self, actor: str, script_key: str, *, from_no: int | None, to_no: int | None
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         normalized_key = self._validate_script_key(script_key)
+        self._require_script_read(actor, normalized_key)
         current = self.store.scripts.get_current_revision_no(normalized_key)
         if current == 0:
             raise NotFound("script has no revisions")
@@ -439,7 +492,6 @@ class ScriptService:
         }
 
     def validate_code(self, actor: str, code: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         return check_python_syntax(code)
 
     def _run_python(
@@ -496,6 +548,41 @@ class ScriptService:
             raise NotFound("script not found")
         return self._default_script(definition)
 
+    def _require_script_read(self, actor: str, script_key: str) -> dict[str, Any]:
+        script = self._require_script(script_key)
+        if str(script.get("script_key") or "") in self._builtins:
+            return script
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(script))
+        return script
+
+    def _require_script_write(self, actor: str, script_key: str) -> dict[str, Any]:
+        script = self._require_script(script_key)
+        if str(script.get("script_key") or "") in self._builtins:
+            require_admin_user(actor, self.admins)
+        elif self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_write(actor=actor, scope=ResourceScope.from_record(script))
+        return script
+
+    def _can_read_script(self, actor: str, script: dict[str, Any]) -> bool:
+        if str(script.get("script_key") or "") in self._builtins:
+            return True
+        if self.access is None:
+            return actor in self.admins
+        return self.access.can_read(actor=actor, scope=ResourceScope.from_record(script))
+
+    def _run_owner_group(self, actor: str, script: dict[str, Any]) -> str:
+        owner_group_key = str(script.get("owner_group_key") or "")
+        if owner_group_key:
+            return owner_group_key
+        if self.access is None:
+            return ""
+        return str(self.access.actor_group_key(actor, required=True))
+
     def _with_script_source(self, script: dict[str, Any]) -> dict[str, Any]:
         payload = dict(script)
         definition = self._builtins.get(str(payload.get("script_key") or ""))
@@ -525,6 +612,7 @@ class ScriptService:
             owner_key=default["owner_key"],
             content_hash=default["content_hash"],
             actor=DEFAULT_SCRIPT_ACTOR,
+            owner_group_key="",
         )
         return self._with_script_source(stored)
 
@@ -569,6 +657,8 @@ class ScriptService:
             "updated_by": None,
             "created_at": None,
             "updated_at": None,
+            "owner_group_key": "",
+            "visibility": "group",
         }
 
     def _validate_script_key(self, script_key: str) -> str:
@@ -601,6 +691,34 @@ class ScriptService:
             # Keep this binding lightweight until skill package management lands.
             return normalized_type, normalized_key
         return normalized_type, normalized_key
+
+    def _validate_owner_access(
+        self,
+        actor: str,
+        owner_type: str,
+        owner_key: str,
+        script_group_key: str,
+        *,
+        adopt_owner_group: bool,
+    ) -> str:
+        if self.access is None or owner_type not in {"workflow", "profile"}:
+            return script_group_key
+        resource_type = (
+            ScopedResourceType.workflow_definition
+            if owner_type == "workflow"
+            else ScopedResourceType.capability_profile
+        )
+        owner = self.access.require_resource_read(
+            actor=actor,
+            resource_type=resource_type,
+            resource_key=owner_key,
+        )
+        owner_group_key = str(owner.get("owner_group_key") or "")
+        if owner_group_key and owner_group_key != script_group_key and actor not in self.admins:
+            raise ValidationError("脚本只能绑定同一数据组的资源")
+        if adopt_owner_group and owner_group_key:
+            return owner_group_key
+        return script_group_key
 
     def _timeout(self, timeout_seconds: int | None) -> int:
         if timeout_seconds is None:

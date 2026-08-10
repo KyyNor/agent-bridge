@@ -351,3 +351,79 @@ def test_workflow_definition_is_group_only_and_artifact_can_be_shared(wm_paths) 
         headers=bob,
         json={"visibility": "group"},
     ).status_code == 403
+
+
+def test_user_scripts_and_their_runs_are_group_scoped(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    carol = {"X-Agent-Bridge-User": "carol"}
+    payload = {
+        "script_key": "team-a.echo",
+        "name": "A 组脚本",
+        "description": "",
+        "language": "python",
+        "code": "def main(envelope):\n    return {'ok': True}\n",
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "status": "active",
+        "owner_type": "system",
+        "owner_key": "",
+    }
+
+    assert client.post("/scripts", headers=alice, json=payload).status_code == 200
+    assert "team-a.echo" in [item["script_key"] for item in client.get(
+        "/scripts", headers=carol
+    ).json()]
+    assert "team-a.echo" not in [item["script_key"] for item in client.get(
+        "/scripts", headers=bob
+    ).json()]
+    assert client.get("/scripts/team-a.echo", headers=bob).status_code == 403
+    assert client.post(
+        "/scripts/team-a.echo/test", headers=bob, json={"params": {}}
+    ).status_code == 403
+
+    executed = client.post(
+        "/scripts/team-a.echo/test", headers=alice, json={"params": {}}
+    )
+    assert executed.status_code == 200
+    run_id = executed.json()["run_id"]
+    assert client.get(f"/script-runs/{run_id}", headers=carol).status_code == 200
+    assert client.get(f"/script-runs/{run_id}", headers=bob).status_code == 403
+
+
+def test_model_evaluation_runs_are_group_scoped(wm_paths) -> None:
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    service = app.state.agent_bridge_service
+
+    for run_id, owner_group_key, created_by in (
+        ("eval_team_a", "team-a", "alice"),
+        ("eval_team_b", "team-b", "bob"),
+    ):
+        service.store.create_model_evaluation_run(
+            run_id=run_id,
+            model_name="internal-model",
+            base_url="https://llm.example.test/v1",
+            datasets=["gsm8k_chat_gen"],
+            max_samples=10,
+            sampling_mode="head",
+            sample_seed=42,
+            work_dir=f"/tmp/{run_id}",
+            created_by=created_by,
+            runtime="docker",
+            owner_group_key=owner_group_key,
+        )
+
+    assert client.get("/model-evaluations/datasets", headers=alice).status_code == 200
+    assert [item["run_id"] for item in client.get(
+        "/model-evaluations", headers=alice
+    ).json()] == ["eval_team_a"]
+    assert [item["run_id"] for item in client.get(
+        "/model-evaluations", headers=bob
+    ).json()] == ["eval_team_b"]
+    assert client.get("/model-evaluations/eval_team_a", headers=alice).status_code == 200
+    assert client.get("/model-evaluations/eval_team_a", headers=bob).status_code == 403

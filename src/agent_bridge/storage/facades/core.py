@@ -14,8 +14,8 @@ class CoreFacadeMixin:
     def get_model_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
         return self.model_evaluations.get_run(run_id)
 
-    def list_model_evaluation_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        return self.model_evaluations.list_runs(limit=limit)
+    def list_model_evaluation_runs(self, *, limit: int = 50, **kwargs: Any) -> list[dict[str, Any]]:
+        return self.model_evaluations.list_runs(limit=limit, **kwargs)
 
     def update_model_evaluation_run(self, run_id: str, **kwargs: Any) -> dict[str, Any] | None:
         return self.model_evaluations.update_run(run_id, **kwargs)

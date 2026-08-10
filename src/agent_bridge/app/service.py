@@ -269,8 +269,13 @@ class AgentBridgeService:
         self.understand_scheduler = UnderstandingScheduler(service=self.codegraph, store=store, admins=admins)
         self.doc_sync_scheduler = DocSyncScheduler(service=self, store=store, admins=admins)
         self.skills = SkillService(store=store, admins=admins)
-        self.scripts = ScriptService(paths=paths, store=store, admins=admins)
-        self.model_evaluations = ModelEvaluationService(paths=paths, store=store, admins=admins)
+        self.scripts = ScriptService(paths=paths, store=store, admins=admins, access=self.access)
+        self.model_evaluations = ModelEvaluationService(
+            paths=paths,
+            store=store,
+            admins=admins,
+            access=self.access,
+        )
         self.workflows = WorkflowService(
             store=store,
             admins=admins,
