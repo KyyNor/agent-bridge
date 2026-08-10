@@ -77,7 +77,7 @@ def test_delete_mcp_service_requires_admin(wm_paths: AgentBridgePaths) -> None:
 
 def test_delete_mcp_service_missing_raises_not_found(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
-    with pytest.raises(NotFound, match="service not found"):
+    with pytest.raises(NotFound, match="资源不存在"):
         service.delete_mcp_service("root", "missing")
 
 
@@ -168,5 +168,5 @@ def test_delete_openapi_service_requires_admin(wm_paths: AgentBridgePaths) -> No
 
 def test_delete_openapi_service_missing_raises_not_found(wm_paths: AgentBridgePaths) -> None:
     service = _service(wm_paths)
-    with pytest.raises(NotFound, match="service not found"):
+    with pytest.raises(NotFound, match="资源不存在"):
         service.delete_openapi_service("root", "missing")

@@ -1373,7 +1373,7 @@ def test_ask_persists_chat_id(wm_paths, tmp_path: Path, monkeypatch) -> None:
 
 def test_ask_requires_capability_profile_for_non_admin(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
-    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "", visibility="shared")
 
     from agent_bridge.core.domain import AskResult
     mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
