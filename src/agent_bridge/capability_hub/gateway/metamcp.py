@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.streamable_http import StreamableHTTPServerTransport
 from pydantic import Field
 
+from agent_bridge.access_control.identity import RequestIdentityResolver
 from agent_bridge.core.config import default_user
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.capability_hub.gateway.top_level_tools import top_level_mcp_tools
@@ -24,6 +25,12 @@ logger = logging.getLogger("agent_bridge.mcp")
 
 _request_profile: ContextVar[str | None] = ContextVar("_request_profile", default=None)
 _request_workflow_context: ContextVar[dict[str, Any] | None] = ContextVar("_request_workflow_context", default=None)
+_request_actor: ContextVar[str | None] = ContextVar("_request_actor", default=None)
+
+
+def _active_actor() -> str:
+    """返回当前 MCP 请求身份；直接构造 server 的兼容场景沿用进程默认用户。"""
+    return _request_actor.get() or default_user()
 
 
 def _is_top_level_mcp_tool_enabled(bridge_service: Any, tool_name: str) -> bool:
@@ -149,7 +156,7 @@ def create_mcp_server(
         started = time.monotonic()
         try:
             result = service.capabilities.search(
-                actor=default_user(),
+                actor=_active_actor(),
                 path=path,
                 query=query,
                 limit=limit,
@@ -175,7 +182,7 @@ def create_mcp_server(
         started = time.monotonic()
         try:
             result = await bridge_service.capabilities.execute(
-                actor=default_user(),
+                actor=_active_actor(),
                 service=service,
                 tool_name=tool_name,
                 params=params or {},
@@ -202,7 +209,7 @@ def create_mcp_server(
     ) -> dict[str, Any]:
         active_profile = _request_profile.get() or profile_key
         result = bridge_service.capabilities.invoke_logged_tool(
-            actor=default_user(),
+            actor=_active_actor(),
             profile_key=active_profile,
             entrypoint="metamcp_search",
             source_type="builtin",
@@ -215,7 +222,7 @@ def create_mcp_server(
             },
             handler=lambda: _search_artifacts_if_enabled(
                 bridge_service,
-                actor=default_user(),
+                actor=_active_actor(),
                 profile_key=active_profile,
                 query=query,
                 path=path,
@@ -256,7 +263,7 @@ def create_mcp_server(
             workflow_key = str(current.get("workflow_key") or "")
             run_id = str(current.get("run_id") or "")
             return bridge_service.capabilities.invoke_logged_tool(
-                actor=default_user(),
+                actor=_active_actor(),
                 profile_key=active_profile,
                 entrypoint="metamcp_execute",
                 source_type="builtin",
@@ -279,7 +286,7 @@ def create_mcp_server(
             workflow_key = str(current.get("workflow_key") or "")
             run_id = str(current.get("run_id") or "")
             return bridge_service.capabilities.invoke_logged_tool(
-                actor=default_user(),
+                actor=_active_actor(),
                 profile_key=active_profile,
                 entrypoint="metamcp_execute",
                 source_type="builtin",
@@ -306,7 +313,7 @@ def create_mcp_server(
             workflow_key = str(current.get("workflow_key") or "")
             run_id = str(current.get("run_id") or "")
             return bridge_service.capabilities.invoke_logged_tool(
-                actor=default_user(),
+                actor=_active_actor(),
                 profile_key=active_profile,
                 entrypoint="metamcp_execute",
                 source_type="builtin",
@@ -353,7 +360,7 @@ def create_mcp_server(
                 continue
             builtin_tools = {
                 tool.tool: tool
-                for tool in provider.list_tools(default_user(), profile_key)
+                for tool in provider.list_tools(_active_actor(), profile_key)
             }
             builtin_tool = builtin_tools.get(direct_spec.tool_name)
             if builtin_tool is None:
@@ -371,7 +378,7 @@ def create_mcp_server(
                 active_profile = _request_profile.get() or profile_key
                 current_workflow_context = _request_workflow_context.get() or active_workflow_context
                 return await service.capabilities.execute(
-                    actor=default_user(),
+                    actor=_active_actor(),
                     service=_spec.service_key,
                     tool_name=_spec.tool_name,
                     params=kwargs,
@@ -394,7 +401,7 @@ def create_mcp_server(
         if profile_key is None or not hasattr(service.capabilities, "pinned_tool_specs"):
             return
         registered_names = {"search", "execute", "artifacts_search"}
-        for spec in service.capabilities.pinned_tool_specs(default_user(), profile_key):
+        for spec in service.capabilities.pinned_tool_specs(_active_actor(), profile_key):
             name = spec["generated_tool_name"]
             if name in registered_names:
                 continue
@@ -411,7 +418,7 @@ def create_mcp_server(
             async def pinned_tool(_spec: dict[str, Any] = spec, **kwargs: Any) -> dict[str, Any]:
                 active_profile = _request_profile.get() or profile_key
                 return await service.capabilities.execute(
-                    actor=default_user(),
+                    actor=_active_actor(),
                     service=_spec["service_key"],
                     tool_name=_spec["tool_name"],
                     params=kwargs,
@@ -512,12 +519,17 @@ def _append_workflow_run_log_if_enabled(
     return _append_workflow_run_log(**kwargs)
 
 
-def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
+def setup_mcp_route(
+    app: Any,
+    service: AgentBridgeService,
+    identity_resolver: RequestIdentityResolver,
+) -> None:
     """Register MCP streamable HTTP endpoint on a FastAPI app."""
     router = APIRouter()
 
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
+        actor = identity_resolver.resolve(request).user_id
         profile = request.headers.get("x-agent-bridge-metamcp-profile")
         workflow_header = request.headers.get("x-agent-bridge-workflow")
         workflow_key = request.headers.get("x-agent-bridge-workflow-key")
@@ -527,11 +539,18 @@ def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
             if workflow_header == "true" and workflow_key and workflow_run_id
             else None
         )
-        logger.info("MCP 请求 method=%s profile=%s workflow=%s", request.method, profile, bool(workflow_context))
-        mcp = create_mcp_server(service, profile_key=profile, workflow_context=workflow_context)
+        logger.info(
+            "MCP 请求 method=%s actor=%s profile=%s workflow=%s",
+            request.method,
+            actor,
+            profile,
+            bool(workflow_context),
+        )
+        actor_token = _request_actor.set(actor)
         token = _request_profile.set(profile)
         workflow_token = _request_workflow_context.set(workflow_context)
         try:
+            mcp = create_mcp_server(service, profile_key=profile, workflow_context=workflow_context)
             response = await _dispatch_mcp(mcp, request)
             logger.info("MCP 响应 status=%d profile=%s", response.status_code, profile)
             return response
@@ -541,6 +560,7 @@ def setup_mcp_route(app: Any, service: AgentBridgeService) -> None:
         finally:
             _request_workflow_context.reset(workflow_token)
             _request_profile.reset(token)
+            _request_actor.reset(actor_token)
 
     app.include_router(router)
 

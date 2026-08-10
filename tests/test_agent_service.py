@@ -55,6 +55,15 @@ def test_build_server_config_profile_only_has_profile_header() -> None:
     assert config["mcpServers"]["agent-bridge"]["timeout"] == 300_000
 
 
+def test_build_server_config_includes_actor_header() -> None:
+    config = build_agent_bridge_server_config("http://x/mcp", "abc", actor="alice")
+
+    assert config["mcpServers"]["agent-bridge"]["headers"] == {
+        "X-Agent-Bridge-MetaMCP-Profile": "abc",
+        "X-Agent-Bridge-User": "alice",
+    }
+
+
 def test_build_server_config_workflow_requires_both_key_and_run_id() -> None:
     full = build_agent_bridge_server_config(
         "http://x/mcp", "abc", workflow_key="wf", run_id="run_1"

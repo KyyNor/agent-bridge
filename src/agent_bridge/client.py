@@ -8,9 +8,6 @@ from typing import Any
 
 import httpx
 
-from agent_bridge.core.config import default_user
-
-
 class AgentBridgeClient:
     def __init__(self, base_url: str, linux_user: str) -> None:
         self.base_url = base_url.rstrip("/")
@@ -18,7 +15,7 @@ class AgentBridgeClient:
 
     @classmethod
     def from_config(cls) -> "AgentBridgeClient":
-        return cls(base_url="http://127.0.0.1:8765", linux_user=default_user(getpass.getuser()))
+        return cls(base_url="http://127.0.0.1:8765", linux_user=getpass.getuser())
 
     def _headers(self) -> dict[str, str]:
         return {"X-Agent-Bridge-User": self.linux_user}

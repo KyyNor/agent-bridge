@@ -83,6 +83,26 @@ class ServerConfig:
     default_backend: str | None = None
 
 
+def load_identity_config(paths: AgentBridgePaths):
+    """读取内部 SSO 与 CLI 身份入口配置。"""
+    from agent_bridge.access_control.identity import IdentityConfig
+
+    ensure_directories(paths)
+    if not paths.server_config_path.exists():
+        load_server_config(paths)
+    raw = tomllib.loads(paths.server_config_path.read_text(encoding="utf-8"))
+    identity = raw.get("identity", {})
+    return IdentityConfig(
+        sso_secret=str(identity.get("sso_secret", "")),
+        sso_algorithm=str(identity.get("sso_algorithm", "HS256")),
+        user_id_claim=str(identity.get("user_id_claim", "user_id")),
+        user_name_claim=str(identity.get("user_name_claim", "user_name")),
+        cookie_name=str(identity.get("cookie_name", "agent_bridge_sso")),
+        cookie_secure=bool(identity.get("cookie_secure", False)),
+        allow_cli_header=bool(identity.get("allow_cli_header", True)),
+    )
+
+
 @dataclass(frozen=True)
 class LoggingConfig:
     """日志配置（server.toml 的 ``[logging]`` 段），所有字段都有默认值。
@@ -183,6 +203,15 @@ def load_server_config(paths: AgentBridgePaths) -> ServerConfig:
             f"host = \"127.0.0.1\"\n"
             f"port = 8765\n"
             f"admins = [{json.dumps(admin)}]\n"
+            f"\n"
+            f"# [identity]  # 内部统一登录与 CLI 身份入口\n"
+            f"# sso_secret = \"\"                # SSO JWT 校验密钥；Web 登录启用时必填\n"
+            f"# sso_algorithm = \"HS256\"        # 与总账户系统签发算法一致\n"
+            f"# user_id_claim = \"user_id\"       # 稳定用户 ID 字段\n"
+            f"# user_name_claim = \"user_name\"   # 展示名称字段\n"
+            f"# cookie_name = \"agent_bridge_sso\"\n"
+            f"# cookie_secure = false             # HTTPS 部署时设为 true\n"
+            f"# allow_cli_header = true           # 允许内部 CLI 传 Linux 用户名\n"
             f"\n"
             f"# [logging]  # 日志配置（取消注释并按需修改；改后需重启服务生效）\n"
             f"# level = \"INFO\"                   # DEBUG/INFO/WARNING/ERROR\n"

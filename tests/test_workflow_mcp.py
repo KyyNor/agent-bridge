@@ -298,11 +298,12 @@ def test_artifacts_search_logs_failure(wm_paths):
 
 
 def test_mcp_route_exposes_workflow_tools_only_with_complete_workflow_headers(wm_paths):
+    from agent_bridge.access_control.identity import IdentityConfig, RequestIdentityResolver
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
 
     svc = _create_service_with_workflow(wm_paths)
     app = FastAPI()
-    setup_mcp_route(app, svc)
+    setup_mcp_route(app, svc, RequestIdentityResolver(IdentityConfig()))
     client = TestClient(app)
 
     def list_tools(headers: dict[str, str]) -> list[str]:
@@ -315,7 +316,10 @@ def test_mcp_route_exposes_workflow_tools_only_with_complete_workflow_headers(wm
         payload = response.json()
         return [tool["name"] for tool in payload["result"]["tools"]]
 
-    base_headers = {"X-Agent-Bridge-MetaMCP-Profile": "report-plane"}
+    base_headers = {
+        "X-Agent-Bridge-User": "root",
+        "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
+    }
     incomplete_names = list_tools({**base_headers, "X-Agent-Bridge-Workflow": "true"})
     complete_names = list_tools(
         {

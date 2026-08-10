@@ -8,12 +8,19 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
-from agent_bridge.core.config import AgentBridgePaths, default_user, load_logging_config, load_server_config
+from agent_bridge.access_control.identity import RequestIdentityResolver
+from agent_bridge.core.config import (
+    AgentBridgePaths,
+    default_user,
+    load_identity_config,
+    load_logging_config,
+    load_server_config,
+)
 from agent_bridge.core.logging import setup_logging
 from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
@@ -30,6 +37,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     setup_logging(resolved_paths, config=load_logging_config(resolved_paths))
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = AgentBridgeService.create(resolved_paths, resolved_admins)
+    identity_resolver = RequestIdentityResolver(load_identity_config(resolved_paths))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -112,8 +120,36 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     def root() -> RedirectResponse:
         return RedirectResponse(url="/admin/capabilities", status_code=307)
 
-    def actor(x_agent_bridge_user: str = Header(alias="X-Agent-Bridge-User")) -> str:
-        return x_agent_bridge_user
+    def identity(request: Request):
+        return identity_resolver.resolve(request)
+
+    def actor(current_identity=Depends(identity)) -> str:
+        return current_identity.user_id
+
+    @app.get("/auth/sso/callback")
+    def sso_callback(
+        token: str = Query(min_length=1),
+        next_path: str = Query(default="/admin/capabilities", alias="next"),
+    ) -> RedirectResponse:
+        identity_resolver.decode_sso_token(token)
+        if not next_path.startswith("/") or next_path.startswith("//"):
+            next_path = "/admin/capabilities"
+        response = RedirectResponse(url=next_path, status_code=303)
+        response.set_cookie(
+            identity_resolver.config.cookie_name,
+            token,
+            httponly=True,
+            secure=identity_resolver.config.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.post("/auth/logout")
+    def logout() -> RedirectResponse:
+        response = RedirectResponse(url="/admin/capabilities", status_code=303)
+        response.delete_cookie(identity_resolver.config.cookie_name, path="/")
+        return response
 
     @app.exception_handler(AgentBridgeError)
     async def _handle_agent_bridge_error(request: Request, exc: AgentBridgeError) -> JSONResponse:
@@ -238,7 +274,7 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
-    setup_mcp_route(app, service)
+    setup_mcp_route(app, service, identity_resolver)
 
     @app.get("/admin/capabilities", response_class=HTMLResponse)
     def capability_admin() -> HTMLResponse:

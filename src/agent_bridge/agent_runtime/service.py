@@ -239,7 +239,11 @@ class AgentService:
                     )
                     install_profile_to_cwd(work_dir, profile, rendered["markdown"])
                 mcp_config = build_agent_bridge_server_config(
-                    self.mcp_url, profile, workflow_key=workflow_key, run_id=run_id
+                    self.mcp_url,
+                    profile,
+                    actor=actor or self._default_actor(),
+                    workflow_key=workflow_key,
+                    run_id=run_id,
                 )
                 write_run_mcp_json(work_dir / ".mcp.json", mcp_config)
                 effective_setting_sources = setting_sources or (

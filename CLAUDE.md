@@ -29,8 +29,9 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 ## 部署与信任模型
 
 - 默认数据根目录为 `/root/agent-bridge`，环境变量 `AGENT_BRIDGE_ROOT` 可覆盖。
-- 当前按内部可信 VM 设计。身份来自 `X-Agent-Bridge-User`，`server.toml` 的 `admins` 决定管理员。
+- 当前按内部可信 VM 设计。Web 身份来自总账户系统 JWT 换取的 HttpOnly Cookie；CLI、MCP 与 Agent 运行身份来自当前 Linux 用户名对应的 `X-Agent-Bridge-User`。两条入口统一解析为稳定用户 ID，`server.toml` 的 `admins` 仅作为维护旁路。
 - 本阶段不增加互联网级认证；部署方负责监听地址、内网访问和反向代理边界。
+- 浏览器前端不得读取、缓存或拼接身份 Header；未识别调用者的后端请求必须明确返回 401。
 - `server_runtime/` 只负责 uvicorn 服务进程；`agent_runtime/` 负责 Coding Agent 执行，不要混用。
 
 ## 应用与存储

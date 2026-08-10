@@ -173,6 +173,13 @@ CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或�
 
 服务配置位于 `config/server.toml`，数据库和运行数据位于 `data/`。主业务库为 `data/agent-bridge.db`，高频工具调用与 Agent 运行审计独立保存到 `data/agent-bridge-logs.db`；升级时会安全复制历史 `wiki.db` 到新的主库文件名。日志默认写入 `logs/agent-bridge.log`。
 
+Web 入口使用内部总账户系统签发的短期 JWT：浏览器访问
+`/auth/sso/callback?token=<JWT>&next=/` 后，后端校验 `server.toml` 的
+`[identity]` 配置并写入 HttpOnly Cookie。前端不读取用户身份，也不自行添加鉴权 Header。
+Agent Bridge CLI 和由 CLI 启动的 MCP/Agent 调用使用当前 Linux 用户名，通过内网可信的
+`X-Agent-Bridge-User` Header 传给后端；该 Header 入口可用
+`identity.allow_cli_header = false` 关闭。无 Cookie 且无受信 Header 的请求返回 401。
+
 业务台账保存于 `data/agent-bridge-ledgers.db`。每个台账最多 100 个字段、200,000 行记录；服务启动后异步构建内存快照，管理读写和后续的受控查询均使用同一份完整快照。
 
 业务台账的 Excel 导入窗口可下载当前字段定义生成的空白 `.xlsx` 模板；模板只包含字段标识表头，不会携带台账中的已有数据。

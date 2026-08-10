@@ -17,6 +17,7 @@ def build_agent_bridge_server_config(
     url: str,
     profile: str | None = None,
     *,
+    actor: str | None = None,
     workflow_key: str | None = None,
     run_id: str | None = None,
 ) -> dict[str, Any]:
@@ -31,6 +32,8 @@ def build_agent_bridge_server_config(
     if not profile:
         return {"mcpServers": {}}
     headers: dict[str, str] = {"X-Agent-Bridge-MetaMCP-Profile": profile}
+    if actor:
+        headers["X-Agent-Bridge-User"] = actor
     if workflow_key and run_id:
         headers["X-Agent-Bridge-Workflow"] = "true"
         headers["X-Agent-Bridge-Workflow-Key"] = workflow_key
