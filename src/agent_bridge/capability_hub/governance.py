@@ -865,6 +865,9 @@ class CapabilityGovernanceService:
             resource_type=resource_type,
             resource_key=resource_key,
             duration_ms=duration_ms,
+            owner_group_key=(
+                str(self.access.actor_group_key(actor) or "") if self.access is not None else ""
+            ),
         )
 
     def list_logs(
@@ -889,7 +892,14 @@ class CapabilityGovernanceService:
         search: str | None = None,
         paginated: bool = False,
     ) -> list[dict[str, Any]] | dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        enforce_scope = self.access is not None and actor not in self.admins
+        viewer_group_key = (
+            self.access.actor_group_key(actor, required=True)
+            if enforce_scope and self.access is not None
+            else None
+        )
         normalized_source_type = self._optional_enum(source_type, SourceType, "source type")
         normalized_status = self._optional_enum(status, CallLogStatus, "call log status")
         normalized_failure_stage = self._optional_enum(failure_stage, FailureStage, "failure stage")
@@ -911,6 +921,8 @@ class CapabilityGovernanceService:
             limit=limit,
             offset=offset,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
         if paginated:
             return self.store.governance.list_tool_call_logs_page(**kwargs)
@@ -920,10 +932,13 @@ class CapabilityGovernanceService:
         return self.store.list_tool_call_logs(**kwargs)
 
     def get_log(self, *, actor: str, log_id: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         log = self.store.get_tool_call_log(log_id)
         if log is None:
             raise NotFound("tool call log not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(log))
         return log
 
     def stats(
@@ -935,13 +950,22 @@ class CapabilityGovernanceService:
         created_to: str | None = None,
         bucket: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        enforce_scope = self.access is not None and actor not in self.admins
+        viewer_group_key = (
+            self.access.actor_group_key(actor, required=True)
+            if enforce_scope and self.access is not None
+            else None
+        )
         try:
             items = self.store.aggregate_tool_call_stats(
                 dimensions=dimensions,
                 created_from=created_from,
                 created_to=created_to,
                 bucket=bucket,
+                viewer_group_key=viewer_group_key,
+                enforce_scope=enforce_scope,
             )
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc

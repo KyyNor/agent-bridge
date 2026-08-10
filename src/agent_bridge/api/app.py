@@ -103,14 +103,27 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
     app.state.agent_bridge_service = service
+
+    def require_dashboard_repository(scope, repo_key: str) -> None:
+        request = Request(scope)
+        current_actor = identity_resolver.resolve(request).user_id
+        service.codegraph.get_repository(current_actor, repo_key)
+
+    def require_memory_dashboard(scope, block_key: str) -> None:
+        request = Request(scope)
+        current_actor = identity_resolver.resolve(request).user_id
+        service.memory.get_block(current_actor, block_key)
+
     app.add_middleware(
         DashboardProxyMiddleware,
         target_resolver=service.codegraph.dashboard_proxy_target,
         token_resolver=service.codegraph.dashboard_repo_by_token,
+        access_checker=require_dashboard_repository,
     )
     app.add_middleware(
         MemoryDashboardProxyMiddleware,
         target_resolver=service.memory.dashboard_proxy_target,
+        access_checker=require_memory_dashboard,
     )
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir, check_dir=False), name="capabilities-static")

@@ -192,6 +192,12 @@ class AgentService:
         caller_run_key = run_key
         run_key = run_key or new_run_id(agent_name or "agent")
         workflow_run_id = run_id if workflow_key else None
+        effective_actor = actor or self._default_actor()
+        owner_group_key = self._resolve_run_owner_group(
+            actor=effective_actor,
+            profile_key=profile,
+            workflow_run_id=workflow_run_id,
+        )
         if caller_run_key is not None:
             with self._client_run_key_lock:
                 if self.control_registry.is_active(run_key):
@@ -213,6 +219,8 @@ class AgentService:
                 prompt=prompt,
                 output_schema=output_schema,
                 started_at=started_iso,
+                actor=effective_actor,
+                owner_group_key=owner_group_key,
             )
         except sqlite3.IntegrityError as exc:
             self.control_registry.finish(run_key)
@@ -632,6 +640,26 @@ class AgentService:
         for admin in sorted(self.admins):
             return admin
         return "root"
+
+    def _resolve_run_owner_group(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        workflow_run_id: str | None,
+    ) -> str:
+        access = getattr(self.governance, "access", None)
+        if access is None:
+            return ""
+        if workflow_run_id:
+            workflow_run = self.store.get_workflow_run(workflow_run_id)
+            if workflow_run and workflow_run.get("owner_group_key"):
+                return str(workflow_run["owner_group_key"])
+        if profile_key:
+            profile = self.store.get_project_profile(profile_key)
+            if profile and profile.get("owner_group_key"):
+                return str(profile["owner_group_key"])
+        return str(access.actor_group_key(actor, required=True))
 
 
 async def _wait_for_thread_event(stop_requested: Any) -> None:

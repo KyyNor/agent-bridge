@@ -122,6 +122,7 @@ def test_capability_and_code_repository_lists_intersect_with_group_access(wm_pat
         "/code-repo/repositories", headers=bob
     ).json()] == ["shared-code"]
     assert client.get("/code-repo/repositories/team-code", headers=bob).status_code == 403
+    assert client.get("/dashboard/team-code/", headers=bob).status_code == 403
     assert client.post(
         "/code-repo/repositories",
         headers=bob,
@@ -279,6 +280,7 @@ def test_profiles_ledgers_and_memory_follow_group_scope(wm_paths) -> None:
     ]
     assert client.get("/memory/blocks", headers=bob).json() == []
     assert client.get("/memory/blocks/team-a-memory", headers=bob).status_code == 403
+    assert client.get("/memory-dashboard/team-a-memory/", headers=bob).status_code == 403
 
 
 def test_workflow_definition_is_group_only_and_artifact_can_be_shared(wm_paths) -> None:
@@ -427,3 +429,78 @@ def test_model_evaluation_runs_are_group_scoped(wm_paths) -> None:
     ).json()] == ["eval_team_b"]
     assert client.get("/model-evaluations/eval_team_a", headers=alice).status_code == 200
     assert client.get("/model-evaluations/eval_team_a", headers=bob).status_code == 403
+
+
+def test_tool_logs_and_agent_runs_are_group_scoped(wm_paths) -> None:
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    service = app.state.agent_bridge_service
+
+    alice_log = service.governance.log_tool_call(
+        actor="alice",
+        profile_key=None,
+        entrypoint="cli",
+        source_type=None,
+        source_key=None,
+        tool_name="team_a_tool",
+        request={},
+        response={"ok": True},
+        status="success",
+        error_message=None,
+        duration_ms=1,
+    )
+    service.governance.log_tool_call(
+        actor="bob",
+        profile_key=None,
+        entrypoint="cli",
+        source_type=None,
+        source_key=None,
+        tool_name="team_b_tool",
+        request={},
+        response={"ok": True},
+        status="success",
+        error_message=None,
+        duration_ms=1,
+    )
+
+    assert [item["tool_name"] for item in client.get(
+        "/tool-call-logs", headers=alice
+    ).json()] == ["team_a_tool"]
+    assert [item["tool_name"] for item in client.get(
+        "/tool-call-logs", headers=bob
+    ).json()] == ["team_b_tool"]
+    assert client.get(f"/tool-call-logs/{alice_log['log_id']}", headers=alice).status_code == 200
+    assert client.get(f"/tool-call-logs/{alice_log['log_id']}", headers=bob).status_code == 403
+    assert client.get(
+        "/tool-call-stats?dimensions=tool_name", headers=alice
+    ).json()["items"][0]["tool_name"] == "team_a_tool"
+
+    service.store.agent_runs.create(
+        run_key="agent_team_a",
+        agent_name="analysis",
+        status="completed",
+        ok=True,
+        prompt="A 组任务",
+        actor="alice",
+        owner_group_key="team-a",
+    )
+    service.store.agent_runs.create(
+        run_key="agent_team_b",
+        agent_name="analysis",
+        status="completed",
+        ok=True,
+        prompt="B 组任务",
+        actor="bob",
+        owner_group_key="team-b",
+    )
+    assert [item["run_key"] for item in client.get("/agent-runs", headers=alice).json()] == [
+        "agent_team_a"
+    ]
+    assert [item["run_key"] for item in client.get("/agent-runs", headers=bob).json()] == [
+        "agent_team_b"
+    ]
+    assert client.get("/agent-runs/agent_team_a", headers=alice).status_code == 200
+    assert client.get("/agent-runs/agent_team_a", headers=bob).status_code == 403

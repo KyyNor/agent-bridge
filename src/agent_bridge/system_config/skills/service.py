@@ -52,7 +52,6 @@ class SkillService:
         }
 
     def list_skills(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
         overrides = {item["skill_name"]: item for item in self.store.list_skill_prompt_overrides()}
         return [
             self._payload(definition, overrides.get(skill_name), include_prompt=False)
@@ -60,7 +59,6 @@ class SkillService:
         ]
 
     def get_skill(self, actor: str, skill_name: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         definition = self._definition(skill_name)
         override = self.store.get_skill_prompt_override(skill_name)
         return self._payload(definition, override, include_prompt=True)
