@@ -30,6 +30,7 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 - 默认数据根目录为 `/root/agent-bridge`，环境变量 `AGENT_BRIDGE_ROOT` 可覆盖。
 - 当前按内部可信 VM 设计。Web 身份来自总账户系统 JWT 换取的 HttpOnly Cookie；CLI、MCP 与 Agent 运行身份来自当前 Linux 用户名对应的 `X-Agent-Bridge-User`。两条入口统一解析为稳定用户 ID，`server.toml` 的 `admins` 仅作为维护旁路。
+- 浏览器允许通过全局管理员密码临时切换为 `server.toml admins` 中的维护身份，裸访问与已有 SSO 会话均可进入。首次提交原子初始化密码；只持久化 PBKDF2-SHA256 哈希与随机会话密钥，管理员 Cookie 为 HttpOnly、有效期 12 小时。改密必须验证当前密码并轮换会话密钥，使全部旧会话立即失效。该入口沿用内网信任边界，不扩展验证码、外部 IdP、功能 RBAC 或前端路由权限。
 - 本阶段不增加互联网级认证；部署方负责监听地址、内网访问和反向代理边界。
 - 浏览器前端不得读取、缓存或拼接身份 Header；未识别调用者的后端请求必须明确返回 401。
 - `server_runtime/` 只负责 uvicorn 服务进程；`agent_runtime/` 负责 Coding Agent 执行，不要混用。

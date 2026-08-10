@@ -122,3 +122,45 @@ def test_password_change_requires_admin_identity_and_current_password(wm_paths) 
 
     assert denied.status_code == 403
     assert wrong.status_code == 401
+
+
+def test_password_admin_uses_existing_cross_group_data_bypass(wm_paths) -> None:
+    app = create_app(wm_paths, admins={"root"})
+    setup = TestClient(app)
+    root = {"X-Agent-Bridge-User": "root"}
+    setup.post(
+        "/access/groups",
+        headers=root,
+        json={"group_key": "team-a", "name": "A 组"},
+    )
+    setup.post(
+        "/access/groups",
+        headers=root,
+        json={"group_key": "team-b", "name": "B 组"},
+    )
+    setup.put(
+        "/access/memberships",
+        headers=root,
+        json={"user_id": "alice", "group_key": "team-a"},
+    )
+    setup.put(
+        "/access/memberships",
+        headers=root,
+        json={"user_id": "bob", "group_key": "team-b"},
+    )
+    created = setup.post(
+        "/kbs",
+        headers={"X-Agent-Bridge-User": "alice"},
+        json={"slug": "private-a", "name": "A 组私有知识库", "visibility": "group"},
+    )
+    assert created.status_code == 200
+    assert setup.get(
+        "/kbs", headers={"X-Agent-Bridge-User": "bob"}
+    ).json() == []
+
+    password_admin = TestClient(app)
+    password_admin.post("/auth/admin/session", json={"password": PASSWORD})
+    visible = password_admin.get("/kbs")
+
+    assert visible.status_code == 200
+    assert [item["slug"] for item in visible.json()] == ["private-a"]

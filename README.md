@@ -180,6 +180,8 @@ Agent Bridge CLI 和由 CLI 启动的 MCP/Agent 调用使用当前 Linux 用户�
 `X-Agent-Bridge-User` Header 传给后端；该 Header 入口可用
 `identity.allow_cli_header = false` 关闭。无 Cookie 且无受信 Header 的请求返回 401。
 
+浏览器侧另提供全局管理员密码入口：无论当前是裸访问还是已经持有 SSO Cookie，都可以从页面左下角输入密码进入管理员模式。系统尚未设置密码时，第一次成功提交会直接完成初始化；密码只以 PBKDF2-SHA256 哈希保存到主业务库，浏览器获得有效期 12 小时的 HttpOnly 管理员 Cookie。管理员模式复用 `server.toml` 中的维护管理员身份，可跨组查看和维护全部数据，但不会改变资源已有的 `owner_group_key` 或 `visibility`。可通过 `GET /auth/admin/status`、`POST/DELETE /auth/admin/session` 管理提权会话；系统管理页通过 `PUT /auth/admin/password` 修改密码，改密会立即使所有旧管理员 Cookie 失效。首次设置属于内网部署初始化动作，不额外引入验证码、互联网限流或页面路由鉴权。
+
 系统在业务库维护“用户 ID → 单一小组”映射。普通用户只能修改本小组资源；同组用户可以互相读取和修改。共享白名单资源可标记为 `shared`，此时其他小组只能读取和使用，不能修改、删除或变更共享状态。管理员可通过 `/access/groups` 和 `/access/memberships` 接口维护映射，并保留跨组故障处理旁路。升级前已有数据尽量按创建者映射归组，无法确认归属的数据保持组内范围并仅允许维护管理员修复，不会自动扩大为共享。
 
 知识库、MCP/OpenAPI 服务、代码仓库、业务台账和工作流产物接受 `visibility=group|shared`，默认 `group`。工作流产物可在详情中逐项切换共享范围；定义、任务、运行过程和日志不会随产物共享。后端在列表、详情、编辑、删除、工具执行、查询、导出、事件流和 Dashboard 代理入口统一检查资源归属；能力 Profile、记忆块及其绑定保持组内可见，Profile 的 allow 列表与小组可见范围取交集，也可以引用其他组显式共享的资源。用户后来换组不会迁移既有资源，资源仍由创建时的归属组维护。
