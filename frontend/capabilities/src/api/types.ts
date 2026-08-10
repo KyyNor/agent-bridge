@@ -318,6 +318,8 @@ export interface WorkflowArtifact {
   producer_node_fingerprint?: string | null
   source_run_id?: string | null
   source_node_id?: string | null
+  owner_group_key: string
+  visibility: ResourceVisibility
 }
 
 export type WorkflowExecutionMode = 'normal' | 'incremental' | 'force_full'
@@ -355,6 +357,8 @@ export interface WorkflowArtifactHistoryVersion {
   task_version: string
   is_current: boolean
   updated_at: string
+  owner_group_key: string
+  visibility: ResourceVisibility
   runs: WorkflowArtifactHistoryRun[]
 }
 
@@ -703,6 +707,8 @@ export interface WorkflowArtifactDetail {
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string
+  owner_group_key: string
+  visibility: ResourceVisibility
 }
 
 export interface ProfileSourceRule {
@@ -1660,6 +1666,8 @@ export interface BusinessLedger {
   fields: BusinessLedgerField[]
   record_count: number
   edit_token?: string
+  owner_group_key: string
+  visibility: ResourceVisibility
 }
 export interface BusinessLedgerRecords {
   ledger_key: string

@@ -44,6 +44,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
   const artifactHistory = ref<WorkflowArtifactHistoryVersion[]>([])
   const artifactHistoryTarget = ref<WorkflowArtifact | null>(null)
   const detailLoading = ref(false)
+  const visibilitySaving = ref(false)
   const historyLoading = ref(false)
   const showArtifact = ref(false)
   const showArtifactHistory = ref(false)
@@ -197,6 +198,24 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
     }
   }
 
+  async function setArtifactVisibility(visibility: 'group' | 'shared') {
+    if (!artifactDetail.value || visibilitySaving.value) return
+    visibilitySaving.value = true
+    artifactError.value = ''
+    try {
+      artifactDetail.value = await api.setWorkflowArtifactVisibility(
+        artifactDetail.value.artifact_id,
+        visibility,
+      )
+      await queryClient.invalidateQueries({ queryKey: ['workflow-artifacts'] })
+      await searchArtifacts()
+    } catch (error: unknown) {
+      artifactError.value = errorMessage(error)
+    } finally {
+      visibilitySaving.value = false
+    }
+  }
+
   function clearArtifacts() {
     void queryClient.cancelQueries({ queryKey: ['workflow-artifacts'] })
     artifacts.value = []
@@ -223,6 +242,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
     artifactHistory,
     artifactHistoryTarget,
     detailLoading,
+    visibilitySaving,
     historyLoading,
     showArtifact,
     showArtifactHistory,
@@ -242,6 +262,7 @@ export function useWorkflowArtifacts(getContext: () => ArtifactContext) {
     setArtifactFormat,
     openArtifact,
     openArtifactHistory,
+    setArtifactVisibility,
     clearArtifacts,
   }
 }

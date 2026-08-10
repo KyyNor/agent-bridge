@@ -624,6 +624,8 @@ export const api = {
     const tail = qs.toString() ? `?${qs}` : ''
     return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`, options)
   },
+  setWorkflowArtifactVisibility: (artifactId: string, visibility: ResourceVisibility) =>
+    put<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}/visibility`, { visibility }),
   executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string, executionMode: WorkflowExecutionMode = 'normal') => {
     const qs = new URLSearchParams()
     if (taskVersion) qs.set('task_version', taskVersion)
@@ -856,8 +858,8 @@ export const api = {
   // Business ledgers
   listBusinessLedgers: () => get<BusinessLedger[]>('/business-ledgers'),
   getBusinessLedger: (ledgerKey: string) => get<BusinessLedger>(`/business-ledgers/${ledgerKey}`),
-  createBusinessLedger: (payload: Omit<BusinessLedger, 'record_count' | 'edit_token'> & { expected_edit_token?: string | null }) => post<BusinessLedger>('/business-ledgers', payload),
-  updateBusinessLedger: (ledgerKey: string, payload: Omit<BusinessLedger, 'ledger_key' | 'record_count' | 'edit_token'> & { expected_edit_token?: string | null }) => put<BusinessLedger>(`/business-ledgers/${ledgerKey}`, payload),
+  createBusinessLedger: (payload: Omit<BusinessLedger, 'record_count' | 'edit_token' | 'owner_group_key'> & { expected_edit_token?: string | null }) => post<BusinessLedger>('/business-ledgers', payload),
+  updateBusinessLedger: (ledgerKey: string, payload: Omit<BusinessLedger, 'ledger_key' | 'record_count' | 'edit_token' | 'owner_group_key'> & { expected_edit_token?: string | null }) => put<BusinessLedger>(`/business-ledgers/${ledgerKey}`, payload),
   deleteBusinessLedger: (ledgerKey: string) => del<{ ledger_key: string; deleted: boolean }>(`/business-ledgers/${ledgerKey}`),
   queryBusinessLedgerRecords: (ledgerKey: string, payload: Record<string, unknown> = {}) => post<BusinessLedgerRecords>(`/business-ledgers/${ledgerKey}/records/query`, payload),
   addBusinessLedgerRecord: (ledgerKey: string, values: Record<string, unknown>) => post<{ record_id: string; values: Record<string, unknown> }>(`/business-ledgers/${ledgerKey}/records`, { values }),

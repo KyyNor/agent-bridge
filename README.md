@@ -182,7 +182,7 @@ Agent Bridge CLI 和由 CLI 启动的 MCP/Agent 调用使用当前 Linux 用户�
 
 系统在业务库维护“用户 ID → 单一小组”映射。普通用户只能修改本小组资源；同组用户可以互相读取和修改。共享白名单资源可标记为 `shared`，此时其他小组只能读取和使用，不能修改、删除或变更共享状态。管理员可通过 `/access/groups` 和 `/access/memberships` 接口维护映射，并保留跨组故障处理旁路。升级前已有数据尽量按创建者映射归组，无法确认归属的数据保持组内范围并仅允许维护管理员修复，不会自动扩大为共享。
 
-知识库、MCP/OpenAPI 服务、代码仓库和业务台账的新建请求均接受 `visibility=group|shared`，默认 `group`。后端在列表、详情、编辑、删除、工具执行和查询入口统一检查资源归属；能力 Profile、记忆块及其绑定保持组内可见，Profile 的 allow 列表与小组可见范围取交集，也可以引用其他组显式共享的资源。用户后来换组不会迁移既有资源，资源仍由创建时的归属组维护。
+知识库、MCP/OpenAPI 服务、代码仓库、业务台账和工作流产物接受 `visibility=group|shared`，默认 `group`。工作流产物可在详情中逐项切换共享范围；定义、任务、运行过程和日志不会随产物共享。后端在列表、详情、编辑、删除、工具执行、查询、导出、事件流和 Dashboard 代理入口统一检查资源归属；能力 Profile、记忆块及其绑定保持组内可见，Profile 的 allow 列表与小组可见范围取交集，也可以引用其他组显式共享的资源。用户后来换组不会迁移既有资源，资源仍由创建时的归属组维护。
 
 业务台账保存于 `data/agent-bridge-ledgers.db`。每个台账最多 100 个字段、200,000 行记录；服务启动后异步构建内存快照，管理读写和后续的受控查询均使用同一份完整快照。共享台账允许其他组查询和导出，但定义、记录和导入操作仍只能由归属组修改。
 
@@ -192,7 +192,7 @@ Agent Bridge CLI 和由 CLI 启动的 MCP/Agent 调用使用当前 Linux 用户�
 
 能力平面通过 `business_ledger` 资源规则显式授权业务台账。获授权的 Agent 使用顶级 MCP 工具 `query_business_ledger` 查询；所有字段默认支持精确匹配和排序，文本字段可额外开启字面包含检索，数字、日期与日期时间字段默认支持大于、小于、大于等于、小于等于和范围筛选。排序可按多个字段依次传入；台账、字段和查询方式自动注入 Profile，上下文外的台账不可发现也不可查询。
 
-Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流沿用同源会话 Cookie，并通过 `Last-Event-ID` 请求头续传，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
+Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、固化的数据组、终态结果和规范化事件；工具调用日志、统计及 Agent 运行的列表、详情、事件、SSE、payload、子 Agent 和停止操作均按运行所属组过滤，维护管理员可跨组排障。每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流沿用同源会话 Cookie，并通过 `Last-Event-ID` 请求头续传，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
 
 工作流 Agent 的 JSON 输出 Schema 按 JSON Schema Draft 07 校验和传递给 Coding Agent。已有
 Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft 07 的 `definitions`；

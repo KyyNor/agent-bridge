@@ -12,6 +12,7 @@ defineProps<{
   open: boolean
   detail: WorkflowArtifactDetail | null
   detailLoading: boolean
+  visibilitySaving: boolean
   detailHtml: string
   fullscreen: FullscreenArtifact | null
   fullscreenHtml: string
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   'update:historyOpen': [open: boolean]
   openFullscreen: [artifact: WorkflowArtifactDetail]
   closeFullscreen: []
+  setVisibility: [visibility: 'group' | 'shared']
 }>()
 
 function updateOpen(open: boolean) {
@@ -43,6 +45,7 @@ function updateOpen(open: boolean) {
         <template v-else-if="detail">
           <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="outline">{{ detail.path }}</Badge>
+            <Badge :variant="detail.visibility === 'shared' ? 'secondary' : 'outline'">{{ detail.visibility === 'shared' ? '共享' : '仅本小组' }}</Badge>
             <Badge v-for="tag in detail.tags" :key="tag" variant="outline">{{ tag }}</Badge>
           </div>
           <p v-if="detail.summary" class="text-sm text-muted-foreground">{{ detail.summary }}</p>
@@ -52,6 +55,7 @@ function updateOpen(open: boolean) {
         <div v-else class="py-8 text-center text-sm text-muted-foreground">无内容</div>
       </div>
       <DialogFooter>
+        <Button v-if="detail" variant="outline" :disabled="visibilitySaving" @click="emit('setVisibility', detail.visibility === 'shared' ? 'group' : 'shared')">{{ visibilitySaving ? '保存中...' : detail.visibility === 'shared' ? '改为仅本小组' : '共享给所有小组' }}</Button>
         <Button v-if="detail" variant="outline" class="mr-auto" title="全屏查看" @click="emit('openFullscreen', detail)"><Maximize2 :size="14" /> 全屏</Button>
         <Button variant="outline" @click="emit('update:open', false)">关闭</Button>
       </DialogFooter>

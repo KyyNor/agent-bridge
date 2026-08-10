@@ -99,7 +99,7 @@
     <div class="meta">Agent Bridge · 权限改造纠偏基线 · 2026-08-10</div>
     <h1>小组数据权限全域梳理</h1>
     <p class="lead">本方案以内部网络已经完成准入为前提，只解决“谁的数据归哪个小组、谁能看到和修改”这一件事。页面不做权限路由，普通 API 不引入细粒度功能 RBAC；Web、CLI、MCP 和后台运行统一在服务端按调用身份与数据归属裁决。</p>
-    <div class="alert"><strong>结论：</strong>当前五个提交只完成了身份链路、组映射基础，以及知识库、MCP、OpenAPI、代码仓库四类资源的第一版控制，尚未覆盖 Profile、业务台账、记忆、工作流、脚本、模型评估运行、Agent 运行与日志；并且现有四类资源仍有代理入口、关联关系和历史数据迁移漏洞。因此本次改造还不能视为完成。</div>
+    <div class="alert"><strong>实施结论：</strong>本分支已把身份解析、小组映射、共享白名单、业务资源、运行数据、日志与代理入口接入同一套服务端数据范围裁决。业务台账与工作流产物均支持显式共享；工作流定义、任务、运行过程、脚本、记忆、Profile 和各类运行日志保持组内。前端只提供归属与共享操作，不承担安全判断。</div>
   </header>
 
   <section>
@@ -158,47 +158,47 @@
           </tr>
           <tr>
             <td>知识库</td><td>知识库、成员、目录、文档、版本、归档、placement、同步状态与任务</td>
-            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag partial">部分完成</span></td>
+            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag done">已完成</span></td>
             <td>历史数据不能默认共享；文档必须只有一个归属组，跨库挂载只能发生在同归属组；读取 placement 时避免泄露其他组元数据；手工同步按组裁决。</td>
           </tr>
           <tr>
             <td>MCP</td><td>MCP service 与 tools</td>
-            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag partial">主体完成</span></td>
+            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag done">已完成</span></td>
             <td>校正历史回填；确认所有工具执行入口均先校验 service 可用范围，日志归调用组。</td>
           </tr>
           <tr>
             <td>OpenAPI</td><td>OpenAPI service 与 tools</td>
-            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag partial">主体完成</span></td>
+            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag done">已完成</span></td>
             <td>校正历史回填；工具调用日志归调用组。</td>
           </tr>
           <tr>
             <td>代码仓库</td><td>Repository、CodeGraph 同步运行、知识库仓库来源关联</td>
-            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag partial">部分完成</span></td>
+            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag done">已完成</span></td>
             <td>Dashboard 代理必须带 Actor 校验；KB 绑定仓库时同时检查 KB 写权限与仓库读/用权限；同步记录继承仓库归属。</td>
           </tr>
           <tr>
             <td>Capability Profile</td><td>Profile、source/resource/pin rules、文档缓存、memory binding</td>
-            <td><span class="tag done">组内根数据</span></td><td>禁止</td><td><span class="tag missing">未覆盖</span></td>
+            <td><span class="tag done">组内根数据</span></td><td>禁止</td><td><span class="tag done">已完成</span></td>
             <td>由 admin-only 改为小组管理；运行前校验 Profile；只能关联同组私有资源或任意共享资源；资源侧关联接口不得修改其他组 Profile。</td>
           </tr>
           <tr>
             <td>业务台账</td><td>Ledger、revisions、records、导入预览与导出</td>
-            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag missing">未覆盖</span></td>
+            <td><span class="tag share-tag">可共享根资源</span></td><td>允许</td><td><span class="tag done">已完成</span></td>
             <td>Ledger 增加归属和显式共享；列表/详情/修改/导入按归属组，跨组可查询和导出共享台账；Profile 可关联同组或共享台账。</td>
           </tr>
           <tr>
             <td>记忆</td><td>Memory block、Profile binding、observations、timeline、dashboard</td>
-            <td><span class="tag done">组内根数据</span></td><td>禁止</td><td><span class="tag missing">未覆盖</span></td>
+            <td><span class="tag done">组内根数据</span></td><td>禁止</td><td><span class="tag done">已完成</span></td>
             <td>Block 增加归属；管理、检索和时间线按组；Memory Dashboard 代理不可绕过身份；Profile 绑定必须同组。</td>
           </tr>
           <tr>
             <td>工作流</td><td>Definition、revisions、tasks、imports、runs、node runs、logs、artifacts</td>
-            <td><span class="tag done">组内根数据 + 运行数据</span> <span class="tag share-tag">可共享产物</span></td><td>仅产物允许</td><td><span class="tag missing">未覆盖</span></td>
+            <td><span class="tag done">组内根数据 + 运行数据</span> <span class="tag share-tag">可共享产物</span></td><td>仅产物允许</td><td><span class="tag done">已完成</span></td>
             <td>定义由小组维护；版本、任务、运行过程和日志保持组内。运行在下发时快照定义归属；产物逐项继承归属并可显式共享，跨组只能检索、读取和复用共享产物。</td>
           </tr>
           <tr>
             <td>脚本</td><td>Script、revision、run</td>
-            <td><span class="tag done">组内数据 / 系统资源</span></td><td>禁止</td><td><span class="tag missing">未覆盖</span></td>
+            <td><span class="tag done">组内数据 / 系统资源</span></td><td>禁止</td><td><span class="tag done">已完成</span></td>
             <td>用户脚本按组，内置脚本保持系统资源；现有 <code>owner_type/owner_key</code> 是业务语义，不替代访问归属；运行继承脚本或工作流归属。</td>
           </tr>
           <tr>
@@ -208,18 +208,18 @@
           </tr>
           <tr>
             <td>模型评估</td><td>数据集目录与运行配置；evaluation run、executions</td>
-            <td><span class="tag system-tag">系统定义</span> <span class="tag done">组内运行</span></td><td>禁止</td><td><span class="tag missing">运行未覆盖</span></td>
+            <td><span class="tag system-tag">系统定义</span> <span class="tag done">组内运行</span></td><td>禁止</td><td><span class="tag done">已完成</span></td>
             <td>数据集和评测配置保持系统级；启动运行时固化调用组，列表、详情、停止和执行明细按组过滤。</td>
           </tr>
           <tr>
             <td>工具调用日志</td><td><code>tool_call_logs</code>、统计聚合与详情</td>
-            <td><span class="tag done">组内运行数据</span></td><td>禁止</td><td><span class="tag missing">未覆盖</span></td>
+            <td><span class="tag done">组内运行数据</span></td><td>禁止</td><td><span class="tag done">已完成</span></td>
             <td>保存 <code>owner_group_key</code>；列表、统计、详情都带组条件；管理员可跨组排障；共享工具产生的日志仍归调用组。</td>
           </tr>
           <tr>
             <td>Agent 运行</td><td><code>agent_runs</code>、events、SSE、payload、subagent、stop</td>
-            <td><span class="tag done">组内运行数据</span></td><td>禁止</td><td><span class="tag missing">高风险缺口</span></td>
-            <td>当前表未持久化 Actor/组且读取入口无范围过滤。需在创建时固化组，并让列表、详情、事件流、大 payload、子 Agent、停止操作共享同一运行权限检查。</td>
+            <td><span class="tag done">组内运行数据</span></td><td>禁止</td><td><span class="tag done">已完成</span></td>
+            <td>创建时固化 Actor/组；列表、详情、事件流、大 payload、子 Agent、停止操作共享同一运行权限检查。</td>
           </tr>
           <tr>
             <td>系统配置</td><td>Code category、知识同步配置、LLM 配置、工具全局开关、健康状态</td>
@@ -272,14 +272,14 @@
       <li>根资源的子表通过外键或关联继承，不为每条子记录猜测创建人。</li>
       <li>工具日志可按已有 <code>actor</code> 回填组；Agent 历史运行没有 Actor，不能根据 Profile 猜测，应标记为仅维护管理员可见。</li>
       <li>工作流、脚本及其运行可优先从根定义继承；无根或关系损坏的数据进入未归属维护队列。</li>
-      <li>提供维护接口完成“查看未归属资源、分配组、转组、修正共享状态”，并记录操作日志。</li>
+      <li>无法判断归属的存量数据保持 <code>owner_group_key=''</code> 且默认组内，不自动共享，仅维护管理员可见；本次不额外扩展通用资源转组功能。</li>
       <li>用户以后换组只影响新建数据和直接调用运行；已有资源和历史运行不自动转移。</li>
     </ol>
   </section>
 
   <section>
-    <h2>六、建议的实施与提交节点</h2>
-    <p class="muted">后续继续在 <code>codex/group-data-access</code> worktree 内实施。每个节点单独提交；3–5 个节点集中做一次领域测试和 review，最终执行全量 Python 与前端验证。</p>
+    <h2>六、实施与提交记录</h2>
+    <p class="muted">实现位于 <code>codex/group-data-access</code> worktree，各关键边界均独立提交，并以领域回归、全量 Python 测试和前端检查收口。</p>
     <div class="commit"><strong>纠偏 1 · 权限模型与迁移基线</strong><br>扩展资源类型 registry 和共享白名单；修正旧资源默认共享；增加未归属状态、资源转组/修复能力；补充文档单组归属不变量。</div>
     <div class="commit"><strong>纠偏 2 · Profile 与跨资源关联</strong><br>Profile 改为组内根数据；运行前校验；Profile-resource、Profile-memory、KB-repository 等关联执行双边访问检查。</div>
     <div class="commit"><strong>纠偏 3 · 业务台账与记忆</strong><br>业务台账接入归属和显式共享，跨组只读/查询；记忆保持组内；Profile 注入校验；封堵 Memory Dashboard 代理。</div>
@@ -302,7 +302,7 @@
     </ul>
   </section>
 
-  <footer>本文件是本分支后续权限改造的范围基线；若新增业务根资源，必须先归类为 System Resource、Group-owned Data、Shared Resource 或 Run Data，再接入统一策略。</footer>
+  <footer>本文件同时作为本次改造的范围基线与验收记录；若新增业务根资源，必须先归类为 System Resource、Group-owned Data、Shared Resource 或 Run Data，再接入统一策略。</footer>
 </main>
 </body>
 </html>

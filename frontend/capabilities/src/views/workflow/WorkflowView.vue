@@ -202,6 +202,7 @@ const {
   artifactHistory,
   artifactHistoryTarget,
   detailLoading,
+  visibilitySaving,
   historyLoading,
   showArtifact,
   showArtifactHistory,
@@ -221,6 +222,7 @@ const {
   setArtifactFormat,
   openArtifact,
   openArtifactHistory,
+  setArtifactVisibility,
   clearArtifacts,
 } = useWorkflowArtifacts(() => ({
   profileKey: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
@@ -2160,6 +2162,7 @@ async function confirmClearWorkflow() {
       :open="showArtifact"
       :detail="artifactDetail"
       :detail-loading="detailLoading"
+      :visibility-saving="visibilitySaving"
       :detail-html="artifactHtml"
       :fullscreen="fullscreenArtifact"
       :fullscreen-html="fullscreenArtifactHtml"
@@ -2171,6 +2174,7 @@ async function confirmClearWorkflow() {
       @update:history-open="showArtifactHistory = $event"
       @open-fullscreen="openArtifactFullscreen"
       @close-fullscreen="closeArtifactFullscreen"
+      @set-visibility="setArtifactVisibility"
     />
   </div>
 </template>
