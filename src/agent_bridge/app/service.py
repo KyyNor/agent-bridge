@@ -12,7 +12,9 @@ from typing import Any, Callable
 
 from agent_bridge.agent_runtime.service import AgentService
 from agent_bridge.agent_runtime.registry import create_coding_agent_registry
-from agent_bridge.access_control.service import AccessControlService
+from agent_bridge.access_control.service import AccessControlService, ResourceScope
+from agent_bridge.access_control.resources import create_scoped_resource_registry
+from agent_bridge.access_control.resources import ScopedResourceType
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
 from agent_bridge.knowledge_management.docs_knowledge.ingest import DocumentIngestService
 from agent_bridge.knowledge_management.docs_knowledge.repo_sync import GitRepoSyncService
@@ -195,7 +197,11 @@ class AgentBridgeService:
         self.store = store
         self.archive = archive
         self.admins = admins
-        self.access = AccessControlService(store.access_control, admins)
+        self.access = AccessControlService(
+            store.access_control,
+            admins,
+            create_scoped_resource_registry(store),
+        )
         self.registry: BackendRegistry | None = None
         # 领域服务在所有 collaborator 就位后装配。门面通过注入的回调暴露
         # 必要的 monkeypatch 点（如 _archive_files）和编排能力（如 sync）。
@@ -219,7 +225,12 @@ class AgentBridgeService:
         self.business_ledgers.init_schema()
         self.governance = CapabilityGovernanceService(store=store, admins=admins)
         self.governance.business_ledgers = self.business_ledgers
-        self.capabilities = CapabilityService(store=store, admins=admins, governance=self.governance)
+        self.capabilities = CapabilityService(
+            store=store,
+            admins=admins,
+            governance=self.governance,
+            access=self.access,
+        )
         agent_runtime_config = load_agent_runtime_config(paths)
         self.agents = AgentService(
             paths=paths,
@@ -228,7 +239,13 @@ class AgentBridgeService:
             governance=self.governance,
             coding_agents=create_coding_agent_registry(agent_runtime_config),
         )
-        self.codegraph = CodeGraphService(paths=paths, store=store, admins=admins, agent_service=self.agents)
+        self.codegraph = CodeGraphService(
+            paths=paths,
+            store=store,
+            admins=admins,
+            agent_service=self.agents,
+            access=self.access,
+        )
         self._repo_sync = GitRepoSyncService(
             store=store,
             codegraph=self.codegraph,
@@ -398,9 +415,24 @@ class AgentBridgeService:
         git_url = str(self.store.get_sync_config().get("claude_mem_git_url") or "").strip()
         return self.memory.worker_service.ensure_plugin(git_url)
 
-    def create_kb(self, actor: str, slug: str, name: str, description: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        kb = self.store.create_kb(slug=slug, name=name, description=description, created_by=actor)
+    def create_kb(
+        self,
+        actor: str,
+        slug: str,
+        name: str,
+        description: str,
+        *,
+        visibility: str = "group",
+    ) -> dict[str, Any]:
+        scope = self.access.new_resource_scope(actor=actor, visibility=visibility or "group")
+        kb = self.store.create_kb(
+            slug=slug,
+            name=name,
+            description=description,
+            created_by=actor,
+            owner_group_key=scope.owner_group_key,
+            visibility=scope.visibility.value,
+        )
         self.docs_knowledge.provision_kb(kb)
         return kb
 
@@ -413,10 +445,11 @@ class AgentBridgeService:
         ON DELETE CASCADE 清除 members / document_kbs / backend_targets /
         sync_jobs / sync_states。
         """
-        require_admin_user(actor, self.admins)
-        kb = self.store.get_kb_by_slug(kb_slug)
-        if kb is None:
-            raise NotFound(f"knowledge base '{kb_slug}' not found")
+        kb = self.access.require_resource_write(
+            actor=actor,
+            resource_type=ScopedResourceType.knowledge_base,
+            resource_key=kb_slug,
+        )
         kb_id = kb["id"]
 
         active_docs = self.store.list_docs_for_kb(kb_id)
@@ -440,10 +473,12 @@ class AgentBridgeService:
         raise ValidationError("knowledge base member roles are no longer supported; use capability profiles")
 
     def list_kbs(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
         return [
             attach_edit_token(kb, self._kb_defaults_edit_snapshot(kb))
-            for kb in self.store.list_kbs()
+            for kb in self.access.visible_resources(
+                actor=actor,
+                resource_type=ScopedResourceType.knowledge_base,
+            )
         ]
 
     def list_kb_status_summaries(self, actor: str) -> list[dict[str, Any]]:
@@ -461,19 +496,17 @@ class AgentBridgeService:
         return summaries
 
     def list_kb_members(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_kb_by_slug(kb_slug) is None:
-            raise NotFound("knowledge base not found")
+        self._require_kb_admin_visible(actor, kb_slug)
         return []
 
     # -- Knowledge-base folders and document placements --
 
     def list_folders(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
-        kb = self._require_kb_admin_visible(actor, kb_slug)
+        kb = self._require_kb_visible(actor, kb_slug)
         return self.store.list_folder_tree(kb["id"])
 
     def list_archive_entries(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
-        kb = self._require_kb_admin_visible(actor, kb_slug)
+        kb = self._require_kb_visible(actor, kb_slug)
         return self.store.list_archive_entries(kb["id"])
 
     def browse_kb(
@@ -487,7 +520,7 @@ class AgentBridgeService:
         if folder_id is not None and archive_entry_id is not None:
             raise ValidationError("folder_id and archive_entry_id cannot be used together")
 
-        kb = self._require_kb_admin_visible(actor, kb_slug)
+        kb = self._require_kb_visible(actor, kb_slug)
         if archive_entry_id is not None:
             return self._browse_archive_context(kb, archive_entry_id)
         return self._browse_folder_context(kb, folder_id)
@@ -974,7 +1007,7 @@ class AgentBridgeService:
         backend: str | None = None,
         folder_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        kb = self._require_kb_admin_visible(actor, kb_slug)
+        kb = self._require_kb_visible(actor, kb_slug)
         return self.store.list_docs_for_kb(
             kb["id"],
             folder_id=folder_id,
@@ -982,7 +1015,7 @@ class AgentBridgeService:
         )
 
     def get_doc(self, actor: str, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
-        doc = self._require_doc_admin_visible(actor, doc_slug)
+        doc = self._require_doc_visible(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"], active_only=True)
         versions = self.store.list_versions(doc["id"])
         for version in versions:
@@ -1014,7 +1047,6 @@ class AgentBridgeService:
         return doc
 
     def delete_document(self, actor: str, doc_slug: str, later: bool = True) -> dict[str, str]:
-        require_admin_user(actor, self.admins)
         doc = self._require_doc_admin_visible(actor, doc_slug)
         kbs = self.store.get_document_kbs(doc["id"], active_only=True)
         for kb in kbs:
@@ -1106,7 +1138,7 @@ class AgentBridgeService:
         self.store.delete_category(category_key=category_key)
 
     def list_kb_repo_sources(self, actor: str, kb_slug: str) -> list[dict[str, Any]]:
-        kb = self._require_kb_admin_visible(actor, kb_slug)
+        kb = self._require_kb_visible(actor, kb_slug)
         return self.store.list_kb_repo_sources(kb["id"])
 
     def upsert_kb_repo_source(
@@ -1398,7 +1430,10 @@ class AgentBridgeService:
                    top_k: int = 6) -> list[dict[str, Any]]:
         from agent_bridge.capability_hub.models import ProfileResourceType
 
-        kbs = self.store.list_kbs()
+        kbs = self.access.visible_resources(
+            actor=actor,
+            resource_type=ScopedResourceType.knowledge_base,
+        )
         if actor not in self.admins or profile_key:
             self._require_profile_key(profile_key)
             allowed = set(
@@ -1443,10 +1478,7 @@ class AgentBridgeService:
                            default_backend_slug: str | None = None,
                            default_agent_id: str | None = None,
                            expected_edit_token: str | None = None) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        kb = self.store.get_kb_by_slug(kb_slug)
-        if kb is None:
-            raise NotFound("knowledge base not found")
+        kb = self._require_kb_admin_visible(actor, kb_slug)
         require_edit_token(
             expected_edit_token,
             self._kb_defaults_edit_snapshot(kb),
@@ -1671,16 +1703,21 @@ class AgentBridgeService:
         return self.docs_knowledge.remove_backend(actor, slug)
 
     def _require_kb_admin_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        kb = self.store.get_kb_by_slug(kb_slug)
-        if kb is None:
-            raise NotFound("knowledge base not found")
-        return kb
+        return self.access.require_resource_write(
+            actor=actor,
+            resource_type=ScopedResourceType.knowledge_base,
+            resource_key=kb_slug,
+        )
+
+    def _require_kb_visible(self, actor: str, kb_slug: str) -> dict[str, Any]:
+        return self.access.require_resource_read(
+            actor=actor,
+            resource_type=ScopedResourceType.knowledge_base,
+            resource_key=kb_slug,
+        )
 
     def _require_kb_runtime_allowed(self, actor: str, kb_slug: str, profile_key: str | None) -> dict[str, Any]:
-        kb = self.store.get_kb_by_slug(kb_slug)
-        if kb is None:
-            raise NotFound("knowledge base not found")
+        kb = self._require_kb_visible(actor, kb_slug)
         if actor in self.admins and not profile_key:
             return kb
         self._require_profile_key(profile_key)
@@ -1705,8 +1742,28 @@ class AgentBridgeService:
             raise ValidationError("unsupported file type")
 
     def _require_doc_admin_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         doc = self.store.get_document_by_slug(doc_slug)
         if doc is None:
             raise NotFound("document not found")
+        placements = self.store.get_document_kbs(doc["id"], active_only=True)
+        if not placements and actor not in self.admins:
+            raise AccessDenied("文档尚未归属可写知识库")
+        for kb in placements:
+            self._require_kb_admin_visible(actor, str(kb["slug"]))
+        return doc
+
+    def _require_doc_visible(self, actor: str, doc_slug: str) -> dict[str, Any]:
+        doc = self.store.get_document_by_slug(doc_slug)
+        if doc is None:
+            raise NotFound("document not found")
+        placements = self.store.get_document_kbs(doc["id"], active_only=True)
+        if not placements:
+            if actor not in self.admins:
+                raise AccessDenied("文档尚未归属可见知识库")
+            return doc
+        if not any(
+            self.access.can_read(actor=actor, scope=ResourceScope.from_record(kb))
+            for kb in placements
+        ):
+            raise AccessDenied("无权访问其他小组的数据")
         return doc

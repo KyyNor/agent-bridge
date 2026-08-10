@@ -7,8 +7,23 @@ from typing import Any
 
 
 class KnowledgeFacadeMixin:
-    def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
-        return self.knowledge.create_kb(slug=slug, name=name, description=description, created_by=created_by)
+    def create_kb(
+        self,
+        slug: str,
+        name: str,
+        description: str,
+        created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "shared",
+    ) -> dict[str, Any]:
+        return self.knowledge.create_kb(
+            slug=slug,
+            name=name,
+            description=description,
+            created_by=created_by,
+            owner_group_key=owner_group_key,
+            visibility=visibility,
+        )
 
     def ensure_root_folder(self, kb_id: int) -> dict[str, Any]:
         return self.folders.ensure_root_folder(kb_id=kb_id)

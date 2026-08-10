@@ -168,6 +168,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         @app.middleware("http")
         async def _reload_admins_if_dynamic(request: Request, call_next):
             reloaded = load_server_config(resolved_paths).admins
+            if reloaded != service.access.admins:
+                service.access.admins = reloaded
+                service.access.bootstrap_admin_memberships()
             service.admins = reloaded
             service.capabilities.admins = reloaded
             service.governance.admins = reloaded

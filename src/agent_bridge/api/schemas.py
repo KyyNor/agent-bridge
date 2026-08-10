@@ -44,6 +44,7 @@ class CreateKbRequest(BaseModel):
     slug: str
     name: str
     description: str = ""
+    visibility: Literal["group", "shared"] | None = None
 
 
 class CreateFolderRequest(BaseModel):
@@ -162,6 +163,7 @@ class RegisterMcpServiceRequest(BaseModel):
     headers: dict[str, Any] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 
@@ -175,6 +177,7 @@ class RegisterOpenApiServiceRequest(BaseModel):
     headers: dict[str, Any] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 
@@ -334,6 +337,7 @@ class CodeRepositoryRequest(BaseModel):
     sync_interval_minutes: int = 60
     auto_understand: bool = False
     status: str = "active"
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 

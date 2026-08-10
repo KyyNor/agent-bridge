@@ -74,7 +74,13 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
 
     @router.post("/kbs")
     def create_kb(payload: CreateKbRequest, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.create_kb(current_actor, payload.slug, payload.name, payload.description)
+        return service.create_kb(
+            current_actor,
+            payload.slug,
+            payload.name,
+            payload.description,
+            visibility=payload.visibility,
+        )
 
     @router.get("/kbs")
     def list_kbs(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:

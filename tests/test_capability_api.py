@@ -73,8 +73,9 @@ def test_mcp_service_registration_api(wm_paths) -> None:
             "name": "MySQL MCP",
             "endpoint_url": "https://mysql.example.test/mcp",
             "headers": {"Authorization": "Bearer secret"},
-            "description": "Database tools",
-            "tags": ["database"],
+                "description": "Database tools",
+                "tags": ["database"],
+                "visibility": "shared",
         },
         headers={"X-Agent-Bridge-User": "root"},
     )

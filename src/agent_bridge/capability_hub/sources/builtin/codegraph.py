@@ -27,7 +27,11 @@ class CodeGraphBuiltinProvider:
         self.governance = governance
 
     def list_resources(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
-        repos = [repo for repo in self.codegraph.store.list_code_repositories() if repo["status"] == "active"]
+        repos = [
+            repo
+            for repo in self.codegraph.list_repositories(actor)
+            if repo["status"] == "active"
+        ]
         filtered = set(
             self.governance.filter_resource_keys(
                 actor=actor,

@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any
 
 from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
+from agent_bridge.access_control.resources import ScopedResourceRegistry, ScopedResourceType
 
 
 _GROUP_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -40,9 +41,15 @@ class AccessControlService:
 
     maintenance_group_key = "system-maintainers"
 
-    def __init__(self, repository, admins: set[str]) -> None:
+    def __init__(
+        self,
+        repository,
+        admins: set[str],
+        resources: ScopedResourceRegistry | None = None,
+    ) -> None:
         self.repository = repository
         self.admins = admins
+        self.resources = resources or ScopedResourceRegistry()
 
     def bootstrap_admin_memberships(self) -> None:
         if not self.admins:
@@ -156,3 +163,34 @@ class AccessControlService:
     def require_write(self, *, actor: str, scope: ResourceScope) -> None:
         if not self.can_write(actor=actor, scope=scope):
             raise AccessDenied("无权修改其他小组的数据")
+
+    def get_resource(
+        self, resource_type: ScopedResourceType | str, resource_key: str
+    ) -> dict[str, Any]:
+        record = self.resources.get(resource_type).get(resource_key)
+        if record is None:
+            raise NotFound("资源不存在")
+        return record
+
+    def require_resource_read(
+        self, *, actor: str, resource_type: ScopedResourceType | str, resource_key: str
+    ) -> dict[str, Any]:
+        record = self.get_resource(resource_type, resource_key)
+        self.require_read(actor=actor, scope=ResourceScope.from_record(record))
+        return record
+
+    def require_resource_write(
+        self, *, actor: str, resource_type: ScopedResourceType | str, resource_key: str
+    ) -> dict[str, Any]:
+        record = self.get_resource(resource_type, resource_key)
+        self.require_write(actor=actor, scope=ResourceScope.from_record(record))
+        return record
+
+    def visible_resources(
+        self, *, actor: str, resource_type: ScopedResourceType | str
+    ) -> list[dict[str, Any]]:
+        return [
+            record
+            for record in self.resources.get(resource_type).list()
+            if self.can_read(actor=actor, scope=ResourceScope.from_record(record))
+        ]

@@ -40,11 +40,23 @@ class KnowledgeRepository:
         self._connect = connect
         self._folders = folder_repository or FolderRepository(db_path, connect)
 
-    def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
+    def create_kb(
+        self,
+        slug: str,
+        name: str,
+        description: str,
+        created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "shared",
+    ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO knowledge_bases (slug, name, description, created_by) VALUES (?, ?, ?, ?)",
-                (slug, name, description, created_by),
+                """
+                INSERT INTO knowledge_bases
+                  (slug, name, description, created_by, owner_group_key, visibility)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (slug, name, description, created_by, owner_group_key, visibility),
             )
             self._folders.ensure_root_folder(int(cursor.lastrowid), conn=conn)
             return self.get_kb_by_id(cursor.lastrowid, conn)

@@ -42,6 +42,7 @@ def create_capability_routes(service, actor, catalog_sources):
             payload.headers,
             payload.description,
             payload.tags,
+            visibility=payload.visibility,
             expected_edit_token=payload.expected_edit_token,
         )
 
@@ -100,6 +101,7 @@ def create_capability_routes(service, actor, catalog_sources):
             payload.headers,
             payload.description,
             payload.tags,
+            visibility=payload.visibility,
             expected_edit_token=payload.expected_edit_token,
         )
 

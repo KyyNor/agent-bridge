@@ -99,6 +99,9 @@ class CodeGraphRepository:
         sync_interval_minutes: int,
         auto_understand: bool,
         status: str,
+        created_by: str = "",
+        owner_group_key: str = "",
+        visibility: str = "shared",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
@@ -114,9 +117,12 @@ class CodeGraphRepository:
                   category_key,
                   sync_interval_minutes,
                   auto_understand,
-                  status
+                  status,
+                  created_by,
+                  owner_group_key,
+                  visibility
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repo_key) DO UPDATE SET
                   name = excluded.name,
                   git_url = excluded.git_url,
@@ -128,6 +134,7 @@ class CodeGraphRepository:
                   sync_interval_minutes = excluded.sync_interval_minutes,
                   auto_understand = excluded.auto_understand,
                   status = excluded.status,
+                  visibility = excluded.visibility,
                   updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -142,6 +149,9 @@ class CodeGraphRepository:
                     sync_interval_minutes,
                     int(auto_understand),
                     status,
+                    created_by,
+                    owner_group_key,
+                    visibility,
                 ),
             )
             row = conn.execute("SELECT * FROM code_repositories WHERE repo_key = ?", (repo_key,)).fetchone()

@@ -22,6 +22,11 @@ from agent_bridge.capability_hub.errors import capability_failure, failure_metad
 from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType, ToolType
 from agent_bridge.capability_hub.governance import CapabilityGovernanceService, monotonic_ms
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
+from agent_bridge.access_control.resources import (
+    ScopedResourceType,
+    create_scoped_resource_registry,
+)
+from agent_bridge.access_control.service import AccessControlService, ResourceScope
 from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.json_util import json_loads as _json_loads
 from agent_bridge.capability_hub.sources.mcp.http_client import McpHttpClient
@@ -187,12 +192,21 @@ class CapabilityService:
         mcp_client: McpHttpClient | None = None,
         openapi_client: OpenApiHttpClient | None = None,
         governance: CapabilityGovernanceService | None = None,
+        access: AccessControlService | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
         self.mcp_client = mcp_client or McpHttpClient()
         self.openapi_client = openapi_client or OpenApiHttpClient()
         self.governance = governance or CapabilityGovernanceService(store=store, admins=admins)
+        self._default_visibility = "group" if access is not None else "shared"
+        self.access = access or AccessControlService(
+            store.access_control,
+            admins,
+            create_scoped_resource_registry(store),
+        )
+        if access is None:
+            self.access.bootstrap_admin_memberships()
         self.builtin_providers: dict[str, BuiltinCapabilityProvider] = {}
         builtin_source = BuiltinSourceAdapter(self)
         mcp_source = McpSourceAdapter(self)
@@ -354,15 +368,21 @@ class CapabilityService:
         description: str,
         tags: list[str],
         *,
+        visibility: str | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         self._validate_service_key(service_key)
         if service_key in self.builtin_providers:
             raise ValidationError("service_key is reserved for built-in capability")
         if self.store.get_openapi_service(service_key) is not None:
             raise ValidationError("service_key is already used by an OpenAPI service")
         existing = self.store.get_mcp_service(service_key)
+        if existing is not None:
+            self.access.require_resource_write(
+                actor=actor,
+                resource_type=ScopedResourceType.mcp_service,
+                resource_key=service_key,
+            )
         require_edit_token(
             expected=expected_edit_token,
             current_snapshot=self._service_edit_snapshot(existing) if existing else None,
@@ -373,6 +393,10 @@ class CapabilityService:
         if headers is None:
             headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
         if existing is None:
+            scope = self.access.new_resource_scope(
+                actor=actor,
+                visibility=visibility or self._default_visibility,
+            )
             service = self.store.create_mcp_service(
                 service_key=service_key,
                 name=name,
@@ -381,6 +405,8 @@ class CapabilityService:
                 description=description,
                 tags=tags,
                 created_by=actor,
+                owner_group_key=scope.owner_group_key,
+                visibility=scope.visibility.value,
             )
         else:
             service = self.store.update_mcp_service(
@@ -390,6 +416,7 @@ class CapabilityService:
                 headers=headers,
                 description=description,
                 tags=tags,
+                visibility=visibility,
             )
         return self._service_payload(service)
 
@@ -406,15 +433,21 @@ class CapabilityService:
         description: str,
         tags: list[str],
         *,
+        visibility: str | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         self._validate_service_key(service_key)
         if service_key in self.builtin_providers or self.store.get_mcp_service(service_key) is not None:
             raise ValidationError("service_key is already used by another capability source")
         if not base_url.strip():
             raise ValidationError("base_url is required")
         existing = self.store.get_openapi_service(service_key)
+        if existing is not None:
+            self.access.require_resource_write(
+                actor=actor,
+                resource_type=ScopedResourceType.openapi_service,
+                resource_key=service_key,
+            )
         require_edit_token(
             expected=expected_edit_token,
             current_snapshot=self._openapi_service_edit_snapshot(existing) if existing else None,
@@ -427,6 +460,10 @@ class CapabilityService:
         if headers is None:
             headers = _json_loads(existing.get("headers_json"), {}) if existing is not None else {}
         if existing is None:
+            scope = self.access.new_resource_scope(
+                actor=actor,
+                visibility=visibility or self._default_visibility,
+            )
             service = self.store.create_openapi_service(
                 service_key=service_key,
                 name=name,
@@ -438,6 +475,8 @@ class CapabilityService:
                 description=description,
                 tags=tags,
                 created_by=actor,
+                owner_group_key=scope.owner_group_key,
+                visibility=scope.visibility.value,
             )
         else:
             service = self.store.update_openapi_service(
@@ -450,35 +489,45 @@ class CapabilityService:
                 headers=headers,
                 description=description,
                 tags=tags,
+                visibility=visibility,
             )
         return self._openapi_service_payload(service)
 
     def list_openapi_services(self, actor: str) -> list[dict[str, Any]]:
         return [
             self._openapi_service_payload(service, redact_secrets=True)
-            for service in self.store.list_openapi_services()
+            for service in self.access.visible_resources(
+                actor=actor,
+                resource_type=ScopedResourceType.openapi_service,
+            )
         ]
 
     def list_openapi_service_summaries(self, actor: str) -> list[dict[str, Any]]:
-        return [
-            self._openapi_service_summary_payload(service)
-            for service in self.store.list_openapi_service_summaries()
-        ]
+        visible = {
+            item["service_key"]
+            for item in self.access.visible_resources(
+                actor=actor,
+                resource_type=ScopedResourceType.openapi_service,
+            )
+        }
+        return [self._openapi_service_summary_payload(service) for service in self.store.list_openapi_service_summaries() if service["service_key"] in visible]
 
     def get_openapi_service(self, actor: str, service_key: str) -> dict[str, Any]:
-        service = self.store.get_openapi_service(service_key)
-        if service is None:
-            raise NotFound("service not found")
+        service = self.access.require_resource_read(
+            actor=actor,
+            resource_type=ScopedResourceType.openapi_service,
+            resource_key=service_key,
+        )
         return self._openapi_service_payload(service, redact_secrets=True)
 
     def set_openapi_service_status(self, actor: str, service_key: str, status: McpServiceStatus | str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         try:
             next_status = McpServiceStatus(status)
         except ValueError as exc:
             raise ValidationError("invalid service status") from exc
         if self.store.get_openapi_service(service_key) is None:
             raise NotFound("service not found")
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.openapi_service, resource_key=service_key)
         self.store.update_openapi_service_status(service_key, next_status)
         updated = self.store.get_openapi_service(service_key)
         if updated is None:
@@ -492,10 +541,7 @@ class CapabilityService:
         *,
         spec_content: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        service = self.store.get_openapi_service(service_key)
-        if service is None:
-            raise NotFound("service not found")
+        service = self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.openapi_service, resource_key=service_key)
         try:
             content = spec_content if spec_content is not None else str(service.get("spec_content") or "")
             if not content.strip():
@@ -513,9 +559,7 @@ class CapabilityService:
             raise
 
     def upsert_openapi_tool(self, actor: str, service_key: str, tool: dict[str, Any]) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_openapi_service(service_key) is None:
-            raise NotFound("service not found")
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.openapi_service, resource_key=service_key)
         tool_type = self._validate_tool_type(tool.get("tool_type"))
         saved = self.store.upsert_openapi_tool(
             service_key=service_key,
@@ -535,18 +579,18 @@ class CapabilityService:
         return self._openapi_tool_payload(saved)
 
     def list_openapi_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
-        self._require_enabled_openapi_service(service_key)
+        self._require_enabled_openapi_service(service_key, actor=actor)
         return [self._openapi_tool_payload(tool) for tool in self._active_openapi_tools(service_key)]
 
     def get_openapi_tool(self, actor: str, service_key: str, tool_name: str) -> dict[str, Any]:
-        self._require_enabled_openapi_service(service_key)
+        self._require_enabled_openapi_service(service_key, actor=actor)
         tool = self.store.get_openapi_tool(service_key, tool_name)
         if tool is None or tool.get("status") != "active":
             raise NotFound("tool not found")
         return self._openapi_tool_payload(tool)
 
     def set_openapi_tool_type(self, actor: str, service_key: str, tool_name: str, tool_type: ToolType | str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.openapi_service, resource_key=service_key)
         next_tool_type = self._validate_tool_type(tool_type)
         if self.store.get_openapi_service(service_key) is None:
             raise NotFound("service not found")
@@ -556,7 +600,7 @@ class CapabilityService:
         return self._openapi_tool_payload(self.store.update_openapi_tool_type(service_key, tool_name, next_tool_type))
 
     def delete_openapi_tool(self, actor: str, service_key: str, tool_name: str) -> None:
-        require_admin_user(actor, self.admins)
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.openapi_service, resource_key=service_key)
         if self.store.get_openapi_tool(service_key, tool_name) is None:
             raise NotFound("tool not found")
         self.store.delete_openapi_tool(service_key, tool_name)
@@ -567,18 +611,14 @@ class CapabilityService:
         删除顺序：先校验权限与存在性，再清理治理软关联（source/pin 规则无外键），
         最后删除服务行 —— mcp_tools 由外键 ON DELETE CASCADE 自动清除。
         """
-        require_admin_user(actor, self.admins)
-        if self.store.get_mcp_service(service_key) is None:
-            raise NotFound("service not found")
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.mcp_service, resource_key=service_key)
         self._purge_service_governance_rules(SourceType.mcp_service.value, service_key)
         self.store.delete_mcp_service(service_key)
         logger.info("已删除 MCP 能力服务 %s", service_key)
 
     def delete_openapi_service(self, actor: str, service_key: str) -> None:
         """硬删除一个 OpenAPI 服务，并清理能力平面里的软关联规则。"""
-        require_admin_user(actor, self.admins)
-        if self.store.get_openapi_service(service_key) is None:
-            raise NotFound("service not found")
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.openapi_service, resource_key=service_key)
         self._purge_service_governance_rules(SourceType.openapi_service.value, service_key)
         self.store.delete_openapi_service(service_key)
         logger.info("已删除 OpenAPI 能力服务 %s", service_key)
@@ -589,19 +629,17 @@ class CapabilityService:
         self.store.delete_pin_rules_by_service(service_key=service_key)
 
     def list_services(self, actor: str) -> list[dict[str, Any]]:
-        return [self._service_payload(service, redact_headers=True) for service in self.store.list_mcp_services()]
+        return [self._service_payload(service, redact_headers=True) for service in self.access.visible_resources(actor=actor, resource_type=ScopedResourceType.mcp_service)]
 
     def list_service_summaries(self, actor: str) -> list[dict[str, Any]]:
-        return [self._service_summary_payload(service) for service in self.store.list_mcp_service_summaries()]
+        visible = {item["service_key"] for item in self.access.visible_resources(actor=actor, resource_type=ScopedResourceType.mcp_service)}
+        return [self._service_summary_payload(service) for service in self.store.list_mcp_service_summaries() if service["service_key"] in visible]
 
     def get_service(self, actor: str, service_key: str) -> dict[str, Any]:
-        service = self.store.get_mcp_service(service_key)
-        if service is None:
-            raise NotFound("service not found")
+        service = self.access.require_resource_read(actor=actor, resource_type=ScopedResourceType.mcp_service, resource_key=service_key)
         return self._service_payload(service, redact_headers=True)
 
     def set_service_status(self, actor: str, service_key: str, status: McpServiceStatus | str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         try:
             next_status = McpServiceStatus(status)
         except ValueError as exc:
@@ -609,6 +647,7 @@ class CapabilityService:
         service = self.store.get_mcp_service(service_key)
         if service is None:
             raise NotFound("service not found")
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.mcp_service, resource_key=service_key)
         self.store.update_mcp_service_status(service_key, next_status)
         updated = self.store.get_mcp_service(service_key)
         if updated is None:
@@ -616,7 +655,7 @@ class CapabilityService:
         return self._service_payload(updated)
 
     def set_tool_type(self, actor: str, service_key: str, tool_name: str, tool_type: ToolType | str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.mcp_service, resource_key=service_key)
         try:
             next_tool_type = ToolType(tool_type)
         except ValueError as exc:
@@ -629,10 +668,7 @@ class CapabilityService:
         return self._tool_payload(self.store.update_mcp_tool_type(service_key, tool_name, next_tool_type))
 
     async def sync_tools(self, actor: str, service_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        service = self.store.get_mcp_service(service_key)
-        if service is None:
-            raise NotFound("service not found")
+        service = self.access.require_resource_write(actor=actor, resource_type=ScopedResourceType.mcp_service, resource_key=service_key)
         headers = _json_loads(service.get("headers_json"), {})
         try:
             tools = await self.mcp_client.list_tools(
@@ -662,11 +698,11 @@ class CapabilityService:
             raise ValidationError(f"MCP tool sync failed: {exc}") from exc
 
     def list_tools(self, actor: str, service_key: str) -> list[dict[str, Any]]:
-        self._require_enabled_service(service_key)
+        self._require_enabled_service(service_key, actor=actor)
         return [self._tool_payload(tool) for tool in self._active_tools(service_key)]
 
     def get_tool(self, actor: str, service_key: str, tool_name: str) -> dict[str, Any]:
-        self._require_enabled_service(service_key)
+        self._require_enabled_service(service_key, actor=actor)
         tool = self.store.get_mcp_tool(service_key, tool_name)
         if tool is None or tool.get("status") != "active":
             raise NotFound("tool not found")
@@ -683,15 +719,54 @@ class CapabilityService:
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
-        result = self.store.list_tool_summaries(
-            source_type=source_type,
-            service_key=service_key,
-            tool_type=tool_type,
-            query=query,
-            limit=limit,
-            offset=offset,
-        )
-        return result
+        visible_mcp = {
+            item["service_key"]
+            for item in self.access.visible_resources(
+                actor=actor, resource_type=ScopedResourceType.mcp_service
+            )
+        }
+        visible_openapi = {
+            item["service_key"]
+            for item in self.access.visible_resources(
+                actor=actor, resource_type=ScopedResourceType.openapi_service
+            )
+        }
+        all_items: list[dict[str, Any]] = []
+        raw_offset = 0
+        while True:
+            page = self.store.list_tool_summaries(
+                source_type=source_type,
+                service_key=service_key,
+                tool_type=tool_type,
+                query=query,
+                limit=200,
+                offset=raw_offset,
+            )
+            all_items.extend(page["items"])
+            raw_offset += len(page["items"])
+            if raw_offset >= page["total"] or not page["items"]:
+                break
+        visible_items = [
+            item
+            for item in all_items
+            if (
+                item["service_key"] in visible_mcp
+                if item["source_type"] == SourceType.mcp_service.value
+                else item["service_key"] in visible_openapi
+            )
+        ]
+        bounded_limit = min(max(int(limit), 1), 200)
+        bounded_offset = max(int(offset), 0)
+        counts: dict[str, int] = {}
+        for item in visible_items:
+            counts[item["tool_type"]] = counts.get(item["tool_type"], 0) + 1
+        return {
+            "items": visible_items[bounded_offset : bounded_offset + bounded_limit],
+            "total": len(visible_items),
+            "limit": bounded_limit,
+            "offset": bounded_offset,
+            "counts": counts,
+        }
 
     def pinned_tool_specs(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
         if profile_key is None:
@@ -699,6 +774,14 @@ class CapabilityService:
         preview = self.governance.profile_pin_preview(actor, profile_key)
         specs = []
         for item in preview.get("tools", []):
+            resource_type = (
+                ScopedResourceType.openapi_service
+                if item.get("source") == SourceType.openapi_service.value
+                else ScopedResourceType.mcp_service
+            )
+            record = self.access.get_resource(resource_type, item["service_key"])
+            if not self.access.can_read(actor=actor, scope=ResourceScope.from_record(record)):
+                continue
             input_schema = item.get("input_schema")
             if not isinstance(input_schema, dict):
                 input_schema = {}
@@ -1017,7 +1100,7 @@ class CapabilityService:
         profile_key: str | None = None,
         friendly_not_found: bool = False,
     ) -> dict[str, Any]:
-        return self._require_enabled(
+        service = self._require_enabled(
             service_key,
             self.store.get_mcp_service,
             "MCP service is not enabled",
@@ -1025,6 +1108,9 @@ class CapabilityService:
             profile_key=profile_key,
             friendly_not_found=friendly_not_found,
         )
+        if actor is not None:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(service))
+        return service
 
     def _require_enabled_openapi_service(
         self,
@@ -1034,7 +1120,7 @@ class CapabilityService:
         profile_key: str | None = None,
         friendly_not_found: bool = False,
     ) -> dict[str, Any]:
-        return self._require_enabled(
+        service = self._require_enabled(
             service_key,
             self.store.get_openapi_service,
             "OpenAPI service is not enabled",
@@ -1042,6 +1128,9 @@ class CapabilityService:
             profile_key=profile_key,
             friendly_not_found=friendly_not_found,
         )
+        if actor is not None:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(service))
+        return service
 
     def _assert_tool_executable(
         self,
@@ -1186,6 +1275,7 @@ class CapabilityService:
                 "headers_json",
                 "description",
                 "tags_json",
+                "visibility",
             )
         }
 
@@ -1203,6 +1293,7 @@ class CapabilityService:
                 "headers_json",
                 "description",
                 "tags_json",
+                "visibility",
             )
         }
 
