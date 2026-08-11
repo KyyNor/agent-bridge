@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager, nullcontext
 import json
 import logging
 import uuid
@@ -34,6 +35,10 @@ from agent_bridge.automation.workflows.incremental import (
 from agent_bridge.automation.workflows.artifact_service import ArtifactService
 from agent_bridge.automation.workflows.definition_import import DefinitionImportService
 from agent_bridge.automation.workflows.report_renderer import render_run_html_report
+from agent_bridge.automation.workflows.runtime_capability import (
+    WorkflowRuntimeCapability,
+    WorkflowRuntimeCapabilityRegistry,
+)
 from agent_bridge.automation.workflows.revisions import (
     definition_payload,
     workflow_content_hash,
@@ -68,6 +73,7 @@ class WorkflowService:
         self.store = store
         self.admins = admins
         self.access = access
+        self.runtime_capabilities = WorkflowRuntimeCapabilityRegistry()
         # Late-wired collaborators (set by AgentBridgeService after both the
         # agent service and skill service are constructed). Kept optional so
         # this service stays usable in isolated tests.
@@ -94,6 +100,60 @@ class WorkflowService:
             require_write=lambda actor, key: self._require_workflow_write(actor, key),
             require_create=self._require_workflow_create,
         )
+
+    def issue_runtime_capability(
+        self, *, run: dict[str, Any], initiated_by: str
+    ) -> WorkflowRuntimeCapability:
+        return self.runtime_capabilities.issue(
+            initiated_by=initiated_by,
+            workflow_key=str(run["workflow_key"]),
+            run_id=str(run["run_id"]),
+            profile_key=str(run["profile_key"]),
+            owner_group_key=str(run.get("owner_group_key") or ""),
+        )
+
+    def require_runtime_capability(
+        self,
+        token: str,
+        *,
+        workflow_key: str,
+        run_id: str,
+        profile_key: str | None,
+    ) -> WorkflowRuntimeCapability:
+        return self.runtime_capabilities.require(
+            token,
+            workflow_key=workflow_key,
+            run_id=run_id,
+            profile_key=profile_key,
+        )
+
+    def bind_runtime_capability(self, capability: WorkflowRuntimeCapability):
+        if self.access is None:
+            return nullcontext()
+        return self.access.bind_actor_group(
+            actor=capability.actor,
+            owner_group_key=capability.owner_group_key,
+        )
+
+    @contextmanager
+    def bind_workflow_owner_scope(self, workflow: dict[str, Any]):
+        """以非管理员临时主体校验或执行工作流所属组的数据范围。"""
+        if self.access is None:
+            yield sorted(self.admins)[0]
+            return
+        owner_group_key = str(workflow.get("owner_group_key") or "")
+        if not owner_group_key:
+            raise ValidationError("工作流缺少数据归属组")
+        runtime_actor = f"workflow-preflight:{uuid.uuid4().hex}"
+        with self.access.bind_actor_group(
+            actor=runtime_actor,
+            owner_group_key=owner_group_key,
+        ):
+            yield runtime_actor
+
+    def require_workflow_execution(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        """运行会改变任务、日志和产物，因此要求工作流写权限。"""
+        return self._require_workflow_write(actor, workflow_key)
 
     def upsert_definition(
         self,
@@ -843,6 +903,7 @@ class WorkflowService:
     def append_run_log(
         self,
         *,
+        actor: str | None = None,
         workflow_key: str,
         run_id: str,
         task_key: str | None,
@@ -851,6 +912,14 @@ class WorkflowService:
         message: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
+        if actor is not None:
+            self.require_workflow_run_context(
+                actor=actor,
+                require_write=True,
+                profile_key=None,
+                workflow_key=workflow_key,
+                run_id=run_id,
+            )
         return self.store.append_workflow_run_log(
             run_id=run_id,
             workflow_key=workflow_key,
@@ -883,6 +952,8 @@ class WorkflowService:
     def require_workflow_run_context(
         self,
         *,
+        actor: str | None = None,
+        require_write: bool = False,
         profile_key: str | None,
         workflow_key: str | None,
         run_id: str | None,
@@ -895,11 +966,22 @@ class WorkflowService:
             raise NotFound("workflow run not found")
         if run["workflow_key"] != workflow["workflow_key"] or run["profile_key"] != workflow["profile_key"]:
             raise ValidationError("workflow run context mismatch")
+        if actor is not None:
+            if require_write:
+                self._require_run_write(actor, run_id)
+            else:
+                self._require_run_read(actor, run_id)
         return workflow, run
 
-    def get_task_for_agent(self, *, profile_key: str | None, workflow_key: str, run_id: str) -> dict[str, Any]:
+    def get_task_for_agent(
+        self, *, actor: str, profile_key: str | None, workflow_key: str, run_id: str
+    ) -> dict[str, Any]:
         _workflow, run = self.require_workflow_run_context(
-            profile_key=profile_key, workflow_key=workflow_key, run_id=run_id
+            actor=actor,
+            require_write=True,
+            profile_key=profile_key,
+            workflow_key=workflow_key,
+            run_id=run_id,
         )
         selected_task_key = run.get("task_key")
         selected_task_version = str(run.get("task_version") or "")
@@ -921,12 +1003,19 @@ class WorkflowService:
     def set_tasks_for_agent(
         self,
         *,
+        actor: str,
         profile_key: str | None,
         workflow_key: str,
         run_id: str,
         tasks: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
+        self.require_workflow_run_context(
+            actor=actor,
+            require_write=True,
+            profile_key=profile_key,
+            workflow_key=workflow_key,
+            run_id=run_id,
+        )
         logger.info(
             "workflow_set_task 收到任务批次 workflow=%s run=%s requested=%d",
             workflow_key,
@@ -1238,6 +1327,21 @@ class WorkflowService:
             require_admin_user(actor, self.admins)
         else:
             self.access.require_read(
+                actor=actor,
+                scope=ResourceScope.from_record(
+                    {"owner_group_key": run.get("owner_group_key"), "visibility": "group"}
+                ),
+            )
+        return run
+
+    def _require_run_write(self, actor: str, run_id: str) -> dict[str, Any]:
+        run = self.store.get_workflow_run(run_id)
+        if run is None:
+            raise NotFound("workflow run not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_write(
                 actor=actor,
                 scope=ResourceScope.from_record(
                     {"owner_group_key": run.get("owner_group_key"), "visibility": "group"}

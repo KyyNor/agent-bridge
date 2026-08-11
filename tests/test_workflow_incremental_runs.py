@@ -356,6 +356,7 @@ def test_get_task_returns_the_task_preleased_for_its_run(wm_paths):
     assert leased is not None
 
     result = service.workflows.get_task_for_agent(
+        actor="root",
         profile_key="report-plane",
         workflow_key="incremental-report",
         run_id="selected-task-run",

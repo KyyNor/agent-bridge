@@ -311,6 +311,7 @@ class ScriptService:
         timeout_seconds: int | None,
         profile_key: str | None,
         workflow_context: dict[str, Any] | None,
+        workflow_capability_token: str | None = None,
         run_type: str = "mcp",
     ) -> dict[str, Any]:
         if run_type not in RUN_TYPES:
@@ -345,7 +346,14 @@ class ScriptService:
                 "run_id": (workflow_context or {}).get("run_id"),
             },
         }
-        process = self._run_python(script, run_id=run_id, envelope=envelope, timeout_seconds=timeout, actor=actor)
+        process = self._run_python(
+            script,
+            run_id=run_id,
+            envelope=envelope,
+            timeout_seconds=timeout,
+            actor=actor,
+            workflow_capability_token=workflow_capability_token,
+        )
         status = "success"
         error_message: str | None = None
         result: dict[str, Any] = {}
@@ -502,6 +510,7 @@ class ScriptService:
         envelope: dict[str, Any],
         timeout_seconds: int,
         actor: str,
+        workflow_capability_token: str | None,
     ) -> ScriptProcessResult:
         run_dir = self.base_run_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -518,7 +527,7 @@ class ScriptService:
                 capture_output=True,
                 timeout=timeout_seconds,
                 cwd=run_dir,
-                env=self._runtime_env(actor, envelope),
+                env=self._runtime_env(actor, envelope, workflow_capability_token),
                 check=False,
             )
             duration_ms = int((time.monotonic() - started) * 1000)
@@ -855,7 +864,12 @@ class ScriptService:
             return text
         return text[:MAX_CAPTURE_CHARS] + "\n...[truncated]"
 
-    def _runtime_env(self, actor: str, envelope: dict[str, Any]) -> dict[str, str]:
+    def _runtime_env(
+        self,
+        actor: str,
+        envelope: dict[str, Any],
+        workflow_capability_token: str | None = None,
+    ) -> dict[str, str]:
         try:
             config = load_server_config(self.paths)
             base_url = f"http://127.0.0.1:{config.port}"
@@ -869,5 +883,6 @@ class ScriptService:
             "AGENT_BRIDGE_WORKFLOW": "true" if workflow.get("enabled") else "false",
             "AGENT_BRIDGE_WORKFLOW_KEY": str(workflow.get("workflow_key") or ""),
             "AGENT_BRIDGE_WORKFLOW_RUN_ID": str(workflow.get("run_id") or ""),
+            "AGENT_BRIDGE_WORKFLOW_CAPABILITY": workflow_capability_token or "",
             "PYTHONIOENCODING": "utf-8",
         }

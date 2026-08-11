@@ -137,6 +137,7 @@ class AgentService:
         backend_key: str | None = None,
         timeout: float | None = None,
         run_key: str | None = None,
+        workflow_capability_token: str | None = None,
     ) -> AgentRunResult:
         """Run a one-shot coding-agent query and return a uniform result.
 
@@ -252,6 +253,7 @@ class AgentService:
                     actor=actor or self._default_actor(),
                     workflow_key=workflow_key,
                     run_id=run_id,
+                    workflow_capability_token=workflow_capability_token,
                 )
                 write_run_mcp_json(work_dir / ".mcp.json", mcp_config)
                 effective_setting_sources = setting_sources or (

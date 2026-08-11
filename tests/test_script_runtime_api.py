@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
+
 
 SCRIPT_CODE = """
 def main(envelope):
@@ -244,6 +246,72 @@ def test_runtime_workflow_routes_use_trusted_header_context(wm_paths):
         "workflow_set_task",
     ]
     assert all(item["source_key"] == "workflow" for item in tool_logs)
+
+
+def test_runtime_workflow_route_rejects_forged_group_and_accepts_capability(wm_paths):
+    client = _create_client(wm_paths)
+    svc = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    svc.access.bootstrap_admin_memberships()
+    svc.access.upsert_group(actor="root", group_key="team-a", name="A 组")
+    svc.access.upsert_group(actor="root", group_key="team-b", name="B 组")
+    svc.access.set_user_group(actor="root", user_id="alice", group_key="team-a")
+    svc.access.set_user_group(actor="root", user_id="bob", group_key="team-b")
+    svc.governance.upsert_profile(
+        actor="alice",
+        profile_key="team-a-profile",
+        name="A 组能力平面",
+        description="",
+        status="active",
+    )
+    svc.workflows.upsert_definition(
+        actor="alice",
+        workflow_key="team-a-workflow",
+        name="A 组工作流",
+        description="",
+        profile_key="team-a-profile",
+        definition={"nodes": [], "edges": []},
+        status="active",
+    )
+    run = svc.store.create_workflow_run(
+        run_id="team-a-run",
+        workflow_key="team-a-workflow",
+        profile_key="team-a-profile",
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/team-a-run",
+    )
+    context_headers = {
+        "X-Agent-Bridge-MetaMCP-Profile": "team-a-profile",
+        "X-Agent-Bridge-Workflow": "true",
+        "X-Agent-Bridge-Workflow-Key": "team-a-workflow",
+        "X-Agent-Bridge-Workflow-Run-Id": "team-a-run",
+    }
+
+    forged = client.post(
+        "/runtime/workflow/set-task",
+        headers={**context_headers, "X-Agent-Bridge-User": "bob"},
+        json={"tasks": [{"task_key": "forged", "payload": {}}]},
+    )
+
+    assert forged.status_code == 403
+    assert svc.store.get_workflow_task("team-a-workflow", "forged") is None
+
+    capability = svc.workflows.issue_runtime_capability(run=run, initiated_by="root")
+    trusted = client.post(
+        "/runtime/workflow/set-task",
+        headers={
+            **context_headers,
+            "X-Agent-Bridge-User": capability.actor,
+            WORKFLOW_CAPABILITY_HEADER: capability.token,
+        },
+        json={"tasks": [{"task_key": "trusted", "payload": {}}]},
+    )
+
+    assert trusted.status_code == 200
+    assert svc.store.get_workflow_task("team-a-workflow", "trusted") is not None
+    logs = svc.governance.list_logs(actor="root", entrypoint="runtime_workflow")
+    assert logs[0]["owner_group_key"] == "team-a"
 
 
 def test_script_test_route_accepts_legacy_script_params_body(wm_paths):

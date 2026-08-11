@@ -333,3 +333,40 @@ def test_mcp_route_exposes_workflow_tools_only_with_complete_workflow_headers(wm
     assert "artifacts_search" in incomplete_names
     assert "workflow_get_task" not in incomplete_names
     assert "workflow_get_task" in complete_names
+
+
+def test_mcp_route_rejects_forged_cross_group_workflow_context(wm_paths):
+    from agent_bridge.access_control.identity import IdentityConfig, RequestIdentityResolver
+    from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
+
+    svc = _create_service_with_workflow(wm_paths)
+    _create_run(svc)
+    svc.access.upsert_group(actor="root", group_key="team-b", name="B 组")
+    svc.access.set_user_group(actor="root", user_id="bob", group_key="team-b")
+    app = FastAPI()
+    setup_mcp_route(app, svc, RequestIdentityResolver(IdentityConfig()))
+    client = TestClient(app)
+
+    response = client.post(
+        "/mcp",
+        headers={
+            "Accept": "application/json, text/event-stream",
+            "X-Agent-Bridge-User": "bob",
+            "X-Agent-Bridge-Workflow": "true",
+            "X-Agent-Bridge-Workflow-Key": "page-report",
+            "X-Agent-Bridge-Workflow-Run-Id": "run_1",
+        },
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "workflow_set_task",
+                "arguments": {"tasks": [{"task_key": "forged", "payload": {}}]},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["isError"] is True
+    assert svc.store.get_workflow_task("page-report", "forged") is None

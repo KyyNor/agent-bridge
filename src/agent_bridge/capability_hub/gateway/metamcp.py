@@ -7,6 +7,7 @@ import json
 import keyword
 import logging
 import time
+from contextlib import nullcontext
 from contextvars import ContextVar
 from typing import Annotated, Any
 
@@ -17,7 +18,9 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 from pydantic import Field
 
 from agent_bridge.access_control.identity import RequestIdentityResolver
+from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
 from agent_bridge.core.config import default_user
+from agent_bridge.core.domain import AccessDenied
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.capability_hub.gateway.top_level_tools import top_level_mcp_tools
 
@@ -271,7 +274,7 @@ def create_mcp_server(
                 tool_name="workflow_get_task",
                 request={"workflow_key": workflow_key, "run_id": run_id},
                 handler=lambda: _workflow_get_task_if_enabled(
-                    bridge_service, active_profile, workflow_key, run_id
+                    bridge_service, active_profile, workflow_key, run_id, _active_actor()
                 ),
             )
 
@@ -294,7 +297,7 @@ def create_mcp_server(
                 tool_name="workflow_set_task",
                 request={"workflow_key": workflow_key, "run_id": run_id, "tasks": tasks},
                 handler=lambda: _workflow_set_task_if_enabled(
-                    bridge_service, active_profile, workflow_key, run_id, tasks
+                    bridge_service, active_profile, workflow_key, run_id, tasks, _active_actor()
                 ),
             )
 
@@ -339,6 +342,7 @@ def create_mcp_server(
                     stage=stage,
                     message=message,
                     payload=payload or {},
+                    actor=_active_actor(),
                 ),
             )
 
@@ -444,13 +448,17 @@ def _append_workflow_run_log(
     stage: str,
     message: str,
     payload: dict[str, Any],
+    actor: str,
 ) -> dict[str, Any]:
     service.workflows.require_workflow_run_context(
+        actor=actor,
+        require_write=True,
         profile_key=profile_key,
         workflow_key=workflow_key,
         run_id=run_id,
     )
     service.workflows.append_run_log(
+        actor=actor,
         workflow_key=workflow_key,
         run_id=run_id,
         task_key=task_key,
@@ -490,10 +498,11 @@ def _workflow_get_task_if_enabled(
     profile_key: str | None,
     workflow_key: str,
     run_id: str,
+    actor: str,
 ) -> dict[str, Any]:
     bridge_service.capabilities.require_top_level_mcp_tool_enabled("workflow_get_task")
     return bridge_service.workflows.get_task_for_agent(
-        profile_key=profile_key, workflow_key=workflow_key, run_id=run_id
+        actor=actor, profile_key=profile_key, workflow_key=workflow_key, run_id=run_id
     )
 
 
@@ -503,10 +512,15 @@ def _workflow_set_task_if_enabled(
     workflow_key: str,
     run_id: str,
     tasks: list[dict[str, Any]],
+    actor: str,
 ) -> dict[str, Any]:
     bridge_service.capabilities.require_top_level_mcp_tool_enabled("workflow_set_task")
     return bridge_service.workflows.set_tasks_for_agent(
-        profile_key=profile_key, workflow_key=workflow_key, run_id=run_id, tasks=tasks
+        actor=actor,
+        profile_key=profile_key,
+        workflow_key=workflow_key,
+        run_id=run_id,
+        tasks=tasks,
     )
 
 
@@ -529,7 +543,6 @@ def setup_mcp_route(
 
     @router.api_route("/mcp", methods=["POST", "GET", "DELETE"])
     async def handle_mcp(request: Request) -> Response:
-        actor = identity_resolver.resolve(request).user_id
         profile = request.headers.get("x-agent-bridge-metamcp-profile")
         workflow_header = request.headers.get("x-agent-bridge-workflow")
         workflow_key = request.headers.get("x-agent-bridge-workflow-key")
@@ -539,6 +552,22 @@ def setup_mcp_route(
             if workflow_header == "true" and workflow_key and workflow_run_id
             else None
         )
+        capability_token = request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip()
+        if capability_token:
+            if workflow_context is None:
+                raise AccessDenied("工作流 capability 缺少运行上下文")
+            runtime_capability = service.workflows.require_runtime_capability(
+                capability_token,
+                workflow_key=str(workflow_context["workflow_key"]),
+                run_id=str(workflow_context["run_id"]),
+                profile_key=profile,
+            )
+            profile = runtime_capability.profile_key
+            actor = runtime_capability.actor
+            runtime_scope = service.workflows.bind_runtime_capability(runtime_capability)
+        else:
+            actor = identity_resolver.resolve(request).user_id
+            runtime_scope = nullcontext()
         logger.info(
             "MCP 请求 method=%s actor=%s profile=%s workflow=%s",
             request.method,
@@ -546,21 +575,22 @@ def setup_mcp_route(
             profile,
             bool(workflow_context),
         )
-        actor_token = _request_actor.set(actor)
-        token = _request_profile.set(profile)
-        workflow_token = _request_workflow_context.set(workflow_context)
-        try:
-            mcp = create_mcp_server(service, profile_key=profile, workflow_context=workflow_context)
-            response = await _dispatch_mcp(mcp, request)
-            logger.info("MCP 响应 status=%d profile=%s", response.status_code, profile)
-            return response
-        except Exception as exc:
-            logger.error("MCP 错误 profile=%s 错误=%s", profile, exc)
-            raise
-        finally:
-            _request_workflow_context.reset(workflow_token)
-            _request_profile.reset(token)
-            _request_actor.reset(actor_token)
+        with runtime_scope:
+            actor_token = _request_actor.set(actor)
+            token = _request_profile.set(profile)
+            workflow_token = _request_workflow_context.set(workflow_context)
+            try:
+                mcp = create_mcp_server(service, profile_key=profile, workflow_context=workflow_context)
+                response = await _dispatch_mcp(mcp, request)
+                logger.info("MCP 响应 status=%d profile=%s", response.status_code, profile)
+                return response
+            except Exception as exc:
+                logger.error("MCP 错误 profile=%s 错误=%s", profile, exc)
+                raise
+            finally:
+                _request_workflow_context.reset(workflow_token)
+                _request_profile.reset(token)
+                _request_actor.reset(actor_token)
 
     app.include_router(router)
 

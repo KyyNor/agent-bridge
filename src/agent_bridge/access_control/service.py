@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -12,6 +14,9 @@ from agent_bridge.access_control.resources import ScopedResourceRegistry, Scoped
 
 
 _GROUP_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_RUNTIME_ACTOR_SCOPE: ContextVar[tuple[str, str] | None] = ContextVar(
+    "agent_bridge_runtime_actor_scope", default=None
+)
 
 
 class ResourceVisibility(str, Enum):
@@ -121,6 +126,24 @@ class AccessControlService:
             "is_maintenance_admin": actor in self.admins,
         }
 
+    @contextmanager
+    def bind_actor_group(self, *, actor: str, owner_group_key: str):
+        """为服务端签发的运行主体绑定可信业务组，不赋予管理员旁路。"""
+        if not actor or not owner_group_key:
+            raise ValidationError("运行主体和归属组不能为空")
+        token = _RUNTIME_ACTOR_SCOPE.set((actor, owner_group_key))
+        try:
+            yield
+        finally:
+            _RUNTIME_ACTOR_SCOPE.reset(token)
+
+    @staticmethod
+    def _runtime_group_key(actor: str) -> str | None:
+        scope = _RUNTIME_ACTOR_SCOPE.get()
+        if scope is None or scope[0] != actor:
+            return None
+        return scope[1]
+
     def new_resource_scope(
         self,
         *,
@@ -147,6 +170,9 @@ class AccessControlService:
         )
 
     def actor_group_key(self, actor: str, *, required: bool = False) -> str | None:
+        runtime_group_key = self._runtime_group_key(actor)
+        if runtime_group_key is not None:
+            return runtime_group_key
         membership = self.repository.get_membership(actor)
         if membership is None:
             if required:
@@ -167,7 +193,12 @@ class AccessControlService:
         return ResourceScope(owner_group_key=owner_group_key, visibility=resolved_visibility)
 
     def can_read(self, *, actor: str, scope: ResourceScope) -> bool:
-        if actor in self.admins or scope.visibility is ResourceVisibility.shared:
+        runtime_group_key = self._runtime_group_key(actor)
+        if scope.visibility is ResourceVisibility.shared:
+            return True
+        if runtime_group_key is not None:
+            return bool(scope.owner_group_key and runtime_group_key == scope.owner_group_key)
+        if actor in self.admins:
             return True
         membership = self.repository.get_membership(actor)
         return bool(
@@ -177,6 +208,9 @@ class AccessControlService:
         )
 
     def can_write(self, *, actor: str, scope: ResourceScope) -> bool:
+        runtime_group_key = self._runtime_group_key(actor)
+        if runtime_group_key is not None:
+            return bool(scope.owner_group_key and runtime_group_key == scope.owner_group_key)
         if actor in self.admins:
             return True
         membership = self.repository.get_membership(actor)
