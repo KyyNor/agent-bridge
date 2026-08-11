@@ -593,6 +593,34 @@ def test_run_installs_profile_claude_md_and_mcp_config(wm_paths, monkeypatch) ->
     assert mcp["mcpServers"]["agent-bridge"]["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
 
 
+def test_unauthorized_profile_is_rejected_before_agent_run_is_reserved(wm_paths) -> None:
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    bundle.access.upsert_group(actor="root", group_key="team-a", name="A 组")
+    bundle.access.upsert_group(actor="root", group_key="team-b", name="B 组")
+    bundle.access.set_user_group(actor="root", user_id="alice", group_key="team-a")
+    bundle.access.set_user_group(actor="root", user_id="bob", group_key="team-b")
+    bundle.governance.upsert_profile(
+        actor="alice",
+        profile_key="team-a-profile",
+        name="A 组能力平面",
+        description="",
+        status="active",
+    )
+
+    result = asyncio.run(
+        bundle.agents.run(
+            prompt="B 组敏感提示词",
+            agent_name="unauthorized",
+            profile="team-a-profile",
+            actor="bob",
+        )
+    )
+
+    assert result.ok is False
+    assert "AccessDenied" in str(result.error)
+    assert bundle.store.agent_runs.list(agent_name="unauthorized") == []
+
+
 def test_run_opencode_writes_native_mcp_config(wm_paths) -> None:
     from agent_bridge.agent_runtime.registry import CodingAgentRegistry
     from agent_bridge.agent_runtime.types import CodingAgentCapabilities, CodingAgentFinal, CodingAgentUpdate
@@ -666,7 +694,27 @@ def test_run_workflow_headers_passed_to_mcp_config(wm_paths, monkeypatch) -> Non
         yield _result()
 
     _patch_sdk(monkeypatch, fake_query)
-    service = AgentBridgeService.create(wm_paths, {"root"}).agents
+    bundle = AgentBridgeService.create(wm_paths, {"root"})
+    bundle.governance.upsert_profile(
+        actor="root", profile_key="abc", name="ABC", description="", status="active"
+    )
+    bundle.workflows.upsert_definition(
+        actor="root",
+        workflow_key="report-wf",
+        name="Report",
+        description="",
+        profile_key="abc",
+        status="active",
+    )
+    bundle.store.create_workflow_run(
+        run_id="report-wf_019edf",
+        workflow_key="report-wf",
+        profile_key="abc",
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/report-wf_019edf",
+    )
+    service = bundle.agents
     monkeypatch.setattr(
         service.governance, "render_profile_markdown", lambda actor, profile: {"markdown": "# x"}
     )
@@ -763,6 +811,25 @@ def test_run_logs_workflow_context(wm_paths, monkeypatch, tmp_path) -> None:
 
     _patch_sdk(monkeypatch, fake_query)
     bundle = AgentBridgeService.create(wm_paths, {"root"})
+    bundle.governance.upsert_profile(
+        actor="root", profile_key="report-plane", name="Report", description="", status="active"
+    )
+    bundle.workflows.upsert_definition(
+        actor="root",
+        workflow_key="report-wf",
+        name="Report Workflow",
+        description="",
+        profile_key="report-plane",
+        status="active",
+    )
+    bundle.store.create_workflow_run(
+        run_id="report-wf_abc123",
+        workflow_key="report-wf",
+        profile_key="report-plane",
+        task_key=None,
+        status="running",
+        temp_dir=str(tmp_path),
+    )
 
     asyncio.run(
         bundle.agents.run(

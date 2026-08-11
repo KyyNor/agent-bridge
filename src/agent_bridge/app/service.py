@@ -1047,14 +1047,23 @@ class AgentBridgeService:
 
     def get_doc(self, actor: str, doc_slug: str, backend: str | None = None) -> dict[str, Any]:
         doc = self._require_doc_visible(actor, doc_slug)
-        kbs = self.store.get_document_kbs(doc["id"], active_only=True)
+        kbs = [
+            kb
+            for kb in self.store.get_document_kbs(doc["id"], active_only=True)
+            if self.access.can_read(actor=actor, scope=ResourceScope.from_record(kb))
+        ]
         versions = self.store.list_versions(doc["id"])
         for version in versions:
             version.pop("archive_path", None)
         doc["kbs"] = kbs
         doc["versions"] = versions
         doc["kb_slugs"] = [kb["slug"] for kb in kbs]
-        sync_states = self.store.list_sync_states_for_doc(doc["id"])
+        visible_kb_ids = {int(kb["kb_id"]) for kb in kbs}
+        sync_states = [
+            state
+            for state in self.store.list_sync_states_for_doc(doc["id"])
+            if int(state["kb_id"]) in visible_kb_ids
+        ]
         if backend:
             sync_states = [s for s in sync_states if s["backend_slug"] == backend]
         doc["sync_states"] = sync_states
@@ -1065,16 +1074,24 @@ class AgentBridgeService:
         doc = self.store.get_document_by_slug(doc_slug)
         if doc is None:
             raise NotFound("document not found")
-        kbs = self.store.get_document_kbs(doc["id"], active_only=True)
-        if not any(item["kb_id"] == kb["id"] for item in kbs):
+        placements = self.store.get_document_kbs(doc["id"], active_only=True)
+        requested_placement = next(
+            (item for item in placements if item["kb_id"] == kb["id"]),
+            None,
+        )
+        if requested_placement is None:
             raise NotFound("document not found")
         versions = self.store.list_versions(doc["id"])
         for version in versions:
             version.pop("archive_path", None)
-        doc["kbs"] = kbs
+        doc["kbs"] = [requested_placement]
         doc["versions"] = versions
-        doc["kb_slugs"] = [item["slug"] for item in kbs]
-        doc["sync_states"] = self.store.list_sync_states_for_doc(doc["id"])
+        doc["kb_slugs"] = [requested_placement["slug"]]
+        doc["sync_states"] = [
+            state
+            for state in self.store.list_sync_states_for_doc(doc["id"])
+            if state["kb_id"] == kb["id"]
+        ]
         return doc
 
     def delete_document(self, actor: str, doc_slug: str, later: bool = True) -> dict[str, str]:
