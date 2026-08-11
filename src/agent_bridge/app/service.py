@@ -229,7 +229,6 @@ class AgentBridgeService:
             admins=admins,
             access=self.access,
         )
-        self.business_ledgers.init_schema()
         self.access.resources.register(BusinessLedgerAccessAdapter(self.business_ledgers))
         self.governance = CapabilityGovernanceService(
             store=store,
