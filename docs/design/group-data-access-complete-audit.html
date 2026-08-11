@@ -256,7 +256,7 @@
           <tr><td>用户直接调用 MCP/OpenAPI/知识检索/Agent</td><td>调用者当前组</td><td>即使使用其他组共享的资源，日志和运行仍只属于调用者组。</td></tr>
           <tr><td>用户手工运行工作流</td><td>工作流定义归属组</td><td>用户必须有该定义的运行/修改权限；运行快照定义组，防止用户后续换组影响历史。</td></tr>
           <tr><td>定时调度工作流</td><td>工作流定义归属组</td><td>scheduler 只是系统执行主体，不是数据所有者。</td></tr>
-          <tr><td>工作流节点启动 Agent/脚本</td><td>父 workflow run 归属组</td><td>通过显式 lineage 传递，不重新用进程用户推断。</td></tr>
+          <tr><td>工作流节点启动 Agent/脚本</td><td>父 workflow run 归属组</td><td>通过服务端短期 capability 与显式 lineage 传递；客户端自报 Header 不能作为授权依据。</td></tr>
           <tr><td>用户直接运行用户脚本</td><td>脚本归属组</td><td>调用者必须与脚本同组；运行继承脚本。</td></tr>
           <tr><td>知识库或仓库同步</td><td>根知识库/仓库归属组</td><td>共享状态不影响同步日志和内部产物归属。</td></tr>
           <tr><td>模型评估</td><td>发起调用者当前组</td><td>评测定义是系统资源，评测输入输出是发起组运行数据。</td></tr>
@@ -290,7 +290,8 @@
     <div class="commit"><strong>纠偏 6 · 前端管理与代理入口收口</strong><br>仅共享白名单资源显示共享开关；增加组归属/未归属修复界面；页面不做鉴权路由；检查 Dashboard、下载、导出、SSE 等非普通 JSON 入口。</div>
     <div class="commit"><strong>纠偏 7 · 全域回归与迁移验收</strong><br>覆盖同组读写、跨组拒绝、共享只读、管理员旁路、未映射用户、CLI Linux 用户、后台调度继承、用户换组历史不迁移；运行全量测试与前端检查。</div>
     <div class="commit"><strong>扩展 8 · 密码管理员访问</strong><br>增加裸访问/SSO 通用的管理员切换入口；首次原子设密；PBKDF2 哈希与 HttpOnly 管理员 Cookie；系统管理页改密与全会话失效；管理员复用现有跨组旁路，不复制业务资源权限判断。</div>
-    <div class="alert"><strong>最终验证：</strong><code>./scripts/test.sh full -q</code> 通过 1330 项 Python 测试；前端通过 249 项测试、Vue/TypeScript 类型检查和 Vite 生产构建。Ruff 与变更空白检查通过。</div>
+    <div class="commit"><strong>复审 9 · 运行身份与详情收口</strong><br>修正存量台账初始化顺序；定时工作流降权到 run 归属组并签发短期 capability；MCP/脚本 helper 校验 actor 与 run 写权限；文档详情过滤不可见 KB placement 和同步状态；Agent 在预留运行记录前校验 Profile 与 workflow lineage。</div>
+    <div class="alert"><strong>最终验证：</strong><code>./scripts/test.sh full -q</code> 通过 1337 项 Python 测试；前端通过 249 项测试、Vue/TypeScript 类型检查和 Vite 生产构建。Ruff 与变更空白检查通过。</div>
   </section>
 
   <section>
