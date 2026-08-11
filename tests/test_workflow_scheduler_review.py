@@ -1,6 +1,9 @@
+from contextlib import contextmanager
+
 from agent_bridge.automation.workflows.executor import WorkflowExecutionResult
 from agent_bridge.automation.workflows.incremental import IncrementalPlan
 from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
+from agent_bridge.core.domain import ValidationError
 
 
 class SchedulerStore:
@@ -138,3 +141,73 @@ def test_scheduler_allocates_concurrent_slots_fairly_with_per_workflow_limit(tmp
     scheduler._release_run_slot("workflow-a")
     scheduler._release_run_slot("workflow-a")
     assert scheduler._running == set()
+
+
+def test_scheduler_isolates_missing_owner_group_without_blocking_other_workflows(
+    tmp_path, monkeypatch
+):
+    workflows = [
+        {
+            "workflow_key": "broken-workflow",
+            "profile_key": "p",
+            "owner_group_key": "",
+            "status": "active",
+            "definition": {"nodes": [], "edges": []},
+        },
+        {
+            "workflow_key": "healthy-workflow",
+            "profile_key": "p",
+            "owner_group_key": "team-a",
+            "status": "active",
+            "definition": {"nodes": [], "edges": []},
+        },
+    ]
+
+    class TickStore:
+        @staticmethod
+        def list_workflow_definitions():
+            return workflows
+
+    class ScopeService:
+        def __init__(self):
+            self.bound = []
+
+        @contextmanager
+        def bind_workflow_owner_scope(self, workflow):
+            self.bound.append(workflow["workflow_key"])
+            if not workflow.get("owner_group_key"):
+                raise ValidationError("工作流缺少数据归属组")
+            yield "workflow-runtime"
+
+    started = []
+
+    class DeferredThread:
+        def __init__(self, *, target, args, daemon):
+            self.args = args
+
+        def start(self):
+            started.append(self.args[0])
+
+    service = ScopeService()
+    scheduler = WorkflowScheduler(
+        service=service,
+        store=TickStore(),
+        admins={"root"},
+        base_run_dir=tmp_path,
+        max_concurrent_runs=2,
+        max_concurrent_runs_per_workflow=1,
+    )
+    scheduler._start_time = None
+    scheduler._stop_time = None
+    monkeypatch.setattr(
+        "agent_bridge.automation.workflows.scheduler.threading.Thread",
+        DeferredThread,
+    )
+
+    scheduler.tick()
+    scheduler.tick()
+
+    assert scheduler.finished_today == {"broken-workflow"}
+    assert service.bound.count("broken-workflow") == 1
+    assert started == ["healthy-workflow"]
+    assert scheduler._running == {"healthy-workflow"}

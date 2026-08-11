@@ -14,7 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from agent_bridge.core.domain import AccessDenied, ConflictError, NotFound
+from agent_bridge.core.domain import AgentBridgeError, AccessDenied, ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
 from agent_bridge.core.timeutil import local_now, utc_iso
 from agent_bridge.agent_runtime.service import STOPPED_ERROR
@@ -310,6 +310,8 @@ class WorkflowScheduler:
             batch = self.next_workflow_batch(candidates, available=available)
             workflows_by_key = {item["workflow_key"]: item for item in workflows}
             for workflow_key in batch:
+                if workflow_key in self.finished_today:
+                    continue
                 workflow = workflows_by_key[workflow_key]
                 try:
                     with self._bind_workflow_owner_scope(workflow) as runtime_actor:
@@ -317,6 +319,15 @@ class WorkflowScheduler:
                 except WorkflowDefinitionValidationError as exc:
                     self.finished_today.add(workflow_key)
                     self._log_validation_failure(workflow_key, exc)
+                    continue
+                except AgentBridgeError as exc:
+                    self.finished_today.add(workflow_key)
+                    logger.warning(
+                        "Workflow 调度预检失败，已隔离至下一窗口 workflow=%s error_type=%s 原因=%s",
+                        workflow_key,
+                        type(exc).__name__,
+                        exc,
+                    )
                     continue
                 definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
                 self._reserve_run_slot(workflow_key)
