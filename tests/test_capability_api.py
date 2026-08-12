@@ -190,6 +190,16 @@ def test_capability_admin_page_serves_html(wm_paths) -> None:
     assert "智能中枢" in response.text
 
 
+def test_capability_admin_history_routes_serve_the_vue_entrypoint(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    response = client.get("/admin/capabilities/workflow/demo/edit", headers={"X-Agent-Bridge-User": "root"})
+
+    assert response.status_code == 200
+    assert "智能中枢" in response.text
+
+
 def test_root_redirects_to_capability_admin_page(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)

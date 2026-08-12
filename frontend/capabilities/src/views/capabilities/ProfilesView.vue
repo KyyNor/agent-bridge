@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Search, Plus, Settings } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import type { ProjectProfile } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
@@ -13,10 +14,11 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import ProfileDetailView from './ProfileDetailView.vue'
 import { confirm } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { navigateTo, registerNavigationGuard } from '../../lib/navigation'
+import { registerRouteLeaveGuard } from '../../router/guards'
 import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
+const router = useRouter()
 
 const profiles = ref<ProjectProfile[]>([])
 const loading = ref(true)
@@ -33,7 +35,7 @@ const formError = ref('')
 const copied = ref('')
 const detailRef = ref<{ hasUnsavedChanges: boolean } | null>(null)
 
-const removeNavigationGuard = registerNavigationGuard(async () => {
+const removeNavigationGuard = registerRouteLeaveGuard(async () => {
   if (!props.routeKey || !detailRef.value?.hasUnsavedChanges) return true
   return confirmDiscardChanges()
 })
@@ -131,7 +133,7 @@ async function copyCommand(profile: ProjectProfile) {
 }
 
 function openDetail(profile: ProjectProfile) {
-  void navigateTo(`profiles/${profile.profile_key}`)
+  void router.push(`/profiles/${profile.profile_key}`)
 }
 
 async function confirmDiscardChanges() {
@@ -143,12 +145,12 @@ async function confirmDiscardChanges() {
 }
 
 async function requestListNavigation() {
-  void navigateTo('profiles', { replace: true })
+  void router.replace('/profiles')
 }
 
 async function handleDetailSaved() {
   await loadProfiles({ fresh: true })
-  void navigateTo('profiles', { replace: true })
+  void router.replace('/profiles')
 }
 </script>
 

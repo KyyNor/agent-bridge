@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import NavIcon from './NavIcon.vue'
-import { navigateTo } from '../lib/navigation'
+import { useRouter } from 'vue-router'
 
 export interface NavItem {
   key: string
@@ -11,7 +11,7 @@ export interface NavItem {
 }
 
 export interface NavGroup {
-  label: string
+  label?: string
   items: NavItem[]
 }
 
@@ -21,8 +21,10 @@ defineProps<{
   footer?: string
 }>()
 
+const router = useRouter()
+
 function navigate(key: string) {
-  void navigateTo(key)
+  void router.push({ name: key })
 }
 </script>
 
@@ -43,7 +45,7 @@ function navigate(key: string) {
       <!-- Navigation -->
       <nav class="flex-1 overflow-y-auto px-3">
         <div v-for="group in navGroups" :key="group.label" class="mb-4">
-          <div class="px-2 pb-1 text-[11px] font-medium text-muted-foreground/50">
+          <div v-if="group.label" class="px-2 pb-1 text-[11px] font-medium text-muted-foreground/50">
             {{ group.label }}
           </div>
           <div class="space-y-0.5">

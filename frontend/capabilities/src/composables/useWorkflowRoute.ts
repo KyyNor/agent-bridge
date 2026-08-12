@@ -1,11 +1,11 @@
 import { computed, onUnmounted, type MaybeRefOrGetter, toValue } from 'vue'
 import { confirm } from './useConfirm'
-import { parseSubRoute, registerNavigationGuard } from '@/lib/navigation'
+import { registerRouteLeaveGuard } from '@/router/guards'
 
 export type WorkflowRouteMode = 'list' | 'new' | 'edit' | 'detail' | 'tasks' | 'progress'
 
 export function useWorkflowRoute(routeKey: MaybeRefOrGetter<string>, hasUnsavedChanges: MaybeRefOrGetter<boolean>) {
-  const routeParts = computed(() => parseSubRoute(toValue(routeKey)).segments)
+  const routeParts = computed(() => toValue(routeKey).split('?', 1)[0].split('/').filter(Boolean))
   const workflowKey = computed(() => routeParts.value[0] || '')
   const mode = computed<WorkflowRouteMode>(() => {
     if (!toValue(routeKey)) return 'list'
@@ -16,7 +16,7 @@ export function useWorkflowRoute(routeKey: MaybeRefOrGetter<string>, hasUnsavedC
   })
   const isFormPage = computed(() => mode.value === 'new' || mode.value === 'edit')
 
-  const removeNavigationGuard = registerNavigationGuard(() => {
+  const removeNavigationGuard = registerRouteLeaveGuard(() => {
     if (!isFormPage.value || !toValue(hasUnsavedChanges)) return true
     return confirm({
       title: mode.value === 'new' ? '放弃新建' : '放弃修改',

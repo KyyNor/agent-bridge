@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '..')
 const source = readFileSync(resolve(root, 'src/composables/useWorkflowTasks.ts'), 'utf8')
 
 test('batch operations protect app navigation and browser unload while active', () => {
-  assert.match(source, /registerNavigationGuard\(\(\) => \{[\s\S]*if \(!batchBusy\.value\) return true/)
+  assert.match(source, /registerRouteLeaveGuard\(\(\) => \{[\s\S]*if \(!batchBusy\.value\) return true/)
   assert.match(source, /title: '批量操作进行中'/)
   assert.match(source, /addEventListener\('beforeunload', handleBeforeUnload\)/)
   assert.match(source, /event\.preventDefault\(\)/)

@@ -11,10 +11,12 @@ function source(path: string) {
 
 test('app provides loading, error boundary, 404, and toast feedback at the shell level', () => {
   const app = source('App.vue')
-  assert.match(app, /loadingComponent: LoadingState/)
-  assert.match(app, /errorComponent: AsyncViewError/)
+  const router = source('router/index.ts')
+  const notFound = source('views/NotFoundView.vue')
+  assert.match(router, /loadingComponent: LoadingState/)
+  assert.match(router, /errorComponent: AsyncViewError/)
   assert.match(app, /<AppErrorBoundary/)
-  assert.match(app, /title="页面不存在"/)
+  assert.match(notFound, /title="页面不存在"/)
   assert.match(app, /<ToastViewport/)
 })
 

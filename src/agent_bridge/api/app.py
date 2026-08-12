@@ -244,4 +244,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     def capability_admin() -> HTMLResponse:
         return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")
 
+    @app.get("/admin/capabilities/{route_path:path}", response_class=HTMLResponse)
+    def capability_admin_history_route(route_path: str) -> HTMLResponse:
+        """为 Vue Router 的 History 路由提供深链接刷新入口。"""
+        return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")
+
     return app

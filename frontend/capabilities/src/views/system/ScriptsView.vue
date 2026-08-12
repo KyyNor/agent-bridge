@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, SyntaxCheckResult, WorkflowDefinition, WorkflowRun } from '../../api/types'
@@ -39,9 +40,10 @@ import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { navigateTo, parseSubRoute, registerNavigationGuard, routeReturnTo } from '../../lib/navigation'
+import { registerRouteLeaveGuard } from '../../router/guards'
 
 const props = defineProps<{ routeKey: string }>()
+const router = useRouter()
 
 const scripts = ref<ManagedScript[]>([])
 const profiles = ref<ProjectProfile[]>([])
@@ -95,12 +97,12 @@ const designResponse = ref<DesignAgentResponse<ScriptDesignResult> | null>(null)
 const designRunKey = ref('')
 const designStopRequested = ref(false)
 
-const routeParts = computed(() => parseSubRoute(props.routeKey).segments)
+const routeParts = computed(() => props.routeKey.split('?', 1)[0].split('/').filter(Boolean))
 const mode = computed<'list' | 'edit'>(() => (props.routeKey ? 'edit' : 'list'))
 const isNew = computed(() => routeParts.value[0] === 'new')
 const editingKey = computed(() => (isNew.value ? '' : routeParts.value[0] || ''))
 const requestedRunId = computed(() => routeParts.value[1] === 'run' ? routeParts.value[2] || '' : '')
-const returnToRoute = computed(() => routeReturnTo(props.routeKey))
+const returnToRoute = computed(() => new URLSearchParams(props.routeKey.split('?', 2)[1] || '').get('returnTo') || '')
 
 function snapshotForm() {
   return JSON.stringify({ form: form.value, outputSchemaEnabled: outputSchemaEnabled.value })
@@ -110,7 +112,7 @@ const formDirty = computed(() =>
   mode.value === 'edit' && !formLoading.value && Boolean(formBaseline.value) && snapshotForm() !== formBaseline.value,
 )
 
-const removeNavigationGuard = registerNavigationGuard(() => {
+const removeNavigationGuard = registerRouteLeaveGuard(() => {
   if (!formDirty.value) return true
   return confirm({
     title: '放弃未保存修改',
@@ -436,15 +438,15 @@ function toggleOutputSchema(enabled: boolean) {
 }
 
 function goList() {
-  void navigateTo(returnToRoute.value || 'scripts', { replace: true })
+  void router.replace(returnToRoute.value || '/scripts')
 }
 
 function openCreate() {
-  void navigateTo('scripts/new')
+  void router.push('/scripts/new')
 }
 
 function openEdit(item: ManagedScript) {
-  void navigateTo('scripts/' + item.script_key)
+  void router.push('/scripts/' + item.script_key)
 }
 
 async function deleteScript(item: ManagedScript) {
@@ -482,7 +484,7 @@ async function saveScript(): Promise<ManagedScript | null> {
     formBaseline.value = snapshotForm()
     // 新建或设计 agent 生成了新 key 后同步 URL，避免后续保存落到旧路由上下文。
     if (isNew.value || saved.script_key !== editingKey.value) {
-      void navigateTo('scripts/' + saved.script_key, { replace: true })
+      void router.replace('/scripts/' + saved.script_key)
     }
     return saved
   } catch (e: unknown) {
@@ -977,7 +979,7 @@ def main(envelope):
     </Dialog>
 
     <div v-if="scriptNotFound" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
-      无法加载该脚本（可能已被删除或不存在）。请<a class="underline" href="#scripts" @click.prevent="goList">返回列表</a>。
+      无法加载该脚本（可能已被删除或不存在）。请<button type="button" class="underline" @click="goList">返回列表</button>。
     </div>
 
     <div v-else class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">

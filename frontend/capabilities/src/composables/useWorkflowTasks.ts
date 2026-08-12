@@ -32,7 +32,7 @@ import {
 } from '../lib/workflowTasks'
 import { distinctActors, filterEventsByActor } from '../lib/workflowEvents'
 import { paginate } from '../lib/pagination'
-import { registerNavigationGuard } from '../lib/navigation'
+import { registerRouteLeaveGuard } from '../router/guards'
 import { confirm } from './useConfirm'
 
 function errorMessage(error: unknown) {
@@ -174,7 +174,7 @@ export function useWorkflowTasks(options: UseWorkflowTasksOptions) {
     && !!batchCurrentRunId.value
     && (batchAction.value === 'run' || !!batchSummary.value))
 
-  const removeBatchNavigationGuard = registerNavigationGuard(() => {
+  const removeBatchNavigationGuard = registerRouteLeaveGuard(() => {
     if (!batchBusy.value) return true
     return confirm({
       title: '批量操作进行中',

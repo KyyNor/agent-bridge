@@ -154,7 +154,7 @@ npm run build
 npm run check
 ```
 
-Vite 产物写入 `src/agent_bridge/static/capabilities/`。该目录不提交到 Git；发布 wheel 前必须先执行 `npm ci && npm run build`。
+Vite 产物写入 `src/agent_bridge/static/capabilities/`。该目录不提交到 Git；发布 wheel 前必须先执行 `npm ci && npm run build`。管理后台使用 Vue Router 的 History 路由：部署入口为 `/admin/capabilities/`，服务端会将其下的深链接刷新回退到同一前端入口；`npm run dev` 时使用 `/static/capabilities/` 基址，Vite 的 SPA fallback 同样支持子路由刷新。
 
 CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或查询失败时，API 会明确返回后端不可用；安装 CLI 后需要重新同步受影响仓库。
 

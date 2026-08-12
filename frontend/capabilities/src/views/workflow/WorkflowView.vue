@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
 import type { ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
@@ -50,13 +51,6 @@ import {
   canRunTask,
 } from '../../lib/workflowTasks'
 import { renderMarkdown } from '../../lib/markdown'
-import {
-  buildAgentRunHash,
-  buildScriptRunHash,
-  buildWorkflowTaskProgressHash,
-  currentHash,
-  navigateTo,
-} from '../../lib/navigation'
 import { useWorkflowRoute } from '../../composables/useWorkflowRoute'
 import { useWorkflowEditorState } from '../../composables/useWorkflowEditorState'
 import { useWorkflowArtifacts } from '../../composables/useWorkflowArtifacts'
@@ -69,6 +63,7 @@ import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 const WORKFLOW_RUN_CACHE_LIMIT = 50
 const ARTIFACT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
 const props = defineProps<{ routeKey: string }>()
+const router = useRouter()
 const { toast } = useToast()
 
 const workflows = ref<WorkflowDefinition[]>([])
@@ -155,7 +150,7 @@ const {
     selectedKey.value = saved.workflow_key
     workflows.value = await api.listWorkflows()
     await loadRunOverviews()
-    void navigateTo(`workflow/${saved.workflow_key}/detail`, { replace: true })
+    void router.replace(`/workflow/${saved.workflow_key}/detail`)
   },
 })
 const editedWorkflowRunBusy = computed(() => runValidationGuard.value.validating || testing.value)
@@ -484,7 +479,7 @@ const {
     setProgressDetailError: (value: string) => { progressDetailError.value = value },
   },
   navigateToTaskProgress: (workflowKey, runId) => {
-    void navigateTo(buildWorkflowTaskProgressHash(workflowKey, runId))
+    void router.push(`/workflow/${workflowKey}/progress/${runId}`)
   },
 })
 
@@ -574,11 +569,11 @@ watch([runPage, runPageSize], () => {
 })
 
 function openCreate() {
-  void navigateTo('workflow/new')
+  void router.push('/workflow/new')
 }
 
 function openEdit(item: WorkflowDefinition) {
-  void navigateTo(`workflow/${item.workflow_key}/edit`)
+  void router.push(`/workflow/${item.workflow_key}/edit`)
 }
 
 function manualInput(): Record<string, unknown> | null {
@@ -655,7 +650,7 @@ async function acceptWorkflowDesign() {
 }
 
 async function openDetail(item: WorkflowDefinition) {
-  void navigateTo(`workflow/${item.workflow_key}/detail`)
+  void router.push(`/workflow/${item.workflow_key}/detail`)
 }
 
 async function prepareDetail(item: WorkflowDefinition) {
@@ -676,7 +671,7 @@ async function selectDetailTab(value: string) {
 }
 
 function goList() {
-  void navigateTo('workflow', { replace: true })
+  void router.replace('/workflow')
 }
 
 /** Navigate back to the detail page of the current workflow, the hub for
@@ -688,7 +683,7 @@ function goDetail() {
     goList()
     return
   }
-  void navigateTo(`workflow/${key}/detail`, { replace: true })
+  void router.replace(`/workflow/${key}/detail`)
 }
 
 /** Return from the edit/new page; the shared navigation guard handles dirty forms. */
@@ -930,7 +925,7 @@ async function confirmWorkflowImport() {
       return
     }
     selectedKey.value = result.workflow_key
-    void navigateTo(`workflow/${result.workflow_key}/detail`)
+    void router.push(`/workflow/${result.workflow_key}/detail`)
   } catch (e: unknown) {
     if (isCurrentWorkflowImportRequest(requestToken)) workflowImportError.value = errorMessage(e)
   } finally {
@@ -952,7 +947,7 @@ async function openTasks(item: WorkflowDefinition) {
     await loadTasks(item.workflow_key)
     return
   }
-  void navigateTo(`workflow/${item.workflow_key}/tasks`)
+  void router.push(`/workflow/${item.workflow_key}/tasks`)
 }
 
 async function prepareTasks(item: WorkflowDefinition) {
@@ -1020,7 +1015,7 @@ async function confirmClearWorkflow() {
 <template>
   <div class="space-y-5">
     <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
-      {{ routeError }}。请<a class="underline" href="#workflow" @click.prevent="goList">返回列表</a>。
+      {{ routeError }}。请<button type="button" class="underline" @click="goList">返回列表</button>。
     </div>
 
     <template v-if="routeMode === 'list'">

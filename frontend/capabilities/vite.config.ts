@@ -25,7 +25,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/': 'http://127.0.0.1:8765',
+      '/': {
+        target: 'http://127.0.0.1:8765',
+        // 让 Vite 自己处理管理后台的 History 路由，API 请求仍代理到后端。
+        bypass(req) {
+          if (req.url?.startsWith('/static/capabilities/')) return req.url
+          return undefined
+        },
+      },
     },
   },
 })

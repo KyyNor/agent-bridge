@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 import { Search, RotateCw, ArrowLeft } from '@lucide/vue'
 import { api } from '../../api/client'
@@ -23,13 +24,13 @@ import {
 } from '../../lib/agentRunStatus'
 import { countAgentRunTabs } from '../../lib/filterTabs'
 import { LOG_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
-import { buildAgentRunHash, navigateTo, parseSubRoute, routeReturnTo } from '../../lib/navigation'
 import { useSubagentDetails } from '../../composables/useSubagentDetails'
 import { useAgentRunEventStream } from '../../composables/useAgentRunEventStream'
 import { lastAgentRunEventId, mergeAgentRunEvent, normalizeAgentRunEvents } from '../../lib/agentRunEvents'
 import { queryClient, queryKeys } from '../../lib/query'
 
-const props = defineProps<{ routeKey?: string }>()
+const route = useRoute()
+const router = useRouter()
 
 const okFilter = ref<AgentRunFilter>('')
 const search = ref('')
@@ -38,7 +39,7 @@ const page = ref(1)
 const pageSize = ref(50)
 
 // Detail (sub-route) state. When routeKey is set we show a detail panel instead
-// of the list — enabling deep links (#agent-runs/{runKey}) aligned with how the
+// of the list — enabling deep links (/agent-runs/{runKey}) aligned with how the
 // workflow view handles its sub-routes.
 const selectedRun = ref<AgentRun | null>(null)
 const payloads = ref<Record<string, string>>({})
@@ -67,8 +68,11 @@ function subagentDetailErrorFor(taskId: string) {
 }
 
 /** The run key extracted from the sub-route (e.g. "agent-runs/<runKey>"). */
-const activeRunKey = computed(() => parseSubRoute(props.routeKey || '').segments[0] || '')
-const returnToRoute = computed(() => routeReturnTo(props.routeKey || ''))
+const activeRunKey = computed(() => {
+  const value = route.params.routeKey
+  return Array.isArray(value) ? value[0] || '' : String(value || '')
+})
+const returnToRoute = computed(() => typeof route.query.returnTo === 'string' ? route.query.returnTo : '')
 
 function formatDate(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -154,7 +158,7 @@ onUnmounted(() => {
 
 function openDetail(run: AgentRun) {
   selectedRun.value = run
-  void navigateTo(buildAgentRunHash(run.run_key, returnToRoute.value))
+  void router.push({ path: `/agent-runs/${run.run_key}`, query: returnToRoute.value ? { returnTo: returnToRoute.value } : {} })
 }
 
 function backToList() {
@@ -162,7 +166,7 @@ function backToList() {
   payloads.value = {}
   payloadErrors.value = {}
   stopDetailEventStream()
-  void navigateTo(returnToRoute.value || 'agent-runs', { replace: true })
+  void router.replace(returnToRoute.value || '/agent-runs')
 }
 async function loadPayload(ref: string) {
   if (!ref || payloads.value[ref] !== undefined) return
