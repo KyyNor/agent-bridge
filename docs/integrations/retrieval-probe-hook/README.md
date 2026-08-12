@@ -112,7 +112,7 @@ user/assistant 的后端，应启用相邻目录
 请求：
 
 ```bash
-curl -X POST http://127.0.0.1:8765/retrieval/probe \
+curl -X POST http://127.0.0.1:8765/api/v1/retrieval/probe \
   -H 'Content-Type: application/json' \
   -H 'X-Agent-Bridge-User: alice' \
   -d '{

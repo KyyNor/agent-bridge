@@ -43,7 +43,8 @@
     "shadcn-vue": "^2.7.3",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
-    "vue": "^3.5.0"
+    "vue": "^3.5.0",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@vitejs/plugin-legacy": "^8.2.1",

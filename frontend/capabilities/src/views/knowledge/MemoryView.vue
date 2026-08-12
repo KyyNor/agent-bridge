@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowLeft, Database, Maximize2, Minimize2, Plus, RefreshCw, Search, Trash2 } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { MemoryBlock, MemoryDashboardStatus, MemorySearchResult, MemoryTimelineResult } from '../../api/types'
@@ -14,7 +15,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { navigateTo } from '../../lib/navigation'
+const router = useRouter()
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -243,11 +244,11 @@ async function loadTimeline(cursor?: string | null) {
 }
 
 function goList() {
-  void navigateTo('memory', { replace: true })
+  void router.replace('/memory')
 }
 
 function openDetail(block: MemoryBlock) {
-  void navigateTo('memory/' + block.block_key)
+  void router.push('/memory/' + block.block_key)
 }
 
 // 记忆区块 status → StatusBadge 语义状态（active 统一为「启用」语义，与其它实体一致）

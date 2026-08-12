@@ -61,7 +61,7 @@ def test_retrieval_probe_api_returns_structured_payload(wm_paths, monkeypatch) -
         fake_probe,
     )
     response = TestClient(app).post(
-        "/retrieval/probe",
+        "/api/v1/retrieval/probe",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "profile_key": "dev",
@@ -92,12 +92,12 @@ def test_retrieval_probe_api_validates_required_fields_and_bounds(wm_paths) -> N
     headers = {"X-Agent-Bridge-User": "root"}
 
     missing = client.post(
-        "/retrieval/probe",
+        "/api/v1/retrieval/probe",
         headers=headers,
         json={"prompt": "订单"},
     )
     invalid = client.post(
-        "/retrieval/probe",
+        "/api/v1/retrieval/probe",
         headers=headers,
         json={
             "profile_key": "dev",
@@ -129,7 +129,7 @@ def test_retrieval_probe_hook_api_forwards_standard_hook_request(wm_paths, monke
     )
     raw_payload = {"hook_event_name": "UserPromptSubmit", "prompt": "订单", "cwd": "/repo"}
     response = TestClient(app).post(
-        "/retrieval/hooks/claude-code/full-probe",
+        "/api/v1/retrieval/hooks/claude-code/full-probe",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "profile_key": "dev",
@@ -155,7 +155,7 @@ def test_retrieval_probe_hook_api_forwards_standard_hook_request(wm_paths, monke
 def test_retrieval_probe_hook_api_validates_timeout_bounds(wm_paths) -> None:
     client = TestClient(create_app(paths=wm_paths, admins={"root"}))
     response = client.post(
-        "/retrieval/hooks/claude-code/full-probe",
+        "/api/v1/retrieval/hooks/claude-code/full-probe",
         headers={"X-Agent-Bridge-User": "root"},
         json={"profile_key": "dev", "payload": {}, "hook_timeout_seconds": 301},
     )
@@ -183,7 +183,7 @@ def test_client_posts_retrieval_probe_with_explicit_timeout(monkeypatch) -> None
     assert result == {"probe_id": "probe_test"}
     assert captured == {
         "method": "POST",
-        "path": "/retrieval/probe",
+        "path": "/api/v1/retrieval/probe",
         "json": payload,
         "timeout": 12.0,
     }
@@ -209,7 +209,7 @@ def test_client_posts_retrieval_probe_hook_with_explicit_timeout(monkeypatch) ->
     assert result["status"] == "ok"
     assert captured == {
         "method": "POST",
-        "path": "/retrieval/hooks/claude-code/full-probe",
+        "path": "/api/v1/retrieval/hooks/claude-code/full-probe",
         "json": payload,
         "timeout": 12.0,
     }

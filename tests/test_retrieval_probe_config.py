@@ -21,17 +21,17 @@ def test_llm_config_api_masks_preserves_and_clears_key(wm_paths) -> None:
     app = create_app(wm_paths, admins={"root"})
     with TestClient(app) as client:
         headers = {"X-Agent-Bridge-User": "root"}
-        response = client.put("/retrieval-probe/llm-config", headers=headers, json={
+        response = client.put("/api/v1/retrieval-probe/llm-config", headers=headers, json={
             "base_url": "http://llm.test/v1", "model": "small", "api_key": "secret",
         })
         assert response.status_code == 200
         assert response.json()["api_key_set"] is True
         assert "api_key" not in response.json()
-        retained = client.put("/retrieval-probe/llm-config", headers=headers, json={
+        retained = client.put("/api/v1/retrieval-probe/llm-config", headers=headers, json={
             "base_url": "http://llm.test/v1", "model": "small", "api_key": "",
         })
         assert retained.json()["api_key_set"] is True
-        cleared = client.put("/retrieval-probe/llm-config", headers=headers, json={
+        cleared = client.put("/api/v1/retrieval-probe/llm-config", headers=headers, json={
             "base_url": "http://llm.test/v1", "model": "small", "clear_api_key": True,
         })
         assert cleared.json()["api_key_set"] is False

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Search, Plus, RotateCw, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import type { CodeRepoCategory, CodeRepository, ProjectProfile, TestCloneResult } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
@@ -14,7 +15,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { confirm, alert } from '../../composables/useConfirm'
 import CodeRepoDetailView from './CodeRepoDetailView.vue'
-import { navigateTo } from '../../lib/navigation'
+const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
@@ -199,11 +200,11 @@ async function deleteRepo(r: CodeRepository) {
 }
 
 function openDetail(r: CodeRepository) {
-  void navigateTo(`code-repos/${r.repo_key}`)
+  void router.push(`/code-repos/${r.repo_key}`)
 }
 
 function backToList() {
-  void navigateTo('code-repos', { replace: true })
+  void router.replace('/code-repos')
 }
 
 const filteredRepos = computed(() => {

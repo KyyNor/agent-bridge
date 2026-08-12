@@ -172,7 +172,7 @@ def test_agent_runs_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> Non
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        f"/agent-runs/workflow_runA/subagent-detail?task_id={task_id}",
+        f"/api/v1/agent-runs/workflow_runA/subagent-detail?task_id={task_id}",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -183,7 +183,7 @@ def test_agent_runs_api_returns_subagent_detail(wm_paths, tmp_path: Path) -> Non
 
     # The old workflow-scoped endpoint is gone (404).
     old = client.get(
-        f"/workflow-runs/run_1/subagent-detail?task_id={task_id}",
+        f"/api/v1/workflow-runs/run_1/subagent-detail?task_id={task_id}",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert old.status_code == 404

@@ -62,7 +62,7 @@ test('validateWorkflow posts draft workflow without saving it', async () => {
 
     assert.equal(result.valid, true)
     assert.equal(calls.length, 1)
-    assert.equal(calls[0].url, '/workflows/validate')
+    assert.equal(calls[0].url, '/api/v1/workflows/validate')
     assert.equal(calls[0].init.method, 'POST')
     assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
       workflow: {
@@ -94,7 +94,7 @@ test('workflow list reads bypass the browser cache after an import', async () =>
   try {
     await api.listWorkflows()
     assert.equal(calls.length, 1)
-    assert.equal(calls[0].url, '/workflows')
+    assert.equal(calls[0].url, '/api/v1/workflows')
     assert.equal(calls[0].init.cache, 'no-store')
   } finally {
     globalThis.fetch = originalFetch

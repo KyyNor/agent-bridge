@@ -103,7 +103,7 @@ def _post_json(path: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 def execute(service: str, tool_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     return _post_json(
-        "/capabilities/execute",
+        "/api/v1/capabilities/execute",
         {
             "service": service,
             "tool_name": tool_name,
@@ -114,12 +114,12 @@ def execute(service: str, tool_name: str, params: dict[str, Any] | None = None) 
 
 def workflow_get_task() -> dict[str, Any]:
     _require_workflow_context()
-    return _post_json("/runtime/workflow/get-task", {})
+    return _post_json("/api/v1/runtime/workflow/get-task", {})
 
 
 def workflow_set_task(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     _require_workflow_context()
-    return _post_json("/runtime/workflow/set-task", {"tasks": tasks})
+    return _post_json("/api/v1/runtime/workflow/set-task", {"tasks": tasks})
 
 
 def workflow_run_log(
@@ -131,7 +131,7 @@ def workflow_run_log(
 ) -> dict[str, Any]:
     _require_workflow_context()
     return _post_json(
-        "/runtime/workflow/run-log",
+        "/api/v1/runtime/workflow/run-log",
         {
             "level": level,
             "stage": stage,

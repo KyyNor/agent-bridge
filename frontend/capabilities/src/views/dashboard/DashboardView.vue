@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Server, Wrench, CheckCircle, XCircle, Plus, RotateCw } from '@lucide/vue'
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import type { CompletedWorkflowTopItem, McpService } from '../../api/types'
 import { timeAgo } from '../../lib/time'
 import StatCard from '../../components/StatCard.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
-import { navigateTo } from '../../lib/navigation'
+const router = useRouter()
 
 const services = ref<McpService[]>([])
 const loading = ref(true)
@@ -17,8 +18,8 @@ const completedWorkflowTop = ref<CompletedWorkflowTopItem[]>([])
 const completedWorkflowTopPeriodLabel = ref('')
 const completedWorkflowTopLoading = ref(true)
 
-function goto(hash: string) {
-  void navigateTo(hash)
+function goto(path: string) {
+  void router.push(`/${path}`)
 }
 
 onMounted(async () => {

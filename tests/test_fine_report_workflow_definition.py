@@ -52,7 +52,7 @@ def test_fine_report_workflow_import_reports_missing_script_reasons(wm_paths):
     client = TestClient(create_app(wm_paths, {"root"}))
 
     response = client.post(
-        "/workflows/import/preview",
+        "/api/v1/workflows/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
         files={
             "file": (

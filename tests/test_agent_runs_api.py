@@ -46,7 +46,7 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     client = _client(wm_paths)
     headers = {"X-Agent-Bridge-User": "root"}
 
-    listed = client.get("/agent-runs", headers=headers)
+    listed = client.get("/api/v1/agent-runs", headers=headers)
     assert listed.status_code == 200
     keys = {row["run_key"] for row in listed.json()}
     assert keys == {"greeter_abc", "failer_def", "runner_xyz"}
@@ -55,19 +55,19 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     assert "events" not in listed.json()[0]
 
     # filter by ok=true
-    ok_only = client.get("/agent-runs?ok=true", headers=headers).json()
+    ok_only = client.get("/api/v1/agent-runs?ok=true", headers=headers).json()
     assert [row["run_key"] for row in ok_only] == ["greeter_abc"]
 
     # filter by agent_name
-    one = client.get("/agent-runs?agent_name=failer", headers=headers).json()
+    one = client.get("/api/v1/agent-runs?agent_name=failer", headers=headers).json()
     assert [row["run_key"] for row in one] == ["failer_def"]
 
     # filter by terminal status, so running placeholders are not treated as failed.
-    failed_only = client.get("/agent-runs?status=failed", headers=headers).json()
+    failed_only = client.get("/api/v1/agent-runs?status=failed", headers=headers).json()
     assert [row["run_key"] for row in failed_only] == ["failer_def"]
 
     # detail includes prompt / result / events
-    detail = client.get("/agent-runs/greeter_abc", headers=headers).json()
+    detail = client.get("/api/v1/agent-runs/greeter_abc", headers=headers).json()
     assert detail["backend_key"] == "opencode"
     assert detail["prompt"] == "hi"
     assert detail["result"] == "hello"
@@ -75,7 +75,7 @@ def test_agent_runs_api_lists_filters_and_gets_detail(wm_paths) -> None:
     assert detail["events"][0]["kind"] == "result"
 
     # 404 for missing
-    missing = client.get("/agent-runs/nope", headers=headers)
+    missing = client.get("/api/v1/agent-runs/nope", headers=headers)
     assert missing.status_code == 404
 
 
@@ -101,26 +101,26 @@ def test_agent_run_stop_api_handles_active_terminal_pending_and_missing(wm_paths
     )
     headers = {"X-Agent-Bridge-User": "root"}
 
-    active = client.post("/agent-runs/active_run/stop", headers=headers)
+    active = client.post("/api/v1/agent-runs/active_run/stop", headers=headers)
     assert active.status_code == 202
     assert active.json() == {"status": "stopping", "run_key": "active_run"}
     assert svc.agents.control_registry.is_stop_requested("active_run") is True
 
-    repeated = client.post("/agent-runs/active_run/stop", headers=headers)
+    repeated = client.post("/api/v1/agent-runs/active_run/stop", headers=headers)
     assert repeated.status_code == 202
     assert repeated.json()["status"] == "stopping"
 
-    terminal = client.post("/agent-runs/completed_run/stop", headers=headers)
+    terminal = client.post("/api/v1/agent-runs/completed_run/stop", headers=headers)
     assert terminal.status_code == 200
     assert terminal.json()["run_key"] == "completed_run"
     assert terminal.json()["status"] == "completed"
 
     svc.agents.request_stop("pending_run")
-    pending = client.post("/agent-runs/pending_run/stop", headers=headers)
+    pending = client.post("/api/v1/agent-runs/pending_run/stop", headers=headers)
     assert pending.status_code == 202
     assert pending.json() == {"status": "stopping", "run_key": "pending_run"}
 
-    missing = client.post("/agent-runs/missing_run/stop", headers=headers)
+    missing = client.post("/api/v1/agent-runs/missing_run/stop", headers=headers)
     assert missing.status_code == 404
 
 
@@ -138,13 +138,13 @@ def test_agent_run_stop_requires_admin_and_active_controller_for_running_rows(wm
     headers = {"X-Agent-Bridge-User": "root"}
 
     non_admin = client.post(
-        "/agent-runs/stale_running/stop",
+        "/api/v1/agent-runs/stale_running/stop",
         headers={"X-Agent-Bridge-User": "viewer"},
     )
     assert non_admin.status_code == 403
     assert not svc.agents.control_registry.has_pending_control("stale_running")
 
-    stale = client.post("/agent-runs/stale_running/stop", headers=headers)
+    stale = client.post("/api/v1/agent-runs/stale_running/stop", headers=headers)
     assert stale.status_code == 409
     assert not svc.agents.control_registry.has_pending_control("stale_running")
 
@@ -156,7 +156,7 @@ def test_agent_run_stop_accepts_active_registration_before_database_row(wm_paths
     svc.agents.control_registry.register("registered_before_row")
 
     response = client.post(
-        "/agent-runs/registered_before_row/stop",
+        "/api/v1/agent-runs/registered_before_row/stop",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -198,11 +198,11 @@ def test_agent_runs_api_filters_by_workflow_run_id(wm_paths) -> None:
     headers = {"X-Agent-Bridge-User": "root"}
 
     # Reverse-lookup by workflow_run_id returns exactly the one matching row.
-    rows = client.get("/agent-runs?workflow_run_id=run_1", headers=headers).json()
+    rows = client.get("/api/v1/agent-runs?workflow_run_id=run_1", headers=headers).json()
     assert [row["run_key"] for row in rows] == ["workflow_runA"]
 
     # And filterable by workflow_key returns both.
-    rows = client.get("/agent-runs?workflow_key=github-summary", headers=headers).json()
+    rows = client.get("/api/v1/agent-runs?workflow_key=github-summary", headers=headers).json()
     assert {row["run_key"] for row in rows} == {"workflow_runA", "workflow_runB"}
 
 
@@ -247,7 +247,7 @@ def test_agent_runs_api_paginated_search_and_status_counts(wm_paths) -> None:
 
     client = _client(wm_paths)
     response = client.get(
-        "/agent-runs",
+        "/api/v1/agent-runs",
         params={"paginated": "true", "search": "shared", "status": "failed", "limit": 1, "offset": -4},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -277,12 +277,12 @@ def test_agent_runs_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:
     client = _client(wm_paths)
     headers = {"X-Agent-Bridge-User": "root"}
     first = client.get(
-        "/agent-runs",
+        "/api/v1/agent-runs",
         params={"paginated": "true", "limit": 10, "offset": 0},
         headers=headers,
     ).json()
     last = client.get(
-        "/agent-runs",
+        "/api/v1/agent-runs",
         params={"paginated": "true", "limit": 10, "offset": 200},
         headers=headers,
     ).json()
@@ -436,7 +436,7 @@ def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path
     headers = {"X-Agent-Bridge-User": "root"}
 
     # Live file takes precedence — progress is visible before the run finishes.
-    events = client.get("/agent-runs/live_run/events", headers=headers).json()
+    events = client.get("/api/v1/agent-runs/live_run/events", headers=headers).json()
     assert [e["kind"] for e in events] == ["status", "agent_message"]
     assert events[1]["message"] == "working"
 
@@ -448,7 +448,7 @@ def test_agent_run_events_reads_live_jsonl_falling_back_to_db(wm_paths, tmp_path
         status="completed",
         events=[{"kind": "result", "message": "done"}],
     )
-    events = client.get("/agent-runs/live_run/events", headers=headers).json()
+    events = client.get("/api/v1/agent-runs/live_run/events", headers=headers).json()
     assert [e["kind"] for e in events] == ["result"]
 
 
@@ -487,7 +487,7 @@ def test_agent_run_detail_recovers_schema_result_from_agent_message_events(wm_pa
 
     client = _client(wm_paths)
     detail = client.get(
-        "/agent-runs/design_script_old_opencode",
+        "/api/v1/agent-runs/design_script_old_opencode",
         headers={"X-Agent-Bridge-User": "root"},
     ).json()
 
@@ -534,7 +534,7 @@ def test_agent_run_events_includes_terminal_db_events_when_live_jsonl_is_stale(w
 
     client = _client(wm_paths)
     events = client.get(
-        "/agent-runs/failed_live_run/events",
+        "/api/v1/agent-runs/failed_live_run/events",
         headers={"X-Agent-Bridge-User": "root"},
     ).json()
 
@@ -572,7 +572,7 @@ def test_agent_run_payload_api_reads_large_payload_and_rejects_traversal(wm_path
     headers = {"X-Agent-Bridge-User": "root"}
 
     payload = client.get(
-        "/agent-runs/payload_run/payload",
+        "/api/v1/agent-runs/payload_run/payload",
         params={"ref": event["output_payload_ref"]},
         headers=headers,
     )
@@ -580,7 +580,7 @@ def test_agent_run_payload_api_reads_large_payload_and_rejects_traversal(wm_path
     assert payload.json()["stdout"] == "x" * 10000
 
     traversal = client.get(
-        "/agent-runs/payload_run/payload",
+        "/api/v1/agent-runs/payload_run/payload",
         params={"ref": "../outside.json"},
         headers=headers,
     )
@@ -633,7 +633,7 @@ def test_agent_run_event_stream_replays_from_last_event_id_then_closes_terminal(
 
     client = _client(wm_paths)
     response = client.get(
-        "/agent-runs/stream_done/events/stream",
+        "/api/v1/agent-runs/stream_done/events/stream",
         headers={"X-Agent-Bridge-User": "root", "Last-Event-ID": "1"},
     )
 

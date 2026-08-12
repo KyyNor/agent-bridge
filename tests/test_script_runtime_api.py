@@ -21,7 +21,7 @@ def _create_client(wm_paths):
 
 def _register_script(client: TestClient) -> None:
     response = client.post(
-        "/scripts",
+        "/api/v1/scripts",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "script_key": "system.ctx_echo",
@@ -64,7 +64,7 @@ def test_script_test_route_injects_profile_and_workflow_headers(wm_paths):
     _register_script(client)
 
     response = client.post(
-        "/scripts/system.ctx_echo/test",
+        "/api/v1/scripts/system.ctx_echo/test",
         headers={
             "X-Agent-Bridge-User": "root",
             "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
@@ -117,7 +117,7 @@ def test_runtime_workflow_set_task_keeps_workflows_isolated_and_accepts_large_ba
 
     def set_tasks(workflow_key: str, run_id: str):
         return client.post(
-            "/runtime/workflow/set-task",
+            "/api/v1/runtime/workflow/set-task",
             headers={
                 "X-Agent-Bridge-User": "root",
                 "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
@@ -158,7 +158,7 @@ def test_runtime_workflow_routes_require_complete_headers(wm_paths):
     client = _create_client(wm_paths)
 
     response = client.post(
-        "/runtime/workflow/get-task",
+        "/api/v1/runtime/workflow/get-task",
         headers={
             "X-Agent-Bridge-User": "root",
             "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
@@ -196,7 +196,7 @@ def test_runtime_workflow_routes_use_trusted_header_context(wm_paths):
     )
 
     set_response = client.post(
-        "/runtime/workflow/set-task",
+        "/api/v1/runtime/workflow/set-task",
         headers={
             "X-Agent-Bridge-User": "root",
             "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
@@ -210,7 +210,7 @@ def test_runtime_workflow_routes_use_trusted_header_context(wm_paths):
     assert set_response.json()["created"] == 1
 
     get_response = client.post(
-        "/runtime/workflow/get-task",
+        "/api/v1/runtime/workflow/get-task",
         headers={
             "X-Agent-Bridge-User": "root",
             "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
@@ -224,7 +224,7 @@ def test_runtime_workflow_routes_use_trusted_header_context(wm_paths):
     assert get_response.json()["task"]["lease_run_id"] == "run_1"
 
     log_response = client.post(
-        "/runtime/workflow/run-log",
+        "/api/v1/runtime/workflow/run-log",
         headers={
             "X-Agent-Bridge-User": "root",
             "X-Agent-Bridge-MetaMCP-Profile": "report-plane",
@@ -251,7 +251,7 @@ def test_script_test_route_accepts_legacy_script_params_body(wm_paths):
     _register_script(client)
 
     response = client.post(
-        "/scripts/system.ctx_echo/test",
+        "/api/v1/scripts/system.ctx_echo/test",
         headers={"X-Agent-Bridge-User": "root"},
         json={"script_params": {"limit": 3}, "timeout_seconds": 10},
     )
@@ -269,7 +269,7 @@ def test_script_reset_route_restores_builtin_default(wm_paths):
     default = svc.scripts.get_script("root", "system.validate_workflow")
 
     override_response = client.post(
-        "/scripts",
+        "/api/v1/scripts",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "script_key": "system.validate_workflow",
@@ -288,7 +288,7 @@ def test_script_reset_route_restores_builtin_default(wm_paths):
     assert override_response.json()["source"] == "database"
 
     response = client.post(
-        "/scripts/system.validate_workflow/reset",
+        "/api/v1/scripts/system.validate_workflow/reset",
         headers={"X-Agent-Bridge-User": "root"},
     )
 

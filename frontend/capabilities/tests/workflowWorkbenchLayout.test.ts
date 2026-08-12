@@ -35,7 +35,7 @@ test('workflow detail implements the approved layered workbench without replacin
   assert.match(file, /detailTab === 'artifacts'/)
   assert.match(file, /detailTab === 'runs'/)
   assert.match(file, /routeMode === 'tasks' \|\| \(routeMode === 'detail' && detailTab === 'tasks'\)/)
-  assert.match(progress, /navigateTo\(`workflow\/\$\{item\.workflow_key\}\/progress\/\$\{run\.run_id\}`\)/)
+  assert.match(progress, /router\.push\(`\/workflow\/\$\{item\.workflow_key\}\/progress\/\$\{run\.run_id\}`\)/)
 })
 
 test('workflow detail header uses the shared large control size for its primary action', () => {

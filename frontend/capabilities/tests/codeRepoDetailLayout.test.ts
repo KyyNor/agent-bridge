@@ -7,13 +7,11 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const read = (path: string) => readFileSync(`${root}/src/${path}`, 'utf8')
 
 test('wires code repository detail as a route-driven independent component', () => {
-  const app = read('App.vue')
-  const navigation = read('lib/navigation.ts')
+  const router = read('router/index.ts')
   const list = read('views/knowledge/CodeRepoView.vue')
   const detail = read('views/knowledge/CodeRepoDetailView.vue')
 
-  assert.match(app, /<CodeRepoView[^>]*:route-key="subRoute"/)
-  assert.match(navigation, /'code-repos'/)
+  assert.match(router, /path: '\/code-repos\/:routeKey\(\.\*\)\*'/)
   assert.match(list, /CodeRepoDetailView/)
   assert.match(list, /code-repos\//)
   assert.doesNotMatch(list, /<!-- Repo Detail Dialog -->/)

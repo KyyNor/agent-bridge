@@ -5,11 +5,12 @@ import test from 'node:test'
 
 const root = resolve(import.meta.dirname, '..')
 const appSource = readFileSync(resolve(root, 'src/App.vue'), 'utf8')
+const routerSource = readFileSync(resolve(root, 'src/router/index.ts'), 'utf8')
 const profileSource = readFileSync(resolve(root, 'src/views/capabilities/ProfilesView.vue'), 'utf8')
 const detailSource = readFileSync(resolve(root, 'src/views/capabilities/ProfileDetailView.vue'), 'utf8')
 
 test('profiles routes provide a dedicated detail component', () => {
-  assert.match(appSource, /<ProfilesView[^>]*:route-key="subRoute"/)
+  assert.match(routerSource, /path: '\/profiles\/:routeKey\(\.\*\)\*'/)
   assert.match(profileSource, /ProfileDetailView/)
   assert.match(profileSource, /requestListNavigation/)
   assert.match(profileSource, /放弃未保存修改/)

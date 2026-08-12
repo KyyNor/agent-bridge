@@ -27,9 +27,9 @@ def test_api_documentation_is_disabled(wm_paths) -> None:
 def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     response = client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -39,14 +39,14 @@ def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
     source.write_bytes(b"one")
     with source.open("rb") as handle:
         doc = client.post(
-            "/docs",
+            "/api/v1/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
         )
     assert doc.status_code == 200
     assert doc.json()["slug"] == "guide"
-    docs = client.get("/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "root"})
+    docs = client.get("/api/v1/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "root"})
     assert docs.status_code == 200
     assert docs.json()[0]["slug"] == "guide"
 
@@ -54,10 +54,10 @@ def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
 def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     assert (
         client.post(
-            "/kbs",
+            "/api/v1/kbs",
             json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
             headers={"X-Agent-Bridge-User": "root"},
         ).status_code
@@ -67,7 +67,7 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
     source.write_bytes(b"one")
     with source.open("rb") as handle:
         doc = client.post(
-            "/docs",
+            "/api/v1/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("nested/path/Guide.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
@@ -79,7 +79,7 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
     source.write_bytes(b"two")
     with source.open("rb") as handle:
         update = client.post(
-            f"/docs/{doc.json()['slug']}/versions",
+            f"/api/v1/docs/{doc.json()['slug']}/versions",
             data={"later": "true"},
             files={"file": ("other:name?.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
@@ -92,19 +92,19 @@ def test_upload_temp_files_are_cleaned_up(wm_paths, tmp_path: Path) -> None:
 def test_invisible_kb_returns_404(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    client.post("/kbs", json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
-    response = client.get("/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "alice"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs", json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/docs?kb=frontend-docs", headers={"X-Agent-Bridge-User": "alice"})
     assert response.status_code == 403
 
 
 def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     assert (
         client.post(
-            "/kbs",
+            "/api/v1/kbs",
             json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
             headers={"X-Agent-Bridge-User": "root"},
         ).status_code
@@ -114,16 +114,16 @@ def test_purge_api_requires_confirmation_body(wm_paths, tmp_path: Path) -> None:
     source.write_bytes(b"one")
     with source.open("rb") as handle:
         doc = client.post(
-            "/docs",
+            "/api/v1/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
         )
     assert doc.status_code == 200
 
-    missing_confirm = client.post(f"/docs/{doc.json()['slug']}/purge", json={}, headers={"X-Agent-Bridge-User": "root"})
+    missing_confirm = client.post(f"/api/v1/docs/{doc.json()['slug']}/purge", json={}, headers={"X-Agent-Bridge-User": "root"})
     confirmed = client.post(
-        f"/docs/{doc.json()['slug']}/purge",
+        f"/api/v1/docs/{doc.json()['slug']}/purge",
         json={"confirm": True},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -137,7 +137,7 @@ def test_create_app_refreshes_admins_from_config_per_request(wm_paths) -> None:
     assert config.admins == {"root"}
     app = create_app(paths=wm_paths, admins=None)
     client = TestClient(app)
-    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
 
     wm_paths.server_config_path.write_text(
         'host = "127.0.0.1"\nport = 8765\nadmins = ["alice"]\n',
@@ -145,7 +145,7 @@ def test_create_app_refreshes_admins_from_config_per_request(wm_paths) -> None:
     )
 
     response = client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
         headers={"X-Agent-Bridge-User": "alice"},
     )
@@ -157,7 +157,7 @@ def test_create_app_refreshes_admins_from_config_per_request(wm_paths) -> None:
 def test_backends_endpoint(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    response = client.get("/backends", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/backends", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
     assert isinstance(response.json(), list)
 
@@ -165,32 +165,32 @@ def test_backends_endpoint(wm_paths) -> None:
 def test_doc_with_backend_filter(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    response = client.get("/docs/nonexistent?backend=mock", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/docs/nonexistent?backend=mock", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code in (200, 404)
 
 
 def test_status_with_backend_filter(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    response = client.get("/status?backend=mock", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/status?backend=mock", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
 
 
 def test_status_requires_admin(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    response = client.get("/status", headers={"X-Agent-Bridge-User": "alice"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/status", headers={"X-Agent-Bridge-User": "alice"})
     assert response.status_code == 403
 
 
 def test_sync_with_backend_filter(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    response = client.post("/sync", json={"all_users": False}, params={"backend": "mock"}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.post("/api/v1/sync", json={"all_users": False}, params={"backend": "mock"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
 
 
@@ -202,9 +202,9 @@ def test_search_endpoint(wm_paths) -> None:
     )
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Agent-Bridge-User": "root"})
-    response = client.get("/search", params={"kb": "test-kb", "q": "hello"}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/search", params={"kb": "test-kb", "q": "hello"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
     data = response.json()
     assert "results" in data
@@ -218,9 +218,9 @@ def test_ask_endpoint(wm_paths) -> None:
     )
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    client.post("/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Agent-Bridge-User": "root"})
-    response = client.post("/ask", json={"kb": "test-kb", "question": "what is X?"}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs", json={"slug": "test-kb", "name": "Test KB"}, headers={"X-Agent-Bridge-User": "root"})
+    response = client.post("/api/v1/ask", json={"kb": "test-kb", "question": "what is X?"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
     data = response.json()
     assert "answer" in data
@@ -229,6 +229,6 @@ def test_ask_endpoint(wm_paths) -> None:
 def test_search_missing_kb(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
-    response = client.get("/search", params={"kb": "nonexistent", "q": "hello"}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/search", params={"kb": "nonexistent", "q": "hello"}, headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 404

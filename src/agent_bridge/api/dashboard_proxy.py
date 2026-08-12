@@ -124,7 +124,7 @@ class MemoryDashboardProxyMiddleware:
         block_key, suffix = _match_memory_dashboard_path(path)
         upstream_path = suffix if block_key else ""
         if block_key is None and (
-            path.startswith("/api/")
+            (path.startswith("/api/") and not path.startswith("/api/v1/"))
             or path == "/stream"
             or _is_memory_dashboard_root_asset(path)
         ):

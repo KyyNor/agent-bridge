@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
+import { router } from '../router'
 import { api } from '../api/client'
 import type {
   AgentRun,
@@ -22,12 +23,6 @@ type WorkflowTaskStatus = Record<string, {
 import { useSubagentDetails } from './useSubagentDetails'
 import { useAgentRunEventStream } from './useAgentRunEventStream'
 import { alert } from './useConfirm'
-import {
-  buildAgentRunHash,
-  buildScriptRunHash,
-  currentHash,
-  navigateTo,
-} from '../lib/navigation'
 import { lastAgentRunEventId, mergeAgentRunEvent, normalizeAgentRunEvents } from '../lib/agentRunEvents'
 import { queryClient, queryKeys } from '../lib/query'
 
@@ -575,7 +570,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
         setSelectedKey(wf.workflow_key)
         selectedRunId.value = res.run_id
         setProgressAgentRunKey('')
-        void navigateTo(`workflow/${wf.workflow_key}/progress/${res.run_id}`)
+        void router.push(`/workflow/${wf.workflow_key}/progress/${res.run_id}`)
         await loadRuns(wf.workflow_key)
         await loadProgressAgentRuns()
         await loadProgressAgentEvents()
@@ -593,7 +588,7 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
   async function openProgress(item: WorkflowDefinition, runId?: string) {
     const run = runId ? (workflowRuns.value[item.workflow_key] || []).find(r => r.run_id === runId) : runningRunFor(item.workflow_key)
     if (!run) return
-    void navigateTo(`workflow/${item.workflow_key}/progress/${run.run_id}`)
+    void router.push(`/workflow/${item.workflow_key}/progress/${run.run_id}`)
   }
 
   async function prepareProgress(item: WorkflowDefinition, runId?: string) {
@@ -627,17 +622,17 @@ export function useWorkflowRunProgress(options: UseWorkflowRunProgressOptions) {
   }
 
   async function openScriptRun(runId: string) {
-    const returnTo = currentHash()
+    const returnTo = router.currentRoute.value.fullPath
     try {
       const scriptRun = await api.getScriptRun(runId)
-      void navigateTo(buildScriptRunHash(scriptRun.script_key, runId, returnTo))
+      void router.push({ path: `/scripts/${scriptRun.script_key}/run/${runId}`, query: { returnTo } })
     } catch (e: unknown) {
       testError.value = errorMessage(e)
     }
   }
 
   function openAgentRun(runKey: string) {
-    void navigateTo(buildAgentRunHash(runKey, currentHash()))
+    void router.push({ path: `/agent-runs/${runKey}`, query: { returnTo: router.currentRoute.value.fullPath } })
   }
 
   /** Resolve the progress run id from the route and load the progress view.

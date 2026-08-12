@@ -78,7 +78,7 @@ def test_completed_workflow_top_api_uses_previous_local_day(wm_paths, monkeypatc
     _create_completed_run(service.store, "daily-report", "daily-report-2", excluded_finished_at)
 
     response = TestClient(app).get(
-        "/workflows/completed-top",
+        "/api/v1/workflows/completed-top",
         headers={"X-Agent-Bridge-User": "root"},
     )
 

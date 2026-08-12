@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, ArrowLeft } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import type { KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendInfo, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
@@ -22,7 +23,7 @@ import KnowledgeUploadDialog from '../../components/knowledge/KnowledgeUploadDia
 import { confirm, alert } from '../../composables/useConfirm'
 import { useKnowledgeUploadQueue } from '../../composables/useKnowledgeUploadQueue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { navigateTo } from '../../lib/navigation'
+const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
@@ -229,7 +230,7 @@ onMounted(async () => {
   await loadDetail()
 })
 
-// Route-driven detail loading: entering #knowledge/<slug> loads that kb's data.
+// Route-driven detail loading: entering /knowledge/<slug> loads that kb's data.
 watch(() => props.routeKey, () => { void loadDetail() })
 
 watch(() => detailTab.value, () => {
@@ -305,11 +306,11 @@ async function createKb() {
 }
 
 function goList() {
-  void navigateTo('knowledge', { replace: true })
+  void router.replace('/knowledge')
 }
 
 async function openDetail(kb: KnowledgeBaseSummary) {
-  void navigateTo('knowledge/' + kb.slug)
+  void router.push('/knowledge/' + kb.slug)
 }
 
 async function loadFolderTree(preferredFolderId?: number | null) {
@@ -832,7 +833,7 @@ function syncBadgeLabel(status?: string | null) {
     <template v-else>
       <!-- Route error -->
       <div v-if="routeError" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
-        {{ routeError }}。请<a class="underline" href="#knowledge" @click.prevent="goList">返回列表</a>。
+        {{ routeError }}。请<button type="button" class="underline" @click="goList">返回列表</button>。
       </div>
 
       <!-- Back button -->

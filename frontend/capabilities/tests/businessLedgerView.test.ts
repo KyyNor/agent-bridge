@@ -6,10 +6,11 @@ const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.ur
 
 test('业务台账有单一导航入口及其浏览页 API 契约', () => {
   const app = read('src/App.vue')
+  const router = read('src/router/index.ts')
   const client = read('src/api/client.ts')
   const view = read('src/views/knowledge/BusinessLedgerView.vue')
   assert.match(app, /key: 'business-ledgers', label: '业务台账'/)
-  assert.match(app, /BusinessLedgerView v-else-if="view === 'business-ledgers'"/)
+  assert.match(router, /path: '\/business-ledgers\/:routeKey\(\.\*\)\*'/)
   assert.match(client, /queryBusinessLedgerRecords/)
   assert.match(client, /previewBusinessLedgerImport/)
   assert.match(view, /预览导入/)

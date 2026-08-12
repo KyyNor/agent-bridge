@@ -31,17 +31,17 @@ def _zip_bytes(members: list[tuple[str, bytes]]) -> bytes:
 
 def _create_kb(client: TestClient, slug: str) -> dict:
     response = client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": slug, "name": slug.upper()},
         headers=_headers(),
     )
     assert response.status_code == 200, response.text
-    return client.get(f"/kbs/{slug}/folders", headers=_headers()).json()[0]
+    return client.get(f"/api/v1/kbs/{slug}/folders", headers=_headers()).json()[0]
 
 
 def _upload_zip(client: TestClient, filename: str, payload: bytes) -> dict:
     response = client.post(
-        "/docs",
+        "/api/v1/docs",
         data={"kb": ["docs"], "later": "true"},
         files={"file": (filename, payload, "application/zip")},
         headers=_headers(),
@@ -53,7 +53,7 @@ def _upload_zip(client: TestClient, filename: str, payload: bytes) -> dict:
 def test_nested_zip_browse_exposes_direct_archive_children_and_document_contract(wm_paths) -> None:
     client = _client(wm_paths)
     headers = _headers()
-    assert client.post("/admin/init", headers=headers).status_code == 200
+    assert client.post("/api/v1/admin/init", headers=headers).status_code == 200
     root = _create_kb(client, "docs")
 
     nested = _zip_bytes([("deep/guide.md", b"guide")])
@@ -65,7 +65,7 @@ def test_nested_zip_browse_exposes_direct_archive_children_and_document_contract
     )
     _upload_zip(client, "release.zip", archive)
 
-    root_browse = client.get("/kbs/docs/browse", headers=headers)
+    root_browse = client.get("/api/v1/kbs/docs/browse", headers=headers)
     assert root_browse.status_code == 200, root_browse.text
     root_payload = root_browse.json()
     assert root_payload["context"] == {
@@ -85,7 +85,7 @@ def test_nested_zip_browse_exposes_direct_archive_children_and_document_contract
     assert outer["parent_folder_id"] == root["id"]
 
     outer_browse = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"archive_entry_id": outer["id"]},
         headers=headers,
     )
@@ -101,7 +101,7 @@ def test_nested_zip_browse_exposes_direct_archive_children_and_document_contract
     packs = next(entry for entry in outer_payload["entries"] if entry["name"] == "packs")
 
     packs_browse = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"archive_entry_id": packs["id"]},
         headers=headers,
     )
@@ -112,7 +112,7 @@ def test_nested_zip_browse_exposes_direct_archive_children_and_document_contract
     assert manuals["parent_id"] == packs["id"]
 
     manuals_browse = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"archive_entry_id": manuals["id"]},
         headers=headers,
     )
@@ -121,7 +121,7 @@ def test_nested_zip_browse_exposes_direct_archive_children_and_document_contract
     assert manuals_browse.json()["parent"]["id"] == packs["id"]
 
     deep_browse = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"archive_entry_id": deep["id"]},
         headers=headers,
     )
@@ -142,50 +142,50 @@ def test_nested_zip_browse_exposes_direct_archive_children_and_document_contract
 def test_browse_rejects_conflicting_and_cross_kb_contexts(wm_paths) -> None:
     client = _client(wm_paths)
     headers = _headers()
-    assert client.post("/admin/init", headers=headers).status_code == 200
+    assert client.post("/api/v1/admin/init", headers=headers).status_code == 200
     root_docs = _create_kb(client, "docs")
     root_other = _create_kb(client, "other")
 
     archive = _zip_bytes([("root.md", b"root")])
     _upload_zip(client, "release.zip", archive)
-    root_browse = client.get("/kbs/docs/browse", headers=headers).json()
+    root_browse = client.get("/api/v1/kbs/docs/browse", headers=headers).json()
     outer = next(entry for entry in root_browse["entries"] if entry["kind"] == "zip")
     document = next(entry for entry in client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"archive_entry_id": outer["id"]},
         headers=headers,
     ).json()["entries"] if entry["kind"] == "document")
 
     conflict = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"folder_id": root_docs["id"], "archive_entry_id": outer["id"]},
         headers=headers,
     )
     assert conflict.status_code == 400
 
     wrong_folder = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"folder_id": root_other["id"]},
         headers=headers,
     )
     assert wrong_folder.status_code == 404
 
     wrong_archive = client.get(
-        "/kbs/other/browse",
+        "/api/v1/kbs/other/browse",
         params={"archive_entry_id": outer["id"]},
         headers=headers,
     )
     assert wrong_archive.status_code == 404
 
     missing_archive = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"archive_entry_id": 999999},
         headers=headers,
     )
     assert missing_archive.status_code == 404
 
     non_container = client.get(
-        "/kbs/docs/browse",
+        "/api/v1/kbs/docs/browse",
         params={"archive_entry_id": document["archive_entry_id"]},
         headers=headers,
     )
@@ -195,12 +195,12 @@ def test_browse_rejects_conflicting_and_cross_kb_contexts(wm_paths) -> None:
 def test_broken_inner_zip_returns_chinese_detail_and_no_state(wm_paths) -> None:
     client = _client(wm_paths)
     headers = _headers()
-    assert client.post("/admin/init", headers=headers).status_code == 200
+    assert client.post("/api/v1/admin/init", headers=headers).status_code == 200
     _create_kb(client, "docs")
 
     broken = _zip_bytes([("broken.zip", b"not a zip")])
     response = client.post(
-        "/docs",
+        "/api/v1/docs",
         data={"kb": ["docs"], "later": "true"},
         files={"file": ("release.zip", broken, "application/zip")},
         headers=headers,
@@ -213,5 +213,5 @@ def test_broken_inner_zip_returns_chinese_detail_and_no_state(wm_paths) -> None:
     assert "内层 ZIP" in detail
     assert "解压失败" in detail
     assert "invalid zip archive" not in detail
-    assert client.get("/docs", params={"kb": "docs"}, headers=headers).json() == []
-    assert client.get("/kbs/docs/browse", headers=headers).json()["entries"] == []
+    assert client.get("/api/v1/docs", params={"kb": "docs"}, headers=headers).json() == []
+    assert client.get("/api/v1/kbs/docs/browse", headers=headers).json()["entries"] == []

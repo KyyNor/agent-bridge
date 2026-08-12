@@ -68,9 +68,9 @@ def test_malformed_definition_uses_structured_validator_issues_for_save_and_vali
         },
     }
 
-    saved = client.post("/workflows", headers={"X-Agent-Bridge-User": "root"}, json=workflow)
+    saved = client.post("/api/v1/workflows", headers={"X-Agent-Bridge-User": "root"}, json=workflow)
     validated = client.post(
-        "/workflows/validate",
+        "/api/v1/workflows/validate",
         headers={"X-Agent-Bridge-User": "root"},
         json={"workflow": workflow},
     )
@@ -95,7 +95,7 @@ def test_validate_workflow_endpoint_requires_complete_workflow(wm_paths):
 
     AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
     response = TestClient(create_app(wm_paths, {"root"})).post(
-        "/workflows/validate",
+        "/api/v1/workflows/validate",
         headers={"X-Agent-Bridge-User": "root"},
         json={"workflow": {"workflow_type": "operation", "definition": {"nodes": [], "edges": []}}},
     )
@@ -118,7 +118,7 @@ def test_validate_workflow_endpoint_reports_missing_profile(wm_paths):
 
     AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
     response = TestClient(create_app(wm_paths, {"root"})).post(
-        "/workflows/validate",
+        "/api/v1/workflows/validate",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "workflow": {
@@ -153,7 +153,7 @@ def test_validate_workflow_endpoint_does_not_persist_draft(wm_paths):
     client = TestClient(create_app(wm_paths, {"root"}))
 
     response = client.post(
-        "/workflows/validate",
+        "/api/v1/workflows/validate",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "workflow": {
@@ -170,7 +170,7 @@ def test_validate_workflow_endpoint_does_not_persist_draft(wm_paths):
 
     assert response.status_code == 200, response.text
     assert response.json()["valid"] is True
-    assert client.get("/workflows", headers={"X-Agent-Bridge-User": "root"}).json() == []
+    assert client.get("/api/v1/workflows", headers={"X-Agent-Bridge-User": "root"}).json() == []
 
 
 def test_workflow_api_saves_structured_definition(wm_paths):
@@ -180,7 +180,7 @@ def test_workflow_api_saves_structured_definition(wm_paths):
     service = AgentBridgeService.create(wm_paths, {"root"})
     service.store.init_schema()
     service.store.upsert_project_profile(profile_key="report-plane", name="Report Plane", created_by="root")
-    response = TestClient(create_app(wm_paths, {"root"})).post("/workflows", headers={"X-Agent-Bridge-User": "root"}, json={"workflow_key": "structured", "name": "Structured", "profile_key": "report-plane", "definition": {"nodes": [], "edges": []}, "status": "active"})
+    response = TestClient(create_app(wm_paths, {"root"})).post("/api/v1/workflows", headers={"X-Agent-Bridge-User": "root"}, json={"workflow_key": "structured", "name": "Structured", "profile_key": "report-plane", "definition": {"nodes": [], "edges": []}, "status": "active"})
     assert response.status_code == 200
     assert response.json()["definition"] == {"nodes": [], "edges": []}
     assert "workflow_js" not in response.json()
@@ -197,7 +197,7 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
     app = create_app(wm_paths, {"root"})
     client = TestClient(app)
     response = client.post(
-        "/workflows",
+        "/api/v1/workflows",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "workflow_key": "page-report",
@@ -212,13 +212,13 @@ def test_workflow_api_creates_and_lists_workflows(wm_paths):
     assert response.json()["workflow_key"] == "page-report"
     assert "manifest" not in response.json()
 
-    listed = client.get("/workflows", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/api/v1/workflows", headers={"X-Agent-Bridge-User": "root"})
     assert listed.status_code == 200
     assert [item["workflow_key"] for item in listed.json()] == ["page-report"]
     assert "manifest" not in listed.json()[0]
     assert listed.json()[0]["definition"] is None
 
-    detail = client.get("/workflows/page-report", headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get("/api/v1/workflows/page-report", headers={"X-Agent-Bridge-User": "root"})
     assert detail.status_code == 200
     assert detail.json()["definition"] == {"nodes": [], "edges": []}
 
@@ -242,15 +242,15 @@ def test_workflow_api_rejects_stale_editor_save(wm_paths):
         "definition": {"nodes": [], "edges": []},
         "status": "active",
     }
-    created = client.post("/workflows", headers=headers, json=payload)
+    created = client.post("/api/v1/workflows", headers=headers, json=payload)
     assert created.status_code == 200, created.text
     assert created.json()["edit_version"] == 1
 
-    first_editor = client.get("/workflows/concurrent-edit", headers=headers).json()
-    stale_editor = client.get("/workflows/concurrent-edit", headers=headers).json()
+    first_editor = client.get("/api/v1/workflows/concurrent-edit", headers=headers).json()
+    stale_editor = client.get("/api/v1/workflows/concurrent-edit", headers=headers).json()
 
     first_save = client.post(
-        "/workflows",
+        "/api/v1/workflows",
         headers=headers,
         json={
             **payload,
@@ -262,7 +262,7 @@ def test_workflow_api_rejects_stale_editor_save(wm_paths):
     assert first_save.json()["edit_version"] == 2
 
     stale_save = client.post(
-        "/workflows",
+        "/api/v1/workflows",
         headers=headers,
         json={
             **payload,
@@ -272,7 +272,7 @@ def test_workflow_api_rejects_stale_editor_save(wm_paths):
     )
     assert stale_save.status_code == 409, stale_save.text
     assert "其他页面更新" in stale_save.json()["detail"]
-    assert client.get("/workflows/concurrent-edit", headers=headers).json()["name"] == "First editor"
+    assert client.get("/api/v1/workflows/concurrent-edit", headers=headers).json()["name"] == "First editor"
 
 
 def test_workflow_api_can_list_more_than_default_twenty_runs(wm_paths):
@@ -302,7 +302,7 @@ def test_workflow_api_can_list_more_than_default_twenty_runs(wm_paths):
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        "/workflows/page-report/runs?limit=75",
+        "/api/v1/workflows/page-report/runs?limit=75",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -341,7 +341,7 @@ def test_workflow_api_lists_artifacts(wm_paths):
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        "/workflow-artifacts?profile_key=report-plane&query=Page",
+        "/api/v1/workflow-artifacts?profile_key=report-plane&query=Page",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert response.status_code == 200
@@ -394,7 +394,7 @@ def test_workflow_api_searches_artifacts_by_path_match(wm_paths):
     client = TestClient(create_app(wm_paths, {"root"}))
     # "finance" 同时命中 task_key 子串与 path 子串
     response = client.get(
-        "/workflow-artifacts?profile_key=report-plane&path_match=finance",
+        "/api/v1/workflow-artifacts?profile_key=report-plane&path_match=finance",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert response.status_code == 200
@@ -403,7 +403,7 @@ def test_workflow_api_searches_artifacts_by_path_match(wm_paths):
 
     # 不匹配的片段返回空
     miss = client.get(
-        "/workflow-artifacts?profile_key=report-plane&path_match=nonexistent",
+        "/api/v1/workflow-artifacts?profile_key=report-plane&path_match=nonexistent",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert miss.status_code == 200
@@ -442,7 +442,7 @@ def test_workflow_api_paginates_artifacts_with_total_and_offset(wm_paths):
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        "/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&limit=1&offset=1",
+        "/api/v1/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&limit=1&offset=1",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -485,7 +485,7 @@ def test_workflow_api_artifact_page_crosses_the_original_thirty_row_limit(wm_pat
 
     client = TestClient(create_app(wm_paths, {"root"}))
     body = client.get(
-        "/workflow-artifacts",
+        "/api/v1/workflow-artifacts",
         params={"workflow_key": "page-report", "limit": 1, "offset": 30},
         headers={"X-Agent-Bridge-User": "root"},
     ).json()
@@ -542,7 +542,7 @@ def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
 
     client = TestClient(create_app(wm_paths, {"root"}))
     current = client.get(
-        "/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
+        "/api/v1/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert current.status_code == 200, current.text
@@ -550,7 +550,7 @@ def test_workflow_api_lists_current_artifacts_and_version_history(wm_paths):
     assert current.json()["items"][0]["is_current"] is True
 
     history = client.get(
-        "/workflow-artifacts/history?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
+        "/api/v1/workflow-artifacts/history?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert history.status_code == 200, history.text
@@ -594,7 +594,7 @@ def test_workflow_api_overview_aggregates_status_from_latest_task_version(wm_pat
     )
 
     client = TestClient(create_app(wm_paths, {"root"}))
-    overviews = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    overviews = client.get("/api/v1/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
     assert overviews.status_code == 200, overviews.text
     entry = next(item for item in overviews.json() if item["workflow_key"] == "page-report")
     # 旧 "" 已 completed 但被忽略；代表版本 v2 仍 pending → 整体 pending
@@ -612,7 +612,7 @@ def test_workflow_api_overview_aggregates_status_from_latest_task_version(wm_pat
         "page-report", "page:a", task_version="v2", run_id="run_2"
     ) is True
 
-    overviews2 = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    overviews2 = client.get("/api/v1/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
     entry2 = next(item for item in overviews2.json() if item["workflow_key"] == "page-report")
     assert entry2["task_aggregated_status"] == "completed"
     assert entry2["task_completed"] == 1
@@ -649,7 +649,7 @@ def test_workflow_api_overview_failed_task_surfaces_failed_aggregate(wm_paths):
     assert svc.store.fail_workflow_task_for_run("page-report", "run_a", "boom") is True
 
     client = TestClient(create_app(wm_paths, {"root"}))
-    overviews = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    overviews = client.get("/api/v1/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
     assert overviews.status_code == 200, overviews.text
     entry = next(item for item in overviews.json() if item["workflow_key"] == "page-report")
     # 代表版本 page:a failed、page:b pending → 整体 failed（不并入 pending）
@@ -664,7 +664,7 @@ def test_workflow_api_overview_failed_task_surfaces_failed_aggregate(wm_paths):
         task_key="page:b", status="running", temp_dir="/tmp/run_b",
     )
     svc.store.lease_workflow_task("page-report", run_id="run_b", lease_seconds=7200)
-    overviews2 = client.get("/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
+    overviews2 = client.get("/api/v1/workflows/run-summaries", headers={"X-Agent-Bridge-User": "root"})
     entry2 = next(item for item in overviews2.json() if item["workflow_key"] == "page-report")
     assert entry2["task_aggregated_status"] == "running"
     assert entry2["task_running"] == 1
@@ -713,7 +713,7 @@ def test_workflow_api_history_groups_same_task_version_runs_and_html(wm_paths):
 
     client = TestClient(create_app(wm_paths, {"root"}))
     history = client.get(
-        "/workflow-artifacts/history?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
+        "/api/v1/workflow-artifacts/history?profile_key=report-plane&workflow_key=page-report&task_key=page:a",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert history.status_code == 200, history.text
@@ -768,7 +768,7 @@ def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        "/workflow-artifacts?profile_key=report-plane&query=Page",
+        "/api/v1/workflow-artifacts?profile_key=report-plane&query=Page",
         headers={"X-Agent-Bridge-User": "alice"},
     )
 
@@ -812,7 +812,7 @@ def test_workflow_api_returns_full_artifact_content(wm_paths):
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        f"/workflow-artifacts/{artifact_id}",
+        f"/api/v1/workflow-artifacts/{artifact_id}",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -836,7 +836,7 @@ def test_workflow_api_rejects_non_admin_artifact_detail_without_trusted_profile(
 
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        f"/workflow-artifacts/{artifact_id}?profile_key=report-plane",
+        f"/api/v1/workflow-artifacts/{artifact_id}?profile_key=report-plane",
         headers={"X-Agent-Bridge-User": "alice"},
     )
 
@@ -851,7 +851,7 @@ def test_workflow_api_artifact_detail_404_for_unknown_id(wm_paths):
     AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
     client = TestClient(create_app(wm_paths, {"root"}))
     response = client.get(
-        "/workflow-artifacts/artifact_does_not_exist",
+        "/api/v1/workflow-artifacts/artifact_does_not_exist",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert response.status_code == 404
@@ -885,7 +885,7 @@ def test_workflow_api_previews_and_confirms_task_import_as_admin(wm_paths):
     workbook_bytes = _task_import_workbook_bytes([["task:new", "v1", "repo"]])
 
     preview_response = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
         files={
             "file": (
@@ -906,7 +906,7 @@ def test_workflow_api_previews_and_confirms_task_import_as_admin(wm_paths):
     ]
 
     confirm_response = client.post(
-        "/workflows/page-report/tasks/import/confirm",
+        "/api/v1/workflows/page-report/tasks/import/confirm",
         headers={"X-Agent-Bridge-User": "root"},
         json={"import_id": preview["import_id"]},
     )
@@ -919,7 +919,7 @@ def test_workflow_api_previews_and_confirms_task_import_as_admin(wm_paths):
 def test_workflow_api_task_import_row_errors_disable_confirmation(wm_paths):
     svc, client = _workflow_import_client(wm_paths)
     response = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
         files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:valid", "v1", "repo"], ["", "v1", "repo"]]))},
     )
@@ -936,7 +936,7 @@ def test_workflow_api_task_import_row_errors_disable_confirmation(wm_paths):
     ]
 
     confirm_response = client.post(
-        "/workflows/page-report/tasks/import/confirm",
+        "/api/v1/workflows/page-report/tasks/import/confirm",
         headers={"X-Agent-Bridge-User": "root"},
         json={"import_id": preview["import_id"]},
     )
@@ -948,7 +948,7 @@ def test_workflow_api_rejects_duplicate_task_key_and_version_confirmation(wm_pat
     svc, client = _workflow_import_client(wm_paths)
     headers = {"X-Agent-Bridge-User": "root"}
     preview_response = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers=headers,
         files={
             "file": (
@@ -972,7 +972,7 @@ def test_workflow_api_rejects_duplicate_task_key_and_version_confirmation(wm_pat
     assert preview["rows"][1]["errors"] == ["task_key + task_version 重复"]
 
     confirm_response = client.post(
-        "/workflows/page-report/tasks/import/confirm",
+        "/api/v1/workflows/page-report/tasks/import/confirm",
         headers=headers,
         json={"import_id": preview["import_id"]},
     )
@@ -999,7 +999,7 @@ def test_workflow_api_rejects_invalid_task_import_files(wm_paths, filename, cont
     else:
         content = _malformed_worksheet_workbook_bytes()
     response = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
         files={"file": (filename, content)},
     )
@@ -1014,7 +1014,7 @@ def test_workflow_api_rejects_task_imports_over_5000_rows(wm_paths):
     )
 
     response = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
         files={"file": ("tasks.xlsx", content)},
     )
@@ -1027,14 +1027,14 @@ def test_workflow_api_rejects_non_admin_task_import_endpoints(wm_paths):
     _svc, client = _workflow_import_client(wm_paths)
     headers = {"X-Agent-Bridge-User": "alice"}
 
-    template_response = client.get("/workflows/page-report/tasks/import/template", headers=headers)
+    template_response = client.get("/api/v1/workflows/page-report/tasks/import/template", headers=headers)
     preview_response = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers=headers,
         files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:new", "v1", "repo"]]))},
     )
     confirm_response = client.post(
-        "/workflows/page-report/tasks/import/confirm",
+        "/api/v1/workflows/page-report/tasks/import/confirm",
         headers=headers,
         json={"import_id": "not-used"},
     )
@@ -1048,18 +1048,18 @@ def test_workflow_api_rejects_second_task_import_confirmation(wm_paths):
     _svc, client = _workflow_import_client(wm_paths)
     headers = {"X-Agent-Bridge-User": "root"}
     preview = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers=headers,
         files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:new", "v1", "repo"]]))},
     ).json()
 
     assert client.post(
-        "/workflows/page-report/tasks/import/confirm",
+        "/api/v1/workflows/page-report/tasks/import/confirm",
         headers=headers,
         json={"import_id": preview["import_id"]},
     ).status_code == 200
     second = client.post(
-        "/workflows/page-report/tasks/import/confirm",
+        "/api/v1/workflows/page-report/tasks/import/confirm",
         headers=headers,
         json={"import_id": preview["import_id"]},
     )
@@ -1071,13 +1071,13 @@ def test_workflow_api_rejects_cross_workflow_task_import_confirmation(wm_paths):
     _svc, client = _workflow_import_client(wm_paths, ("page-report", "other-workflow"))
     headers = {"X-Agent-Bridge-User": "root"}
     preview = client.post(
-        "/workflows/page-report/tasks/import/preview",
+        "/api/v1/workflows/page-report/tasks/import/preview",
         headers=headers,
         files={"file": ("tasks.xlsx", _task_import_workbook_bytes([["task:new", "v1", "repo"]]))},
     ).json()
 
     response = client.post(
-        "/workflows/other-workflow/tasks/import/confirm",
+        "/api/v1/workflows/other-workflow/tasks/import/confirm",
         headers=headers,
         json={"import_id": preview["import_id"]},
     )
@@ -1089,7 +1089,7 @@ def test_workflow_api_downloads_task_import_template(wm_paths):
     _svc, client = _workflow_import_client(wm_paths)
 
     response = client.get(
-        "/workflows/page-report/tasks/import/template",
+        "/api/v1/workflows/page-report/tasks/import/template",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -1117,7 +1117,7 @@ def test_workflow_api_lists_runs_for_workflow(wm_paths):
     )
 
     client = TestClient(create_app(wm_paths, {"root"}))
-    response = client.get("/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200, response.text
     runs = response.json()
@@ -1126,7 +1126,7 @@ def test_workflow_api_lists_runs_for_workflow(wm_paths):
     assert runs[1]["status"] == "completed"
 
     summary_page = client.get(
-        "/workflows/page-report/runs/summary?limit=1&offset=0",
+        "/api/v1/workflows/page-report/runs/summary?limit=1&offset=0",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert summary_page.status_code == 200, summary_page.text
@@ -1135,7 +1135,7 @@ def test_workflow_api_lists_runs_for_workflow(wm_paths):
     assert "definition_snapshot" not in summary_page.json()["runs"][0]
 
     overviews = client.get(
-        "/workflows/run-summaries",
+        "/api/v1/workflows/run-summaries",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert overviews.status_code == 200, overviews.text
@@ -1173,7 +1173,7 @@ def test_workflow_api_lists_all_tasks_for_workflow_without_leasing(wm_paths):
     )
 
     client = TestClient(app)
-    response = client.get("/workflows/page-report/tasks", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/workflows/page-report/tasks", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -1226,7 +1226,7 @@ def test_workflow_api_clears_execution_data_without_deleting_definition(wm_paths
     )
 
     client = TestClient(create_app(wm_paths, {"root"}))
-    response = client.post("/workflows/page-report/clear", headers={"X-Agent-Bridge-User": "root"})
+    response = client.post("/api/v1/workflows/page-report/clear", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200, response.text
     assert response.json() == {
@@ -1237,11 +1237,11 @@ def test_workflow_api_clears_execution_data_without_deleting_definition(wm_paths
         "logs_deleted": 1,
         "artifacts_deleted": 1,
     }
-    assert client.get("/workflows/page-report", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
-    assert client.get("/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"}).json() == []
-    assert client.get("/workflows/page-report/tasks", headers={"X-Agent-Bridge-User": "root"}).json() == {"tasks": []}
+    assert client.get("/api/v1/workflows/page-report", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.get("/api/v1/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"}).json() == []
+    assert client.get("/api/v1/workflows/page-report/tasks", headers={"X-Agent-Bridge-User": "root"}).json() == {"tasks": []}
     artifacts = client.get(
-        "/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&include_history=true",
+        "/api/v1/workflow-artifacts?profile_key=report-plane&workflow_key=page-report&include_history=true",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert artifacts.json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
@@ -1261,16 +1261,16 @@ def test_workflow_api_deletes_workflow_and_cascades(wm_paths):
     )
 
     client = TestClient(create_app(wm_paths, {"root"}))
-    deleted = client.post("/workflows/page-report/delete", headers={"X-Agent-Bridge-User": "root"})
+    deleted = client.post("/api/v1/workflows/page-report/delete", headers={"X-Agent-Bridge-User": "root"})
     assert deleted.status_code == 200, deleted.text
 
-    listed = client.get("/workflows", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/api/v1/workflows", headers={"X-Agent-Bridge-User": "root"})
     assert listed.json() == []
 
-    gone = client.get("/workflows/page-report", headers={"X-Agent-Bridge-User": "root"})
+    gone = client.get("/api/v1/workflows/page-report", headers={"X-Agent-Bridge-User": "root"})
     assert gone.status_code == 404
 
-    runs = client.get("/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"})
+    runs = client.get("/api/v1/workflows/page-report/runs", headers={"X-Agent-Bridge-User": "root"})
     assert runs.status_code == 200
     assert runs.json() == []  # runs cascaded away
 
@@ -1289,7 +1289,7 @@ def test_workflow_api_get_run_returns_single_run(wm_paths):
     )
 
     client = TestClient(create_app(wm_paths, {"root"}))
-    response = client.get("/workflow-runs/run_1", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/workflow-runs/run_1", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200, response.text
     assert response.json()["run_id"] == "run_1"
     assert response.json()["status"] == "completed"
@@ -1301,7 +1301,7 @@ def test_workflow_api_get_run_404_for_unknown(wm_paths):
 
     AgentBridgeService.create(wm_paths, {"root"}).store.init_schema()
     client = TestClient(create_app(wm_paths, {"root"}))
-    response = client.get("/workflow-runs/run_nope", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/workflow-runs/run_nope", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 404
 
 
@@ -1342,18 +1342,18 @@ def test_workflow_api_stop_run_maps_stopping_terminal_and_conflict(wm_paths):
     client = TestClient(app)
     headers = {"X-Agent-Bridge-User": "root"}
 
-    stopping = client.post("/workflow-runs/run_api_stop/stop", headers=headers)
+    stopping = client.post("/api/v1/workflow-runs/run_api_stop/stop", headers=headers)
     assert stopping.status_code == 202
     assert stopping.json() == {"status": "stopping", "run_id": "run_api_stop"}
-    assert client.post("/workflow-runs/run_api_stop/stop", headers=headers).status_code == 202
+    assert client.post("/api/v1/workflow-runs/run_api_stop/stop", headers=headers).status_code == 202
 
-    terminal = client.post("/workflow-runs/run_api_completed/stop", headers=headers)
+    terminal = client.post("/api/v1/workflow-runs/run_api_completed/stop", headers=headers)
     assert terminal.status_code == 200
     assert terminal.json()["status"] == "completed"
 
-    conflict = client.post("/workflow-runs/run_api_conflict/stop", headers=headers)
+    conflict = client.post("/api/v1/workflow-runs/run_api_conflict/stop", headers=headers)
     assert conflict.status_code == 409
-    missing = client.post("/workflow-runs/run_api_missing/stop", headers=headers)
+    missing = client.post("/api/v1/workflow-runs/run_api_missing/stop", headers=headers)
     assert missing.status_code == 404
 
 
@@ -1378,7 +1378,7 @@ def test_workflow_api_stop_requires_admin_before_controller_lookup(wm_paths):
     client = TestClient(create_app(wm_paths, {"root"}))
 
     response = client.post(
-        "/workflow-runs/run_api_non_admin/stop",
+        "/api/v1/workflow-runs/run_api_non_admin/stop",
         headers={"X-Agent-Bridge-User": "viewer"},
     )
 
@@ -1418,7 +1418,7 @@ def test_workflow_api_returns_run_events_from_run_directory(wm_paths, tmp_path):
     client = TestClient(create_app(wm_paths, {"root"}))
     # The workflow-specific events endpoint is gone (404); events are served
     # from /agent-runs?workflow_run_id= instead.
-    response = client.get("/workflow-runs/run_1/events", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/workflow-runs/run_1/events", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 404
 
 
@@ -1436,5 +1436,5 @@ def test_workflow_api_run_returns_409_when_already_running(wm_paths):
     app.state.agent_bridge_service.workflow_scheduler._running.add("page-report")
     client = TestClient(app)
 
-    response = client.post("/workflows/page-report/run", headers={"X-Agent-Bridge-User": "root"})
+    response = client.post("/api/v1/workflows/page-report/run", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 409

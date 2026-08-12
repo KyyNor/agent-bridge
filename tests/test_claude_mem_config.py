@@ -115,7 +115,7 @@ def test_claude_mem_config_api_saves_without_returning_secret_and_stops_workers(
     headers = {"X-Agent-Bridge-User": "root"}
 
     saved = client.post(
-        "/claude-mem/config",
+        "/api/v1/claude-mem/config",
         json={
             "base_url": "https://open.bigmodel.cn/api/anthropic",
             "auth_token": "new-secret",

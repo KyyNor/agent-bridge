@@ -1,62 +1,34 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { resolve } from 'node:path'
 
-import {
-  buildAgentRunHash,
-  buildScriptRunHash,
-  buildWorkflowTaskProgressHash,
-  parseSubRoute,
-  routeReturnTo,
-  shouldShowPageHeader,
-} from '../src/lib/navigation.ts'
+const root = resolve(import.meta.dirname, '..')
+const router = readFileSync(resolve(root, 'src/router/index.ts'), 'utf8')
+const app = readFileSync(resolve(root, 'src/App.vue'), 'utf8')
+const viteConfig = readFileSync(resolve(root, 'vite.config.ts'), 'utf8')
 
-test('shouldShowPageHeader keeps the page title on the scripts list route', () => {
-  assert.equal(shouldShowPageHeader('scripts', ''), true)
+test('uses Vue Router History mode and has explicit deep-link routes', () => {
+  assert.match(router, /createWebHistory\('\/agent-bridge\/'\)/)
+  assert.match(router, /path: '\/services\/:routeKey\(\.\*\)\*'/)
+  assert.match(router, /path: '\/workflow\/:routeKey\(\.\*\)\*'/)
+  assert.match(router, /path: '\/agent-runs\/:routeKey\(\.\*\)\*'/)
+  assert.match(router, /path: '\/:pathMatch\(\.\*\)\*'/)
+  assert.match(viteConfig, /agent-bridge-dev-history-fallback/)
+  assert.match(viteConfig, /startsWith\('\/agent-bridge\/'\)/)
 })
 
-test('shouldShowPageHeader hides the page title on script detail routes', () => {
-  assert.equal(shouldShowPageHeader('scripts', 'test_dd'), false)
-  assert.equal(shouldShowPageHeader('scripts', 'new'), false)
+test('App delegates view selection to RouterView and no longer owns fragment history', () => {
+  assert.match(app, /<RouterView v-slot=/)
+  assert.doesNotMatch(app, /hashchange|popstate|location\.hash|window\.history/)
+  assert.doesNotMatch(app, /<DashboardView v-if/)
 })
 
-test('shouldShowPageHeader hides the page title on service and workflow detail routes', () => {
-  assert.equal(shouldShowPageHeader('services', 'new'), false)
-  assert.equal(shouldShowPageHeader('services', 'edit/mcp_service/mysql'), false)
-  assert.equal(shouldShowPageHeader('memory', 'dev-memory'), false)
-  assert.equal(shouldShowPageHeader('knowledge', 'my-kb'), false)
-  assert.equal(shouldShowPageHeader('profiles', 'safe-readonly'), false)
-  assert.equal(shouldShowPageHeader('code-repos', 'repo-a'), false)
-  assert.equal(shouldShowPageHeader('workflow', 'sales_report/detail'), false)
-  assert.equal(shouldShowPageHeader('workflow', 'sales_report/edit'), false)
-  assert.equal(shouldShowPageHeader('workflow', 'sales_report/tasks'), false)
-  assert.equal(shouldShowPageHeader('workflow', 'sales_report/progress/run-1'), false)
-})
-
-test('shouldShowPageHeader keeps the page title for plain non-script routes', () => {
-  assert.equal(shouldShowPageHeader('workflow', ''), true)
-  assert.equal(shouldShowPageHeader('services', ''), true)
-  assert.equal(shouldShowPageHeader('knowledge', ''), true)
-  assert.equal(shouldShowPageHeader('profiles', ''), true)
-  assert.equal(shouldShowPageHeader('code-repos', ''), true)
-  assert.equal(shouldShowPageHeader('tool-debug', ''), true)
-})
-
-test('buildWorkflowTaskProgressHash returns the progress route when a task execution starts a run', () => {
-  assert.equal(
-    buildWorkflowTaskProgressHash('github-repo', 'github-repo_019f20752fa774fba90c58cd90832ab0'),
-    'workflow/github-repo/progress/github-repo_019f20752fa774fba90c58cd90832ab0',
-  )
-})
-
-test('run detail routes preserve and decode their workflow return context', () => {
-  const workflowProgress = 'workflow/sales_report/progress/run-1'
-  const agentRoute = buildAgentRunHash('agent-run-1', workflowProgress)
-  const scriptRoute = buildScriptRunHash('report-script', 'script-run-1', workflowProgress)
-
-  assert.equal(agentRoute, 'agent-runs/agent-run-1?returnTo=workflow%2Fsales_report%2Fprogress%2Frun-1')
-  assert.equal(scriptRoute, 'scripts/report-script/run/script-run-1?returnTo=workflow%2Fsales_report%2Fprogress%2Frun-1')
-  assert.deepEqual(parseSubRoute(agentRoute).segments, ['agent-runs', 'agent-run-1'])
-  assert.equal(routeReturnTo(agentRoute), workflowProgress)
-  assert.deepEqual(parseSubRoute(scriptRoute).segments, ['scripts', 'report-script', 'run', 'script-run-1'])
-  assert.equal(routeReturnTo(scriptRoute), workflowProgress)
+test('navigation configuration reflects the confirmed information architecture', () => {
+  assert.match(app, /\{ items: \[\{ key: 'dashboard', label: '平台概览'/)
+  assert.match(app, /key: 'profiles', label: '知识平面'/)
+  assert.match(app, /label: '知识管理',[\s\S]*key: 'services'/)
+  assert.doesNotMatch(app, /能力治理/)
+  assert.doesNotMatch(app, /key: 'tools', label: '工具目录'/)
+  assert.doesNotMatch(app, /key: 'tool-debug', label: '工具调试'/)
 })

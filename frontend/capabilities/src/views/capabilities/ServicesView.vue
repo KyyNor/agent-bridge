@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ArrowLeft, Plus, RotateCw, Save, Search, Trash2 } from '@lucide/vue'
+import { ArrowLeft, Bug, Plus, RotateCw, Save, Search, Trash2, Wrench } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
@@ -17,7 +18,7 @@ import CategoryBadge from '../../components/CategoryBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { navigateTo, registerNavigationGuard } from '../../lib/navigation'
+import { registerRouteLeaveGuard } from '../../router/guards'
 import {
   buildOpenApiServicePayload,
   buildServicePayload,
@@ -38,6 +39,7 @@ import {
 import { queryClient, queryKeys } from '../../lib/query'
 
 const props = defineProps<{ routeKey: string }>()
+const router = useRouter()
 
 const mcpServices = ref<McpService[]>([])
 const openApiServices = ref<OpenApiService[]>([])
@@ -94,7 +96,7 @@ const formDirty = computed(() =>
   isFormPage.value && !saving.value && Boolean(formBaseline.value) && snapshotForm() !== formBaseline.value,
 )
 
-const removeNavigationGuard = registerNavigationGuard(() => {
+const removeNavigationGuard = registerRouteLeaveGuard(() => {
   if (!formDirty.value) return true
   return confirm({
     title: '放弃未保存修改',
@@ -186,15 +188,15 @@ const dialogTitle = computed(() => {
 const primaryActionLabel = computed(() => saving.value ? '保存中...' : '保存')
 
 function goList() {
-  void navigateTo('services', { replace: true })
+  void router.replace('/services')
 }
 
 function openCreate() {
-  void navigateTo('services/new')
+  void router.push('/services/new')
 }
 
 function openEdit(service: CapabilityServiceSource) {
-  void navigateTo(`services/edit/${service.source_type}/${service.service_key}`)
+  void router.push(`/services/edit/${service.source_type}/${service.service_key}`)
 }
 
 async function applyRoute() {
@@ -371,7 +373,7 @@ const toolTypeOptions = [
     </EditorActionBar>
 
     <div v-if="serviceNotFound" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
-      无法加载该服务（可能已被删除或不存在）。请<a class="underline" href="#services" @click.prevent="goList">返回列表</a>。
+      无法加载该服务（可能已被删除或不存在）。请<button type="button" class="underline" @click="goList">返回列表</button>。
     </div>
 
     <Card v-else>
@@ -460,10 +462,11 @@ const toolTypeOptions = [
   <div v-else class="space-y-5">
     <!-- 页头操作：新建服务进 #ph-actions（仅列表态） -->
     <Teleport v-if="!isFormPage" to="#ph-actions" defer>
-      <Button size="lg" class="shadow-btn" @click="openCreate">
-        <Plus :size="14" />
-        新建服务
-      </Button>
+      <div class="flex gap-2">
+        <Button variant="outline" size="lg" @click="router.push('/tools')"><Wrench :size="14" />工具目录</Button>
+        <Button variant="outline" size="lg" @click="router.push('/tool-debug')"><Bug :size="14" />工具调试</Button>
+        <Button size="lg" class="shadow-btn" @click="openCreate"><Plus :size="14" />新建服务</Button>
+      </div>
     </Teleport>
 
     <!-- 页头筛选：搜索 + 状态分段 + 类型进 #ph-filters（仅列表态） -->
