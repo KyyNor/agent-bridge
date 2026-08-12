@@ -213,6 +213,16 @@ export interface OutputWorkflowNode { id: string; type: 'output'; name: string; 
 export type WorkflowNode = GetTaskWorkflowNode | AgentWorkflowNode | ScriptWorkflowNode | OutputWorkflowNode
 export interface WorkflowGraph { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
 export interface WorkflowValidationIssue { scope: 'workflow' | 'node' | 'edge'; id: string | null; field: string | null; code: string; message: string }
+
+export type OnboardingTourStatus = 'completed' | 'skipped'
+
+export interface OnboardingTourProgress {
+  tour_key: string
+  tour_version: number
+  status: OnboardingTourStatus | null
+  updated_at: string | null
+  should_show: boolean
+}
 export type WorkflowValidationError = WorkflowValidationIssue
 export interface WorkflowValidationResult { valid: boolean; errors: WorkflowValidationIssue[]; warnings: WorkflowValidationIssue[] }
 export interface WorkflowDraft {

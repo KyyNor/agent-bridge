@@ -17,6 +17,7 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import CategoryBadge from '../../components/CategoryBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import TourReplayButton from '../../components/TourReplayButton.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { registerRouteLeaveGuard } from '../../router/guards'
 import {
@@ -37,9 +38,12 @@ import {
   type OpenApiImportState,
 } from './openapiImport'
 import { queryClient, queryKeys } from '../../lib/query'
+import { servicesFirstUseTour } from '../../lib/onboardingTours'
+import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const props = defineProps<{ routeKey: string }>()
 const router = useRouter()
+const { maybeStartTour, startTour } = useOnboardingTour()
 
 const mcpServices = ref<McpService[]>([])
 const openApiServices = ref<OpenApiService[]>([])
@@ -148,12 +152,21 @@ onMounted(async () => {
   await loadServices()
   await applyRoute()
   loading.value = false
+  await maybeStartServicesTour()
 })
 
 watch(
   () => props.routeKey,
-  () => { void applyRoute() },
+  async () => {
+    await applyRoute()
+    await maybeStartServicesTour()
+  },
 )
+
+async function maybeStartServicesTour() {
+  if (isFormPage.value || loading.value) return
+  await maybeStartTour(servicesFirstUseTour)
+}
 
 const filtered = computed(() => {
   let list = services.value
@@ -463,15 +476,16 @@ const toolTypeOptions = [
     <!-- 页头操作：新建服务进 #ph-actions（仅列表态） -->
     <Teleport v-if="!isFormPage" to="#ph-actions" defer>
       <div class="flex gap-2">
+        <TourReplayButton :tour="servicesFirstUseTour" @start="startTour" />
         <Button variant="outline" size="lg" @click="router.push('/tools')"><Wrench :size="14" />工具目录</Button>
         <Button variant="outline" size="lg" @click="router.push('/tool-debug')"><Bug :size="14" />工具调试</Button>
-        <Button size="lg" class="shadow-btn" @click="openCreate"><Plus :size="14" />新建服务</Button>
+        <Button data-tour="services-create" size="lg" class="shadow-btn" @click="openCreate"><Plus :size="14" />新建服务</Button>
       </div>
     </Teleport>
 
     <!-- 页头筛选：搜索 + 状态分段 + 类型进 #ph-filters（仅列表态） -->
     <Teleport v-if="!isFormPage" to="#ph-filters" defer>
-      <div class="relative w-full max-w-[360px]">
+      <div data-tour="services-filter" class="relative w-full max-w-[360px]">
         <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-placeholder" />
         <Input v-model="search" placeholder="搜索服务名称、地址或描述..." class="h-9 pl-8" />
       </div>
@@ -488,7 +502,7 @@ const toolTypeOptions = [
       </Select>
     </Teleport>
 
-    <Card>
+    <Card data-tour="services-list">
       <CardContent class="p-0">
         <div v-if="filtered.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
           {{ search ? '无匹配结果' : '暂无已登记的服务' }}

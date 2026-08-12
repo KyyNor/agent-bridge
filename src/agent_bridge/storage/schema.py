@@ -194,6 +194,16 @@ CREATE TABLE IF NOT EXISTS metamcp_tool_settings (
   updated_by TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS onboarding_tour_statuses (
+  actor TEXT NOT NULL,
+  tour_key TEXT NOT NULL,
+  tour_version INTEGER NOT NULL CHECK (tour_version > 0),
+  status TEXT NOT NULL CHECK (status IN ('completed', 'skipped')),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (actor, tour_key, tour_version)
+);
+CREATE INDEX IF NOT EXISTS idx_onboarding_tour_statuses_actor
+  ON onboarding_tour_statuses(actor, updated_at DESC);
 CREATE TABLE IF NOT EXISTS openapi_services (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   service_key TEXT NOT NULL UNIQUE,

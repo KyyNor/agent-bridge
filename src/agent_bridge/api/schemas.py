@@ -29,6 +29,11 @@ class ClaudeCodeHookRequest(BaseModel):
     hook_timeout_seconds: int = Field(default=60, ge=1, le=300)
 
 
+class OnboardingTourStatusRequest(BaseModel):
+    version: int = Field(ge=1)
+    status: Literal["completed", "skipped"]
+
+
 class CreateKbRequest(BaseModel):
     slug: str
     name: str

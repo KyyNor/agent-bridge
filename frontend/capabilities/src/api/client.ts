@@ -109,6 +109,8 @@ import type {
   SyntaxCheckResult,
   BusinessLedger,
   BusinessLedgerRecords,
+  OnboardingTourProgress,
+  OnboardingTourStatus,
 } from './types'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
 
@@ -474,6 +476,10 @@ export const api = {
     post<ModelEvaluationRun>('/model-evaluations', payload),
 
   // Workflows
+  getOnboardingTourProgress: (tourKey: string, version: number) =>
+    get<OnboardingTourProgress>(`/onboarding/tours/${encodeURIComponent(tourKey)}?version=${version}`),
+  saveOnboardingTourProgress: (tourKey: string, version: number, status: OnboardingTourStatus) =>
+    put<OnboardingTourProgress>(`/onboarding/tours/${encodeURIComponent(tourKey)}`, { version, status }),
   listWorkflows: () => get<WorkflowDefinition[]>('/workflows'),
   getWorkflow: (key: string) => get<WorkflowDefinition>(`/workflows/${key}`),
   deleteWorkflow: (key: string) => post<{ workflow_key: string; deleted: boolean }>(`/workflows/${key}/delete`),
