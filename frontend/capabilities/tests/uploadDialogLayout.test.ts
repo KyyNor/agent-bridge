@@ -76,7 +76,7 @@ test('upload dialog uses a shared queue index with at most three async workers',
 
 test('batch upload starts one sync pass after all files are queued', () => {
   const uploadFunction = uploadQueue().slice(uploadQueue().indexOf('async function uploadDocuments'))
-  assert.match(uploadFunction, /await api\.triggerSync\(\)/)
+  assert.match(uploadFunction, /await api\.triggerKbSync\(kb\.slug\)/)
 })
 
 test('knowledge sync badges translate backend states into user-facing labels', () => {
@@ -143,7 +143,7 @@ test('knowledge detail uses one refresh path for browse data and fresh sync jobs
   const refreshFunction = file.slice(file.indexOf('async function refreshKnowledgeDetail'))
   assert.match(refreshFunction, /refreshDetailKbSummary\(/)
   assert.match(refreshFunction, /refreshCurrentDocs\(/)
-  assert.match(refreshFunction, /api\.getSyncStatus\(\)/)
-  assert.match(refreshFunction, /detailSyncJobs\.value = .*jobs\.filter/)
+  assert.match(refreshFunction, /api\.getKbSyncStatus\(detailKb\.value\.slug\)/)
+  assert.match(refreshFunction, /detailSyncJobs\.value = syncStatusResult\.value\.jobs/)
   assert.match(file, /await refreshKnowledgeDetail\(\)/)
 })

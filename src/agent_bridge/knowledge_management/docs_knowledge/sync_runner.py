@@ -33,7 +33,7 @@ class _FacadeCallbacks(Protocol):
     """门面对 runner 暴露的最小回调表面。"""
 
     def get_adapter(self, slug: str): ...
-    def align_backends(self) -> None: ...
+    def align_backends(self, kb_id: int | None = None) -> None: ...
 
 
 class SyncJobRunner:
@@ -56,15 +56,18 @@ class SyncJobRunner:
         all_users: bool,
         backend: str | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        kb_id: int | None = None,
     ) -> dict[str, int]:
-        require_admin_user(actor, self.admins)
+        if kb_id is None:
+            require_admin_user(actor, self.admins)
         # A target may have been created by an older migration without its
         # remote ID.  Repair it before taking the job snapshot so that the
         # sync path never needs to use the local KB slug as a remote ID.
-        self._facade.align_backends()
+        self._facade.align_backends(kb_id=kb_id)
         jobs = self.store.list_runnable_jobs(
             actor=None,
             backend_slug=backend,
+            kb_id=kb_id,
         )
         logger.info("文档同步: %d 个待处理任务", len(jobs))
         succeeded = 0
@@ -99,6 +102,7 @@ class SyncJobRunner:
                 refreshed_jobs = self.store.list_runnable_jobs(
                     actor=None,
                     backend_slug=backend,
+                    kb_id=kb_id,
                 )
                 for refreshed_job in reversed(refreshed_jobs):
                     if (

@@ -64,6 +64,65 @@ def test_knowledge_base_group_and_shared_access_is_enforced_by_backend(wm_paths)
     ).status_code == 200
 
 
+def test_group_member_can_sync_only_own_group_knowledge_base(wm_paths, tmp_path) -> None:
+    wm_paths.server_config_path.parent.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        '[backends.mock]\nbackend_type = "mock"\n',
+        encoding="utf-8",
+    )
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+
+    for headers, slug, visibility in (
+        (alice, "team-a-kb", "group"),
+        (bob, "team-b-kb", "group"),
+        (bob, "team-b-shared-kb", "shared"),
+    ):
+        assert client.post(
+            "/kbs",
+            headers=headers,
+            json={"slug": slug, "name": slug, "visibility": visibility},
+        ).status_code == 200
+
+    for headers, kb_slug, filename in (
+        (alice, "team-a-kb", "team-a.pdf"),
+        (bob, "team-b-kb", "team-b.pdf"),
+    ):
+        source = tmp_path / filename
+        source.write_bytes(filename.encode())
+        with source.open("rb") as handle:
+            response = client.post(
+                "/docs",
+                headers=headers,
+                data={"kb": [kb_slug], "later": "true"},
+                files={"file": (filename, handle, "application/pdf")},
+            )
+        assert response.status_code == 200
+
+    response = client.post("/kbs/team-a-kb/sync", headers=alice)
+    assert response.status_code == 200
+    assert response.json() == {"processed": 1, "succeeded": 1, "failed": 0}
+    status = client.get("/kbs/team-a-kb/status", headers=alice)
+    assert status.status_code == 200
+    assert [job["kb_slug"] for job in status.json()["jobs"]] == ["team-a-kb"]
+
+    team_b = app.state.agent_bridge_service.store.knowledge.get_kb_by_slug("team-b-kb")
+    assert team_b is not None
+    remaining = app.state.agent_bridge_service.store.list_runnable_jobs(
+        actor=None,
+        kb_id=team_b["id"],
+    )
+    assert [job["doc_slug"] for job in remaining] == ["team-b"]
+    assert client.post("/kbs/team-b-kb/sync", headers=alice).status_code == 403
+    assert client.post("/kbs/team-b-shared-kb/sync", headers=alice).status_code == 403
+    assert client.get("/kbs/team-b-kb/status", headers=alice).status_code == 403
+    assert client.get("/kbs/team-b-shared-kb/status", headers=alice).status_code == 200
+    assert client.post("/sync", headers=alice, json={"all_users": False}).status_code == 403
+
+
 def test_capability_and_code_repository_lists_intersect_with_group_access(wm_paths) -> None:
     client = TestClient(create_app(wm_paths, admins={"root"}))
     _configure_groups(client)

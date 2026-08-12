@@ -231,7 +231,7 @@ export function useKnowledgeUploadQueue({
           if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: '正在同步' })
         })
         try {
-          await api.triggerSync()
+          await api.triggerKbSync(kb.slug)
         } catch {
           syncStartError = '文件已入库，但同步未启动，请稍后点击“立即同步”。'
         }

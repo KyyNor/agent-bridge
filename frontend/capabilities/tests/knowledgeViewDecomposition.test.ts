@@ -22,5 +22,5 @@ test('knowledge subcomponents retain their explicit API boundaries', () => {
   assert.match(source('src/components/knowledge/KnowledgeSearchPanel.vue'), /api\.search/)
   assert.match(source('src/components/knowledge/KnowledgeSearchPanel.vue'), /api\.ask/)
   assert.match(source('src/components/knowledge/KnowledgeDocumentDetailDialog.vue'), /api\.getDoc/)
-  assert.match(source('src/components/knowledge/KnowledgeSyncJobsPanel.vue'), /api\.triggerSync/)
+  assert.match(source('src/components/knowledge/KnowledgeSyncJobsPanel.vue'), /api\.triggerKbSync/)
 })

@@ -143,8 +143,8 @@ class _SyncRunnerFacade:
     def get_adapter(self, slug: str):
         return self._service._get_adapter(slug)
 
-    def align_backends(self) -> None:
-        self._service.align_backends()
+    def align_backends(self, kb_id: int | None = None) -> None:
+        self._service.align_backends(kb_id=kb_id)
 
 
 class _RepoSyncFacade:
@@ -1129,6 +1129,23 @@ class AgentBridgeService:
             actor, all_users, backend=backend, progress_callback=progress_callback
         )
 
+    def sync_kb(
+        self,
+        actor: str,
+        kb_slug: str,
+        backend: str | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, int]:
+        """仅处理指定知识库的同步任务。"""
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        return self._sync_runner.sync(
+            actor,
+            all_users=False,
+            backend=backend,
+            progress_callback=progress_callback,
+            kb_id=int(kb["id"]),
+        )
+
     def _run_job(
         self,
         job: dict[str, Any],
@@ -1476,6 +1493,20 @@ class AgentBridgeService:
         require_admin_user(actor, self.admins)
         return {"jobs": self.store.list_all_jobs(backend_slug=backend)}
 
+    def kb_status(
+        self,
+        actor: str,
+        kb_slug: str,
+        backend: str | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        kb = self._require_kb_visible(actor, kb_slug)
+        return {
+            "jobs": self.store.list_all_jobs(
+                backend_slug=backend,
+                kb_id=int(kb["id"]),
+            )
+        }
+
     def search_all(self, actor: str, question: str, *,
                    profile_key: str | None = None,
                    top_k: int = 6) -> list[dict[str, Any]]:
@@ -1707,8 +1738,8 @@ class AgentBridgeService:
             self.archive.remove(Path(archive_path))
         return {"slug": doc_slug, "status": "purged"}
 
-    def align_backends(self) -> None:
-        self.docs_knowledge.align_backends()
+    def align_backends(self, kb_id: int | None = None) -> None:
+        self.docs_knowledge.align_backends(kb_id=kb_id)
 
     def list_backends(self, actor: str) -> list[dict[str, Any]]:
         return self.docs_knowledge.list_backends(actor)

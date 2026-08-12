@@ -5,10 +5,13 @@ import type { SyncJob } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import StatusBadge from '../StatusBadge.vue'
 import { Button } from '../ui/button'
+import { SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{
+  kbSlug: string
   jobs: SyncJob[]
   onSynced: () => Promise<void>
+  readOnly?: boolean
 }>()
 
 const syncing = ref(false)
@@ -30,7 +33,7 @@ function badgeLabel(status?: string | null) {
 async function triggerSync() {
   syncing.value = true
   try {
-    await api.triggerSync()
+    await api.triggerKbSync(props.kbSlug)
     await props.onSynced()
   } catch {
     // 请求失败时保留当前任务表，用户可再次发起同步。
@@ -43,8 +46,8 @@ async function triggerSync() {
 <template>
   <div class="space-y-4">
     <div class="flex items-center gap-3">
-      <Button size="sm" @click="triggerSync" :disabled="syncing">{{ syncing ? '同步中...' : '立即同步' }}</Button>
-      <span class="text-sm text-muted-foreground">处理所有待处理和失败的同步任务</span>
+      <Button size="sm" @click="triggerSync" :disabled="syncing || readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">{{ syncing ? '同步中...' : '立即同步' }}</Button>
+      <span class="text-sm text-muted-foreground">处理当前知识库待处理和失败的同步任务</span>
     </div>
     <div v-if="jobs.length === 0" class="py-6 text-center text-sm text-muted-foreground">暂无同步任务</div>
     <table v-else class="w-full">

@@ -981,10 +981,20 @@ export const api = {
     if (backend) qs.set('backend', backend)
     return post<{ processed: number }>(`/sync${qs.toString() ? '?' + qs : ''}`, { all_users: allUsers })
   },
+  triggerKbSync: (kbSlug: string, backend?: string) => {
+    const qs = new URLSearchParams()
+    if (backend) qs.set('backend', backend)
+    return post<{ processed: number }>(`/kbs/${encodeURIComponent(kbSlug)}/sync${qs.toString() ? '?' + qs : ''}`)
+  },
   getSyncStatus: (backend?: string) => {
     const qs = new URLSearchParams()
     if (backend) qs.set('backend', backend)
     return get<{ jobs: SyncJob[] }>(`/status${qs.toString() ? '?' + qs : ''}`)
+  },
+  getKbSyncStatus: (kbSlug: string, backend?: string) => {
+    const qs = new URLSearchParams()
+    if (backend) qs.set('backend', backend)
+    return get<{ jobs: SyncJob[] }>(`/kbs/${encodeURIComponent(kbSlug)}/status${qs.toString() ? '?' + qs : ''}`)
   },
 
   // Search & Ask

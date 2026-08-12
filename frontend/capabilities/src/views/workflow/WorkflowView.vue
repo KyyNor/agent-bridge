@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
-import type { ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
+import type { AccessActorContext, ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
@@ -65,6 +65,7 @@ import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
 import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { isSharedResourceReadOnly } from '../../lib/resourceAccess'
 
 const WORKFLOW_RUN_CACHE_LIMIT = 50
 const ARTIFACT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
@@ -72,6 +73,7 @@ const props = defineProps<{ routeKey: string }>()
 const { toast } = useToast()
 
 const workflows = ref<WorkflowDefinition[]>([])
+const actorContext = ref<AccessActorContext | null>(null)
 const profiles = ref<ProjectProfile[]>([])
 const scripts = ref<ManagedScript[]>([])
 const skills = ref<SkillPrompt[]>([])
@@ -228,6 +230,7 @@ const {
   profileKey: selectedWorkflow.value?.profile_key || form.value.profile_key || undefined,
   workflowKey: selectedWorkflow.value?.workflow_key,
 }))
+const artifactDetailReadOnly = computed(() => isSharedResourceReadOnly(actorContext.value, artifactDetail.value))
 
 function openTaskArtifactFullscreen(task: WorkflowTask) {
   const artifact = activeTaskArtifact(task)
@@ -500,7 +503,8 @@ const detailTabs = computed(() => [
 ])
 const pagedWorkflows = computed(() => paginate(workflows.value, workflowPage.value, workflowPageSize.value))
 onMounted(async () => {
-  await loadAll()
+  const [, actor] = await Promise.all([loadAll(), api.getAccessContext()])
+  actorContext.value = actor
   await applyRoute()
 })
 
@@ -2163,6 +2167,7 @@ async function confirmClearWorkflow() {
       :detail="artifactDetail"
       :detail-loading="detailLoading"
       :visibility-saving="visibilitySaving"
+      :read-only="artifactDetailReadOnly"
       :detail-html="artifactHtml"
       :fullscreen="fullscreenArtifact"
       :fullscreen-html="fullscreenArtifactHtml"

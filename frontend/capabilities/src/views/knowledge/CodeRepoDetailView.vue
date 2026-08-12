@@ -21,10 +21,12 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import StatusBadge from '../../components/StatusBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
+import { SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{
   repoKey: string
   repo: CodeRepository | null
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -311,6 +313,9 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+      <div v-if="readOnly" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-3 text-sm text-warning-soft-fg">
+        {{ SHARED_RESOURCE_READ_ONLY_HINT }}
+      </div>
       <div v-if="detailError" class="rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning-soft-fg">
         {{ detailError }}
       </div>
@@ -446,13 +451,13 @@ onBeforeUnmount(() => {
               </div>
               <div v-else-if="uaAvailability && !uaAvailability.ua_skill_available && uaAvailability.ua_git_url_configured" class="flex items-center justify-between rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success-soft-fg">
                 <span>UA 技能未安装，将在运行分析时自动安装</span>
-                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing || readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                   {{ uaAnalyzing ? '安装并分析中...' : '安装并分析' }}
                 </Button>
               </div>
               <div v-else-if="uaAvailability && uaAvailability.ua_skill_available" class="flex items-center justify-between rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success-soft-fg">
                 <span>Understand Anything 技能已就绪</span>
-                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing">
+                <Button size="sm" @click="triggerAnalyze" :disabled="uaAnalyzing || readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                   {{ uaAnalyzing ? '分析中...' : '运行分析' }}
                 </Button>
               </div>

@@ -268,9 +268,17 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
     def status(backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, list[dict[str, Any]]]:
         return service.status(current_actor, backend=backend)
 
+    @router.get("/kbs/{kb_slug}/status")
+    def kb_status(kb_slug: str, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, list[dict[str, Any]]]:
+        return service.kb_status(current_actor, kb_slug, backend=backend)
+
     @router.post("/sync")
     def sync(payload: SyncRequest, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, int]:
         return service.sync(current_actor, all_users=payload.all_users, backend=backend)
+
+    @router.post("/kbs/{kb_slug}/sync")
+    def sync_kb(kb_slug: str, backend: str | None = None, current_actor: str = Depends(actor)) -> dict[str, int]:
+        return service.sync_kb(current_actor, kb_slug, backend=backend)
 
     @router.get("/search")
     def search(q: str, kb: str, backend: str | None = None, top_k: int = 6, profile_key: str | None = None, current_actor: str = Depends(actor)) -> dict[str, Any]:

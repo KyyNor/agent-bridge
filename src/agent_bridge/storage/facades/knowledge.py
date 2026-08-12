@@ -325,11 +325,24 @@ class KnowledgeFacadeMixin:
     def list_pending_jobs(self) -> list[dict[str, Any]]:
         return self.knowledge.list_pending_jobs()
 
-    def list_runnable_jobs(self, actor: str | None, backend_slug: str | None = None) -> list[dict[str, Any]]:
-        return self.knowledge.list_runnable_jobs(actor=actor, backend_slug=backend_slug)
+    def list_runnable_jobs(
+        self,
+        actor: str | None,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.knowledge.list_runnable_jobs(
+            actor=actor,
+            backend_slug=backend_slug,
+            kb_id=kb_id,
+        )
 
-    def list_all_jobs(self, backend_slug: str | None = None) -> list[dict[str, Any]]:
-        return self.knowledge.list_all_jobs(backend_slug=backend_slug)
+    def list_all_jobs(
+        self,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.knowledge.list_all_jobs(backend_slug=backend_slug, kb_id=kb_id)
 
     def update_job_status(self, job_id: int, status: SyncJobStatus, error: str | None = None) -> None:
         return self.knowledge.update_job_status(job_id=job_id, status=status, error=error)

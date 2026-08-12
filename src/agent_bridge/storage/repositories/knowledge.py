@@ -804,7 +804,12 @@ class KnowledgeRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_runnable_jobs(self, actor: str | None, backend_slug: str | None = None) -> list[dict[str, Any]]:
+    def list_runnable_jobs(
+        self,
+        actor: str | None,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -837,6 +842,7 @@ class KnowledgeRepository:
                     OR member.role IN (?, ?)
                   )
                   AND (job.backend_slug = ? OR ? IS NULL)
+                  AND (job.kb_id = ? OR ? IS NULL)
                 ORDER BY job.created_at, job.id
                 """,
                 (
@@ -849,11 +855,17 @@ class KnowledgeRepository:
                     KbRole.admin.value,
                     backend_slug,
                     backend_slug,
+                    kb_id,
+                    kb_id,
                 ),
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_all_jobs(self, backend_slug: str | None = None) -> list[dict[str, Any]]:
+    def list_all_jobs(
+        self,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -869,9 +881,10 @@ class KnowledgeRepository:
                 JOIN knowledge_bases kb ON kb.id = job.kb_id
                 LEFT JOIN document_versions v ON v.id = job.version_id
                 WHERE (job.backend_slug = ? OR ? IS NULL)
+                  AND (job.kb_id = ? OR ? IS NULL)
                 ORDER BY job.created_at, job.id
                 """,
-                (backend_slug, backend_slug),
+                (backend_slug, backend_slug, kb_id, kb_id),
             ).fetchall()
             return [dict(row) for row in rows]
 

@@ -2,7 +2,7 @@
 import { Search } from '@lucide/vue'
 import { onMounted, ref, computed, watch } from 'vue'
 import { api } from '../../api/client'
-import type { CapabilityServiceSource, CapabilityToolSummary } from '../../api/types'
+import type { AccessActorContext, CapabilityServiceSource, CapabilityToolSummary } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Input } from '../../components/ui/input'
@@ -10,6 +10,7 @@ import CategoryBadge from '../../components/CategoryBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const allTools = ref<CapabilityToolSummary[]>([])
 const services = ref<CapabilityServiceSource[]>([])
@@ -22,17 +23,23 @@ const search = ref('')
 const typeFilter = ref('')
 const page = ref(1)
 const pageSize = ref(10)
+const actorContext = ref<AccessActorContext | null>(null)
 
 async function loadTools() {
   loading.value = true
   try {
     if (!servicesLoaded.value) {
-      const [mcpServices, openApiServices] = await Promise.all([api.listServices(true), api.listOpenApiServices(true)])
+      const [mcpServices, openApiServices, actor] = await Promise.all([
+        api.listServices(true),
+        api.listOpenApiServices(true),
+        api.getAccessContext(),
+      ])
       services.value = [
         ...mcpServices.map(service => ({ ...service, source_type: 'mcp_service' as const })),
         ...openApiServices.map(service => ({ ...service, source_type: 'openapi_service' as const })),
       ]
       servicesLoaded.value = true
+      actorContext.value = actor
     }
     const [sourceType, serviceKey] = selectedService.value !== '__all__'
       ? selectedService.value.split(':')
@@ -58,7 +65,12 @@ watch([selectedService, typeFilter, search, page, pageSize], () => { void loadTo
 async function updateType(tool: CapabilityToolSummary, newType: string) {
   if (tool.source_type === 'openapi_service') await api.updateOpenApiToolType(tool.service_key, tool.tool_name, newType)
   else await api.updateToolType(tool.service_key, tool.tool_name, newType)
-  tool.tool_type = newType
+  await loadTools()
+}
+
+function toolReadOnly(tool: CapabilityToolSummary) {
+  const source = services.value.find(service => service.source_type === tool.source_type && service.service_key === tool.service_key)
+  return isSharedResourceReadOnly(actorContext.value, source)
 }
 
 const displayTools = computed(() => allTools.value)
@@ -147,8 +159,8 @@ function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label
               </td>
               <td class="max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ t.description }}</td>
               <td class="px-4 py-3">
-                <Select :default-value="t.tool_type" @update:model-value="(v) => updateType(t, String(v))">
-                  <SelectTrigger class="h-8 w-[100px] text-xs">
+                <Select :model-value="t.tool_type" :disabled="toolReadOnly(t)" @update:model-value="(v) => updateType(t, String(v))">
+                  <SelectTrigger class="h-8 w-[100px] text-xs" :title="toolReadOnly(t) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
