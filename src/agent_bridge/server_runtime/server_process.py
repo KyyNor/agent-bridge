@@ -18,6 +18,7 @@ from agent_bridge.core.config import ROOT_ENV_VAR, AgentBridgePaths, load_server
 logger = logging.getLogger(__name__)
 
 _LOG_CONFIG_PATH = str(Path(__file__).resolve().parent.parent / "logging.json")
+_STARTUP_HEALTH_TIMEOUT_SECONDS = 15.0
 
 
 def _read_pid(path: Path) -> int | None:
@@ -44,7 +45,7 @@ def server_status(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
 
 
 def start_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
-    """启动 uvicorn 子进程并做最长 5s 的健康检查轮询。"""
+    """启动 uvicorn 子进程并做最长 15s 的健康检查轮询。"""
     resolved = paths or AgentBridgePaths.from_root()
     status = server_status(resolved)
     if status["running"]:
@@ -77,7 +78,7 @@ def start_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
     resolved.server_pid_path.write_text(str(process.pid), encoding="utf-8")
     logger.info("uvicorn 子进程已拉起 pid=%s", process.pid)
     health_url = f"http://{config.host}:{config.port}/health"
-    deadline = time.monotonic() + 5.0
+    deadline = time.monotonic() + _STARTUP_HEALTH_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if process.poll() is not None:
             resolved.server_pid_path.unlink(missing_ok=True)
@@ -92,8 +93,8 @@ def start_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:
             logger.info("健康检查通过 pid=%s host=%s port=%s", process.pid, config.host, config.port)
             return {"running": True, "pid": process.pid}
         time.sleep(0.1)
-    logger.error("服务在 5 秒内未通过健康检查 pid=%s 日志=%s", process.pid, resolved.server_log_path)
-    raise RuntimeError(f"server did not become healthy within 5 seconds; see log: {resolved.server_log_path}")
+    logger.error("服务在 15 秒内未通过健康检查 pid=%s 日志=%s", process.pid, resolved.server_log_path)
+    raise RuntimeError(f"server did not become healthy within 15 seconds; see log: {resolved.server_log_path}")
 
 
 def stop_server(paths: AgentBridgePaths | None = None) -> dict[str, Any]:

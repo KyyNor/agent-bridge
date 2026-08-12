@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from agent_bridge.core.config import ROOT_ENV_VAR
@@ -37,3 +38,23 @@ def test_start_server_passes_root_to_child_environment(monkeypatch, wm_paths) ->
 
     assert status == {"running": True, "pid": 123}
     assert captured["env"][ROOT_ENV_VAR] == str(wm_paths.root)
+
+
+def test_start_server_waits_up_to_fifteen_seconds_for_health(monkeypatch, wm_paths) -> None:
+    class FakeProcess:
+        pid = 123
+
+        def poll(self):
+            return None
+
+    monotonic_values = iter((0.0, 0.0, 15.0))
+    monkeypatch.setattr("agent_bridge.server_runtime.server_process.subprocess.Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(
+        "agent_bridge.server_runtime.server_process.httpx.get",
+        lambda *args, **kwargs: (_ for _ in ()).throw(httpx.ConnectError("not ready")),
+    )
+    monkeypatch.setattr("agent_bridge.server_runtime.server_process.time.monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr("agent_bridge.server_runtime.server_process.time.sleep", lambda _: None)
+
+    with pytest.raises(RuntimeError, match="within 15 seconds"):
+        start_server(wm_paths)
