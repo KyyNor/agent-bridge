@@ -11,12 +11,16 @@ import { Input } from '../../components/ui/input'
 import StatusBadge from '../../components/StatusBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import TourReplayButton from '../../components/TourReplayButton.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { navigateTo } from '../../lib/navigation'
+import { memoryFirstUseTour } from '../../lib/onboardingTours'
+import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const props = defineProps<{ routeKey: string }>()
+const { maybeStartTour, startTour } = useOnboardingTour()
 
 const blocks = ref<MemoryBlock[]>([])
 const page = ref(1)
@@ -62,12 +66,15 @@ const dashboardSrc = computed(() => {
   return dashboardStatus.value.url
 })
 
-onMounted(loadBlocks)
+onMounted(async () => {
+  await loadBlocks()
+  await maybeStartMemoryTour()
+})
 onBeforeUnmount(stopDashboardTouchTimer)
 
 watch(
   () => props.routeKey,
-  () => {
+  async () => {
     searchResult.value = null
     timeline.value = null
     dashboardStatus.value = null
@@ -76,6 +83,7 @@ watch(
     stopDashboardTouchTimer()
     void loadHealth()
     void loadDashboardStatus()
+    await maybeStartMemoryTour()
   },
 )
 
@@ -92,6 +100,11 @@ async function loadBlocks() {
   }
   await loadHealth()
   await loadDashboardStatus()
+}
+
+async function maybeStartMemoryTour() {
+  if (mode.value !== 'list' || loading.value || error.value) return
+  await maybeStartTour(memoryFirstUseTour)
 }
 
 async function deleteBlock(block: MemoryBlock) {
@@ -268,12 +281,13 @@ function errorMessage(e: unknown) {
     <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态且页头存在时） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
       <!-- 次要操作在前 -->
-      <Button variant="outline" size="lg" :disabled="loading" @click="loadBlocks">
+      <TourReplayButton :tour="memoryFirstUseTour" @start="startTour" />
+      <Button data-tour="memory-refresh" variant="outline" size="lg" :disabled="loading" @click="loadBlocks">
         <RefreshCw :size="14" />
         刷新
       </Button>
       <!-- 主操作固定最右：primary + shadow-btn -->
-      <Button size="lg" class="shadow-btn" @click="showCreate = true">
+      <Button data-tour="memory-create" size="lg" class="shadow-btn" @click="showCreate = true">
         <Plus :size="14" />
         新建记忆区块
       </Button>
@@ -281,7 +295,7 @@ function errorMessage(e: unknown) {
 
     <div v-if="error" class="rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ error }}</div>
 
-    <Card>
+    <Card data-tour="memory-list">
       <CardContent class="p-0">
         <div v-if="blocks.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">
           暂无记忆区块，点击「新建记忆区块」开始

@@ -66,7 +66,7 @@ import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
 import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { workflowFirstUseTour } from '../../lib/onboardingTours'
+import { workflowEditorFirstUseTour, workflowFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const WORKFLOW_RUN_CACHE_LIMIT = 50
@@ -504,6 +504,7 @@ onMounted(async () => {
   await loadAll()
   await applyRoute()
   await maybeStartWorkflowTour()
+  await maybeStartWorkflowEditorTour()
 })
 
 watch(selectedKey, () => {
@@ -518,6 +519,7 @@ watch(
     cancelBatchQueue()
     await applyRoute()
     await maybeStartWorkflowTour()
+    await maybeStartWorkflowEditorTour()
   },
 )
 
@@ -551,6 +553,11 @@ async function loadAll() {
 async function maybeStartWorkflowTour() {
   if (routeMode.value !== 'list' || loading.value || error.value || routeError.value) return
   await maybeStartTour(workflowFirstUseTour)
+}
+
+async function maybeStartWorkflowEditorTour() {
+  if (!isWorkflowFormPage.value || routeError.value || formError.value) return
+  await maybeStartTour(workflowEditorFirstUseTour)
 }
 
 let editorResourcesLoaded = false
@@ -1834,7 +1841,8 @@ async function confirmClearWorkflow() {
               </p>
             </div>
           </div>
-          <div class="flex flex-wrap gap-2">
+          <div data-tour="workflow-editor-actions" class="flex flex-wrap gap-2">
+            <TourReplayButton :tour="workflowEditorFirstUseTour" @start="startTour" />
             <Button variant="outline" size="sm" :disabled="designing" @click="openWorkflowDesigner('modify')">
               <WandSparkles class="mr-1.5 h-4 w-4" />
               AI 设计
@@ -1885,9 +1893,9 @@ async function confirmClearWorkflow() {
               </div>
             </div>
 
-            <div class="workflow-editor-region flex flex-col overflow-hidden rounded-md border bg-muted/10" style="height: clamp(480px, calc(100vh - 240px), 820px);">
+            <div data-tour="workflow-editor-canvas" class="workflow-editor-region flex flex-col overflow-hidden rounded-md border bg-muted/10" style="height: clamp(480px, calc(100vh - 240px), 820px);">
               <!-- 调色板：横排置顶，自然高度 -->
-              <WorkflowNodePalette orientation="horizontal" @add-node="addNode" />
+              <div data-tour="workflow-editor-palette"><WorkflowNodePalette orientation="horizontal" @add-node="addNode" /></div>
               <!-- 画布：flex-1 撑满剩余高度，min-h-0 让 VueFlow 正确测量 -->
               <div class="min-h-0 flex-1">
                 <WorkflowEditorCanvas

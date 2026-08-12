@@ -21,12 +21,16 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import StatusBadge from '../../components/StatusBadge.vue'
 import SearchableMultiSelect, { type SearchableMultiSelectOption } from '../../components/SearchableMultiSelect.vue'
+import TourReplayButton from '../../components/TourReplayButton.vue'
 import { profileConfigDraftKey, type ProfileConfigDraft } from './profileConfigSnapshot'
+import { profileConfigFirstUseTour } from '../../lib/onboardingTours'
+import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const props = defineProps<{
   profileKey: string
   profile: ProjectProfile | null
 }>()
+const { maybeStartTour, startTour } = useOnboardingTour()
 
 const emit = defineEmits<{
   saved: []
@@ -256,6 +260,7 @@ async function loadProfile(profileKey: string) {
   await loadProfileMemory(profileKey)
   captureInitialDraft()
   configLoading.value = false
+  if (!configError.value) await maybeStartTour(profileConfigFirstUseTour)
 }
 
 watch(() => props.profileKey, profileKey => { void loadProfile(profileKey) }, { immediate: true })
@@ -565,6 +570,7 @@ async function refreshProfileDoc(raiseError = false) {
           <p v-if="configProfile.description" class="mt-1 text-xs text-muted-foreground">{{ configProfile.description }}</p>
         </div>
       </div>
+      <TourReplayButton :tour="profileConfigFirstUseTour" @start="startTour" />
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -574,7 +580,7 @@ async function refreshProfileDoc(raiseError = false) {
       </div>
       <div v-else class="space-y-5 pb-4">
         <!-- Copy Command -->
-        <div>
+        <div data-tour="profile-command">
           <div class="mb-2 text-sm font-medium">接入命令</div>
           <div class="flex min-w-0 items-center gap-2 rounded-lg bg-secondary px-4 py-2.5">
             <code class="min-w-0 flex-1 break-all font-mono text-sm text-foreground">{{ configProfile ? getProfileCommand(configProfile) : '' }}</code>
@@ -615,7 +621,7 @@ async function refreshProfileDoc(raiseError = false) {
         </section>
 
         <!-- Allow List -->
-        <div>
+        <div data-tour="profile-services">
           <div class="mb-2 text-sm font-medium">允许访问的服务</div>
           <div v-if="allServices.length === 0" class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
             暂无已注册的服务，请先在能力接入中添加服务
@@ -631,7 +637,7 @@ async function refreshProfileDoc(raiseError = false) {
         </div>
 
         <!-- KB Resources -->
-        <div>
+        <div data-tour="profile-resources">
           <div class="mb-2 text-sm font-medium">允许访问的文档知识</div>
           <div v-if="allKbs.length === 0" class="rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground">
             暂无文档知识，请先在文档知识中添加
@@ -793,7 +799,7 @@ async function refreshProfileDoc(raiseError = false) {
       <div v-if="saveError" class="mb-3 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">{{ saveError }}</div>
       <div class="flex flex-wrap justify-end gap-2">
         <Button variant="outline" type="button" @click="emit('cancel')">取消</Button>
-        <Button @click="saveConfig" :disabled="!canSaveConfig">{{ configSaving ? '保存中...' : '确认' }}</Button>
+        <Button data-tour="profile-save" @click="saveConfig" :disabled="!canSaveConfig">{{ configSaving ? '保存中...' : '确认' }}</Button>
       </div>
     </div>
   </div>

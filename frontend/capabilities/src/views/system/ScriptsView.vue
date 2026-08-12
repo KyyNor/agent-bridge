@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Check, HelpCircle, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from '@lucide/vue'
+import { ArrowLeft, Check, Play, Plus, RotateCcw, Save, Trash2, WandSparkles } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { DesignAgentResponse, ManagedScript, ProjectProfile, ScriptDesignResult, ScriptRun, SyntaxCheckResult, WorkflowDefinition, WorkflowRun } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -38,8 +38,11 @@ import {
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import TourReplayButton from '../../components/TourReplayButton.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { navigateTo, parseSubRoute, registerNavigationGuard, routeReturnTo } from '../../lib/navigation'
+import { scriptsFirstUseTour } from '../../lib/onboardingTours'
+import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const props = defineProps<{ routeKey: string }>()
 
@@ -48,9 +51,11 @@ const profiles = ref<ProjectProfile[]>([])
 const workflows = ref<WorkflowDefinition[]>([])
 const loading = ref(true)
 const error = ref('')
+// 旧的长文档弹窗保留为兼容内容；列表入口统一使用 Driver.js 新手指南。
 const showGuide = ref(false)
 const scriptPage = ref(1)
 const scriptPageSize = ref(10)
+const { maybeStartTour, startTour } = useOnboardingTour()
 
 // 编辑模式表单状态
 const form = ref<ScriptEditableFields>(emptyForm())
@@ -157,7 +162,13 @@ const workflowRunOptions = computed(() =>
 
 onMounted(async () => {
   await loadAll()
+  await maybeStartScriptsTour()
 })
+
+async function maybeStartScriptsTour() {
+  if (mode.value !== 'list' || loading.value || error.value) return
+  await maybeStartTour(scriptsFirstUseTour)
+}
 
 // 实时语法校验：代码变化时 debounce 调用 /scripts/validate（不保存）。
 watch(
@@ -192,7 +203,10 @@ watch(
 watch(
   () => props.routeKey,
   async (key) => {
-    if (!key) return
+    if (!key) {
+      await maybeStartScriptsTour()
+      return
+    }
     if (syntaxTimer) clearTimeout(syntaxTimer)
     syntaxRequestId += 1
     liveSyntax.value = null
@@ -750,11 +764,8 @@ function errorMessage(e: unknown) {
   <div v-if="mode === 'list'" class="space-y-5">
     <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="showGuide = true">
-        <HelpCircle :size="14" />
-        使用指引
-      </Button>
-      <Button size="lg" class="shadow-btn" @click="openCreate">
+      <TourReplayButton :tour="scriptsFirstUseTour" @start="startTour" />
+      <Button data-tour="scripts-create" size="lg" class="shadow-btn" @click="openCreate">
         <Plus :size="14" />
         新建脚本
       </Button>
@@ -862,7 +873,7 @@ def main(envelope):
       {{ error }}
     </div>
 
-    <Card>
+    <Card data-tour="scripts-list">
       <CardContent class="p-0">
         <div class="flex items-center justify-between gap-3 border-b px-4 py-3">
           <div>
@@ -933,7 +944,8 @@ def main(envelope):
             </div>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2">
+          <div data-tour="scripts-editor-actions" class="flex flex-wrap gap-2">
+            <TourReplayButton :tour="scriptsFirstUseTour" @start="startTour" />
           <Button v-if="isBuiltInScript" variant="outline" size="sm" :disabled="saving || testing" @click="resetBuiltInScript">
             <RotateCcw class="mr-1.5 h-4 w-4" />
             恢复默认

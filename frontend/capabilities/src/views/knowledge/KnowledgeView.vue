@@ -11,6 +11,7 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import PaginationBar from '../../components/PaginationBar.vue'
+import TourReplayButton from '../../components/TourReplayButton.vue'
 import FolderTree from '../../components/knowledge/FolderTree.vue'
 import KnowledgeDefaultBackendPanel from '../../components/knowledge/KnowledgeDefaultBackendPanel.vue'
 import KnowledgeDocumentDetailDialog from '../../components/knowledge/KnowledgeDocumentDetailDialog.vue'
@@ -24,8 +25,11 @@ import { useKnowledgeUploadQueue } from '../../composables/useKnowledgeUploadQue
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { navigateTo } from '../../lib/navigation'
 import { queryClient, queryKeys } from '../../lib/query'
+import { knowledgeFirstUseTour } from '../../lib/onboardingTours'
+import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const props = defineProps<{ routeKey: string }>()
+const { maybeStartTour, startTour } = useOnboardingTour()
 
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
 const pagedKbs = computed(() => paginate(kbs.value, page.value, pageSize.value))
@@ -227,10 +231,14 @@ onMounted(async () => {
   await Promise.all([loadKbs(), loadBackends()])
   loading.value = false
   await loadDetail()
+  await maybeStartKnowledgeTour()
 })
 
 // Route-driven detail loading: entering #knowledge/<slug> loads that kb's data.
-watch(() => props.routeKey, () => { void loadDetail() })
+watch(() => props.routeKey, async () => {
+  await loadDetail()
+  await maybeStartKnowledgeTour()
+})
 
 watch(() => detailTab.value, () => {
   if (detailTab.value !== 'docs') selectedDocSlugs.value = new Set()
@@ -244,6 +252,11 @@ async function loadKbs(options: { fresh?: boolean } = {}) {
       queryFn: ({ signal }) => api.listWikiKbs({ signal }),
     })
   } catch { kbs.value = [] }
+}
+
+async function maybeStartKnowledgeTour() {
+  if (mode.value !== 'list' || loading.value) return
+  await maybeStartTour(knowledgeFirstUseTour)
 }
 
 async function refreshDetailKbSummary() {
@@ -769,18 +782,19 @@ function syncBadgeLabel(status?: string | null) {
     <template v-if="mode === 'list'">
     <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="loadKbs({ fresh: true })">
+      <TourReplayButton :tour="knowledgeFirstUseTour" @start="startTour" />
+      <Button data-tour="knowledge-refresh" variant="outline" size="lg" @click="loadKbs({ fresh: true })">
         <RotateCw :size="14" />
         刷新
       </Button>
-      <Button size="lg" class="shadow-btn" @click="showCreate = true">
+      <Button data-tour="knowledge-create" size="lg" class="shadow-btn" @click="showCreate = true">
         <Plus :size="14" />
         创建文档知识
       </Button>
     </Teleport>
 
     <!-- KB Table -->
-    <Card>
+    <Card data-tour="knowledge-list">
       <CardContent class="p-0">
         <div v-if="kbs.length === 0" class="px-5 py-12 text-center text-sm text-muted-foreground">暂无文档知识，点击「创建文档知识」开始</div>
         <table v-else class="w-full">

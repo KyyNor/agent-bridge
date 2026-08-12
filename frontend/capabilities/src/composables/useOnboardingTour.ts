@@ -14,13 +14,15 @@ function nextFrame(): Promise<void> {
   return new Promise(resolve => requestAnimationFrame(() => resolve()))
 }
 
-async function waitForTourTargets(tour: ProductTourDefinition): Promise<boolean> {
+async function waitForTourTargets(tour: ProductTourDefinition): Promise<DriveStep[]> {
   await nextTick()
+  let availableSteps: DriveStep[] = []
   for (let frame = 0; frame < TOUR_TARGET_WAIT_FRAMES; frame += 1) {
-    if (tour.steps.every(step => document.querySelector(step.element))) return true
+    availableSteps = tour.steps.filter(step => document.querySelector(step.element)).map(toDriverStep)
+    if (availableSteps.length === tour.steps.length) return availableSteps
     await nextFrame()
   }
-  return false
+  return availableSteps
 }
 
 /**
@@ -53,7 +55,9 @@ export function useOnboardingTour() {
 
   async function startTour(tour: ProductTourDefinition): Promise<boolean> {
     if (activeDriver?.isActive()) return false
-    if (!await waitForTourTargets(tour)) return false
+    // 权限、空数据或路由状态可能让某些入口不存在；仅展示已稳定出现的步骤。
+    const availableSteps = await waitForTourTargets(tour)
+    if (!availableSteps.length) return false
 
     let finished = false
     const finish = (status: OnboardingTourStatus) => {
@@ -63,7 +67,7 @@ export function useOnboardingTour() {
       activeDriver?.destroy()
     }
     const tourDriver = driver({
-      steps: tour.steps.map(toDriverStep),
+      steps: availableSteps,
       animate: true,
       allowClose: true,
       overlayClickBehavior: 'close',

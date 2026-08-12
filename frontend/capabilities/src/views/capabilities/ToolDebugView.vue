@@ -16,6 +16,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../../components/ui/textarea'
 import CategoryBadge from '../../components/CategoryBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
+import TourReplayButton from '../../components/TourReplayButton.vue'
+import { toolDebugFirstUseTour } from '../../lib/onboardingTours'
+import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 type ToolDebugSourceType = 'mcp_service' | 'openapi_service'
 
@@ -48,6 +51,7 @@ const selectedToolName = ref('')
 const paramsText = ref('{\n  \n}')
 
 const activeProfiles = computed(() => profiles.value.filter(profile => profile.status === 'active'))
+const { maybeStartTour, startTour } = useOnboardingTour()
 
 const selectedService = computed(() => {
   return services.value.find(service => serviceId(service) === selectedServiceId.value) || null
@@ -67,6 +71,7 @@ const selectedToolRequestText = computed(() =>
 
 onMounted(async () => {
   await loadProfiles()
+  if (!loading.value && !error.value) await maybeStartTour(toolDebugFirstUseTour)
 })
 
 watch(selectedProfileKey, async (profileKey, previous) => {
@@ -290,11 +295,14 @@ function errorMessage(e: unknown) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
+    <div class="flex justify-end">
+      <TourReplayButton :tour="toolDebugFirstUseTour" @start="startTour" />
+    </div>
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
       {{ error }}
     </div>
 
-    <Card>
+    <Card data-tour="tool-debug-selection">
       <CardContent class="grid gap-4 p-5 lg:grid-cols-[220px_260px_minmax(0,1fr)_auto]">
         <div class="space-y-2">
           <div class="text-xs font-medium text-muted-foreground">能力平面</div>
@@ -379,7 +387,7 @@ function errorMessage(e: unknown) {
               </span>
             </div>
 
-            <div class="space-y-2">
+            <div data-tour="tool-debug-params" class="space-y-2">
               <div class="text-xs font-medium text-muted-foreground">params (JSON 对象)</div>
               <Textarea v-model="paramsText" class="min-h-[320px] font-mono text-xs" />
             </div>
@@ -392,7 +400,7 @@ function errorMessage(e: unknown) {
               <div class="text-xs text-muted-foreground">
                 调试上下文：{{ profiles.find(p => p.profile_key === selectedProfileKey)?.name || selectedProfileKey }}
               </div>
-              <Button :disabled="executing" @click="executeTool">
+              <Button data-tour="tool-debug-run" :disabled="executing" @click="executeTool">
                 <Play class="mr-1.5 h-4 w-4" />
                 {{ executing ? '执行中...' : '执行工具' }}
               </Button>
