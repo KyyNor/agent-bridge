@@ -2,6 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Driver.js 使用现有颜色、圆角与阴影令牌，避免导览成为一套独立视觉语言。 */
+.agent-bridge-tour-popover.driver-popover {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-pop);
+  color: var(--popover-foreground);
+  font-family: var(--font-sans);
+}
+
+.agent-bridge-tour-popover .driver-popover-title {
+  color: var(--foreground);
+  font-size: 14px;
+}
+
+.agent-bridge-tour-popover .driver-popover-description,
+.agent-bridge-tour-popover .driver-popover-progress-text {
+  color: var(--muted-foreground);
+}
+
+.agent-bridge-tour-popover .driver-popover-next-btn {
+  background: var(--primary);
+  border-color: var(--primary);
+  border-radius: var(--radius-control);
+  color: var(--primary-foreground);
+  text-shadow: none;
+}
+
+.agent-bridge-tour-popover .driver-popover-prev-btn {
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  text-shadow: none;
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-skip {
+  margin-right: auto;
+}
+
 :root {
   --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;

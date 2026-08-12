@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ArrowLeft, Download, FolderOutput, GitBranch, HelpCircle, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
+import { ArrowLeft, Download, FolderOutput, GitBranch, ListTodo, Maximize2, MoreHorizontal, Play, Plus, Save, Upload, WandSparkles, X } from '@lucide/vue'
 import { api, beginWorkflowValidationRun, finishWorkflowValidationRun, hasBlockingWorkflowValidationErrors, invalidateWorkflowValidationRun, isCurrentWorkflowValidationRun, workflowValidationErrorMessage, workflowValidationIssuesFor } from '../../api/client'
 import type { ProjectProfile, WorkflowArtifact, WorkflowDefinition, WorkflowDraft, WorkflowRun, WorkflowRunEvent, WorkflowRunLog, WorkflowRunSummary, WorkflowSubagentDetail, WorkflowTask, WorkflowTaskImportPreview, WorkflowImportPreview, WorkflowImportTargetMode, AgentRun, AgentRuntimeConfig, ManagedScript, SkillPrompt, WorkflowEdge, WorkflowGraph, WorkflowNode, WorkflowNodeRun, WorkflowNodeType, WorkflowValidationError, WorkflowType, WorkflowExecutionMode, WorkflowExecutionPlan } from '../../api/types'
 import { Badge } from '../../components/ui/badge'
@@ -37,6 +37,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
+import TourReplayButton from '../../components/TourReplayButton.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from '../../lib/workflowDefinition'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
@@ -65,6 +66,8 @@ import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
 import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
+import { workflowFirstUseTour } from '../../lib/onboardingTours'
+import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const WORKFLOW_RUN_CACHE_LIMIT = 50
 const ARTIFACT_PAGE_SIZE_OPTIONS = [10, 20, 50] as const
@@ -83,7 +86,6 @@ const workflowPage = ref(1)
 const workflowPageSize = ref(10)
 const error = ref('')
 const workflowDetailError = ref('')
-const showGuide = ref(false)
 const showClearConfirm = ref(false)
 const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs' | 'versions'>('overview')
 const taskWorkflowKey = ref('')
@@ -114,6 +116,7 @@ let workflowImportRequestToken = 0
 const routeError = ref('')
 const manualInputValues = ref<Record<string, string>>({})
 const advancedInput = ref('{}')
+const { maybeStartTour, startTour } = useOnboardingTour()
 
 const {
   form,
@@ -500,6 +503,7 @@ const pagedWorkflows = computed(() => paginate(workflows.value, workflowPage.val
 onMounted(async () => {
   await loadAll()
   await applyRoute()
+  await maybeStartWorkflowTour()
 })
 
 watch(selectedKey, () => {
@@ -513,6 +517,7 @@ watch(
     closeWorkflowImport()
     cancelBatchQueue()
     await applyRoute()
+    await maybeStartWorkflowTour()
   },
 )
 
@@ -541,6 +546,11 @@ async function loadAll() {
   } finally {
     loading.value = false
   }
+}
+
+async function maybeStartWorkflowTour() {
+  if (routeMode.value !== 'list' || loading.value || error.value || routeError.value) return
+  await maybeStartTour(workflowFirstUseTour)
 }
 
 let editorResourcesLoaded = false
@@ -1024,17 +1034,14 @@ async function confirmClearWorkflow() {
     </div>
 
     <template v-if="routeMode === 'list'">
-    <!-- 页头操作：使用指引 + 新建工作流进 #ph-actions（仅列表态） -->
+    <!-- 页头操作：新手指南 + 新建工作流进 #ph-actions（仅列表态） -->
     <Teleport v-if="routeMode === 'list'" to="#ph-actions" defer>
-      <Button variant="outline" size="lg" @click="showGuide = true">
-        <HelpCircle :size="14" />
-        使用指引
-      </Button>
-      <Button variant="outline" size="lg" @click="openWorkflowImport()">
+      <TourReplayButton :tour="workflowFirstUseTour" @start="startTour" />
+      <Button data-tour="workflow-import" variant="outline" size="lg" @click="openWorkflowImport()">
         <Upload :size="14" />
         导入工作流
       </Button>
-      <Button size="lg" class="shadow-btn" @click="openCreate">
+      <Button data-tour="workflow-create" size="lg" class="shadow-btn" @click="openCreate">
         <Plus :size="14" />
         新建工作流
       </Button>
@@ -1044,63 +1051,7 @@ async function confirmClearWorkflow() {
       {{ error }}
     </div>
 
-    <Dialog v-model:open="showGuide">
-      <DialogContent class="w-[96vw] max-w-[980px] sm:max-w-[980px]">
-        <DialogHeader>
-          <DialogTitle>工作流使用指引</DialogTitle>
-        </DialogHeader>
-        <div class="max-h-[74vh] space-y-4 overflow-auto pr-1 text-sm leading-6 text-muted-foreground">
-          <section class="rounded-md border p-4">
-            <h3 class="mb-2 text-sm font-semibold text-foreground">结构化 DAG</h3>
-            <p>画布由获取任务、Agent、托管脚本和输出结果四类节点组成；节点输出通过显式引用和条件连线传递。</p>
-            <div class="mt-3 grid gap-3 md:grid-cols-3">
-              <div class="rounded-md bg-muted/50 p-3">
-                <div class="font-mono text-xs text-foreground">workflow_get_task</div>
-                <p class="mt-1 text-xs">领取当前运行的一条待处理任务。</p>
-              </div>
-              <div class="rounded-md bg-muted/50 p-3">
-                <div class="font-mono text-xs text-foreground">workflow_set_task</div>
-                <p class="mt-1 text-xs">写入任务列表，任务可带 <span class="font-mono">type</span> 供脚本分支。</p>
-              </div>
-              <div class="rounded-md bg-muted/50 p-3">
-                <div class="font-mono text-xs text-foreground">workflow_run_log</div>
-                <p class="mt-1 text-xs">记录运行过程中的业务日志。</p>
-              </div>
-            </div>
-          </section>
-
-          <section class="rounded-md border p-4">
-            <h3 class="mb-2 text-sm font-semibold text-foreground">节点输出</h3>
-            <pre class="overflow-auto rounded-md bg-muted p-3 text-xs text-foreground">{
-  "status": "completed",
-  "task_key": "page:a",
-  "task_version": "v1",
-  "artifacts": [
-    {
-      "title": "Page A",
-      "path": "reports/page-a.md",
-      "tags": ["page"],
-      "format": "markdown",
-      "file": "out/artifacts/page-a.md",
-      "summary": "summary"
-    }
-  ]
-}</pre>
-            <p class="mt-2">获取任务节点没有领取到任务时，运行以 <span class="font-mono text-foreground">no_task</span> 结束；HTML 输出失败则记录为 warning，不影响 Markdown 主产物。</p>
-          </section>
-
-          <section class="rounded-md border p-4">
-            <h3 class="mb-2 text-sm font-semibold text-foreground">测试运行</h3>
-            <p>含获取任务节点时使用任务队列；其他工作流可由脚本参数中的 <span class="font-mono text-foreground" v-pre>{{ input.path }}</span> 引用推导输入字段，并用高级 JSON 补充值。</p>
-          </section>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showGuide = false">关闭</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Card>
+    <Card data-tour="workflow-list">
       <CardContent class="p-0">
         <div class="flex items-center justify-between gap-3 border-b px-4 py-3">
           <div>

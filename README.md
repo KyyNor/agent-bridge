@@ -229,6 +229,10 @@ tests/                         # 后端测试
 
 增量执行会复用配置、运行资源和历史产物均一致的已完成节点。条件分支的实际路径依赖节点输出，预览会将该分支及其下游标为“待条件结果”；运行时仅在条件命中后决定复用或重新执行，未命中的分支不会使汇合节点失效。
 
+## 工作流首次使用导览
+
+工作流列表使用 Driver.js 提供简洁的首次使用导览，并提供“新手指南”按钮供随时回看。导览脚本位于 `frontend/capabilities/src/lib/onboardingTours.ts`，每个导览以稳定的 `data-tour` 锚点、`key` 与 `version` 定义；用户完成、跳过状态则独立保存在主库的 `onboarding_tour_statuses`，按请求身份 `X-Agent-Bridge-User`、导览 key 与版本隔离。前端通过 `GET/PUT /onboarding/tours/{tour_key}` 读写状态；提升导览 `version` 即会为所有用户提供新版导览，无需删除旧记录。其他页面只需新增导览定义，并把 `TourReplayButton` 与 `useOnboardingTour` 接入其已完成渲染的页面。
+
 ## 工作流任务版本演进
 
 `task_key` 是任务的唯一身份，`task_version` 是它的版本演进线。当同一 `task_key` 出现新的 `task_version` 时：

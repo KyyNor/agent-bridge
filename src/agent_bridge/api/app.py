@@ -234,7 +234,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     app.include_router(create_retrieval_probe_routes(service, actor))
 
     from agent_bridge.api.routes.model_evaluations import create_model_evaluation_routes
+    from agent_bridge.api.routes.onboarding import create_onboarding_routes
     app.include_router(create_model_evaluation_routes(service, actor))
+    app.include_router(create_onboarding_routes(service, actor))
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route

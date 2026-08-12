@@ -54,6 +54,7 @@ from agent_bridge.system_config.scripts.service import ScriptService
 from agent_bridge.system_config.skills.service import SkillService
 from agent_bridge.system_config.plugin_update_scheduler import PluginUpdateScheduler
 from agent_bridge.system_config.model_evaluation.service import ModelEvaluationService
+from agent_bridge.app.onboarding import OnboardingService
 from agent_bridge.automation.workflows.scheduler import WorkflowScheduler
 from agent_bridge.automation.workflows.service import WorkflowService
 from agent_bridge.automation.workflows.handlers import WorkflowNodeHandlers
@@ -240,6 +241,7 @@ class AgentBridgeService:
         self.skills = SkillService(store=store, admins=admins)
         self.scripts = ScriptService(paths=paths, store=store, admins=admins)
         self.model_evaluations = ModelEvaluationService(paths=paths, store=store, admins=admins)
+        self.onboarding = OnboardingService(store=store)
         self.workflows = WorkflowService(
             store=store,
             admins=admins,
