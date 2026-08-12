@@ -14,8 +14,8 @@ class CoreFacadeMixin:
     def get_model_evaluation_run(self, run_id: str) -> dict[str, Any] | None:
         return self.model_evaluations.get_run(run_id)
 
-    def list_model_evaluation_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        return self.model_evaluations.list_runs(limit=limit)
+    def list_model_evaluation_runs(self, *, limit: int = 50, **kwargs: Any) -> list[dict[str, Any]]:
+        return self.model_evaluations.list_runs(limit=limit, **kwargs)
 
     def update_model_evaluation_run(self, run_id: str, **kwargs: Any) -> dict[str, Any] | None:
         return self.model_evaluations.update_run(run_id, **kwargs)
@@ -142,8 +142,11 @@ class CoreFacadeMixin:
         sync_interval_minutes: int,
         auto_understand: bool,
         status: str,
+        created_by: str = "",
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
-        return self.codegraph.upsert_code_repository(repo_key=repo_key, name=name, git_url=git_url, branch=branch, auth_ref=auth_ref, description=description, tags=tags, category_key=category_key, sync_interval_minutes=sync_interval_minutes, auto_understand=auto_understand, status=status)
+        return self.codegraph.upsert_code_repository(repo_key=repo_key, name=name, git_url=git_url, branch=branch, auth_ref=auth_ref, description=description, tags=tags, category_key=category_key, sync_interval_minutes=sync_interval_minutes, auto_understand=auto_understand, status=status, created_by=created_by, owner_group_key=owner_group_key, visibility=visibility)
 
     def list_code_repositories(self) -> list[dict[str, Any]]:
         return self.codegraph.list_code_repositories()

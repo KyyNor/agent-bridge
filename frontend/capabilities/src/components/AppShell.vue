@@ -80,8 +80,9 @@ function navigate(key: string) {
       </nav>
 
       <!-- Footer -->
-      <div class="px-5 py-4 text-[11px] text-muted-foreground/40">
-        {{ footer || 'v0.1.0' }}
+      <div class="space-y-3 px-5 py-4">
+        <slot name="footer" />
+        <div class="text-[11px] text-muted-foreground/40">{{ footer || 'v0.1.0' }}</div>
       </div>
     </aside>
 

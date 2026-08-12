@@ -14,7 +14,8 @@ from agent_bridge.api.schemas import DesignAgentRequest
 from agent_bridge.agent_runtime.json_schema import DRAFT7_SCHEMA_URI
 from agent_bridge.agent_runtime.trace import read_payload
 from agent_bridge.automation.workflows.definition import WorkflowGraph
-from agent_bridge.core.domain import ConflictError, NotFound, require_admin_user
+from agent_bridge.access_control.service import ResourceScope
+from agent_bridge.core.domain import ConflictError, NotFound
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +267,24 @@ BUSINESS_LEDGER_DESIGN_SCHEMA: dict[str, Any] = {
 def create_agent_runs_routes(service, actor):
     router = APIRouter()
 
+    def require_run_read(current_actor: str, run_key: str) -> dict[str, Any]:
+        row = service.store.agent_runs.get(run_key)
+        if row is None:
+            raise NotFound("agent run not found")
+        service.access.require_read(
+            actor=current_actor,
+            scope=ResourceScope.from_record(row),
+        )
+        return row
+
+    def require_run_write(current_actor: str, run_key: str) -> dict[str, Any]:
+        row = require_run_read(current_actor, run_key)
+        service.access.require_write(
+            actor=current_actor,
+            scope=ResourceScope.from_record(row),
+        )
+        return row
+
     @router.get("/agent-runs")
     def list_agent_runs(
         agent_name: str | None = None,
@@ -282,6 +301,12 @@ def create_agent_runs_routes(service, actor):
         paginated: bool = False,
         current_actor: str = Depends(actor),
     ) -> list[dict[str, Any]] | dict[str, Any]:
+        enforce_scope = current_actor not in service.admins
+        viewer_group_key = (
+            service.access.actor_group_key(current_actor, required=True)
+            if enforce_scope
+            else None
+        )
         if paginated:
             return service.store.agent_runs.list_paginated(
                 agent_name=agent_name,
@@ -295,6 +320,8 @@ def create_agent_runs_routes(service, actor):
                 search=search,
                 limit=limit,
                 offset=offset,
+                viewer_group_key=viewer_group_key,
+                enforce_scope=enforce_scope,
             )
         return service.store.agent_runs.list(
             agent_name=agent_name,
@@ -308,13 +335,13 @@ def create_agent_runs_routes(service, actor):
             limit=limit,
             offset=offset,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
 
     @router.get("/agent-runs/{run_key}")
     def get_agent_run(run_key: str, current_actor: str = Depends(actor)) -> dict[str, Any]:
-        row = service.store.agent_runs.get(run_key)
-        if row is None:
-            raise NotFound("agent run not found")
+        row = require_run_read(current_actor, run_key)
         return _normalize_agent_run_result(row)
 
     @router.get("/agent-runs/{run_key}/events")
@@ -325,9 +352,7 @@ def create_agent_runs_routes(service, actor):
         time as the agent streams), so progress polling sees events before the
         run finishes. Falls back to the persisted ``events_json`` (flushed at
         completion) for historical runs whose work directory is gone."""
-        row = service.store.agent_runs.get(run_key)
-        if row is None:
-            raise NotFound("agent run not found")
+        row = require_run_read(current_actor, run_key)
         return _live_or_persisted_events(row)
 
     @router.get("/agent-runs/{run_key}/events/stream")
@@ -338,9 +363,7 @@ def create_agent_runs_routes(service, actor):
         current_actor: str = Depends(actor),
     ) -> StreamingResponse:
         """以 SSE 推送已写入 JSONL 的 Agent 事件，并支持断线重放。"""
-        row = service.store.agent_runs.get(run_key)
-        if row is None:
-            raise NotFound("agent run not found")
+        row = require_run_read(current_actor, run_key)
         try:
             cursor = max(0, int(last_event_id or "0"))
         except ValueError:
@@ -414,9 +437,7 @@ def create_agent_runs_routes(service, actor):
         current_actor: str = Depends(actor),
     ) -> Response:
         """Read a large tool input/output stored below the run directory."""
-        row = service.store.agent_runs.get(run_key)
-        if row is None:
-            raise NotFound("agent run not found")
+        row = require_run_read(current_actor, run_key)
         cwd = row.get("cwd")
         if not cwd:
             raise NotFound("agent run payload not found")
@@ -432,8 +453,9 @@ def create_agent_runs_routes(service, actor):
         response: Response,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        require_admin_user(current_actor, service.admins)
         row = service.store.agent_runs.get(run_key)
+        if row is not None:
+            row = require_run_write(current_actor, run_key)
         if row is not None and row.get("status") != "running":
             return row
         active = service.agents.has_active_control(run_key)
@@ -462,9 +484,7 @@ def create_agent_runs_routes(service, actor):
 
         from agent_bridge.agent_runtime.subagent_details import build_subagent_detail
 
-        row = service.store.agent_runs.get(run_key)
-        if row is None:
-            raise NotFound("agent run not found")
+        row = require_run_read(current_actor, run_key)
         cwd = row.get("cwd")
         if not cwd:
             return {"task_id": task_id, "transcript_dir": None, "agents": []}
@@ -475,7 +495,6 @@ def create_agent_runs_routes(service, actor):
         payload: DesignAgentRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        require_admin_user(current_actor, service.admins)
         result = await service.agents.run(
             prompt=_design_prompt(
                 kind="workflow",
@@ -498,7 +517,6 @@ def create_agent_runs_routes(service, actor):
         payload: DesignAgentRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        require_admin_user(current_actor, service.admins)
         result = await service.agents.run(
             prompt=_design_prompt(
                 kind="script",
@@ -521,7 +539,6 @@ def create_agent_runs_routes(service, actor):
         payload: DesignAgentRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        require_admin_user(current_actor, service.admins)
         result = await service.agents.run(
             prompt=_design_prompt(
                 kind="business ledger",

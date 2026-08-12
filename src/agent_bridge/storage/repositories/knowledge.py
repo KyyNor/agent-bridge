@@ -40,11 +40,23 @@ class KnowledgeRepository:
         self._connect = connect
         self._folders = folder_repository or FolderRepository(db_path, connect)
 
-    def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
+    def create_kb(
+        self,
+        slug: str,
+        name: str,
+        description: str,
+        created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
+    ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO knowledge_bases (slug, name, description, created_by) VALUES (?, ?, ?, ?)",
-                (slug, name, description, created_by),
+                """
+                INSERT INTO knowledge_bases
+                  (slug, name, description, created_by, owner_group_key, visibility)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (slug, name, description, created_by, owner_group_key, visibility),
             )
             self._folders.ensure_root_folder(int(cursor.lastrowid), conn=conn)
             return self.get_kb_by_id(cursor.lastrowid, conn)
@@ -158,13 +170,14 @@ class KnowledgeRepository:
         slug: str,
         title: str,
         owner_user: str,
+        owner_group_key: str = "",
         source_type: str = "manual",
         source_repo_key: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO documents (slug, title, owner_user, source_type, source_repo_key) VALUES (?, ?, ?, ?, ?)",
-                (slug, title, owner_user, source_type, source_repo_key),
+                "INSERT INTO documents (slug, title, owner_user, owner_group_key, source_type, source_repo_key) VALUES (?, ?, ?, ?, ?, ?)",
+                (slug, title, owner_user, owner_group_key, source_type, source_repo_key),
             )
             row = conn.execute("SELECT * FROM documents WHERE id = ?", (cursor.lastrowid,)).fetchone()
             document = row_to_dict(row)
@@ -791,7 +804,12 @@ class KnowledgeRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_runnable_jobs(self, actor: str | None, backend_slug: str | None = None) -> list[dict[str, Any]]:
+    def list_runnable_jobs(
+        self,
+        actor: str | None,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -824,6 +842,7 @@ class KnowledgeRepository:
                     OR member.role IN (?, ?)
                   )
                   AND (job.backend_slug = ? OR ? IS NULL)
+                  AND (job.kb_id = ? OR ? IS NULL)
                 ORDER BY job.created_at, job.id
                 """,
                 (
@@ -836,11 +855,17 @@ class KnowledgeRepository:
                     KbRole.admin.value,
                     backend_slug,
                     backend_slug,
+                    kb_id,
+                    kb_id,
                 ),
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def list_all_jobs(self, backend_slug: str | None = None) -> list[dict[str, Any]]:
+    def list_all_jobs(
+        self,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -856,9 +881,10 @@ class KnowledgeRepository:
                 JOIN knowledge_bases kb ON kb.id = job.kb_id
                 LEFT JOIN document_versions v ON v.id = job.version_id
                 WHERE (job.backend_slug = ? OR ? IS NULL)
+                  AND (job.kb_id = ? OR ? IS NULL)
                 ORDER BY job.created_at, job.id
                 """,
-                (backend_slug, backend_slug),
+                (backend_slug, backend_slug, kb_id, kb_id),
             ).fetchall()
             return [dict(row) for row in rows]
 

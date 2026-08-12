@@ -98,7 +98,10 @@ class WorkflowNodeHandlers:
         if self.workflow_service is None:
             raise NodeExecutionError(node.id, "workflow service is not configured")
         result = self.workflow_service.get_task_for_agent(
-            profile_key=context.workflow["profile_key"], workflow_key=context.workflow["workflow_key"], run_id=context.run_id
+            actor=context.actor,
+            profile_key=context.workflow["profile_key"],
+            workflow_key=context.workflow["workflow_key"],
+            run_id=context.run_id,
         )
         task = result.get("task")
         context.task = task
@@ -124,6 +127,9 @@ class WorkflowNodeHandlers:
             timeout=config.timeout_seconds,
             skills=None,
             actor=context.actor,
+            workflow_capability_token=str(
+                context.workflow.get("runtime_capability_token") or ""
+            ) or None,
         )
         if not result.ok:
             raise NodeExecutionError(node.id, result.error or "agent node failed")
@@ -143,6 +149,9 @@ class WorkflowNodeHandlers:
                 timeout_seconds=config.timeout_seconds,
                 profile_key=context.workflow["profile_key"],
                 workflow_context={"workflow": True, "workflow_key": context.workflow["workflow_key"], "run_id": context.run_id},
+                workflow_capability_token=str(
+                    context.workflow.get("runtime_capability_token") or ""
+                ) or None,
                 run_type="mcp",
             )
         except Exception as exc:

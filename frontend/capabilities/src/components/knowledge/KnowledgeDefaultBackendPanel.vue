@@ -3,10 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { BackendAgent, BackendInfo, KnowledgeBaseSummary } from '../../api/types'
 import { Button } from '../ui/button'
+import { SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{
   kb: KnowledgeBaseSummary
   backends: BackendInfo[]
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -114,7 +116,7 @@ watch(() => [props.kb.slug, props.kb.default_backend_slug, props.kb.default_agen
         <span class="text-xs text-muted-foreground">· 默认 Agent:</span>
         <span class="text-sm font-medium">{{ agentLabel }}</span>
       </template>
-      <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="startEditing">修改</Button>
+      <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="startEditing" :disabled="readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">修改</Button>
     </template>
     <template v-else>
       <select v-model="backendSlug" @change="onBackendChange" class="h-8 rounded-md border border-border bg-background px-2 text-sm flex-1 min-w-[180px]">

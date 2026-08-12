@@ -73,8 +73,9 @@ def test_mcp_service_registration_api(wm_paths) -> None:
             "name": "MySQL MCP",
             "endpoint_url": "https://mysql.example.test/mcp",
             "headers": {"Authorization": "Bearer secret"},
-            "description": "Database tools",
-            "tags": ["database"],
+                "description": "Database tools",
+                "tags": ["database"],
+                "visibility": "shared",
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -232,49 +233,50 @@ def test_capability_static_assets_are_served(wm_paths) -> None:
 def test_capability_admin_page_is_chinese_control_console(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "智能中枢" in html
+    assert "AGENT_BRIDGE_DEFAULT_USER" not in html
 
 def test_capability_static_assets_use_chinese_labels(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "智能中枢" in html
 
 def test_capability_admin_page_uses_modal_service_form_and_no_refresh_buttons(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert 'id="app"' in html
 
 def test_capability_admin_page_has_phase2_views_and_modals(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert 'id="app"' in html
 
 def test_capability_static_assets_support_phase2_interactions(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "script" in html
 
 def test_capability_static_assets_support_query_route_state(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "html" in html
 
 def test_capability_admin_page_has_profile_dialog_and_tool_filters(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert "智能中枢" in html
 
 def test_capability_static_assets_render_filterable_tool_table_and_two_column_modal(wm_paths) -> None:
     from agent_bridge.web.pages import capability_admin_page
 
-    html = capability_admin_page("root")
+    html = capability_admin_page()
     assert 'id="app"' in html
 
 def test_mcp_service_status_and_tools_api(wm_paths) -> None:
@@ -397,6 +399,14 @@ def test_profile_resource_rules_api(wm_paths) -> None:
         "/api/v1/capability-profiles",
         json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
         headers={"X-Agent-Bridge-User": "root"},
+    )
+    app.state.agent_bridge_service.store.create_kb(
+        "frontend-docs",
+        "Frontend Docs",
+        "",
+        "root",
+        owner_group_key=app.state.agent_bridge_service.access.maintenance_group_key,
+        visibility="group",
     )
 
     saved = client.put(

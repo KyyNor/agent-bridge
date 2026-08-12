@@ -26,16 +26,32 @@ class ModelEvaluationRepository:
         work_dir: str,
         created_by: str,
         runtime: str = "docker",
+        owner_group_key: str = "",
     ) -> dict[str, Any]:
         now = utc_iso()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO model_evaluation_runs (
-                  run_id, model_name, base_url, runtime, datasets_json, max_samples, sampling_mode, sample_seed, status, work_dir, created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
+                  run_id, model_name, base_url, runtime, datasets_json, max_samples,
+                  sampling_mode, sample_seed, status, work_dir, created_by,
+                  owner_group_key, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)
                 """,
-                (run_id, model_name, base_url, runtime, json.dumps(datasets), max_samples, sampling_mode, sample_seed, work_dir, created_by, now),
+                (
+                    run_id,
+                    model_name,
+                    base_url,
+                    runtime,
+                    json.dumps(datasets),
+                    max_samples,
+                    sampling_mode,
+                    sample_seed,
+                    work_dir,
+                    created_by,
+                    owner_group_key,
+                    now,
+                ),
             )
         return self.get_run(run_id) or {}
 
@@ -44,10 +60,23 @@ class ModelEvaluationRepository:
             row = conn.execute("SELECT * FROM model_evaluation_runs WHERE run_id = ?", (run_id,)).fetchone()
         return self._decode(row)
 
-    def list_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+    def list_runs(
+        self,
+        *,
+        limit: int = 50,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
+            where_sql = "WHERE owner_group_key = ?" if enforce_scope else ""
+            params: list[Any] = []
+            if enforce_scope:
+                params.append(viewer_group_key or "")
+            params.append(limit)
             rows = conn.execute(
-                "SELECT * FROM model_evaluation_runs ORDER BY created_at DESC LIMIT ?", (limit,)
+                f"SELECT * FROM model_evaluation_runs {where_sql} "
+                "ORDER BY created_at DESC LIMIT ?",
+                params,
             ).fetchall()
         return [decoded for row in rows if (decoded := self._decode(row)) is not None]
 

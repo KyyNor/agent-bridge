@@ -21,14 +21,17 @@ class MemoryRepository:
         description: str,
         data_dir: str,
         created_by: str,
+        owner_group_key: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO memory_blocks (block_key, name, description, data_dir, created_by)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO memory_blocks (
+                  block_key, name, description, data_dir, created_by, owner_group_key, visibility
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 'group')
                 """,
-                (block_key, name, description, data_dir, created_by),
+                (block_key, name, description, data_dir, created_by, owner_group_key),
             )
             row = conn.execute("SELECT * FROM memory_blocks WHERE block_key = ?", (block_key,)).fetchone()
             block = row_to_dict(row)

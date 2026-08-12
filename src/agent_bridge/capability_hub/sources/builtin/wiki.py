@@ -29,7 +29,7 @@ class WikiBuiltinProvider:
         self.service = service
 
     def list_resources(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
-        kbs = self.service.store.list_kbs()
+        kbs = self.service.list_kbs(actor)
         if actor not in self.service.admins and not profile_key:
             return []
         visible = set(

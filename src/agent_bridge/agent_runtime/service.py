@@ -33,6 +33,7 @@ from agent_bridge.agent_runtime.support import (
     write_run_mcp_json,
 )
 from agent_bridge.capability_hub.profiles.docs import install_profile_to_cwd
+from agent_bridge.access_control.service import ResourceScope
 from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.agent_runtime.types import CodingAgent, CodingAgentFinal, CodingAgentRequest
 from agent_bridge.agent_runtime.trace import (
@@ -41,7 +42,7 @@ from agent_bridge.agent_runtime.trace import (
     externalize_event_payloads,
 )
 from agent_bridge.core.ids import new_run_id
-from agent_bridge.core.domain import ConflictError
+from agent_bridge.core.domain import AgentBridgeError, ConflictError, NotFound, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,7 @@ class AgentService:
         backend_key: str | None = None,
         timeout: float | None = None,
         run_key: str | None = None,
+        workflow_capability_token: str | None = None,
     ) -> AgentRunResult:
         """Run a one-shot coding-agent query and return a uniform result.
 
@@ -192,6 +194,28 @@ class AgentService:
         caller_run_key = run_key
         run_key = run_key or new_run_id(agent_name or "agent")
         workflow_run_id = run_id if workflow_key else None
+        effective_actor = actor or self._default_actor()
+        try:
+            owner_group_key = self._authorize_run_context(
+                actor=effective_actor,
+                profile_key=profile,
+                workflow_key=workflow_key,
+                workflow_run_id=workflow_run_id,
+            )
+        except AgentBridgeError as exc:
+            logger.warning(
+                "Agent run 权限预检拒绝 actor=%s profile=%s workflow=%s run=%s 原因=%s",
+                effective_actor,
+                profile,
+                workflow_key,
+                workflow_run_id,
+                exc,
+            )
+            return AgentRunResult(
+                ok=False,
+                error=f"{type(exc).__name__}: {exc}",
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
         if caller_run_key is not None:
             with self._client_run_key_lock:
                 if self.control_registry.is_active(run_key):
@@ -213,6 +237,8 @@ class AgentService:
                 prompt=prompt,
                 output_schema=output_schema,
                 started_at=started_iso,
+                actor=effective_actor,
+                owner_group_key=owner_group_key,
             )
         except sqlite3.IntegrityError as exc:
             self.control_registry.finish(run_key)
@@ -239,7 +265,12 @@ class AgentService:
                     )
                     install_profile_to_cwd(work_dir, profile, rendered["markdown"])
                 mcp_config = build_agent_bridge_server_config(
-                    self.mcp_url, profile, workflow_key=workflow_key, run_id=run_id
+                    self.mcp_url,
+                    profile,
+                    actor=actor or self._default_actor(),
+                    workflow_key=workflow_key,
+                    run_id=run_id,
+                    workflow_capability_token=workflow_capability_token,
                 )
                 write_run_mcp_json(work_dir / ".mcp.json", mcp_config)
                 effective_setting_sources = setting_sources or (
@@ -628,6 +659,36 @@ class AgentService:
         for admin in sorted(self.admins):
             return admin
         return "root"
+
+    def _authorize_run_context(
+        self,
+        *,
+        actor: str,
+        profile_key: str | None,
+        workflow_key: str | None,
+        workflow_run_id: str | None,
+    ) -> str:
+        access = getattr(self.governance, "access", None)
+        if access is None:
+            return ""
+        profile = self.governance.get_profile(actor, profile_key) if profile_key else None
+        if bool(workflow_key) != bool(workflow_run_id):
+            raise ValidationError("workflow key and run id must be provided together")
+        if workflow_run_id:
+            workflow_run = self.store.get_workflow_run(workflow_run_id)
+            if workflow_run is None:
+                raise NotFound("workflow run not found")
+            if workflow_run.get("workflow_key") != workflow_key:
+                raise ValidationError("workflow run context mismatch")
+            if profile_key and workflow_run.get("profile_key") != profile_key:
+                raise ValidationError("workflow run profile mismatch")
+            access.require_write(actor=actor, scope=ResourceScope.from_record(workflow_run))
+            if workflow_run.get("owner_group_key"):
+                return str(workflow_run["owner_group_key"])
+        if profile is not None:
+            if profile.get("owner_group_key"):
+                return str(profile["owner_group_key"])
+        return str(access.actor_group_key(actor, required=True))
 
 
 async def _wait_for_thread_event(stop_requested: Any) -> None:

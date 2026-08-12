@@ -30,6 +30,7 @@ class ScriptsRepository:
         owner_key: str,
         content_hash: str,
         actor: str,
+        owner_group_key: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             existing = conn.execute("SELECT script_key FROM scripts WHERE script_key = ?", (script_key,)).fetchone()
@@ -38,9 +39,10 @@ class ScriptsRepository:
                     """
                     INSERT INTO scripts (
                       script_key, name, description, language, code, status,
-                      owner_type, owner_key, content_hash, input_schema_json, output_schema_json, created_by, updated_by
+                      owner_type, owner_key, content_hash, input_schema_json, output_schema_json,
+                      created_by, updated_by, owner_group_key
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         script_key,
@@ -56,6 +58,7 @@ class ScriptsRepository:
                         self._dump_schema(output_schema),
                         actor,
                         actor,
+                        owner_group_key,
                     ),
                 )
             else:
@@ -73,6 +76,7 @@ class ScriptsRepository:
                         input_schema_json = ?,
                         output_schema_json = ?,
                         updated_by = ?,
+                        owner_group_key = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE script_key = ?
                     """,
@@ -88,6 +92,7 @@ class ScriptsRepository:
                         self._dump_schema(input_schema),
                         self._dump_schema(output_schema),
                         actor,
+                        owner_group_key,
                         script_key,
                     ),
                 )
@@ -157,15 +162,17 @@ class ScriptsRepository:
         error_message: str | None,
         duration_ms: int,
         actor: str,
+        owner_group_key: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO script_runs (
                   run_id, script_key, run_type, params_json, result_json,
-                  stdout, stderr, status, exit_code, error_message, duration_ms, created_by
+                  stdout, stderr, status, exit_code, error_message, duration_ms,
+                  created_by, owner_group_key
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -180,6 +187,7 @@ class ScriptsRepository:
                     error_message,
                     duration_ms,
                     actor,
+                    owner_group_key,
                 ),
             )
             run = row_to_dict(conn.execute("SELECT * FROM script_runs WHERE run_id = ?", (run_id,)).fetchone())
@@ -187,16 +195,29 @@ class ScriptsRepository:
                 raise KeyError(f"script run not found: {run_id}")
             return run
 
-    def list_script_runs(self, script_key: str, *, limit: int) -> list[dict[str, Any]]:
+    def list_script_runs(
+        self,
+        script_key: str,
+        *,
+        limit: int,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
+    ) -> list[dict[str, Any]]:
         with self._connect() as conn:
+            scope_sql = " AND owner_group_key = ?" if enforce_scope else ""
+            params: list[Any] = [script_key]
+            if enforce_scope:
+                params.append(viewer_group_key or "")
+            params.append(limit)
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM script_runs
                 WHERE script_key = ?
+                {scope_sql}
                 ORDER BY created_at DESC, run_id DESC
                 LIMIT ?
                 """,
-                (script_key, limit),
+                params,
             ).fetchall()
             return [dict(row) for row in rows]
 

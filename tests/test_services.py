@@ -93,6 +93,37 @@ def test_service_scoped_document_delete_preserves_shared_documents(wm_paths, tmp
     assert any(job["operation"] == "delete" and job["kb_id"] == kb_b["id"] for job in service.status("root")["jobs"])
 
 
+def test_document_detail_only_returns_visible_kb_placements(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.access.upsert_group(actor="root", group_key="team-a", name="A 组")
+    service.access.upsert_group(actor="root", group_key="team-b", name="B 组")
+    service.access.set_user_group(actor="root", user_id="alice", group_key="team-a")
+    service.access.set_user_group(actor="root", user_id="bob", group_key="team-b")
+    shared_kb = service.create_kb("bob", "shared-kb", "共享知识库", "", visibility="shared")
+    private_kb = service.create_kb("bob", "private-kb", "B 组知识库", "", visibility="group")
+    source = tmp_path / "mixed-scope.md"
+    source.write_text("mixed scope", encoding="utf-8")
+    doc = service.add_document("bob", source, ["shared-kb", "private-kb"], later=True)
+    for kb in (shared_kb, private_kb):
+        service.store.upsert_sync_state(
+            doc["id"],
+            kb["id"],
+            "mock",
+            f"remote-{kb['slug']}",
+            SyncStateStatus.synced,
+        )
+
+    visible = service.get_doc("alice", doc["slug"])
+
+    assert visible["kb_slugs"] == ["shared-kb"]
+    assert [item["slug"] for item in visible["kbs"]] == ["shared-kb"]
+    assert {item["kb_id"] for item in visible["sync_states"]} == {shared_kb["id"]}
+
+    requested = service.get_doc_for_kb("root", "shared-kb", doc["slug"])
+    assert requested["kb_slugs"] == ["shared-kb"]
+    assert {item["kb_id"] for item in requested["sync_states"]} == {shared_kb["id"]}
+
+
 def test_service_folder_delete_requires_confirmation_and_recursively_detaches_docs(wm_paths, tmp_path: Path) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
     service.create_kb("root", "kb-a", "KB A", "")
@@ -1373,7 +1404,7 @@ def test_ask_persists_chat_id(wm_paths, tmp_path: Path, monkeypatch) -> None:
 
 def test_ask_requires_capability_profile_for_non_admin(wm_paths, tmp_path: Path, monkeypatch) -> None:
     service = _service_with_mock_backend(wm_paths, tmp_path)
-    service.create_kb("root", "frontend-docs", "Frontend Docs", "")
+    service.create_kb("root", "frontend-docs", "Frontend Docs", "", visibility="shared")
 
     from agent_bridge.core.domain import AskResult
     mock_result = AskResult(answer="yes", chunks=[], session_id="s1")
@@ -1381,6 +1412,11 @@ def test_ask_requires_capability_profile_for_non_admin(wm_paths, tmp_path: Path,
     monkeypatch.setattr(adapter, "ask", lambda *a, **kw: (mock_result, ""))
 
     service.governance.upsert_profile("root", "safe", "Safe", "", "active")
+    service.access.set_user_group(
+        actor="root",
+        user_id="alice",
+        group_key=service.access.maintenance_group_key,
+    )
 
     with pytest.raises(AccessDenied, match="capability profile is required"):
         service.ask("alice", "frontend-docs", "what is X?")

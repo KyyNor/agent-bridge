@@ -18,8 +18,18 @@ class GovernanceFacadeMixin:
         description: str = "",
         status: str = "active",
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
-        return self.governance.upsert_project_profile(profile_key=profile_key, name=name, description=description, status=status, created_by=created_by)
+        return self.governance.upsert_project_profile(
+            profile_key=profile_key,
+            name=name,
+            description=description,
+            status=status,
+            created_by=created_by,
+            owner_group_key=owner_group_key,
+            visibility=visibility,
+        )
 
     def get_project_profile(self, profile_key: str) -> dict[str, Any] | None:
         return self.governance.get_project_profile(profile_key=profile_key)
@@ -133,8 +143,9 @@ class GovernanceFacadeMixin:
         resource_type: str | None = None,
         resource_key: str | None = None,
         duration_ms: int | None = None,
+        owner_group_key: str = "",
     ) -> dict[str, Any]:
-        log = self.governance.create_tool_call_log(log_id=log_id, actor=actor, profile_key=profile_key, entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, request=request, response=response, status=status, error_message=error_message, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, duration_ms=duration_ms)
+        log = self.governance.create_tool_call_log(log_id=log_id, actor=actor, profile_key=profile_key, entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, request=request, response=response, status=status, error_message=error_message, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, duration_ms=duration_ms, owner_group_key=owner_group_key)
         self.maybe_prune_runtime_logs()
         return log
 
@@ -156,8 +167,10 @@ class GovernanceFacadeMixin:
         created_to: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> list[dict[str, Any]]:
-        return self.governance.list_tool_call_logs(entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, profile_key=profile_key, status=status, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, created_from=created_from, created_to=created_to, limit=limit, offset=offset)
+        return self.governance.list_tool_call_logs(entrypoint=entrypoint, source_type=source_type, source_key=source_key, tool_name=tool_name, profile_key=profile_key, status=status, failure_stage=failure_stage, failure_owner=failure_owner, error_type=error_type, resource_type=resource_type, resource_key=resource_key, created_from=created_from, created_to=created_to, limit=limit, offset=offset, viewer_group_key=viewer_group_key, enforce_scope=enforce_scope)
 
     def aggregate_tool_call_stats(
         self,
@@ -166,8 +179,9 @@ class GovernanceFacadeMixin:
         created_from: str | None,
         created_to: str | None,
         bucket: str | None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        return self.governance.aggregate_tool_call_stats(dimensions=dimensions, created_from=created_from, created_to=created_to, bucket=bucket)
+        return self.governance.aggregate_tool_call_stats(dimensions=dimensions, created_from=created_from, created_to=created_to, bucket=bucket, **kwargs)
 
     def aggregate_pin_group_usage(self, *, profile_key: str, created_from: str) -> list[dict[str, Any]]:
         return self.governance.aggregate_pin_group_usage(profile_key=profile_key, created_from=created_from)

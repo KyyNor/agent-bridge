@@ -18,6 +18,7 @@ import {
   Brain,
   TableProperties,
   ChartNoAxesCombined,
+  Users,
 } from '@lucide/vue'
 
 const props = defineProps<{ name: string }>()
@@ -32,6 +33,7 @@ const icon = computed(() => {
     knowledge: BookOpen,
     'code-repos': GitBranch,
     'system-config': Cog,
+    'access-control': Users,
     skills: FileCheck,
     scripts: Terminal,
     workflow: Workflow,

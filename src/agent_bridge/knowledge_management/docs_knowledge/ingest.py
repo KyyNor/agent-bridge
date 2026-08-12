@@ -27,7 +27,6 @@ from agent_bridge.core.domain import (
     NotFound,
     Operation,
     ValidationError,
-    require_admin_user,
 )
 from agent_bridge.core.slug import make_slug, unique_slug
 from agent_bridge.knowledge_management.docs_knowledge.archive import ArchiveStorage
@@ -93,11 +92,13 @@ class DocumentIngestService:
     ) -> dict[str, Any]:
         if not kb_slugs:
             raise ValidationError("at least one knowledge base is required")
-        require_admin_user(actor, self.admins)
         self._facade.validate_source(source, allowed_extensions=UPLOAD_EXTENSIONS)
         if folder_id is not None and len(kb_slugs) != 1:
             raise ValidationError("folder_id can only be used with one knowledge base")
         kbs = [self._facade.require_kb_admin_visible(actor, kb_slug) for kb_slug in kb_slugs]
+        owner_groups = {str(kb.get("owner_group_key") or "") for kb in kbs}
+        if len(owner_groups) != 1 or not next(iter(owner_groups)):
+            raise ValidationError("同一文档只能加入同一个数据组的知识库")
         if folder_id is not None and self.store.get_folder(kbs[0]["id"], folder_id) is None:
             raise NotFound("folder not found")
 
@@ -211,6 +212,7 @@ class DocumentIngestService:
         )
         doc = self.store.create_document(
             slug=slug, title=Path(basename).stem, owner_user=actor,
+            owner_group_key=str(kb_targets[0]["owner_group_key"]),
             source_type=source_type, source_repo_key=source_repo_key,
         )
         version = self.store.create_document_version(
@@ -411,7 +413,6 @@ class DocumentIngestService:
         later: bool,
         original_filename: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         doc = self._facade.require_doc_admin_visible(actor, doc_slug)
         self._facade.validate_source(source)
         kbs = self.store.get_document_kbs(doc["id"], active_only=True)

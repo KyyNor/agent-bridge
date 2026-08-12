@@ -11,10 +11,11 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Protocol
 
+from agent_bridge.access_control.service import ResourceScope
 from agent_bridge.capability_hub.errors import capability_failure
 from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage, McpServiceStatus, SourceType
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef
-from agent_bridge.core.domain import ValidationError
+from agent_bridge.core.domain import AccessDenied, ValidationError
 from agent_bridge.core.json_util import json_loads
 
 
@@ -161,10 +162,45 @@ class _GovernedExternalSourceAdapter:
         self.service = service
 
     def _allowed(self, actor: str, profile_key: str | None, source_key: str) -> bool:
-        return self.service.governance.is_source_allowed(actor, profile_key, self.source_type, source_key)
+        record = self._resource_record(source_key)
+        profile_allowed = self.service.governance.is_source_allowed(
+            actor, profile_key, self.source_type, source_key
+        )
+        if record is None:
+            return profile_allowed
+        return bool(
+            self.service.access.can_read(
+                actor=actor,
+                scope=ResourceScope.from_record(record),
+            )
+            and profile_allowed
+        )
+
+    def _resource_record(self, source_key: str) -> dict[str, Any] | None:
+        raise NotImplementedError
 
     def _require_allowed(self, actor: str, profile_key: str | None, source_key: str) -> None:
-        if self._allowed(actor, profile_key, source_key):
+        record = self._resource_record(source_key)
+        if record is not None and not self.service.access.can_read(
+            actor=actor,
+            scope=ResourceScope.from_record(record),
+        ):
+            logger.warning(
+                "能力执行被拒绝 actor=%s service=%s 原因=数据不在当前小组可见范围 来源=%s",
+                actor,
+                source_key,
+                self.source_label,
+            )
+            raise capability_failure(
+                AccessDenied("无权使用其他小组的能力资源"),
+                status=CallLogStatus.blocked.value,
+                stage=FailureStage.profile_policy.value,
+                owner=FailureOwner.policy.value,
+                error_type="data_scope_blocked",
+            )
+        if self.service.governance.is_source_allowed(
+            actor, profile_key, self.source_type, source_key
+        ):
             return
         logger.warning(
             "能力执行被拒绝 actor=%s service=%s 原因=%s 来源=%s",
@@ -189,10 +225,16 @@ class McpSourceAdapter(_GovernedExternalSourceAdapter):
     def matches(self, source_key: str) -> bool:
         return self.service.store.get_mcp_service(source_key) is not None
 
+    def _resource_record(self, source_key: str) -> dict[str, Any] | None:
+        return self.service.store.get_mcp_service(source_key)
+
     def root_items(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
         services = [
             service
-            for service in self.service.store.list_mcp_services()
+            for service in self.service.access.visible_resources(
+                actor=actor,
+                resource_type=self.source_type,
+            )
             if service["status"] == McpServiceStatus.enabled.value
             and service["service_key"] not in self.service.builtin_providers
         ]
@@ -226,7 +268,7 @@ class McpSourceAdapter(_GovernedExternalSourceAdapter):
         if not self._allowed(actor, profile_key, source_key):
             logger.debug("搜索 MCP 来源被拒绝 path=%s", source_key)
             return []
-        self.service._require_enabled_service(source_key)
+        self.service._require_enabled_service(source_key, actor=actor)
         return [self.service._tool_search_item(tool) for tool in self.service._active_tools(source_key)]
 
     def tool_names(self, actor: str, source_key: str, profile_key: str | None) -> list[str]:
@@ -255,10 +297,16 @@ class OpenApiSourceAdapter(_GovernedExternalSourceAdapter):
     def matches(self, source_key: str) -> bool:
         return self.service.store.get_openapi_service(source_key) is not None
 
+    def _resource_record(self, source_key: str) -> dict[str, Any] | None:
+        return self.service.store.get_openapi_service(source_key)
+
     def root_items(self, actor: str, profile_key: str | None) -> list[dict[str, Any]]:
         services = [
             service
-            for service in self.service.store.list_openapi_services()
+            for service in self.service.access.visible_resources(
+                actor=actor,
+                resource_type=self.source_type,
+            )
             if service["status"] == McpServiceStatus.enabled.value
         ]
         visible = set(
@@ -292,7 +340,7 @@ class OpenApiSourceAdapter(_GovernedExternalSourceAdapter):
         if not self._allowed(actor, profile_key, source_key):
             logger.debug("搜索 OpenAPI 来源被拒绝 path=%s", source_key)
             return []
-        self.service._require_enabled_openapi_service(source_key)
+        self.service._require_enabled_openapi_service(source_key, actor=actor)
         return [self.service._openapi_tool_search_item(tool) for tool in self.service._active_openapi_tools(source_key)]
 
     def tool_names(self, actor: str, source_key: str, profile_key: str | None) -> list[str]:

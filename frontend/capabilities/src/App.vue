@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import AppShell from './components/AppShell.vue'
+import AdminAccessControl from './components/AdminAccessControl.vue'
 import type { NavGroup } from './components/AppShell.vue'
 import AppErrorBoundary from './components/AppErrorBoundary.vue'
 import PageHeader from './components/PageHeader.vue'
@@ -38,6 +39,7 @@ const navGroups: NavGroup[] = [
     label: '系统管理',
     items: [
       { key: 'system-config', label: '系统管理', description: '配置调度计划、公共模型、仓库分类和知识后端' },
+      { key: 'access-control', label: '小组权限', description: '维护用户与数据小组映射' },
       { key: 'model-evaluations', label: '模型评估', description: '以 Docker 隔离执行通用、数学、指令、代码和 Agent 评测' },
       { key: 'skills', label: 'Skill 管理', description: '维护内置技能提示词' },
       { key: 'scripts', label: '脚本管理', description: '管理受控脚本并在线测试运行' },
@@ -52,6 +54,7 @@ const showPageHeader = computed(() => !navMeta.value.hideHeaderOnSubRoute || !ha
 
 <template>
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
+    <template #footer><AdminAccessControl /></template>
     <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll">
       <PageHeader v-if="showPageHeader" :title="navMeta.title || 'Agent Bridge'" />
       <div class="min-w-0 p-7">

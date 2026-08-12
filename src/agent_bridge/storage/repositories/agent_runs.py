@@ -39,6 +39,8 @@ class AgentRunsRepository:
         events: list[dict[str, Any]] | None = None,
         started_at: str | None = None,
         finished_at: str | None = None,
+        actor: str = "",
+        owner_group_key: str = "",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
@@ -47,9 +49,9 @@ class AgentRunsRepository:
                   run_key, agent_name, backend_key, profile_key, workflow_key, workflow_run_id,
                   session_id, cwd, model, ok, status, error, duration_ms, cost_usd,
                   num_turns, prompt, output_schema_json, result_json, events_json,
-                  started_at, finished_at
+                  started_at, finished_at, actor, owner_group_key
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_key,
@@ -73,6 +75,8 @@ class AgentRunsRepository:
                     json.dumps(events or [], ensure_ascii=False, default=str),
                     started_at,
                     finished_at,
+                    actor,
+                    owner_group_key,
                 ),
             )
             row = conn.execute(
@@ -191,6 +195,8 @@ class AgentRunsRepository:
         limit: int = 50,
         offset: int = 0,
         search: str | None = None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> list[dict[str, Any]]:
         clauses, params = self._filters(
             agent_name=agent_name,
@@ -202,6 +208,8 @@ class AgentRunsRepository:
             created_from=created_from,
             created_to=created_to,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         bounded_limit = min(max(limit, 1), 200)
@@ -228,6 +236,8 @@ class AgentRunsRepository:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> dict[str, Any]:
         bounded_limit = min(max(limit, 1), 200)
         bounded_offset = max(offset, 0)
@@ -241,6 +251,8 @@ class AgentRunsRepository:
             created_from=created_from,
             created_to=created_to,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
         base_clauses, base_params = self._filters(
             agent_name=agent_name,
@@ -252,6 +264,8 @@ class AgentRunsRepository:
             created_from=created_from,
             created_to=created_to,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
         list_where = (" WHERE " + " AND ".join(list_clauses)) if list_clauses else ""
         base_where = (" WHERE " + " AND ".join(base_clauses)) if base_clauses else ""
@@ -320,9 +334,14 @@ class AgentRunsRepository:
         created_from: str | None,
         created_to: str | None,
         search: str | None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
+        if enforce_scope:
+            clauses.append("owner_group_key = ?")
+            params.append(viewer_group_key or "")
         if agent_name:
             clauses.append("agent_name = ?")
             params.append(agent_name)

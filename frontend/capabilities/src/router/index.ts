@@ -27,6 +27,7 @@ const CodeRepoView = asyncView(() => import('@/views/knowledge/CodeRepoView.vue'
 const KnowledgeView = asyncView(() => import('@/views/knowledge/KnowledgeView.vue'))
 const KnowledgeProcessingConfigView = asyncView(() => import('@/views/knowledge/KnowledgeProcessingConfigView.vue'))
 const ModelEvaluationView = asyncView(() => import('@/views/system/ModelEvaluationView.vue'))
+const AccessControlView = asyncView(() => import('@/views/system/AccessControlView.vue'))
 const MemoryView = asyncView(() => import('@/views/knowledge/MemoryView.vue'))
 const BusinessLedgerView = asyncView(() => import('@/views/knowledge/BusinessLedgerView.vue'))
 const WorkflowView = asyncView(() => import('@/views/workflow/WorkflowView.vue'))
@@ -71,6 +72,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/agent-runs/:routeKey(.*)*', name: 'agent-runs', component: AgentRunsView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'agent-runs', title: 'Agent 运行', hideHeaderOnSubRoute: true } },
   { path: '/stats', name: 'stats', component: StatsView, meta: { navKey: 'stats', title: '调用统计' } },
   { path: '/system-config', name: 'system-config', component: KnowledgeProcessingConfigView, meta: { navKey: 'system-config', title: '系统管理' } },
+  { path: '/access-control', name: 'access-control', component: AccessControlView, meta: { navKey: 'access-control', title: '小组权限' } },
   { path: '/model-evaluations', name: 'model-evaluations', component: ModelEvaluationView, meta: { navKey: 'model-evaluations', title: '模型评估' } },
   { path: '/skills', name: 'skills', component: SkillManagementView, meta: { navKey: 'skills', title: 'Skill 管理' } },
   { path: '/scripts/:routeKey(.*)*', name: 'scripts', component: ScriptsView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'scripts', title: '脚本管理', hideHeaderOnSubRoute: true } },

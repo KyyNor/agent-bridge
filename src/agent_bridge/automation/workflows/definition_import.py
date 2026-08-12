@@ -53,14 +53,23 @@ class DefinitionImportService:
         admins: set[str],
         validator: Any,
         upsert_definition: Callable[..., dict[str, Any]],
+        require_read: Callable[[str, str], dict[str, Any]] | None = None,
+        require_write: Callable[[str, str], dict[str, Any]] | None = None,
+        require_create: Callable[[str, str], Any] | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
         self.validator = validator
         self.upsert_definition = upsert_definition
+        self.require_read = require_read
+        self.require_write = require_write
+        self.require_create = require_create
 
     def export_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        if self.require_read is not None:
+            self.require_read(actor, workflow_key)
+        else:
+            require_admin_user(actor, self.admins)
         with self.store.transaction():
             workflow = self.store.get_workflow_definition(workflow_key)
             if workflow is None:
@@ -138,7 +147,6 @@ class DefinitionImportService:
         target_workflow_key: str | None = None,
         target_mode: str = "auto",
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         if target_mode not in WORKFLOW_IMPORT_MODES:
             raise ValidationError("导入方式不正确，请选择自动判断、导入为新工作流或覆盖现有工作流")
         try:
@@ -196,6 +204,15 @@ class DefinitionImportService:
         imported["definition"] = graph.model_dump(mode="json")
 
         existing = self.store.get_workflow_definition(target_key)
+        if existing is None:
+            if self.require_create is not None:
+                self.require_create(actor, str(imported["profile_key"]))
+            else:
+                require_admin_user(actor, self.admins)
+        elif self.require_write is not None:
+            self.require_write(actor, target_key)
+        else:
+            require_admin_user(actor, self.admins)
         if target_mode == "new" and existing is not None:
             raise ConflictError(
                 f"目标 workflow key「{target_key}」已经存在，请更换 key 或选择覆盖现有工作流"
@@ -261,7 +278,6 @@ class DefinitionImportService:
         }
 
     def confirm_definition_import(self, actor: str, import_id: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         now = utc_now()
         with self.store.transaction():
             snapshot = self.store.workflows.get_workflow_definition_import(import_id)

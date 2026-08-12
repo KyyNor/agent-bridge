@@ -1,0 +1,565 @@
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from fastapi.testclient import TestClient
+
+from agent_bridge.access_control.resources import create_scoped_resource_registry
+from agent_bridge.access_control.service import AccessControlService
+from agent_bridge.api.app import create_app
+from agent_bridge.capability_hub.service import CapabilityService
+from agent_bridge.core.domain import AccessDenied
+from agent_bridge.storage.sqlite import SQLiteStore
+
+
+def _configure_groups(client: TestClient) -> None:
+    root = {"X-Agent-Bridge-User": "root"}
+    for group_key in ("team-a", "team-b"):
+        response = client.post(
+            "/api/v1/access/groups",
+            headers=root,
+            json={"group_key": group_key, "name": group_key.upper()},
+        )
+        assert response.status_code == 200
+    for user_id, group_key in (("alice", "team-a"), ("carol", "team-a"), ("bob", "team-b")):
+        response = client.put(
+            "/api/v1/access/memberships",
+            headers=root,
+            json={"user_id": user_id, "group_key": group_key},
+        )
+        assert response.status_code == 200
+
+
+def test_knowledge_base_group_and_shared_access_is_enforced_by_backend(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    carol = {"X-Agent-Bridge-User": "carol"}
+
+    assert client.post(
+        "/api/v1/kbs",
+        headers=alice,
+        json={"slug": "team-notes", "name": "组内知识", "visibility": "group"},
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/kbs",
+        headers=alice,
+        json={"slug": "shared-notes", "name": "共享知识", "visibility": "shared"},
+    ).status_code == 200
+
+    assert [item["slug"] for item in client.get("/api/v1/kbs", headers=bob).json()] == ["shared-notes"]
+    assert client.get("/api/v1/kbs/team-notes/folders", headers=bob).status_code == 403
+    assert client.get("/api/v1/kbs/shared-notes/folders", headers=bob).status_code == 200
+    assert client.post(
+        "/api/v1/kbs/shared-notes/folders",
+        headers=bob,
+        json={"name": "不能跨组新建"},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/kbs/team-notes/folders",
+        headers=carol,
+        json={"name": "同组可新建"},
+    ).status_code == 200
+
+
+def test_group_member_can_sync_only_own_group_knowledge_base(wm_paths, tmp_path) -> None:
+    wm_paths.server_config_path.parent.mkdir(parents=True, exist_ok=True)
+    wm_paths.server_config_path.write_text(
+        '[backends.mock]\nbackend_type = "mock"\n',
+        encoding="utf-8",
+    )
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+
+    for headers, slug, visibility in (
+        (alice, "team-a-kb", "group"),
+        (bob, "team-b-kb", "group"),
+        (bob, "team-b-shared-kb", "shared"),
+    ):
+        assert client.post(
+            "/api/v1/kbs",
+            headers=headers,
+            json={"slug": slug, "name": slug, "visibility": visibility},
+        ).status_code == 200
+
+    for headers, kb_slug, filename in (
+        (alice, "team-a-kb", "team-a.pdf"),
+        (bob, "team-b-kb", "team-b.pdf"),
+    ):
+        source = tmp_path / filename
+        source.write_bytes(filename.encode())
+        with source.open("rb") as handle:
+            response = client.post(
+                "/api/v1/docs",
+                headers=headers,
+                data={"kb": [kb_slug], "later": "true"},
+                files={"file": (filename, handle, "application/pdf")},
+            )
+        assert response.status_code == 200
+
+    response = client.post("/api/v1/kbs/team-a-kb/sync", headers=alice)
+    assert response.status_code == 200
+    assert response.json() == {"processed": 1, "succeeded": 1, "failed": 0}
+    status = client.get("/api/v1/kbs/team-a-kb/status", headers=alice)
+    assert status.status_code == 200
+    assert [job["kb_slug"] for job in status.json()["jobs"]] == ["team-a-kb"]
+
+    team_b = app.state.agent_bridge_service.store.knowledge.get_kb_by_slug("team-b-kb")
+    assert team_b is not None
+    remaining = app.state.agent_bridge_service.store.list_runnable_jobs(
+        actor=None,
+        kb_id=team_b["id"],
+    )
+    assert [job["doc_slug"] for job in remaining] == ["team-b"]
+    assert client.post("/api/v1/kbs/team-b-kb/sync", headers=alice).status_code == 403
+    assert client.post("/api/v1/kbs/team-b-shared-kb/sync", headers=alice).status_code == 403
+    assert client.get("/api/v1/kbs/team-b-kb/status", headers=alice).status_code == 403
+    assert client.get("/api/v1/kbs/team-b-shared-kb/status", headers=alice).status_code == 200
+    assert client.post("/api/v1/sync", headers=alice, json={"all_users": False}).status_code == 403
+
+
+def test_capability_and_code_repository_lists_intersect_with_group_access(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    carol = {"X-Agent-Bridge-User": "carol"}
+
+    mcp_base = {
+        "name": "内部 MCP",
+        "endpoint_url": "https://mcp.example.test/mcp",
+        "description": "组内能力",
+        "tags": ["internal"],
+    }
+    assert client.post(
+        "/api/v1/capabilities/mcp-services",
+        headers=alice,
+        json={**mcp_base, "service_key": "team-mcp", "visibility": "group"},
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/capabilities/mcp-services",
+        headers=alice,
+        json={**mcp_base, "service_key": "shared-mcp", "visibility": "shared"},
+    ).status_code == 200
+
+    assert [item["service_key"] for item in client.get(
+        "/api/v1/capabilities/mcp-services", headers=bob
+    ).json()] == ["shared-mcp"]
+    assert client.get("/api/v1/capabilities/mcp-services/team-mcp", headers=bob).status_code == 403
+    assert client.post(
+        "/api/v1/capabilities/mcp-services",
+        headers=bob,
+        json={**mcp_base, "service_key": "shared-mcp", "visibility": "shared"},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/capabilities/mcp-services",
+        headers=carol,
+        json={**mcp_base, "service_key": "shared-mcp", "name": "同组更新"},
+    ).status_code == 200
+
+    repo_base = {
+        "name": "代码参考",
+        "git_url": "https://git.example.test/team/repo.git",
+        "branch": "main",
+    }
+    assert client.post(
+        "/api/v1/code-repo/repositories",
+        headers=alice,
+        json={**repo_base, "repo_key": "team-code", "visibility": "group"},
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/code-repo/repositories",
+        headers=alice,
+        json={**repo_base, "repo_key": "shared-code", "visibility": "shared"},
+    ).status_code == 200
+    assert [item["repo_key"] for item in client.get(
+        "/api/v1/code-repo/repositories", headers=bob
+    ).json()] == ["shared-code"]
+    assert client.get("/api/v1/code-repo/repositories/team-code", headers=bob).status_code == 403
+    assert client.get("/dashboard/team-code/", headers=bob).status_code == 403
+    assert client.post(
+        "/api/v1/code-repo/repositories",
+        headers=bob,
+        json={**repo_base, "repo_key": "shared-code", "visibility": "shared"},
+    ).status_code == 403
+
+
+class _FakeMcpClient:
+    async def call_tool(self, endpoint_url, headers, tool_name, arguments, timeout=150.0):
+        return {"is_error": False, "content": [], "structured": {"actor_can_use": True}}
+
+
+def test_mcp_execution_checks_data_scope_before_transport(wm_paths) -> None:
+    store = SQLiteStore(wm_paths.db_path)
+    store.init_schema()
+    access = AccessControlService(
+        store.access_control,
+        {"root"},
+        create_scoped_resource_registry(store),
+    )
+    access.bootstrap_admin_memberships()
+    access.upsert_group(actor="root", group_key="team-a", name="A 组")
+    access.upsert_group(actor="root", group_key="team-b", name="B 组")
+    access.set_user_group(actor="root", user_id="alice", group_key="team-a")
+    access.set_user_group(actor="root", user_id="carol", group_key="team-a")
+    access.set_user_group(actor="root", user_id="bob", group_key="team-b")
+    service = CapabilityService(
+        store=store,
+        admins={"root"},
+        access=access,
+        mcp_client=_FakeMcpClient(),
+    )
+    for service_key, visibility in (("team-mcp", "group"), ("shared-mcp", "shared")):
+        service.register_service(
+            "alice",
+            service_key,
+            service_key,
+            "https://mcp.example.test/mcp",
+            {},
+            "",
+            [],
+            visibility=visibility,
+        )
+        store.upsert_mcp_tool(
+            service_key=service_key,
+            tool_name="search",
+            display_name="search",
+            description="",
+            input_schema={"type": "object"},
+            tool_type="search",
+            tags=[],
+            examples=[],
+        )
+
+    with pytest.raises(AccessDenied, match="其他小组"):
+        asyncio.run(service.execute("bob", "team-mcp", "search", {}))
+    assert asyncio.run(service.execute("bob", "shared-mcp", "search", {}))["success"]
+    assert asyncio.run(service.execute("carol", "team-mcp", "search", {}))["success"]
+
+
+def test_profiles_ledgers_and_memory_follow_group_scope(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    carol = {"X-Agent-Bridge-User": "carol"}
+
+    profile_payload = {
+        "profile_key": "team-a-profile",
+        "name": "A 组能力平面",
+        "description": "",
+        "status": "active",
+    }
+    assert client.post("/api/v1/capability-profiles", headers=alice, json=profile_payload).status_code == 200
+    assert [item["profile_key"] for item in client.get("/api/v1/capability-profiles", headers=carol).json()] == [
+        "team-a-profile"
+    ]
+    assert client.get("/api/v1/capability-profiles", headers=bob).json() == []
+    assert client.get("/api/v1/capability-profiles/team-a-profile", headers=bob).status_code == 403
+
+    fields = [
+        {
+            "field_key": "name",
+            "name": "名称",
+            "field_type": "text",
+            "query_modes": ["contains"],
+        }
+    ]
+    for ledger_key, visibility in (("team-ledger", "group"), ("shared-ledger", "shared")):
+        assert client.post(
+            "/api/v1/business-ledgers",
+            headers=alice,
+            json={
+                "ledger_key": ledger_key,
+                "name": ledger_key,
+                "fields": fields,
+                "visibility": visibility,
+            },
+        ).status_code == 200
+    assert client.post(
+        "/api/v1/business-ledgers/shared-ledger/records",
+        headers=alice,
+        json={"values": {"name": "可共享记录"}},
+    ).status_code == 200
+    assert [item["ledger_key"] for item in client.get("/api/v1/business-ledgers", headers=bob).json()] == [
+        "shared-ledger"
+    ]
+    assert client.get("/api/v1/business-ledgers/team-ledger", headers=bob).status_code == 403
+    assert client.post(
+        "/api/v1/business-ledgers/shared-ledger/records/query",
+        headers=bob,
+        json={"filters": {}, "limit": 10, "offset": 0},
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/business-ledgers/shared-ledger/records",
+        headers=bob,
+        json={"values": {"name": "禁止跨组写入"}},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/capability-profiles",
+        headers=bob,
+        json={
+            "profile_key": "team-b-profile",
+            "name": "B 组能力平面",
+            "description": "",
+            "status": "active",
+        },
+    ).status_code == 200
+    assert client.put(
+        "/api/v1/capability-profiles/team-b-profile/resources",
+        headers=bob,
+        json={
+            "resources": [
+                {"resource_type": "business_ledger", "resource_key": "shared-ledger"}
+            ]
+        },
+    ).status_code == 200
+    assert client.put(
+        "/api/v1/capability-profiles/team-b-profile/resources",
+        headers=bob,
+        json={
+            "resources": [
+                {"resource_type": "business_ledger", "resource_key": "team-ledger"}
+            ]
+        },
+    ).status_code == 403
+
+    assert client.post(
+        "/api/v1/memory/blocks",
+        headers=alice,
+        json={"block_key": "team-a-memory", "name": "A 组记忆", "description": ""},
+    ).status_code == 200
+    assert [item["block_key"] for item in client.get("/api/v1/memory/blocks", headers=carol).json()] == [
+        "team-a-memory"
+    ]
+    assert client.get("/api/v1/memory/blocks", headers=bob).json() == []
+    assert client.get("/api/v1/memory/blocks/team-a-memory", headers=bob).status_code == 403
+    assert client.get("/memory-dashboard/team-a-memory/", headers=bob).status_code == 403
+
+
+def test_workflow_definition_is_group_only_and_artifact_can_be_shared(wm_paths) -> None:
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+
+    assert client.post(
+        "/api/v1/capability-profiles",
+        headers=alice,
+        json={
+            "profile_key": "team-a-workflow",
+            "name": "A 组工作流能力平面",
+            "description": "",
+            "status": "active",
+        },
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/workflows",
+        headers=alice,
+        json={
+            "workflow_key": "team-a-report",
+            "name": "A 组报告",
+            "description": "",
+            "profile_key": "team-a-workflow",
+            "definition": {"nodes": [], "edges": []},
+            "status": "active",
+        },
+    ).status_code == 200
+
+    assert [item["workflow_key"] for item in client.get("/api/v1/workflows", headers=alice).json()] == [
+        "team-a-report"
+    ]
+    assert client.get("/api/v1/workflows", headers=bob).json() == []
+    assert client.get("/api/v1/workflows/team-a-report", headers=bob).status_code == 403
+
+    artifact = app.state.agent_bridge_service.workflows.save_artifact(
+        workflow_key="team-a-report",
+        profile_key="team-a-workflow",
+        run_id="run-team-a",
+        task_key="report:one",
+        title="A 组报告产物",
+        path="reports/team-a.md",
+        tags=["report"],
+        format="markdown",
+        summary="只在共享后跨组可见",
+        content="# A 组报告",
+        metadata={},
+    )
+    artifact_id = artifact["artifact_id"]
+
+    assert client.get(f"/api/v1/workflow-artifacts/{artifact_id}", headers=bob).status_code == 403
+    assert client.get("/api/v1/workflow-artifacts", headers=bob).json()["items"] == []
+    assert client.put(
+        f"/api/v1/workflow-artifacts/{artifact_id}/visibility",
+        headers=alice,
+        json={"visibility": "shared"},
+    ).status_code == 200
+
+    shared = client.get(f"/api/v1/workflow-artifacts/{artifact_id}", headers=bob)
+    assert shared.status_code == 200
+    assert shared.json()["visibility"] == "shared"
+    assert [item["artifact_id"] for item in client.get(
+        "/api/v1/workflow-artifacts", headers=bob
+    ).json()["items"]] == [artifact_id]
+    assert client.put(
+        f"/api/v1/workflow-artifacts/{artifact_id}/visibility",
+        headers=bob,
+        json={"visibility": "group"},
+    ).status_code == 403
+
+
+def test_user_scripts_and_their_runs_are_group_scoped(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    carol = {"X-Agent-Bridge-User": "carol"}
+    payload = {
+        "script_key": "team-a.echo",
+        "name": "A 组脚本",
+        "description": "",
+        "language": "python",
+        "code": "def main(envelope):\n    return {'ok': True}\n",
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "status": "active",
+        "owner_type": "system",
+        "owner_key": "",
+    }
+
+    assert client.post("/api/v1/scripts", headers=alice, json=payload).status_code == 200
+    assert "team-a.echo" in [item["script_key"] for item in client.get(
+        "/api/v1/scripts", headers=carol
+    ).json()]
+    assert "team-a.echo" not in [item["script_key"] for item in client.get(
+        "/api/v1/scripts", headers=bob
+    ).json()]
+    assert client.get("/api/v1/scripts/team-a.echo", headers=bob).status_code == 403
+    assert client.post(
+        "/api/v1/scripts/team-a.echo/test", headers=bob, json={"params": {}}
+    ).status_code == 403
+
+    executed = client.post(
+        "/api/v1/scripts/team-a.echo/test", headers=alice, json={"params": {}}
+    )
+    assert executed.status_code == 200
+    run_id = executed.json()["run_id"]
+    assert client.get(f"/api/v1/script-runs/{run_id}", headers=carol).status_code == 200
+    assert client.get(f"/api/v1/script-runs/{run_id}", headers=bob).status_code == 403
+
+
+def test_model_evaluation_runs_are_group_scoped(wm_paths) -> None:
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    service = app.state.agent_bridge_service
+
+    for run_id, owner_group_key, created_by in (
+        ("eval_team_a", "team-a", "alice"),
+        ("eval_team_b", "team-b", "bob"),
+    ):
+        service.store.create_model_evaluation_run(
+            run_id=run_id,
+            model_name="internal-model",
+            base_url="https://llm.example.test/v1",
+            datasets=["gsm8k_chat_gen"],
+            max_samples=10,
+            sampling_mode="head",
+            sample_seed=42,
+            work_dir=f"/tmp/{run_id}",
+            created_by=created_by,
+            runtime="docker",
+            owner_group_key=owner_group_key,
+        )
+
+    assert client.get("/api/v1/model-evaluations/datasets", headers=alice).status_code == 200
+    assert [item["run_id"] for item in client.get(
+        "/api/v1/model-evaluations", headers=alice
+    ).json()] == ["eval_team_a"]
+    assert [item["run_id"] for item in client.get(
+        "/api/v1/model-evaluations", headers=bob
+    ).json()] == ["eval_team_b"]
+    assert client.get("/api/v1/model-evaluations/eval_team_a", headers=alice).status_code == 200
+    assert client.get("/api/v1/model-evaluations/eval_team_a", headers=bob).status_code == 403
+
+
+def test_tool_logs_and_agent_runs_are_group_scoped(wm_paths) -> None:
+    app = create_app(wm_paths, admins={"root"})
+    client = TestClient(app)
+    _configure_groups(client)
+    alice = {"X-Agent-Bridge-User": "alice"}
+    bob = {"X-Agent-Bridge-User": "bob"}
+    service = app.state.agent_bridge_service
+
+    alice_log = service.governance.log_tool_call(
+        actor="alice",
+        profile_key=None,
+        entrypoint="cli",
+        source_type=None,
+        source_key=None,
+        tool_name="team_a_tool",
+        request={},
+        response={"ok": True},
+        status="success",
+        error_message=None,
+        duration_ms=1,
+    )
+    service.governance.log_tool_call(
+        actor="bob",
+        profile_key=None,
+        entrypoint="cli",
+        source_type=None,
+        source_key=None,
+        tool_name="team_b_tool",
+        request={},
+        response={"ok": True},
+        status="success",
+        error_message=None,
+        duration_ms=1,
+    )
+
+    assert [item["tool_name"] for item in client.get(
+        "/api/v1/tool-call-logs", headers=alice
+    ).json()] == ["team_a_tool"]
+    assert [item["tool_name"] for item in client.get(
+        "/api/v1/tool-call-logs", headers=bob
+    ).json()] == ["team_b_tool"]
+    assert client.get(f"/api/v1/tool-call-logs/{alice_log['log_id']}", headers=alice).status_code == 200
+    assert client.get(f"/api/v1/tool-call-logs/{alice_log['log_id']}", headers=bob).status_code == 403
+    assert client.get(
+        "/api/v1/tool-call-stats?dimensions=tool_name", headers=alice
+    ).json()["items"][0]["tool_name"] == "team_a_tool"
+
+    service.store.agent_runs.create(
+        run_key="agent_team_a",
+        agent_name="analysis",
+        status="completed",
+        ok=True,
+        prompt="A 组任务",
+        actor="alice",
+        owner_group_key="team-a",
+    )
+    service.store.agent_runs.create(
+        run_key="agent_team_b",
+        agent_name="analysis",
+        status="completed",
+        ok=True,
+        prompt="B 组任务",
+        actor="bob",
+        owner_group_key="team-b",
+    )
+    assert [item["run_key"] for item in client.get("/api/v1/agent-runs", headers=alice).json()] == [
+        "agent_team_a"
+    ]
+    assert [item["run_key"] for item in client.get("/api/v1/agent-runs", headers=bob).json()] == [
+        "agent_team_b"
+    ]
+    assert client.get("/api/v1/agent-runs/agent_team_a", headers=alice).status_code == 200
+    assert client.get("/api/v1/agent-runs/agent_team_a", headers=bob).status_code == 403

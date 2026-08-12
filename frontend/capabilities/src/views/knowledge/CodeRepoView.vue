@@ -3,7 +3,7 @@ import { Search, Plus, RotateCw, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
-import type { CodeRepoCategory, CodeRepository, ProjectProfile, TestCloneResult } from '../../api/types'
+import type { AccessActorContext, CodeRepoCategory, CodeRepository, ProjectProfile, ResourceVisibility, TestCloneResult } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
@@ -17,12 +17,14 @@ import { confirm, alert } from '../../composables/useConfirm'
 import CodeRepoDetailView from './CodeRepoDetailView.vue'
 const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{ routeKey: string }>()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
 
 const repos = ref<CodeRepository[]>([])
 const loading = ref(true)
+const actorContext = ref<AccessActorContext | null>(null)
 const searchQuery = ref('')
 const filterCategory = ref('__all__')
 const page = ref(1)
@@ -34,7 +36,9 @@ const categories = ref<CodeRepoCategory[]>([])
 // Repo form dialog
 const showRepoForm = ref(false)
 const repoFormMode = ref<'add' | 'edit'>('add')
-const repoForm = ref({ repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false })
+const repoForm = ref<{ repo_key: string; name: string; git_url: string; branch: string; description: string; category_key: string; auto_understand: boolean; visibility: ResourceVisibility }>({
+  repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false, visibility: 'group',
+})
 const repoSaving = ref(false)
 const repoError = ref('')
 const repoExpectedEditToken = ref<string | null>('')
@@ -60,9 +64,14 @@ const pendingProfileKeys = ref<string[]>([])
 const planeSaving = ref(false)
 
 onMounted(async () => {
-  await Promise.all([loadRepos(), loadCategories()])
+  const [, , actor] = await Promise.all([loadRepos(), loadCategories(), api.getAccessContext()])
+  actorContext.value = actor
   loading.value = false
 })
+
+function repoReadOnly(repo: CodeRepository | null | undefined) {
+  return isSharedResourceReadOnly(actorContext.value, repo)
+}
 
 async function loadRepos(options: { fresh?: boolean } = {}) {
   if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.codeRepositories() })
@@ -109,11 +118,12 @@ async function openRepoForm(mode: 'add' | 'edit', r?: CodeRepository) {
       description: r.description || '',
       category_key: r.category_key || '__none__',
       auto_understand: Boolean(r.auto_understand),
+      visibility: r.visibility,
     }
     editingHasAuth.value = r.has_auth_ref || false
   } else {
     repoExpectedEditToken.value = ''
-    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false }
+    repoForm.value = { repo_key: '', name: '', git_url: '', branch: 'main', description: '', category_key: '__none__', auto_understand: false, visibility: 'group' }
   }
   showRepoForm.value = true
 }
@@ -144,6 +154,7 @@ async function saveRepo() {
       description: repoForm.value.description,
       category_key: repoForm.value.category_key === '__none__' ? '' : repoForm.value.category_key,
       auto_understand: repoForm.value.auto_understand,
+      visibility: repoForm.value.visibility,
       expected_edit_token: repoExpectedEditToken.value,
     }
     if (authRef || repoFormMode.value === 'add') {
@@ -275,6 +286,7 @@ function categoryName(key: string) {
     v-else-if="mode === 'detail'"
     :repo-key="props.routeKey"
     :repo="detailRepo"
+    :read-only="repoReadOnly(detailRepo)"
     @back="backToList"
   />
   <div v-else class="space-y-5">
@@ -320,6 +332,7 @@ function categoryName(key: string) {
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Git URL</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">分支</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">范围</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">最近同步</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
@@ -341,16 +354,26 @@ function categoryName(key: string) {
                 <Badge v-else-if="r.status === 'error'" variant="destructive">异常</Badge>
                 <Badge v-else variant="secondary">{{ r.status }}</Badge>
               </td>
+              <td class="px-4 py-3">
+                <div v-if="r.visibility === 'shared'">
+                  <Badge variant="secondary">共享</Badge>
+                  <div v-if="repoReadOnly(r)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
+                </div>
+                <div v-else>
+                  <Badge variant="outline">组内</Badge>
+                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ r.owner_group_key }}</div>
+                </div>
+              </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(r.last_synced_at) }}</td>
               <td class="px-4 py-3">
                 <div class="flex gap-2">
-                  <Button variant="ghost" size="sm" @click="syncRepo(r.repo_key)" :disabled="syncingKey === r.repo_key" class="h-8 text-xs">
+                  <Button variant="ghost" size="sm" @click="syncRepo(r.repo_key)" :disabled="syncingKey === r.repo_key || repoReadOnly(r)" :title="repoReadOnly(r) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">
                     {{ syncingKey === r.repo_key ? '同步中...' : '同步' }}
                   </Button>
-                  <Button variant="outline" size="sm" @click="openRepoForm('edit', r)" class="h-8 text-xs">编辑</Button>
+                  <Button variant="outline" size="sm" @click="openRepoForm('edit', r)" :disabled="repoReadOnly(r)" :title="repoReadOnly(r) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">编辑</Button>
                   <Button variant="outline" size="sm" @click="openDetail(r)" class="h-8 text-xs">详情</Button>
-                  <Button variant="outline" size="sm" @click="openPlaneDialog(r)" class="h-8 text-xs">能力平面</Button>
-                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteRepo(r)">
+                  <Button variant="outline" size="sm" @click="openPlaneDialog(r)" :disabled="repoReadOnly(r)" :title="repoReadOnly(r) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">能力平面</Button>
+                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteRepo(r)" :disabled="repoReadOnly(r)" :title="repoReadOnly(r) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                     <Trash2 :size="14" />
                     删除
                   </Button>
@@ -452,6 +475,17 @@ function categoryName(key: string) {
           <div class="space-y-2">
             <label class="text-sm font-medium">描述</label>
             <Input v-model="repoForm.description" placeholder="项目代码仓库" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="repoForm.visibility">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">仅本小组</SelectItem>
+                <SelectItem value="shared">共享给所有小组</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可使用，维护仍只允许归属小组。</p>
           </div>
           <div class="flex items-center gap-2">
             <input type="checkbox" v-model="repoForm.auto_understand" class="size-4 rounded-sm border-border" id="repo-auto-understand" />

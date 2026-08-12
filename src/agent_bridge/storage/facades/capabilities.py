@@ -22,8 +22,10 @@ class CapabilitiesFacadeMixin:
         description: str,
         tags: list[str],
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
-        return self.capabilities.create_mcp_service(service_key=service_key, name=name, endpoint_url=endpoint_url, headers=headers, description=description, tags=tags, created_by=created_by)
+        return self.capabilities.create_mcp_service(service_key=service_key, name=name, endpoint_url=endpoint_url, headers=headers, description=description, tags=tags, created_by=created_by, owner_group_key=owner_group_key, visibility=visibility)
 
     def update_mcp_service(
         self,
@@ -34,8 +36,9 @@ class CapabilitiesFacadeMixin:
         headers: dict[str, Any],
         description: str,
         tags: list[str],
+        visibility: str | None = None,
     ) -> dict[str, Any]:
-        return self.capabilities.update_mcp_service(service_key=service_key, name=name, endpoint_url=endpoint_url, headers=headers, description=description, tags=tags)
+        return self.capabilities.update_mcp_service(service_key=service_key, name=name, endpoint_url=endpoint_url, headers=headers, description=description, tags=tags, visibility=visibility)
 
     def get_mcp_service(self, service_key: str) -> dict[str, Any] | None:
         return self.capabilities.get_mcp_service(service_key=service_key)
@@ -115,6 +118,8 @@ class CapabilitiesFacadeMixin:
         description: str,
         tags: list[str],
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         return self.capabilities.create_openapi_service(
             service_key=service_key,
@@ -127,6 +132,8 @@ class CapabilitiesFacadeMixin:
             description=description,
             tags=tags,
             created_by=created_by,
+            owner_group_key=owner_group_key,
+            visibility=visibility,
         )
 
     def update_openapi_service(
@@ -141,6 +148,7 @@ class CapabilitiesFacadeMixin:
         headers: dict[str, Any],
         description: str,
         tags: list[str],
+        visibility: str | None = None,
     ) -> dict[str, Any]:
         return self.capabilities.update_openapi_service(
             service_key=service_key,
@@ -152,6 +160,7 @@ class CapabilitiesFacadeMixin:
             headers=headers,
             description=description,
             tags=tags,
+            visibility=visibility,
         )
 
     def get_openapi_service(self, service_key: str) -> dict[str, Any] | None:

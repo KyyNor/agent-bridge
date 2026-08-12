@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager, nullcontext
 import json
 import logging
 import uuid
@@ -8,6 +9,8 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from agent_bridge.access_control.resources import ScopedResourceType
+from agent_bridge.access_control.service import AccessControlService, ResourceScope
 from agent_bridge.core.domain import ConflictError, NotFound, ValidationError, require_admin_user
 from agent_bridge.core.diff import text_diff, workflow_structured_diff
 from agent_bridge.core.timeutil import local_now, parse_utc, utc_iso, utc_now
@@ -32,11 +35,19 @@ from agent_bridge.automation.workflows.incremental import (
 from agent_bridge.automation.workflows.artifact_service import ArtifactService
 from agent_bridge.automation.workflows.definition_import import DefinitionImportService
 from agent_bridge.automation.workflows.report_renderer import render_run_html_report
+from agent_bridge.automation.workflows.runtime_capability import (
+    WorkflowRuntimeCapability,
+    WorkflowRuntimeCapabilityRegistry,
+)
 from agent_bridge.automation.workflows.revisions import (
     definition_payload,
     workflow_content_hash,
     workflow_revision_snapshot,
     workflow_version_hash,
+)
+from agent_bridge.automation.workflows.validation import (
+    WorkflowDefinitionValidationError,
+    WorkflowValidationIssue,
 )
 from agent_bridge.automation.workflows.validator import WorkflowValidator
 from agent_bridge.automation.workflows.window import parse_hhmm, previous_window_bounds
@@ -57,9 +68,12 @@ class WorkflowService:
         skills: Any = None,
         scripts: Any = None,
         artifact_search_cache_dir: Path | None = None,
+        access: AccessControlService | None = None,
     ) -> None:
         self.store = store
         self.admins = admins
+        self.access = access
+        self.runtime_capabilities = WorkflowRuntimeCapabilityRegistry()
         # Late-wired collaborators (set by AgentBridgeService after both the
         # agent service and skill service are constructed). Kept optional so
         # this service stays usable in isolated tests.
@@ -77,11 +91,69 @@ class WorkflowService:
             admins=admins,
             workflow_service=self,
             cache_dir=artifact_search_cache_dir,
+            access=access,
         )
         self._imports = DefinitionImportService(
             store=store, admins=admins, validator=self.validator,
             upsert_definition=self.upsert_definition,
+            require_read=lambda actor, key: self._require_workflow_read(actor, key),
+            require_write=lambda actor, key: self._require_workflow_write(actor, key),
+            require_create=self._require_workflow_create,
         )
+
+    def issue_runtime_capability(
+        self, *, run: dict[str, Any], initiated_by: str
+    ) -> WorkflowRuntimeCapability:
+        return self.runtime_capabilities.issue(
+            initiated_by=initiated_by,
+            workflow_key=str(run["workflow_key"]),
+            run_id=str(run["run_id"]),
+            profile_key=str(run["profile_key"]),
+            owner_group_key=str(run.get("owner_group_key") or ""),
+        )
+
+    def require_runtime_capability(
+        self,
+        token: str,
+        *,
+        workflow_key: str,
+        run_id: str,
+        profile_key: str | None,
+    ) -> WorkflowRuntimeCapability:
+        return self.runtime_capabilities.require(
+            token,
+            workflow_key=workflow_key,
+            run_id=run_id,
+            profile_key=profile_key,
+        )
+
+    def bind_runtime_capability(self, capability: WorkflowRuntimeCapability):
+        if self.access is None:
+            return nullcontext()
+        return self.access.bind_actor_group(
+            actor=capability.actor,
+            owner_group_key=capability.owner_group_key,
+        )
+
+    @contextmanager
+    def bind_workflow_owner_scope(self, workflow: dict[str, Any]):
+        """以非管理员临时主体校验或执行工作流所属组的数据范围。"""
+        if self.access is None:
+            yield sorted(self.admins)[0]
+            return
+        owner_group_key = str(workflow.get("owner_group_key") or "")
+        if not owner_group_key:
+            raise ValidationError("工作流缺少数据归属组")
+        runtime_actor = f"workflow-preflight:{uuid.uuid4().hex}"
+        with self.access.bind_actor_group(
+            actor=runtime_actor,
+            owner_group_key=owner_group_key,
+        ):
+            yield runtime_actor
+
+    def require_workflow_execution(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        """运行会改变任务、日志和产物，因此要求工作流写权限。"""
+        return self._require_workflow_write(actor, workflow_key)
 
     def upsert_definition(
         self,
@@ -98,7 +170,16 @@ class WorkflowService:
         expected_edit_version: int | None = None,
         task_refresh_policy: str = "auto",
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        current_scope = self.store.get_workflow_definition(workflow_key)
+        if current_scope is None:
+            owner_group_key = self._require_workflow_create(actor, profile_key)
+            scope = ResourceScope.from_record(
+                {"owner_group_key": owner_group_key, "visibility": "group"}
+            )
+        else:
+            self._require_workflow_write(actor, workflow_key)
+            scope = ResourceScope.from_record(current_scope)
+            self._require_profile_same_group(actor, profile_key, scope.owner_group_key)
         if revision_source not in WORKFLOW_REVISION_SOURCES:
             raise ValidationError(f"unsupported workflow revision source: {revision_source}")
         if task_refresh_policy not in WORKFLOW_TASK_REFRESH_POLICIES:
@@ -152,6 +233,7 @@ class WorkflowService:
                 status=next_status,
                 workflow_type=next_type,
                 created_by=actor,
+                owner_group_key=scope.owner_group_key,
             )
             # 版本口径判定：name/description/timeout/title 等展示或运行控制字段变更
             # 也应产生新版本号（供版本历史与 diff），但不影响重跑。
@@ -190,21 +272,25 @@ class WorkflowService:
         return definition_payload(result)
 
     def list_definitions(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+            visible = self.store.list_workflow_definition_summaries()
+        else:
+            visible = [
+                item for item in self.store.list_workflow_definition_summaries()
+                if self.access.can_read(actor=actor, scope=ResourceScope.from_record(item))
+            ]
         return [
             self._definition_summary_payload(item)
-            for item in self.store.list_workflow_definition_summaries()
+            for item in visible
         ]
 
     def get_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        workflow = self.store.get_workflow_definition(workflow_key)
-        if workflow is None:
-            raise NotFound("workflow not found")
+        workflow = self._require_workflow_read(actor, workflow_key)
         return definition_payload(workflow)
 
     def restore_revision(self, actor: str, workflow_key: str, revision_no: int) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_workflow_write(actor, workflow_key)
         with self.store.transaction():
             current = self.store.get_workflow_definition(workflow_key)
             if current is None:
@@ -262,22 +348,20 @@ class WorkflowService:
         return self._imports.confirm_definition_import(actor, import_id)
 
     def delete_definition(self, actor: str, workflow_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_write(actor, workflow_key)
         self.store.delete_workflow_definition(workflow_key)
         logger.info("Workflow 定义已删除 workflow=%s actor=%s", workflow_key, actor)
         return {"workflow_key": workflow_key, "deleted": True}
 
     def clear_execution_data(self, actor: str, workflow_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_write(actor, workflow_key)
         counts = self.store.clear_workflow_execution_data(workflow_key)
         return {"workflow_key": workflow_key, "cleared": True, **counts}
 
     def list_runs(self, actor: str, workflow_key: str, *, limit: int = 20) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        if self.store.get_workflow_definition(workflow_key) is None and actor in self.admins:
+            return []
+        self._require_workflow_read(actor, workflow_key)
         bounded = min(max(limit, 1), 200)
         return self.store.list_workflow_runs(workflow_key, limit=bounded)
 
@@ -289,7 +373,7 @@ class WorkflowService:
         limit: int = 20,
         offset: int = 0,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_workflow_read(actor, workflow_key)
         return self.store.list_workflow_run_summaries(
             workflow_key,
             limit=limit,
@@ -297,12 +381,15 @@ class WorkflowService:
         )
 
     def list_run_overviews(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        return self.store.list_workflow_run_overviews()
+        allowed = {item["workflow_key"] for item in self.list_definitions(actor)}
+        return [
+            item for item in self.store.list_workflow_run_overviews()
+            if item.get("workflow_key") in allowed
+        ]
 
     def list_completed_workflow_top(self, actor: str, *, limit: int = 5) -> dict[str, Any]:
         """返回上一个已结束工作流执行窗口内完成次数最多的工作流。"""
-        require_admin_user(actor, self.admins)
+        allowed = {item["workflow_key"] for item in self.list_definitions(actor)}
         config = self.store.get_sync_config()
         now = local_now()
         period_start_local, period_end_local = previous_window_bounds(
@@ -317,11 +404,13 @@ class WorkflowService:
                 f"{period_start_local:%m-%d %H:%M} → "
                 f"{period_end_local:%m-%d %H:%M}"
             ),
-            "items": self.store.list_completed_workflow_top(
+            "items": [
+                item for item in self.store.list_completed_workflow_top(
                 period_start=utc_iso(period_start_local),
                 period_end=utc_iso(period_end_local),
                 limit=limit,
-            ),
+                ) if item.get("workflow_key") in allowed
+            ],
         }
 
     def list_tasks(
@@ -334,9 +423,7 @@ class WorkflowService:
         search: str | None = None,
         sort: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_read(actor, workflow_key)
         return {
             "tasks": self.store.list_workflow_tasks(
                 workflow_key, status=status, type=type, search=search, sort=sort
@@ -351,9 +438,7 @@ class WorkflowService:
         tasks: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """显式将当前工作流中选定的完成任务放入增量刷新队列。"""
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_write(actor, workflow_key)
         revision_no = self.store.workflows.get_current_definition_revision_no(workflow_key)
         revision = (
             self.store.workflows.get_definition_revision(workflow_key, revision_no)
@@ -399,9 +484,7 @@ class WorkflowService:
         filename: str,
         content: bytes,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_write(actor, workflow_key)
 
         self.store.delete_expired_workflow_task_imports()
         try:
@@ -491,9 +574,7 @@ class WorkflowService:
         workflow_key: str,
         import_id: str,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_write(actor, workflow_key)
         snapshot = self.store.get_workflow_task_import(import_id)
         if snapshot is None:
             raise NotFound("workflow task import not found")
@@ -516,9 +597,7 @@ class WorkflowService:
         actor: str,
         workflow_key: str,
     ) -> bytes:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_read(actor, workflow_key)
         return build_task_import_template_file()
 
     @staticmethod
@@ -560,7 +639,7 @@ class WorkflowService:
         revision is deliberately non-rerunnable unless the caller explicitly
         chooses ``force_full``.
         """
-        require_admin_user(actor, self.admins)
+        self._require_workflow_write(actor, workflow_key)
         if execution_mode not in {"normal", "incremental", "force_full"}:
             raise ValidationError(f"unsupported workflow execution mode: {execution_mode}")
         if self.store.get_workflow_definition(workflow_key) is None:
@@ -641,9 +720,7 @@ class WorkflowService:
         are kept while waiting for retry; a successful retry clears the task's
         ``last_error``. Detailed historical errors remain on workflow runs.
         """
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_write(actor, workflow_key)
         task = self.store.get_workflow_task(workflow_key, task_key, task_version=(task_version or None))
         if task is None:
             raise NotFound("workflow task not found")
@@ -669,11 +746,13 @@ class WorkflowService:
         }
 
     def get_run(self, actor: str, run_id: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        run = self.store.get_workflow_run(run_id)
-        if run is None:
-            raise NotFound("workflow run not found")
+        run = self._require_run_read(actor, run_id)
         run["node_runs"] = self.store.list_workflow_node_runs(run_id)
+        return run
+
+    def require_run_write(self, actor: str, run_id: str) -> dict[str, Any]:
+        run = self._require_run_read(actor, run_id)
+        self._require_workflow_write(actor, str(run["workflow_key"]))
         return run
 
     def preview_incremental_run(
@@ -724,6 +803,7 @@ class WorkflowService:
         planning logic lives in the ``incremental`` module so this service stays
         focused on orchestration.
         """
+        self._require_workflow_read(actor, workflow_key)
         return _build_incremental_plan(
             store=self.store,
             validator=self.validator,
@@ -771,9 +851,7 @@ class WorkflowService:
     # --- versioning & diff -----------------------------------------------
 
     def list_revisions(self, actor: str, workflow_key: str, *, limit: int = 100) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_read(actor, workflow_key)
         revisions = self.store.workflows.list_definition_revisions(workflow_key, limit=limit)
         current = self.store.workflows.get_current_definition_revision_no(workflow_key)
         for rev in revisions:
@@ -781,9 +859,7 @@ class WorkflowService:
         return revisions
 
     def get_revision(self, actor: str, workflow_key: str, revision_no: int) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_read(actor, workflow_key)
         revision = self.store.workflows.get_definition_revision(workflow_key, revision_no)
         if revision is None:
             raise NotFound("workflow revision not found")
@@ -794,9 +870,7 @@ class WorkflowService:
     def diff_revisions(
         self, actor: str, workflow_key: str, *, from_no: int | None, to_no: int | None
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        if self.store.get_workflow_definition(workflow_key) is None:
-            raise NotFound("workflow not found")
+        self._require_workflow_read(actor, workflow_key)
         current = self.store.workflows.get_current_definition_revision_no(workflow_key)
         if current == 0:
             raise NotFound("workflow has no revisions")
@@ -829,6 +903,7 @@ class WorkflowService:
     def append_run_log(
         self,
         *,
+        actor: str | None = None,
         workflow_key: str,
         run_id: str,
         task_key: str | None,
@@ -837,6 +912,14 @@ class WorkflowService:
         message: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
+        if actor is not None:
+            self.require_workflow_run_context(
+                actor=actor,
+                require_write=True,
+                profile_key=None,
+                workflow_key=workflow_key,
+                run_id=run_id,
+            )
         return self.store.append_workflow_run_log(
             run_id=run_id,
             workflow_key=workflow_key,
@@ -848,7 +931,7 @@ class WorkflowService:
         )
 
     def list_run_logs(self, actor: str, run_id: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        self._require_run_read(actor, run_id)
         return self.store.list_workflow_run_logs(run_id)
 
     def require_workflow_context(
@@ -869,6 +952,8 @@ class WorkflowService:
     def require_workflow_run_context(
         self,
         *,
+        actor: str | None = None,
+        require_write: bool = False,
         profile_key: str | None,
         workflow_key: str | None,
         run_id: str | None,
@@ -881,11 +966,22 @@ class WorkflowService:
             raise NotFound("workflow run not found")
         if run["workflow_key"] != workflow["workflow_key"] or run["profile_key"] != workflow["profile_key"]:
             raise ValidationError("workflow run context mismatch")
+        if actor is not None:
+            if require_write:
+                self._require_run_write(actor, run_id)
+            else:
+                self._require_run_read(actor, run_id)
         return workflow, run
 
-    def get_task_for_agent(self, *, profile_key: str | None, workflow_key: str, run_id: str) -> dict[str, Any]:
+    def get_task_for_agent(
+        self, *, actor: str, profile_key: str | None, workflow_key: str, run_id: str
+    ) -> dict[str, Any]:
         _workflow, run = self.require_workflow_run_context(
-            profile_key=profile_key, workflow_key=workflow_key, run_id=run_id
+            actor=actor,
+            require_write=True,
+            profile_key=profile_key,
+            workflow_key=workflow_key,
+            run_id=run_id,
         )
         selected_task_key = run.get("task_key")
         selected_task_version = str(run.get("task_version") or "")
@@ -907,12 +1003,19 @@ class WorkflowService:
     def set_tasks_for_agent(
         self,
         *,
+        actor: str,
         profile_key: str | None,
         workflow_key: str,
         run_id: str,
         tasks: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        self.require_workflow_run_context(profile_key=profile_key, workflow_key=workflow_key, run_id=run_id)
+        self.require_workflow_run_context(
+            actor=actor,
+            require_write=True,
+            profile_key=profile_key,
+            workflow_key=workflow_key,
+            run_id=run_id,
+        )
         logger.info(
             "workflow_set_task 收到任务批次 workflow=%s run=%s requested=%d",
             workflow_key,
@@ -1090,6 +1193,13 @@ class WorkflowService:
             trusted_profile_context=trusted_profile_context,
         )
 
+    def set_artifact_visibility(
+        self, *, actor: str, artifact_id: str, visibility: str
+    ) -> dict[str, Any]:
+        return self._artifacts.set_visibility(
+            actor=actor, artifact_id=artifact_id, visibility=visibility
+        )
+
     def search_artifacts(
         self,
         *,
@@ -1149,3 +1259,92 @@ class WorkflowService:
             limit=limit,
             trusted_profile_context=trusted_profile_context,
         )
+
+    def _require_workflow_create(self, actor: str, profile_key: str) -> str:
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+            return ""
+        actor_group_key = str(self.access.actor_group_key(actor, required=True))
+        try:
+            profile = self._require_profile_same_group(actor, profile_key, actor_group_key)
+        except NotFound as exc:
+            raise WorkflowDefinitionValidationError(
+                [
+                    WorkflowValidationIssue(
+                        scope="workflow",
+                        id=None,
+                        field="profile_key",
+                        code="not_found",
+                        message="能力平面不存在",
+                    )
+                ]
+            ) from exc
+        return str(profile.get("owner_group_key") or actor_group_key)
+
+    def _require_profile_same_group(
+        self, actor: str, profile_key: str, owner_group_key: str
+    ) -> dict[str, Any]:
+        if self.access is None:
+            profile = self.store.get_project_profile(profile_key)
+            if profile is None:
+                raise NotFound("profile not found")
+            return profile
+        profile = self.access.require_resource_read(
+            actor=actor,
+            resource_type=ScopedResourceType.capability_profile,
+            resource_key=profile_key,
+        )
+        profile_group_key = str(profile.get("owner_group_key") or "")
+        if profile_group_key and profile_group_key != owner_group_key and actor not in self.admins:
+            raise ValidationError("工作流只能使用同一数据组的能力平面")
+        return profile
+
+    def _require_workflow_read(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        workflow = self.store.get_workflow_definition(workflow_key)
+        if workflow is None:
+            raise NotFound("workflow not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(workflow))
+        return workflow
+
+    def _require_workflow_write(self, actor: str, workflow_key: str) -> dict[str, Any]:
+        workflow = self.store.get_workflow_definition(workflow_key)
+        if workflow is None:
+            raise NotFound("workflow not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_write(actor=actor, scope=ResourceScope.from_record(workflow))
+        return workflow
+
+    def _require_run_read(self, actor: str, run_id: str) -> dict[str, Any]:
+        run = self.store.get_workflow_run(run_id)
+        if run is None:
+            raise NotFound("workflow run not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_read(
+                actor=actor,
+                scope=ResourceScope.from_record(
+                    {"owner_group_key": run.get("owner_group_key"), "visibility": "group"}
+                ),
+            )
+        return run
+
+    def _require_run_write(self, actor: str, run_id: str) -> dict[str, Any]:
+        run = self.store.get_workflow_run(run_id)
+        if run is None:
+            raise NotFound("workflow run not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_write(
+                actor=actor,
+                scope=ResourceScope.from_record(
+                    {"owner_group_key": run.get("owner_group_key"), "visibility": "group"}
+                ),
+            )
+        return run

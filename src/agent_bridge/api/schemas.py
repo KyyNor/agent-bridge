@@ -11,6 +11,26 @@ class CreateMemoryBlockRequest(BaseModel):
     description: str = ""
 
 
+class UpsertAccessGroupRequest(BaseModel):
+    group_key: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=2000)
+
+
+class SetUserGroupRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=255)
+    group_key: str = Field(min_length=1, max_length=64)
+
+
+class AdminLoginRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=256)
+
+
+class ChangeAdminPasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
 class UpdateMemoryBlockStatusRequest(BaseModel):
     status: str
 
@@ -38,6 +58,7 @@ class CreateKbRequest(BaseModel):
     slug: str
     name: str
     description: str = ""
+    visibility: Literal["group", "shared"] | None = None
 
 
 class CreateFolderRequest(BaseModel):
@@ -156,6 +177,7 @@ class RegisterMcpServiceRequest(BaseModel):
     headers: dict[str, Any] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 
@@ -169,6 +191,7 @@ class RegisterOpenApiServiceRequest(BaseModel):
     headers: dict[str, Any] | None = None
     description: str = ""
     tags: list[str] = Field(default_factory=list)
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 
@@ -222,6 +245,7 @@ class BusinessLedgerRequest(BaseModel):
     name: str
     description: str = ""
     fields: list[BusinessLedgerFieldRequest]
+    visibility: Literal["group", "shared"] = "group"
     expected_edit_token: str | None = None
 
 
@@ -229,6 +253,7 @@ class BusinessLedgerUpdateRequest(BaseModel):
     name: str
     description: str = ""
     fields: list[BusinessLedgerFieldRequest]
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 
@@ -247,6 +272,10 @@ class BusinessLedgerQueryRequest(BaseModel):
     sort: list[BusinessLedgerSortRequest] | BusinessLedgerSortRequest | None = None
     limit: int = Field(default=50, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
+
+
+class WorkflowArtifactVisibilityRequest(BaseModel):
+    visibility: Literal["group", "shared"]
 
 
 class ProjectProfileRequest(BaseModel):
@@ -328,6 +357,7 @@ class CodeRepositoryRequest(BaseModel):
     sync_interval_minutes: int = 60
     auto_understand: bool = False
     status: str = "active"
+    visibility: Literal["group", "shared"] | None = None
     expected_edit_token: str | None = None
 
 

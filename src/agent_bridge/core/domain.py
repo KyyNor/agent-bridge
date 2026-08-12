@@ -18,6 +18,10 @@ class AccessDenied(AgentBridgeError):
     status_code = 403
 
 
+class AuthenticationRequired(AgentBridgeError):
+    status_code = 401
+
+
 class NotFound(AgentBridgeError):
     status_code = 404
 

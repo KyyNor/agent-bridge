@@ -67,6 +67,9 @@ def _base_headers() -> dict[str, str]:
         headers["X-Agent-Bridge-Workflow"] = "true"
         headers["X-Agent-Bridge-Workflow-Key"] = os.environ.get("AGENT_BRIDGE_WORKFLOW_KEY", "")
         headers["X-Agent-Bridge-Workflow-Run-Id"] = os.environ.get("AGENT_BRIDGE_WORKFLOW_RUN_ID", "")
+        capability = os.environ.get("AGENT_BRIDGE_WORKFLOW_CAPABILITY", "").strip()
+        if capability:
+            headers["X-Agent-Bridge-Workflow-Capability"] = capability
     return headers
 
 

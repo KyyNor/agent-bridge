@@ -224,12 +224,16 @@ class DocsKnowledgeService:
             "config": preset.get("config") or {},
         }
 
-    def align_backends(self) -> None:
+    def align_backends(self, kb_id: int | None = None) -> None:
         registry = self.registry
         if not registry:
             return
         configured_slugs = set(registry.list_slugs())
-        for kb in self.store.list_kbs():
+        if kb_id is None:
+            knowledge_bases = self.store.list_kbs()
+        else:
+            knowledge_bases = [self.store.get_kb_by_id(kb_id)]
+        for kb in knowledge_bases:
             existing_targets = self.store.list_backend_targets(kb["id"])
             for target in existing_targets:
                 if (

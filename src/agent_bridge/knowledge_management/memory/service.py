@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from agent_bridge.access_control.resources import ScopedResourceType
+from agent_bridge.access_control.service import AccessControlService, ResourceScope
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.core.editing import attach_edit_token, require_edit_token
 from agent_bridge.core.slug import make_slug
@@ -26,10 +28,12 @@ class MemoryService:
         admins: set[str],
         worker_service: Any | None = None,
         governance_service: Any | None = None,
+        access: AccessControlService | None = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
+        self.access = access
         self.worker_service = worker_service or ClaudeMemWorkerService(paths=paths)
         self.hooks = MemoryHookService(
             memory_service=self,
@@ -38,7 +42,17 @@ class MemoryService:
         )
 
     def create_block(self, actor: str, block_key: str, name: str, description: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        scope = (
+            self.access.new_resource_scope(
+                actor=actor,
+                visibility="group",
+                resource_type=ScopedResourceType.memory_block,
+            )
+            if self.access is not None
+            else None
+        )
+        if self.access is None:
+            require_admin_user(actor, self.admins)
         normalized_key = make_slug(block_key)
         if not normalized_key or normalized_key != block_key:
             raise ValidationError("memory block key must be a lowercase slug")
@@ -50,21 +64,24 @@ class MemoryService:
             description=description,
             data_dir=str(self._default_data_dir(block_key)),
             created_by=actor,
+            owner_group_key=scope.owner_group_key if scope is not None else "",
         )
 
     def list_blocks(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        return self.store.memory.list_memory_blocks()
+        blocks = self.store.memory.list_memory_blocks()
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+            return blocks
+        return [
+            block for block in blocks
+            if self.access.can_read(actor=actor, scope=ResourceScope.from_record(block))
+        ]
 
     def get_block(self, actor: str, block_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        block = self.store.memory.get_memory_block(block_key)
-        if block is None:
-            raise NotFound("memory block not found")
-        return block
+        return self._require_block_read(actor, block_key)
 
     def set_block_status(self, actor: str, block_key: str, status: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_block_write(actor, block_key)
         if status not in ACTIVE_MEMORY_STATUSES:
             raise ValidationError("invalid memory block status")
         if self.store.memory.get_memory_block(block_key) is None:
@@ -79,10 +96,7 @@ class MemoryService:
         删除后绑定行保留但 block_key 置空（``resolve_profile_block`` 会安全返回
         not_configured）。
         """
-        require_admin_user(actor, self.admins)
-        block = self.store.memory.get_memory_block(block_key)
-        if block is None:
-            raise NotFound("memory block not found")
+        block = self._require_block_write(actor, block_key)
 
         # 停止可能正在运行的 claude-mem worker 进程（容错，失败不阻断删除）
         try:
@@ -98,8 +112,7 @@ class MemoryService:
         return {"block_key": block_key, "deleted": True}
 
     def get_profile_binding(self, actor: str, profile_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        self._require_profile(profile_key)
+        self._require_profile_access(actor, profile_key, write=False)
         binding = self.store.memory.get_profile_memory_binding(profile_key)
         payload = binding or {"profile_key": profile_key, "block_key": None, "enabled": 1}
         return attach_edit_token(payload, self._profile_binding_snapshot(payload))
@@ -113,8 +126,7 @@ class MemoryService:
         enabled: bool,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        self._require_profile(profile_key)
+        profile = self._require_profile_access(actor, profile_key, write=True)
         current = self.store.memory.get_profile_memory_binding(profile_key) or {
             "profile_key": profile_key,
             "block_key": None,
@@ -131,6 +143,9 @@ class MemoryService:
             block = self.store.memory.get_memory_block(block_key)
             if block is None:
                 raise NotFound("memory block not found")
+            self._require_block_read(actor, block_key)
+            if str(block.get("owner_group_key") or "") != str(profile.get("owner_group_key") or ""):
+                raise ValidationError("能力平面只能绑定同一数据组的记忆块")
             if block.get("status") != "active":
                 raise ValidationError("memory block is not active")
         saved = self.store.memory.set_profile_memory_binding(profile_key, block_key, enabled=enabled)
@@ -151,6 +166,8 @@ class MemoryService:
         if profile is None or profile.get("status") != "active":
             logger.debug("profile=%s 未激活或不存在，记忆块未绑定", profile_key)
             return {"status": "not_configured", "block": None}
+        if self.access is not None:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(profile))
         binding = self.store.memory.get_profile_memory_binding(profile_key)
         if not binding or not binding.get("enabled") or not binding.get("block_key"):
             logger.debug("profile=%s 未绑定记忆块或绑定已禁用", profile_key)
@@ -159,6 +176,8 @@ class MemoryService:
         if block is None or block.get("status") != "active":
             logger.warning("profile=%s 绑定的记忆块 block=%s 不存在或未激活", profile_key, binding.get("block_key"))
             return {"status": "not_configured", "block": None}
+        if self.access is not None:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(block))
         return {"status": "ok", "block": block}
 
     def search(
@@ -243,8 +262,7 @@ class MemoryService:
 
     def _resolve_runtime_block(self, actor: str, profile_key: str | None, block_key: str | None) -> dict[str, Any]:
         if block_key:
-            require_admin_user(actor, self.admins)
-            block = self.store.memory.get_memory_block(block_key)
+            block = self._require_block_read(actor, block_key)
             if block is None or block.get("status") != "active":
                 return {"status": "not_configured", "block": None}
             return {"status": "ok", "block": block}
@@ -255,6 +273,38 @@ class MemoryService:
         if profile is None:
             raise NotFound("profile not found")
         return profile
+
+    def _require_profile_access(
+        self, actor: str, profile_key: str, *, write: bool
+    ) -> dict[str, Any]:
+        profile = self._require_profile(profile_key)
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        elif write:
+            self.access.require_write(actor=actor, scope=ResourceScope.from_record(profile))
+        else:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(profile))
+        return profile
+
+    def _require_block_read(self, actor: str, block_key: str) -> dict[str, Any]:
+        block = self.store.memory.get_memory_block(block_key)
+        if block is None:
+            raise NotFound("memory block not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(block))
+        return block
+
+    def _require_block_write(self, actor: str, block_key: str) -> dict[str, Any]:
+        block = self.store.memory.get_memory_block(block_key)
+        if block is None:
+            raise NotFound("memory block not found")
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_write(actor=actor, scope=ResourceScope.from_record(block))
+        return block
 
     def _default_data_dir(self, block_key: str) -> Path:
         return self.paths.data_dir / "claude-mem" / "blocks" / block_key

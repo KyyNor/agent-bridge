@@ -773,7 +773,7 @@ def test_workflow_api_rejects_non_admin_profile_artifact_query(wm_paths):
     )
 
     assert response.status_code == 403
-    assert "profile context is not trusted" in response.text
+    assert "无权访问其他小组的数据" in response.text
 
 
 def _seed_artifact(svc, content: str = "# Page A\n\nFull body") -> str:
@@ -841,7 +841,7 @@ def test_workflow_api_rejects_non_admin_artifact_detail_without_trusted_profile(
     )
 
     assert response.status_code == 403
-    assert "profile context is not trusted" in response.text
+    assert "无权访问其他小组的数据" in response.text
 
 
 def test_workflow_api_artifact_detail_404_for_unknown_id(wm_paths):

@@ -13,6 +13,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
+from agent_bridge.access_control.service import AccessControlService, ResourceScope
 from agent_bridge.core.config import AgentBridgePaths
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 
@@ -33,9 +34,11 @@ class ModelEvaluationService:
         store,
         admins: set[str],
         runtime: ContainerRuntime | None = None,
+        access: AccessControlService | None = None,
     ) -> None:
         self._store = store
         self._admins = admins
+        self._access = access
         self._run_root = paths.run_dir / "model-evaluations"
         manifest_override = os.environ.get("AGENT_BRIDGE_EVAL_SWEBENCH_MANIFEST", "").strip()
         self._swebench_manifest_path = (
@@ -60,7 +63,6 @@ class ModelEvaluationService:
         }
 
     def list_datasets(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self._admins)
         return [
             {
                 "key": spec.key,
@@ -76,7 +78,6 @@ class ModelEvaluationService:
         ]
 
     def runtime_status(self, actor: str) -> dict[str, Any]:
-        require_admin_user(actor, self._admins)
         return self._runtime_status()
 
     def _runtime_status(self) -> dict[str, Any]:
@@ -114,7 +115,6 @@ class ModelEvaluationService:
         }
 
     def list_models(self, actor: str, *, base_url: str = "", api_key: str = "") -> list[dict[str, str]]:
-        require_admin_user(actor, self._admins)
         endpoint, key = self._resolve_connection(base_url=base_url, api_key=api_key)
         try:
             with httpx.Client(timeout=15.0, follow_redirects=True) as client:
@@ -135,14 +135,26 @@ class ModelEvaluationService:
         return sorted(models, key=lambda item: item["id"].lower())
 
     def list_runs(self, actor: str, *, limit: int = 50) -> list[dict[str, Any]]:
-        require_admin_user(actor, self._admins)
-        return [self._public_run(run) for run in self._store.list_model_evaluation_runs(limit=max(1, min(limit, 100)))]
+        enforce_scope = self._access is not None and actor not in self._admins
+        viewer_group_key = (
+            self._access.actor_group_key(actor, required=True)
+            if enforce_scope and self._access is not None
+            else None
+        )
+        return [
+            self._public_run(run)
+            for run in self._store.list_model_evaluation_runs(
+                limit=max(1, min(limit, 100)),
+                viewer_group_key=viewer_group_key,
+                enforce_scope=enforce_scope,
+            )
+        ]
 
     def get_run(self, actor: str, run_id: str) -> dict[str, Any]:
-        require_admin_user(actor, self._admins)
         run = self._store.get_model_evaluation_run(run_id)
         if run is None:
             raise NotFound(f"未找到模型评估任务: {run_id}")
+        self._require_run_read(actor, run)
         return self._public_run(run)
 
     def start_run(
@@ -157,7 +169,11 @@ class ModelEvaluationService:
         base_url: str = "",
         api_key: str = "",
     ) -> dict[str, Any]:
-        require_admin_user(actor, self._admins)
+        owner_group_key = (
+            str(self._access.actor_group_key(actor, required=True))
+            if self._access is not None
+            else ""
+        )
         self._require_runtime()
         cleaned_model = model_name.strip()
         if not cleaned_model:
@@ -187,6 +203,7 @@ class ModelEvaluationService:
             work_dir=str(work_dir),
             created_by=actor,
             runtime="docker",
+            owner_group_key=owner_group_key,
         )
         images = self._images()
         grouped = self._group_datasets(selected_datasets)
@@ -213,6 +230,12 @@ class ModelEvaluationService:
         thread.start()
         logger.info("模型评估任务已创建 run_id=%s model=%s datasets=%s", run_id, cleaned_model, selected_datasets)
         return self._public_run(run)
+
+    def _require_run_read(self, actor: str, run: dict[str, Any]) -> None:
+        if self._access is None:
+            require_admin_user(actor, self._admins)
+            return
+        self._access.require_read(actor=actor, scope=ResourceScope.from_record(run))
 
     def recover_interrupted_runs(self) -> int:
         removed = self._runtime.cleanup_managed()

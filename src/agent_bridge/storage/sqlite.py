@@ -28,6 +28,7 @@ class SQLiteStore(SQLiteStoreFacade):
         )
 
         from agent_bridge.storage.repositories.agent_runs import AgentRunsRepository
+        from agent_bridge.storage.repositories.access_control import AccessControlRepository
         from agent_bridge.storage.repositories.capabilities import CapabilitiesRepository
         from agent_bridge.storage.repositories.codegraph import CodeGraphRepository
         from agent_bridge.storage.repositories.governance import GovernanceRepository
@@ -40,6 +41,7 @@ class SQLiteStore(SQLiteStoreFacade):
         from agent_bridge.storage.repositories.onboarding import OnboardingRepository
         from agent_bridge.storage.repositories.workflows import WorkflowsRepository
 
+        self.access_control = AccessControlRepository(db_path, self.connect)
         self.folders = FolderRepository(db_path, self.connect)
         self.knowledge = KnowledgeRepository(db_path, self.connect, self.folders)
         self.capabilities = CapabilitiesRepository(db_path, self.connect)
@@ -141,6 +143,18 @@ class SQLiteStore(SQLiteStoreFacade):
         if self.log_db_path != self.db_path:
             with self.log_connect() as conn:
                 apply_runtime_log_schema(conn)
+                conn.execute(
+                    """
+                    UPDATE tool_call_logs
+                    SET owner_group_key = COALESCE(
+                      (SELECT membership.group_key
+                       FROM main_db.user_group_memberships membership
+                       WHERE membership.user_id = tool_call_logs.actor),
+                      ''
+                    )
+                    WHERE owner_group_key = ''
+                    """
+                )
             self._migrate_runtime_logs_from_main()
 
     def _migrate_runtime_logs_from_main(self) -> None:

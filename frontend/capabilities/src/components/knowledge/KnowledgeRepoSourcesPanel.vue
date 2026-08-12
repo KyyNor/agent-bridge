@@ -8,9 +8,11 @@ import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { confirm } from '../../composables/useConfirm'
+import { SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{
   kb: KnowledgeBaseSummary | null
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -172,7 +174,7 @@ watch(kbSlug, () => { void loadSources() }, { immediate: true })
           <Input v-model="repoSourceForm.include_suffixes" placeholder=".md, .txt" />
         </div>
         <div class="flex items-end">
-          <Button class="h-9" @click="saveRepoSource" :disabled="saving || !repoSourceForm.repo_key">{{ saving ? '保存中...' : '保存' }}</Button>
+          <Button class="h-9" @click="saveRepoSource" :disabled="saving || !repoSourceForm.repo_key || readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">{{ saving ? '保存中...' : '保存' }}</Button>
         </div>
       </div>
       <div v-if="error" class="mt-3 rounded-md bg-destructive-soft px-3 py-2 text-xs text-destructive">{{ error }}</div>
@@ -197,8 +199,8 @@ watch(kbSlug, () => { void loadSources() }, { immediate: true })
         <td class="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{{ source.last_synced_at ? formatLocalDatetime(source.last_synced_at) : '未同步' }}</td>
         <td class="px-3 py-2 max-w-[180px] overflow-hidden text-ellipsis text-xs text-destructive" :title="source.last_error ?? ''">{{ source.last_error || '—' }}</td>
         <td class="px-3 py-2 text-right"><div class="flex justify-end gap-2">
-          <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="syncing[source.repo_key]">{{ syncing[source.repo_key] ? '同步中...' : '立即同步' }}</Button>
-          <Button variant="outline" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteRepoSource(source)" :disabled="deleting[source.repo_key]">{{ deleting[source.repo_key] ? '删除中...' : '删除' }}</Button>
+          <Button variant="outline" size="sm" class="h-7 text-xs" @click="syncRepoSource(source)" :disabled="syncing[source.repo_key] || readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">{{ syncing[source.repo_key] ? '同步中...' : '立即同步' }}</Button>
+          <Button variant="outline" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteRepoSource(source)" :disabled="deleting[source.repo_key] || readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">{{ deleting[source.repo_key] ? '删除中...' : '删除' }}</Button>
         </div></td>
       </tr></tbody>
     </table>

@@ -103,19 +103,23 @@ class GovernanceRepository:
         description: str = "",
         status: str = "active",
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO project_profiles (profile_key, name, description, status, created_by)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO project_profiles (
+                  profile_key, name, description, status, created_by, owner_group_key, visibility
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(profile_key) DO UPDATE SET
                   name = excluded.name,
                   description = excluded.description,
                   status = excluded.status,
                   updated_at = CURRENT_TIMESTAMP
                 """,
-                (profile_key, name, description, status, created_by),
+                (profile_key, name, description, status, created_by, owner_group_key, visibility),
             )
             row = conn.execute(
                 "SELECT * FROM project_profiles WHERE profile_key = ?",
@@ -463,6 +467,7 @@ class GovernanceRepository:
         resource_type: str | None = None,
         resource_key: str | None = None,
         duration_ms: int | None = None,
+        owner_group_key: str = "",
     ) -> dict[str, Any]:
         request_value = {} if request is None else request
         response_value = {} if response is None else response
@@ -488,9 +493,10 @@ class GovernanceRepository:
                   resource_key,
                   request_summary_json,
                   response_summary_json,
-                  duration_ms
+                  duration_ms,
+                  owner_group_key
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     log_id,
@@ -512,6 +518,7 @@ class GovernanceRepository:
                     json.dumps(json_summary(request_value), ensure_ascii=False, default=str),
                     json.dumps(json_summary(response_value), ensure_ascii=False, default=str),
                     duration_ms,
+                    owner_group_key,
                 ),
             )
             row = conn.execute("SELECT * FROM tool_call_logs WHERE log_id = ?", (log_id,)).fetchone()
@@ -539,6 +546,8 @@ class GovernanceRepository:
         limit: int = 50,
         offset: int = 0,
         search: str | None = None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> list[dict[str, Any]]:
         filters, params = self._tool_call_log_filters(
             entrypoint=entrypoint,
@@ -555,6 +564,8 @@ class GovernanceRepository:
             created_from=created_from,
             created_to=created_to,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         params.extend([limit, offset])
@@ -590,6 +601,8 @@ class GovernanceRepository:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> dict[str, Any]:
         bounded_limit = min(max(limit, 1), 200)
         bounded_offset = max(offset, 0)
@@ -608,6 +621,8 @@ class GovernanceRepository:
             created_from=created_from,
             created_to=created_to,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
         base_filters, base_params = self._tool_call_log_filters(
             entrypoint=entrypoint,
@@ -624,6 +639,8 @@ class GovernanceRepository:
             created_from=created_from,
             created_to=created_to,
             search=search,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
         )
         where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
         base_where_clause = f"WHERE {' AND '.join(base_filters)}" if base_filters else ""
@@ -686,9 +703,14 @@ class GovernanceRepository:
         created_from: str | None,
         created_to: str | None,
         search: str | None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> tuple[list[str], list[Any]]:
         filters: list[str] = []
         params: list[Any] = []
+        if enforce_scope:
+            filters.append("owner_group_key = ?")
+            params.append(viewer_group_key or "")
         for column, value in [
             ("entrypoint", entrypoint),
             ("source_type", enum_value(source_type)),
@@ -730,6 +752,8 @@ class GovernanceRepository:
         created_from: str | None,
         created_to: str | None,
         bucket: str | None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
     ) -> list[dict[str, Any]]:
         allowed_dimensions = {
             "profile_key",
@@ -778,6 +802,9 @@ class GovernanceRepository:
         group_clause = f"GROUP BY {', '.join(group_columns)}" if group_columns else ""
         filters: list[str] = []
         params: list[Any] = []
+        if enforce_scope:
+            filters.append("tool_call_logs.owner_group_key = ?")
+            params.append(viewer_group_key or "")
         if created_from is not None:
             filters.append("tool_call_logs.created_at >= ?")
             params.append(created_from)

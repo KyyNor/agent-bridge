@@ -16,6 +16,7 @@ class WorkflowsFacadeMixin:
         profile_key: str,
         status: str,
         created_by: str,
+        owner_group_key: str = "",
         workflow_type: str = "operation",
         definition: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -27,6 +28,7 @@ class WorkflowsFacadeMixin:
             definition=definition,
             status=status,
             created_by=created_by,
+            owner_group_key=owner_group_key,
             workflow_type=workflow_type,
         )
 
@@ -240,6 +242,7 @@ class WorkflowsFacadeMixin:
         execution_mode: str = "normal",
         execution_plan: dict[str, Any] | list[Any] | None = None,
         source_run_id: str | None = None,
+        owner_group_key: str | None = None,
     ) -> dict[str, Any]:
         return self.workflows.create_workflow_run(
             run_id=run_id,
@@ -256,6 +259,7 @@ class WorkflowsFacadeMixin:
             execution_mode=execution_mode,
             execution_plan=execution_plan,
             source_run_id=source_run_id,
+            owner_group_key=owner_group_key,
         )
 
     def get_workflow_run(self, run_id: str) -> dict[str, Any] | None:
@@ -417,6 +421,8 @@ class WorkflowsFacadeMixin:
         task_version: str = "",
         producer_node_id: str | None = None,
         producer_node_fingerprint: str | None = None,
+        owner_group_key: str | None = None,
+        visibility: str = "group",
     ) -> dict[str, Any]:
         return self.workflows.upsert_workflow_artifact(
             workflow_key=workflow_key,
@@ -433,6 +439,8 @@ class WorkflowsFacadeMixin:
             metadata=metadata,
             producer_node_id=producer_node_id,
             producer_node_fingerprint=producer_node_fingerprint,
+            owner_group_key=owner_group_key,
+            visibility=visibility,
         )
 
     def get_workflow_artifact(self, artifact_id: str) -> dict[str, Any] | None:
@@ -456,6 +464,9 @@ class WorkflowsFacadeMixin:
         include_history: bool = False,
         format: str | None = None,
         path_match: str | None = None,
+        viewer_group_key: str | None = None,
+        enforce_scope: bool = False,
+        include_shared_for_profile: bool = False,
     ) -> list[dict[str, Any]]:
         return self.workflows.search_workflow_artifacts(
             profile_key=profile_key,
@@ -470,4 +481,7 @@ class WorkflowsFacadeMixin:
             limit=limit,
             format=format,
             path_match=path_match,
+            viewer_group_key=viewer_group_key,
+            enforce_scope=enforce_scope,
+            include_shared_for_profile=include_shared_for_profile,
         )

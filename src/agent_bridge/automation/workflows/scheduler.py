@@ -4,6 +4,7 @@ import logging
 import asyncio
 import threading
 import time as monotonic_time
+from contextlib import nullcontext
 from dataclasses import asdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -13,7 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from agent_bridge.core.domain import ConflictError, NotFound
+from agent_bridge.core.domain import AgentBridgeError, AccessDenied, ConflictError, NotFound
 from agent_bridge.core.ids import new_run_id
 from agent_bridge.core.timeutil import local_now, utc_iso
 from agent_bridge.agent_runtime.service import STOPPED_ERROR
@@ -309,12 +310,24 @@ class WorkflowScheduler:
             batch = self.next_workflow_batch(candidates, available=available)
             workflows_by_key = {item["workflow_key"]: item for item in workflows}
             for workflow_key in batch:
+                if workflow_key in self.finished_today:
+                    continue
                 workflow = workflows_by_key[workflow_key]
                 try:
-                    graph = self._require_valid_workflow(workflow, actor=None)
+                    with self._bind_workflow_owner_scope(workflow) as runtime_actor:
+                        graph = self._require_valid_workflow(workflow, actor=runtime_actor)
                 except WorkflowDefinitionValidationError as exc:
                     self.finished_today.add(workflow_key)
                     self._log_validation_failure(workflow_key, exc)
+                    continue
+                except AgentBridgeError as exc:
+                    self.finished_today.add(workflow_key)
+                    logger.warning(
+                        "Workflow 调度预检失败，已隔离至下一窗口 workflow=%s error_type=%s 原因=%s",
+                        workflow_key,
+                        type(exc).__name__,
+                        exc,
+                    )
                     continue
                 definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
                 self._reserve_run_slot(workflow_key)
@@ -414,8 +427,12 @@ class WorkflowScheduler:
             if workflow.get("definition") is None:
                 from agent_bridge.core.domain import ValidationError
                 raise ValidationError("工作流需要通过新编辑器迁移")
-            graph = self._require_valid_workflow(workflow, actor=actor)
-            definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
+            if actor is None:
+                raise AccessDenied("即时运行必须提供调用身份")
+            self._service.require_workflow_execution(actor, workflow_key)
+            with self._bind_workflow_owner_scope(workflow) as runtime_actor:
+                graph = self._require_valid_workflow(workflow, actor=runtime_actor)
+                definition_snapshot = self._definition_snapshot(graph, workflow["definition"])
             selected_task = None
             effective_mode = execution_mode
             if task_key is not None:
@@ -429,13 +446,14 @@ class WorkflowScheduler:
                     str(selected_task["task_key"]),
                     task_version=str(selected_task.get("task_version") or ""),
                 )
-            plan = self._build_plan(
-                workflow=workflow,
-                definition=definition_snapshot,
-                actor=actor,
-                task=selected_task,
-                execution_mode=effective_mode,
-            )
+            with self._bind_workflow_owner_scope(workflow) as runtime_actor:
+                plan = self._build_plan(
+                    workflow=workflow,
+                    definition=definition_snapshot,
+                    actor=runtime_actor,
+                    task=selected_task,
+                    execution_mode=effective_mode,
+                )
             run_id = new_run_id(workflow_key)
             base_dir = self._base_run_dir or Path("workflow-runs")
             self._store.create_workflow_run(
@@ -543,7 +561,10 @@ class WorkflowScheduler:
                 "definition": run["definition_snapshot"] if run is not None else workflow["definition"],
             }
             try:
-                graph = self._require_valid_workflow(validation_workflow, actor=actor)
+                with self._bind_workflow_owner_scope(workflow) as runtime_actor:
+                    graph = self._require_valid_workflow(
+                        validation_workflow, actor=runtime_actor
+                    )
             except WorkflowDefinitionValidationError as exc:
                 self.finished_today.add(workflow_key)
                 self._log_validation_failure(workflow_key, exc, run_id=run_id)
@@ -568,13 +589,15 @@ class WorkflowScheduler:
                 if resources_validated
                 else self._definition_snapshot(graph, workflow["definition"])
             )
-            plan = plan or self._build_plan(
-                workflow=workflow,
-                definition=definition_snapshot,
-                actor=actor,
-                task=None,
-                execution_mode="normal",
-            )
+            if plan is None:
+                with self._bind_workflow_owner_scope(workflow) as runtime_actor:
+                    plan = self._build_plan(
+                        workflow=workflow,
+                        definition=definition_snapshot,
+                        actor=runtime_actor,
+                        task=None,
+                        execution_mode="normal",
+                    )
             self._store.create_workflow_run(
                 run_id=run_id,
                 workflow_key=workflow_key,
@@ -605,6 +628,7 @@ class WorkflowScheduler:
         if self._executor is None:
             raise RuntimeError("workflow DAG executor is not configured")
         started_at = monotonic_time.monotonic()
+        runtime_capability = None
         try:
             run = run or self._store.get_workflow_run(run_id)
             if run is None:
@@ -620,13 +644,32 @@ class WorkflowScheduler:
                 **workflow,
                 "definition": run["definition_snapshot"],
             }
-            execution = asyncio.run(self._executor.run(
-                workflow=execution_workflow,
-                run_id=run_id,
-                input_data=run["input"],
-                actor=actor or sorted(self._admins)[0],
-                plan=plan,
-            ))
+            issue_capability = getattr(self._service, "issue_runtime_capability", None)
+            if callable(issue_capability):
+                runtime_capability = issue_capability(
+                    run=run,
+                    initiated_by=actor or "workflow-scheduler",
+                )
+                execution_workflow["runtime_capability_token"] = runtime_capability.token
+            runtime_actor = (
+                runtime_capability.actor
+                if runtime_capability is not None
+                else self._default_actor(actor)
+            )
+            bind_capability = getattr(self._service, "bind_runtime_capability", None)
+            runtime_scope = (
+                bind_capability(runtime_capability)
+                if runtime_capability is not None and callable(bind_capability)
+                else nullcontext()
+            )
+            with runtime_scope:
+                execution = asyncio.run(self._executor.run(
+                    workflow=execution_workflow,
+                    run_id=run_id,
+                    input_data=run["input"],
+                    actor=runtime_actor,
+                    plan=plan,
+                ))
             if self._is_parent_stop_requested(run_id):
                 return self._finish_stopped(
                     workflow_key,
@@ -703,6 +746,11 @@ class WorkflowScheduler:
                 self._release_leased_tasks(workflow_key, run_id, str(exc))
             return {"status": status, "error": str(exc)}
         finally:
+            if runtime_capability is not None:
+                registry = getattr(self._service, "runtime_capabilities", None)
+                revoke = getattr(registry, "revoke", None)
+                if callable(revoke):
+                    revoke(runtime_capability.token)
             self._finish_workflow_control(run_id)
 
     def _release_leased_tasks(self, workflow_key: str, run_id: str, error: str) -> None:
@@ -843,6 +891,12 @@ class WorkflowScheduler:
 
     def _default_actor(self, actor: str | None) -> str:
         return actor or sorted(self._admins)[0]
+
+    def _bind_workflow_owner_scope(self, workflow: dict[str, Any]):
+        bind = getattr(self._service, "bind_workflow_owner_scope", None)
+        if callable(bind):
+            return bind(workflow)
+        return nullcontext(self._default_actor(None))
 
     def _require_valid_workflow(self, workflow: dict[str, Any], *, actor: str | None) -> WorkflowGraph | Any:
         if self._validator is None:

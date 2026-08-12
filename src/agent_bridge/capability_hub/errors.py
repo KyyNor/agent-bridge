@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from agent_bridge.capability_hub.models import CallLogStatus, FailureOwner, FailureStage
-from agent_bridge.core.domain import AgentBridgeError, NotFound, ValidationError
+from agent_bridge.core.domain import AccessDenied, AgentBridgeError, NotFound, ValidationError
 
 
 @dataclass(frozen=True)
@@ -52,16 +52,27 @@ class CapabilityNotFoundError(_CapabilityErrorMixin, NotFound):
     """带审计上下文的能力目录不存在错误。"""
 
 
+class CapabilityAccessDeniedError(_CapabilityErrorMixin, AccessDenied):
+    """带审计上下文的数据或 Profile 策略拒绝错误。"""
+
+
 class CapabilityInternalError(_CapabilityErrorMixin, AgentBridgeError):
     """带审计上下文的能力平台内部错误。"""
 
 
-CapabilityError = CapabilityValidationError | CapabilityNotFoundError | CapabilityInternalError
+CapabilityError = (
+    CapabilityValidationError
+    | CapabilityNotFoundError
+    | CapabilityAccessDeniedError
+    | CapabilityInternalError
+)
 
 
 def _error_class(exc: Exception) -> type[CapabilityError]:
     if isinstance(exc, NotFound):
         return CapabilityNotFoundError
+    if isinstance(exc, AccessDenied):
+        return CapabilityAccessDeniedError
     if isinstance(exc, ValidationError):
         return CapabilityValidationError
     return CapabilityInternalError

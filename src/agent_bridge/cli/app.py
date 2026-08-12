@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import getpass
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -85,7 +86,9 @@ def _load_json_file(path: Path) -> dict[str, Any]:
     return loaded
 
 
-def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> dict[str, Any]:
+def _with_metamcp_config(
+    existing: dict[str, Any], url: str, profile: str, linux_user: str | None = None
+) -> dict[str, Any]:
     config = dict(existing)
     servers = config.get("mcpServers")
     if not isinstance(servers, dict):
@@ -96,7 +99,10 @@ def _with_metamcp_config(existing: dict[str, Any], url: str, profile: str) -> di
     servers["agent-bridge"] = {
         "type": "http",
         "url": url,
-        "headers": {"X-Agent-Bridge-MetaMCP-Profile": profile},
+        "headers": {
+            "X-Agent-Bridge-MetaMCP-Profile": profile,
+            "X-Agent-Bridge-User": linux_user or getpass.getuser(),
+        },
         "timeout": DEFAULT_CLAUDE_CODE_MCP_TOOL_TIMEOUT_MS,
     }
     config["mcpServers"] = servers

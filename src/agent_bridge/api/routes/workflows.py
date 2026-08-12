@@ -14,8 +14,8 @@ from agent_bridge.api.schemas import (
     WorkflowTaskRefreshRequest,
     WorkflowTaskImportConfirmRequest,
     WorkflowValidationRequest,
+    WorkflowArtifactVisibilityRequest,
 )
-from agent_bridge.core.domain import require_admin_user
 
 
 def create_workflow_routes(service, actor):
@@ -169,7 +169,7 @@ def create_workflow_routes(service, actor):
         response: Response,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
-        require_admin_user(current_actor, service.admins)
+        service.workflows.require_run_write(current_actor, run_id)
         result = service.workflow_scheduler.stop_workflow_run(run_id)
         if result.get("status") == "stopping":
             response.status_code = 202
@@ -238,6 +238,18 @@ def create_workflow_routes(service, actor):
             actor=current_actor,
             artifact_id=artifact_id,
             profile_key=profile_key,
+        )
+
+    @router.put("/workflow-artifacts/{artifact_id}/visibility")
+    def set_artifact_visibility(
+        artifact_id: str,
+        payload: WorkflowArtifactVisibilityRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.workflows.set_artifact_visibility(
+            actor=current_actor,
+            artifact_id=artifact_id,
+            visibility=payload.visibility,
         )
 
     @router.post("/workflows/{workflow_key}/run")

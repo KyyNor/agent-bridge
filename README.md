@@ -173,7 +173,22 @@ CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或�
 
 服务配置位于 `config/server.toml`，数据库和运行数据位于 `data/`。主业务库为 `data/agent-bridge.db`，高频工具调用与 Agent 运行审计独立保存到 `data/agent-bridge-logs.db`；升级时会安全复制历史 `wiki.db` 到新的主库文件名。日志默认写入 `logs/agent-bridge.log`。
 
-业务台账保存于 `data/agent-bridge-ledgers.db`。每个台账最多 100 个字段、200,000 行记录；服务启动后异步构建内存快照，管理读写和后续的受控查询均使用同一份完整快照。
+Web 入口使用内部总账户系统签发的短期 JWT：浏览器访问
+`/api/v1/auth/sso/callback?token=<JWT>&next=/` 后，后端校验 `server.toml` 的
+`[identity]` 配置并写入 HttpOnly Cookie。前端不读取用户身份，也不自行添加鉴权 Header。
+Agent Bridge CLI 和由 CLI 启动的 MCP/Agent 调用使用当前 Linux 用户名，通过内网可信的
+`X-Agent-Bridge-User` Header 传给后端；该 Header 入口可用
+`identity.allow_cli_header = false` 关闭。无 Cookie 且无受信 Header 的请求返回 401。
+
+浏览器侧另提供全局管理员密码入口：无论当前是裸访问还是已经持有 SSO Cookie，都可以从页面左下角输入密码进入管理员模式。系统尚未设置密码时，第一次成功提交会直接完成初始化；密码只以 PBKDF2-SHA256 哈希保存到主业务库，浏览器获得有效期 12 小时的 HttpOnly 管理员 Cookie。管理员模式复用 `server.toml` 中的维护管理员身份，可跨组查看和维护全部数据，但不会改变资源已有的 `owner_group_key` 或 `visibility`。可通过 `GET /api/v1/auth/admin/status`、`POST/DELETE /api/v1/auth/admin/session` 管理提权会话；系统管理页通过 `PUT /api/v1/auth/admin/password` 修改密码，改密会立即使所有旧管理员 Cookie 失效。首次设置属于内网部署初始化动作，不额外引入验证码、互联网限流或页面路由鉴权。
+
+系统在业务库维护“用户 ID → 单一小组”映射。普通用户只能修改本小组资源；同组用户可以互相读取和修改。共享白名单资源可标记为 `shared`，此时其他小组只能读取和使用，不能修改、删除或变更共享状态。管理员可通过 `/api/v1/access/groups` 和 `/api/v1/access/memberships` 接口维护映射，并保留跨组故障处理旁路。升级前已有数据尽量按创建者映射归组，无法确认归属的数据保持组内范围并仅允许维护管理员修复，不会自动扩大为共享。
+
+知识库、MCP/OpenAPI 服务、代码仓库、业务台账和工作流产物接受 `visibility=group|shared`，默认 `group`。工作流产物可在详情中逐项切换共享范围；定义、任务、运行过程和日志不会随产物共享。后端在列表、详情、编辑、删除、工具执行、查询、导出、事件流和 Dashboard 代理入口统一检查资源归属；能力 Profile、记忆块及其绑定保持组内可见，Profile 的 allow 列表与小组可见范围取交集，也可以引用其他组显式共享的资源。用户后来换组不会迁移既有资源，资源仍由创建时的归属组维护。
+
+工作流手工运行要求调用者对定义有组内写权限；定时运行使用工作流自身的归属组，不使用维护管理员旁路。运行期间 Agent MCP 和脚本 helper 会携带服务端签发的短期 capability，并与 Profile、workflow 和 run ID 一起校验；单独伪造这些 Header 不能领取或修改其他组任务。运行产生的工具日志、Agent 记录和产物始终归父工作流 run 所属组。
+
+业务台账保存于 `data/agent-bridge-ledgers.db`。每个台账最多 100 个字段、200,000 行记录；服务启动后异步构建内存快照，管理读写和后续的受控查询均使用同一份完整快照。共享台账允许其他组查询和导出，但定义、记录和导入操作仍只能由归属组修改。
 
 业务台账的 Excel 导入窗口可下载当前字段定义生成的空白 `.xlsx` 模板；模板只包含字段标识表头，不会携带台账中的已有数据。
 
@@ -181,7 +196,7 @@ CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或�
 
 能力平面通过 `business_ledger` 资源规则显式授权业务台账。获授权的 Agent 使用顶级 MCP 工具 `query_business_ledger` 查询；所有字段默认支持精确匹配和排序，文本字段可额外开启字面包含检索，数字、日期与日期时间字段默认支持大于、小于、大于等于、小于等于和范围筛选。排序可按多个字段依次传入；台账、字段和查询方式自动注入 Profile，上下文外的台账不可发现也不可查询。
 
-Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /api/v1/agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /api/v1/agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流以保留 `X-Agent-Bridge-User` Header，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/api/v1/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
+Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、固化的数据组、终态结果和规范化事件；工具调用日志、统计及 Agent 运行的列表、详情、事件、SSE、payload、子 Agent 和停止操作均按运行所属组过滤，维护管理员可跨组排障。每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /api/v1/agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /api/v1/agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流沿用同源会话 Cookie，并通过 `Last-Event-ID` 请求头续传，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/api/v1/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
 
 工作流 Agent 的 JSON 输出 Schema 按 JSON Schema Draft 07 校验和传递给 Coding Agent。已有
 Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft 07 的 `definitions`；
@@ -195,7 +210,7 @@ Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft
 
 其他管理页采用统一的 `edit_token` 乐观并发协议。代码仓库、分类、知识后端、知识库默认检索配置、能力服务、Profile 配置、脚本和 Skill 在进入编辑时会读取最新详情；保存时传回 `expected_edit_token`。系统级配置页也会携带加载时取得的令牌。若另一个标签页已先保存，服务端返回 `409`，当前页面保留草稿并提示刷新，不会用历史数据覆盖新配置。令牌是服务端根据可编辑字段生成的不透明摘要，不包含或暴露 API Key、认证头等秘密。
 
-当前部署模型是内部可信 VM：请求身份来自 `X-Agent-Bridge-User`，不提供互联网级认证。部署方必须限制监听地址、网络访问和反向代理边界。
+当前部署模型是内部可信 VM，不提供互联网级认证。浏览器身份来自总账户系统换取的会话 Cookie；CLI、MCP 与 Agent 进程身份来自受信的 Linux 用户名 Header。部署方必须限制监听地址、网络访问和反向代理边界，并禁止外部请求直接进入 CLI Header 信任通道。
 
 ## 目录概览
 
@@ -231,7 +246,7 @@ tests/                         # 后端测试
 
 ## 工作流首次使用导览
 
-工作流列表及编辑器、文档知识、能力接入、工具调试、能力平面配置、记忆区块和脚本管理均使用 Driver.js 提供简洁的首次使用导览，并提供“新手指南”按钮供随时回看。导览脚本位于 `frontend/capabilities/src/lib/onboardingTours.ts`，每个导览以稳定的 `data-tour` 锚点、独立 `key` 与 `version` 定义；用户完成、跳过状态则独立保存在主库的 `onboarding_tour_statuses`，按请求身份 `X-Agent-Bridge-User`、导览 key 与版本隔离。前端仅在页面主要内容加载后自动检查；动态、空数据或无权限而未渲染的锚点会安全跳过。前端通过 `GET/PUT /onboarding/tours/{tour_key}` 读写状态；提升导览 `version` 即会为所有用户提供新版导览，无需删除旧记录。其他页面只需新增导览定义，并把 `TourReplayButton` 与 `useOnboardingTour` 接入其已完成渲染的页面。
+工作流列表及编辑器、文档知识、能力接入、工具调试、能力平面配置、记忆区块和脚本管理均使用 Driver.js 提供简洁的首次使用导览，并提供“新手指南”按钮供随时回看。导览脚本位于 `frontend/capabilities/src/lib/onboardingTours.ts`，每个导览以稳定的 `data-tour` 锚点、独立 `key` 与 `version` 定义；用户完成、跳过状态则独立保存在主库的 `onboarding_tour_statuses`，按当前请求身份、导览 key 与版本隔离。前端仅在页面主要内容加载后自动检查；动态、空数据或无权限而未渲染的锚点会安全跳过。前端通过 `GET/PUT /api/v1/onboarding/tours/{tour_key}` 读写状态；提升导览 `version` 即会为所有用户提供新版导览，无需删除旧记录。其他页面只需新增导览定义，并把 `TourReplayButton` 与 `useOnboardingTour` 接入其已完成渲染的页面。
 
 ## 工作流任务版本演进
 

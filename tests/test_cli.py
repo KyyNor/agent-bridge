@@ -38,8 +38,8 @@ def test_client_init_system_posts_admin_init(monkeypatch) -> None:
     }
 
 
-def test_client_from_config_uses_environment_user(monkeypatch) -> None:
-    monkeypatch.setenv("AGENT_BRIDGE_USER", "kyynor")
+def test_client_from_config_uses_linux_user(monkeypatch) -> None:
+    monkeypatch.setattr("agent_bridge.client.getpass.getuser", lambda: "kyynor")
 
     client = AgentBridgeClient.from_config()
 

@@ -55,14 +55,17 @@ class CapabilitiesRepository:
         description: str,
         tags: list[str],
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO mcp_services (
-                  service_key, name, endpoint_url, headers_json, description, tags_json, created_by
+                  service_key, name, endpoint_url, headers_json, description, tags_json, created_by,
+                  owner_group_key, visibility
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     service_key,
@@ -72,6 +75,8 @@ class CapabilitiesRepository:
                     description,
                     json.dumps(tags, ensure_ascii=False),
                     created_by,
+                    owner_group_key,
+                    visibility,
                 ),
             )
             row = conn.execute("SELECT * FROM mcp_services WHERE service_key = ?", (service_key,)).fetchone()
@@ -89,6 +94,7 @@ class CapabilitiesRepository:
         headers: dict[str, Any],
         description: str,
         tags: list[str],
+        visibility: str | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
@@ -99,6 +105,7 @@ class CapabilitiesRepository:
                     headers_json = ?,
                     description = ?,
                     tags_json = ?,
+                    visibility = COALESCE(?, visibility),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE service_key = ?
                 """,
@@ -108,6 +115,7 @@ class CapabilitiesRepository:
                     json.dumps(headers, ensure_ascii=False),
                     description,
                     json.dumps(tags, ensure_ascii=False),
+                    visibility,
                     service_key,
                 ),
             )
@@ -135,6 +143,7 @@ class CapabilitiesRepository:
                 SELECT
                   s.service_key, s.name, s.endpoint_url, s.description,
                   s.tags_json, s.status, s.created_by, s.created_at,
+                  s.owner_group_key, s.visibility,
                   s.updated_at, s.last_synced_at, s.last_error,
                   COUNT(t.id) AS tool_count
                 FROM mcp_services s
@@ -434,15 +443,18 @@ class CapabilitiesRepository:
         description: str,
         tags: list[str],
         created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO openapi_services (
                   service_key, name, base_url, spec_url, spec_content,
-                  auth_config_json, headers_json, description, tags_json, created_by
+                  auth_config_json, headers_json, description, tags_json, created_by,
+                  owner_group_key, visibility
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     service_key,
@@ -455,6 +467,8 @@ class CapabilitiesRepository:
                     description,
                     json.dumps(tags, ensure_ascii=False),
                     created_by,
+                    owner_group_key,
+                    visibility,
                 ),
             )
             row = conn.execute("SELECT * FROM openapi_services WHERE service_key = ?", (service_key,)).fetchone()
@@ -475,6 +489,7 @@ class CapabilitiesRepository:
         headers: dict[str, Any],
         description: str,
         tags: list[str],
+        visibility: str | None = None,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             conn.execute(
@@ -488,6 +503,7 @@ class CapabilitiesRepository:
                     headers_json = ?,
                     description = ?,
                     tags_json = ?,
+                    visibility = COALESCE(?, visibility),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE service_key = ?
                 """,
@@ -500,6 +516,7 @@ class CapabilitiesRepository:
                     json.dumps(headers, ensure_ascii=False),
                     description,
                     json.dumps(tags, ensure_ascii=False),
+                    visibility,
                     service_key,
                 ),
             )
@@ -527,6 +544,7 @@ class CapabilitiesRepository:
                 SELECT
                   s.service_key, s.name, s.base_url, s.spec_url, s.description,
                   s.tags_json, s.status, s.created_by, s.created_at,
+                  s.owner_group_key, s.visibility,
                   s.updated_at, s.last_imported_at, s.last_error,
                   COUNT(t.id) AS tool_count
                 FROM openapi_services s

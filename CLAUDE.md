@@ -29,13 +29,19 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 ## 部署与信任模型
 
 - 默认数据根目录为 `/root/agent-bridge`，环境变量 `AGENT_BRIDGE_ROOT` 可覆盖。
-- 当前按内部可信 VM 设计。身份来自 `X-Agent-Bridge-User`，`server.toml` 的 `admins` 决定管理员。
+- 当前按内部可信 VM 设计。Web 身份来自总账户系统 JWT 换取的 HttpOnly Cookie；CLI、MCP 与 Agent 运行身份来自当前 Linux 用户名对应的 `X-Agent-Bridge-User`。两条入口统一解析为稳定用户 ID，`server.toml` 的 `admins` 仅作为维护旁路。
+- 浏览器允许通过全局管理员密码临时切换为 `server.toml admins` 中的维护身份，裸访问与已有 SSO 会话均可进入。首次提交原子初始化密码；只持久化 PBKDF2-SHA256 哈希与随机会话密钥，管理员 Cookie 为 HttpOnly、有效期 12 小时。改密必须验证当前密码并轮换会话密钥，使全部旧会话立即失效。该入口沿用内网信任边界，不扩展验证码、外部 IdP、功能 RBAC 或前端路由权限。
 - 本阶段不增加互联网级认证；部署方负责监听地址、内网访问和反向代理边界。
+- 浏览器前端不得读取、缓存或拼接身份 Header；未识别调用者的后端请求必须明确返回 401。
 - `server_runtime/` 只负责 uvicorn 服务进程；`agent_runtime/` 负责 Coding Agent 执行，不要混用。
 
 ## 应用与存储
 
 `AgentBridgeService` 是装配根和兼容门面。FastAPI 路由调用应用/领域 service，领域 service 使用 repositories 或 adapter。不要继续把具体知识后端、工作流或脚本业务堆入门面。
+
+数据权限采用单小组归属模型：`user_group_memberships` 将稳定用户 ID 映射到一个小组；受保护资源保存 `owner_group_key` 和 `visibility=group|shared`。读取规则是同组或共享，写入规则始终是同组；`admins` 仅作为维护旁路。存量资源优先按创建者映射归组，无法确认归属时保持组内范围并进入维护修复，不得自动共享。资源访问必须进入 `AccessControlService` 与资源 adapter，不在 API 路由或前端复制判断。
+
+知识库、MCP/OpenAPI、代码仓库、业务台账与工作流产物属于共享白名单，并通过 `ScopedResourceAdapter` 注册到资源 registry；Profile、记忆和工作流定义保持组内。列表、详情和执行都必须走同一访问服务；Profile 来源/资源规则只能引用同组资源或显式共享资源。子资源（工具、CodeGraph 文件与符号）继承父资源范围；文档固化单一归属组，禁止跨组知识库混合挂载。
 
 `SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。主业务库为 `agent-bridge.db`，工具调用与 Agent 运行审计位于独立的 `agent-bridge-logs.db`；运行日志 repository 必须使用日志连接，不能重新写回主库。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
@@ -43,7 +49,7 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 业务台账 Excel 导入模板仅导出当前字段标识表头，绝不复用数据导出接口或泄露已有记录。
 
-业务台账定义可通过 `design_business_ledger` 设计 Agent 生成或修改。该 Agent 的输出必须经过 Draft 07 Schema 约束，只能形成待管理员采纳的完整定义；不得直接写入台账记录或注册为 Agent MCP 管理能力。
+业务台账定义可通过 `design_business_ledger` 设计 Agent 生成或修改。该 Agent 的输出必须经过 Draft 07 Schema 约束，只能形成待当前用户采纳的完整定义；不得直接写入台账记录或注册为 Agent MCP 管理能力。设计运行及其日志归当前用户的数据组。
 
 业务台账是 `business_ledger` 内置能力来源，Agent 只获得顶级 `query_business_ledger` 读取工具；管理定义和数据的 API 不得注册到 Agent MCP。没有 Profile 或未显式绑定资源时必须 fail closed；拒绝访问时只能提示当前 Profile 已获授权的台账。
 
@@ -165,6 +171,8 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 - `WorkflowScheduler` 负责运行时间窗、并发和任务租约，不继承单 cron 基类。
 
 服务启动时必须回收上一进程遗留的工作流 `running` 记录：运行转为 `failed`，正在执行的节点结束，任务租约按 `lease_origin_status` 精确释放，关联的 `agent_runs` 也必须结束。调度器启动前从持久化的自动运行记录恢复当前窗口的计数，不能依赖进程内存；前端手动或批量运行进入终态后必须刷新工作流概览聚合状态。页面批量队列本身仍是前端内存队列，不提供服务重启后的续跑语义。
+
+工作流执行身份必须区分“触发者”和“业务运行主体”。手工运行先校验触发者对定义的写权限；定时运行不得借维护管理员身份读取业务资源。每次 run 按持久化的 `owner_group_key` 签发进程内短期 capability，Agent MCP 与脚本 runtime 必须同时携带 capability 和 workflow/profile/run lineage；服务端校验后绑定不可获得管理员旁路的临时主体。`workflow_get_task`、`workflow_set_task`、`workflow_run_log` 必须校验 run 写权限，客户端自报的 workflow headers 不是可信凭证。工具审计、Agent run 和节点产物均按父 run 归属组落库。自动调度的单个工作流若在归属或定义预检中失败，必须隔离到当前窗口结束并继续处理同批其他工作流，不能让异常逃出 `tick()` 或在每轮重复失败。
 
 `agent` 与 `output` 节点的 `timeout_seconds` 是 1–86400 秒的运行控制参数，默认 600 秒；它不属于节点产物语义，单独调整超时不得使节点或下游失去复用资格。工作流名称、描述、节点显示名称和 Output 节点配置标题是展示字段，调整它们同样不得改变增量复用或触发重跑。版本判定走双口径：执行语义口径（`content_hash`，剥离 name/description/timeout/title 等字段）喂重跑与 stale 判定，单独调整这些字段时必须稳定不变；版本历史口径（`version_hash`，含这些字段）喂版本号递增与 diff，会随之变更并产生新 `revision_no`——这是版本记录而非增量版本，版本号递增本身不触发重跑。
 

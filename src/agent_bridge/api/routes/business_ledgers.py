@@ -26,6 +26,7 @@ def create_business_ledger_routes(service, actor):
             name=payload.name,
             description=payload.description,
             fields=[item.model_dump() for item in payload.fields],
+            visibility=payload.visibility,
             expected_edit_token=payload.expected_edit_token,
         )
 
@@ -41,6 +42,7 @@ def create_business_ledger_routes(service, actor):
             name=payload.name,
             description=payload.description,
             fields=[item.model_dump() for item in payload.fields],
+            visibility=payload.visibility,
             expected_edit_token=payload.expected_edit_token,
         )
 

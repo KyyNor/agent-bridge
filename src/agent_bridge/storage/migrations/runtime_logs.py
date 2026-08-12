@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS tool_call_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   log_id TEXT NOT NULL UNIQUE,
   actor TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
   profile_key TEXT,
   entrypoint TEXT NOT NULL,
   source_type TEXT,
@@ -38,6 +39,8 @@ CREATE INDEX IF NOT EXISTS idx_tool_call_logs_resource ON tool_call_logs(resourc
 CREATE TABLE IF NOT EXISTS agent_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_key TEXT NOT NULL UNIQUE,
+  actor TEXT NOT NULL DEFAULT '',
+  owner_group_key TEXT NOT NULL DEFAULT '',
   agent_name TEXT NOT NULL,
   backend_key TEXT,
   profile_key TEXT,
@@ -70,3 +73,22 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_backend_key ON agent_runs(backend_key)
 
 def apply_runtime_log_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(RUNTIME_LOG_SCHEMA)
+    for table, columns in {
+        "tool_call_logs": {"owner_group_key": "TEXT NOT NULL DEFAULT ''"},
+        "agent_runs": {
+            "actor": "TEXT NOT NULL DEFAULT ''",
+            "owner_group_key": "TEXT NOT NULL DEFAULT ''",
+        },
+    }.items():
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_owner_group "
+        "ON tool_call_logs(owner_group_key, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_runs_owner_group "
+        "ON agent_runs(owner_group_key, created_at DESC)"
+    )

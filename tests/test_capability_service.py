@@ -142,13 +142,17 @@ def test_register_service_requires_admin_and_valid_service_key(wm_paths: AgentBr
 
 def test_set_service_status_requires_admin_validates_status_and_missing_service(wm_paths: AgentBridgePaths) -> None:
     service, _client = _service(wm_paths)
+    service.register_service(
+        "root", "docs-api", "Docs API", "https://example.test/mcp", {}, "", [],
+        visibility="shared",
+    )
 
     with pytest.raises(AccessDenied):
         service.set_service_status("alice", "docs-api", McpServiceStatus.disabled.value)
     with pytest.raises(ValidationError, match="invalid service status"):
         service.set_service_status("root", "docs-api", "paused")
     with pytest.raises(NotFound, match="service not found"):
-        service.set_service_status("root", "docs-api", McpServiceStatus.disabled.value)
+        service.set_service_status("root", "missing-api", McpServiceStatus.disabled.value)
 
 
 def test_sync_tools_stores_tools_and_passes_headers(wm_paths: AgentBridgePaths) -> None:

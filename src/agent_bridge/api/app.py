@@ -8,12 +8,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
-from agent_bridge.core.config import AgentBridgePaths, default_user, load_logging_config, load_server_config
+from agent_bridge.access_control.identity import RequestIdentityResolver
+from agent_bridge.access_control.admin_access import AdminAccessService
+from agent_bridge.api.schemas import AdminLoginRequest, ChangeAdminPasswordRequest
+from agent_bridge.core.config import (
+    AgentBridgePaths,
+    load_identity_config,
+    load_logging_config,
+    load_server_config,
+)
 from agent_bridge.core.logging import setup_logging
 from agent_bridge.core.domain import AgentBridgeError
 from agent_bridge.automation.workflows.validation import WorkflowDefinitionValidationError
@@ -30,6 +38,16 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     setup_logging(resolved_paths, config=load_logging_config(resolved_paths))
     resolved_admins = admins if admins is not None else load_server_config(resolved_paths).admins
     service = AgentBridgeService.create(resolved_paths, resolved_admins)
+    admin_access = AdminAccessService(service.store.access_control, service.access.admins)
+
+    def password_admin_actor() -> str | None:
+        return sorted(service.access.admins)[0] if service.access.admins else None
+
+    identity_resolver = RequestIdentityResolver(
+        load_identity_config(resolved_paths),
+        admin_access=admin_access,
+        admin_actor_provider=password_admin_actor,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -96,20 +114,107 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     app = FastAPI(title="Agent Bridge", docs_url=None, openapi_url=None, redoc_url=None, lifespan=lifespan)
     app.state.agent_bridge_service = service
+
+    def require_dashboard_repository(scope, repo_key: str) -> None:
+        request = Request(scope)
+        current_actor = identity_resolver.resolve(request).user_id
+        service.codegraph.get_repository(current_actor, repo_key)
+
+    def require_memory_dashboard(scope, block_key: str) -> None:
+        request = Request(scope)
+        current_actor = identity_resolver.resolve(request).user_id
+        service.memory.get_block(current_actor, block_key)
+
     app.add_middleware(
         DashboardProxyMiddleware,
         target_resolver=service.codegraph.dashboard_proxy_target,
         token_resolver=service.codegraph.dashboard_repo_by_token,
+        access_checker=require_dashboard_repository,
     )
     app.add_middleware(
         MemoryDashboardProxyMiddleware,
         target_resolver=service.memory.dashboard_proxy_target,
+        access_checker=require_memory_dashboard,
     )
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir, check_dir=False), name="capabilities-static")
 
-    def actor(x_agent_bridge_user: str = Header(alias="X-Agent-Bridge-User")) -> str:
-        return x_agent_bridge_user
+    def identity(request: Request):
+        return identity_resolver.resolve(request)
+
+    def actor(current_identity=Depends(identity)) -> str:
+        return current_identity.user_id
+
+    @app.get("/api/v1/auth/admin/status")
+    def admin_status(request: Request) -> dict[str, Any]:
+        token = request.cookies.get(admin_access.cookie_name, "").strip()
+        return admin_access.status(token)
+
+    @app.post("/api/v1/auth/admin/session")
+    def create_admin_session(request: Request, payload: AdminLoginRequest) -> JSONResponse:
+        try:
+            subject_user_id = identity_resolver.resolve_base(request).user_id
+        except AgentBridgeError:
+            subject_user_id = "anonymous"
+        result = admin_access.login(
+            password=payload.password,
+            subject_user_id=subject_user_id,
+        )
+        token = str(result.pop("session_token"))
+        response = JSONResponse(content=result)
+        response.set_cookie(
+            admin_access.cookie_name,
+            token,
+            max_age=12 * 60 * 60,
+            httponly=True,
+            secure=identity_resolver.config.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.delete("/api/v1/auth/admin/session")
+    def delete_admin_session() -> JSONResponse:
+        response = JSONResponse(content={"active": False})
+        response.delete_cookie(admin_access.cookie_name, path="/")
+        return response
+
+    @app.put("/api/v1/auth/admin/password")
+    def change_admin_password(
+        payload: ChangeAdminPasswordRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, bool]:
+        return admin_access.change_password(
+            actor=current_actor,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+
+    @app.get("/api/v1/auth/sso/callback")
+    def sso_callback(
+        token: str = Query(min_length=1),
+        next_path: str = Query(default="/agent-bridge/", alias="next"),
+    ) -> RedirectResponse:
+        identity_resolver.decode_sso_token(token)
+        if not next_path.startswith("/") or next_path.startswith("//"):
+            next_path = "/agent-bridge/"
+        response = RedirectResponse(url=next_path, status_code=303)
+        response.set_cookie(
+            identity_resolver.config.cookie_name,
+            token,
+            httponly=True,
+            secure=identity_resolver.config.cookie_secure,
+            samesite="lax",
+            path="/",
+        )
+        return response
+
+    @app.post("/api/v1/auth/logout")
+    def logout() -> RedirectResponse:
+        response = RedirectResponse(url="/agent-bridge/", status_code=303)
+        response.delete_cookie(identity_resolver.config.cookie_name, path="/")
+        response.delete_cookie(admin_access.cookie_name, path="/")
+        return response
 
     @app.exception_handler(AgentBridgeError)
     async def _handle_agent_bridge_error(request: Request, exc: AgentBridgeError) -> JSONResponse:
@@ -128,6 +233,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         @app.middleware("http")
         async def _reload_admins_if_dynamic(request: Request, call_next):
             reloaded = load_server_config(resolved_paths).admins
+            if reloaded != service.access.admins:
+                service.access.admins = reloaded
+                service.access.bootstrap_admin_memberships()
+            admin_access.admins = reloaded
             service.admins = reloaded
             service.capabilities.admins = reloaded
             service.governance.admins = reloaded
@@ -199,6 +308,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     from agent_bridge.api.routes.health import router as health_router
     app.include_router(health_router)
 
+    from agent_bridge.api.routes.access_control import create_access_control_routes
+    app.include_router(create_access_control_routes(service, actor), prefix="/api/v1")
+
     from agent_bridge.api.routes.knowledge import create_knowledge_routes
     app.include_router(create_knowledge_routes(service, actor, save_upload, upload_filename), prefix="/api/v1")
 
@@ -237,11 +349,11 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
-    setup_mcp_route(app, service)
+    setup_mcp_route(app, service, identity_resolver)
 
     @app.get("/agent-bridge/{route_path:path}", response_class=HTMLResponse)
     def capability_admin_history_route(route_path: str) -> HTMLResponse:
         """为 Vue Router 的 History 路由提供深链接刷新入口。"""
-        return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")
+        return HTMLResponse(content=capability_admin_page(), media_type="text/html")
 
     return app

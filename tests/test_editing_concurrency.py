@@ -47,6 +47,15 @@ def test_profile_edit_tokens_reject_stale_independent_updates(wm_paths) -> None:
     detail = service.governance.get_profile("root", "safe")
     stale_rules_token = detail["rules_edit_token"]
     stale_resources_token = detail["resources_edit_token"]
+    service.capabilities.register_service(
+        "root",
+        "mysql",
+        "MySQL",
+        "https://example.test/mcp",
+        {},
+        "",
+        [],
+    )
     service.governance.replace_profile_rules(
         "root",
         "safe",

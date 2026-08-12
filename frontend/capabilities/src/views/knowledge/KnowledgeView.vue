@@ -3,13 +3,14 @@ import { Plus, RotateCw, Upload, File, Folder, Archive, Trash2, ArrowLeft } from
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
-import type { KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendInfo, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse } from '../../api/types'
+import type { AccessActorContext, KnowledgeBaseSummary, Document, KnowledgeFolder, SyncJob, BackendInfo, KnowledgeBrowseDocumentEntry, KnowledgeBrowseEntry, KnowledgeBrowseResponse, ResourceVisibility } from '../../api/types'
 import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import StatusBadge from '../../components/StatusBadge.vue'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import PaginationBar from '../../components/PaginationBar.vue'
 import TourReplayButton from '../../components/TourReplayButton.vue'
@@ -28,23 +29,20 @@ const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
 import { knowledgeFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
-
+import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 const props = defineProps<{ routeKey: string }>()
 const { maybeStartTour, startTour } = useOnboardingTour()
-
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
 const pagedKbs = computed(() => paginate(kbs.value, page.value, pageSize.value))
-
 const kbs = ref<KnowledgeBaseSummary[]>([])
 const page = ref(1)
 const pageSize = ref(10)
 const loading = ref(true)
+const actorContext = ref<AccessActorContext | null>(null)
 const showCreate = ref(false)
-const createForm = ref({ slug: '', name: '', description: '' })
+const createForm = ref<{ slug: string; name: string; description: string; visibility: ResourceVisibility }>({ slug: '', name: '', description: '', visibility: 'group' })
 const createSaving = ref(false)
 const createError = ref('')
-
-// Detail (secondary page driven by hash route)
 const detailKb = ref<KnowledgeBaseSummary | null>(null)
 const detailTab = ref<'docs' | 'sync' | 'sources' | 'search'>('docs')
 const detailDocs = ref<Document[]>([])
@@ -84,7 +82,6 @@ const detailSyncJobs = ref<SyncJob[]>([])
 const detailRepoSourceCount = ref(0)
 const detailLoading = ref(false)
 const routeError = ref('')
-// Batch document delete
 const selectedDocSlugs = ref<Set<string>>(new Set())
 const allDocsSelected = computed(() => detailDocs.value.length > 0 && detailDocs.value.every(d => selectedDocSlugs.value.has(d.slug)))
 const someDocsSelected = computed(() => detailDocs.value.some(d => selectedDocSlugs.value.has(d.slug)))
@@ -92,6 +89,10 @@ const detailTotalDocumentCount = computed(() => {
   const slug = detailKb.value?.slug
   return kbs.value.find(kb => kb.slug === slug)?.document_count ?? detailKb.value?.document_count ?? 0
 })
+const detailReadOnly = computed(() => isSharedResourceReadOnly(actorContext.value, detailKb.value))
+function kbReadOnly(kb: KnowledgeBaseSummary | null | undefined) {
+  return isSharedResourceReadOnly(actorContext.value, kb)
+}
 const rootFolder = computed(() => detailFolders.value.find(folder => folder.is_root) || detailFolders.value[0] || null)
 const currentFolder = computed(() => detailFolders.value.find(folder => folder.id === selectedFolderId.value) || null)
 const browseContext = computed(() => detailBrowse.value?.context || null)
@@ -135,20 +136,16 @@ const placementRootLabel = computed(() => {
   if (placementDialogMode.value === 'place') return detailKb.value?.name || '根目录'
   return kbs.value.find(kb => kb.slug === placementKbSlug.value)?.name || '根目录'
 })
-
 function clampFolderPaneWidth(width: number) {
   return Math.min(FOLDER_PANE_MAX_WIDTH, Math.max(FOLDER_PANE_MIN_WIDTH, width))
 }
-
 function setFolderPaneWidth(width: number) {
   folderPaneWidth.value = clampFolderPaneWidth(width)
 }
-
 function handleFolderPanePointerMove(event: PointerEvent) {
   if (!isResizingFolderPane.value) return
   setFolderPaneWidth(folderPaneResizeStartWidth + event.clientX - folderPaneResizeStartX)
 }
-
 function stopFolderPaneResize() {
   if (!isResizingFolderPane.value) return
   isResizingFolderPane.value = false
@@ -158,7 +155,6 @@ function stopFolderPaneResize() {
   document.body.style.cursor = previousBodyCursor
   document.body.style.userSelect = previousBodyUserSelect
 }
-
 function startFolderPaneResize(event: PointerEvent) {
   if (event.button !== 0 || isResizingFolderPane.value) return
   event.preventDefault()
@@ -173,7 +169,6 @@ function startFolderPaneResize(event: PointerEvent) {
   window.addEventListener('pointerup', stopFolderPaneResize)
   window.addEventListener('pointercancel', stopFolderPaneResize)
 }
-
 function handleFolderPaneKeydown(event: KeyboardEvent) {
   const step = event.shiftKey ? 40 : 10
   if (event.key === 'ArrowLeft') {
@@ -184,21 +179,12 @@ function handleFolderPaneKeydown(event: KeyboardEvent) {
     setFolderPaneWidth(folderPaneWidth.value + step)
   }
 }
-
 onBeforeUnmount(stopFolderPaneResize)
-
-// Document detail
 const showDocDetail = ref(false)
 const docDetailSlug = ref('')
-
-// Plane assignment dialog
 const showPlaneDialog = ref(false)
 const planeKb = ref<KnowledgeBaseSummary | null>(null)
-
-// Backends
 const backends = ref<BackendInfo[]>([])
-
-
 const {
   showUploadDialog,
   uploadKb,
@@ -227,24 +213,21 @@ const {
     else await refreshDetailKbSummary()
   },
 })
-
 onMounted(async () => {
-  await Promise.all([loadKbs(), loadBackends()])
+  const [, , actor] = await Promise.all([loadKbs(), loadBackends(), api.getAccessContext()])
+  actorContext.value = actor
   loading.value = false
   await loadDetail()
   await maybeStartKnowledgeTour()
 })
-
 // Route-driven detail loading: entering /knowledge/<slug> loads that kb's data.
 watch(() => props.routeKey, async () => {
   await loadDetail()
   await maybeStartKnowledgeTour()
 })
-
 watch(() => detailTab.value, () => {
   if (detailTab.value !== 'docs') selectedDocSlugs.value = new Set()
 })
-
 async function loadKbs(options: { fresh?: boolean } = {}) {
   if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeBases() })
   try {
@@ -254,19 +237,16 @@ async function loadKbs(options: { fresh?: boolean } = {}) {
     })
   } catch { kbs.value = [] }
 }
-
 async function maybeStartKnowledgeTour() {
   if (mode.value !== 'list' || loading.value) return
   await maybeStartTour(knowledgeFirstUseTour)
 }
-
 async function refreshDetailKbSummary() {
   await loadKbs({ fresh: true })
   if (!detailKb.value) return
   const latest = kbs.value.find(kb => kb.slug === detailKb.value?.slug)
   if (latest) detailKb.value = latest
 }
-
 async function deleteKb(kb: KnowledgeBaseSummary) {
   const ok = await confirm({
     title: '删除文档知识库',
@@ -282,7 +262,6 @@ async function deleteKb(kb: KnowledgeBaseSummary) {
     await alert({ title: '删除失败', description: e.message || '删除失败', destructive: true })
   }
 }
-
 async function loadBackends(options: { fresh?: boolean } = {}) {
   if (options.fresh) await queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeBackends() })
   try {
@@ -292,7 +271,6 @@ async function loadBackends(options: { fresh?: boolean } = {}) {
     })
   } catch { backends.value = [] }
 }
-
 async function createKb() {
   createError.value = ''
   if (!createForm.value.slug || !createForm.value.name) {
@@ -306,9 +284,10 @@ async function createKb() {
       slug,
       name: createForm.value.name,
       description: createForm.value.description || undefined,
+      visibility: createForm.value.visibility,
     })
     showCreate.value = false
-    createForm.value = { slug: '', name: '', description: '' }
+    createForm.value = { slug: '', name: '', description: '', visibility: 'group' }
     await loadKbs({ fresh: true })
     const newKb = kbs.value.find(k => k.slug === slug)
     if (newKb) openDetail(newKb)
@@ -317,15 +296,12 @@ async function createKb() {
   }
   createSaving.value = false
 }
-
 function goList() {
   void router.replace('/knowledge')
 }
-
 async function openDetail(kb: KnowledgeBaseSummary) {
   void router.push('/knowledge/' + kb.slug)
 }
-
 async function loadFolderTree(preferredFolderId?: number | null) {
   if (!detailKb.value) return
   folderTreeLoading.value = true
@@ -413,10 +389,10 @@ async function refreshKnowledgeDetail(preferredFolderId?: number | null) {
   const [summaryResult, foldersResult, syncStatusResult] = await Promise.allSettled([
     refreshDetailKbSummary(),
     loadFolderTree(preferredFolderId),
-    api.getSyncStatus(),
+    api.getKbSyncStatus(detailKb.value.slug),
   ])
   if (syncStatusResult.status === 'fulfilled' && detailKb.value) {
-    detailSyncJobs.value = syncStatusResult.value.jobs.filter((job: SyncJob) => job.kb_slug === detailKb.value!.slug)
+    detailSyncJobs.value = syncStatusResult.value.jobs
   }
   try {
     await refreshCurrentDocs()
@@ -803,6 +779,7 @@ function syncBadgeLabel(status?: string | null) {
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">名称</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标识</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">范围</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">文档数</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">同步失败</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
@@ -815,6 +792,16 @@ function syncBadgeLabel(status?: string | null) {
                 <div class="text-xs text-muted-foreground">{{ k.description }}</div>
               </td>
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ k.slug }}</td>
+              <td class="px-4 py-3">
+                <div v-if="k.visibility === 'shared'">
+                  <Badge variant="secondary">共享</Badge>
+                  <div v-if="kbReadOnly(k)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
+                </div>
+                <div v-else>
+                  <Badge variant="outline">组内</Badge>
+                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ k.owner_group_key }}</div>
+                </div>
+              </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ k.document_count }}</td>
               <td class="px-4 py-3 tabular-nums text-sm">
                 <Badge v-if="k.sync_failed_count > 0" variant="destructive">{{ k.sync_failed_count }}</Badge>
@@ -823,8 +810,8 @@ function syncBadgeLabel(status?: string | null) {
               <td class="px-4 py-3">
                 <div class="flex gap-2">
                   <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
-                  <Button variant="outline" size="sm" @click="openPlaneDialog(k)" class="h-8 text-xs">能力平面</Button>
-                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteKb(k)">
+                  <Button variant="outline" size="sm" @click="openPlaneDialog(k)" :disabled="kbReadOnly(k)" :title="kbReadOnly(k) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">能力平面</Button>
+                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteKb(k)" :disabled="kbReadOnly(k)" :title="kbReadOnly(k) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                     <Trash2 :size="12" />
                     删除
                   </Button>
@@ -857,11 +844,11 @@ function syncBadgeLabel(status?: string | null) {
           返回
         </Button>
         <div class="flex flex-wrap gap-2">
-          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openUploadDialog(detailKb)">
+          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openUploadDialog(detailKb)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
             <Upload :size="12" class="mr-1" />
             上传
           </Button>
-          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openPlaneDialog(detailKb)">能力平面</Button>
+          <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openPlaneDialog(detailKb)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">能力平面</Button>
         </div>
       </div>
 
@@ -871,8 +858,12 @@ function syncBadgeLabel(status?: string | null) {
         <p class="font-mono text-xs text-muted-foreground">{{ detailKb.slug }}</p>
       </div>
 
+      <div v-if="detailKb && detailReadOnly" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-3 text-sm text-warning-soft-fg">
+        {{ SHARED_RESOURCE_READ_ONLY_HINT }}
+      </div>
+
       <div v-if="detailKb" v-show="!detailLoading" class="space-y-4">
-        <KnowledgeDefaultBackendPanel :kb="detailKb" :backends="backends" @saved="updateKnowledgeDefaults" />
+        <KnowledgeDefaultBackendPanel :kb="detailKb" :backends="backends" :read-only="detailReadOnly" @saved="updateKnowledgeDefaults" />
         <!-- Tabs -->
         <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
           <button v-for="t in [
@@ -903,6 +894,7 @@ function syncBadgeLabel(status?: string | null) {
               :root-label="detailKb.name"
               :all-count="detailTotalDocumentCount"
               :loading="folderTreeLoading"
+              :actions-enabled="!detailReadOnly"
               @select="selectFolder"
               @create="openCreateFolder"
               @rename="openRenameFolder"
@@ -951,7 +943,7 @@ function syncBadgeLabel(status?: string | null) {
             <!-- Batch toolbar -->
             <div v-if="selectedDocSlugs.size > 0" class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
               <span class="text-sm font-medium">已选 {{ selectedDocSlugs.size }} 项</span>
-              <Button variant="destructive" size="sm" class="h-7 text-xs" @click="batchDeleteDocs">
+              <Button variant="destructive" size="sm" class="h-7 text-xs" @click="batchDeleteDocs" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                 <Trash2 :size="12" class="mr-1" />批量删除
               </Button>
               <Button variant="ghost" size="sm" class="h-7 text-xs text-muted-foreground" @click="selectedDocSlugs = new Set()">取消选择</Button>
@@ -1001,9 +993,9 @@ function syncBadgeLabel(status?: string | null) {
                       <td class="px-3 py-2">
                         <div class="flex justify-end gap-1">
                           <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openDocumentDetail(entry.slug)">详情</Button>
-                          <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openPlaceDialog(documentFromBrowseEntry(entry))">移动</Button>
-                          <Button v-if="otherKnowledgeBases.length > 0" variant="ghost" size="sm" class="h-7 text-xs" @click="openAttachDialog(documentFromBrowseEntry(entry))">关联</Button>
-                          <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(entry.slug, entry.title)">删除</Button>
+                          <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openPlaceDialog(documentFromBrowseEntry(entry))" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">移动</Button>
+                          <Button v-if="otherKnowledgeBases.length > 0" variant="ghost" size="sm" class="h-7 text-xs" @click="openAttachDialog(documentFromBrowseEntry(entry))" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">关联</Button>
+                          <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(entry.slug, entry.title)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">删除</Button>
                         </div>
                       </td>
                     </tr>
@@ -1041,9 +1033,9 @@ function syncBadgeLabel(status?: string | null) {
                   <td class="px-3 py-2">
                     <div class="flex justify-end gap-1">
                       <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openDocumentDetail(d.slug)">详情</Button>
-                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openPlaceDialog(d)">移动</Button>
-                      <Button v-if="otherKnowledgeBases.length > 0" variant="ghost" size="sm" class="h-7 text-xs" @click="openAttachDialog(d)">关联</Button>
-                      <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(d.slug, d.title)">删除</Button>
+                      <Button variant="ghost" size="sm" class="h-7 text-xs" @click="openPlaceDialog(d)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">移动</Button>
+                      <Button v-if="otherKnowledgeBases.length > 0" variant="ghost" size="sm" class="h-7 text-xs" @click="openAttachDialog(d)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">关联</Button>
+                      <Button variant="ghost" size="sm" class="h-7 text-xs text-destructive hover:text-destructive" @click="deleteDoc(d.slug, d.title)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">删除</Button>
                     </div>
                   </td>
                 </tr></tbody>
@@ -1052,12 +1044,13 @@ function syncBadgeLabel(status?: string | null) {
           </section>
         </div>
 
-        <KnowledgeSyncJobsPanel v-if="detailTab === 'sync'" :jobs="detailSyncJobs" :on-synced="refreshKnowledgeDetail" />
+        <KnowledgeSyncJobsPanel v-if="detailTab === 'sync'" :kb-slug="detailKb.slug" :jobs="detailSyncJobs" :on-synced="refreshKnowledgeDetail" :read-only="detailReadOnly" />
 
         <!-- Git 数据源由独立面板加载和维护，避免详情视图承载仓库同步状态。 -->
         <KnowledgeRepoSourcesPanel
           v-show="detailTab === 'sources'"
           :kb="detailKb"
+          :read-only="detailReadOnly"
           @sources-change="detailRepoSourceCount = $event.length"
           @refresh-detail="refreshKnowledgeDetail()"
         />
@@ -1086,6 +1079,13 @@ function syncBadgeLabel(status?: string | null) {
           <div class="space-y-2">
             <label class="text-sm font-medium">描述</label>
             <Input v-model="createForm.description" placeholder="文档知识描述" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="createForm.visibility"><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+              <SelectItem value="group">仅本小组</SelectItem><SelectItem value="shared">共享给所有小组</SelectItem>
+            </SelectContent></Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可使用，维护仍只允许归属小组。</p>
           </div>
         </form>
         <DialogFooter>

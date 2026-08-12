@@ -7,8 +7,23 @@ from typing import Any
 
 
 class KnowledgeFacadeMixin:
-    def create_kb(self, slug: str, name: str, description: str, created_by: str) -> dict[str, Any]:
-        return self.knowledge.create_kb(slug=slug, name=name, description=description, created_by=created_by)
+    def create_kb(
+        self,
+        slug: str,
+        name: str,
+        description: str,
+        created_by: str,
+        owner_group_key: str = "",
+        visibility: str = "group",
+    ) -> dict[str, Any]:
+        return self.knowledge.create_kb(
+            slug=slug,
+            name=name,
+            description=description,
+            created_by=created_by,
+            owner_group_key=owner_group_key,
+            visibility=visibility,
+        )
 
     def ensure_root_folder(self, kb_id: int) -> dict[str, Any]:
         return self.folders.ensure_root_folder(kb_id=kb_id)
@@ -171,11 +186,12 @@ class KnowledgeFacadeMixin:
         slug: str,
         title: str,
         owner_user: str,
+        owner_group_key: str = "",
         source_type: str = "manual",
         source_repo_key: str = "",
     ) -> dict[str, Any]:
         return self.knowledge.create_document(
-            slug=slug, title=title, owner_user=owner_user,
+            slug=slug, title=title, owner_user=owner_user, owner_group_key=owner_group_key,
             source_type=source_type, source_repo_key=source_repo_key,
         )
 
@@ -309,11 +325,24 @@ class KnowledgeFacadeMixin:
     def list_pending_jobs(self) -> list[dict[str, Any]]:
         return self.knowledge.list_pending_jobs()
 
-    def list_runnable_jobs(self, actor: str | None, backend_slug: str | None = None) -> list[dict[str, Any]]:
-        return self.knowledge.list_runnable_jobs(actor=actor, backend_slug=backend_slug)
+    def list_runnable_jobs(
+        self,
+        actor: str | None,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.knowledge.list_runnable_jobs(
+            actor=actor,
+            backend_slug=backend_slug,
+            kb_id=kb_id,
+        )
 
-    def list_all_jobs(self, backend_slug: str | None = None) -> list[dict[str, Any]]:
-        return self.knowledge.list_all_jobs(backend_slug=backend_slug)
+    def list_all_jobs(
+        self,
+        backend_slug: str | None = None,
+        kb_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.knowledge.list_all_jobs(backend_slug=backend_slug, kb_id=kb_id)
 
     def update_job_status(self, job_id: int, status: SyncJobStatus, error: str | None = None) -> None:
         return self.knowledge.update_job_status(job_id=job_id, status=status, error=error)

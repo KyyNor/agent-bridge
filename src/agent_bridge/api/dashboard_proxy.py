@@ -10,6 +10,7 @@ import httpx
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import external_dashboard_url
+from agent_bridge.core.domain import AgentBridgeError
 
 
 HOP_BY_HOP_HEADERS = {
@@ -56,10 +57,12 @@ class DashboardProxyMiddleware:
         app: ASGIApp,
         target_resolver: Callable[[str], str | None],
         token_resolver: Callable[[str], str | None] | None = None,
+        access_checker: Callable[[Scope, str], None] | None = None,
     ) -> None:
         self.app = app
         self.target_resolver = target_resolver
         self.token_resolver = token_resolver
+        self.access_checker = access_checker
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -77,6 +80,12 @@ class DashboardProxyMiddleware:
         if repo_key is None:
             await self.app(scope, receive, send)
             return
+        if self.access_checker is not None:
+            try:
+                self.access_checker(scope, repo_key)
+            except AgentBridgeError as exc:
+                await _send_plain(send, exc.status_code, exc.message.encode("utf-8"))
+                return
 
         target = self.target_resolver(repo_key)
         if target is None:
@@ -111,9 +120,11 @@ class MemoryDashboardProxyMiddleware:
         self,
         app: ASGIApp,
         target_resolver: Callable[[str], str | None],
+        access_checker: Callable[[Scope, str], None] | None = None,
     ) -> None:
         self.app = app
         self.target_resolver = target_resolver
+        self.access_checker = access_checker
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -133,6 +144,12 @@ class MemoryDashboardProxyMiddleware:
         if block_key is None:
             await self.app(scope, receive, send)
             return
+        if self.access_checker is not None:
+            try:
+                self.access_checker(scope, block_key)
+            except AgentBridgeError as exc:
+                await _send_plain(send, exc.status_code, exc.message.encode("utf-8"))
+                return
 
         target = self.target_resolver(block_key)
         if target is None:

@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any, Callable, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
+from agent_bridge.access_control.resources import (
+    ScopedResourceType,
+    create_scoped_resource_registry,
+)
+from agent_bridge.access_control.service import AccessControlService
 from agent_bridge.knowledge_management.code_knowledge.backend import CliCodeGraphBackend, CodeGraphBackend
 from agent_bridge.knowledge_management.code_knowledge.dashboard_urls import external_dashboard_url
 from agent_bridge.knowledge_management.code_knowledge.ua_client import UnderstandAnythingClient
@@ -43,10 +48,18 @@ class CodeGraphService:
         backend: CodeGraphBackend | None = None,
         ua_client: UnderstandAnythingClient | None = None,
         agent_service: Any = None,
+        access: AccessControlService | None = None,
     ) -> None:
         self.paths = paths
         self.store = store
         self.admins = admins
+        self.access = access or AccessControlService(
+            store.access_control,
+            admins,
+            create_scoped_resource_registry(store),
+        )
+        if access is None:
+            self.access.bootstrap_admin_memberships()
         self.backend = backend or CliCodeGraphBackend()
         self.ua_client = ua_client or UnderstandAnythingClient(root=paths.root, agent_service=agent_service)
         self.plugin_runtime = GitPluginRuntime(paths)
@@ -69,9 +82,9 @@ class CodeGraphService:
         sync_interval_minutes: int,
         auto_understand: bool,
         status: str,
+        visibility: str | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
         if status not in {"active", "disabled"}:
             raise ValidationError("invalid repository status")
         if not repo_key or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo_key):
@@ -86,6 +99,12 @@ class CodeGraphService:
             raise ValidationError("sync interval must be positive")
 
         existing = self.store.get_code_repository(repo_key)
+        if existing is not None:
+            self.access.require_resource_write(
+                actor=actor,
+                resource_type=ScopedResourceType.code_repository,
+                resource_key=repo_key,
+            )
         require_edit_token(
             expected=expected_edit_token,
             current_snapshot=self._repository_edit_snapshot(existing) if existing else None,
@@ -97,6 +116,11 @@ class CodeGraphService:
             if existing:
                 auth_ref = existing.get("auth_ref", "")
 
+        scope = (
+            self.access.new_resource_scope(actor=actor, visibility=visibility or "group")
+            if existing is None
+            else None
+        )
         repository = self.store.upsert_code_repository(
             repo_key=repo_key,
             name=name,
@@ -109,18 +133,33 @@ class CodeGraphService:
             sync_interval_minutes=sync_interval_minutes,
             auto_understand=auto_understand,
             status=status,
+            created_by=actor if existing is None else str(existing.get("created_by") or ""),
+            owner_group_key=(
+                scope.owner_group_key if scope is not None else str(existing.get("owner_group_key") or "")
+            ),
+            visibility=(
+                scope.visibility.value
+                if scope is not None
+                else visibility or str(existing.get("visibility") or "shared")
+            ),
         )
         return self._repository_payload(repository)
 
     def list_repositories(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        return [self._repository_payload(repo) for repo in self.store.list_code_repositories()]
+        return [
+            self._repository_payload(repo)
+            for repo in self.access.visible_resources(
+                actor=actor,
+                resource_type=ScopedResourceType.code_repository,
+            )
+        ]
 
     def get_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        repository = self.store.get_code_repository(repo_key)
-        if repository is None:
-            raise NotFound("repository not found")
+        repository = self.access.require_resource_read(
+            actor=actor,
+            resource_type=ScopedResourceType.code_repository,
+            resource_key=repo_key,
+        )
         return self._repository_payload(repository)
 
     def delete_repository(self, actor: str, repo_key: str) -> dict[str, Any]:
@@ -132,7 +171,11 @@ class CodeGraphService:
         """
         from agent_bridge.capability_hub.models import ProfileResourceType
 
-        require_admin_user(actor, self.admins)
+        self.access.require_resource_write(
+            actor=actor,
+            resource_type=ScopedResourceType.code_repository,
+            resource_key=repo_key,
+        )
         repo = self.store.get_code_repository(repo_key)
         if repo is None:
             raise NotFound("repository not found")
@@ -178,7 +221,11 @@ class CodeGraphService:
         CodeGraph CLI 是唯一索引后端；后端缺失或索引失败时明确标记失败。
         全程记录 sync run 状态；任一阶段失败都标记 run 并抛明确领域错误。
         """
-        require_admin_user(actor, self.admins)
+        self.access.require_resource_write(
+            actor=actor,
+            resource_type=ScopedResourceType.code_repository,
+            resource_key=repo_key,
+        )
         repo = self._require_repository(repo_key)
         self.paths.repos_dir.mkdir(parents=True, exist_ok=True)
         local_path = self.paths.repos_dir / repo_key
@@ -242,7 +289,7 @@ class CodeGraphService:
 
     def search_code(self, actor: str, repo_key: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """使用正式 CodeGraph 后端搜索代码图。"""
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         local_path = self._require_indexed_repository(repo_key, "查询")
         logger.debug("代码查询后端=CodeGraph repo=%s query=%s", repo_key, query)
         nodes = self._backend_call(
@@ -252,7 +299,7 @@ class CodeGraphService:
         return [self._codegraph_node_payload(n) for n in nodes]
 
     def get_file(self, actor: str, repo_key: str, path: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._require_local_repository(repo_key).resolve()
         file_path = (local_path / path).resolve()
@@ -274,7 +321,7 @@ class CodeGraphService:
         }
 
     def find_symbol(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         local_path = self._require_indexed_repository(repo_key, "查找符号")
         nodes = self._backend_call(
             "查找符号",
@@ -283,7 +330,7 @@ class CodeGraphService:
         return [self._codegraph_node_payload(n) for n in nodes]
 
     def repository_overview(self, actor: str, repo_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         repo = self._require_repository(repo_key)
         local_path = self._require_indexed_repository(repo_key, "读取索引状态")
         stats = self._backend_call("读取索引状态", lambda: self.backend.status(local_path))
@@ -298,32 +345,32 @@ class CodeGraphService:
         }
 
     def callers(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         local_path = self._require_indexed_repository(repo_key, "查询调用者")
         nodes = self._backend_call("查询调用者", lambda: self.backend.callers(local_path, symbol))
         return [self._codegraph_node_payload(n) for n in nodes[:limit]]
 
     def callees(self, actor: str, repo_key: str, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         local_path = self._require_indexed_repository(repo_key, "查询被调用者")
         nodes = self._backend_call("查询被调用者", lambda: self.backend.callees(local_path, symbol))
         return [self._codegraph_node_payload(n) for n in nodes[:limit]]
 
     def impact(self, actor: str, repo_key: str, symbol: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         local_path = self._require_indexed_repository(repo_key, "分析影响范围")
         nodes = self._backend_call("分析影响范围", lambda: self.backend.impact(local_path, symbol))
         return [self._codegraph_node_payload(n) for n in nodes]
 
     def list_files(self, actor: str, repo_key: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._require_local_repository(repo_key)
         return self._tracked_files(local_path)
 
     async def explore(self, actor: str, repo_key: str, query: str) -> dict[str, Any]:
         """通过 codegraph MCP 直连执行代码图查询（``codegraph_explore`` 工具）。"""
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         local_path = self._require_indexed_repository(repo_key, "探索代码图")
         logger.info("代码探索开始 repo=%s 后端=CodeGraph query=%s", repo_key, query)
         try:
@@ -349,6 +396,20 @@ class CodeGraphService:
         if repo is None or repo.get("status") != "active":
             raise NotFound("repository not found")
         return repo
+
+    def _require_repository_read(self, actor: str, repo_key: str) -> dict[str, Any]:
+        return self.access.require_resource_read(
+            actor=actor,
+            resource_type=ScopedResourceType.code_repository,
+            resource_key=repo_key,
+        )
+
+    def _require_repository_write(self, actor: str, repo_key: str) -> dict[str, Any]:
+        return self.access.require_resource_write(
+            actor=actor,
+            resource_type=ScopedResourceType.code_repository,
+            resource_key=repo_key,
+        )
 
     def _local_path(self, repo_key: str) -> Path:
         return self.paths.repos_dir / repo_key
@@ -398,7 +459,7 @@ class CodeGraphService:
     # -- Understand Anything --
 
     def get_understand_status(self, actor: str, repo_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         repo = self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         current_commit = repo.get("last_commit")
@@ -421,7 +482,7 @@ class CodeGraphService:
         }
 
     def get_understand_summary(self, actor: str, repo_key: str) -> dict[str, Any] | None:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         result = self.ua_client.summary(local_path)
@@ -446,7 +507,10 @@ class CodeGraphService:
         }
 
     def check_understand_availability(self, actor: str, repo_key: str | None = None) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        if repo_key:
+            self._require_repository_read(actor, repo_key)
+        else:
+            require_admin_user(actor, self.admins)
         project_dir = self._local_path(repo_key) if repo_key else None
         sync_config = self.store.get_sync_config()
         ua_git_url = sync_config.get("ua_git_url", "")
@@ -468,7 +532,7 @@ class CodeGraphService:
 
         从 sync_config 读 ``ua_git_url`` 与 ``understand_timeout_minutes``。
         """
-        require_admin_user(actor, self.admins)
+        self._require_repository_write(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         if not local_path.is_dir():
@@ -500,13 +564,13 @@ class CodeGraphService:
         }
 
     def dashboard_status_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_read(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         return self._external_dashboard_payload(repo_key, self.ua_client.dashboard_status(local_path))
 
     def start_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_write(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         if not local_path.is_dir():
@@ -514,13 +578,13 @@ class CodeGraphService:
         return self._external_dashboard_payload(repo_key, self.ua_client.start_dashboard(local_path))
 
     def stop_dashboard_understand(self, actor: str, repo_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_write(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         return self.ua_client.stop_dashboard(local_path)
 
     def touch_understand_dashboard(self, actor: str, repo_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_repository_write(actor, repo_key)
         self._require_repository(repo_key)
         local_path = self._local_path(repo_key)
         self.ua_client.touch_dashboard(local_path)
@@ -723,6 +787,7 @@ class CodeGraphService:
                 "sync_interval_minutes",
                 "auto_understand",
                 "status",
+                "visibility",
             )
         }
 

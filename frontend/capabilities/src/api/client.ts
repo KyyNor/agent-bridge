@@ -111,12 +111,14 @@ import type {
   BusinessLedgerRecords,
   OnboardingTourProgress,
   OnboardingTourStatus,
+  AccessActorContext,
+  AdminAccessStatus,
+  AccessGroup,
+  UserGroupMembership,
+  ResourceVisibility,
 } from './types'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
 
-const DEFAULT_USER = typeof window === 'undefined'
-  ? 'root'
-  : (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
 const API_BASE = '/api/v1'
 
 function apiUrl(path: string): string {
@@ -166,7 +168,7 @@ export function finishWorkflowValidationRun(guard: WorkflowValidationRunGuard, t
 }
 
 function headers(): Record<string, string> {
-  return { 'X-Agent-Bridge-User': DEFAULT_USER }
+  return {}
 }
 
 function formatValidationIssue(value: unknown): string {
@@ -226,7 +228,7 @@ async function get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> 
   return r.json()
 }
 
-/** 使用 fetch 读取 SSE，保留管理端现有的身份 Header。 */
+/** 使用 fetch 读取 SSE，沿用同源会话 Cookie 并支持 Last-Event-ID 断线续传。 */
 export async function openAgentRunEventStream(
   runKey: string,
   lastEventId: number,
@@ -316,7 +318,6 @@ function postFormDataWithProgress<T>(
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', apiUrl(url))
-    xhr.setRequestHeader('X-Agent-Bridge-User', DEFAULT_USER)
     xhr.upload.onprogress = event => onProgress?.(event.loaded, event.total)
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -344,6 +345,28 @@ async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Bl
 }
 
 export const api = {
+  // 管理员密码与浏览器提权会话
+  getAdminAccessStatus: () => get<AdminAccessStatus>('/auth/admin/status'),
+  createAdminSession: (password: string) =>
+    post<AdminAccessStatus>('/auth/admin/session', { password }),
+  deleteAdminSession: () => del<{ active: boolean }>('/auth/admin/session'),
+  changeAdminPassword: (currentPassword: string, newPassword: string) =>
+    put<{ updated: boolean }>('/auth/admin/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+
+  // 当前身份与小组映射
+  getAccessContext: () => get<AccessActorContext>('/access/me'),
+  listAccessGroups: () => get<AccessGroup[]>('/access/groups'),
+  upsertAccessGroup: (group: Pick<AccessGroup, 'group_key' | 'name' | 'description'>) =>
+    post<AccessGroup>('/access/groups', group),
+  listGroupMemberships: () => get<UserGroupMembership[]>('/access/memberships'),
+  setUserGroup: (membership: { user_id: string; group_key: string }) =>
+    put<UserGroupMembership>('/access/memberships', membership),
+  deleteUserGroup: (userId: string) =>
+    del<{ deleted: boolean }>(`/access/memberships/${encodeURIComponent(userId)}`),
+
   // MCP Services
   listTopLevelMcpTools: () => get<TopLevelMcpTool[]>('/capabilities/top-level-mcp-tools'),
   updateTopLevelMcpToolStatus: (name: string, status: 'enabled' | 'disabled') =>
@@ -625,6 +648,8 @@ export const api = {
     const tail = qs.toString() ? `?${qs}` : ''
     return get<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}${tail}`, options)
   },
+  setWorkflowArtifactVisibility: (artifactId: string, visibility: ResourceVisibility) =>
+    put<WorkflowArtifactDetail>(`/workflow-artifacts/${artifactId}/visibility`, { visibility }),
   executeWorkflowTask: (workflowKey: string, taskKey: string, taskVersion?: string, executionMode: WorkflowExecutionMode = 'normal') => {
     const qs = new URLSearchParams()
     if (taskVersion) qs.set('task_version', taskVersion)
@@ -857,8 +882,8 @@ export const api = {
   // Business ledgers
   listBusinessLedgers: () => get<BusinessLedger[]>('/business-ledgers'),
   getBusinessLedger: (ledgerKey: string) => get<BusinessLedger>(`/business-ledgers/${ledgerKey}`),
-  createBusinessLedger: (payload: Omit<BusinessLedger, 'record_count' | 'edit_token'> & { expected_edit_token?: string | null }) => post<BusinessLedger>('/business-ledgers', payload),
-  updateBusinessLedger: (ledgerKey: string, payload: Omit<BusinessLedger, 'ledger_key' | 'record_count' | 'edit_token'> & { expected_edit_token?: string | null }) => put<BusinessLedger>(`/business-ledgers/${ledgerKey}`, payload),
+  createBusinessLedger: (payload: Omit<BusinessLedger, 'record_count' | 'edit_token' | 'owner_group_key'> & { expected_edit_token?: string | null }) => post<BusinessLedger>('/business-ledgers', payload),
+  updateBusinessLedger: (ledgerKey: string, payload: Omit<BusinessLedger, 'ledger_key' | 'record_count' | 'edit_token' | 'owner_group_key'> & { expected_edit_token?: string | null }) => put<BusinessLedger>(`/business-ledgers/${ledgerKey}`, payload),
   deleteBusinessLedger: (ledgerKey: string) => del<{ ledger_key: string; deleted: boolean }>(`/business-ledgers/${ledgerKey}`),
   queryBusinessLedgerRecords: (ledgerKey: string, payload: Record<string, unknown> = {}) => post<BusinessLedgerRecords>(`/business-ledgers/${ledgerKey}/records/query`, payload),
   addBusinessLedgerRecord: (ledgerKey: string, values: Record<string, unknown>) => post<{ record_id: string; values: Record<string, unknown> }>(`/business-ledgers/${ledgerKey}/records`, { values }),
@@ -871,7 +896,7 @@ export const api = {
 
   // Knowledge Bases
   listKbs: () => get<KnowledgeBase[]>('/kbs'),
-  createKb: (data: { slug: string; name: string; description?: string }) =>
+  createKb: (data: { slug: string; name: string; description?: string; visibility: ResourceVisibility }) =>
     post<KnowledgeBase>('/kbs', data),
   updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null; expected_edit_token?: string | null }) =>
     put<KnowledgeBase>(`/kbs/${kbSlug}/defaults`, data),
@@ -968,10 +993,20 @@ export const api = {
     if (backend) qs.set('backend', backend)
     return post<{ processed: number }>(`/sync${qs.toString() ? '?' + qs : ''}`, { all_users: allUsers })
   },
+  triggerKbSync: (kbSlug: string, backend?: string) => {
+    const qs = new URLSearchParams()
+    if (backend) qs.set('backend', backend)
+    return post<{ processed: number }>(`/kbs/${encodeURIComponent(kbSlug)}/sync${qs.toString() ? '?' + qs : ''}`)
+  },
   getSyncStatus: (backend?: string) => {
     const qs = new URLSearchParams()
     if (backend) qs.set('backend', backend)
     return get<{ jobs: SyncJob[] }>(`/status${qs.toString() ? '?' + qs : ''}`)
+  },
+  getKbSyncStatus: (kbSlug: string, backend?: string) => {
+    const qs = new URLSearchParams()
+    if (backend) qs.set('backend', backend)
+    return get<{ jobs: SyncJob[] }>(`/kbs/${encodeURIComponent(kbSlug)}/status${qs.toString() ? '?' + qs : ''}`)
   },
 
   // Search & Ask

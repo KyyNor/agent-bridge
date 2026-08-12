@@ -3,7 +3,7 @@ import { ArrowLeft, Bug, Plus, RotateCw, Save, Search, Trash2, Wrench } from '@l
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
-import type { CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
+import type { AccessActorContext, CapabilityServiceSource, McpService, OpenApiService, OpenApiTool } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
 import EditorActionBar from '../../components/EditorActionBar.vue'
 import { timeAgo } from '../../lib/time'
@@ -40,6 +40,7 @@ import {
 import { queryClient, queryKeys } from '../../lib/query'
 import { servicesFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{ routeKey: string }>()
 const router = useRouter()
@@ -54,6 +55,7 @@ const statusFilter = ref('all')
 const sourceFilter = ref<'all' | ServiceSourceType>('all')
 const page = ref(1)
 const pageSize = ref(10)
+const actorContext = ref<AccessActorContext | null>(null)
 
 const formMode = ref<ServiceFormMode>('create')
 const sourceType = ref<ServiceSourceType>('mcp_service')
@@ -149,7 +151,8 @@ async function loadServices(options: { fresh?: boolean } = {}) {
 }
 
 onMounted(async () => {
-  await loadServices()
+  const [, actor] = await Promise.all([loadServices(), api.getAccessContext()])
+  actorContext.value = actor
   await applyRoute()
   loading.value = false
   await maybeStartServicesTour()
@@ -209,7 +212,12 @@ function openCreate() {
 }
 
 function openEdit(service: CapabilityServiceSource) {
+  if (isSharedResourceReadOnly(actorContext.value, service)) return
   void router.push(`/services/edit/${service.source_type}/${service.service_key}`)
+}
+
+function serviceReadOnly(service: CapabilityServiceSource | null | undefined) {
+  return isSharedResourceReadOnly(actorContext.value, service)
 }
 
 async function applyRoute() {
@@ -378,7 +386,7 @@ const toolTypeOptions = [
             </p>
           </div>
         </div>
-        <Button :disabled="saving || serviceNotFound" size="sm" @click="saveService">
+        <Button :disabled="saving || serviceNotFound || serviceReadOnly(editingService)" :title="serviceReadOnly(editingService) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" size="sm" @click="saveService">
           <Save class="mr-1.5 h-4 w-4" />
           {{ primaryActionLabel }}
         </Button>
@@ -387,6 +395,9 @@ const toolTypeOptions = [
 
     <div v-if="serviceNotFound" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-3 text-sm text-destructive-soft-fg">
       无法加载该服务（可能已被删除或不存在）。请<button type="button" class="underline" @click="goList">返回列表</button>。
+    </div>
+    <div v-else-if="serviceReadOnly(editingService)" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-3 text-sm text-warning-soft-fg">
+      {{ SHARED_RESOURCE_READ_ONLY_HINT }}
     </div>
 
     <Card v-else>
@@ -423,6 +434,17 @@ const toolTypeOptions = [
           <div class="space-y-2">
             <label class="text-sm font-medium">请求 Header</label>
             <textarea v-model="mcpForm.headers" placeholder='{"Authorization":"Bearer token"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="mcpForm.visibility">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">仅本小组</SelectItem>
+                <SelectItem value="shared">共享给所有小组</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可调用，修改和删除仍只允许归属小组。</p>
           </div>
         </template>
 
@@ -466,6 +488,17 @@ const toolTypeOptions = [
           <div class="space-y-2">
             <label class="text-sm font-medium">标签</label>
             <Input v-model="openApiForm.tags" placeholder="业务, 查询" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium">数据可见范围</label>
+            <Select v-model="openApiForm.visibility">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="group">仅本小组</SelectItem>
+                <SelectItem value="shared">共享给所有小组</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">共享后所有用户都可调用，修改和删除仍只允许归属小组。</p>
           </div>
         </template>
       </CardContent>
@@ -514,6 +547,7 @@ const toolTypeOptions = [
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">类型</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">连接地址</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">范围</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">工具数</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">最近同步</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">操作</th>
@@ -534,23 +568,33 @@ const toolTypeOptions = [
                 <StatusBadge v-else-if="s.status === 'error'" status="error" label="连接失败" />
                 <StatusBadge v-else status="disabled" />
               </td>
+              <td class="px-4 py-3">
+                <div v-if="s.visibility === 'shared'">
+                  <Badge variant="secondary">共享</Badge>
+                  <div v-if="serviceReadOnly(s)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
+                </div>
+                <div v-else>
+                  <Badge variant="outline">组内</Badge>
+                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ s.owner_group_key }}</div>
+                </div>
+              </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ toolCounts[serviceCountKey(s)] ?? '...' }}</td>
               <td class="px-4 py-3 text-xs text-muted-foreground">{{ timeAgo(lastSyncAt(s)) }}</td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-1.5">
-                  <Button v-if="s.source_type === 'openapi_service'" variant="ghost" size="sm" @click="openImportDialog(s)" class="h-8 gap-1.5 text-xs">
+                  <Button v-if="s.source_type === 'openapi_service'" variant="ghost" size="sm" @click="openImportDialog(s)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 gap-1.5 text-xs">
                     <RotateCw :size="14" />
                     同步接口
                   </Button>
-                  <Button v-else variant="ghost" size="sm" @click="syncMcpTools(s.service_key)" class="h-8 gap-1.5 text-xs">
+                  <Button v-else variant="ghost" size="sm" @click="syncMcpTools(s.service_key)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 gap-1.5 text-xs">
                     <RotateCw :size="14" />
                     同步
                   </Button>
-                  <Button variant="ghost" size="sm" @click="openEdit(s)" class="h-8 text-xs">编辑</Button>
-                  <Button variant="ghost" size="sm" @click="toggleStatus(s)" class="h-8 text-xs">
+                  <Button variant="ghost" size="sm" @click="openEdit(s)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">编辑</Button>
+                  <Button variant="ghost" size="sm" @click="toggleStatus(s)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">
                     {{ s.status === 'enabled' ? '停用' : '启用' }}
                   </Button>
-                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteService(s)">
+                  <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteService(s)" :disabled="serviceReadOnly(s)" :title="serviceReadOnly(s) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                     <Trash2 :size="14" />
                     删除
                   </Button>

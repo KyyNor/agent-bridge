@@ -15,6 +15,8 @@ from typing import Any
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 
+from agent_bridge.access_control.resources import ScopedResourceType
+from agent_bridge.access_control.service import AccessControlService, ResourceScope, ResourceVisibility
 from agent_bridge.core.domain import NotFound, ValidationError, require_admin_user
 from agent_bridge.core.editing import attach_edit_token, require_edit_token
 
@@ -37,6 +39,8 @@ CREATE TABLE IF NOT EXISTS business_ledgers (
   definition_json TEXT NOT NULL,
   current_revision_no INTEGER NOT NULL DEFAULT 1,
   created_by TEXT NOT NULL,
+  owner_group_key TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility IN ('group', 'shared')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -71,9 +75,16 @@ class LedgerSnapshot:
 class BusinessLedgerService:
     """管理台账数据；所有读取查询均针对不可变的内存快照。"""
 
-    def __init__(self, *, db_path: Path, admins: set[str]) -> None:
+    def __init__(
+        self,
+        *,
+        db_path: Path,
+        admins: set[str],
+        access: AccessControlService | None = None,
+    ) -> None:
         self.db_path = db_path
         self.admins = admins
+        self.access = access
         self._snapshots: dict[str, LedgerSnapshot] = {}
         self._import_previews: dict[str, tuple[str, list[dict[str, Any]]]] = {}
         self._lock = threading.RLock()
@@ -89,6 +100,25 @@ class BusinessLedgerService:
     def init_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(LEDGER_SCHEMA)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(business_ledgers)")}
+            if "owner_group_key" not in columns:
+                conn.execute(
+                    "ALTER TABLE business_ledgers ADD COLUMN owner_group_key TEXT NOT NULL DEFAULT ''"
+                )
+            if "visibility" not in columns:
+                conn.execute(
+                    "ALTER TABLE business_ledgers ADD COLUMN visibility TEXT NOT NULL DEFAULT 'group'"
+                )
+            if self.access is not None:
+                rows = conn.execute(
+                    "SELECT ledger_key, created_by FROM business_ledgers WHERE owner_group_key = ''"
+                ).fetchall()
+                for row in rows:
+                    group_key = self.access.actor_group_key(str(row["created_by"])) or ""
+                    conn.execute(
+                        "UPDATE business_ledgers SET owner_group_key = ?, visibility = 'group' WHERE ledger_key = ?",
+                        (group_key, row["ledger_key"]),
+                    )
 
     async def load_all_async(self) -> None:
         await asyncio.to_thread(self.reload_all)
@@ -100,8 +130,10 @@ class BusinessLedgerService:
             self._snapshots = snapshots
 
     def list_ledgers(self, actor: str) -> list[dict[str, Any]]:
-        require_admin_user(actor, self.admins)
-        definitions = self._list_definitions_raw()
+        definitions = [
+            item for item in self._list_definitions_raw()
+            if self._can_read(actor, item)
+        ]
         with self._connect() as conn:
             counts = {
                 row["ledger_key"]: int(row["count"])
@@ -111,7 +143,7 @@ class BusinessLedgerService:
             }
         return [self._payload(item, record_count=counts.get(item["ledger_key"], 0)) for item in definitions]
 
-    def ledger_contexts(self, ledger_keys: list[str]) -> list[dict[str, Any]]:
+    def ledger_contexts(self, ledger_keys: list[str], *, actor: str | None = None) -> list[dict[str, Any]]:
         """返回可安全注入 Profile 的台账说明，不要求管理权限。"""
         allowed = set(ledger_keys)
         return [
@@ -131,21 +163,30 @@ class BusinessLedgerService:
                 ],
             }
             for item in self._list_definitions_raw()
-            if item["ledger_key"] in allowed
+            if item["ledger_key"] in allowed and (actor is None or self._can_read(actor, item))
         ]
 
     def ledger_keys(self) -> list[str]:
         return [item["ledger_key"] for item in self._list_definitions_raw()]
 
     def get_ledger(self, actor: str, ledger_key: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        ledger = self._get_definition_raw(ledger_key)
+        ledger = self._require_read(actor, ledger_key)
         return self._payload(ledger, record_count=self._record_count(ledger_key))
 
     def create_ledger(
-        self, actor: str, *, ledger_key: str, name: str, description: str, fields: list[dict[str, Any]], expected_edit_token: str | None = None
+        self, actor: str, *, ledger_key: str, name: str, description: str, fields: list[dict[str, Any]], visibility: str = "group", expected_edit_token: str | None = None
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        scope = (
+            self.access.new_resource_scope(
+                actor=actor,
+                visibility=visibility,
+                resource_type=ScopedResourceType.business_ledger,
+            )
+            if self.access is not None
+            else ResourceScope("", ResourceVisibility(visibility))
+        )
+        if self.access is None:
+            require_admin_user(actor, self.admins)
         self._validate_ledger_key(ledger_key)
         existing = self._get_definition_raw(ledger_key, required=False)
         require_edit_token(expected_edit_token, existing, resource_type="业务台账", resource_key=ledger_key, actor=actor)
@@ -154,8 +195,8 @@ class BusinessLedgerService:
         definition = self._definition(ledger_key, name, description, fields)
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO business_ledgers (ledger_key, name, description, definition_json, created_by) VALUES (?, ?, ?, ?, ?)",
-                (ledger_key, name, description, json.dumps(definition, ensure_ascii=False), actor),
+                "INSERT INTO business_ledgers (ledger_key, name, description, definition_json, created_by, owner_group_key, visibility) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (ledger_key, name, description, json.dumps(definition, ensure_ascii=False), actor, scope.owner_group_key, scope.visibility.value),
             )
             conn.execute(
                 "INSERT INTO business_ledger_revisions (ledger_key, revision_no, definition_json, created_by) VALUES (?, 1, ?, ?)",
@@ -165,10 +206,10 @@ class BusinessLedgerService:
         return self.get_ledger(actor, ledger_key)
 
     def update_ledger(
-        self, actor: str, ledger_key: str, *, name: str, description: str, fields: list[dict[str, Any]], expected_edit_token: str | None = None
+        self, actor: str, ledger_key: str, *, name: str, description: str, fields: list[dict[str, Any]], visibility: str | None = None, expected_edit_token: str | None = None
     ) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        current = self._get_definition_raw(ledger_key)
+        current = self._require_write(actor, ledger_key)
+        resolved_visibility = ResourceVisibility(visibility or str(current.get("visibility") or "group"))
         require_edit_token(expected_edit_token, current, resource_type="业务台账", resource_key=ledger_key, actor=actor)
         definition = self._definition(ledger_key, name, description, fields)
         # 已有记录必须可被新定义读取，防止类型修改造成不可见脏数据。
@@ -177,8 +218,8 @@ class BusinessLedgerService:
         revision_no = int(current["current_revision_no"]) + 1
         with self._connect() as conn:
             conn.execute(
-                "UPDATE business_ledgers SET name = ?, description = ?, definition_json = ?, current_revision_no = ?, updated_at = CURRENT_TIMESTAMP WHERE ledger_key = ?",
-                (name, description, json.dumps(definition, ensure_ascii=False), revision_no, ledger_key),
+                "UPDATE business_ledgers SET name = ?, description = ?, definition_json = ?, current_revision_no = ?, visibility = ?, updated_at = CURRENT_TIMESTAMP WHERE ledger_key = ?",
+                (name, description, json.dumps(definition, ensure_ascii=False), revision_no, resolved_visibility.value, ledger_key),
             )
             conn.execute(
                 "INSERT INTO business_ledger_revisions (ledger_key, revision_no, definition_json, created_by) VALUES (?, ?, ?, ?)",
@@ -188,20 +229,18 @@ class BusinessLedgerService:
         return self.get_ledger(actor, ledger_key)
 
     def delete_ledger(self, actor: str, ledger_key: str) -> None:
-        require_admin_user(actor, self.admins)
-        self._get_definition_raw(ledger_key)
+        self._require_write(actor, ledger_key)
         with self._connect() as conn:
             conn.execute("DELETE FROM business_ledgers WHERE ledger_key = ?", (ledger_key,))
         with self._lock:
             self._snapshots.pop(ledger_key, None)
 
     def list_records(self, actor: str, ledger_key: str, **query: Any) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        return self.query(ledger_key, **query)
+        self._require_read(actor, ledger_key)
+        return self.query(ledger_key, actor=actor, **query)
 
     def add_record(self, actor: str, ledger_key: str, values: dict[str, Any]) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        definition = self._get_definition_raw(ledger_key)
+        definition = self._require_write(actor, ledger_key)
         normalized = self._normalize_values(definition, values)
         if self._record_count(ledger_key) >= MAX_LEDGER_RECORDS:
             raise ValidationError(f"单个台账最多保存 {MAX_LEDGER_RECORDS} 行数据")
@@ -215,8 +254,7 @@ class BusinessLedgerService:
         return {"record_id": record_id, "values": normalized}
 
     def update_record(self, actor: str, ledger_key: str, record_id: str, values: dict[str, Any]) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        definition = self._get_definition_raw(ledger_key)
+        definition = self._require_write(actor, ledger_key)
         normalized = self._normalize_values(definition, values)
         with self._connect() as conn:
             changed = conn.execute(
@@ -229,7 +267,7 @@ class BusinessLedgerService:
         return {"record_id": record_id, "values": normalized}
 
     def delete_record(self, actor: str, ledger_key: str, record_id: str) -> None:
-        require_admin_user(actor, self.admins)
+        self._require_write(actor, ledger_key)
         with self._connect() as conn:
             changed = conn.execute(
                 "DELETE FROM business_ledger_records WHERE ledger_key = ? AND record_id = ?", (ledger_key, record_id)
@@ -239,8 +277,7 @@ class BusinessLedgerService:
         self._replace_snapshot(ledger_key)
 
     def preview_xlsx_import(self, actor: str, ledger_key: str, content: bytes) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
-        definition = self._get_definition_raw(ledger_key)
+        definition = self._require_write(actor, ledger_key)
         try:
             workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
             sheet = workbook.active
@@ -271,7 +308,7 @@ class BusinessLedgerService:
         return {"preview_id": preview_id, "rows": len(prepared), "errors": errors, "columns": [field["field_key"] if field else None for field in mapped]}
 
     def confirm_xlsx_import(self, actor: str, ledger_key: str, preview_id: str) -> dict[str, Any]:
-        require_admin_user(actor, self.admins)
+        self._require_write(actor, ledger_key)
         prepared = self._import_previews.pop(preview_id, None)
         if prepared is None or prepared[0] != ledger_key:
             raise NotFound("导入预览不存在或已过期")
@@ -287,7 +324,7 @@ class BusinessLedgerService:
         return {"ledger_key": ledger_key, "imported": len(rows)}
 
     def export_xlsx(self, actor: str, ledger_key: str) -> bytes:
-        require_admin_user(actor, self.admins)
+        self._require_read(actor, ledger_key)
         snapshot = self._snapshot(ledger_key)
         workbook = Workbook()
         sheet = workbook.active
@@ -301,8 +338,7 @@ class BusinessLedgerService:
 
     def xlsx_import_template(self, actor: str, ledger_key: str) -> bytes:
         """生成仅包含字段标识表头的 Excel 导入模板。"""
-        require_admin_user(actor, self.admins)
-        definition = self._get_definition_raw(ledger_key)
+        definition = self._require_read(actor, ledger_key)
         workbook = Workbook()
         workbook.active.append([field["field_key"] for field in definition["fields"]])
         output = BytesIO()
@@ -313,6 +349,7 @@ class BusinessLedgerService:
         self,
         ledger_key: str,
         *,
+        actor: str | None = None,
         filters: dict[str, dict[str, Any]] | None = None,
         keyword: str | None = None,
         sort: list[dict[str, str]] | dict[str, str] | None = None,
@@ -320,6 +357,8 @@ class BusinessLedgerService:
         offset: int = 0,
         agent_visible_only: bool = False,
     ) -> dict[str, Any]:
+        if actor is not None:
+            self._require_read(actor, ledger_key)
         snapshot = self._snapshot(ledger_key)
         definition = snapshot.definition
         fields = {field["field_key"]: field for field in definition["fields"]}
@@ -514,6 +553,33 @@ class BusinessLedgerService:
                 raise NotFound("业务台账不存在")
             return None
         return self._definition_row(row)
+
+    def get_definition(self, ledger_key: str) -> dict[str, Any] | None:
+        return self._get_definition_raw(ledger_key, required=False)
+
+    def list_definitions(self) -> list[dict[str, Any]]:
+        return self._list_definitions_raw()
+
+    def _can_read(self, actor: str, ledger: dict[str, Any]) -> bool:
+        if self.access is None:
+            return actor in self.admins
+        return self.access.can_read(actor=actor, scope=ResourceScope.from_record(ledger))
+
+    def _require_read(self, actor: str, ledger_key: str) -> dict[str, Any]:
+        ledger = self._get_definition_raw(ledger_key)
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_read(actor=actor, scope=ResourceScope.from_record(ledger))
+        return ledger
+
+    def _require_write(self, actor: str, ledger_key: str) -> dict[str, Any]:
+        ledger = self._get_definition_raw(ledger_key)
+        if self.access is None:
+            require_admin_user(actor, self.admins)
+        else:
+            self.access.require_write(actor=actor, scope=ResourceScope.from_record(ledger))
+        return ledger
 
     def _definition_row(self, row: sqlite3.Row) -> dict[str, Any]:
         payload = json.loads(row["definition_json"])
