@@ -83,8 +83,7 @@ export function hasSubRoute(route: RouteLocationNormalized): boolean {
 }
 
 export const router = createRouter({
-  // Vite 开发服务器从静态资源基址提供 SPA；部署时由管理后台入口承载。
-  history: createWebHistory(import.meta.env.DEV ? '/static/capabilities/' : '/admin/capabilities/'),
+  history: createWebHistory('/agent-bridge/'),
   routes,
   scrollBehavior: () => ({ top: 0 }),
 })

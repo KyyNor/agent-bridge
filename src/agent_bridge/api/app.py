@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
@@ -108,10 +108,6 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir, check_dir=False), name="capabilities-static")
 
-    @app.get("/")
-    def root() -> RedirectResponse:
-        return RedirectResponse(url="/admin/capabilities", status_code=307)
-
     def actor(x_agent_bridge_user: str = Header(alias="X-Agent-Bridge-User")) -> str:
         return x_agent_bridge_user
 
@@ -204,47 +200,43 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     app.include_router(health_router)
 
     from agent_bridge.api.routes.knowledge import create_knowledge_routes
-    app.include_router(create_knowledge_routes(service, actor, save_upload, upload_filename))
+    app.include_router(create_knowledge_routes(service, actor, save_upload, upload_filename), prefix="/api/v1")
 
     from agent_bridge.api.routes.capabilities import create_capability_routes
-    app.include_router(create_capability_routes(service, actor, catalog_sources))
+    app.include_router(create_capability_routes(service, actor, catalog_sources), prefix="/api/v1")
 
     from agent_bridge.api.routes.governance import create_governance_routes
-    app.include_router(create_governance_routes(service, actor))
+    app.include_router(create_governance_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.agent_runs import create_agent_runs_routes
-    app.include_router(create_agent_runs_routes(service, actor))
+    app.include_router(create_agent_runs_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.builtins import create_builtin_routes
-    app.include_router(create_builtin_routes(service, actor))
+    app.include_router(create_builtin_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.workflows import create_workflow_routes
-    app.include_router(create_workflow_routes(service, actor))
+    app.include_router(create_workflow_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.script_runtime import create_script_runtime_routes
-    app.include_router(create_script_runtime_routes(service, actor))
+    app.include_router(create_script_runtime_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.memory import create_memory_routes
-    app.include_router(create_memory_routes(service, actor))
+    app.include_router(create_memory_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.business_ledgers import create_business_ledger_routes
-    app.include_router(create_business_ledger_routes(service, actor))
+    app.include_router(create_business_ledger_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.retrieval_probe import create_retrieval_probe_routes
-    app.include_router(create_retrieval_probe_routes(service, actor))
+    app.include_router(create_retrieval_probe_routes(service, actor), prefix="/api/v1")
 
     from agent_bridge.api.routes.model_evaluations import create_model_evaluation_routes
-    app.include_router(create_model_evaluation_routes(service, actor))
+    app.include_router(create_model_evaluation_routes(service, actor), prefix="/api/v1")
 
     # MCP streamable HTTP endpoint
     from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
     setup_mcp_route(app, service)
 
-    @app.get("/admin/capabilities", response_class=HTMLResponse)
-    def capability_admin() -> HTMLResponse:
-        return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")
-
-    @app.get("/admin/capabilities/{route_path:path}", response_class=HTMLResponse)
+    @app.get("/agent-bridge/{route_path:path}", response_class=HTMLResponse)
     def capability_admin_history_route(route_path: str) -> HTMLResponse:
         """为 Vue Router 的 History 路由提供深链接刷新入口。"""
         return HTMLResponse(content=capability_admin_page(default_user()), media_type="text/html")

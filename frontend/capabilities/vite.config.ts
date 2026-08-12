@@ -7,6 +7,17 @@ export default defineConfig({
   base: '/static/capabilities/',
   plugins: [
     vue(),
+    {
+      name: 'agent-bridge-dev-history-fallback',
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.method === 'GET' && req.url?.split('?', 1)[0].startsWith('/agent-bridge/')) {
+            req.url = '/static/capabilities/index.html'
+          }
+          next()
+        })
+      },
+    },
     // 内网定制浏览器内核较低（Chrome 90），需要 polyfill ES2021+ API
     // 如 Object.hasOwn (Chrome 93+)、Array.prototype.at (Chrome 92+) 等
     legacy({
@@ -25,13 +36,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/': {
+      '/api/v1': {
         target: 'http://127.0.0.1:8765',
-        // 让 Vite 自己处理管理后台的 History 路由，API 请求仍代理到后端。
-        bypass(req) {
-          if (req.url?.startsWith('/static/capabilities/')) return req.url
-          return undefined
-        },
       },
     },
   },

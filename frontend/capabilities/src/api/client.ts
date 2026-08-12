@@ -115,6 +115,11 @@ import { scriptResetPath } from '../lib/scriptManagement.ts'
 const DEFAULT_USER = typeof window === 'undefined'
   ? 'root'
   : (window as unknown as Record<string, string>).AGENT_BRIDGE_DEFAULT_USER || 'root'
+const API_BASE = '/api/v1'
+
+function apiUrl(path: string): string {
+  return `${API_BASE}${path}`
+}
 
 export function workflowValidationIssuesFor(
   issues: WorkflowValidationIssue[],
@@ -214,7 +219,7 @@ export type ApiRequestOptions = {
 }
 
 async function get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
-  const r = await fetch(url, { headers: headers(), cache: 'no-store', signal: options.signal })
+  const r = await fetch(apiUrl(url), { headers: headers(), cache: 'no-store', signal: options.signal })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
@@ -230,7 +235,7 @@ export async function openAgentRunEventStream(
     Accept: 'text/event-stream',
   }
   if (lastEventId > 0) streamHeaders['Last-Event-ID'] = String(lastEventId)
-  const response = await fetch(`/agent-runs/${encodeURIComponent(runKey)}/events/stream`, {
+  const response = await fetch(apiUrl(`/agent-runs/${encodeURIComponent(runKey)}/events/stream`), {
     headers: streamHeaders,
     cache: 'no-store',
     signal,
@@ -241,7 +246,7 @@ export async function openAgentRunEventStream(
 }
 
 async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
-  const r = await fetch(url, {
+  const r = await fetch(apiUrl(url), {
     method: 'POST',
     headers: { ...headers(), 'Content-Type': 'application/json', ...(extraHeaders || {}) },
     body: body ? JSON.stringify(body) : undefined,
@@ -251,7 +256,7 @@ async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string
 }
 
 async function put<T>(url: string, body?: unknown): Promise<T> {
-  const r = await fetch(url, {
+  const r = await fetch(apiUrl(url), {
     method: 'PUT',
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
@@ -261,7 +266,7 @@ async function put<T>(url: string, body?: unknown): Promise<T> {
 }
 
 async function patch<T>(url: string, body?: unknown): Promise<T> {
-  const r = await fetch(url, {
+  const r = await fetch(apiUrl(url), {
     method: 'PATCH',
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
@@ -271,13 +276,13 @@ async function patch<T>(url: string, body?: unknown): Promise<T> {
 }
 
 async function del<T>(url: string): Promise<T> {
-  const r = await fetch(url, { method: 'DELETE', headers: headers() })
+  const r = await fetch(apiUrl(url), { method: 'DELETE', headers: headers() })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.json()
 }
 
 async function postFormData<T>(url: string, formData: FormData): Promise<T> {
-  const r = await fetch(url, {
+  const r = await fetch(apiUrl(url), {
     method: 'POST',
     headers: headers(),
     body: formData,
@@ -308,7 +313,7 @@ function postFormDataWithProgress<T>(
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', url)
+    xhr.open('POST', apiUrl(url))
     xhr.setRequestHeader('X-Agent-Bridge-User', DEFAULT_USER)
     xhr.upload.onprogress = event => onProgress?.(event.loaded, event.total)
     xhr.onload = () => {
@@ -331,7 +336,7 @@ function postFormDataWithProgress<T>(
 }
 
 async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Blob> {
-  const r = await fetch(url, { headers: headers(), signal: options.signal })
+  const r = await fetch(apiUrl(url), { headers: headers(), signal: options.signal })
   if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
   return r.blob()
 }
@@ -891,7 +896,7 @@ export const api = {
     payload: { name?: string; parent_folder_id?: number | null },
   ) => patch<KnowledgeFolder>(`/kbs/${kbSlug}/folders/${folderId}`, payload),
   deleteFolder: async (kbSlug: string, folderId: number, confirm = false): Promise<FolderDeleteResult> => {
-    const r = await fetch(`/kbs/${kbSlug}/folders/${folderId}`, {
+    const r = await fetch(apiUrl(`/kbs/${kbSlug}/folders/${folderId}`), {
       method: 'DELETE',
       headers: { ...headers(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm }),

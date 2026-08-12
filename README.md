@@ -16,7 +16,7 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 工作流产物的标题、摘要、路径和正文使用 jieba 预分词与 SQLite FTS5 检索；长度至少 3 的 ASCII 标识符支持前缀匹配，结构化权限与版本过滤仍由 SQLite 普通条件处理。
 - `artifacts_search` 使用 DiskCache 缓存检索结果，默认保留 8 小时；缓存时长可在「系统管理」页面修改，保存后立即按新配置生效。当前版本不主动因新产物写入而清理缓存。
 - 管理服务端 Python 脚本、Skill、同步调度和插件更新。
-- 在 `/admin/capabilities` 提供管理后台，在 `/mcp` 提供 MetaMCP 入口。
+- 在 `/agent-bridge/` 提供管理后台，在 `/api/v1/` 提供第一方 HTTP API，在 `/mcp` 提供 MetaMCP 入口。
 
 「系统管理 → 顶层 MCP 工具」可查看所有可配置的 `/mcp` 顶层工具（`search` 和 `execute` 两个固定入口除外），并临时关闭其中任意工具。关闭会立即使该工具不再出现在 MCP tools/list 和能力目录中，且通过通用 `execute` 调用其对应内置能力同样会被拒绝；重新启用即可恢复。
 
@@ -45,7 +45,7 @@ uv run agent-bridge server status
 
 然后访问：
 
-- 管理后台：<http://127.0.0.1:8765/admin/capabilities>
+- 管理后台：<http://127.0.0.1:8765/agent-bridge/>
 - 健康检查：<http://127.0.0.1:8765/health>
 - MetaMCP：<http://127.0.0.1:8765/mcp>
 
@@ -154,7 +154,7 @@ npm run build
 npm run check
 ```
 
-Vite 产物写入 `src/agent_bridge/static/capabilities/`。该目录不提交到 Git；发布 wheel 前必须先执行 `npm ci && npm run build`。管理后台使用 Vue Router 的 History 路由：部署入口为 `/admin/capabilities/`，服务端会将其下的深链接刷新回退到同一前端入口；`npm run dev` 时使用 `/static/capabilities/` 基址，Vite 的 SPA fallback 同样支持子路由刷新。
+Vite 产物写入 `src/agent_bridge/static/capabilities/`。该目录不提交到 Git；发布 wheel 前必须先执行 `npm ci && npm run build`。管理后台使用 Vue Router 的 History 路由：部署入口为 `/agent-bridge/`，服务端会将其下的深链接刷新回退到同一前端入口；第一方 HTTP API 统一位于 `/api/v1/`，`/mcp` 与 `/health` 保持独立入口。`npm run dev` 同样可通过 `/agent-bridge/` 验证客户端路由。
 
 CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或查询失败时，API 会明确返回后端不可用；安装 CLI 后需要重新同步受影响仓库。
 
@@ -181,7 +181,7 @@ CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或�
 
 能力平面通过 `business_ledger` 资源规则显式授权业务台账。获授权的 Agent 使用顶级 MCP 工具 `query_business_ledger` 查询；所有字段默认支持精确匹配和排序，文本字段可额外开启字面包含检索，数字、日期与日期时间字段默认支持大于、小于、大于等于、小于等于和范围筛选。排序可按多个字段依次传入；台账、字段和查询方式自动注入 Profile，上下文外的台账不可发现也不可查询。
 
-Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流以保留 `X-Agent-Bridge-User` Header，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
+Agent 运行记录采用 SQLite 与运行目录混合存储：`data/agent-bridge-logs.db` 保存 `agent_runs` 摘要、终态结果和规范化事件；每次运行的 `messages.jsonl`、实时 `events.jsonl` 和较大的工具输入/输出保存在 `run/agent-runs/<run-key>/` 下。运行中的时间轴通过 `GET /api/v1/agent-runs/{run_key}/events/stream` SSE 接收已落盘的新事件，以 `Last-Event-ID` 断线重放；`GET /api/v1/agent-runs/{run_key}/events` 仍用于初始快照和重同步。浏览器客户端使用 fetch 流以保留 `X-Agent-Bridge-User` Header，不直接使用原生 `EventSource`。若经反向代理部署，必须关闭 SSE 响应缓冲并将读取超时设置为大于最长 Agent run。事件时间轴展示短 payload，较大的 payload 通过 `/api/v1/agent-runs/{run_key}/payload?ref=...` 按需读取；Agent 运行详情、工作流批量执行详情、任务展开日志和运行进度复用同一组输入提示词和执行结果卡片，每张卡片均可打开详情。Markdown 在详情中正常渲染，JSON 先格式化再展示，HTML、Python、JavaScript 使用语法高亮；工具输入、输出和模型详情同样提供“查看”入口。
 
 工作流 Agent 的 JSON 输出 Schema 按 JSON Schema Draft 07 校验和传递给 Coding Agent。已有
 Draft 2020-12 Schema 中的 `$defs` 及其本地 `$ref` 会自动转换为 Draft 07 的 `definitions`；

@@ -47,15 +47,15 @@ def _setup_repo_and_kb(tmp_path: Path, client: TestClient):
     (repo / "guide.md").write_text("# Guide\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "add guide"], cwd=repo, check=True, capture_output=True)
-    client.post("/kbs", json={"slug": "docs", "name": "Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs", json={"slug": "docs", "name": "Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
     client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={"repo_key": "r1", "name": "R1", "git_url": str(repo), "branch": "master"},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    client.post("/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
     client.post(
-        "/kbs/docs/repo-sources",
+        "/api/v1/kbs/docs/repo-sources",
         json={"repo_key": "r1", "include_suffixes": [".md"]},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -67,7 +67,7 @@ def test_mcp_service_registration_api(wm_paths) -> None:
     client = TestClient(app)
 
     created = client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={
             "service_key": "mysql",
             "name": "MySQL MCP",
@@ -78,7 +78,7 @@ def test_mcp_service_registration_api(wm_paths) -> None:
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "alice"})
+    listed = client.get("/api/v1/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "alice"})
 
     assert created.status_code == 200
     assert created.json()["service_key"] == "mysql"
@@ -88,7 +88,7 @@ def test_mcp_service_registration_api(wm_paths) -> None:
     assert listed.json()[0]["headers"] == {"Authorization": "***"}
 
     summary = client.get(
-        "/capabilities/mcp-services?summary=true",
+        "/api/v1/capabilities/mcp-services?summary=true",
         headers={"X-Agent-Bridge-User": "alice"},
     )
     assert summary.status_code == 200
@@ -101,7 +101,7 @@ def test_top_level_mcp_tool_status_api(wm_paths) -> None:
     client = TestClient(app)
     headers = {"X-Agent-Bridge-User": "root"}
 
-    listed = client.get("/capabilities/top-level-mcp-tools", headers=headers)
+    listed = client.get("/api/v1/capabilities/top-level-mcp-tools", headers=headers)
     assert listed.status_code == 200
     names = {item["name"] for item in listed.json()}
     assert {"memory_search", "artifacts_search"}.issubset(names)
@@ -109,7 +109,7 @@ def test_top_level_mcp_tool_status_api(wm_paths) -> None:
     assert "execute" not in names
 
     disabled = client.post(
-        "/capabilities/top-level-mcp-tools/memory_search/status",
+        "/api/v1/capabilities/top-level-mcp-tools/memory_search/status",
         json={"status": "disabled"},
         headers=headers,
     )
@@ -117,7 +117,7 @@ def test_top_level_mcp_tool_status_api(wm_paths) -> None:
     assert disabled.json()["status"] == "disabled"
 
     forbidden = client.post(
-        "/capabilities/top-level-mcp-tools/memory_search/status",
+        "/api/v1/capabilities/top-level-mcp-tools/memory_search/status",
         json={"status": "disabled"},
         headers={"X-Agent-Bridge-User": "alice"},
     )
@@ -129,7 +129,7 @@ def test_mcp_service_registration_requires_admin(wm_paths) -> None:
     client = TestClient(app)
 
     response = client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={
             "service_key": "mysql",
             "name": "MySQL MCP",
@@ -148,7 +148,7 @@ def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths)
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={
             "service_key": "mysql",
             "name": "MySQL MCP",
@@ -161,7 +161,7 @@ def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths)
     )
 
     updated = client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={
             "service_key": "mysql",
             "name": "MySQL Reporting MCP",
@@ -171,7 +171,7 @@ def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths)
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/api/v1/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "root"})
 
     assert updated.status_code == 200
     assert updated.json()["headers"] == {"Authorization": "Bearer secret"}
@@ -179,35 +179,45 @@ def test_mcp_service_update_without_headers_preserves_existing_headers(wm_paths)
     assert listed.json()[0]["tags"] == ["database", "reporting"]
 
 
-def test_capability_admin_page_serves_html(wm_paths) -> None:
+def test_agent_bridge_spa_serves_html(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/admin/capabilities", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/agent-bridge/", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "智能中枢" in response.text
 
 
-def test_capability_admin_history_routes_serve_the_vue_entrypoint(wm_paths) -> None:
+def test_agent_bridge_history_routes_serve_the_vue_entrypoint(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/admin/capabilities/workflow/demo/edit", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/agent-bridge/workflow/demo/edit", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert "智能中枢" in response.text
 
 
-def test_root_redirects_to_capability_admin_page(wm_paths) -> None:
+def test_agent_bridge_trailing_slash_and_api_boundary(wm_paths) -> None:
+    app = create_app(paths=wm_paths, admins={"root"})
+    client = TestClient(app)
+
+    assert client.get("/agent-bridge", follow_redirects=False).headers["location"].endswith("/agent-bridge/")
+    assert client.get("/api/v1/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.get("/capabilities/mcp-services", headers={"X-Agent-Bridge-User": "root"}).status_code == 404
+    assert client.get("/api/v1/not-found", headers={"X-Agent-Bridge-User": "root"}).status_code == 404
+    assert client.get("/static/capabilities/not-found.js").status_code == 404
+
+
+def test_root_does_not_redirect_to_management_spa(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
     response = client.get("/", follow_redirects=False)
 
-    assert response.status_code == 307
-    assert response.headers["location"] == "/admin/capabilities"
+    assert response.status_code == 404
 
 
 def test_capability_static_assets_are_served(wm_paths) -> None:
@@ -271,7 +281,7 @@ def test_mcp_service_status_and_tools_api(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={
             "service_key": "mysql",
             "name": "MySQL MCP",
@@ -281,11 +291,11 @@ def test_mcp_service_status_and_tools_api(wm_paths) -> None:
     )
 
     disabled = client.post(
-        "/capabilities/mcp-services/mysql/status",
+        "/api/v1/capabilities/mcp-services/mysql/status",
         json={"status": "disabled"},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    tools = client.get("/capabilities/mcp-services/mysql/tools", headers={"X-Agent-Bridge-User": "root"})
+    tools = client.get("/api/v1/capabilities/mcp-services/mysql/tools", headers={"X-Agent-Bridge-User": "root"})
 
     assert disabled.status_code == 200
     assert disabled.json()["status"] == "disabled"
@@ -297,7 +307,7 @@ def test_mcp_tool_type_api_requires_admin_and_updates_tool(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={"service_key": "mysql", "name": "MySQL MCP", "endpoint_url": "https://mysql.example.test/mcp"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -314,17 +324,17 @@ def test_mcp_tool_type_api_requires_admin_and_updates_tool(wm_paths) -> None:
     )
 
     denied = client.put(
-        "/capabilities/mcp-services/mysql/tools/query_sql/type",
+        "/api/v1/capabilities/mcp-services/mysql/tools/query_sql/type",
         json={"tool_type": "search"},
         headers={"X-Agent-Bridge-User": "alice"},
     )
     invalid = client.put(
-        "/capabilities/mcp-services/mysql/tools/query_sql/type",
+        "/api/v1/capabilities/mcp-services/mysql/tools/query_sql/type",
         json={"tool_type": "other"},
         headers={"X-Agent-Bridge-User": "root"},
     )
     updated = client.put(
-        "/capabilities/mcp-services/mysql/tools/query_sql/type",
+        "/api/v1/capabilities/mcp-services/mysql/tools/query_sql/type",
         json={"tool_type": "search"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -340,30 +350,30 @@ def test_profile_api_and_catalog_preview(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
         headers={"X-Agent-Bridge-User": "root"},
     )
     client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={"service_key": "hive", "name": "Hive", "endpoint_url": "https://hive.test/mcp"},
         headers={"X-Agent-Bridge-User": "root"},
     )
 
     created = client.post(
-        "/capability-profiles",
+        "/api/v1/capability-profiles",
         json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
         headers={"X-Agent-Bridge-User": "root"},
     )
     rules = client.put(
-        "/capability-profiles/safe-readonly/rules",
+        "/api/v1/capability-profiles/safe-readonly/rules",
         json={"rules": [{"source_type": "mcp_service", "source_key": "hive", "effect": "deny"}]},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/capability-profiles", headers={"X-Agent-Bridge-User": "root"})
-    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/api/v1/capability-profiles", headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get("/api/v1/capability-profiles/safe-readonly", headers={"X-Agent-Bridge-User": "root"})
     catalog = client.get(
-        "/capability-catalog",
+        "/api/v1/capability-catalog",
         params={"profile_key": "safe-readonly"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -384,17 +394,17 @@ def test_profile_resource_rules_api(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/capability-profiles",
+        "/api/v1/capability-profiles",
         json={"profile_key": "safe-readonly", "name": "安全只读", "description": "", "status": "active"},
         headers={"X-Agent-Bridge-User": "root"},
     )
 
     saved = client.put(
-        "/capability-profiles/safe-readonly/resources",
+        "/api/v1/capability-profiles/safe-readonly/resources",
         json={"resources": [{"resource_type": "wiki_kb", "resource_key": "frontend-docs"}]},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    detail = client.get("/capability-profiles/safe-readonly", headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get("/api/v1/capability-profiles/safe-readonly", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200
     assert saved.json()["resource_rules"][0]["resource_key"] == "frontend-docs"
@@ -414,12 +424,12 @@ def test_profile_pin_api_round_trip(wm_paths) -> None:
         created_by="root",
     )
     client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
         headers={"X-Agent-Bridge-User": "root"},
     )
     client.post(
-        "/capabilities/mcp-services/mysql/status",
+        "/api/v1/capabilities/mcp-services/mysql/status",
         json={"status": "enabled"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -439,20 +449,20 @@ def test_profile_pin_api_round_trip(wm_paths) -> None:
     )
 
     saved = client.put(
-        "/capability-profiles/safe/pins",
+        "/api/v1/capability-profiles/safe/pins",
         json={"pins": [{"service_key": "mysql", "tool_type": "search"}]},
         headers={"X-Agent-Bridge-User": "root"},
     )
     settings = client.put(
-        "/capability-profiles/safe/pins/settings",
+        "/api/v1/capability-profiles/safe/pins/settings",
         json={"mode": "count", "count": 2},
         headers={"X-Agent-Bridge-User": "root"},
     )
     refreshed = client.post(
-        "/capability-profiles/safe/pins/refresh",
+        "/api/v1/capability-profiles/safe/pins/refresh",
         headers={"X-Agent-Bridge-User": "root"},
     )
-    fetched = client.get("/capability-profiles/safe/pins", headers={"X-Agent-Bridge-User": "root"})
+    fetched = client.get("/api/v1/capability-profiles/safe/pins", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200
     assert [(group["service_key"], group["tool_type"], group["source"]) for group in saved.json()["groups"]] == [
@@ -478,7 +488,7 @@ def test_profile_doc_api_render_and_notes(wm_paths) -> None:
     store.upsert_project_profile(profile_key="safe", name="Safe", description="", status="active", created_by="root")
 
     notes = client.put(
-        "/capability-profiles/safe/doc/manual-notes",
+        "/api/v1/capability-profiles/safe/doc/manual-notes",
         json={"manual_notes": "Manual policy"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -486,7 +496,7 @@ def test_profile_doc_api_render_and_notes(wm_paths) -> None:
     assert "Manual policy" in notes.json()["markdown"]
 
     rendered = client.post(
-        "/capability-profiles/safe/doc/render",
+        "/api/v1/capability-profiles/safe/doc/render",
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert rendered.status_code == 200
@@ -501,12 +511,12 @@ def test_builtin_wiki_kbs_api_returns_status_summary(wm_paths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
     client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
         headers={"X-Agent-Bridge-User": "root"},
     )
 
-    response = client.get("/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert response.json()[0]["slug"] == "frontend-docs"
@@ -524,29 +534,29 @@ def test_knowledge_web_management_api_flow(tmp_path: Path, wm_paths) -> None:
     client = TestClient(app)
     source = tmp_path / "Guide.md"
     source.write_text("# Guide\n\nhello web knowledge\n", encoding="utf-8")
-    client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"})
 
     created = client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
         headers={"X-Agent-Bridge-User": "root"},
     )
     uploaded = client.post(
-        "/docs",
+        "/api/v1/docs",
         data={"kb": "frontend-docs", "later": "true"},
         files={"file": ("Guide.md", source.read_bytes(), "text/markdown")},
         headers={"X-Agent-Bridge-User": "root"},
     )
     blocked_upload = client.post(
-        "/docs",
+        "/api/v1/docs",
         data={"kb": "frontend-docs", "later": "true"},
         files={"file": ("Guide.md", source.read_bytes(), "text/markdown")},
         headers={"X-Agent-Bridge-User": "alice"},
     )
-    docs = client.get("/docs", params={"kb": "frontend-docs"}, headers={"X-Agent-Bridge-User": "root"})
-    detail = client.get("/docs/guide", headers={"X-Agent-Bridge-User": "root"})
-    status = client.get("/status", headers={"X-Agent-Bridge-User": "root"})
-    summary = client.get("/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "root"})
+    docs = client.get("/api/v1/docs", params={"kb": "frontend-docs"}, headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get("/api/v1/docs/guide", headers={"X-Agent-Bridge-User": "root"})
+    status = client.get("/api/v1/status", headers={"X-Agent-Bridge-User": "root"})
+    summary = client.get("/api/v1/builtin/wiki/kbs", headers={"X-Agent-Bridge-User": "root"})
 
     assert created.status_code == 200
     assert uploaded.status_code == 200
@@ -580,7 +590,7 @@ def test_backend_list_reports_weknora_type(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/backends", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/backends", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -595,7 +605,7 @@ def test_backend_list_requires_admin(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
-    response = client.get("/backends", headers={"X-Agent-Bridge-User": "alice"})
+    response = client.get("/api/v1/backends", headers={"X-Agent-Bridge-User": "alice"})
 
     assert response.status_code == 403
 
@@ -606,14 +616,14 @@ def test_backend_create_and_update_forward_edit_token(wm_paths) -> None:
     headers = {"X-Agent-Bridge-User": "root"}
 
     created = client.post(
-        "/backends",
+        "/api/v1/backends",
         json={"slug": "mock-backend", "backend_type": "mock", "expected_edit_token": None},
         headers=headers,
     )
     assert created.status_code == 200
 
     updated = client.put(
-        "/backends/mock-backend",
+        "/api/v1/backends/mock-backend",
         json={"timeout": 90, "expected_edit_token": created.json()["edit_token"]},
         headers=headers,
     )
@@ -630,17 +640,18 @@ def test_frontend_stats_view_uses_calls_field_from_backend() -> None:
 
 def test_frontend_knowledge_navigation_groups_document_code_and_config() -> None:
     source = Path("frontend/capabilities/src/App.vue").read_text(encoding="utf-8")
+    router = Path("frontend/capabilities/src/router/index.ts").read_text(encoding="utf-8")
 
     assert "label: '资源管理'" not in source
     assert "key: 'knowledge', label: '文档知识'" in source
     assert "key: 'code-repos', label: '代码知识'" in source
     assert "key: 'system-config', label: '系统管理'" in source
-    assert "KnowledgeProcessingConfigView" in source
-    assert "CodeRepoView" in source
-    assert "view === 'system-config'" in source
-    assert "view === 'code-repos'" in source
-    assert "BuiltinsView" not in source
-    assert "view === 'builtins'" not in source
+    assert "KnowledgeProcessingConfigView" in router
+    assert "CodeRepoView" in router
+    assert "path: '/system-config'" in router
+    assert "path: '/code-repos/:routeKey" in router
+    assert "BuiltinsView" not in router
+    assert "path: '/builtins'" not in router
     assert source.count("label: '知识管理'") == 1
     assert source.index("label: '调用观测'") < source.index("label: '系统管理'")
 
@@ -709,12 +720,12 @@ def test_kb_repo_source_api_saves_config_and_syncs_filtered_files(wm_paths, tmp_
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "docs"], cwd=repo, check=True, capture_output=True)
     client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": "docs", "name": "Docs", "description": ""},
         headers={"X-Agent-Bridge-User": "root"},
     )
     client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={
             "repo_key": "docs-repo",
             "name": "Docs Repo",
@@ -723,19 +734,19 @@ def test_kb_repo_source_api_saves_config_and_syncs_filtered_files(wm_paths, tmp_
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    client.post("/code-repo/repositories/docs-repo/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/code-repo/repositories/docs-repo/sync", headers={"X-Agent-Bridge-User": "root"})
 
     saved = client.post(
-        "/kbs/docs/repo-sources",
+        "/api/v1/kbs/docs/repo-sources",
         json={"repo_key": "docs-repo", "include_suffixes": [".md", ".txt"]},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/api/v1/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"})
     synced = client.post(
-        "/kbs/docs/repo-sources/docs-repo/sync",
+        "/api/v1/kbs/docs/repo-sources/docs-repo/sync",
         headers={"X-Agent-Bridge-User": "root"},
     )
-    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"})
+    docs = client.get("/api/v1/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200, saved.text
     assert saved.json()["include_suffixes"] == [".md", ".txt"]
@@ -774,12 +785,12 @@ def test_tool_call_log_api_returns_full_payload(wm_paths) -> None:
     _, structured = asyncio.run(mcp.call_tool("search", {"query": "mysql"}))
     log_id = structured["log_id"]
 
-    listed = client.get("/tool-call-logs", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/api/v1/tool-call-logs", headers={"X-Agent-Bridge-User": "root"})
     page = client.get(
-        "/tool-call-logs?paginated=true&limit=10",
+        "/api/v1/tool-call-logs?paginated=true&limit=10",
         headers={"X-Agent-Bridge-User": "root"},
     )
-    detail = client.get(f"/tool-call-logs/{log_id}", headers={"X-Agent-Bridge-User": "root"})
+    detail = client.get(f"/api/v1/tool-call-logs/{log_id}", headers={"X-Agent-Bridge-User": "root"})
 
     assert listed.status_code == 200
     assert listed.json()[0]["log_id"] == log_id
@@ -829,7 +840,7 @@ def test_tool_call_log_api_filters_by_failure_classification(wm_paths) -> None:
     )
 
     response = client.get(
-        "/tool-call-logs",
+        "/api/v1/tool-call-logs",
         params={"failure_owner": FailureOwner.upstream_mcp.value, "failure_stage": FailureStage.upstream_tool.value},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -858,7 +869,7 @@ def test_tool_call_log_api_paginates_search_and_status_counts(wm_paths) -> None:
         )
 
     response = client.get(
-        "/tool-call-logs",
+        "/api/v1/tool-call-logs",
         params={"paginated": "true", "search": "shared-api", "status": "error", "limit": 1, "offset": -3},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -900,12 +911,12 @@ def test_tool_call_log_api_paginates_beyond_two_hundred_rows(wm_paths) -> None:
 
     headers = {"X-Agent-Bridge-User": "root"}
     first = client.get(
-        "/tool-call-logs",
+        "/api/v1/tool-call-logs",
         params={"paginated": "true", "limit": 10, "offset": 0},
         headers=headers,
     ).json()
     last = client.get(
-        "/tool-call-logs",
+        "/api/v1/tool-call-logs",
         params={"paginated": "true", "limit": 10, "offset": 200},
         headers=headers,
     ).json()
@@ -938,7 +949,7 @@ def test_tool_call_stats_api_groups_by_dimensions(wm_paths) -> None:
     )
 
     response = client.get(
-        "/tool-call-stats",
+        "/api/v1/tool-call-stats",
         params={"dimensions": "profile_key,source_key,tool_name"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -953,7 +964,7 @@ def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/capabilities/mcp-services",
+        "/api/v1/capabilities/mcp-services",
         json={"service_key": "mysql", "name": "MySQL", "endpoint_url": "https://mysql.test/mcp"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -981,9 +992,9 @@ def test_capability_catalog_source_and_tool_details(wm_paths) -> None:
         status="success",
     )
 
-    source = client.get("/capability-catalog/sources/mcp_service/mysql", headers={"X-Agent-Bridge-User": "root"})
+    source = client.get("/api/v1/capability-catalog/sources/mcp_service/mysql", headers={"X-Agent-Bridge-User": "root"})
     tool = client.get(
-        "/capability-catalog/sources/mcp_service/mysql/tools/query_sql",
+        "/api/v1/capability-catalog/sources/mcp_service/mysql/tools/query_sql",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -1002,7 +1013,7 @@ def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
     client = TestClient(app)
 
     created = client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -1013,8 +1024,8 @@ def test_codegraph_repository_admin_api(tmp_path: Path, wm_paths) -> None:
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    listed = client.get("/code-repo/repositories", headers={"X-Agent-Bridge-User": "root"})
-    synced = client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+    listed = client.get("/api/v1/code-repo/repositories", headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/api/v1/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
 
     assert created.status_code == 200
     assert created.json()["repo_key"] == "web-app"
@@ -1032,7 +1043,7 @@ def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) 
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -1041,17 +1052,17 @@ def test_codegraph_repository_detail_and_semantic_api(tmp_path: Path, wm_paths) 
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
 
-    status = client.get("/code-repo/status", headers={"X-Agent-Bridge-User": "root"})
-    overview = client.get("/code-repo/repositories/web-app/overview", headers={"X-Agent-Bridge-User": "root"})
+    status = client.get("/api/v1/code-repo/status", headers={"X-Agent-Bridge-User": "root"})
+    overview = client.get("/api/v1/code-repo/repositories/web-app/overview", headers={"X-Agent-Bridge-User": "root"})
     query = client.post(
-        "/code-repo/repositories/web-app/query",
+        "/api/v1/code-repo/repositories/web-app/query",
         json={"query": "hello", "limit": 5},
         headers={"X-Agent-Bridge-User": "root"},
     )
     callers = client.post(
-        "/code-repo/repositories/web-app/callers",
+        "/api/v1/code-repo/repositories/web-app/callers",
         json={"query": "hello", "limit": 5},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -1071,7 +1082,7 @@ def test_codegraph_query_api_returns_503_when_backend_is_unavailable(tmp_path: P
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     created = client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -1089,7 +1100,7 @@ def test_codegraph_query_api_returns_503_when_backend_is_unavailable(tmp_path: P
     app.state.agent_bridge_service.codegraph.backend = CliCodeGraphBackend(client=backend_client)
 
     response = client.post(
-        "/code-repo/repositories/web-app/query",
+        "/api/v1/code-repo/repositories/web-app/query",
         json={"query": "hello", "limit": 5},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -1103,7 +1114,7 @@ def test_understand_summary_returns_empty_payload_when_graph_missing(tmp_path: P
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -1113,7 +1124,7 @@ def test_understand_summary_returns_empty_payload_when_graph_missing(tmp_path: P
         headers={"X-Agent-Bridge-User": "root"},
     )
 
-    response = client.get("/code-repo/repositories/web-app/understand/summary", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/code-repo/repositories/web-app/understand/summary", headers={"X-Agent-Bridge-User": "root"})
 
     assert response.status_code == 200
     assert response.json() == {
@@ -1149,7 +1160,7 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -1158,13 +1169,13 @@ def test_codegraph_repository_explore_api_uses_stdio_mcp(tmp_path: Path, wm_path
         },
         headers={"X-Agent-Bridge-User": "root"},
     )
-    client.post("/sync-config", json={"code_sync_cron": "0 * * * *", "mcp_timeout_seconds": 150}, headers={"X-Agent-Bridge-User": "root"})
-    client.post("/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/sync-config", json={"code_sync_cron": "0 * * * *", "mcp_timeout_seconds": 150}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/code-repo/repositories/web-app/sync", headers={"X-Agent-Bridge-User": "root"})
     fake_mcp = FakeMcpClient()
     app.state.agent_bridge_service.codegraph.backend.mcp_client = fake_mcp
 
     response = client.post(
-        "/code-repo/repositories/web-app/explore",
+        "/api/v1/code-repo/repositories/web-app/explore",
         json={"query": "hello"},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -1187,11 +1198,11 @@ def test_sync_config_api_round_trips_log_retention_days(wm_paths) -> None:
     client = TestClient(app)
 
     saved = client.post(
-        "/sync-config",
+        "/api/v1/sync-config",
         json={"code_sync_cron": "0 * * * *", "log_retention_days": 90},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    loaded = client.get("/sync-config", headers={"X-Agent-Bridge-User": "root"})
+    loaded = client.get("/api/v1/sync-config", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200
     assert saved.json()["log_retention_days"] == 90
@@ -1204,11 +1215,11 @@ def test_sync_config_api_round_trips_artifact_search_cache_ttl(wm_paths) -> None
     client = TestClient(app)
 
     saved = client.post(
-        "/sync-config",
+        "/api/v1/sync-config",
         json={"code_sync_cron": "0 * * * *", "artifact_search_cache_ttl_hours": 12},
         headers={"X-Agent-Bridge-User": "root"},
     )
-    loaded = client.get("/sync-config", headers={"X-Agent-Bridge-User": "root"})
+    loaded = client.get("/api/v1/sync-config", headers={"X-Agent-Bridge-User": "root"})
 
     assert saved.status_code == 200
     assert saved.json()["artifact_search_cache_ttl_hours"] == 12
@@ -1222,7 +1233,7 @@ def test_codegraph_repository_admin_api_requires_admin(tmp_path: Path, wm_paths)
     client = TestClient(app)
 
     response = client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={
             "repo_key": "web-app",
             "name": "Web App",
@@ -1240,7 +1251,7 @@ def test_execute_capability_api_uses_service_tool_name_params(wm_paths) -> None:
     client = TestClient(app)
 
     response = client.post(
-        "/capabilities/execute",
+        "/api/v1/capabilities/execute",
         json={
             "service": "built-in",
             "tool_name": "load_skill",
@@ -1309,13 +1320,14 @@ def test_frontend_scripts_view_exposes_runtime_guide_and_test_headers() -> None:
 
 def test_frontend_tool_debug_view_exposes_profile_scoped_execute_debugging() -> None:
     app_source = Path("frontend/capabilities/src/App.vue").read_text(encoding="utf-8")
+    router_source = Path("frontend/capabilities/src/router/index.ts").read_text(encoding="utf-8")
     view_source = Path("frontend/capabilities/src/views/capabilities/ToolDebugView.vue").read_text(encoding="utf-8")
     client_source = Path("frontend/capabilities/src/api/client.ts").read_text(encoding="utf-8")
 
-    assert "tool-debug" in app_source
-    assert "工具调试" in app_source
-    assert "ToolDebugView" in app_source
-    assert "按能力平面选择并手动调试对外提供的工具" in app_source
+    assert "tool-debug" in router_source
+    assert "工具调试" in router_source
+    assert "ToolDebugView" in router_source
+    assert "按能力平面选择并手动调试对外提供的工具" not in app_source
     assert "能力平面" in view_source
     assert "执行工具" in view_source
     assert "调试结果" in view_source
@@ -1333,12 +1345,12 @@ def test_sync_changes_imports_new_files(wm_paths, tmp_path: Path) -> None:
     client = TestClient(app)
     repo = _setup_repo_and_kb(tmp_path, client)
     # 首次同步:guide.md 是新文件(app.py 不在 include_suffixes,被跳过)
-    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    r = client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
     assert r.status_code == 200, r.text
     assert r.json()["added"] == 1
     assert r.json()["removed"] == 0
     assert r.json()["updated"] == 0
-    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    docs = client.get("/api/v1/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     assert {d["title"] for d in docs} == {"guide"}
 
 
@@ -1348,22 +1360,22 @@ def test_sync_changes_modifies_changed_file_as_delete_then_add(wm_paths, tmp_pat
     client = TestClient(app)
     repo = _setup_repo_and_kb(tmp_path, client)
     # 首次导入 guide.md
-    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
-    docs_before = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    docs_before = client.get("/api/v1/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     doc_id_before = docs_before[0]["id"]
     # 修改文件内容
     (repo / "guide.md").write_text("# Guide v2\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "v2"], cwd=repo, check=True, capture_output=True)
-    client.post("/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
     # 再次同步:应为 updated=1
-    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    r = client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
     assert r.json()["updated"] == 1
     assert r.json()["added"] == 0
-    docs_after = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    docs_after = client.get("/api/v1/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     # doc_id 变化(先删后加)
     assert docs_after[0]["id"] != doc_id_before
-    unchanged = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    unchanged = client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
     assert unchanged.json()["unchanged"] == 1
     assert unchanged.json()["added"] == 0
     assert unchanged.json()["removed"] == 0
@@ -1375,13 +1387,13 @@ def test_sync_changes_refreshes_repo_before_diff(wm_paths, tmp_path: Path) -> No
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
     repo = _setup_repo_and_kb(tmp_path, client)
-    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
 
     (repo / "guide.md").write_text("# Guide from upstream\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "upstream update"], cwd=repo, check=True, capture_output=True)
 
-    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    r = client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
 
     assert r.status_code == 200, r.text
     assert r.json()["updated"] == 1
@@ -1399,20 +1411,20 @@ def test_sync_changes_handles_duplicate_slugs_stably(wm_paths, tmp_path: Path) -
     (repo / "b" / "guide.md").write_text("# Second\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "duplicate guides"], cwd=repo, check=True, capture_output=True)
-    client.post("/kbs", json={"slug": "docs", "name": "Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs", json={"slug": "docs", "name": "Docs", "description": ""}, headers={"X-Agent-Bridge-User": "root"})
     client.post(
-        "/code-repo/repositories",
+        "/api/v1/code-repo/repositories",
         json={"repo_key": "r1", "name": "R1", "git_url": str(repo), "branch": "master"},
         headers={"X-Agent-Bridge-User": "root"},
     )
     client.post(
-        "/kbs/docs/repo-sources",
+        "/api/v1/kbs/docs/repo-sources",
         json={"repo_key": "r1", "include_suffixes": [".md"]},
         headers={"X-Agent-Bridge-User": "root"},
     )
 
-    first = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
-    second = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    first = client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    second = client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
 
     assert first.status_code == 200, first.text
     assert first.json()["added"] == 2
@@ -1430,20 +1442,20 @@ def test_sync_changes_removes_deleted_file(wm_paths, tmp_path: Path) -> None:
     store = SQLiteStore(wm_paths.db_path)
     kb = store.get_kb_by_slug("docs")
     store.ensure_backend_target(kb["id"], "mock", "mock")
-    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
-    client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     # 删除文件
     (repo / "guide.md").unlink()
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-m", "del"], cwd=repo, check=True, capture_output=True)
-    client.post("/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
-    r = client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/code-repo/repositories/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    r = client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
     assert r.json()["removed"] == 1
     # active 文档应已清空(guide 被软删)
-    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    docs = client.get("/api/v1/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     assert docs == []
     # 应生成 delete 同步任务
-    jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
+    jobs = client.get("/api/v1/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
     assert any(j["operation"] == "delete" for j in jobs)
 
 
@@ -1457,20 +1469,20 @@ def test_delete_kb_repo_source_cancels_pending_create_without_delete_job(wm_path
     kb = store.get_kb_by_slug("docs")
     store.ensure_backend_target(kb["id"], "mock", "mock")
     # 导入 git 文档
-    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
     # 删除数据源
-    r = client.post("/kbs/docs/repo-sources/r1/delete", headers={"X-Agent-Bridge-User": "root"})
+    r = client.post("/api/v1/kbs/docs/repo-sources/r1/delete", headers={"X-Agent-Bridge-User": "root"})
     assert r.status_code == 200, r.text
     assert r.json()["deleted_docs"] == 1
     # active 文档清空
-    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    docs = client.get("/api/v1/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     assert docs == []
     # 还没上传过后端:取消 create,不生成 delete
-    jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
+    jobs = client.get("/api/v1/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
     assert [(j["operation"], j["status"]) for j in jobs] == [("create", "cancelled")]
     assert not any(j["operation"] == "delete" for j in jobs)
     # 数据源已解绑(list 为空)
-    sources = client.get("/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"}).json()
+    sources = client.get("/api/v1/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"}).json()
     assert sources == []
 
 
@@ -1482,17 +1494,17 @@ def test_delete_kb_repo_source_removes_synced_docs_and_generates_delete_jobs(wm_
     store = SQLiteStore(wm_paths.db_path)
     kb = store.get_kb_by_slug("docs")
     store.ensure_backend_target(kb["id"], "mock", "mock")
-    client.post("/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
-    client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/kbs/docs/repo-sources/r1/sync", headers={"X-Agent-Bridge-User": "root"})
+    client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
 
-    r = client.post("/kbs/docs/repo-sources/r1/delete", headers={"X-Agent-Bridge-User": "root"})
+    r = client.post("/api/v1/kbs/docs/repo-sources/r1/delete", headers={"X-Agent-Bridge-User": "root"})
 
     assert r.status_code == 200, r.text
     assert r.json()["deleted_docs"] == 1
-    docs = client.get("/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
+    docs = client.get("/api/v1/docs?kb=docs", headers={"X-Agent-Bridge-User": "root"}).json()
     assert docs == []
-    jobs = client.get("/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
+    jobs = client.get("/api/v1/status", headers={"X-Agent-Bridge-User": "root"}).json()["jobs"]
     assert any(j["operation"] == "delete" for j in jobs)
     # 数据源已解绑(list 为空)
-    sources = client.get("/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"}).json()
+    sources = client.get("/api/v1/kbs/docs/repo-sources", headers={"X-Agent-Bridge-User": "root"}).json()
     assert sources == []

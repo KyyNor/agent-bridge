@@ -209,7 +209,7 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 - 工作流定义/节点视觉 helper 位于 `src/lib`，不放在 `views/`。
 - 设计原型不得放入 `public/`；测试验证真实组件、源码或行为。
 
-修改前端后执行 `npm run check`。生产构建输出到 `src/agent_bridge/static/capabilities/`，该目录被忽略；发布流程必须先构建前端再构建 wheel。管理后台使用 Vue Router History 路由，`/admin/capabilities/` 下的深链接由 FastAPI 回退到前端入口。
+修改前端后执行 `npm run check`。生产构建输出到 `src/agent_bridge/static/capabilities/`，该目录被忽略；发布流程必须先构建前端再构建 wheel。管理后台使用 Vue Router History 路由，`/agent-bridge/` 下的深链接由 FastAPI 回退到前端入口；第一方 HTTP API 统一使用 `/api/v1/`，`/mcp` 与 `/health` 不加版本前缀。
 
 ## 文档同步检查
 

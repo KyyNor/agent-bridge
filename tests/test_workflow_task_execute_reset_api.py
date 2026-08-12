@@ -50,7 +50,7 @@ def test_reset_endpoint_restores_abandoned_task(wm_paths):
     svc.store.release_or_abandon_tasks_for_run("w", "run_1", max_attempts=0, error_message="boom")
     assert svc.store.get_workflow_task("w", "page:a")["status"] == "abandoned"
 
-    resp = client.post("/workflows/w/tasks/page:a/reset", headers=H)
+    resp = client.post("/api/v1/workflows/w/tasks/page:a/reset", headers=H)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "pending"
@@ -61,7 +61,7 @@ def test_reset_endpoint_restores_abandoned_task(wm_paths):
 def test_execute_endpoint_rejects_unknown_task(wm_paths):
     svc, client = _client(wm_paths)
     svc.store.upsert_workflow_tasks("w", [{"task_key": "page:a", "payload": {}}])
-    resp = client.post("/workflows/w/tasks/nope/execute", headers=H)
+    resp = client.post("/api/v1/workflows/w/tasks/nope/execute", headers=H)
     assert resp.status_code == 404, resp.text
 
 
@@ -81,7 +81,7 @@ def test_execute_endpoint_rejects_completed_task_without_reset(wm_paths):
     svc.store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
     svc.store.complete_workflow_task("w", "page:a", run_id="run_1")
 
-    resp = client.post("/workflows/w/tasks/page:a/execute", headers=H)
+    resp = client.post("/api/v1/workflows/w/tasks/page:a/execute", headers=H)
     assert resp.status_code == 400, resp.text
     # No new run created (execute short-circuited before the scheduler).
     assert len(svc.store.list_workflow_runs("w", limit=10)) == 1
@@ -100,7 +100,7 @@ def test_reset_endpoint_rejects_active_running_task(wm_paths):
     )
     svc.store.lease_workflow_task("w", run_id="run_1", lease_seconds=7200)
 
-    resp = client.post("/workflows/w/tasks/page:a/reset", headers=H)
+    resp = client.post("/api/v1/workflows/w/tasks/page:a/reset", headers=H)
     assert resp.status_code == 400, resp.text
     task = svc.store.get_workflow_task("w", "page:a")
     assert task["status"] == "running"
@@ -113,7 +113,7 @@ def test_reset_endpoint_supports_task_keys_with_slashes(wm_paths):
     svc.store.upsert_workflow_tasks("w", [{"task_key": task_key, "payload": {}}])
     svc.store.set_priority_for_task("w", task_key)
 
-    resp = client.post(f"/workflows/w/tasks/{quote(task_key, safe='')}/reset", headers=H)
+    resp = client.post(f"/api/v1/workflows/w/tasks/{quote(task_key, safe='')}/reset", headers=H)
     assert resp.status_code == 200, resp.text
     assert resp.json()["task_key"] == task_key
     assert svc.store.get_workflow_task("w", task_key)["priority_flag"] is None
@@ -122,7 +122,7 @@ def test_reset_endpoint_supports_task_keys_with_slashes(wm_paths):
 def test_reset_endpoint_requires_admin(wm_paths):
     svc, client = _client(wm_paths)
     svc.store.upsert_workflow_tasks("w", [{"task_key": "page:a", "payload": {}}])
-    resp = client.post("/workflows/w/tasks/page:a/reset", headers={"X-Agent-Bridge-User": "intruder"})
+    resp = client.post("/api/v1/workflows/w/tasks/page:a/reset", headers={"X-Agent-Bridge-User": "intruder"})
     assert resp.status_code == 403, resp.text
 
 
@@ -154,7 +154,7 @@ def test_refresh_endpoint_marks_only_requested_completed_task(wm_paths):
     )
 
     response = client.post(
-        "/workflows/w/tasks/refresh",
+        "/api/v1/workflows/w/tasks/refresh",
         headers=H,
         json={"tasks": [{"task_key": "page:a", "task_version": "v1"}]},
     )

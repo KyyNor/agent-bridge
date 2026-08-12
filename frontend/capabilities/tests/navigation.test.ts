@@ -9,12 +9,13 @@ const app = readFileSync(resolve(root, 'src/App.vue'), 'utf8')
 const viteConfig = readFileSync(resolve(root, 'vite.config.ts'), 'utf8')
 
 test('uses Vue Router History mode and has explicit deep-link routes', () => {
-  assert.match(router, /createWebHistory\(import\.meta\.env\.DEV \? '\/static\/capabilities\/' : '\/admin\/capabilities\/'\)/)
+  assert.match(router, /createWebHistory\('\/agent-bridge\/'\)/)
   assert.match(router, /path: '\/services\/:routeKey\(\.\*\)\*'/)
   assert.match(router, /path: '\/workflow\/:routeKey\(\.\*\)\*'/)
   assert.match(router, /path: '\/agent-runs\/:routeKey\(\.\*\)\*'/)
   assert.match(router, /path: '\/:pathMatch\(\.\*\)\*'/)
-  assert.match(viteConfig, /req\.url\?\.startsWith\('\/static\/capabilities\/'\)/)
+  assert.match(viteConfig, /agent-bridge-dev-history-fallback/)
+  assert.match(viteConfig, /startsWith\('\/agent-bridge\/'\)/)
 })
 
 test('App delegates view selection to RouterView and no longer owns fragment history', () => {

@@ -32,7 +32,7 @@ def test_client_init_system_posts_admin_init(monkeypatch) -> None:
     monkeypatch.setattr("agent_bridge.client.httpx.post", fake_post)
     AgentBridgeClient("http://example.test/", "root").init_system()
     assert captured == {
-        "url": "http://example.test/admin/init",
+        "url": "http://example.test/api/v1/admin/init",
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
     }
@@ -60,7 +60,7 @@ def test_client_purge_document_sends_confirmation(monkeypatch) -> None:
     result = AgentBridgeClient("http://example.test/", "root").purge_document("guide", confirm=True)
     assert result == {"slug": "guide", "status": "purged"}
     assert captured == {
-        "url": "http://example.test/docs/guide/purge",
+        "url": "http://example.test/api/v1/docs/guide/purge",
         "json": {"confirm": True},
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
@@ -130,7 +130,7 @@ def test_client_search_sends_get(monkeypatch) -> None:
     result = AgentBridgeClient("http://example.test/", "root").search("my-kb", "what?", backend="openai", top_k=3)
     assert result == {"results": []}
     assert captured == {
-        "url": "http://example.test/search",
+        "url": "http://example.test/api/v1/search",
         "params": {"kb": "my-kb", "q": "what?", "backend": "openai", "top_k": "3"},
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 30.0,
@@ -151,7 +151,7 @@ def test_client_ask_sends_post(monkeypatch) -> None:
     result = AgentBridgeClient("http://example.test/", "root").ask("my-kb", "is it?", backend="openai", session_id="s1")
     assert result == {"answer": "yes", "session_id": "s1"}
     assert captured == {
-        "url": "http://example.test/ask",
+        "url": "http://example.test/api/v1/ask",
         "json": {"kb": "my-kb", "question": "is it?", "backend": "openai", "session_id": "s1"},
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 60.0,
@@ -840,7 +840,7 @@ def test_client_render_profile_doc_posts_render_endpoint(monkeypatch) -> None:
 
     assert result == {"markdown": "# Safe\n"}
     assert captured == {
-        "url": "http://example.test/capability-profiles/safe/doc/render",
+        "url": "http://example.test/api/v1/capability-profiles/safe/doc/render",
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
     }
@@ -860,7 +860,7 @@ def test_client_refresh_profile_doc_context_file_posts_refresh_endpoint(monkeypa
 
     assert result == {"profile_doc_path": "/server/profiles/safe.md"}
     assert captured == {
-        "url": "http://example.test/capability-profiles/safe/doc/context-file",
+        "url": "http://example.test/api/v1/capability-profiles/safe/doc/context-file",
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
     }
@@ -880,7 +880,7 @@ def test_client_refresh_profile_pin_cache_posts_refresh_endpoint(monkeypatch) ->
 
     assert result == {"profile_key": "safe"}
     assert captured == {
-        "url": "http://example.test/capability-profiles/safe/pins/refresh",
+        "url": "http://example.test/api/v1/capability-profiles/safe/pins/refresh",
         "headers": {"X-Agent-Bridge-User": "root"},
         "timeout": 10.0,
     }

@@ -22,21 +22,21 @@ def test_model_evaluation_runtime_requires_docker_images(wm_paths) -> None:
     app = create_app(wm_paths, admins={"root"})
     with TestClient(app) as client:
         headers = {"X-Agent-Bridge-User": "root"}
-        response = client.get("/model-evaluations/runtime", headers=headers)
+        response = client.get("/api/v1/model-evaluations/runtime", headers=headers)
         assert response.status_code == 200
         payload = response.json()
         assert payload["configured"] is False
         assert payload["runtime"] == "docker"
         assert "Docker" in payload["message"]
 
-        datasets = client.get("/model-evaluations/datasets", headers=headers)
+        datasets = client.get("/api/v1/model-evaluations/datasets", headers=headers)
         assert datasets.status_code == 200
         assert {item["key"] for item in datasets.json()} == {
             "ceval_gen", "mmlu_pro_gen", "gsm8k_chat_gen", "ifeval_gen", "humaneval", "mbpp", "swebench_lite"
         }
 
         started = client.post(
-            "/model-evaluations",
+            "/api/v1/model-evaluations",
             headers=headers,
             json={"model_name": "example", "datasets": ["gsm8k_chat_gen"]},
         )
@@ -44,7 +44,7 @@ def test_model_evaluation_runtime_requires_docker_images(wm_paths) -> None:
         assert "Docker" in started.json()["detail"]
 
         invalid_samples = client.post(
-            "/model-evaluations",
+            "/api/v1/model-evaluations",
             headers=headers,
             json={"model_name": "example", "datasets": ["gsm8k_chat_gen"], "max_samples": 0},
         )
@@ -84,7 +84,7 @@ def test_model_evaluation_models_fall_back_to_public_model_config(wm_paths, monk
     with TestClient(app) as client:
         headers = {"X-Agent-Bridge-User": "root"}
         configured = client.put(
-            "/retrieval-probe/llm-config",
+            "/api/v1/retrieval-probe/llm-config",
             headers=headers,
             json={"base_url": "https://llm.example/v1", "model": "probe", "api_key": "secret"},
         )
@@ -92,7 +92,7 @@ def test_model_evaluation_models_fall_back_to_public_model_config(wm_paths, monk
         route = respx.get("https://llm.example/v1/models").mock(
             return_value=Response(200, json={"data": [{"id": "model-b"}, {"id": "model-a"}]})
         )
-        response = client.post("/model-evaluations/models", headers=headers, json={})
+        response = client.post("/api/v1/model-evaluations/models", headers=headers, json={})
         assert response.status_code == 200
         assert response.json() == [{"id": "model-a", "label": "model-a"}, {"id": "model-b", "label": "model-b"}]
         assert route.called

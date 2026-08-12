@@ -20,7 +20,7 @@ def _write_mock_backend_config(wm_paths) -> None:
 
 
 def _jobs_by_operation(client: TestClient) -> dict[str, list[dict]]:
-    response = client.get("/status", headers={"X-Agent-Bridge-User": "root"})
+    response = client.get("/api/v1/status", headers={"X-Agent-Bridge-User": "root"})
     assert response.status_code == 200
     jobs = response.json()["jobs"]
     grouped: dict[str, list[dict]] = {}
@@ -32,9 +32,9 @@ def _jobs_by_operation(client: TestClient) -> dict[str, list[dict]]:
 def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
     _write_mock_backend_config(wm_paths)
     client = TestClient(create_app(paths=wm_paths, admins={"root"}))
-    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
     assert client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": "frontend-docs", "name": "Frontend Docs", "description": ""},
         headers={"X-Agent-Bridge-User": "root"},
     ).status_code == 200
@@ -45,7 +45,7 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
 
     with v1.open("rb") as handle:
         added = client.post(
-            "/docs",
+            "/api/v1/docs",
             data={"kb": ["frontend-docs"], "later": "true"},
             files={"file": ("Guide.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
@@ -55,7 +55,7 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
     jobs = _jobs_by_operation(client)
     assert jobs["create"][-1]["status"] == "pending"
 
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
@@ -63,7 +63,7 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
 
     with v2.open("rb") as handle:
         updated = client.post(
-            "/docs/guide/versions",
+            "/api/v1/docs/guide/versions",
             data={"later": "true"},
             files={"file": ("Guide-v2.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
@@ -73,18 +73,18 @@ def test_phase_one_smoke_flow(wm_paths, tmp_path: Path) -> None:
     jobs = _jobs_by_operation(client)
     assert jobs["update"][-1]["status"] == "pending"
 
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
     assert jobs["update"][-1]["status"] == "succeeded"
 
-    deleted = client.post("/docs/guide/delete", headers={"X-Agent-Bridge-User": "root"})
+    deleted = client.post("/api/v1/docs/guide/delete", headers={"X-Agent-Bridge-User": "root"})
     assert deleted.status_code == 200
     jobs = _jobs_by_operation(client)
     assert jobs["delete"][-1]["status"] == "pending"
 
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
@@ -104,18 +104,18 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     client = TestClient(create_app(paths=wm_paths, admins={"root"}))
 
     # 1. Init system
-    assert client.post("/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
+    assert client.post("/api/v1/admin/init", headers={"X-Agent-Bridge-User": "root"}).status_code == 200
 
     # 2. Create KB — backend target auto-created from registry config
     kb_resp = client.post(
-        "/kbs",
+        "/api/v1/kbs",
         json={"slug": "auth-docs", "name": "Auth Docs", "description": "Phase 2 test"},
         headers={"X-Agent-Bridge-User": "root"},
     )
     assert kb_resp.status_code == 200
 
     # Verify backends endpoint lists mock
-    backends = client.get("/backends", headers={"X-Agent-Bridge-User": "root"}).json()
+    backends = client.get("/api/v1/backends", headers={"X-Agent-Bridge-User": "root"}).json()
     assert len(backends) >= 1
     assert any(b["slug"] == "mock" for b in backends)
 
@@ -127,7 +127,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
 
     with v1.open("rb") as handle:
         added = client.post(
-            "/docs",
+            "/api/v1/docs",
             data={"kb": ["auth-docs"], "later": "true"},
             files={"file": ("AuthGuide.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
@@ -141,14 +141,14 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     assert create_job["backend_slug"] == "mock"
 
     # 4. Sync — verify document synced to mock backend
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
     assert jobs["create"][-1]["status"] == "succeeded"
 
     # 5. Check doc detail — verify sync_states visible with backend info
-    doc_detail = client.get("/docs/authguide", headers={"X-Agent-Bridge-User": "root"})
+    doc_detail = client.get("/api/v1/docs/authguide", headers={"X-Agent-Bridge-User": "root"})
     assert doc_detail.status_code == 200
     detail = doc_detail.json()
     assert "sync_states" in detail
@@ -160,7 +160,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     # 6. Update document — verify new sync job for mock backend
     with v2.open("rb") as handle:
         updated = client.post(
-            "/docs/authguide/versions",
+            "/api/v1/docs/authguide/versions",
             data={"later": "true"},
             files={"file": ("AuthGuide-v2.pdf", handle, "application/pdf")},
             headers={"X-Agent-Bridge-User": "root"},
@@ -173,14 +173,14 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     assert update_job["backend_slug"] == "mock"
 
     # 7. Sync — verify update synced
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
     assert jobs["update"][-1]["status"] == "succeeded"
 
     # 8. Delete document — verify delete sync job for mock backend
-    deleted = client.post("/docs/authguide/delete", headers={"X-Agent-Bridge-User": "root"})
+    deleted = client.post("/api/v1/docs/authguide/delete", headers={"X-Agent-Bridge-User": "root"})
     assert deleted.status_code == 200
     jobs = _jobs_by_operation(client)
     delete_job = jobs["delete"][-1]
@@ -188,7 +188,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     assert delete_job["backend_slug"] == "mock"
 
     # 9. Sync — verify delete synced
-    synced = client.post("/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
+    synced = client.post("/api/v1/sync", json={"all_users": False}, headers={"X-Agent-Bridge-User": "root"})
     assert synced.status_code == 200
     assert synced.json()["processed"] == 1
     jobs = _jobs_by_operation(client)
@@ -205,7 +205,7 @@ def test_phase_two_multi_backend_smoke(wm_paths, tmp_path: Path) -> None:
     ]
 
     # 10. Test align_backends — backends endpoint still lists mock
-    backends_after = client.get("/backends", headers={"X-Agent-Bridge-User": "root"}).json()
+    backends_after = client.get("/api/v1/backends", headers={"X-Agent-Bridge-User": "root"}).json()
     assert any(b["slug"] == "mock" for b in backends_after)
 
 

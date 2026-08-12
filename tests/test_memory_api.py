@@ -27,13 +27,13 @@ def test_memory_block_api_crud_and_binding(wm_paths):
     client = _client(wm_paths)
     headers = {"X-Agent-Bridge-User": "root"}
     client.post(
-        "/capability-profiles",
+        "/api/v1/capability-profiles",
         json={"profile_key": "dev", "name": "Dev", "description": "", "status": "active"},
         headers=headers,
     )
 
     created = client.post(
-        "/memory/blocks",
+        "/api/v1/memory/blocks",
         json={"block_key": "dev-memory", "name": "Dev Memory", "description": "Project memory"},
         headers=headers,
     )
@@ -42,14 +42,14 @@ def test_memory_block_api_crud_and_binding(wm_paths):
     assert created.json()["last_health"] == {}
 
     binding = client.put(
-        "/capability-profiles/dev/memory",
+        "/api/v1/capability-profiles/dev/memory",
         json={"block_key": "dev-memory", "enabled": True},
         headers=headers,
     )
     assert binding.status_code == 200
     assert binding.json()["block_key"] == "dev-memory"
 
-    read_binding = client.get("/capability-profiles/dev/memory", headers=headers)
+    read_binding = client.get("/api/v1/capability-profiles/dev/memory", headers=headers)
     assert read_binding.json()["block_key"] == "dev-memory"
 
 
@@ -57,13 +57,13 @@ def test_memory_hook_api_returns_noop_when_unbound(wm_paths):
     client = _client(wm_paths)
     headers = {"X-Agent-Bridge-User": "root"}
     client.post(
-        "/capability-profiles",
+        "/api/v1/capability-profiles",
         json={"profile_key": "dev", "name": "Dev", "description": "", "status": "active"},
         headers=headers,
     )
 
     response = client.post(
-        "/memory/hooks/claude-code/context",
+        "/api/v1/memory/hooks/claude-code/context",
         json={
             "profile_key": "dev",
             "event_name": "SessionStart",
@@ -87,22 +87,22 @@ def test_profile_doc_context_file_api_refreshes_memory_context(wm_paths):
     client = TestClient(app)
     headers = {"X-Agent-Bridge-User": "root"}
     client.post(
-        "/capability-profiles",
+        "/api/v1/capability-profiles",
         json={"profile_key": "dev", "name": "Dev", "description": "", "status": "active"},
         headers=headers,
     )
     client.post(
-        "/memory/blocks",
+        "/api/v1/memory/blocks",
         json={"block_key": "dev-memory", "name": "Dev Memory", "description": "Project memory"},
         headers=headers,
     )
     client.put(
-        "/capability-profiles/dev/memory",
+        "/api/v1/capability-profiles/dev/memory",
         json={"block_key": "dev-memory", "enabled": True},
         headers=headers,
     )
 
-    response = client.post("/capability-profiles/dev/doc/context-file", headers=headers)
+    response = client.post("/api/v1/capability-profiles/dev/doc/context-file", headers=headers)
 
     profile_path = wm_paths.profiles_dir / "dev.md"
     assert response.status_code == 200
@@ -121,12 +121,12 @@ def test_memory_dashboard_api_starts_worker_and_returns_embedded_url(wm_paths):
     client = TestClient(app)
     headers = {"X-Agent-Bridge-User": "root"}
     client.post(
-        "/memory/blocks",
+        "/api/v1/memory/blocks",
         json={"block_key": "dev-memory", "name": "Dev Memory", "description": "Project memory"},
         headers=headers,
     )
 
-    response = client.post("/memory/blocks/dev-memory/dashboard/start", headers=headers)
+    response = client.post("/api/v1/memory/blocks/dev-memory/dashboard/start", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["running"] is True

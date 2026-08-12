@@ -63,7 +63,7 @@ def test_workflow_design_agent_uses_design_workflow_skill(wm_paths) -> None:
     svc.agents.run = fake_run
 
     response = client.post(
-        "/agent-runs/design/workflow",
+        "/api/v1/agent-runs/design/workflow",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "mode": "modify",
@@ -164,7 +164,7 @@ def test_business_ledger_design_agent_uses_design_business_ledger_skill(wm_paths
 
     svc.agents.run = fake_run
     response = client.post(
-        "/agent-runs/design/business-ledger",
+        "/api/v1/agent-runs/design/business-ledger",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "mode": "create",
@@ -299,7 +299,7 @@ def test_script_design_agent_uses_design_script_skill(wm_paths) -> None:
     svc.agents.run = fake_run
 
     response = client.post(
-        "/agent-runs/design/script",
+        "/api/v1/agent-runs/design/script",
         headers={"X-Agent-Bridge-User": "root"},
         json={
             "mode": "create",

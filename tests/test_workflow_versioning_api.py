@@ -43,7 +43,7 @@ def test_restore_revision_endpoint_appends_restore_revision(wm_paths):
     _save(service, "v2")
 
     response = client.post(
-        "/workflows/wf/revisions/1/restore",
+        "/api/v1/workflows/wf/revisions/1/restore",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -61,7 +61,7 @@ def test_export_endpoint_returns_downloadable_json_envelope(wm_paths):
     _save(service, "v1")
 
     response = client.get(
-        "/workflows/wf/export",
+        "/api/v1/workflows/wf/export",
         headers={"X-Agent-Bridge-User": "root"},
     )
 
@@ -91,7 +91,7 @@ def test_import_api_creates_new_workflow_after_preview_and_confirm(wm_paths):
     }
 
     preview = client.post(
-        "/workflows/import/preview",
+        "/api/v1/workflows/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
         files={"file": ("import.workflow.json", json.dumps(exported).encode(), "application/json")},
     )
@@ -100,7 +100,7 @@ def test_import_api_creates_new_workflow_after_preview_and_confirm(wm_paths):
     assert preview_body["operation"] == "create"
 
     confirmed = client.post(
-        "/workflows/import/confirm",
+        "/api/v1/workflows/import/confirm",
         headers={"X-Agent-Bridge-User": "root"},
         json={"import_id": preview_body["import_id"]},
     )
@@ -128,7 +128,7 @@ def test_import_api_overwrite_preview_returns_diff(wm_paths):
     }
 
     preview = client.post(
-        "/workflows/import/preview",
+        "/api/v1/workflows/import/preview",
         headers={"X-Agent-Bridge-User": "root"},
         data={"target_workflow_key": "wf", "target_mode": "overwrite"},
         files={"file": ("import.workflow.json", json.dumps(exported).encode(), "application/json")},

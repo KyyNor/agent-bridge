@@ -10,7 +10,7 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
     client = TestClient(app)
     headers = {"X-Agent-Bridge-User": "root"}
 
-    initial = client.get("/agent-runtime/config", headers=headers)
+    initial = client.get("/api/v1/agent-runtime/config", headers=headers)
     assert initial.status_code == 200
     assert initial.json()["default_backend"] == "claude"
     assert [item["slug"] for item in initial.json()["available_backends"]] == ["claude"]
@@ -27,7 +27,7 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
             }
         ],
     }
-    saved = client.post("/agent-runtime/config", json=payload, headers=headers)
+    saved = client.post("/api/v1/agent-runtime/config", json=payload, headers=headers)
 
     assert saved.status_code == 200
     assert {key: saved.json()[key] for key in ("default_backend", "backends")} == payload
@@ -45,7 +45,7 @@ def test_agent_runtime_config_api_rejects_missing_default_backend(wm_paths) -> N
     client = TestClient(app)
 
     response = client.post(
-        "/agent-runtime/config",
+        "/api/v1/agent-runtime/config",
         json={"default_backend": "opencode", "backends": []},
         headers={"X-Agent-Bridge-User": "root"},
     )
@@ -60,7 +60,7 @@ def test_agent_runtime_config_api_rejects_slug_type_mismatch(wm_paths) -> None:
     client = TestClient(app)
 
     response = client.post(
-        "/agent-runtime/config",
+        "/api/v1/agent-runtime/config",
         json={
             "default_backend": "claude",
             "backends": [{"slug": "claude", "type": "codex"}],
@@ -87,7 +87,7 @@ def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -
         ],
     }
     saved = client.post(
-        "/agent-runtime/config",
+        "/api/v1/agent-runtime/config",
         json=payload,
         headers={"X-Agent-Bridge-User": "root"},
     )

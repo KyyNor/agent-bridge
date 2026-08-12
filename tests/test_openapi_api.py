@@ -12,7 +12,7 @@ def test_openapi_admin_flow_import_preview_save_and_catalog(wm_paths: AgentBridg
         headers = {"X-Agent-Bridge-User": "root"}
 
         created = client.post(
-            "/capabilities/openapi-services",
+            "/api/v1/capabilities/openapi-services",
             headers=headers,
             json={
                 "service_key": "petstore",
@@ -33,7 +33,7 @@ def test_openapi_admin_flow_import_preview_save_and_catalog(wm_paths: AgentBridg
         assert created.json()["service_key"] == "petstore"
 
         preview = client.post(
-            "/capabilities/openapi-services/petstore/import",
+            "/api/v1/capabilities/openapi-services/petstore/import",
             headers=headers,
             json={},
         )
@@ -41,39 +41,39 @@ def test_openapi_admin_flow_import_preview_save_and_catalog(wm_paths: AgentBridg
         assert preview.json()["operations"][0]["tool_name"] == "list_pets"
 
         saved = client.put(
-            "/capabilities/openapi-services/petstore/tools/list_pets",
+            "/api/v1/capabilities/openapi-services/petstore/tools/list_pets",
             headers=headers,
             json={**preview.json()["operations"][0], "description": "Admin edited description"},
         )
         assert saved.status_code == 200
         assert saved.json()["description"] == "Admin edited description"
 
-        tools = client.get("/capabilities/openapi-services/petstore/tools", headers=headers)
+        tools = client.get("/api/v1/capabilities/openapi-services/petstore/tools", headers=headers)
         assert tools.status_code == 200
         assert [item["tool"] for item in tools.json()] == ["list_pets"]
 
-        service_summary = client.get("/capabilities/openapi-services?summary=true", headers=headers)
+        service_summary = client.get("/api/v1/capabilities/openapi-services?summary=true", headers=headers)
         assert service_summary.status_code == 200
         assert service_summary.json()[0]["tool_count"] == 1
         assert "spec_content" not in service_summary.json()[0]
 
-        tool_summary = client.get("/capability-tools?source_type=openapi_service", headers=headers)
+        tool_summary = client.get("/api/v1/capability-tools?source_type=openapi_service", headers=headers)
         assert tool_summary.status_code == 200
         assert tool_summary.json()["items"][0]["tool_name"] == "list_pets"
         assert "input_schema" not in tool_summary.json()["items"][0]
 
         tool_detail = client.get(
-            "/capabilities/openapi-services/petstore/tools/list_pets",
+            "/api/v1/capabilities/openapi-services/petstore/tools/list_pets",
             headers=headers,
         )
         assert tool_detail.status_code == 200
         assert "input_schema" in tool_detail.json()
 
-        catalog = client.get("/capability-catalog", headers=headers)
+        catalog = client.get("/api/v1/capability-catalog", headers=headers)
         assert catalog.status_code == 200
         assert any(item["source_type"] == "openapi_service" and item["source_key"] == "petstore" for item in catalog.json()["sources"])
 
-        detail = client.get("/capability-catalog/sources/openapi_service/petstore", headers=headers)
+        detail = client.get("/api/v1/capability-catalog/sources/openapi_service/petstore", headers=headers)
         assert detail.status_code == 200
         assert detail.json()["tools"][0]["tool"] == "list_pets"
 
@@ -83,7 +83,7 @@ def test_openapi_import_preview_does_not_persist_operations(wm_paths: AgentBridg
     with TestClient(app) as client:
         headers = {"X-Agent-Bridge-User": "root"}
         client.post(
-            "/capabilities/openapi-services",
+            "/api/v1/capabilities/openapi-services",
             headers=headers,
             json={
                 "service_key": "crm",
@@ -93,8 +93,8 @@ def test_openapi_import_preview_does_not_persist_operations(wm_paths: AgentBridg
             },
         )
 
-        response = client.post("/capabilities/openapi-services/crm/import", headers=headers, json={})
+        response = client.post("/api/v1/capabilities/openapi-services/crm/import", headers=headers, json={})
 
         assert response.status_code == 200
         assert response.json()["operations"][0]["tool_name"] == "list_accounts"
-        assert client.get("/capabilities/openapi-services/crm/tools", headers=headers).json() == []
+        assert client.get("/api/v1/capabilities/openapi-services/crm/tools", headers=headers).json() == []
