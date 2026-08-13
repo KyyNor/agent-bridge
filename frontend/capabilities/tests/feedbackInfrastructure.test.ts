@@ -21,16 +21,22 @@ test('app provides loading, error boundary, 404, and toast feedback at the shell
 })
 
 test('error boundary explains authentication and authorization failures separately from rendering errors', () => {
+  const app = source('App.vue')
   const boundary = source('components/AppErrorBoundary.vue')
   const client = source('api/client.ts')
+  const accessFeedback = source('lib/accessFeedback.ts')
 
   assert.match(client, /export class HttpRequestError extends Error/)
+  assert.match(client, /reportAuthenticationRequired\(status\)/)
   assert.match(client, /throw httpError\(r\.status, await r\.text\(\)\)/)
+  assert.match(accessFeedback, /export const authenticationRequired = ref\(false\)/)
+  assert.match(app, /v-if="authenticationRequired"/)
+  assert.match(app, /authenticationRequiredPresentation\.description/)
   assert.match(boundary, /status === 401/)
-  assert.match(boundary, /需要先完成登录/)
-  assert.match(boundary, /统一登录入口重新进入 Agent Bridge/)
+  assert.match(accessFeedback, /需要先完成登录/)
+  assert.match(accessFeedback, /统一登录入口重新进入 Agent Bridge/)
   assert.match(boundary, /status === 403/)
-  assert.match(boundary, /暂无页面访问权限/)
+  assert.match(accessFeedback, /暂无页面访问权限/)
 })
 
 test('shared feedback primitives and toast store are available to views', () => {

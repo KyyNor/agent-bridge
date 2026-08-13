@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onErrorCaptured, ref, watch } from 'vue'
 import { HttpRequestError } from '../api/client'
+import { accessDeniedPresentation, authenticationRequiredPresentation } from '../lib/accessFeedback'
 import ErrorState from './ui/feedback/ErrorState.vue'
 
 const props = defineProps<{ resetKey: string }>()
@@ -11,15 +12,13 @@ const errorPresentation = computed(() => {
   const status = failure.value instanceof HttpRequestError ? failure.value.status : null
   if (status === 401) {
     return {
-      title: '需要先完成登录',
-      description: '当前浏览器没有有效的 Agent Bridge 登录信息，因此暂时无法加载此页面。请从统一登录入口重新进入 Agent Bridge；如果仍无法访问，请联系管理员确认账号已开通。',
+      ...authenticationRequiredPresentation,
       actionLabel: '',
     }
   }
   if (status === 403) {
     return {
-      title: '暂无页面访问权限',
-      description: '已确认你的登录身份，但账号还没有访问此页面所需的小组权限。请联系管理员开通权限后重试。',
+      ...accessDeniedPresentation,
       actionLabel: '重试',
     }
   }

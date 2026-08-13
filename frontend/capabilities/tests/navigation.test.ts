@@ -20,7 +20,7 @@ test('uses Vue Router History mode and has explicit deep-link routes', () => {
 })
 
 test('App delegates view selection to RouterView and no longer owns fragment history', () => {
-  assert.match(app, /<RouterView v-slot=/)
+  assert.match(app, /<RouterView(?: v-else)? v-slot=/)
   assert.doesNotMatch(app, /hashchange|popstate|location\.hash|window\.history/)
   assert.doesNotMatch(app, /<DashboardView v-if/)
 })
@@ -31,6 +31,13 @@ test('navigation configuration reflects the confirmed information architecture',
   assert.doesNotMatch(app, /能力治理/)
   assert.doesNotMatch(app, /key: 'tools', label: '工具目录'/)
   assert.doesNotMatch(app, /key: 'tool-debug', label: '工具调试'/)
+})
+
+test('system management and access-control navigation are limited to maintenance administrators', () => {
+  assert.match(app, /const adminOnlyNavigationKeys = new Set\(\['system-config', 'access-control'\]\)/)
+  assert.match(app, /actorContext\.value\?\.is_maintenance_admin \|\| !adminOnlyNavigationKeys\.has\(item\.key\)/)
+  assert.match(app, /!actor\.is_maintenance_admin && adminOnlyNavigationKeys\.has\(navKey\)/)
+  assert.match(app, /router\.replace\(\{ name: 'dashboard' \}\)/)
 })
 
 test('secondary capability tool pages use the shared page-header return pattern', () => {

@@ -117,6 +117,7 @@ import type {
   UserGroupMembership,
   ResourceVisibility,
 } from './types'
+import { reportAuthenticationRequired } from '../lib/accessFeedback'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
 
 const API_BASE = '/api/v1'
@@ -230,6 +231,7 @@ function formatHttpError(_status: number, raw: string): string {
 }
 
 function httpError(status: number, raw: string): HttpRequestError {
+  reportAuthenticationRequired(status)
   return new HttpRequestError(status, formatHttpError(status, raw))
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppShell from './components/AppShell.vue'
 import AdminAccessControl from './components/AdminAccessControl.vue'
@@ -10,12 +10,18 @@ import SidebarTourButton from './components/SidebarTourButton.vue'
 import ConfirmDialog from './components/ui/dialog/ConfirmDialog.vue'
 import { ToastViewport } from './components/ui/toast'
 import { hasSubRoute, type NavigationMeta } from './router'
+import { api } from './api/client'
+import type { AccessActorContext } from './api/types'
+import { authenticationRequired, authenticationRequiredPresentation } from './lib/accessFeedback'
+import ErrorState from './components/ui/feedback/ErrorState.vue'
 
 const route = useRoute()
 const router = useRouter()
+const actorContext = ref<AccessActorContext | null>(null)
+const adminOnlyNavigationKeys = new Set(['system-config', 'access-control'])
 
 // 一级入口不显示分组标题；其余项目沿用现有的信息架构分组。
-const navGroups: NavGroup[] = [
+const navigationGroups: NavGroup[] = [
   {
     items: [
       { key: 'dashboard', label: '平台概览', description: '查看平台运行状态和关键指标' },
@@ -56,6 +62,31 @@ const navGroups: NavGroup[] = [
 const navMeta = computed(() => route.meta as NavigationMeta)
 const activeNavKey = computed(() => navMeta.value.navKey || '')
 const showPageHeader = computed(() => !navMeta.value.hideHeaderOnSubRoute || !hasSubRoute(route))
+const navGroups = computed(() => navigationGroups
+  .map(group => ({
+    ...group,
+    items: group.items.filter(item => actorContext.value?.is_maintenance_admin || !adminOnlyNavigationKeys.has(item.key)),
+  }))
+  .filter(group => group.items.length > 0),
+)
+
+async function loadActorContext() {
+  try {
+    actorContext.value = await api.getAccessContext()
+  } catch {
+    // 401 会由全站认证失败状态接管；其他失败则按默认非管理员菜单展示。
+  }
+}
+
+watch([actorContext, activeNavKey], ([actor, navKey]) => {
+  if (actor && !actor.is_maintenance_admin && adminOnlyNavigationKeys.has(navKey)) {
+    void router.replace({ name: 'dashboard' })
+  }
+})
+
+onMounted(() => {
+  void loadActorContext()
+})
 
 function returnToParent() {
   if (navMeta.value.backTo) void router.push(navMeta.value.backTo)
@@ -78,7 +109,12 @@ function returnToParent() {
         @back="returnToParent"
       />
       <div class="min-w-0 p-7">
-        <RouterView v-slot="{ Component }">
+        <ErrorState
+          v-if="authenticationRequired"
+          :title="authenticationRequiredPresentation.title"
+          :description="authenticationRequiredPresentation.description"
+        />
+        <RouterView v-else v-slot="{ Component }">
           <AppErrorBoundary :reset-key="route.fullPath">
             <component :is="Component" />
           </AppErrorBoundary>
