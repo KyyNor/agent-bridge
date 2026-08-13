@@ -15,7 +15,12 @@ const route = useRoute()
 
 // 一级入口不显示分组标题；其余项目沿用现有的信息架构分组。
 const navGroups: NavGroup[] = [
-  { items: [{ key: 'dashboard', label: '平台概览', description: '查看平台运行状态和关键指标' }] },
+  {
+    items: [
+      { key: 'dashboard', label: '平台概览', description: '查看平台运行状态和关键指标' },
+      { key: 'profiles', label: '知识平面', description: '管理能力访问策略和权限' },
+    ],
+  },
   {
     label: '知识管理',
     items: [
@@ -26,7 +31,6 @@ const navGroups: NavGroup[] = [
       { key: 'services', label: '能力接入', description: '管理和配置 MCP/OpenAPI 服务连接' },
     ],
   },
-  { items: [{ key: 'profiles', label: '知识平面', description: '管理能力访问策略和权限' }] },
   { label: '自动化', items: [{ key: 'workflow', label: '工作流管理', description: '管理和编排知识工作流' }] },
   {
     label: '调用观测',

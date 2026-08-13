@@ -17,7 +17,7 @@ import { confirm, alert } from '../../composables/useConfirm'
 import CodeRepoDetailView from './CodeRepoDetailView.vue'
 const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
-import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{ routeKey: string }>()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
@@ -356,7 +356,7 @@ function categoryName(key: string) {
               </td>
               <td class="px-4 py-3">
                 <div v-if="r.visibility === 'shared'">
-                  <Badge variant="secondary">共享</Badge>
+                  <Badge variant="secondary" :class="SHARED_RESOURCE_BADGE_CLASS">共享</Badge>
                   <div v-if="repoReadOnly(r)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
                 </div>
                 <div v-else>

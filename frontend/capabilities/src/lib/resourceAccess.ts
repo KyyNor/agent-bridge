@@ -1,6 +1,7 @@
 import type { AccessActorContext, ResourceScopeFields } from '../api/types'
 
 export const SHARED_RESOURCE_READ_ONLY_HINT = '共享资源只能查看和使用，不能修改'
+export const SHARED_RESOURCE_BADGE_CLASS = 'bg-info-soft text-info-soft-fg'
 
 export function canModifyResource(
   actor: AccessActorContext | null | undefined,

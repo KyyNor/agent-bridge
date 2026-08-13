@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   canModifyResource,
   isSharedResourceReadOnly,
+  SHARED_RESOURCE_BADGE_CLASS,
   SHARED_RESOURCE_READ_ONLY_HINT,
 } from '../src/lib/resourceAccess'
 
@@ -23,6 +24,7 @@ test('共享资源对归属组可写、对其他组只读', () => {
   assert.equal(canModifyResource(groupA, foreign), false)
   assert.equal(isSharedResourceReadOnly(groupA, foreign), true)
   assert.equal(SHARED_RESOURCE_READ_ONLY_HINT, '共享资源只能查看和使用，不能修改')
+  assert.equal(SHARED_RESOURCE_BADGE_CLASS, 'bg-info-soft text-info-soft-fg')
 })
 
 test('维护管理员可以修改所有资源，组内私有资源不误标成共享只读', () => {

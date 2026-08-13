@@ -39,7 +39,7 @@ import {
 import { queryClient, queryKeys } from '../../lib/query'
 import { servicesFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
-import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{ routeKey: string }>()
 const router = useRouter()
@@ -568,7 +568,7 @@ const toolTypeOptions = [
               </td>
               <td class="px-4 py-3">
                 <div v-if="s.visibility === 'shared'">
-                  <Badge variant="secondary">共享</Badge>
+                  <Badge variant="secondary" :class="SHARED_RESOURCE_BADGE_CLASS">共享</Badge>
                   <div v-if="serviceReadOnly(s)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
                 </div>
                 <div v-else>

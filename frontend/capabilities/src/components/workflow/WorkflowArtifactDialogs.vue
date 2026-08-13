@@ -7,7 +7,7 @@ import { renderMarkdown } from '../../lib/markdown'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog'
-import { SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
+import { SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 defineProps<{
   open: boolean
@@ -47,7 +47,7 @@ function updateOpen(open: boolean) {
         <template v-else-if="detail">
           <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="outline">{{ detail.path }}</Badge>
-            <Badge :variant="detail.visibility === 'shared' ? 'secondary' : 'outline'">{{ detail.visibility === 'shared' ? '共享' : '仅本小组' }}</Badge>
+            <Badge :variant="detail.visibility === 'shared' ? 'secondary' : 'outline'" :class="detail.visibility === 'shared' ? SHARED_RESOURCE_BADGE_CLASS : undefined">{{ detail.visibility === 'shared' ? '共享' : '仅本小组' }}</Badge>
             <Badge v-for="tag in detail.tags" :key="tag" variant="outline">{{ tag }}</Badge>
           </div>
           <div v-if="readOnly" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning-soft-fg">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>

@@ -25,8 +25,7 @@ test('App delegates view selection to RouterView and no longer owns fragment his
 })
 
 test('navigation configuration reflects the confirmed information architecture', () => {
-  assert.match(app, /\{ items: \[\{ key: 'dashboard', label: '平台概览'/)
-  assert.match(app, /key: 'profiles', label: '知识平面'/)
+  assert.match(app, /items: \[[\s\S]*key: 'dashboard', label: '平台概览'[\s\S]*key: 'profiles', label: '知识平面'[\s\S]*\],[\s\S]*label: '知识管理'/)
   assert.match(app, /label: '知识管理',[\s\S]*key: 'services'/)
   assert.doesNotMatch(app, /能力治理/)
   assert.doesNotMatch(app, /key: 'tools', label: '工具目录'/)

@@ -28,7 +28,7 @@ const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
 import { knowledgeFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
-import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 const props = defineProps<{ routeKey: string }>()
 const { maybeStartTour } = useOnboardingTour()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
@@ -792,7 +792,7 @@ function syncBadgeLabel(status?: string | null) {
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ k.slug }}</td>
               <td class="px-4 py-3">
                 <div v-if="k.visibility === 'shared'">
-                  <Badge variant="secondary">共享</Badge>
+                  <Badge variant="secondary" :class="SHARED_RESOURCE_BADGE_CLASS">共享</Badge>
                   <div v-if="kbReadOnly(k)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
                 </div>
                 <div v-else>
