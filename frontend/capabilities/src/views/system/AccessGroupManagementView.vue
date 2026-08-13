@@ -84,13 +84,13 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="mx-auto max-w-5xl space-y-5">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-      <div class="flex items-start gap-2">
-        <Button variant="ghost" size="sm" class="mt-0.5 px-2" @click="$emit('back')"><ArrowLeft :size="14" class="mr-1.5" />返回</Button>
-        <div><h2 class="text-lg font-semibold">维护小组</h2><p class="mt-1 text-sm text-muted-foreground">管理可分配给用户的协作小组。</p></div>
+  <div class="space-y-5">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <Button variant="ghost" size="sm" class="h-8 px-2" @click="$emit('back')"><ArrowLeft :size="14" class="mr-1.5" />返回</Button>
+        <div><h2 class="text-xl font-semibold tracking-tight text-foreground">维护小组</h2><p class="mt-0.5 text-xs text-muted-foreground">管理可分配给用户的协作小组。</p></div>
       </div>
-      <div class="flex gap-2"><Button variant="outline" :disabled="loading" @click="load"><RefreshCw :size="14" />刷新</Button><Button class="shadow-btn" @click="openCreateDialog"><Plus :size="14" />添加小组</Button></div>
+      <div class="flex flex-wrap gap-2"><Button variant="outline" size="lg" :disabled="loading" @click="load"><RefreshCw :size="14" />刷新</Button><Button size="lg" class="shadow-btn" @click="openCreateDialog"><Plus :size="14" />添加小组</Button></div>
     </div>
 
     <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>

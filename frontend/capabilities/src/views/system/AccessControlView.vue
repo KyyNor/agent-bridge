@@ -166,7 +166,12 @@ watch(() => props.routeKey, routeKey => {
           </div>
           <div v-if="filteredUsers.length === 0" class="p-8 text-center text-sm text-muted-foreground">暂无用户</div>
           <div v-else class="overflow-auto">
-            <table class="w-full min-w-[720px]">
+            <table class="w-full min-w-[720px] table-fixed">
+              <colgroup>
+                <col class="w-[40%]" />
+                <col class="w-[40%]" />
+                <col class="w-[20%]" />
+              </colgroup>
               <thead><tr class="border-b border-border">
                 <th class="px-5 py-3 text-left text-xs font-medium text-muted-foreground">用户 ID</th>
                 <th class="px-5 py-3 text-left text-xs font-medium text-muted-foreground">当前小组</th>
