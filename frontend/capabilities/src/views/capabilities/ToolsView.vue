@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { Search } from '@lucide/vue'
+import { ArrowLeft, Search } from '@lucide/vue'
 import { onMounted, ref, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
 import type { AccessActorContext, CapabilityServiceSource, CapabilityToolSummary } from '../../api/types'
 import { Card, CardContent } from '../../components/ui/card'
+import { Button } from '../../components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Input } from '../../components/ui/input'
 import CategoryBadge from '../../components/CategoryBadge.vue'
@@ -12,6 +14,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '../../lib/pagination'
 import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
+const router = useRouter()
 const allTools = ref<CapabilityToolSummary[]>([])
 const services = ref<CapabilityServiceSource[]>([])
 const servicesLoaded = ref(false)
@@ -97,6 +100,10 @@ function typeLabel(v: string) { return toolTypes.find(t => t.value === v)?.label
 </script>
 
 <template>
+  <Button variant="ghost" size="sm" class="-ml-2 mb-4 h-8 px-2" @click="router.push('/services')">
+    <ArrowLeft :size="14" />
+    返回能力接入
+  </Button>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
     <!-- 页头筛选：搜索 + 类型分段 + 服务筛选进 #ph-filters -->

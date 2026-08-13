@@ -6,6 +6,8 @@ import { resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const router = readFileSync(resolve(root, 'src/router/index.ts'), 'utf8')
 const app = readFileSync(resolve(root, 'src/App.vue'), 'utf8')
+const toolsView = readFileSync(resolve(root, 'src/views/capabilities/ToolsView.vue'), 'utf8')
+const toolDebugView = readFileSync(resolve(root, 'src/views/capabilities/ToolDebugView.vue'), 'utf8')
 const viteConfig = readFileSync(resolve(root, 'vite.config.ts'), 'utf8')
 
 test('uses Vue Router History mode and has explicit deep-link routes', () => {
@@ -30,4 +32,12 @@ test('navigation configuration reflects the confirmed information architecture',
   assert.doesNotMatch(app, /能力治理/)
   assert.doesNotMatch(app, /key: 'tools', label: '工具目录'/)
   assert.doesNotMatch(app, /key: 'tool-debug', label: '工具调试'/)
+})
+
+test('secondary capability tool pages provide a stable return to capability services', () => {
+  for (const source of [toolsView, toolDebugView]) {
+    assert.match(source, /<ArrowLeft/)
+    assert.match(source, /返回能力接入/)
+    assert.match(source, /router\.push\('\/services'\)/)
+  }
 })

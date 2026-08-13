@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Play, RefreshCw, Wrench } from '@lucide/vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft, Play, RefreshCw, Wrench } from '@lucide/vue'
 import { api } from '../../api/client'
 import type {
   CapabilityTool,
@@ -30,6 +31,7 @@ type ToolDebugTool = CapabilityTool & {
   service_name: string
 }
 
+const router = useRouter()
 const profiles = ref<ProjectProfile[]>([])
 const services = ref<ToolDebugService[]>([])
 const tools = ref<ToolDebugTool[]>([])
@@ -292,6 +294,10 @@ function errorMessage(e: unknown) {
 </script>
 
 <template>
+  <Button variant="ghost" size="sm" class="-ml-2 mb-4 h-8 px-2" @click="router.push('/services')">
+    <ArrowLeft :size="14" />
+    返回能力接入
+  </Button>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
