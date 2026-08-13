@@ -112,6 +112,7 @@ import type {
   OnboardingTourProgress,
   OnboardingTourStatus,
   AccessActorContext,
+  AccessUser,
   AdminAccessStatus,
   AccessGroup,
   UserGroupMembership,
@@ -375,11 +376,14 @@ export const api = {
 
   // 当前身份与小组映射
   getAccessContext: () => get<AccessActorContext>('/access/me'),
+  listAccessUsers: () => get<AccessUser[]>('/access/users'),
+  createAccessUser: (userId: string) => post<AccessUser>('/access/users', { user_id: userId }),
   listAccessGroups: () => get<AccessGroup[]>('/access/groups'),
   upsertAccessGroup: (group: Pick<AccessGroup, 'group_key' | 'name' | 'description'>) =>
     post<AccessGroup>('/access/groups', group),
+  deleteAccessGroup: (groupKey: string) => del<{ deleted: boolean }>(`/access/groups/${encodeURIComponent(groupKey)}`),
   listGroupMemberships: () => get<UserGroupMembership[]>('/access/memberships'),
-  setUserGroup: (membership: { user_id: string; group_key: string }) =>
+  setUserGroup: (membership: { user_id: string; group_key: string | null }) =>
     put<UserGroupMembership>('/access/memberships', membership),
   deleteUserGroup: (userId: string) =>
     del<{ deleted: boolean }>(`/access/memberships/${encodeURIComponent(userId)}`),

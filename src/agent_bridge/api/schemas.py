@@ -17,9 +17,13 @@ class UpsertAccessGroupRequest(BaseModel):
     description: str = Field(default="", max_length=2000)
 
 
+class CreateAccessUserRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=255)
+
+
 class SetUserGroupRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=255)
-    group_key: str = Field(min_length=1, max_length=64)
+    group_key: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class AdminLoginRequest(BaseModel):

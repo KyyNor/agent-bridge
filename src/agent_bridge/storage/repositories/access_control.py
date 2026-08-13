@@ -12,6 +12,50 @@ class AccessControlRepository:
         self._db_path = db_path
         self._connect = connect
 
+    def create_user(self, *, user_id: str, actor: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO access_users (user_id, created_by) VALUES (?, ?)",
+                (user_id, actor),
+            )
+            row = conn.execute(
+                "SELECT * FROM access_users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            user = row_to_dict(row)
+            if user is None:
+                raise KeyError(f"user not found: {user_id}")
+            return user
+
+    def ensure_user(self, *, user_id: str, actor: str) -> None:
+        """为历史脚本和旧接口保留幂等登记；管理界面应显式创建用户。"""
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO access_users (user_id, created_by) VALUES (?, ?)",
+                (user_id, actor),
+            )
+
+    def get_user(self, user_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM access_users WHERE user_id = ? AND status = 'active'",
+                (user_id,),
+            ).fetchone()
+            return row_to_dict(row)
+
+    def list_users(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT users.*, membership.group_key, groups.name AS group_name
+                FROM access_users users
+                LEFT JOIN user_group_memberships membership ON membership.user_id = users.user_id
+                LEFT JOIN access_groups groups ON groups.group_key = membership.group_key
+                WHERE users.status = 'active'
+                ORDER BY users.user_id
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def upsert_group(
         self,
         *,
@@ -52,9 +96,31 @@ class AccessControlRepository:
     def list_groups(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM access_groups WHERE status = 'active' ORDER BY group_key"
+                """
+                SELECT groups.*, COUNT(membership.user_id) AS member_count
+                FROM access_groups groups
+                LEFT JOIN user_group_memberships membership ON membership.group_key = groups.group_key
+                WHERE groups.status = 'active'
+                GROUP BY groups.group_key
+                ORDER BY groups.group_key
+                """
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def group_member_count(self, group_key: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM user_group_memberships WHERE group_key = ?",
+                (group_key,),
+            ).fetchone()
+            return int(row["count"] if row else 0)
+
+    def delete_group(self, group_key: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM access_groups WHERE group_key = ?", (group_key,)
+            )
+            return cursor.rowcount > 0
 
     def set_membership(self, *, user_id: str, group_key: str, actor: str) -> dict[str, Any]:
         with self._connect() as conn:

@@ -2,6 +2,13 @@ from __future__ import annotations
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS access_users (
+  user_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS access_groups (
   group_key TEXT PRIMARY KEY,
   name TEXT NOT NULL,

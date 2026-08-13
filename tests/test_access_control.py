@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+import pytest
 
 from agent_bridge.access_control.service import (
     AccessControlService,
@@ -8,6 +9,7 @@ from agent_bridge.access_control.service import (
     ResourceVisibility,
 )
 from agent_bridge.api.app import create_app
+from agent_bridge.core.domain import ValidationError
 from agent_bridge.storage.sqlite import SQLiteStore
 
 
@@ -124,3 +126,60 @@ def test_access_group_management_api(wm_paths) -> None:
     }
     denied = client.get("/api/v1/access/groups", headers={"X-Agent-Bridge-User": "alice"})
     assert denied.status_code == 403
+
+
+def test_user_directory_keeps_user_when_membership_is_cleared(wm_paths) -> None:
+    _, access = _access_service(wm_paths)
+
+    access.create_user(actor="root", user_id="carol")
+    access.set_user_group(actor="root", user_id="carol", group_key="team-a")
+    access.set_user_group(actor="root", user_id="carol", group_key=None)
+
+    users = {user["user_id"]: user for user in access.list_users("root")}
+    assert users["carol"]["group_key"] is None
+    assert users["carol"]["group_name"] is None
+
+
+def test_group_with_members_cannot_be_deleted_until_memberships_are_handled(wm_paths) -> None:
+    _, access = _access_service(wm_paths)
+
+    with pytest.raises(ValidationError, match="仍有 1 名成员"):
+        access.delete_group(actor="root", group_key="team-a")
+
+    access.set_user_group(actor="root", user_id="alice", group_key=None)
+    assert access.delete_group(actor="root", group_key="team-a") == {"deleted": True}
+
+
+def test_user_directory_api_and_nullable_group_assignment(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    root = {"X-Agent-Bridge-User": "root"}
+    assert client.post(
+        "/api/v1/access/users", headers=root, json={"user_id": "carol"}
+    ).status_code == 200
+    assert client.post(
+        "/api/v1/access/groups",
+        headers=root,
+        json={"group_key": "team-a", "name": "A 组"},
+    ).status_code == 200
+
+    assigned = client.put(
+        "/api/v1/access/memberships",
+        headers=root,
+        json={"user_id": "carol", "group_key": "team-a"},
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["group_key"] == "team-a"
+
+    cleared = client.put(
+        "/api/v1/access/memberships",
+        headers=root,
+        json={"user_id": "carol", "group_key": None},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["group_key"] is None
+    users = {
+        item["user_id"]: item
+        for item in client.get("/api/v1/access/users", headers=root).json()
+    }
+    assert users["carol"]["group_key"] is None
+    assert client.delete("/api/v1/access/groups/team-a", headers=root).json() == {"deleted": True}

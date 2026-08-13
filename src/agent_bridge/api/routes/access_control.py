@@ -6,7 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from agent_bridge.api.schemas import SetUserGroupRequest, UpsertAccessGroupRequest
+from agent_bridge.api.schemas import (
+    CreateAccessUserRequest,
+    SetUserGroupRequest,
+    UpsertAccessGroupRequest,
+)
 
 
 def create_access_control_routes(service, actor):
@@ -20,12 +24,30 @@ def create_access_control_routes(service, actor):
     def list_groups(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.access.list_groups(current_actor)
 
+    @router.delete("/groups/{group_key}")
+    def delete_group(
+        group_key: str,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, bool]:
+        return service.access.delete_group(actor=current_actor, group_key=group_key)
+
     @router.post("/groups")
     def upsert_group(
         payload: UpsertAccessGroupRequest,
         current_actor: str = Depends(actor),
     ) -> dict[str, Any]:
         return service.access.upsert_group(actor=current_actor, **payload.model_dump())
+
+    @router.get("/users")
+    def list_users(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return service.access.list_users(current_actor)
+
+    @router.post("/users")
+    def create_user(
+        payload: CreateAccessUserRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.access.create_user(actor=current_actor, **payload.model_dump())
 
     @router.get("/memberships")
     def list_memberships(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:

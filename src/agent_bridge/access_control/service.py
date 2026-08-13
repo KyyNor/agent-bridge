@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from agent_bridge.core.domain import AccessDenied, NotFound, ValidationError, require_admin_user
+from agent_bridge.core.domain import (
+    AccessDenied,
+    ConflictError,
+    NotFound,
+    ValidationError,
+    require_admin_user,
+)
 from agent_bridge.access_control.resources import ScopedResourceRegistry, ScopedResourceType
 
 
@@ -42,7 +48,7 @@ class ResourceScope:
 
 
 class AccessControlService:
-    """维护单小组成员关系，并集中执行资源读写策略。"""
+    """维护用户目录、小组目录及单小组归属关系，并集中执行资源读写策略。"""
 
     maintenance_group_key = "system-maintainers"
 
@@ -66,6 +72,7 @@ class AccessControlService:
             actor=sorted(self.admins)[0],
         )
         for admin in sorted(self.admins):
+            self.repository.ensure_user(user_id=admin, actor=admin)
             if self.repository.get_membership(admin) is None:
                 self.repository.set_membership(
                     user_id=admin,
@@ -90,22 +97,56 @@ class AccessControlService:
             actor=actor,
         )
 
+    def delete_group(self, *, actor: str, group_key: str) -> dict[str, bool]:
+        require_admin_user(actor, self.admins)
+        normalized_key = group_key.strip().lower()
+        if normalized_key == self.maintenance_group_key:
+            raise ValidationError("系统维护组不能删除")
+        if self.repository.get_group(normalized_key) is None:
+            raise NotFound(f"小组不存在：{normalized_key}")
+        member_count = self.repository.group_member_count(normalized_key)
+        if member_count:
+            raise ValidationError(
+                f"小组仍有 {member_count} 名成员，请先为成员换组或取消归属后再删除"
+            )
+        return {"deleted": self.repository.delete_group(normalized_key)}
+
     def list_groups(self, actor: str) -> list[dict[str, Any]]:
         require_admin_user(actor, self.admins)
         return self.repository.list_groups()
 
+    def create_user(self, *, actor: str, user_id: str) -> dict[str, Any]:
+        require_admin_user(actor, self.admins)
+        normalized_user = user_id.strip()
+        if not normalized_user:
+            raise ValidationError("用户 ID 不能为空")
+        if self.repository.get_user(normalized_user) is not None:
+            raise ConflictError(f"用户已存在：{normalized_user}")
+        return self.repository.create_user(user_id=normalized_user, actor=actor)
+
+    def list_users(self, actor: str) -> list[dict[str, Any]]:
+        require_admin_user(actor, self.admins)
+        return self.repository.list_users()
+
     def set_user_group(
-        self, *, actor: str, user_id: str, group_key: str
+        self, *, actor: str, user_id: str, group_key: str | None
     ) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_user = user_id.strip()
         if not normalized_user:
             raise ValidationError("用户 ID 不能为空")
-        if self.repository.get_group(group_key) is None:
-            raise NotFound(f"小组不存在：{group_key}")
+        # 兼容历史 CLI/测试入口：直接分配时补建用户目录记录。
+        # 维护界面始终通过 create_user 显式登记，取消归属不会删除此记录。
+        self.repository.ensure_user(user_id=normalized_user, actor=actor)
+        if group_key is None:
+            self.repository.delete_membership(normalized_user)
+            return {"user_id": normalized_user, "group_key": None, "group_name": None}
+        normalized_group_key = group_key.strip().lower()
+        if self.repository.get_group(normalized_group_key) is None:
+            raise NotFound(f"小组不存在：{normalized_group_key}")
         return self.repository.set_membership(
             user_id=normalized_user,
-            group_key=group_key,
+            group_key=normalized_group_key,
             actor=actor,
         )
 

@@ -24,6 +24,17 @@ export interface AccessGroup {
   name: string
   description: string
   status: string
+  member_count: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AccessUser {
+  user_id: string
+  status: string
+  group_key: string | null
+  group_name: string | null
   created_by: string
   created_at: string
   updated_at: string

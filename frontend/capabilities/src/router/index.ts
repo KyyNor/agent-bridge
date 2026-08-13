@@ -73,7 +73,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/agent-runs/:routeKey(.*)*', name: 'agent-runs', component: AgentRunsView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'agent-runs', title: 'Agent 运行', hideHeaderOnSubRoute: true } },
   { path: '/stats', name: 'stats', component: StatsView, meta: { navKey: 'stats', title: '调用统计' } },
   { path: '/system-config', name: 'system-config', component: KnowledgeProcessingConfigView, meta: { navKey: 'system-config', title: '系统管理' } },
-  { path: '/access-control', name: 'access-control', component: AccessControlView, meta: { navKey: 'access-control', title: '小组权限' } },
+  { path: '/access-control/:routeKey(.*)*', name: 'access-control', component: AccessControlView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'access-control', title: '小组权限', hideHeaderOnSubRoute: true } },
   { path: '/model-evaluations', name: 'model-evaluations', component: ModelEvaluationView, meta: { navKey: 'model-evaluations', title: '模型评估' } },
   { path: '/skills', name: 'skills', component: SkillManagementView, meta: { navKey: 'skills', title: 'Skill 管理' } },
   { path: '/scripts/:routeKey(.*)*', name: 'scripts', component: ScriptsView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'scripts', title: '脚本管理', hideHeaderOnSubRoute: true } },

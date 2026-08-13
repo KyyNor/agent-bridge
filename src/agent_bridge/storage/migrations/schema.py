@@ -197,6 +197,17 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
 def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS access_users (
+          user_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS access_groups (
           group_key TEXT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -223,6 +234,12 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_user_group_memberships_group
         ON user_group_memberships(group_key, user_id)
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO access_users (user_id, created_by)
+        SELECT user_id, updated_by FROM user_group_memberships
         """
     )
     conn.execute(
