@@ -26,7 +26,7 @@ import { useKnowledgeUploadQueue } from '../../composables/useKnowledgeUploadQue
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
-import { knowledgeFirstUseTour } from '../../lib/onboardingTours'
+import { knowledgeDetailFirstUseTour, knowledgeFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 import { isSharedResourceReadOnly, SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 const props = defineProps<{ routeKey: string }>()
@@ -218,11 +218,13 @@ onMounted(async () => {
   loading.value = false
   await loadDetail()
   await maybeStartKnowledgeTour()
+  await maybeStartKnowledgeDetailTour()
 })
 // Route-driven detail loading: entering /knowledge/<slug> loads that kb's data.
 watch(() => props.routeKey, async () => {
   await loadDetail()
   await maybeStartKnowledgeTour()
+  await maybeStartKnowledgeDetailTour()
 })
 watch(() => detailTab.value, () => {
   if (detailTab.value !== 'docs') selectedDocSlugs.value = new Set()
@@ -237,8 +239,10 @@ async function loadKbs(options: { fresh?: boolean } = {}) {
   } catch { kbs.value = [] }
 }
 async function maybeStartKnowledgeTour() {
-  if (mode.value !== 'list' || loading.value) return
-  await maybeStartTour(knowledgeFirstUseTour)
+  if (mode.value === 'list' && !loading.value) await maybeStartTour(knowledgeFirstUseTour)
+}
+async function maybeStartKnowledgeDetailTour() {
+  if (mode.value === 'detail' && !detailLoading.value && !routeError.value && detailKb.value) await maybeStartTour(knowledgeDetailFirstUseTour)
 }
 async function refreshDetailKbSummary() {
   await loadKbs({ fresh: true })
@@ -841,7 +845,7 @@ function syncBadgeLabel(status?: string | null) {
           <ArrowLeft :size="14" class="mr-1.5" />
           返回
         </Button>
-        <div class="flex flex-wrap gap-2">
+        <div data-tour="knowledge-detail-actions" class="flex flex-wrap gap-2">
           <Button v-if="detailKb" variant="outline" size="sm" class="h-8 text-xs" @click="openUploadDialog(detailKb)" :disabled="detailReadOnly" :title="detailReadOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
             <Upload :size="12" class="mr-1" />
             上传
@@ -861,9 +865,9 @@ function syncBadgeLabel(status?: string | null) {
       </div>
 
       <div v-if="detailKb" v-show="!detailLoading" class="space-y-4">
-        <KnowledgeDefaultBackendPanel :kb="detailKb" :backends="backends" :read-only="detailReadOnly" @saved="updateKnowledgeDefaults" />
+        <div data-tour="knowledge-detail-backend"><KnowledgeDefaultBackendPanel :kb="detailKb" :backends="backends" :read-only="detailReadOnly" @saved="updateKnowledgeDefaults" /></div>
         <!-- Tabs -->
-        <div class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
+        <div data-tour="knowledge-detail-tabs" class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
           <button v-for="t in [
             { key: 'docs', label: `文档 (${detailTotalDocumentCount})` },
             { key: 'sync', label: `同步 (${detailSyncJobs.length})` },

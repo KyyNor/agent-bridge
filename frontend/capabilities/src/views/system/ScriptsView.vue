@@ -41,7 +41,7 @@ import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { registerRouteLeaveGuard } from '../../router/guards'
-import { scriptsFirstUseTour } from '../../lib/onboardingTours'
+import { scriptDetailFirstUseTour, scriptsFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const props = defineProps<{ routeKey: string }>()
@@ -171,6 +171,11 @@ async function maybeStartScriptsTour() {
   await maybeStartTour(scriptsFirstUseTour)
 }
 
+async function maybeStartScriptDetailTour() {
+  if (mode.value !== 'edit' || formLoading.value || scriptNotFound.value || formError.value) return
+  await maybeStartTour(scriptDetailFirstUseTour)
+}
+
 // 实时语法校验：代码变化时 debounce 调用 /scripts/validate（不保存）。
 watch(
   () => form.value.code,
@@ -224,6 +229,7 @@ watch(
       runDetail.value = null
       testWorkflowKey.value = '__none__'
       testWorkflowRunId.value = ''
+      await maybeStartScriptDetailTour()
       return
     }
     formLoading.value = true
@@ -248,6 +254,7 @@ watch(
     } finally {
       formLoading.value = false
     }
+    await maybeStartScriptDetailTour()
   },
   { immediate: true },
 )
@@ -944,7 +951,7 @@ def main(envelope):
             </div>
           </div>
         </div>
-        <div data-tour="scripts-editor-actions" class="flex flex-wrap gap-2">
+        <div data-tour="script-detail-actions" class="flex flex-wrap gap-2">
           <Button v-if="isBuiltInScript" variant="outline" size="sm" :disabled="saving || testing" @click="resetBuiltInScript">
             <RotateCcw class="mr-1.5 h-4 w-4" />
             恢复默认
@@ -993,7 +1000,7 @@ def main(envelope):
 
     <div v-else class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
       <!-- 左栏：编辑器 -->
-      <Card>
+      <Card data-tour="script-detail-editor">
         <CardContent class="space-y-4 p-4">
           <div v-if="formLoading" class="py-16 text-center text-sm text-muted-foreground">加载中</div>
           <template v-else>
@@ -1104,7 +1111,7 @@ def main(envelope):
 
       <!-- 右栏：运行 + 结果（sticky） -->
       <div class="space-y-4 xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100vh-2rem)] xl:overflow-y-scroll xl:pr-1">
-        <Card>
+        <Card data-tour="script-detail-test">
           <CardContent class="space-y-3 p-4">
             <div class="text-sm font-semibold text-foreground">测试运行</div>
             <div v-if="isNew" class="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning-soft-fg">

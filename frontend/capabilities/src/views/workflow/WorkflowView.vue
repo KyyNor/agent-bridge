@@ -59,7 +59,7 @@ import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
 import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { workflowEditorFirstUseTour, workflowFirstUseTour } from '../../lib/onboardingTours'
+import { workflowDetailFirstUseTour, workflowEditorFirstUseTour, workflowFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 import { isSharedResourceReadOnly } from '../../lib/resourceAccess'
 
@@ -505,6 +505,7 @@ onMounted(async () => {
   await applyRoute()
   await maybeStartWorkflowTour()
   await maybeStartWorkflowEditorTour()
+  await maybeStartWorkflowDetailTour()
 })
 
 watch(selectedKey, () => {
@@ -520,6 +521,7 @@ watch(
     await applyRoute()
     await maybeStartWorkflowTour()
     await maybeStartWorkflowEditorTour()
+    await maybeStartWorkflowDetailTour()
   },
 )
 
@@ -558,6 +560,11 @@ async function maybeStartWorkflowTour() {
 async function maybeStartWorkflowEditorTour() {
   if (!isWorkflowFormPage.value || routeError.value || formError.value) return
   await maybeStartTour(workflowEditorFirstUseTour)
+}
+
+async function maybeStartWorkflowDetailTour() {
+  if (routeMode.value !== 'detail' || routeError.value || workflowDetailError.value || !selectedWorkflow.value) return
+  await maybeStartTour(workflowDetailFirstUseTour)
 }
 
 let editorResourcesLoaded = false
@@ -1117,7 +1124,7 @@ async function confirmClearWorkflow() {
             <p class="mt-0.5 text-xs text-muted-foreground">{{ selectedWorkflow?.workflow_key || routeWorkflowKey }} · {{ selectedProfileName }}</p>
           </div>
         </div>
-        <div v-if="selectedWorkflow" class="flex flex-wrap gap-2">
+        <div v-if="selectedWorkflow" data-tour="workflow-detail-actions" class="flex flex-wrap gap-2">
           <Button variant="outline" size="lg" @click="downloadWorkflowDefinition">
             <Download :size="14" />
             导出工作流
@@ -1164,7 +1171,7 @@ async function confirmClearWorkflow() {
             <p class="basis-full pt-1 text-sm text-muted-foreground">{{ selectedWorkflow.description || '无描述' }}</p>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div data-tour="workflow-detail-summary" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="最近运行" :value="latestRunValue" :tone="latestRunTone">
               <template #icon><Play class="h-4 w-4" /></template>
               <template #sub>{{ latestRun ? `${formatLocalDatetime(latestRun.started_at)} · ${latestRun.run_id}` : '运行后在此查看状态' }}</template>
@@ -1183,7 +1190,7 @@ async function confirmClearWorkflow() {
             </StatCard>
           </div>
 
-          <SegmentedTabs v-model="detailTab" :tabs="detailTabs" @update:model-value="selectDetailTab" />
+          <SegmentedTabs v-model="detailTab" :tabs="detailTabs" data-tour="workflow-detail-tabs" @update:model-value="selectDetailTab" />
 
           <div v-if="detailTab === 'overview'" class="space-y-4">
             <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.7fr)]">

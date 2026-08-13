@@ -3,13 +3,16 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import {
+  knowledgeDetailFirstUseTour,
   knowledgeFirstUseTour,
   memoryFirstUseTour,
   onboardingTourForRoute,
   profileConfigFirstUseTour,
+  scriptDetailFirstUseTour,
   scriptsFirstUseTour,
   servicesFirstUseTour,
   toolDebugFirstUseTour,
+  workflowDetailFirstUseTour,
   workflowEditorFirstUseTour,
   workflowFirstUseTour,
 } from '../src/lib/onboardingTours'
@@ -65,31 +68,36 @@ test('sidebar guide selects the tour matching the current route and mode', () =>
   assert.equal(onboardingTourForRoute('workflow', []), workflowFirstUseTour)
   assert.equal(onboardingTourForRoute('workflow', ['new']), workflowEditorFirstUseTour)
   assert.equal(onboardingTourForRoute('workflow', ['daily-report', 'edit']), workflowEditorFirstUseTour)
-  assert.equal(onboardingTourForRoute('workflow', ['daily-report']), null)
+  assert.equal(onboardingTourForRoute('workflow', ['daily-report', 'detail']), workflowDetailFirstUseTour)
+  assert.equal(onboardingTourForRoute('workflow', ['daily-report']), workflowDetailFirstUseTour)
+  assert.equal(onboardingTourForRoute('workflow', ['daily-report', 'tasks']), null)
   assert.equal(onboardingTourForRoute('knowledge', []), knowledgeFirstUseTour)
-  assert.equal(onboardingTourForRoute('knowledge', ['docs']), null)
+  assert.equal(onboardingTourForRoute('knowledge', ['docs']), knowledgeDetailFirstUseTour)
   assert.equal(onboardingTourForRoute('services', []), servicesFirstUseTour)
   assert.equal(onboardingTourForRoute('tool-debug', undefined), toolDebugFirstUseTour)
   assert.equal(onboardingTourForRoute('profiles', ['default']), profileConfigFirstUseTour)
   assert.equal(onboardingTourForRoute('memory', []), memoryFirstUseTour)
-  assert.equal(onboardingTourForRoute('scripts', ['builtin', 'edit']), scriptsFirstUseTour)
+  assert.equal(onboardingTourForRoute('scripts', ['builtin', 'edit']), scriptDetailFirstUseTour)
   assert.equal(onboardingTourForRoute('dashboard', undefined), null)
 })
 
 test('additional management tours are independently versioned and use stable anchors', () => {
   const tours = [
     knowledgeFirstUseTour,
+    knowledgeDetailFirstUseTour,
     servicesFirstUseTour,
     toolDebugFirstUseTour,
     profileConfigFirstUseTour,
     workflowEditorFirstUseTour,
+    workflowDetailFirstUseTour,
     memoryFirstUseTour,
     scriptsFirstUseTour,
+    scriptDetailFirstUseTour,
   ]
   assert.equal(new Set(tours.map(tour => tour.key)).size, tours.length)
   for (const tour of tours) {
     assert.equal(tour.version, 1)
-    assert.ok(tour.steps.length >= 3 && tour.steps.length <= 5)
+    assert.ok(tour.steps.length >= 2 && tour.steps.length <= 5)
     for (const step of tour.steps) assert.match(step.element, /^\[data-tour="[a-z0-9-]+"\]$/)
   }
 })
@@ -97,12 +105,15 @@ test('additional management tours are independently versioned and use stable anc
 test('management pages wait for stable loading and keep their automatic tour anchors', () => {
   const cases = [
     ['views/knowledge/KnowledgeView.vue', 'knowledgeFirstUseTour'],
+    ['views/knowledge/KnowledgeView.vue', 'knowledgeDetailFirstUseTour'],
     ['views/capabilities/ServicesView.vue', 'servicesFirstUseTour'],
     ['views/capabilities/ToolDebugView.vue', 'toolDebugFirstUseTour'],
     ['views/capabilities/ProfileDetailView.vue', 'profileConfigFirstUseTour'],
     ['views/workflow/WorkflowView.vue', 'workflowEditorFirstUseTour'],
+    ['views/workflow/WorkflowView.vue', 'workflowDetailFirstUseTour'],
     ['views/knowledge/MemoryView.vue', 'memoryFirstUseTour'],
     ['views/system/ScriptsView.vue', 'scriptsFirstUseTour'],
+    ['views/system/ScriptsView.vue', 'scriptDetailFirstUseTour'],
   ] as const
   const composable = readFileSync(resolve(root, 'src/composables/useOnboardingTour.ts'), 'utf8')
   assert.match(composable, /仅展示已稳定出现的步骤/)

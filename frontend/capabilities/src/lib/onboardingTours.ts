@@ -99,6 +99,33 @@ export const workflowEditorFirstUseTour: ProductTourDefinition = {
   ],
 }
 
+export const workflowDetailFirstUseTour: ProductTourDefinition = {
+  key: 'workflow-detail-first-use', version: 1, name: '工作流详情新手指南',
+  steps: [
+    { element: '[data-tour="workflow-detail-actions"]', popover: { title: '从这里运行或维护', description: '可直接运行工作流；导入、导出、编辑和清空等维护操作也集中在页头右侧。', side: 'bottom', align: 'end' } },
+    { element: '[data-tour="workflow-detail-summary"]', popover: { title: '先看运行概况', description: '这里汇总最近运行、待处理任务、当前产物和依赖节点，便于快速判断下一步。', side: 'bottom', align: 'start' } },
+    { element: '[data-tour="workflow-detail-tabs"]', popover: { title: '按任务、产物和运行深入查看', description: '通过标签页管理任务队列、检索工作流产物、查看运行记录，并追溯版本历史。', side: 'bottom', align: 'start' } },
+  ],
+}
+
+export const knowledgeDetailFirstUseTour: ProductTourDefinition = {
+  key: 'knowledge-detail-first-use', version: 1, name: '文档知识详情新手指南',
+  steps: [
+    { element: '[data-tour="knowledge-detail-actions"]', popover: { title: '上传资料或配置授权', description: '上传文档后可通过能力平面控制哪些 Agent 能访问这个知识库。共享只读资料不会开放修改操作。', side: 'bottom', align: 'end' } },
+    { element: '[data-tour="knowledge-detail-backend"]', popover: { title: '选择默认检索方式', description: '在这里配置默认知识后端与检索 Agent，作为该知识库的检索入口。', side: 'bottom', align: 'start' } },
+    { element: '[data-tour="knowledge-detail-tabs"]', popover: { title: '管理资料并验证检索', description: '文档页负责目录和文件，同步页排查处理状态，Git 数据源用于持续同步，检索页可直接验证效果。', side: 'bottom', align: 'start' } },
+  ],
+}
+
+export const scriptDetailFirstUseTour: ProductTourDefinition = {
+  key: 'script-detail-first-use', version: 1, name: '脚本详情新手指南',
+  steps: [
+    { element: '[data-tour="script-detail-actions"]', popover: { title: '保存、设计与运行', description: '修改后先保存，也可以让 AI 生成草案；运行会使用当前脚本及右侧测试上下文。', side: 'bottom', align: 'end' } },
+    { element: '[data-tour="script-detail-editor"]', popover: { title: '维护代码与输入输出契约', description: '代码必须实现 main(envelope)；输入与输出 Schema 会用于参数校验和工作流字段映射。', side: 'right', align: 'start' } },
+    { element: '[data-tour="script-detail-test"]', popover: { title: '填写真实上下文后测试', description: '按字段填写参数，按需选择能力平面或工作流运行，再执行并在下方核对结果。', side: 'left', align: 'start' } },
+  ],
+}
+
 export const memoryFirstUseTour: ProductTourDefinition = {
   key: 'memory-first-use', version: 1, name: '记忆区块新手指南',
   steps: [
@@ -113,7 +140,6 @@ export const scriptsFirstUseTour: ProductTourDefinition = {
   steps: [
     { element: '[data-tour="scripts-create"]', popover: { title: '创建受控脚本', description: '脚本需要实现 main(envelope) 并返回 dict；可从新建页开始或编辑已有脚本。', side: 'bottom', align: 'end' } },
     { element: '[data-tour="scripts-list"]', popover: { title: '编辑或运行脚本', description: '从列表进入编辑页，可查看脚本来源、调整代码与契约，并进行测试运行。', side: 'top', align: 'start' } },
-    { element: '[data-tour="scripts-editor-actions"]', popover: { title: '保存与测试运行', description: '编辑页提供 AI 设计、保存和运行操作；先保存可确保测试基于最新版本。', side: 'bottom', align: 'end' } },
   ],
 }
 
@@ -130,13 +156,14 @@ export function onboardingTourForRoute(routeName: unknown, routeKey: unknown): P
   if (name === 'workflow') {
     if (segments.length === 0) return workflowFirstUseTour
     if (segments[0] === 'new' || segments[1] === 'edit') return workflowEditorFirstUseTour
-    return null
+    if (segments[1] === 'tasks' || segments[1] === 'progress') return null
+    return workflowDetailFirstUseTour
   }
   if (name === 'profiles') return segments.length > 0 ? profileConfigFirstUseTour : null
-  if (name === 'scripts') return scriptsFirstUseTour
+  if (name === 'scripts') return segments.length > 0 ? scriptDetailFirstUseTour : scriptsFirstUseTour
   if (name === 'tool-debug') return toolDebugFirstUseTour
+  if (name === 'knowledge') return segments.length > 0 ? knowledgeDetailFirstUseTour : knowledgeFirstUseTour
   if (segments.length > 0) return null
-  if (name === 'knowledge') return knowledgeFirstUseTour
   if (name === 'services') return servicesFirstUseTour
   if (name === 'memory') return memoryFirstUseTour
   return null
