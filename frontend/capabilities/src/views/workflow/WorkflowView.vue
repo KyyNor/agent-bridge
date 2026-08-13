@@ -526,7 +526,8 @@ const pendingTaskCount = computed(() =>
 )
 const detailTabs = computed(() => [
   { key: 'overview', label: '概览' },
-  { key: 'tasks', label: '任务队列', count: pendingTaskCount.value || undefined },
+  // 标签数量固定表达队列规模，不随任务状态从待处理变为完成而改变。
+  { key: 'tasks', label: '任务队列', count: tasks.value.length || undefined },
   { key: 'artifacts', label: '工作流产物', count: artifactTotal.value || undefined },
   { key: 'runs', label: '运行记录', count: workflowRunTotals.value[selectedWorkflow.value?.workflow_key || ''] || undefined },
   { key: 'versions', label: '版本历史' },
@@ -754,7 +755,8 @@ async function prepareDetail(item: WorkflowDefinition) {
   detailTab.value = 'overview'
   runPage.value = 1
   resetArtifactPage()
-  await loadRecentArtifacts()
+  // 详情首屏即取得队列总数，避免任务标签在切换到队列页后才补显示数字。
+  await Promise.all([loadRecentArtifacts(), loadTasks(item.workflow_key)])
 }
 
 async function selectDetailTab(value: string) {
