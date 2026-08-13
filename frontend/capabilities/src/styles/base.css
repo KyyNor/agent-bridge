@@ -37,6 +37,25 @@
 
 .agent-bridge-tour-popover .agent-bridge-tour-skip {
   margin-right: auto;
+  padding: 5px 10px;
+  background: var(--secondary);
+  border: 1px solid var(--muted-foreground);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-btn);
+  color: var(--secondary-foreground);
+  font-weight: 500;
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-skip:hover,
+.agent-bridge-tour-popover .agent-bridge-tour-skip:focus {
+  background: var(--accent);
+  border-color: var(--ring);
+  color: var(--accent-foreground);
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-skip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 :root {

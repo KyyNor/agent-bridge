@@ -47,7 +47,7 @@ export function useOnboardingTour() {
     const button = document.createElement('button')
     button.type = 'button'
     button.dataset.tourSkip = 'true'
-    button.className = 'driver-popover-prev-btn agent-bridge-tour-skip'
+    button.className = 'driver-popover-footer-btn driver-popover-prev-btn agent-bridge-tour-skip'
     button.textContent = '跳过导览'
     button.addEventListener('click', skip)
     popover.footerButtons.prepend(button)
