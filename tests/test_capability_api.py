@@ -212,13 +212,14 @@ def test_agent_bridge_trailing_slash_and_api_boundary(wm_paths) -> None:
     assert client.get("/static/capabilities/not-found.js").status_code == 404
 
 
-def test_root_does_not_redirect_to_management_spa(wm_paths) -> None:
+def test_root_redirects_to_management_spa(wm_paths) -> None:
     app = create_app(paths=wm_paths, admins={"root"})
     client = TestClient(app)
 
     response = client.get("/", follow_redirects=False)
 
-    assert response.status_code == 404
+    assert response.status_code == 307
+    assert response.headers["location"] == "/agent-bridge/"
 
 
 def test_capability_static_assets_are_served(wm_paths) -> None:

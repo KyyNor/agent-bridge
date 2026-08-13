@@ -139,6 +139,10 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir, check_dir=False), name="capabilities-static")
 
+    @app.get("/")
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/agent-bridge/", status_code=307)
+
     def identity(request: Request):
         return identity_resolver.resolve(request)
 
