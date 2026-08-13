@@ -171,6 +171,17 @@ function headers(): Record<string, string> {
   return {}
 }
 
+/** 保留 HTTP 状态码，供页面区分认证、授权和普通请求失败。 */
+export class HttpRequestError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'HttpRequestError'
+    this.status = status
+  }
+}
+
 function formatValidationIssue(value: unknown): string {
   if (typeof value === 'string') return value
   if (!value || typeof value !== 'object') return String(value ?? '')
@@ -218,13 +229,17 @@ function formatHttpError(_status: number, raw: string): string {
   return detail || '请求失败，请稍后重试'
 }
 
+function httpError(status: number, raw: string): HttpRequestError {
+  return new HttpRequestError(status, formatHttpError(status, raw))
+}
+
 export type ApiRequestOptions = {
   signal?: AbortSignal
 }
 
 async function get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
   const r = await fetch(apiUrl(url), { headers: headers(), cache: 'no-store', signal: options.signal })
-  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
+  if (!r.ok) throw httpError(r.status, await r.text())
   return r.json()
 }
 
@@ -244,7 +259,7 @@ export async function openAgentRunEventStream(
     cache: 'no-store',
     signal,
   })
-  if (!response.ok) throw new Error(formatHttpError(response.status, await response.text()))
+  if (!response.ok) throw httpError(response.status, await response.text())
   if (!response.body) throw new Error('SSE 响应不包含可读取的数据流')
   return response
 }
@@ -255,7 +270,7 @@ async function post<T>(url: string, body?: unknown, extraHeaders?: Record<string
     headers: { ...headers(), 'Content-Type': 'application/json', ...(extraHeaders || {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
+  if (!r.ok) throw httpError(r.status, await r.text())
   return r.json()
 }
 
@@ -265,7 +280,7 @@ async function put<T>(url: string, body?: unknown): Promise<T> {
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
+  if (!r.ok) throw httpError(r.status, await r.text())
   return r.json()
 }
 
@@ -275,13 +290,13 @@ async function patch<T>(url: string, body?: unknown): Promise<T> {
     headers: { ...headers(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
+  if (!r.ok) throw httpError(r.status, await r.text())
   return r.json()
 }
 
 async function del<T>(url: string): Promise<T> {
   const r = await fetch(apiUrl(url), { method: 'DELETE', headers: headers() })
-  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
+  if (!r.ok) throw httpError(r.status, await r.text())
   return r.json()
 }
 
@@ -291,7 +306,7 @@ async function postFormData<T>(url: string, formData: FormData): Promise<T> {
     headers: headers(),
     body: formData,
   })
-  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
+  if (!r.ok) throw httpError(r.status, await r.text())
   return r.json()
 }
 
@@ -340,7 +355,7 @@ function postFormDataWithProgress<T>(
 
 async function getBlob(url: string, options: ApiRequestOptions = {}): Promise<Blob> {
   const r = await fetch(apiUrl(url), { headers: headers(), signal: options.signal })
-  if (!r.ok) throw new Error(formatHttpError(r.status, await r.text()))
+  if (!r.ok) throw httpError(r.status, await r.text())
   return r.blob()
 }
 
@@ -938,7 +953,7 @@ export const api = {
     if (r.status === 409 && !confirm && payload && typeof payload === 'object' && 'detail' in payload) {
       return (payload as { detail: FolderDeleteResult }).detail
     }
-    if (!r.ok) throw new Error(`${r.status}: ${raw}`)
+    if (!r.ok) throw httpError(r.status, raw)
     return payload as FolderDeleteResult
   },
 
