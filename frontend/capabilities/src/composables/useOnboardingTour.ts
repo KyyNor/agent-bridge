@@ -42,13 +42,40 @@ export function useOnboardingTour() {
     }
   }
 
-  function appendSkipButton(popover: PopoverDOM, skip: () => void) {
+  function renderPopoverChrome(popover: PopoverDOM, current: number, total: number, skip: () => void) {
+    let status = popover.wrapper.querySelector<HTMLElement>('[data-tour-status]')
+    if (!status) {
+      status = document.createElement('div')
+      status.dataset.tourStatus = 'true'
+      status.className = 'agent-bridge-tour-status'
+      popover.title.before(status)
+    }
+    status.textContent = `新手指南 · ${current} / ${total}`
+
+    let progressRow = popover.wrapper.querySelector<HTMLElement>('[data-tour-progress-row]')
+    if (!progressRow) {
+      progressRow = document.createElement('div')
+      progressRow.dataset.tourProgressRow = 'true'
+      progressRow.className = 'agent-bridge-tour-progress'
+      const progressElement = document.createElement('progress')
+      progressElement.setAttribute('aria-label', '导览进度')
+      progressRow.append(progressElement, document.createElement('span'))
+      popover.footer.before(progressRow)
+    }
+    const progress = progressRow.querySelector('progress')
+    const progressText = progressRow.querySelector('span')
+    if (progress) {
+      progress.max = total
+      progress.value = current
+    }
+    if (progressText) progressText.textContent = `${current} / ${total}`
+
     if (popover.footerButtons.querySelector('[data-tour-skip]')) return
     const button = document.createElement('button')
     button.type = 'button'
     button.dataset.tourSkip = 'true'
     button.className = 'driver-popover-footer-btn driver-popover-prev-btn agent-bridge-tour-skip'
-    button.textContent = '跳过导览'
+    button.textContent = '退出指南'
     button.addEventListener('click', skip)
     popover.footerButtons.prepend(button)
   }
@@ -72,14 +99,18 @@ export function useOnboardingTour() {
       allowClose: true,
       overlayClickBehavior: 'close',
       smoothScroll: true,
-      showProgress: true,
-      progressText: '{{current}} / {{total}}',
+      showProgress: false,
       nextBtnText: '下一步',
       prevBtnText: '上一步',
       doneBtnText: '完成',
       showButtons: ['next', 'previous', 'close'],
       popoverClass: 'agent-bridge-tour-popover',
-      onPopoverRender: popover => appendSkipButton(popover, () => finish('skipped')),
+      onPopoverRender: (popover, options) => renderPopoverChrome(
+        popover,
+        (options.index ?? 0) + 1,
+        availableSteps.length,
+        () => finish('skipped'),
+      ),
       onNextClick: (_element, _step, options) => {
         if (options.driver.isLastStep()) finish('completed')
         else options.driver.moveNext()

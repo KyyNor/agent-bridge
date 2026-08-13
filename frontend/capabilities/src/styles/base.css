@@ -4,6 +4,10 @@
 
 /* Driver.js 使用现有颜色、圆角与阴影令牌，避免导览成为一套独立视觉语言。 */
 .agent-bridge-tour-popover.driver-popover {
+  width: min(400px, calc(100vw - 32px));
+  min-width: 0;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
   border: 1px solid var(--border);
   border-radius: var(--radius-overlay);
   box-shadow: var(--shadow-pop);
@@ -12,13 +16,81 @@
 }
 
 .agent-bridge-tour-popover .driver-popover-title {
+  margin-top: 12px;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.4;
 }
 
-.agent-bridge-tour-popover .driver-popover-description,
-.agent-bridge-tour-popover .driver-popover-progress-text {
+.agent-bridge-tour-popover .driver-popover-description {
+  margin-top: 8px;
   color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.agent-bridge-tour-popover .driver-popover-close-btn {
+  top: 14px;
+  right: 12px;
+  color: var(--muted-foreground);
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-progress progress {
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-compact);
+  appearance: none;
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-progress progress::-webkit-progress-bar {
+  background: var(--secondary);
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-progress progress::-webkit-progress-value {
+  background: var(--primary);
+  border-radius: var(--radius-compact);
+}
+
+.agent-bridge-tour-popover .agent-bridge-tour-progress progress::-moz-progress-bar {
+  background: var(--primary);
+  border-radius: var(--radius-compact);
+}
+
+.agent-bridge-tour-popover .driver-popover-footer {
+  margin-top: 18px;
+}
+
+.agent-bridge-tour-popover .driver-popover-footer-btn {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .agent-bridge-tour-popover .driver-popover-next-btn {
@@ -37,13 +109,10 @@
 
 .agent-bridge-tour-popover .agent-bridge-tour-skip {
   margin-right: auto;
-  padding: 5px 10px;
-  background: var(--secondary);
-  border: 1px solid var(--muted-foreground);
+  background: var(--popover);
+  border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  box-shadow: var(--shadow-btn);
   color: var(--secondary-foreground);
-  font-weight: 500;
 }
 
 .agent-bridge-tour-popover .agent-bridge-tour-skip:hover,
