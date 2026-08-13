@@ -32,14 +32,26 @@ const emit = defineEmits<{
     </div>
     <div v-if="loading" class="py-4 text-center text-sm text-muted-foreground">加载中</div>
     <div v-else-if="!runs.length" class="rounded-md border px-4 py-6 text-sm text-muted-foreground">暂无运行记录</div>
-    <div v-else class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-      <button v-for="run in runs" :key="run.run_id" class="list-row-interactive rounded-md border px-3 py-2 text-left" @click="emit('open', run.run_id)">
-        <div class="flex items-center justify-between gap-2">
-          <span class="truncate font-mono text-xs">{{ run.run_id }}</span>
-          <Badge :variant="run.status === 'completed' ? 'secondary' : 'outline'" :class="badgeClass(run.status)">{{ statusLabel(run.status) }}</Badge>
-        </div>
-        <div class="mt-1 text-xs text-muted-foreground">{{ formatDatetime(run.started_at) }}</div>
-      </button>
+    <div v-else class="overflow-hidden rounded-md border border-border">
+      <div class="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_120px_150px] gap-4 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground md:grid">
+        <span>运行 ID</span>
+        <span>任务</span>
+        <span>状态</span>
+        <span>开始时间</span>
+      </div>
+      <div class="divide-y">
+        <button
+          v-for="run in runs"
+          :key="run.run_id"
+          class="list-row-interactive grid w-full gap-1 px-3 py-3 text-left md:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_120px_150px] md:items-center md:gap-4"
+          @click="emit('open', run.run_id)"
+        >
+          <span class="truncate font-mono text-xs text-foreground">{{ run.run_id }}</span>
+          <span class="truncate text-xs text-muted-foreground">{{ run.task_key || '手动运行' }}</span>
+          <span><Badge :variant="run.status === 'completed' ? 'secondary' : 'outline'" :class="badgeClass(run.status)">{{ statusLabel(run.status) }}</Badge></span>
+          <span class="text-xs text-muted-foreground">{{ formatDatetime(run.started_at) }}</span>
+        </button>
+      </div>
     </div>
     <PaginationBar
       v-if="runs.length"

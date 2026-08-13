@@ -490,7 +490,14 @@ const {
   },
 })
 
-const pendingTaskCount = computed(() => (taskStats.value.pending || 0) + (taskStats.value.failed || 0) + (taskStats.value.abandoned || 0))
+// “需要处理”与队列可执行状态保持一致：stale 表示定义已变更、等待增量执行，
+// 不能因其不是 pending 而从详情页的待处理数字中漏掉。
+const pendingTaskCount = computed(() =>
+  (taskStats.value.pending || 0)
+  + (taskStats.value.stale || 0)
+  + (taskStats.value.failed || 0)
+  + (taskStats.value.abandoned || 0),
+)
 const detailTabs = computed(() => [
   { key: 'overview', label: '概览' },
   { key: 'tasks', label: '任务队列', count: pendingTaskCount.value || undefined },
