@@ -34,7 +34,7 @@ test('workflow detail implements the approved layered workbench without replacin
   assert.match(file, /detailTab === 'overview'/)
   assert.match(file, /detailTab === 'artifacts'/)
   assert.match(file, /detailTab === 'runs'/)
-  assert.match(file, /routeMode === 'tasks' \|\| \(routeMode === 'detail' && detailTab === 'tasks'\)/)
+  assert.match(file, /routeMode === 'tasks' \|\| \(routeMode === 'detail' && detailTab === 'tasks' && !workflowDetailTourPreview\)/)
   assert.match(progress, /router\.push\(`\/workflow\/\$\{item\.workflow_key\}\/progress\/\$\{run\.run_id\}`\)/)
 })
 

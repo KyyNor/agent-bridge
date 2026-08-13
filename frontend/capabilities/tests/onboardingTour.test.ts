@@ -55,7 +55,7 @@ test('onboarding controller separates sidebar replay from automatic per-user per
   assert.match(styles, /\.agent-bridge-tour-popover \.agent-bridge-tour-skip:focus-visible/)
   assert.match(sidebarButton, /onboardingTourForRoute\(route\.name, route\.params\.routeKey\)/)
   assert.match(sidebarButton, /startTour\(tour\.value\)/)
-  assert.match(sidebarButton, /当前页面指南/)
+  assert.match(sidebarButton, /查看指南/)
   assert.match(sidebarButton, /当前页面暂未配置指南/)
   assert.match(app, /<SidebarTourButton \/>/)
   assert.doesNotMatch(view, /TourReplayButton/)
@@ -96,8 +96,8 @@ test('additional management tours are independently versioned and use stable anc
   ]
   assert.equal(new Set(tours.map(tour => tour.key)).size, tours.length)
   for (const tour of tours) {
-    assert.equal(tour.version, 1)
-    assert.ok(tour.steps.length >= 2 && tour.steps.length <= 5)
+    assert.ok(Number.isInteger(tour.version) && tour.version >= 1)
+    assert.ok(tour.steps.length >= 2 && tour.steps.length <= 8)
     for (const step of tour.steps) assert.match(step.element, /^\[data-tour="[a-z0-9-]+"\]$/)
   }
 })
@@ -124,4 +124,23 @@ test('management pages wait for stable loading and keep their automatic tour anc
     assert.match(source, /data-tour=/)
     assert.doesNotMatch(source, /TourReplayButton/)
   }
+})
+
+test('workflow tours open temporary previews and clean them up without changing business data', () => {
+  const definitions = readFileSync(resolve(root, 'src/lib/onboardingTours.ts'), 'utf8')
+  const controller = readFileSync(resolve(root, 'src/composables/useOnboardingTour.ts'), 'utf8')
+  const workflow = readFileSync(resolve(root, 'src/views/workflow/WorkflowView.vue'), 'utf8')
+  const preview = readFileSync(resolve(root, 'src/views/workflow/WorkflowDetailTourPreview.vue'), 'utf8')
+
+  assert.match(definitions, /startAction: 'workflow-editor:agent-preview:start'/)
+  assert.match(definitions, /endAction: 'workflow-editor:agent-preview:stop'/)
+  assert.match(definitions, /data-tour="workflow-editor-agent-panel"/)
+  for (const tab of ['overview', 'tasks', 'artifacts', 'runs', 'versions']) {
+    assert.match(definitions, new RegExp(`action: 'workflow-detail:preview:${tab}'`))
+  }
+  assert.match(controller, /dispatchTourAction\(tour\.startAction\)/)
+  assert.match(controller, /dispatchTourAction\(tour\.endAction\)/)
+  assert.match(workflow, /workflowEditorTourAgentNode/)
+  assert.match(workflow, /workflowDetailTourPreview/)
+  assert.match(preview, /以下为临时示例数据，退出指南后恢复真实页面/)
 })

@@ -8,6 +8,8 @@ export type TourPopover = {
 export type ProductTourStep = {
   element: string
   popover: TourPopover
+  /** 进入步骤时通知当前页面切换演示状态；不写入业务数据。 */
+  action?: string
 }
 
 /** 导览脚本与用户完成状态解耦：变更 version 即可向已完成用户重新展示。 */
@@ -16,7 +18,11 @@ export type ProductTourDefinition = {
   version: number
   name: string
   steps: ProductTourStep[]
+  startAction?: string
+  endAction?: string
 }
+
+export const PRODUCT_TOUR_ACTION_EVENT = 'agent-bridge:product-tour-action'
 
 export const workflowFirstUseTour: ProductTourDefinition = {
   key: 'workflow-first-use',
@@ -91,20 +97,29 @@ export const profileConfigFirstUseTour: ProductTourDefinition = {
 }
 
 export const workflowEditorFirstUseTour: ProductTourDefinition = {
-  key: 'workflow-editor-first-use', version: 1, name: '工作流编辑器新手指南',
+  key: 'workflow-editor-first-use', version: 2, name: '工作流编辑器新手指南',
+  startAction: 'workflow-editor:agent-preview:start',
+  endAction: 'workflow-editor:agent-preview:stop',
   steps: [
     { element: '[data-tour="workflow-editor-palette"]', popover: { title: '从节点调色板开始', description: '将节点加入画布，再用连线表达依赖或条件分支。总结型工作流会保留其系统输出节点。', side: 'bottom', align: 'start' } },
     { element: '[data-tour="workflow-editor-canvas"]', popover: { title: '在画布编排依赖', description: '点击节点或连线可在右侧编辑其配置；画布空白处可返回工作流信息。', side: 'right', align: 'start' } },
+    { element: '[data-tour="workflow-editor-agent-panel"]', popover: { title: '配置 Agent 节点', description: '这里设置提示词、执行后端、Profile MCP、超时、输出模式和技能。面板中的内容是指南示例，不会改动当前工作流。', side: 'left', align: 'start' } },
     { element: '[data-tour="workflow-editor-actions"]', popover: { title: '验证后保存或测试', description: '可先用 AI 设计生成草案或测试运行；保存时可选择是否安排受影响任务增量刷新。', side: 'bottom', align: 'end' } },
   ],
 }
 
 export const workflowDetailFirstUseTour: ProductTourDefinition = {
-  key: 'workflow-detail-first-use', version: 1, name: '工作流详情新手指南',
+  key: 'workflow-detail-first-use', version: 2, name: '工作流详情新手指南',
+  startAction: 'workflow-detail:preview:overview',
+  endAction: 'workflow-detail:preview:stop',
   steps: [
     { element: '[data-tour="workflow-detail-actions"]', popover: { title: '从这里运行或维护', description: '可直接运行工作流；导入、导出、编辑和清空等维护操作也集中在页头右侧。', side: 'bottom', align: 'end' } },
     { element: '[data-tour="workflow-detail-summary"]', popover: { title: '先看运行概况', description: '这里汇总最近运行、待处理任务、当前产物和依赖节点，便于快速判断下一步。', side: 'bottom', align: 'start' } },
-    { element: '[data-tour="workflow-detail-tabs"]', popover: { title: '按任务、产物和运行深入查看', description: '通过标签页管理任务队列、检索工作流产物、查看运行记录，并追溯版本历史。', side: 'bottom', align: 'start' } },
+    { element: '[data-tour="workflow-detail-tour-preview"]', action: 'workflow-detail:preview:overview', popover: { title: '概览：掌握当前状态', description: '示例数据展示工作流图、最近运行、最新产物和下一步建议，适合每次进入时先快速检查。', side: 'top', align: 'start' } },
+    { element: '[data-tour="workflow-detail-tour-preview"]', action: 'workflow-detail:preview:tasks', popover: { title: '任务队列：处理待办', description: '示例任务演示待处理、增量更新与失败状态；真实页面可筛选、批量选择并运行或刷新任务。', side: 'top', align: 'start' } },
+    { element: '[data-tour="workflow-detail-tour-preview"]', action: 'workflow-detail:preview:artifacts', popover: { title: '工作流产物：查找输出', description: '示例目录展示 Markdown、HTML 等输出；真实页面支持按路径、格式和关键词检索并查看历史。', side: 'top', align: 'start' } },
+    { element: '[data-tour="workflow-detail-tour-preview"]', action: 'workflow-detail:preview:runs', popover: { title: '运行记录：定位一次执行', description: '示例记录展示成功与失败运行；打开真实记录可继续查看节点进度、Agent 事件与错误上下文。', side: 'top', align: 'start' } },
+    { element: '[data-tour="workflow-detail-tour-preview"]', action: 'workflow-detail:preview:versions', popover: { title: '版本历史：追溯变更', description: '示例版本展示保存来源与变更摘要；真实页面可以比较定义差异，并按需恢复历史版本。', side: 'top', align: 'start' } },
   ],
 }
 

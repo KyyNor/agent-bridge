@@ -23,13 +23,13 @@ function openTour() {
     type="button"
     variant="outline"
     size="sm"
-    class="h-8 w-full justify-start gap-2 text-xs"
+    class="h-8 w-full justify-start gap-2 text-xs hover:border-primary/30 hover:bg-accent hover:text-accent-foreground"
     :disabled="!tour"
     :title="hint"
     :aria-label="hint"
     @click="openTour"
   >
     <CircleHelp :size="14" />
-    当前页面指南
+    查看指南
   </Button>
 </template>

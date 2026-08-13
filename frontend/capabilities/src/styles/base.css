@@ -96,6 +96,19 @@
   text-shadow: none;
 }
 
+.agent-bridge-tour-popover .driver-popover-next-btn:hover,
+.agent-bridge-tour-popover .driver-popover-next-btn:focus {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  filter: brightness(0.92);
+}
+
+.agent-bridge-tour-popover .driver-popover-next-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .agent-bridge-tour-popover .driver-popover-prev-btn {
   border-radius: var(--radius-control);
   color: var(--muted-foreground);

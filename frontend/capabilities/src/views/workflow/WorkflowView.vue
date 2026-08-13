@@ -22,6 +22,7 @@ import WorkflowArtifactDialogs from '../../components/workflow/WorkflowArtifactD
 import WorkflowDesignerDrawer from '../../components/workflow/WorkflowDesignerDrawer.vue'
 import WorkflowTaskToolbar from '../../components/workflow/WorkflowTaskToolbar.vue'
 import WorkflowRunHistory from '../../components/workflow/WorkflowRunHistory.vue'
+import WorkflowDetailTourPreview from './WorkflowDetailTourPreview.vue'
 import WorkflowEditorCanvas from './WorkflowEditorCanvas.vue'
 import WorkflowNodePalette from './WorkflowNodePalette.vue'
 import WorkflowConfigDrawer from './WorkflowConfigDrawer.vue'
@@ -59,7 +60,7 @@ import { useWorkflowTasks } from '../../composables/useWorkflowTasks'
 import { useWorkflowRunProgress } from '../../composables/useWorkflowRunProgress'
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
-import { workflowDetailFirstUseTour, workflowEditorFirstUseTour, workflowFirstUseTour } from '../../lib/onboardingTours'
+import { PRODUCT_TOUR_ACTION_EVENT, workflowDetailFirstUseTour, workflowEditorFirstUseTour, workflowFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 import { isSharedResourceReadOnly } from '../../lib/resourceAccess'
 
@@ -84,6 +85,31 @@ const error = ref('')
 const workflowDetailError = ref('')
 const showClearConfirm = ref(false)
 const detailTab = ref<'overview' | 'tasks' | 'artifacts' | 'runs' | 'versions'>('overview')
+const workflowDetailTourPreview = ref(false)
+let detailTabBeforeTour = detailTab.value
+const workflowEditorTourAgentPreview = ref(false)
+const workflowEditorTourAgentNode = ref<WorkflowNode>({
+  id: 'tour-agent-preview',
+  type: 'agent',
+  name: '分析资料并生成结论',
+  position: { x: 0, y: 0 },
+  config: {
+    prompt: '结合任务输入与上游资料，提取关键事实、风险和下一步建议。',
+    backend_key: 'codex',
+    mcp_enabled: true,
+    skill_names: [],
+    timeout_seconds: 600,
+    result_mode: 'json',
+    output_schema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: '结论摘要' },
+        risks: { type: 'array', items: { type: 'string' }, description: '风险列表' },
+      },
+      required: ['summary'],
+    },
+  },
+})
 const taskWorkflowKey = ref('')
 const clearing = ref(false)
 const clearTarget = ref<WorkflowDefinition | null>(null)
@@ -506,7 +532,39 @@ const detailTabs = computed(() => [
   { key: 'versions', label: '版本历史' },
 ])
 const pagedWorkflows = computed(() => paginate(workflows.value, workflowPage.value, workflowPageSize.value))
+
+function handleProductTourAction(event: Event) {
+  const action = (event as CustomEvent<{ action?: string }>).detail?.action || ''
+  if (action === 'workflow-editor:agent-preview:start') {
+    workflowEditorTourAgentPreview.value = true
+    workflowEditorTourAgentNode.value = {
+      ...workflowEditorTourAgentNode.value,
+      config: { ...workflowEditorTourAgentNode.value.config, backend_key: defaultBackend.value },
+    } as WorkflowNode
+    return
+  }
+  if (action === 'workflow-editor:agent-preview:stop') {
+    workflowEditorTourAgentPreview.value = false
+    return
+  }
+  if (action === 'workflow-detail:preview:stop') {
+    workflowDetailTourPreview.value = false
+    detailTab.value = detailTabBeforeTour
+    return
+  }
+  const previewTab = action.match(/^workflow-detail:preview:(overview|tasks|artifacts|runs|versions)$/)?.[1]
+  if (!previewTab) return
+  if (!workflowDetailTourPreview.value) detailTabBeforeTour = detailTab.value
+  workflowDetailTourPreview.value = true
+  detailTab.value = previewTab as typeof detailTab.value
+}
+
+function replaceTourAgentNode(node: WorkflowNode) {
+  workflowEditorTourAgentNode.value = node
+}
+
 onMounted(async () => {
+  window.addEventListener(PRODUCT_TOUR_ACTION_EVENT, handleProductTourAction)
   const [, actor] = await Promise.all([loadAll(), api.getAccessContext()])
   actorContext.value = actor
   await applyRoute()
@@ -533,6 +591,7 @@ watch(
 )
 
 onUnmounted(() => {
+  window.removeEventListener(PRODUCT_TOUR_ACTION_EVENT, handleProductTourAction)
   stopTestPolling()
   stopProgressAgentEventStream()
   cancelBatchQueue()
@@ -1199,7 +1258,9 @@ async function confirmClearWorkflow() {
 
           <SegmentedTabs v-model="detailTab" :tabs="detailTabs" data-tour="workflow-detail-tabs" @update:model-value="selectDetailTab" />
 
-          <div v-if="detailTab === 'overview'" class="space-y-4">
+          <WorkflowDetailTourPreview v-if="workflowDetailTourPreview" :tab="detailTab" />
+
+          <div v-if="detailTab === 'overview' && !workflowDetailTourPreview" class="space-y-4">
             <div class="grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.7fr)]">
               <Card v-if="selectedWorkflow.definition" class="shadow-card">
                 <CardContent class="p-4">
@@ -1237,7 +1298,7 @@ async function confirmClearWorkflow() {
           </div>
 
           <WorkflowArtifactBrowser
-            v-if="detailTab === 'artifacts'"
+            v-if="detailTab === 'artifacts' && !workflowDetailTourPreview"
             v-model:query="artifactQuery"
             v-model:path-match="artifactPathMatch"
             v-model:page="artifactPage"
@@ -1257,7 +1318,7 @@ async function confirmClearWorkflow() {
           />
 
           <WorkflowRunHistory
-            v-if="detailTab === 'runs'"
+            v-if="detailTab === 'runs' && !workflowDetailTourPreview"
             v-model:page="runPage"
             v-model:page-size="runPageSize"
             :runs="runs"
@@ -1270,7 +1331,7 @@ async function confirmClearWorkflow() {
             @refresh="loadRuns(selectedWorkflow.workflow_key)"
             @open="openProgress(selectedWorkflow, $event)"
           />
-          <section v-if="detailTab === 'versions'" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
+          <section v-if="detailTab === 'versions' && !workflowDetailTourPreview" class="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-semibold">版本历史</h3>
               <span v-if="selectedWorkflow?.revision_no" class="rounded bg-secondary px-2 py-0.5 font-mono text-xs text-muted-foreground">当前 v{{ selectedWorkflow.revision_no }}</span>
@@ -1355,7 +1416,7 @@ async function confirmClearWorkflow() {
     />
 
     <WorkflowTaskImportDialog
-      v-if="routeMode === 'tasks' || (routeMode === 'detail' && detailTab === 'tasks')"
+      v-if="routeMode === 'tasks' || (routeMode === 'detail' && detailTab === 'tasks' && !workflowDetailTourPreview)"
       v-model:open="showTaskImport"
       :preview="taskImportPreview"
       :loading="taskImportLoading"
@@ -1367,7 +1428,7 @@ async function confirmClearWorkflow() {
       @confirm="confirmTaskImport"
     />
 
-    <section v-if="(routeMode === 'tasks' || (routeMode === 'detail' && detailTab === 'tasks')) && !routeError" class="space-y-4">
+    <section v-if="(routeMode === 'tasks' || (routeMode === 'detail' && detailTab === 'tasks' && !workflowDetailTourPreview)) && !routeError" class="space-y-4">
       <div v-if="routeMode === 'tasks'" class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-3">
           <Button variant="ghost" size="sm" class="h-8 px-2" @click="goDetail">
@@ -1927,8 +1988,25 @@ async function confirmClearWorkflow() {
 
         <!-- ============ 右栏：选中节点/边时显示配置，否则显示工作流信息（互斥） ============ -->
         <div class="space-y-4">
+          <Card v-if="workflowEditorTourAgentPreview" data-tour="workflow-editor-agent-panel" class="shadow-card">
+            <CardContent class="space-y-3 p-4">
+              <div class="flex items-center justify-between gap-2 border-b pb-2">
+                <div><Badge class="mb-1 bg-info-soft text-info-soft-fg">指南示例</Badge><div class="text-sm font-semibold">Agent 节点配置</div></div>
+                <span class="text-xs text-muted-foreground">不会写入工作流</span>
+              </div>
+              <WorkflowNodeConfigPanel
+                :node="workflowEditorTourAgentNode"
+                :scripts="scripts"
+                :skills="skills"
+                :backends="backendKeys"
+                :reference-items="[]"
+                :issues="[]"
+                @replace="replaceTourAgentNode"
+              />
+            </CardContent>
+          </Card>
           <!-- 配置态：选中节点/边且 overlay 模式时，整栏只显示配置（元数据隐藏） -->
-          <Card v-if="(selectedNode || selectedEdge) && configDrawerOpen && configDrawerMode === 'overlay'" class="shadow-card">
+          <Card v-else-if="(selectedNode || selectedEdge) && configDrawerOpen && configDrawerMode === 'overlay'" class="shadow-card">
             <CardContent class="space-y-3 p-4">
               <div class="flex items-center justify-between gap-2 border-b pb-2">
                 <div class="min-w-0">

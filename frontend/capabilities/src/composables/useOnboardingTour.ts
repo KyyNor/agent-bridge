@@ -2,12 +2,20 @@ import { nextTick, onUnmounted } from 'vue'
 import { driver, type DriveStep, type Driver, type PopoverDOM } from 'driver.js'
 import { api } from '../api/client'
 import type { OnboardingTourStatus } from '../api/types'
-import type { ProductTourDefinition, ProductTourStep } from '../lib/onboardingTours'
+import { PRODUCT_TOUR_ACTION_EVENT, type ProductTourDefinition, type ProductTourStep } from '../lib/onboardingTours'
 
 const TOUR_TARGET_WAIT_FRAMES = 12
 
 function toDriverStep(step: ProductTourStep): DriveStep {
-  return { element: step.element, popover: step.popover }
+  return {
+    element: step.element,
+    popover: step.popover,
+    onHighlightStarted: step.action ? () => dispatchTourAction(step.action) : undefined,
+  }
+}
+
+function dispatchTourAction(action?: string) {
+  if (action) window.dispatchEvent(new CustomEvent(PRODUCT_TOUR_ACTION_EVENT, { detail: { action } }))
 }
 
 function nextFrame(): Promise<void> {
@@ -92,11 +100,21 @@ export function useOnboardingTour() {
 
   async function startTour(tour: ProductTourDefinition): Promise<boolean> {
     if (activeDriver?.isActive()) return false
+    dispatchTourAction(tour.startAction)
     // 权限、空数据或路由状态可能让某些入口不存在；仅展示已稳定出现的步骤。
     const availableSteps = await waitForTourTargets(tour)
-    if (!availableSteps.length) return false
+    if (!availableSteps.length) {
+      dispatchTourAction(tour.endAction)
+      return false
+    }
 
     let finished = false
+    let cleanedUp = false
+    const cleanup = () => {
+      if (cleanedUp) return
+      cleanedUp = true
+      dispatchTourAction(tour.endAction)
+    }
     const finish = (status: OnboardingTourStatus) => {
       if (finished) return
       finished = true
@@ -132,6 +150,7 @@ export function useOnboardingTour() {
         else tourDriver.destroy()
       },
       onDestroyed: () => {
+        cleanup()
         if (activeDriver === tourDriver) activeDriver = null
       },
     })
