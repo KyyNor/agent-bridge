@@ -42,6 +42,7 @@ export interface NavigationMeta {
   navKey?: string
   title?: string
   hideHeaderOnSubRoute?: boolean
+  backTo?: string
 }
 
 function subRoute(route: RouteLocationNormalized): string {
@@ -60,9 +61,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/', redirect: { name: 'dashboard' } },
   { path: '/dashboard', name: 'dashboard', component: DashboardView, meta: { navKey: 'dashboard', title: '平台概览' } },
   { path: '/services/:routeKey(.*)*', name: 'services', component: ServicesView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'services', title: '能力接入', hideHeaderOnSubRoute: true } },
-  { path: '/tools', name: 'tools', component: ToolsView, meta: { navKey: 'tools', title: '工具目录' } },
+  { path: '/tools', name: 'tools', component: ToolsView, meta: { navKey: 'tools', title: '工具目录', backTo: '/services' } },
   { path: '/profiles/:routeKey(.*)*', name: 'profiles', component: ProfilesView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'profiles', title: '知识平面', hideHeaderOnSubRoute: true } },
-  { path: '/tool-debug', name: 'tool-debug', component: ToolDebugView, meta: { navKey: 'tool-debug', title: '工具调试' } },
+  { path: '/tool-debug', name: 'tool-debug', component: ToolDebugView, meta: { navKey: 'tool-debug', title: '工具调试', backTo: '/services' } },
   { path: '/knowledge/:routeKey(.*)*', name: 'knowledge', component: KnowledgeView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'knowledge', title: '文档知识', hideHeaderOnSubRoute: true } },
   { path: '/code-repos/:routeKey(.*)*', name: 'code-repos', component: CodeRepoView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'code-repos', title: '代码知识', hideHeaderOnSubRoute: true } },
   { path: '/memory/:routeKey(.*)*', name: 'memory', component: MemoryView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'memory', title: '记忆区块', hideHeaderOnSubRoute: true } },

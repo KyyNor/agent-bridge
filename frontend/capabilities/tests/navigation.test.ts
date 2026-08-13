@@ -6,8 +6,7 @@ import { resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const router = readFileSync(resolve(root, 'src/router/index.ts'), 'utf8')
 const app = readFileSync(resolve(root, 'src/App.vue'), 'utf8')
-const toolsView = readFileSync(resolve(root, 'src/views/capabilities/ToolsView.vue'), 'utf8')
-const toolDebugView = readFileSync(resolve(root, 'src/views/capabilities/ToolDebugView.vue'), 'utf8')
+const pageHeader = readFileSync(resolve(root, 'src/components/PageHeader.vue'), 'utf8')
 const viteConfig = readFileSync(resolve(root, 'vite.config.ts'), 'utf8')
 
 test('uses Vue Router History mode and has explicit deep-link routes', () => {
@@ -34,10 +33,12 @@ test('navigation configuration reflects the confirmed information architecture',
   assert.doesNotMatch(app, /key: 'tool-debug', label: '工具调试'/)
 })
 
-test('secondary capability tool pages provide a stable return to capability services', () => {
-  for (const source of [toolsView, toolDebugView]) {
-    assert.match(source, /<ArrowLeft/)
-    assert.match(source, /返回能力接入/)
-    assert.match(source, /router\.push\('\/services'\)/)
-  }
+test('secondary capability tool pages use the shared page-header return pattern', () => {
+  assert.match(router, /path: '\/tools'.*backTo: '\/services'/)
+  assert.match(router, /path: '\/tool-debug'.*backTo: '\/services'/)
+  assert.match(app, /:show-back="Boolean\(navMeta\.backTo\)"/)
+  assert.match(app, /@back="returnToParent"/)
+  assert.match(pageHeader, /v-if="showBack"[^>]*@click="\$emit\('back'\)"/)
+  assert.match(pageHeader, /<ArrowLeft/)
+  assert.match(pageHeader, />\s*返回\s*</)
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RouterView, useRoute } from 'vue-router'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppShell from './components/AppShell.vue'
 import AdminAccessControl from './components/AdminAccessControl.vue'
 import type { NavGroup } from './components/AppShell.vue'
@@ -12,6 +12,7 @@ import { ToastViewport } from './components/ui/toast'
 import { hasSubRoute, type NavigationMeta } from './router'
 
 const route = useRoute()
+const router = useRouter()
 
 // 一级入口不显示分组标题；其余项目沿用现有的信息架构分组。
 const navGroups: NavGroup[] = [
@@ -55,6 +56,10 @@ const navGroups: NavGroup[] = [
 const navMeta = computed(() => route.meta as NavigationMeta)
 const activeNavKey = computed(() => navMeta.value.navKey || '')
 const showPageHeader = computed(() => !navMeta.value.hideHeaderOnSubRoute || !hasSubRoute(route))
+
+function returnToParent() {
+  if (navMeta.value.backTo) void router.push(navMeta.value.backTo)
+}
 </script>
 
 <template>
@@ -66,7 +71,12 @@ const showPageHeader = computed(() => !navMeta.value.hideHeaderOnSubRoute || !ha
       </div>
     </template>
     <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll">
-      <PageHeader v-if="showPageHeader" :title="navMeta.title || 'Agent Bridge'" />
+      <PageHeader
+        v-if="showPageHeader"
+        :title="navMeta.title || 'Agent Bridge'"
+        :show-back="Boolean(navMeta.backTo)"
+        @back="returnToParent"
+      />
       <div class="min-w-0 p-7">
         <RouterView v-slot="{ Component }">
           <AppErrorBoundary :reset-key="route.fullPath">

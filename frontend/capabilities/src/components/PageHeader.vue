@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { ArrowLeft } from '@lucide/vue'
+import { Button } from './ui/button'
+
 /**
  * 统一页头 —— 收敛「标题 + 主操作 + 搜索/筛选」为单页头区，
  * 消灭全局 banner 与各视图内部工具栏的 chrome 冗余。
@@ -18,11 +21,14 @@ withDefaults(
   defineProps<{
     title: string
     description?: string
+    showBack?: boolean
     /** 长表格页开启吸顶 */
     sticky?: boolean
   }>(),
-  { description: '', sticky: false },
+  { description: '', showBack: false, sticky: false },
 )
+
+defineEmits<{ back: [] }>()
 </script>
 
 <template>
@@ -35,9 +41,15 @@ withDefaults(
   >
     <!-- 主行：标题左 / 操作右 -->
     <div class="flex items-start justify-between gap-4 py-3.5">
-      <div class="min-w-0">
-        <h1 class="text-base font-semibold text-foreground">{{ title }}</h1>
-        <p v-if="description" class="mt-0.5 text-[13px] text-muted-foreground">{{ description }}</p>
+      <div class="flex min-w-0 items-start gap-2">
+        <Button v-if="showBack" variant="ghost" size="sm" class="h-8 shrink-0 px-2" @click="$emit('back')">
+          <ArrowLeft :size="14" class="mr-1.5" />
+          返回
+        </Button>
+        <div class="min-w-0">
+          <h1 class="text-base font-semibold text-foreground">{{ title }}</h1>
+          <p v-if="description" class="mt-0.5 text-[13px] text-muted-foreground">{{ description }}</p>
+        </div>
       </div>
       <!-- Teleport 目标：主操作按钮（primary 固定最右） -->
       <div id="ph-actions" class="flex min-h-9 shrink-0 flex-wrap items-center justify-end gap-2 empty:hidden" />
