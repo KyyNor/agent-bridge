@@ -38,7 +38,6 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
-import TourReplayButton from '../../components/TourReplayButton.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
 import { createDefaultGraph, deriveManualInputFields, deriveWorkflowBackendKeys, isProtectedSummaryEdge, migrateWorkflowGraph } from '../../lib/workflowDefinition'
 import { workflowNodeToneClass, workflowNodeTypeText } from '../../lib/workflowNodeVisuals'
@@ -113,7 +112,7 @@ let workflowImportRequestToken = 0
 const routeError = ref('')
 const manualInputValues = ref<Record<string, string>>({})
 const advancedInput = ref('{}')
-const { maybeStartTour, startTour } = useOnboardingTour()
+const { maybeStartTour } = useOnboardingTour()
 
 const {
   form,
@@ -1042,9 +1041,8 @@ async function confirmClearWorkflow() {
     </div>
 
     <template v-if="routeMode === 'list'">
-    <!-- 页头操作：新手指南 + 新建工作流进 #ph-actions（仅列表态） -->
+    <!-- 页头操作：新建与导入工作流进 #ph-actions（仅列表态） -->
     <Teleport v-if="routeMode === 'list'" to="#ph-actions" defer>
-      <TourReplayButton :tour="workflowFirstUseTour" @start="startTour" />
       <Button data-tour="workflow-import" variant="outline" size="lg" @click="openWorkflowImport()">
         <Upload :size="14" />
         导入工作流
@@ -1843,7 +1841,6 @@ async function confirmClearWorkflow() {
             </div>
           </div>
           <div data-tour="workflow-editor-actions" class="flex flex-wrap gap-2">
-            <TourReplayButton :tour="workflowEditorFirstUseTour" @start="startTour" />
             <Button variant="outline" size="sm" :disabled="designing" @click="openWorkflowDesigner('modify')">
               <WandSparkles class="mr-1.5 h-4 w-4" />
               AI 设计

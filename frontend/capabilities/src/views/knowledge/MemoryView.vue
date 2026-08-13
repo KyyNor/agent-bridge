@@ -12,7 +12,6 @@ import { Input } from '../../components/ui/input'
 import StatusBadge from '../../components/StatusBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
-import TourReplayButton from '../../components/TourReplayButton.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
@@ -21,7 +20,7 @@ import { memoryFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
 const props = defineProps<{ routeKey: string }>()
-const { maybeStartTour, startTour } = useOnboardingTour()
+const { maybeStartTour } = useOnboardingTour()
 
 const blocks = ref<MemoryBlock[]>([])
 const page = ref(1)
@@ -282,7 +281,6 @@ function errorMessage(e: unknown) {
     <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态且页头存在时） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
       <!-- 次要操作在前 -->
-      <TourReplayButton :tour="memoryFirstUseTour" @start="startTour" />
       <Button data-tour="memory-refresh" variant="outline" size="lg" :disabled="loading" @click="loadBlocks">
         <RefreshCw :size="14" />
         刷新

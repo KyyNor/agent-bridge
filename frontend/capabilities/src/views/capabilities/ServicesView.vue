@@ -17,7 +17,6 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import CategoryBadge from '../../components/CategoryBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
-import TourReplayButton from '../../components/TourReplayButton.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { registerRouteLeaveGuard } from '../../router/guards'
 import {
@@ -44,7 +43,7 @@ import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../
 
 const props = defineProps<{ routeKey: string }>()
 const router = useRouter()
-const { maybeStartTour, startTour } = useOnboardingTour()
+const { maybeStartTour } = useOnboardingTour()
 
 const mcpServices = ref<McpService[]>([])
 const openApiServices = ref<OpenApiService[]>([])
@@ -509,7 +508,6 @@ const toolTypeOptions = [
     <!-- 页头操作：新建服务进 #ph-actions（仅列表态） -->
     <Teleport v-if="!isFormPage" to="#ph-actions" defer>
       <div class="flex gap-2">
-        <TourReplayButton :tour="servicesFirstUseTour" @start="startTour" />
         <Button variant="outline" size="lg" @click="router.push('/tools')"><Wrench :size="14" />工具目录</Button>
         <Button variant="outline" size="lg" @click="router.push('/tool-debug')"><Bug :size="14" />工具调试</Button>
         <Button data-tour="services-create" size="lg" class="shadow-btn" @click="openCreate"><Plus :size="14" />新建服务</Button>

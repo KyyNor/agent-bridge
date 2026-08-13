@@ -116,3 +116,28 @@ export const scriptsFirstUseTour: ProductTourDefinition = {
     { element: '[data-tour="scripts-editor-actions"]', popover: { title: '保存与测试运行', description: '编辑页提供 AI 设计、保存和运行操作；先保存可确保测试基于最新版本。', side: 'bottom', align: 'end' } },
   ],
 }
+
+function routeSegments(routeKey: unknown): string[] {
+  const raw = Array.isArray(routeKey) ? routeKey.join('/') : typeof routeKey === 'string' ? routeKey : ''
+  return raw.split('?', 1)[0].split('/').filter(Boolean)
+}
+
+/** 根据当前页面选择可手动重播的导览；详情页未配置导览时返回 null。 */
+export function onboardingTourForRoute(routeName: unknown, routeKey: unknown): ProductTourDefinition | null {
+  const name = typeof routeName === 'string' ? routeName : ''
+  const segments = routeSegments(routeKey)
+
+  if (name === 'workflow') {
+    if (segments.length === 0) return workflowFirstUseTour
+    if (segments[0] === 'new' || segments[1] === 'edit') return workflowEditorFirstUseTour
+    return null
+  }
+  if (name === 'profiles') return segments.length > 0 ? profileConfigFirstUseTour : null
+  if (name === 'scripts') return scriptsFirstUseTour
+  if (name === 'tool-debug') return toolDebugFirstUseTour
+  if (segments.length > 0) return null
+  if (name === 'knowledge') return knowledgeFirstUseTour
+  if (name === 'services') return servicesFirstUseTour
+  if (name === 'memory') return memoryFirstUseTour
+  return null
+}

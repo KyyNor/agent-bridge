@@ -6,6 +6,7 @@ import AdminAccessControl from './components/AdminAccessControl.vue'
 import type { NavGroup } from './components/AppShell.vue'
 import AppErrorBoundary from './components/AppErrorBoundary.vue'
 import PageHeader from './components/PageHeader.vue'
+import SidebarTourButton from './components/SidebarTourButton.vue'
 import ConfirmDialog from './components/ui/dialog/ConfirmDialog.vue'
 import { ToastViewport } from './components/ui/toast'
 import { hasSubRoute, type NavigationMeta } from './router'
@@ -54,7 +55,12 @@ const showPageHeader = computed(() => !navMeta.value.hideHeaderOnSubRoute || !ha
 
 <template>
   <AppShell :nav-groups="navGroups" :active="activeNavKey">
-    <template #footer><AdminAccessControl /></template>
+    <template #footer>
+      <div class="space-y-2">
+        <SidebarTourButton />
+        <AdminAccessControl />
+      </div>
+    </template>
     <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll">
       <PageHeader v-if="showPageHeader" :title="navMeta.title || 'Agent Bridge'" />
       <div class="min-w-0 p-7">

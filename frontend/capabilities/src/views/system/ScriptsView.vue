@@ -39,7 +39,6 @@ import {
 import { formatLocalDatetime, formatDuration } from '../../lib/time'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
-import TourReplayButton from '../../components/TourReplayButton.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { registerRouteLeaveGuard } from '../../router/guards'
 import { scriptsFirstUseTour } from '../../lib/onboardingTours'
@@ -57,7 +56,7 @@ const error = ref('')
 const showGuide = ref(false)
 const scriptPage = ref(1)
 const scriptPageSize = ref(10)
-const { maybeStartTour, startTour } = useOnboardingTour()
+const { maybeStartTour } = useOnboardingTour()
 
 // 编辑模式表单状态
 const form = ref<ScriptEditableFields>(emptyForm())
@@ -766,7 +765,6 @@ function errorMessage(e: unknown) {
   <div v-if="mode === 'list'" class="space-y-5">
     <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
-      <TourReplayButton :tour="scriptsFirstUseTour" @start="startTour" />
       <Button data-tour="scripts-create" size="lg" class="shadow-btn" @click="openCreate">
         <Plus :size="14" />
         新建脚本
@@ -946,8 +944,7 @@ def main(envelope):
             </div>
           </div>
         </div>
-          <div data-tour="scripts-editor-actions" class="flex flex-wrap gap-2">
-            <TourReplayButton :tour="scriptsFirstUseTour" @start="startTour" />
+        <div data-tour="scripts-editor-actions" class="flex flex-wrap gap-2">
           <Button v-if="isBuiltInScript" variant="outline" size="sm" :disabled="saving || testing" @click="resetBuiltInScript">
             <RotateCcw class="mr-1.5 h-4 w-4" />
             恢复默认

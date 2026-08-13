@@ -16,7 +16,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../../components/ui/textarea'
 import CategoryBadge from '../../components/CategoryBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
-import TourReplayButton from '../../components/TourReplayButton.vue'
 import { toolDebugFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 
@@ -51,7 +50,7 @@ const selectedToolName = ref('')
 const paramsText = ref('{\n  \n}')
 
 const activeProfiles = computed(() => profiles.value.filter(profile => profile.status === 'active'))
-const { maybeStartTour, startTour } = useOnboardingTour()
+const { maybeStartTour } = useOnboardingTour()
 
 const selectedService = computed(() => {
   return services.value.find(service => serviceId(service) === selectedServiceId.value) || null
@@ -295,9 +294,6 @@ function errorMessage(e: unknown) {
 <template>
   <div v-if="loading" class="py-12 text-center text-sm text-muted-foreground">加载中...</div>
   <div v-else class="space-y-5">
-    <div class="flex justify-end">
-      <TourReplayButton :tour="toolDebugFirstUseTour" @start="startTour" />
-    </div>
     <div v-if="error" class="rounded-md border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive-soft-fg">
       {{ error }}
     </div>

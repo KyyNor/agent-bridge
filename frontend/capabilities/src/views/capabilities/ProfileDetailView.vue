@@ -21,7 +21,6 @@ import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import StatusBadge from '../../components/StatusBadge.vue'
 import SearchableMultiSelect, { type SearchableMultiSelectOption } from '../../components/SearchableMultiSelect.vue'
-import TourReplayButton from '../../components/TourReplayButton.vue'
 import { profileConfigDraftKey, type ProfileConfigDraft } from './profileConfigSnapshot'
 import { profileConfigFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
@@ -30,7 +29,7 @@ const props = defineProps<{
   profileKey: string
   profile: ProjectProfile | null
 }>()
-const { maybeStartTour, startTour } = useOnboardingTour()
+const { maybeStartTour } = useOnboardingTour()
 
 const emit = defineEmits<{
   saved: []
@@ -570,7 +569,6 @@ async function refreshProfileDoc(raiseError = false) {
           <p v-if="configProfile.description" class="mt-1 text-xs text-muted-foreground">{{ configProfile.description }}</p>
         </div>
       </div>
-      <TourReplayButton :tour="profileConfigFirstUseTour" @start="startTour" />
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto pr-1">

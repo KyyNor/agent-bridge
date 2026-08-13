@@ -13,7 +13,6 @@ import { Input } from '../../components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import PaginationBar from '../../components/PaginationBar.vue'
-import TourReplayButton from '../../components/TourReplayButton.vue'
 import FolderTree from '../../components/knowledge/FolderTree.vue'
 import KnowledgeDefaultBackendPanel from '../../components/knowledge/KnowledgeDefaultBackendPanel.vue'
 import KnowledgeDocumentDetailDialog from '../../components/knowledge/KnowledgeDocumentDetailDialog.vue'
@@ -31,7 +30,7 @@ import { knowledgeFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
 import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 const props = defineProps<{ routeKey: string }>()
-const { maybeStartTour, startTour } = useOnboardingTour()
+const { maybeStartTour } = useOnboardingTour()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
 const pagedKbs = computed(() => paginate(kbs.value, page.value, pageSize.value))
 const kbs = ref<KnowledgeBaseSummary[]>([])
@@ -759,7 +758,6 @@ function syncBadgeLabel(status?: string | null) {
     <template v-if="mode === 'list'">
     <!-- 页头操作：Teleport 进全局 PageHeader 的 #ph-actions（仅列表态） -->
     <Teleport v-if="mode === 'list'" to="#ph-actions" defer>
-      <TourReplayButton :tour="knowledgeFirstUseTour" @start="startTour" />
       <Button data-tour="knowledge-refresh" variant="outline" size="lg" @click="loadKbs({ fresh: true })">
         <RotateCw :size="14" />
         刷新
