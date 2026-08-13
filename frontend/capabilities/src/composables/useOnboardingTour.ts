@@ -57,16 +57,26 @@ export function useOnboardingTour() {
       progressRow = document.createElement('div')
       progressRow.dataset.tourProgressRow = 'true'
       progressRow.className = 'agent-bridge-tour-progress'
-      const progressElement = document.createElement('progress')
-      progressElement.setAttribute('aria-label', '导览进度')
-      progressRow.append(progressElement, document.createElement('span'))
+      const progressTrack = document.createElement('div')
+      progressTrack.dataset.tourProgressTrack = 'true'
+      progressTrack.className = 'agent-bridge-tour-progress-track'
+      progressTrack.setAttribute('role', 'progressbar')
+      progressTrack.setAttribute('aria-label', '导览进度')
+      progressTrack.setAttribute('aria-valuemin', '1')
+      progressRow.append(progressTrack, document.createElement('output'))
       popover.footer.before(progressRow)
     }
-    const progress = progressRow.querySelector('progress')
-    const progressText = progressRow.querySelector('span')
+    const progress = progressRow.querySelector<HTMLElement>('[data-tour-progress-track]')
+    const progressText = progressRow.querySelector('output')
     if (progress) {
-      progress.max = total
-      progress.value = current
+      progress.setAttribute('aria-valuemax', String(total))
+      progress.setAttribute('aria-valuenow', String(current))
+      if (progress.children.length !== total) {
+        progress.replaceChildren(...Array.from({ length: total }, () => document.createElement('span')))
+      }
+      Array.from(progress.children).forEach((segment, index) => {
+        segment.classList.toggle('is-complete', index < current)
+      })
     }
     if (progressText) progressText.textContent = `${current} / ${total}`
 
