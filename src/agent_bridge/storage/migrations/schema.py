@@ -447,6 +447,7 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         {
             "default_backend_slug": "TEXT",
             "default_agent_id": "TEXT",
+            "sync_on_upload": "INTEGER NOT NULL DEFAULT 0",
         },
     )
     store._ensure_columns(

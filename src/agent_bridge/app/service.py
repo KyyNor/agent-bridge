@@ -452,6 +452,7 @@ class AgentBridgeService:
         description: str,
         *,
         visibility: str = "group",
+        sync_on_upload: bool = False,
     ) -> dict[str, Any]:
         scope = self.access.new_resource_scope(actor=actor, visibility=visibility or "group")
         kb = self.store.create_kb(
@@ -461,9 +462,10 @@ class AgentBridgeService:
             created_by=actor,
             owner_group_key=scope.owner_group_key,
             visibility=scope.visibility.value,
+            sync_on_upload=sync_on_upload,
         )
         self.docs_knowledge.provision_kb(kb)
-        return kb
+        return self._serialize_kb(kb)
 
     def delete_kb(self, actor: str, kb_slug: str) -> dict[str, Any]:
         """硬删除一个知识库。
@@ -503,7 +505,7 @@ class AgentBridgeService:
 
     def list_kbs(self, actor: str) -> list[dict[str, Any]]:
         return [
-            attach_edit_token(kb, self._kb_defaults_edit_snapshot(kb))
+            attach_edit_token(self._serialize_kb(kb), self._kb_defaults_edit_snapshot(kb))
             for kb in self.access.visible_resources(
                 actor=actor,
                 resource_type=ScopedResourceType.knowledge_base,
@@ -1572,7 +1574,15 @@ class AgentBridgeService:
         )
         self.store.update_kb_defaults(kb["id"], default_backend_slug, default_agent_id)
         saved = self.store.get_kb_by_slug(kb_slug)
-        return attach_edit_token(saved or {}, self._kb_defaults_edit_snapshot(saved))
+        return attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
+
+    @staticmethod
+    def _serialize_kb(kb: dict[str, Any] | None) -> dict[str, Any]:
+        """将 SQLite 的知识库布尔字段规范为 API 布尔值。"""
+        payload = dict(kb or {})
+        if "sync_on_upload" in payload:
+            payload["sync_on_upload"] = bool(payload["sync_on_upload"])
+        return payload
 
     @staticmethod
     def _kb_defaults_edit_snapshot(kb: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1581,7 +1591,28 @@ class AgentBridgeService:
         return {
             "default_backend_slug": kb.get("default_backend_slug"),
             "default_agent_id": kb.get("default_agent_id"),
+            "sync_on_upload": bool(kb.get("sync_on_upload")),
         }
+
+    def update_kb_sync_policy(
+        self,
+        actor: str,
+        kb_slug: str,
+        *,
+        sync_on_upload: bool,
+        expected_edit_token: str | None = None,
+    ) -> dict[str, Any]:
+        kb = self._require_kb_admin_visible(actor, kb_slug)
+        require_edit_token(
+            expected_edit_token,
+            self._kb_defaults_edit_snapshot(kb),
+            resource_type="文档知识库同步策略",
+            resource_key=kb_slug,
+            actor=actor,
+        )
+        self.store.update_kb_sync_policy(kb["id"], sync_on_upload)
+        saved = self.store.get_kb_by_slug(kb_slug)
+        return attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
 
     def resolve_retrieval_strategy(self, kb_slug: str, profile_key: str | None) -> tuple[dict[str, Any], RetrievalStrategy]:
         kb = self.store.get_kb_by_slug(kb_slug)

@@ -17,6 +17,7 @@ from agent_bridge.api.schemas import (
     SyncRequest,
     UpdateFolderRequest,
     UpdateKbDefaultsRequest,
+    UpdateKbSyncPolicyRequest,
     UpsertBackendRequest,
     UpdateBackendRequest,
 )
@@ -80,6 +81,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             payload.name,
             payload.description,
             visibility=payload.visibility,
+            sync_on_upload=payload.sync_on_upload,
         )
 
     @router.get("/kbs")
@@ -184,7 +186,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
         current_actor: str = Depends(actor),
         file: UploadFile = File(),
         kb: list[str] = Form(),
-        later: bool = Form(False),
+        later: bool = Form(True),
         folder_id: int | None = Form(None),
         relative_path: str | None = Form(None),
     ) -> dict[str, Any]:
@@ -220,7 +222,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
         doc_slug: str,
         current_actor: str = Depends(actor),
         file: UploadFile = File(),
-        later: bool = Form(False),
+        later: bool = Form(True),
     ) -> dict[str, Any]:
         upload_path = save_upload(file)
         try:
@@ -301,6 +303,19 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             kb_slug,
             default_backend_slug=payload.default_backend_slug,
             default_agent_id=payload.default_agent_id,
+            expected_edit_token=payload.expected_edit_token,
+        )
+
+    @router.put("/kbs/{kb_slug}/sync-policy")
+    def update_kb_sync_policy(
+        kb_slug: str,
+        payload: UpdateKbSyncPolicyRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.update_kb_sync_policy(
+            current_actor,
+            kb_slug,
+            sync_on_upload=payload.sync_on_upload,
             expected_edit_token=payload.expected_edit_token,
         )
 

@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import PaginationBar from '../../components/PaginationBar.vue'
 import FolderTree from '../../components/knowledge/FolderTree.vue'
 import KnowledgeDefaultBackendPanel from '../../components/knowledge/KnowledgeDefaultBackendPanel.vue'
+import KnowledgeSyncPolicyPanel from '../../components/knowledge/KnowledgeSyncPolicyPanel.vue'
 import KnowledgeDocumentDetailDialog from '../../components/knowledge/KnowledgeDocumentDetailDialog.vue'
 import KnowledgePlaneDialog from '../../components/knowledge/KnowledgePlaneDialog.vue'
 import KnowledgeRepoSourcesPanel from '../../components/knowledge/KnowledgeRepoSourcesPanel.vue'
@@ -326,7 +327,6 @@ async function loadFolderTree(preferredFolderId?: number | null) {
     folderTreeLoading.value = false
   }
 }
-
 function documentFromBrowseEntry(entry: KnowledgeBrowseDocumentEntry): Document {
   return {
     id: entry.doc_id,
@@ -340,13 +340,11 @@ function documentFromBrowseEntry(entry: KnowledgeBrowseDocumentEntry): Document 
     folder_path: browseContext.value?.archive_entry_id == null ? currentFolder.value?.path || null : null,
   }
 }
-
 function browseContextQuery() {
   const context = detailBrowse.value?.context
   if (context?.archive_entry_id != null) return { archiveEntryId: context.archive_entry_id }
   return { folderId: context?.kind === 'folder' ? context.id : selectedFolderId.value ?? undefined }
 }
-
 async function loadBrowse(folderId?: number, archiveEntryId?: number) {
   if (!detailKb.value) return
   browseLoading.value = true
@@ -369,7 +367,6 @@ async function loadBrowse(folderId?: number, archiveEntryId?: number) {
     browseLoading.value = false
   }
 }
-
 async function refreshCurrentDocs() {
   if (!detailKb.value) return
   if (showingAllDocuments.value) {
@@ -386,7 +383,6 @@ async function refreshCurrentDocs() {
   }
   selectedDocSlugs.value = new Set()
 }
-
 async function refreshKnowledgeDetail(preferredFolderId?: number | null) {
   if (!detailKb.value) return
   const [summaryResult, foldersResult, syncStatusResult] = await Promise.allSettled([
@@ -723,13 +719,16 @@ function openPlaneDialog(k: KnowledgeBaseSummary) {
   planeKb.value = k
   showPlaneDialog.value = true
 }
-
 async function updateKnowledgeDefaults(defaults: { default_backend_slug: string | null; default_agent_id: string | null }) {
   if (!detailKb.value) return
   detailKb.value = { ...detailKb.value, ...defaults }
   await loadKbs({ fresh: true })
 }
-
+async function updateKnowledgeSyncPolicy(policy: { sync_on_upload: boolean }) {
+  if (!detailKb.value) return
+  detailKb.value = { ...detailKb.value, ...policy }
+  await loadKbs({ fresh: true })
+}
 // 同步/任务 status → StatusBadge 语义状态
 function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disabled' {
   if (status === 'synced' || status === 'succeeded' || status === 'success') return 'success'
@@ -866,6 +865,7 @@ function syncBadgeLabel(status?: string | null) {
 
       <div v-if="detailKb" v-show="!detailLoading" class="space-y-4">
         <div data-tour="knowledge-detail-backend"><KnowledgeDefaultBackendPanel :kb="detailKb" :backends="backends" :read-only="detailReadOnly" @saved="updateKnowledgeDefaults" /></div>
+        <KnowledgeSyncPolicyPanel :kb="detailKb" :read-only="detailReadOnly" @saved="updateKnowledgeSyncPolicy" />
         <!-- Tabs -->
         <div data-tour="knowledge-detail-tabs" class="flex gap-0.5 rounded-lg bg-secondary p-0.5">
           <button v-for="t in [

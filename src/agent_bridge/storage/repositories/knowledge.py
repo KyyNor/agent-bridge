@@ -48,15 +48,16 @@ class KnowledgeRepository:
         created_by: str,
         owner_group_key: str = "",
         visibility: str = "group",
+        sync_on_upload: bool = False,
     ) -> dict[str, Any]:
         with self._connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO knowledge_bases
-                  (slug, name, description, created_by, owner_group_key, visibility)
-                VALUES (?, ?, ?, ?, ?, ?)
+                  (slug, name, description, created_by, owner_group_key, visibility, sync_on_upload)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (slug, name, description, created_by, owner_group_key, visibility),
+                (slug, name, description, created_by, owner_group_key, visibility, int(sync_on_upload)),
             )
             self._folders.ensure_root_folder(int(cursor.lastrowid), conn=conn)
             return self.get_kb_by_id(cursor.lastrowid, conn)
@@ -1436,4 +1437,15 @@ class KnowledgeRepository:
                 WHERE id = ?
                 """,
                 (default_backend_slug, default_agent_id, kb_id),
+            )
+
+    def update_kb_sync_policy(self, kb_id: int, sync_on_upload: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE knowledge_bases
+                SET sync_on_upload = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (int(sync_on_upload), kb_id),
             )

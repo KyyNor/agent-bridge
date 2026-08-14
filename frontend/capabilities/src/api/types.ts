@@ -1007,6 +1007,7 @@ export interface KnowledgeBaseSummary extends ResourceScopeFields {
   role?: string
   default_backend_slug?: string | null
   default_agent_id?: string | null
+  sync_on_upload: boolean
   edit_token?: string
   backend_targets: { id: number; kb_id: number; slug: string; backend_type: string; backend_kb_id: string | null; config_json: string; status: string; created_at: string; updated_at: string }[]
   document_count: number
@@ -1025,6 +1026,7 @@ export interface KnowledgeBase extends ResourceScopeFields {
   role?: string
   default_backend_slug?: string | null
   default_agent_id?: string | null
+  sync_on_upload: boolean
   edit_token?: string
 }
 

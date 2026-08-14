@@ -226,7 +226,7 @@ export function useKnowledgeUploadQueue({
         return
       }
       let syncStartError = ''
-      if (uploadedCount > 0) {
+      if (uploadedCount > 0 && kb.sync_on_upload) {
         uploadIndexes.forEach(index => {
           if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: '正在同步' })
         })
@@ -235,6 +235,10 @@ export function useKnowledgeUploadQueue({
         } catch {
           syncStartError = '文件已入库，但同步未启动，请稍后点击“立即同步”。'
         }
+      } else if (uploadedCount > 0) {
+        uploadIndexes.forEach(index => {
+          if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: '已入库，等待定时同步' })
+        })
       }
       if (skippedCount > 0) {
         await alert({ title: '上传完成', description: `成功入库 ${uploadedCount} 个文件，跳过 ${skippedCount} 个重复文件。` })

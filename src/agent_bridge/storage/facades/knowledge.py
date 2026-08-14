@@ -15,6 +15,7 @@ class KnowledgeFacadeMixin:
         created_by: str,
         owner_group_key: str = "",
         visibility: str = "group",
+        sync_on_upload: bool = False,
     ) -> dict[str, Any]:
         return self.knowledge.create_kb(
             slug=slug,
@@ -23,6 +24,7 @@ class KnowledgeFacadeMixin:
             created_by=created_by,
             owner_group_key=owner_group_key,
             visibility=visibility,
+            sync_on_upload=sync_on_upload,
         )
 
     def ensure_root_folder(self, kb_id: int) -> dict[str, Any]:
@@ -92,6 +94,9 @@ class KnowledgeFacadeMixin:
 
     def update_kb_defaults(self, kb_id: int, default_backend_slug: str | None, default_agent_id: str | None) -> None:
         return self.knowledge.update_kb_defaults(kb_id=kb_id, default_backend_slug=default_backend_slug, default_agent_id=default_agent_id)
+
+    def update_kb_sync_policy(self, kb_id: int, sync_on_upload: bool) -> None:
+        return self.knowledge.update_kb_sync_policy(kb_id=kb_id, sync_on_upload=sync_on_upload)
 
     def ensure_backend_target(self, kb_id: int, slug: str, backend_type: str) -> None:
         return self.knowledge.ensure_backend_target(kb_id=kb_id, slug=slug, backend_type=backend_type)

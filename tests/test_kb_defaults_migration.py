@@ -27,11 +27,13 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
     # drop them, recreating the exact failing condition.
     with store.connect() as conn:
         assert "default_backend_slug" in _columns(conn, "knowledge_bases")
+        assert "sync_on_upload" in _columns(conn, "knowledge_bases")
+        kb = store.create_kb(slug="test-kb", name="Test", description="", created_by="tester")
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN default_backend_slug")
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN default_agent_id")
+        conn.execute("ALTER TABLE knowledge_bases DROP COLUMN sync_on_upload")
         assert "default_backend_slug" not in _columns(conn, "knowledge_bases")
-
-    kb = store.create_kb(slug="test-kb", name="Test", description="", created_by="tester")
+        assert "sync_on_upload" not in _columns(conn, "knowledge_bases")
 
     # Without the migration, update_kb_defaults reproduces the original crash.
     with pytest.raises(sqlite3.OperationalError):
@@ -43,6 +45,7 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
         cols = _columns(conn, "knowledge_bases")
         assert "default_backend_slug" in cols
         assert "default_agent_id" in cols
+        assert "sync_on_upload" in cols
 
     # The previously-failing write now succeeds and persists.
     store.update_kb_defaults(kb["id"], "some-backend", "agent-1")
@@ -50,6 +53,10 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
     assert updated is not None
     assert updated["default_backend_slug"] == "some-backend"
     assert updated["default_agent_id"] == "agent-1"
+    assert updated["sync_on_upload"] == 0
+
+    store.update_kb_sync_policy(kb["id"], True)
+    assert store.get_kb_by_slug("test-kb")["sync_on_upload"] == 1
 
     # Idempotent: running the migration again is a no-op.
     store.migrate_phase2()

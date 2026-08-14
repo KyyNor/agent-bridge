@@ -35,6 +35,14 @@ def test_kb_and_doc_api_flow(wm_paths, tmp_path: Path) -> None:
     )
     assert response.status_code == 200
     assert response.json()["slug"] == "frontend-docs"
+    assert response.json()["sync_on_upload"] is False
+    policy = client.put(
+        "/api/v1/kbs/frontend-docs/sync-policy",
+        json={"sync_on_upload": True},
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+    assert policy.status_code == 200
+    assert policy.json()["sync_on_upload"] is True
     source = tmp_path / "Guide.pdf"
     source.write_bytes(b"one")
     with source.open("rb") as handle:

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
   visibility TEXT NOT NULL DEFAULT 'group' CHECK (visibility IN ('group', 'shared')),
   default_backend_slug TEXT,
   default_agent_id TEXT,
+  sync_on_upload INTEGER NOT NULL DEFAULT 0 CHECK (sync_on_upload IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

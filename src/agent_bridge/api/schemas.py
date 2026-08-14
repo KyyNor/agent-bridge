@@ -63,6 +63,7 @@ class CreateKbRequest(BaseModel):
     name: str
     description: str = ""
     visibility: Literal["group", "shared"] | None = None
+    sync_on_upload: bool = False
 
 
 class CreateFolderRequest(BaseModel):
@@ -341,6 +342,11 @@ class ResourceProfilesRequest(BaseModel):
 class UpdateKbDefaultsRequest(BaseModel):
     default_backend_slug: str | None = None
     default_agent_id: str | None = None
+    expected_edit_token: str | None = None
+
+
+class UpdateKbSyncPolicyRequest(BaseModel):
+    sync_on_upload: bool
     expected_edit_token: str | None = None
 
 

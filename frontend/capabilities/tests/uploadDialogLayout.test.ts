@@ -74,9 +74,11 @@ test('upload dialog uses a shared queue index with at most three async workers',
   assert.match(queue, /Promise\.all\(/)
 })
 
-test('batch upload starts one sync pass after all files are queued', () => {
+test('batch upload starts one sync pass only when the knowledge base enables immediate sync', () => {
   const uploadFunction = uploadQueue().slice(uploadQueue().indexOf('async function uploadDocuments'))
+  assert.match(uploadFunction, /uploadedCount > 0 && kb\.sync_on_upload/)
   assert.match(uploadFunction, /await api\.triggerKbSync\(kb\.slug\)/)
+  assert.match(uploadFunction, /已入库，等待定时同步/)
 })
 
 test('knowledge sync badges translate backend states into user-facing labels', () => {

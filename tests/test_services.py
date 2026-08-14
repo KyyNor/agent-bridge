@@ -39,9 +39,20 @@ def test_admin_creates_kb_and_member_roles_are_disabled(wm_paths, tmp_path: Path
     service = _service_with_mock_backend(wm_paths, tmp_path)
     kb = service.create_kb(actor="root", slug="frontend-docs", name="Frontend Docs", description="")
     assert kb["slug"] == "frontend-docs"
+    assert kb["sync_on_upload"] is False
     assert service.list_kbs(actor="root")[0]["slug"] == "frontend-docs"
     with pytest.raises(ValidationError, match="member roles are no longer supported"):
         service.grant_kb_member(actor="root", kb_slug="frontend-docs", linux_user="alice", role="contributor")
+
+
+def test_kb_upload_sync_policy_defaults_to_deferred_and_can_be_changed(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb(actor="root", slug="frontend-docs", name="Frontend Docs", description="")
+
+    updated = service.update_kb_sync_policy("root", kb["slug"], sync_on_upload=True)
+
+    assert updated["sync_on_upload"] is True
+    assert service.list_kbs("root")[0]["sync_on_upload"] is True
 
 
 def test_service_manages_folders_and_rejects_cross_kb_or_cyclic_moves(wm_paths, tmp_path: Path) -> None:

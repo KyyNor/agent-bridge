@@ -9,6 +9,7 @@ const source = (path: string) => readFileSync(resolve(root, path), 'utf-8')
 test('knowledge view assembles independent settings, retrieval, detail, and sync regions', () => {
   const view = source('src/views/knowledge/KnowledgeView.vue')
   assert.match(view, /KnowledgeDefaultBackendPanel/)
+  assert.match(view, /KnowledgeSyncPolicyPanel/)
   assert.match(view, /KnowledgePlaneDialog/)
   assert.match(view, /KnowledgeSearchPanel/)
   assert.match(view, /KnowledgeDocumentDetailDialog/)
@@ -18,6 +19,7 @@ test('knowledge view assembles independent settings, retrieval, detail, and sync
 
 test('knowledge subcomponents retain their explicit API boundaries', () => {
   assert.match(source('src/components/knowledge/KnowledgeDefaultBackendPanel.vue'), /api\.updateKbDefaults/)
+  assert.match(source('src/components/knowledge/KnowledgeSyncPolicyPanel.vue'), /api\.updateKbSyncPolicy/)
   assert.match(source('src/components/knowledge/KnowledgePlaneDialog.vue'), /api\.setResourceProfiles/)
   assert.match(source('src/components/knowledge/KnowledgeSearchPanel.vue'), /api\.search/)
   assert.match(source('src/components/knowledge/KnowledgeSearchPanel.vue'), /api\.ask/)

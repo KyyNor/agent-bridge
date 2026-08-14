@@ -221,6 +221,8 @@ Agent 运行事件以 `agent_runs` 为统一查询基准。前端通过 `RunEven
 
 ## 文档同步检查
 
+知识库使用 `sync_on_upload` 控制管理后台上传完成后是否立即发起同步，默认 `false`。关闭时文档只入库并进入同步队列，由 `doc_sync_cron` 处理；不得在上传队列中无条件调用立即同步接口。HTTP 文档上传的 `later` 默认值必须保持为延后同步。
+
 以下变化必须在同一提交更新 README、CLAUDE、AGENTS 或示例：
 
 - CLI 命令、配置副作用或部署步骤；
