@@ -563,6 +563,7 @@ def test_schema_migration_adds_phase2_columns(tmp_path: Path) -> None:
     with store.connect() as conn:
         col_names = {desc[1] for desc in conn.execute("PRAGMA table_info(backend_targets)").fetchall()}
         assert "backend_kb_id" in col_names
+        assert "last_error" in col_names
 
 
 def test_migration_is_idempotent(tmp_path: Path) -> None:

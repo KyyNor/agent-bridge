@@ -921,8 +921,8 @@ export const api = {
     post<KnowledgeBase>('/kbs', data),
   updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null; expected_edit_token?: string | null }) =>
     put<KnowledgeBase>(`/kbs/${kbSlug}/defaults`, data),
-  updateKbSyncPolicy: (kbSlug: string, data: { sync_on_upload: boolean; expected_edit_token?: string | null }) =>
-    put<KnowledgeBase>(`/kbs/${kbSlug}/sync-policy`, data),
+  updateKbSyncPolicy: (kbSlug: string, data: { sync_on_upload?: boolean; backend_sync_on_upload?: Record<string, boolean>; expected_edit_token?: string | null }) =>
+    put<KnowledgeBaseSummary>(`/kbs/${kbSlug}/sync-policy`, data),
   listKbRepoSources: (kbSlug: string) =>
     get<KbRepoSource[]>(`/kbs/${kbSlug}/repo-sources`),
   saveKbRepoSource: (kbSlug: string, data: { repo_key: string; include_suffixes: string[] }) =>

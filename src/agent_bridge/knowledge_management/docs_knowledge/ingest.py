@@ -320,6 +320,7 @@ class DocumentIngestService:
                     ) from exc
                 raise
             outer_path = normalize_relative_document_path(relative_path or display_name)
+            outer_parent_parts, outer_basename = split_document_path(outer_path)
             with self._document_ingest_lock:
                 archive_files_before = self._facade.archive_files()
                 results: list[dict[str, Any]] = []
@@ -327,13 +328,15 @@ class DocumentIngestService:
                     with self.store.transaction():
                         archive_entry_ids_by_kb: dict[int, dict[str, int]] = {}
                         for kb in kb_targets:
-                            selected_folder_id = folder_id
-                            if selected_folder_id is None or len(kb_targets) != 1:
-                                selected_folder_id = int(self.store.ensure_root_folder(kb["id"])["id"])
+                            selected_folder_id = self._ensure_document_parent_folder(
+                                kb["id"],
+                                folder_id if len(kb_targets) == 1 else None,
+                                outer_parent_parts,
+                            )
                             outer_entry = self.store.create_archive_entry(
                                 kb["id"],
                                 kind="zip",
-                                name=Path(outer_path).name,
+                                name=outer_basename,
                                 relative_path=outer_path,
                                 parent_folder_id=selected_folder_id,
                             )

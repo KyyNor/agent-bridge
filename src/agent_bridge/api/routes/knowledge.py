@@ -316,6 +316,7 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             current_actor,
             kb_slug,
             sync_on_upload=payload.sync_on_upload,
+            backend_sync_on_upload=payload.backend_sync_on_upload,
             expected_edit_token=payload.expected_edit_token,
         )
 

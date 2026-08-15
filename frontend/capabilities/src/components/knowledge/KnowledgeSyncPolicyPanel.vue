@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api } from '../../api/client'
 import type { KnowledgeBaseSummary } from '../../api/types'
 import { Button } from '../ui/button'
@@ -11,27 +11,29 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  saved: [policy: { sync_on_upload: boolean }]
+  saved: [policy: { backend_sync_on_upload: Record<string, boolean> }]
 }>()
 
 const editing = ref(false)
-const syncOnUpload = ref(false)
+const policies = ref<Record<string, boolean>>({})
 const editToken = ref<string | undefined>()
 const saving = ref(false)
 const saveError = ref('')
 
 function syncFromKnowledgeBase() {
   editing.value = false
-  syncOnUpload.value = props.kb.sync_on_upload
+  policies.value = Object.fromEntries(props.kb.backend_targets.map(target => [target.slug, target.sync_on_upload]))
   editToken.value = props.kb.edit_token
 }
+
+const activeTargets = computed(() => props.kb.backend_targets.filter(target => target.status === 'active'))
 
 async function startEditing() {
   saveError.value = ''
   try {
     const latest = (await api.listWikiKbs()).find(kb => kb.slug === props.kb.slug)
     if (!latest) throw new Error('文档知识库不存在')
-    syncOnUpload.value = latest.sync_on_upload
+    policies.value = Object.fromEntries(latest.backend_targets.map(target => [target.slug, target.sync_on_upload]))
     editToken.value = latest.edit_token
     editing.value = true
   } catch (error: unknown) {
@@ -44,11 +46,11 @@ async function save() {
   saveError.value = ''
   try {
     const saved = await api.updateKbSyncPolicy(props.kb.slug, {
-      sync_on_upload: syncOnUpload.value,
+      backend_sync_on_upload: policies.value,
       expected_edit_token: editToken.value,
     })
     editToken.value = saved.edit_token
-    emit('saved', { sync_on_upload: saved.sync_on_upload })
+    emit('saved', { backend_sync_on_upload: policies.value })
     editing.value = false
   } catch (error: unknown) {
     saveError.value = error instanceof Error ? error.message : '保存失败'
@@ -57,21 +59,26 @@ async function save() {
   }
 }
 
-watch(() => [props.kb.slug, props.kb.sync_on_upload] as const, syncFromKnowledgeBase, { immediate: true })
+watch(() => [props.kb.slug, props.kb.backend_targets] as const, syncFromKnowledgeBase, { deep: true, immediate: true })
 </script>
 
 <template>
   <div class="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-4 py-2.5">
     <span class="text-xs text-muted-foreground shrink-0">上传同步策略</span>
     <template v-if="!editing">
-      <span class="text-sm font-medium">{{ kb.sync_on_upload ? '上传后立即同步' : '仅定时同步' }}</span>
-      <span class="text-xs text-muted-foreground">{{ kb.sync_on_upload ? '文件入库后自动开始同步。' : '文件入库后等待文档同步计划处理。' }}</span>
+      <span v-if="activeTargets.length === 0" class="text-sm text-muted-foreground">暂无启用的知识后端</span>
+      <template v-for="target in activeTargets" :key="target.slug">
+        <span class="text-sm font-medium">{{ target.slug }}</span>
+        <span :class="target.sync_on_upload ? 'text-xs text-success' : 'text-xs text-muted-foreground'">{{ target.sync_on_upload ? '立即同步' : '定时同步' }}</span>
+        <span v-if="target.last_error" class="max-w-[280px] truncate text-xs text-destructive" :title="target.last_error">建库失败：{{ target.last_error }}</span>
+      </template>
       <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="startEditing" :disabled="readOnly" :title="readOnly ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">修改</Button>
     </template>
     <template v-else>
-      <label class="flex items-center gap-2 text-sm">
-        <input v-model="syncOnUpload" type="checkbox" />
-        上传完成后立即同步
+      <div v-if="activeTargets.length === 0" class="text-sm text-muted-foreground">暂无启用的知识后端</div>
+      <label v-for="target in activeTargets" :key="target.slug" class="flex items-center gap-2 text-sm">
+        <input v-model="policies[target.slug]" type="checkbox" />
+        {{ target.slug }}（{{ target.backend_type }}）：上传后立即同步
       </label>
       <span class="text-xs text-muted-foreground">关闭时仅创建待同步任务，由定时计划处理。</span>
       <Button variant="ghost" size="sm" class="h-6 ml-auto text-xs" @click="syncFromKnowledgeBase">取消</Button>

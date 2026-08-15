@@ -62,15 +62,19 @@ class DocsKnowledgeService:
         if not registry:
             return
         for backend_slug in registry.list_slugs():
+            backend = self.store.get_backend(backend_slug)
             self.store.ensure_backend_target(
-                kb["id"], slug=backend_slug, backend_type=backend_slug
+                kb["id"],
+                slug=backend_slug,
+                backend_type=str((backend or {}).get("backend_type") or backend_slug),
             )
             adapter = self.get_adapter(backend_slug)
             try:
                 backend_kb_id = adapter.create_kb(kb["slug"], kb["name"])
             except Exception as exc:
+                self.store.mark_backend_target_error(kb["id"], backend_slug, str(exc))
                 logger.warning(
-                    "远端知识库创建失败 kb=%s backend=%s 原因=%s",
+                    "远端知识库创建失败，将在后续同步时重试 kb=%s backend=%s 原因=%s",
                     kb["slug"],
                     backend_slug,
                     exc,
@@ -249,8 +253,11 @@ class DocsKnowledgeService:
                     None,
                 )
                 if target is None:
+                    backend = self.store.get_backend(backend_slug)
                     self.store.ensure_backend_target(
-                        kb["id"], slug=backend_slug, backend_type=backend_slug
+                        kb["id"],
+                        slug=backend_slug,
+                        backend_type=str((backend or {}).get("backend_type") or backend_slug),
                     )
                     self._repair_backend_kb(kb, backend_slug, adapter)
                 else:
@@ -267,8 +274,9 @@ class DocsKnowledgeService:
             backend_kb_id = adapter.create_kb(kb["slug"], kb["name"])
             self.store.update_backend_target_kb_id(kb["id"], backend_slug, backend_kb_id)
         except Exception as exc:
+            self.store.mark_backend_target_error(kb["id"], backend_slug, str(exc))
             logger.warning(
-                "后端知识库对齐失败 kb=%s backend=%s 原因=%s",
+                "后端知识库对齐失败，将在下次同步重试 kb=%s backend=%s 原因=%s",
                 kb["slug"],
                 backend_slug,
                 exc,

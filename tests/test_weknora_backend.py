@@ -60,6 +60,39 @@ def test_upload_uses_file_endpoint(respx_mock, tmp_path: Path):
     assert "multipart/form-data" in request.headers["content-type"]
 
 
+def test_upload_converts_legacy_office_content_misnamed_as_xlsx(
+    respx_mock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    base_url = "http://localhost"
+    route = respx_mock.post(f"{base_url}/api/v1/knowledge-bases/kb-123/knowledge/file").mock(
+        return_value=httpx.Response(201, json={"success": True, "data": {"id": "know-456"}})
+    )
+    source = tmp_path / "report.xlsx"
+    source.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-xls")
+    converted = tmp_path / "converted.xlsx"
+    converted.write_bytes(b"converted-ooxml")
+    converted_calls: list[tuple[Path, str, Path]] = []
+
+    def fake_convert(path: Path, suffix: str, outdir: Path) -> Path:
+        converted_calls.append((path, suffix, outdir))
+        assert path.suffix == ".xls"
+        assert path.read_bytes() == source.read_bytes()
+        return converted
+
+    monkeypatch.setattr(
+        "agent_bridge.knowledge_management.docs_knowledge.backends.weknora.convert_via_soffice",
+        fake_convert,
+    )
+    backend = WeknoraBackend(base_url=base_url, api_key="test-key")
+
+    assert backend.upload("kb-123", "report", source, "report.xlsx") == "know-456"
+    assert len(converted_calls) == 1
+    assert converted_calls[0][1] == ".xlsx"
+    content = route.calls.last.request.content
+    assert b'filename="report.xlsx"' in content
+    assert b"converted-ooxml" in content
+
+
 def test_weknora_declares_folder_capability_and_sends_relative_file_name(respx_mock, tmp_path: Path):
     base_url = "http://localhost"
     route = respx_mock.post(f"{base_url}/api/v1/knowledge-bases/kb-123/knowledge/file").mock(

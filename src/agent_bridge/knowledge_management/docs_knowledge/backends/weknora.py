@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import httpx
 
 from agent_bridge.core.domain import AskResult, BackendCapabilities, BackendDocStatus, RetrievalResult
+from agent_bridge.knowledge_management.docs_knowledge.backends._office_convert import (
+    convert_via_soffice,
+    mislabeled_legacy_office_suffix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +221,31 @@ class WeknoraBackend:
         remote_path: str | None = None,
     ) -> str:
         remote_filename = self._remote_filename(filename, remote_path)
+        legacy_suffix = mislabeled_legacy_office_suffix(
+            file_path,
+            Path(remote_filename).suffix,
+        )
+        if legacy_suffix is None:
+            return self._upload_file(backend_kb_id, file_path, remote_filename)
+
+        logger.info(
+            "检测到 Office 扩展名与内容不符，开始 LibreOffice 转换 file=%s declared=%s actual=%s",
+            file_path.name,
+            Path(remote_filename).suffix.lower(),
+            legacy_suffix,
+        )
+        with TemporaryDirectory(prefix="agent-bridge-weknora-office-") as temporary_dir:
+            working_dir = Path(temporary_dir)
+            legacy_source = working_dir / f"source{legacy_suffix}"
+            shutil.copyfile(file_path, legacy_source)
+            converted = convert_via_soffice(
+                legacy_source,
+                Path(remote_filename).suffix.lower(),
+                working_dir,
+            )
+            return self._upload_file(backend_kb_id, converted, remote_filename)
+
+    def _upload_file(self, backend_kb_id: str, file_path: Path, remote_filename: str) -> str:
         with file_path.open("rb") as file_handle:
             response = self._request(
                 "POST",

@@ -13,12 +13,35 @@ from agent_bridge.knowledge_management.docs_knowledge.backends.ragflow import Ra
 
 def test_create_kb(respx_mock):
     base_url = "http://localhost:9380"
-    respx_mock.post(f"{base_url}/api/v1/datasets").mock(
+    list_route = respx_mock.get(f"{base_url}/api/v1/datasets").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    create_route = respx_mock.post(f"{base_url}/api/v1/datasets").mock(
         return_value=httpx.Response(200, json={"data": {"id": "ds-123"}})
     )
     backend = RagFlowBackend(base_url=base_url, api_key="test-key", timeout=30)
     kb_id = backend.create_kb("test-kb", "Test KB")
     assert kb_id == "ds-123"
+    assert list_route.called
+    assert create_route.called
+
+
+def test_create_kb_reuses_existing_dataset(respx_mock):
+    base_url = "http://localhost:9380"
+    respx_mock.get(f"{base_url}/api/v1/datasets").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {"kbs": [{"id": "ds-existing", "name": "test-kb"}]}},
+        )
+    )
+    create_route = respx_mock.post(f"{base_url}/api/v1/datasets").mock(
+        return_value=httpx.Response(200, json={"data": {"id": "unexpected"}})
+    )
+
+    backend = RagFlowBackend(base_url=base_url, api_key="test-key", timeout=30)
+
+    assert backend.create_kb("test-kb", "Test KB") == "ds-existing"
+    assert not create_route.called
 
 
 def test_ragflow_declares_flat_backend():
@@ -100,6 +123,9 @@ def test_get_status_parsing(respx_mock):
 
 def test_create_kb_failure(respx_mock):
     base_url = "http://localhost:9380"
+    respx_mock.get(f"{base_url}/api/v1/datasets").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
     respx_mock.post(f"{base_url}/api/v1/datasets").mock(
         return_value=httpx.Response(401, json={"code": 401, "message": "Unauthorized"})
     )

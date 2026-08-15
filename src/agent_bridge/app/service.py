@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import asdict
 from pathlib import Path
@@ -520,7 +521,13 @@ class AgentBridgeService:
             summaries.append(
                 {
                     **kb,
-                    "backend_targets": targets,
+                    "backend_targets": [
+                        self._serialize_backend_target(
+                            target,
+                            default_sync_on_upload=bool(kb.get("sync_on_upload")),
+                        )
+                        for target in targets
+                    ],
                     **counts,
                 }
             )
@@ -580,6 +587,35 @@ class AgentBridgeService:
             "archive_entry_id": int(entry["id"]),
         }
 
+    @staticmethod
+    def _archive_descendant_file_counts(
+        entries: list[dict[str, Any]],
+    ) -> dict[int, int]:
+        """计算每个 ZIP / 虚拟目录的递归文件数。"""
+        children_by_parent: dict[int, list[dict[str, Any]]] = {}
+        for item in entries:
+            parent_id = item.get("parent_id")
+            if parent_id is not None:
+                children_by_parent.setdefault(int(parent_id), []).append(item)
+
+        counts: dict[int, int] = {}
+
+        def count_files(entry_id: int) -> int:
+            if entry_id in counts:
+                return counts[entry_id]
+            count = 0
+            for child in children_by_parent.get(entry_id, []):
+                if child["kind"] == "document":
+                    count += 1
+                else:
+                    count += count_files(int(child["id"]))
+            counts[entry_id] = count
+            return count
+
+        for item in entries:
+            count_files(int(item["id"]))
+        return counts
+
     def _browse_folder_context(
         self,
         kb: dict[str, Any],
@@ -615,10 +651,10 @@ class AgentBridgeService:
             if item.get("archive_entry_id") is None
         ]
 
+        all_archive_entries = self.store.list_archive_entries(kb_id)
+        archive_file_counts = self._archive_descendant_file_counts(all_archive_entries)
         folder_counts = {
-            int(item["id"]): sum(
-                1 for child in folder_tree if child.get("parent_id") == item["id"]
-            )
+            int(item["id"]): int(item.get("descendant_file_count") or 0)
             for item in direct_folders
         }
         entries: list[dict[str, Any]] = [
@@ -642,9 +678,7 @@ class AgentBridgeService:
                 "parent_id": item.get("parent_id"),
                 "parent_folder_id": int(folder["id"]),
                 "archive_entry_id": int(item["id"]),
-                "child_count": len(
-                    self.store.list_archive_entries(kb_id, parent_id=int(item["id"]))
-                ),
+                "child_count": archive_file_counts.get(int(item["id"]), 0),
             }
             for item in archive_entries
         )
@@ -682,6 +716,8 @@ class AgentBridgeService:
             if parent_folder is not None:
                 parent = self._browse_folder_context_payload(parent_folder)
 
+        all_archive_entries = self.store.list_archive_entries(kb_id)
+        archive_file_counts = self._archive_descendant_file_counts(all_archive_entries)
         children = self.store.list_archive_entries(
             kb_id,
             parent_id=int(entry["id"]),
@@ -703,12 +739,7 @@ class AgentBridgeService:
                         "parent_id": int(entry["id"]),
                         "parent_folder_id": None,
                         "archive_entry_id": int(child["id"]),
-                        "child_count": len(
-                            self.store.list_archive_entries(
-                                kb_id,
-                                parent_id=int(child["id"]),
-                            )
-                        ),
+                        "child_count": archive_file_counts.get(int(child["id"]), 0),
                     }
                 )
                 continue
@@ -1584,22 +1615,54 @@ class AgentBridgeService:
             payload["sync_on_upload"] = bool(payload["sync_on_upload"])
         return payload
 
-    @staticmethod
-    def _kb_defaults_edit_snapshot(kb: dict[str, Any] | None) -> dict[str, Any] | None:
+    def _kb_defaults_edit_snapshot(self, kb: dict[str, Any] | None) -> dict[str, Any] | None:
         if kb is None:
             return None
         return {
             "default_backend_slug": kb.get("default_backend_slug"),
             "default_agent_id": kb.get("default_agent_id"),
             "sync_on_upload": bool(kb.get("sync_on_upload")),
+            "backend_sync_on_upload": {
+                target["slug"]: self._target_sync_on_upload(
+                    target,
+                    default_sync_on_upload=bool(kb.get("sync_on_upload")),
+                )
+                for target in self.store.list_backend_targets(kb["id"])
+            },
         }
+
+    @staticmethod
+    def _target_sync_on_upload(
+        target: dict[str, Any], *, default_sync_on_upload: bool = False
+    ) -> bool:
+        config_json = target.get("config_json") or "{}"
+        try:
+            config = json.loads(config_json) if isinstance(config_json, str) else config_json
+        except (TypeError, json.JSONDecodeError):
+            config = {}
+        return bool(config.get("sync_on_upload", default_sync_on_upload)) if isinstance(config, dict) else default_sync_on_upload
+
+    @classmethod
+    def _serialize_backend_target(
+        cls,
+        target: dict[str, Any],
+        *,
+        default_sync_on_upload: bool = False,
+    ) -> dict[str, Any]:
+        payload = dict(target)
+        payload["sync_on_upload"] = cls._target_sync_on_upload(
+            target,
+            default_sync_on_upload=default_sync_on_upload,
+        )
+        return payload
 
     def update_kb_sync_policy(
         self,
         actor: str,
         kb_slug: str,
         *,
-        sync_on_upload: bool,
+        sync_on_upload: bool | None = None,
+        backend_sync_on_upload: dict[str, bool] | None = None,
         expected_edit_token: str | None = None,
     ) -> dict[str, Any]:
         kb = self._require_kb_admin_visible(actor, kb_slug)
@@ -1610,9 +1673,46 @@ class AgentBridgeService:
             resource_key=kb_slug,
             actor=actor,
         )
-        self.store.update_kb_sync_policy(kb["id"], sync_on_upload)
+        targets = self.store.list_backend_targets(kb["id"])
+        requested_policies = backend_sync_on_upload or {}
+        unknown_targets = sorted(set(requested_policies) - {target["slug"] for target in targets})
+        if unknown_targets:
+            raise ValidationError(f"未知知识后端: {', '.join(unknown_targets)}")
+        if sync_on_upload is None and not requested_policies:
+            raise ValidationError("至少提供一个同步策略")
+
+        current_policies = {
+            target["slug"]: self._target_sync_on_upload(
+                target,
+                default_sync_on_upload=bool(kb.get("sync_on_upload")),
+            )
+            for target in targets
+        }
+        if sync_on_upload is not None:
+            current_policies = {slug: bool(sync_on_upload) for slug in current_policies}
+        current_policies.update({slug: bool(value) for slug, value in requested_policies.items()})
+        for backend_slug, value in current_policies.items():
+            self.store.update_backend_target_config(
+                kb["id"], backend_slug, {"sync_on_upload": value}
+            )
+        # ``knowledge_bases.sync_on_upload`` 是旧 API 的兼容摘要。尚未配置
+        # 后端时仍需保留调用方提交的全局值，等后端补齐后再作为默认值继承。
+        effective_legacy_policy = (
+            any(current_policies.values())
+            if current_policies
+            else bool(sync_on_upload)
+        )
+        self.store.update_kb_sync_policy(kb["id"], effective_legacy_policy)
         saved = self.store.get_kb_by_slug(kb_slug)
-        return attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
+        payload = attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
+        payload["backend_targets"] = [
+            self._serialize_backend_target(
+                target,
+                default_sync_on_upload=bool((saved or {}).get("sync_on_upload")),
+            )
+            for target in self.store.list_backend_targets(kb["id"])
+        ]
+        return payload
 
     def resolve_retrieval_strategy(self, kb_slug: str, profile_key: str | None) -> tuple[dict[str, Any], RetrievalStrategy]:
         kb = self.store.get_kb_by_slug(kb_slug)

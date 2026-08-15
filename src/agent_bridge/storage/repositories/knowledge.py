@@ -1169,7 +1169,9 @@ class KnowledgeRepository:
                 """
                 INSERT INTO backend_targets (kb_id, slug, backend_type)
                 VALUES (?, ?, ?)
-                ON CONFLICT(kb_id, slug) DO NOTHING
+                ON CONFLICT(kb_id, slug) DO UPDATE SET
+                  backend_type = excluded.backend_type,
+                  updated_at = CURRENT_TIMESTAMP
                 """,
                 (kb_id, slug, backend_type),
             )
@@ -1192,15 +1194,26 @@ class KnowledgeRepository:
     def update_backend_target_kb_id(self, kb_id: int, slug: str, backend_kb_id: str) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE backend_targets SET backend_kb_id = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
+                "UPDATE backend_targets SET backend_kb_id = ?, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
                 (backend_kb_id, kb_id, slug),
+            )
+
+    def mark_backend_target_error(self, kb_id: int, slug: str, error: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE backend_targets
+                SET last_error = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE kb_id = ? AND slug = ?
+                """,
+                (error, kb_id, slug),
             )
 
     def rebuild_backend_target(self, kb_id: int, backend_slug: str, new_backend_kb_id: str) -> int:
         """Re-create backend target after backend KB was deleted: update ID, reset states, replace all sync jobs."""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE backend_targets SET backend_kb_id = ?, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
+                "UPDATE backend_targets SET backend_kb_id = ?, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE kb_id = ? AND slug = ?",
                 (new_backend_kb_id, kb_id, backend_slug),
             )
             conn.execute(

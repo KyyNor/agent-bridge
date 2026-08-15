@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import io
+import json
 from pathlib import Path
 import threading
 import time
@@ -53,6 +54,64 @@ def test_kb_upload_sync_policy_defaults_to_deferred_and_can_be_changed(wm_paths,
 
     assert updated["sync_on_upload"] is True
     assert service.list_kbs("root")[0]["sync_on_upload"] is True
+
+
+def test_kb_upload_sync_policy_can_differ_per_backend(wm_paths, tmp_path: Path) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    kb = service.create_kb(actor="root", slug="frontend-docs", name="Frontend Docs", description="")
+    service.store.ensure_backend_target(kb["id"], "ragflow", "ragflow")
+    service.store.ensure_backend_target(kb["id"], "pageindex", "pageindex")
+    service.store.update_backend_target_config(kb["id"], "ragflow", {"chat_id": "keep-me"})
+
+    updated = service.update_kb_sync_policy(
+        "root",
+        kb["slug"],
+        backend_sync_on_upload={"mock": True, "ragflow": False, "pageindex": False},
+    )
+
+    policies = {target["slug"]: target["sync_on_upload"] for target in updated["backend_targets"]}
+    assert policies == {"mock": True, "pageindex": False, "ragflow": False}
+    ragflow = next(target for target in service.store.list_backend_targets(kb["id"]) if target["slug"] == "ragflow")
+    assert json.loads(ragflow["config_json"]) == {"chat_id": "keep-me", "sync_on_upload": False}
+
+
+def test_remote_kb_provision_error_is_visible_and_retried(wm_paths, tmp_path: Path) -> None:
+    class FlakyBackend:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        def capabilities(self) -> BackendCapabilities:
+            return BackendCapabilities(supports_folders=False)
+
+        def create_kb(self, slug: str, name: str) -> str:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("RagFlow API error 401: Unauthorized")
+            return "ragflow-dataset-123"
+
+    ensure_directories(wm_paths)
+    service = AgentBridgeService.create(wm_paths, admins={"root"})
+    service.store.upsert_backend(slug="ragflow-prod", backend_type="ragflow")
+    service.registry = BackendRegistry(
+        {"ragflow-prod": BackendConfig(slug="ragflow-prod", backend_type="mock")},
+        paths=tmp_path,
+    )
+    backend = FlakyBackend()
+    service.registry._adapters["ragflow-prod"] = backend  # type: ignore[attr-defined]
+    service.init_system()
+
+    kb = service.create_kb("root", "docs", "Docs", "")
+    failed_target = service.store.list_backend_targets(kb["id"])[0]
+    assert failed_target["backend_type"] == "ragflow"
+    assert failed_target["backend_kb_id"] is None
+    assert "Unauthorized" in failed_target["last_error"]
+
+    service.align_backends(kb["id"])
+
+    repaired_target = service.store.list_backend_targets(kb["id"])[0]
+    assert backend.attempts == 2
+    assert repaired_target["backend_kb_id"] == "ragflow-dataset-123"
+    assert repaired_target["last_error"] is None
 
 
 def test_service_manages_folders_and_rejects_cross_kb_or_cyclic_moves(wm_paths, tmp_path: Path) -> None:
@@ -603,6 +662,50 @@ def test_document_relative_path_uses_selected_folder_as_base(wm_paths, tmp_path:
     assert doc["title"] == "guide"
     assert placement["folder_path"] == "Base/A/B"
     assert not placement["folder_path"].startswith("root/")
+
+
+def test_zip_relative_path_uses_the_same_parent_folder_as_other_folder_uploads(
+    wm_paths, tmp_path: Path
+) -> None:
+    service = _service_with_mock_backend(wm_paths, tmp_path)
+    service.create_kb("root", "kb", "KB", "")
+    document = tmp_path / "a.md"
+    document.write_text("a", encoding="utf-8")
+    nested_document = tmp_path / "nested.md"
+    nested_document.write_text("nested", encoding="utf-8")
+    service.add_document("root", document, ["kb"], later=True, relative_path="xxx/a.md")
+    service.add_document("root", nested_document, ["kb"], later=True, relative_path="xxx/b/nested.md")
+    archive = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive, "w") as outer:
+        outer.writestr("guide.md", b"guide")
+        outer.writestr("nested/reference.md", b"reference")
+
+    service.add_document(
+        "root", archive, ["kb"], later=True, relative_path="xxx/c.zip"
+    )
+
+    kb = service.store.get_kb_by_slug("kb")
+    folders = {item["path"]: item for item in service.list_folders("root", "kb")}
+    entries = service.store.list_archive_entries(kb["id"])
+    outer = next(entry for entry in entries if entry["kind"] == "zip" and entry["name"] == "c.zip")
+    assert outer["relative_path"] == "xxx/c.zip"
+    assert outer["parent_folder_id"] == folders["xxx"]["id"]
+
+    root_browse = service.browse_kb("root", "kb")
+    folder_entry = next(entry for entry in root_browse["entries"] if entry["kind"] == "folder")
+    assert folder_entry["name"] == "xxx"
+    assert folder_entry["child_count"] == 2
+    browse = service.browse_kb("root", "kb", folder_id=folders["xxx"]["id"])
+    archive_entry = next(entry for entry in browse["entries"] if entry["kind"] == "zip")
+    assert archive_entry["child_count"] == 2
+    archive_browse = service.browse_kb("root", "kb", archive_entry_id=archive_entry["id"])
+    virtual_folder = next(entry for entry in archive_browse["entries"] if entry["kind"] == "folder")
+    assert virtual_folder["child_count"] == 1
+    assert [(entry["kind"], entry["name"]) for entry in browse["entries"]] == [
+        ("folder", "b"),
+        ("zip", "c.zip"),
+        ("document", "a.md"),
+    ]
 
 
 def test_multi_kb_relative_path_creates_same_subfolders_without_explicit_folder(

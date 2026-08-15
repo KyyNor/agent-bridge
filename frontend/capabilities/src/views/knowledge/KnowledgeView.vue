@@ -724,10 +724,9 @@ async function updateKnowledgeDefaults(defaults: { default_backend_slug: string 
   detailKb.value = { ...detailKb.value, ...defaults }
   await loadKbs({ fresh: true })
 }
-async function updateKnowledgeSyncPolicy(policy: { sync_on_upload: boolean }) {
+async function updateKnowledgeSyncPolicy() {
   if (!detailKb.value) return
-  detailKb.value = { ...detailKb.value, ...policy }
-  await loadKbs({ fresh: true })
+  await refreshDetailKbSummary()
 }
 // 同步/任务 status → StatusBadge 语义状态
 function syncBadgeStatus(status?: string | null): 'success' | 'error' | 'disabled' {
@@ -975,7 +974,7 @@ function syncBadgeLabel(status?: string | null) {
                           <Folder v-else :size="16" class="shrink-0 text-primary/80" />
                           <span class="min-w-0 flex-1 truncate text-sm font-medium" :title="entry.relative_path">{{ entry.name }}</span>
                           <Badge variant="outline" class="shrink-0 text-[10px]">{{ entry.kind === 'zip' ? 'ZIP' : '文件夹' }}</Badge>
-                          <span class="shrink-0 text-xs text-muted-foreground">{{ entry.child_count }} 项</span>
+                          <span class="shrink-0 text-xs text-muted-foreground">{{ entry.child_count }} 个文件</span>
                         </button>
                       </td>
                     </tr>

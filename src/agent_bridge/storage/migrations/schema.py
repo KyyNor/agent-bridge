@@ -429,7 +429,11 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         ON model_evaluation_executions(run_id, created_at ASC)
         """
     )
-    store._ensure_columns(conn, "backend_targets", {"backend_kb_id": "TEXT"})
+    store._ensure_columns(
+        conn,
+        "backend_targets",
+        {"backend_kb_id": "TEXT", "last_error": "TEXT"},
+    )
     store._ensure_columns(
         conn,
         "sync_states",

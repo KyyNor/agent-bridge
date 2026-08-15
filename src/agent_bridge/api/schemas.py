@@ -346,8 +346,15 @@ class UpdateKbDefaultsRequest(BaseModel):
 
 
 class UpdateKbSyncPolicyRequest(BaseModel):
-    sync_on_upload: bool
+    sync_on_upload: bool | None = None
+    backend_sync_on_upload: dict[str, bool] = Field(default_factory=dict)
     expected_edit_token: str | None = None
+
+    @model_validator(mode="after")
+    def _require_policy(self) -> "UpdateKbSyncPolicyRequest":
+        if self.sync_on_upload is None and not self.backend_sync_on_upload:
+            raise ValueError("at least one sync policy must be provided")
+        return self
 
 
 class CreateAgentRequest(BaseModel):

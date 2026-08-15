@@ -226,14 +226,16 @@ export function useKnowledgeUploadQueue({
         return
       }
       let syncStartError = ''
-      if (uploadedCount > 0 && kb.sync_on_upload) {
+      const immediateTargets = kb.backend_targets.filter(target => target.status === 'active' && target.sync_on_upload)
+      if (uploadedCount > 0 && immediateTargets.length > 0) {
         uploadIndexes.forEach(index => {
-          if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: '正在同步' })
+          if (uploadFiles.value[index]?.status === 'success') updateUploadItem(index, { stage: `正在同步：${immediateTargets.map(target => target.slug).join('、')}` })
         })
         try {
-          await api.triggerKbSync(kb.slug)
+          const results = await Promise.allSettled(immediateTargets.map(target => api.triggerKbSync(kb.slug, target.slug)))
+          if (results.some(result => result.status === 'rejected')) throw new Error('部分后端同步未启动')
         } catch {
-          syncStartError = '文件已入库，但同步未启动，请稍后点击“立即同步”。'
+          syncStartError = '文件已入库，但部分后端同步未启动，请稍后点击“立即同步”。'
         }
       } else if (uploadedCount > 0) {
         uploadIndexes.forEach(index => {

@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS backend_targets (
   backend_type TEXT NOT NULL DEFAULT 'mock',
   backend_kb_id TEXT,
   config_json TEXT NOT NULL DEFAULT '{}',
+  last_error TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

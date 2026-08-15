@@ -155,6 +155,9 @@ class RagFlowBackend:
         return BackendCapabilities(supports_folders=False)
 
     def create_kb(self, slug: str, name: str) -> str:
+        existing_id = self._find_dataset_id_by_name(slug)
+        if existing_id:
+            return existing_id
         response = self._request(
             "POST",
             f"{self.base_url}/api/v1/datasets",
@@ -162,6 +165,23 @@ class RagFlowBackend:
         )
         self._raise(response)
         return response.json()["data"]["id"]
+
+    def _find_dataset_id_by_name(self, name: str) -> str | None:
+        """重连已有的同名数据集，避免本地 target 遗失 ID 后重复建库。"""
+        response = self._request(
+            "GET",
+            f"{self.base_url}/api/v1/datasets",
+            params={"name": name, "page": 1, "page_size": 100},
+        )
+        self._raise(response)
+        payload = response.json().get("data", [])
+        items = payload.get("kbs", []) if isinstance(payload, dict) else payload
+        if not isinstance(items, list):
+            return None
+        for item in items:
+            if isinstance(item, dict) and item.get("name") == name and item.get("id"):
+                return str(item["id"])
+        return None
 
     def delete_kb(self, backend_kb_id: str) -> None:
         response = self._request(

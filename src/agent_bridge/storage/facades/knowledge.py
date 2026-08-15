@@ -110,6 +110,9 @@ class KnowledgeFacadeMixin:
     def update_backend_target_kb_id(self, kb_id: int, slug: str, backend_kb_id: str) -> None:
         return self.knowledge.update_backend_target_kb_id(kb_id=kb_id, slug=slug, backend_kb_id=backend_kb_id)
 
+    def mark_backend_target_error(self, kb_id: int, slug: str, error: str) -> None:
+        return self.knowledge.mark_backend_target_error(kb_id=kb_id, slug=slug, error=error)
+
     def rebuild_backend_target(self, kb_id: int, backend_slug: str, new_backend_kb_id: str) -> int:
         return self.knowledge.rebuild_backend_target(kb_id=kb_id, backend_slug=backend_slug, new_backend_kb_id=new_backend_kb_id)
 

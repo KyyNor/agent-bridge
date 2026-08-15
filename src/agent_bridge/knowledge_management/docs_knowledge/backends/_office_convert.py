@@ -1,4 +1,4 @@
-"""Convert legacy Microsoft Office files (.doc/.ppt) to OOXML via LibreOffice.
+"""Convert legacy Microsoft Office files to OOXML via LibreOffice.
 
 ``markitdown`` only understands the modern OOXML formats (.docx/.pptx); the
 legacy binary formats (.doc/.ppt) need to be pre-converted. This module wraps
@@ -14,7 +14,10 @@ import sys
 from pathlib import Path
 
 # Legacy binary Office suffix -> the OOXML suffix markitdown can consume.
-SOFFICE_TARGETS = {".doc": ".docx", ".ppt": ".pptx"}
+SOFFICE_TARGETS = {".doc": ".docx", ".xls": ".xlsx", ".ppt": ".pptx"}
+
+_OLE_COMPOUND_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+_OOXML_TO_LEGACY_SUFFIX = {".docx": ".doc", ".xlsx": ".xls", ".pptx": ".ppt"}
 
 # Default per-invocation timeout. soffice cold start can be slow (~5-15s on
 # first launch), so we keep this generous.
@@ -51,6 +54,25 @@ def find_soffice() -> str | None:
             if Path(candidate).exists():
                 return candidate
     return None
+
+
+def mislabeled_legacy_office_suffix(src: Path, declared_suffix: str) -> str | None:
+    """Return the real legacy suffix when an OOXML-named file is actually OLE.
+
+    Some legacy Office files are renamed from ``.xls``/``.doc`` to
+    ``.xlsx``/``.docx`` without conversion.  The OOXML parsers then attempt to
+    unzip OLE compound data and fail.  Inspect the invariant binary signature
+    instead of trusting the filename.
+    """
+    legacy_suffix = _OOXML_TO_LEGACY_SUFFIX.get(declared_suffix.lower())
+    if legacy_suffix is None:
+        return None
+    try:
+        with src.open("rb") as handle:
+            signature = handle.read(len(_OLE_COMPOUND_SIGNATURE))
+    except OSError:
+        return None
+    return legacy_suffix if signature == _OLE_COMPOUND_SIGNATURE else None
 
 
 def _install_hint() -> str:

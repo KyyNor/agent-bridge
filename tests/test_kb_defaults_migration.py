@@ -28,12 +28,15 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
     with store.connect() as conn:
         assert "default_backend_slug" in _columns(conn, "knowledge_bases")
         assert "sync_on_upload" in _columns(conn, "knowledge_bases")
+        assert "last_error" in _columns(conn, "backend_targets")
         kb = store.create_kb(slug="test-kb", name="Test", description="", created_by="tester")
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN default_backend_slug")
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN default_agent_id")
         conn.execute("ALTER TABLE knowledge_bases DROP COLUMN sync_on_upload")
+        conn.execute("ALTER TABLE backend_targets DROP COLUMN last_error")
         assert "default_backend_slug" not in _columns(conn, "knowledge_bases")
         assert "sync_on_upload" not in _columns(conn, "knowledge_bases")
+        assert "last_error" not in _columns(conn, "backend_targets")
 
     # Without the migration, update_kb_defaults reproduces the original crash.
     with pytest.raises(sqlite3.OperationalError):
@@ -46,6 +49,7 @@ def test_migrate_phase2_adds_kb_defaults_columns(tmp_path: Path) -> None:
         assert "default_backend_slug" in cols
         assert "default_agent_id" in cols
         assert "sync_on_upload" in cols
+        assert "last_error" in _columns(conn, "backend_targets")
 
     # The previously-failing write now succeeds and persists.
     store.update_kb_defaults(kb["id"], "some-backend", "agent-1")

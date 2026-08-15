@@ -995,6 +995,20 @@ export interface TestCloneResult {
   message: string
 }
 
+export interface KnowledgeBackendTarget {
+  id: number
+  kb_id: number
+  slug: string
+  backend_type: string
+  backend_kb_id: string | null
+  config_json: string
+  sync_on_upload: boolean
+  last_error: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
 export interface KnowledgeBaseSummary extends ResourceScopeFields {
   id: number
   slug: string
@@ -1009,7 +1023,7 @@ export interface KnowledgeBaseSummary extends ResourceScopeFields {
   default_agent_id?: string | null
   sync_on_upload: boolean
   edit_token?: string
-  backend_targets: { id: number; kb_id: number; slug: string; backend_type: string; backend_kb_id: string | null; config_json: string; status: string; created_at: string; updated_at: string }[]
+  backend_targets: KnowledgeBackendTarget[]
   document_count: number
   sync_failed_count: number
 }
