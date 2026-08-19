@@ -29,6 +29,20 @@ class ExecutionRequest:
 ContainerReporter = Callable[[ContainerHandle], None]
 ProgressReporter = Callable[[str], None]
 
+LOG_TAIL_MAX_CHARS = 4000
+
+
+def container_log_tail(log_path: Path) -> str:
+    """读取容器日志尾部，容器失败时随错误信息返回，便于直接定位容器内报错。"""
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"无法读取日志 {log_path}：{exc}"
+    tail = text[-LOG_TAIL_MAX_CHARS:].strip()
+    if not tail:
+        return f"日志为空：{log_path}"
+    return f"日志 {log_path} 尾部内容：\n{tail}"
+
 
 class EvaluationRunner(Protocol):
     key: str

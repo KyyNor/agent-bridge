@@ -12,7 +12,7 @@ from agent_bridge.api.app import create_app
 from agent_bridge.storage.sqlite import SQLiteStore
 from agent_bridge.system_config.model_evaluation.runners.code import CodeRunner
 from agent_bridge.system_config.model_evaluation.runners.opencompass import OpenCompassRunner
-from agent_bridge.system_config.model_evaluation.runners.protocol import ExecutionRequest
+from agent_bridge.system_config.model_evaluation.runners.protocol import ExecutionRequest, container_log_tail
 from agent_bridge.system_config.model_evaluation.runners.swebench import SWEbenchRunner
 from agent_bridge.system_config.model_evaluation.runtimes import BindMount, ContainerHandle, ContainerSpec, DockerCliRuntime
 from agent_bridge.system_config.model_evaluation.service import ModelEvaluationService
@@ -356,3 +356,143 @@ def test_docker_runtime_passes_read_only_bind_mount(tmp_path: Path, monkeypatch)
         "--mount", f"type=bind,src={manifest_path},dst=/opt/manifest.json,readonly",
         "--workdir", "/workspace", "--network", "bridge", "worker:latest", "swe-agent",
     ]
+
+
+def test_docker_runtime_opens_mounted_workspace_for_container_writes(tmp_path: Path, monkeypatch) -> None:
+    runtime = DockerCliRuntime(docker_bin="docker")
+
+    class _Process:
+        def poll(self) -> None:
+            return None
+
+    monkeypatch.setattr("agent_bridge.system_config.model_evaluation.runtimes.docker.subprocess.Popen", lambda command, **kwargs: _Process())
+    monkeypatch.setattr(runtime, "_wait_for_cidfile", lambda cidfile, process: "container-1")
+
+    mounted_dir = tmp_path / "mounted"
+    runtime.run(
+        ContainerSpec(image="worker:latest", command=("swe-agent",), work_dir=mounted_dir, labels={}),
+        log_path=mounted_dir / "runner.log",
+    )
+    assert mounted_dir.stat().st_mode & 0o7777 == 0o1777
+
+    unmounted_dir = tmp_path / "unmounted"
+    runtime.run(
+        ContainerSpec(image="worker:latest", command=("sleep",), work_dir=unmounted_dir, labels={}, mount_workspace=False),
+        log_path=unmounted_dir / "runner.log",
+    )
+    assert unmounted_dir.stat().st_mode & 0o7777 != 0o1777
+
+
+def test_container_log_tail_reports_missing_and_truncates_long_logs(tmp_path: Path) -> None:
+    missing = container_log_tail(tmp_path / "missing.log")
+    assert "无法读取日志" in missing
+
+    empty = tmp_path / "empty.log"
+    empty.write_text("", encoding="utf-8")
+    assert "日志为空" in container_log_tail(empty)
+
+    long_log = tmp_path / "runner.log"
+    long_log.write_text("STARTMARK" + "x" * 6000 + "tail-end", encoding="utf-8")
+    summary = container_log_tail(long_log)
+    assert summary.startswith(f"日志 {long_log} 尾部内容：\n")
+    assert summary.endswith("tail-end")
+    assert "STARTMARK" not in summary
+
+
+class _FailingContainerRuntime:
+    """模拟容器输出日志后退出的运行时。"""
+
+    def __init__(self, *, log_name: str, log_text: str, return_code: int = 1) -> None:
+        self._log_name = log_name
+        self._log_text = log_text
+        self._return_code = return_code
+
+    def run(self, spec: ContainerSpec, *, log_path: Path) -> ContainerHandle:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(self._log_text, encoding="utf-8")
+        assert log_path.name == self._log_name
+        return ContainerHandle(container_id="failed-1", image=spec.image, command=spec.command)
+
+    def poll(self, handle: ContainerHandle) -> int:
+        return self._return_code
+
+    def wait(self, handle: ContainerHandle) -> int:
+        return self._return_code
+
+    def stop(self, handle: ContainerHandle) -> None:
+        pass
+
+
+def _execution_request(work_dir: Path, manifest_path: Path, datasets: tuple[str, ...]) -> ExecutionRequest:
+    return ExecutionRequest(
+        run_id="run-1",
+        execution_id="execution-1",
+        work_dir=work_dir,
+        model_name="demo",
+        base_url="https://llm.example/v1",
+        api_key="key",
+        datasets=datasets,
+        max_samples=1,
+        sampling_mode="head",
+        sample_seed=42,
+        opencompass_image="opencompass:latest",
+        agent_worker_image="worker:latest",
+        swebench_manifest_path=manifest_path,
+    )
+
+
+def test_opencompass_runner_failure_includes_log_tail(tmp_path: Path) -> None:
+    request = _execution_request(tmp_path / "work", tmp_path / "swebench-manifest.json", ("gsm8k_chat_gen",))
+    runtime = _FailingContainerRuntime(
+        log_name="runner.log",
+        log_text="Traceback (most recent call last):\nPermissionError: [Errno 13] Permission denied: '/workspace/output'",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        OpenCompassRunner().execute(
+            request,
+            runtime,  # type: ignore[arg-type]
+            report_container=lambda _handle: None,
+            report_progress=lambda _message: None,
+        )
+
+    message = str(excinfo.value)
+    assert "OpenCompass 容器退出，退出码 1" in message
+    assert "Permission denied: '/workspace/output'" in message
+    assert str(request.work_dir / "runner.log") in message
+
+
+def test_code_runner_generation_failure_includes_log_tail(tmp_path: Path) -> None:
+    request = _execution_request(tmp_path / "work", tmp_path / "swebench-manifest.json", ("humaneval",))
+    runtime = _FailingContainerRuntime(log_name="generation.log", log_text="ImportError: No module named 'requests'")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        CodeRunner().execute(
+            request,
+            runtime,  # type: ignore[arg-type]
+            report_container=lambda _handle: None,
+            report_progress=lambda _message: None,
+        )
+
+    message = str(excinfo.value)
+    assert "代码生成容器执行失败" in message
+    assert "No module named 'requests'" in message
+
+
+def test_swebench_runner_failure_includes_log_tail(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "swebench-manifest.json"
+    manifest_path.write_text('{"version":"test","tasks":[]}', encoding="utf-8")
+    request = _execution_request(tmp_path / "work", manifest_path, ("swebench_lite",))
+    runtime = _FailingContainerRuntime(log_name="runner.log", log_text="ERROR: agent crashed")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        SWEbenchRunner().execute(
+            request,
+            runtime,  # type: ignore[arg-type]
+            report_container=lambda _handle: None,
+            report_progress=lambda _message: None,
+        )
+
+    message = str(excinfo.value)
+    assert "SWE-bench Agent 容器执行失败" in message
+    assert "agent crashed" in message

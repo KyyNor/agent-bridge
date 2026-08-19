@@ -8,7 +8,7 @@ from typing import Any
 
 from agent_bridge.system_config.model_evaluation.runtimes import ContainerRuntime, ContainerSpec
 
-from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter
+from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter, container_log_tail
 
 
 class CodeRunner:
@@ -29,7 +29,7 @@ class CodeRunner:
         generation_handle = runtime.run(generator, log_path=request.work_dir / "generation.log")
         report_container(generation_handle)
         if runtime.wait(generation_handle):
-            raise RuntimeError("代码生成容器执行失败；请查看 generation.log")
+            raise RuntimeError(f"代码生成容器执行失败；{container_log_tail(request.work_dir / 'generation.log')}")
         generated_path = request.work_dir / "generated-cases.json"
         payload = json.loads(generated_path.read_text(encoding="utf-8"))
         cases = payload.get("cases") if isinstance(payload, dict) else None

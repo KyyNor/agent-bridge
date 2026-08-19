@@ -9,7 +9,7 @@ from typing import Any
 
 from agent_bridge.system_config.model_evaluation.runtimes import BindMount, ContainerHandle, ContainerRuntime, ContainerSpec
 
-from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter
+from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter, container_log_tail
 
 SWE_COMMAND_TIMEOUT_SECONDS = 180
 SWE_FINAL_TEST_TIMEOUT_SECONDS = 900
@@ -76,7 +76,7 @@ class SWEbenchRunner:
             for handle in testbeds.values():
                 runtime.stop(handle)
         if return_code:
-            raise RuntimeError("SWE-bench Agent 容器执行失败；请查看 runner.log")
+            raise RuntimeError(f"SWE-bench Agent 容器执行失败；{container_log_tail(request.work_dir / 'runner.log')}")
         result_path = request.work_dir / "result.json"
         if not result_path.exists():
             raise RuntimeError("SWE-bench Agent 未产出 result.json")

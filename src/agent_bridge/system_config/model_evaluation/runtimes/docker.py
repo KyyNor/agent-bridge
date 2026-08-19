@@ -53,6 +53,13 @@ class DockerCliRuntime(ContainerRuntime):
 
     def run(self, spec: ContainerSpec, *, log_path: Path) -> ContainerHandle:
         spec.work_dir.mkdir(parents=True, exist_ok=True)
+        if spec.mount_workspace:
+            # Linux 上 bind mount 按宿主 uid 校验写权限，镜像内为非 root 用户；
+            # 挂载根目录需放开写入（sticky 位，同 /tmp 语义），否则容器无法创建 output 等产物目录。
+            try:
+                os.chmod(spec.work_dir, 0o1777)
+            except OSError as exc:
+                logger.warning("评估挂载目录放开写权限失败 work_dir=%s error=%s", spec.work_dir, exc)
         cidfile = spec.work_dir / f"container-{uuid.uuid4().hex}.cid"
         command = [self._docker_bin, "run", "--rm", "--cidfile", str(cidfile)]
         for key, value in spec.labels.items():

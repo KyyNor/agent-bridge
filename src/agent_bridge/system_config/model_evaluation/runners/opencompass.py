@@ -9,7 +9,7 @@ from typing import Any
 
 from agent_bridge.system_config.model_evaluation.runtimes import ContainerRuntime, ContainerSpec
 
-from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter
+from .protocol import ContainerReporter, ExecutionRequest, ProgressReporter, container_log_tail
 
 
 _CONFIG_IMPORTS = {
@@ -49,7 +49,7 @@ class OpenCompassRunner:
         report_container(handle)
         return_code = runtime.wait(handle)
         if return_code:
-            raise RuntimeError(f"OpenCompass 容器退出，退出码 {return_code}；请查看评估日志")
+            raise RuntimeError(f"OpenCompass 容器退出，退出码 {return_code}；{container_log_tail(request.work_dir / 'runner.log')}")
         return collect_opencompass_results(request.work_dir / "output")
 
     @staticmethod

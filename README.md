@@ -75,6 +75,8 @@ export AGENT_BRIDGE_EVAL_AGENT_WORKER_IMAGE=agent-bridge-agent-worker:latest
 
 普通题集在一次性 `opencompass-runner` 容器中执行；HumanEval/MBPP 的每个 case 会启动无网络、无 API Key 的独立代码沙箱；SWE-bench 按任务启动独立 testbed。SWE Agent 单次模型请求最多 6 分钟、最多 40 轮，单条命令最多 3 分钟、最终验收最多 15 分钟；当前不设置单题总时长上限。API Key 只作为容器运行时环境变量传递，不保存到 SQLite、运行请求文件或日志。
 
+评估执行目录以 bind mount 挂入容器；Linux 会按宿主 uid 校验写权限，因此启动容器前会把挂载根目录放开为 1777（含 sticky 位），镜像内的非 root 用户才能创建 `output` 等产物目录。容器异常退出时，失败信息会附带对应日志（`runner.log` / `generation.log`）的尾部内容；完整日志保留在 `AGENT_BRIDGE_ROOT/run/model-evaluations/<run_id>/executions/<runner>/` 下。
+
 若公共模型配置的 Base URL 指向宿主机的 `localhost`，容器默认会改用 `host.docker.internal`；Linux 部署可通过 `AGENT_BRIDGE_EVAL_DOCKER_HOST` 指向可从容器访问的宿主机地址或网关。没有可访问的 Docker 环境或指定镜像时，不存在 venv/CLI 后备，评估功能直接不可用。
 
 ## Profile 接入 Claude Code
