@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from agent_bridge.storage.migrations.schema import ensure_tool_call_logs_stats_index
+
 
 RUNTIME_LOG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS tool_call_logs (
@@ -92,3 +94,5 @@ def apply_runtime_log_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_agent_runs_owner_group "
         "ON agent_runs(owner_group_key, created_at DESC)"
     )
+    # 概览页与调用统计的时间窗聚合覆盖索引，与主库单库模式共用同一 DDL。
+    ensure_tool_call_logs_stats_index(conn)

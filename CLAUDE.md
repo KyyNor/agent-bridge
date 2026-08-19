@@ -45,6 +45,8 @@ CLI 根命令只有 `server`、`profile`、`memory`。不要在文档中添加�
 
 `SQLiteStore` 仍提供兼容门面，具体持久化按 `storage/repositories/` 分域。主业务库为 `agent-bridge.db`，工具调用与 Agent 运行审计位于独立的 `agent-bridge-logs.db`；运行日志 repository 必须使用日志连接，不能重新写回主库。新增存储逻辑优先进入对应 repository；schema 变化使用幂等、可测试的迁移步骤。
 
+大表查询性能由两组载荷索引护航：`workflow_runs` 的 `idx_workflow_runs_task(workflow_key, task_key, task_version, status, finished_at DESC, id DESC)` 支撑任务队列视图与增量基线的按任务关联；`tool_call_logs` 的 `idx_tool_call_logs_stats(created_at, owner_group_key, status, resource_type, source_type, source_key, tool_name, profile_key, duration_ms)` 让概览页与调用统计的时间窗分组聚合免回表。两表行内均内嵌大 JSON 字段（运行定义快照、完整请求/响应），任何缺索引的全量回表都会随数据量线性放大。索引经启动迁移幂等创建；大库首次升级构建耗时较长属一次性成本。
+
 业务台账使用独立的 `agent-bridge-ledgers.db`，定义与记录均以 SQLite 持久化；加载、筛选、排序和模糊匹配只针对 pandas 内存快照执行。所有字段默认精确匹配和可排序，文本字段仅额外配置是否允许字面包含检索，数字、日期与日期时间默认支持完整范围运算；多字段排序按传入顺序生效。每个台账上限为 100 字段、200,000 行；写入必须完整重建并原子替换快照，查询不得回退至 SQLite。
 
 业务台账 Excel 导入模板仅导出当前字段标识表头，绝不复用数据导出接口或泄露已有记录。

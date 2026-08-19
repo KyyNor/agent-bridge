@@ -171,7 +171,7 @@ CodeGraph 不提供 SQLite 文本索引降级。CLI 缺失、索引未建立或�
 └── run/
 ```
 
-服务配置位于 `config/server.toml`，数据库和运行数据位于 `data/`。主业务库为 `data/agent-bridge.db`，高频工具调用与 Agent 运行审计独立保存到 `data/agent-bridge-logs.db`；升级时会安全复制历史 `wiki.db` 到新的主库文件名。日志默认写入 `logs/agent-bridge.log`。
+服务配置位于 `config/server.toml`，数据库和运行数据位于 `data/`。主业务库为 `data/agent-bridge.db`，高频工具调用与 Agent 运行审计独立保存到 `data/agent-bridge-logs.db`；升级时会安全复制历史 `wiki.db` 到新的主库文件名。日志默认写入 `logs/agent-bridge.log`。升级后的首次启动会为任务队列和日志聚合构建查询索引，数据量较大时该过程可能耗时数分钟，属一次性成本。
 
 Web 入口使用内部总账户系统签发的短期 JWT：浏览器访问
 `/api/v1/auth/sso/callback?token=<JWT>&next=/` 后，后端校验 `server.toml` 的
