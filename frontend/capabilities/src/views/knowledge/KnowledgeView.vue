@@ -8,9 +8,10 @@ import { formatLocalDatetime } from '../../lib/time'
 import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import StatusBadge from '../../components/StatusBadge.vue'
+import ResourceVisibilitySelect from '../../components/ResourceVisibilitySelect.vue'
+import KbVisibilityCell from '../../components/knowledge/KbVisibilityCell.vue'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import PaginationBar from '../../components/PaginationBar.vue'
 import FolderTree from '../../components/knowledge/FolderTree.vue'
@@ -29,7 +30,7 @@ const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
 import { knowledgeDetailFirstUseTour, knowledgeFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
-import { isSharedResourceReadOnly, SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
+import { canModifyResource, isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 const props = defineProps<{ routeKey: string }>()
 const { maybeStartTour } = useOnboardingTour()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
@@ -793,14 +794,12 @@ function syncBadgeLabel(status?: string | null) {
               </td>
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ k.slug }}</td>
               <td class="px-4 py-3">
-                <div v-if="k.visibility === 'shared'">
-                  <Badge variant="secondary" :class="SHARED_RESOURCE_BADGE_CLASS">共享</Badge>
-                  <div v-if="kbReadOnly(k)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
-                </div>
-                <div v-else>
-                  <Badge variant="outline">组内</Badge>
-                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ k.owner_group_key }}</div>
-                </div>
+                <KbVisibilityCell
+                  :kb="k"
+                  :read-only="kbReadOnly(k)"
+                  :can-modify="canModifyResource(actorContext, k)"
+                  @changed="loadKbs({ fresh: true })"
+                />
               </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ k.document_count }}</td>
               <td class="px-4 py-3 tabular-nums text-sm">
@@ -1081,13 +1080,7 @@ function syncBadgeLabel(status?: string | null) {
             <label class="text-sm font-medium">描述</label>
             <Input v-model="createForm.description" placeholder="文档知识描述" />
           </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">数据可见范围</label>
-            <Select v-model="createForm.visibility"><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
-              <SelectItem value="group">仅本小组</SelectItem><SelectItem value="shared">共享给所有小组</SelectItem>
-            </SelectContent></Select>
-            <p class="text-xs text-muted-foreground">共享后所有用户都可使用，维护仍只允许归属小组。</p>
-          </div>
+          <ResourceVisibilitySelect v-model="createForm.visibility" />
         </form>
         <DialogFooter>
           <DialogClose as-child><Button variant="outline" type="button">取消</Button></DialogClose>

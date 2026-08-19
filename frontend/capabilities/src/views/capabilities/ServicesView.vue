@@ -17,6 +17,8 @@ import StatusBadge from '../../components/StatusBadge.vue'
 import CategoryBadge from '../../components/CategoryBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import ResourceScopeBadge from '../../components/ResourceScopeBadge.vue'
+import ResourceVisibilitySelect from '../../components/ResourceVisibilitySelect.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { registerRouteLeaveGuard } from '../../router/guards'
 import {
@@ -39,7 +41,7 @@ import {
 import { queryClient, queryKeys } from '../../lib/query'
 import { servicesFirstUseTour } from '../../lib/onboardingTours'
 import { useOnboardingTour } from '../../composables/useOnboardingTour'
-import { isSharedResourceReadOnly, SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{ routeKey: string }>()
 const router = useRouter()
@@ -434,17 +436,7 @@ const toolTypeOptions = [
             <label class="text-sm font-medium">请求 Header</label>
             <textarea v-model="mcpForm.headers" placeholder='{"Authorization":"Bearer token"}' rows="5" class="w-full rounded-lg border border-input px-3 py-2 font-mono text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" />
           </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">数据可见范围</label>
-            <Select v-model="mcpForm.visibility">
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="group">仅本小组</SelectItem>
-                <SelectItem value="shared">共享给所有小组</SelectItem>
-              </SelectContent>
-            </Select>
-            <p class="text-xs text-muted-foreground">共享后所有用户都可调用，修改和删除仍只允许归属小组。</p>
-          </div>
+          <ResourceVisibilitySelect v-model="mcpForm.visibility" hint="共享后所有用户都可调用，修改和删除仍只允许归属小组。" />
         </template>
 
         <template v-else>
@@ -488,17 +480,7 @@ const toolTypeOptions = [
             <label class="text-sm font-medium">标签</label>
             <Input v-model="openApiForm.tags" placeholder="业务, 查询" />
           </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">数据可见范围</label>
-            <Select v-model="openApiForm.visibility">
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="group">仅本小组</SelectItem>
-                <SelectItem value="shared">共享给所有小组</SelectItem>
-              </SelectContent>
-            </Select>
-            <p class="text-xs text-muted-foreground">共享后所有用户都可调用，修改和删除仍只允许归属小组。</p>
-          </div>
+          <ResourceVisibilitySelect v-model="openApiForm.visibility" hint="共享后所有用户都可调用，修改和删除仍只允许归属小组。" />
         </template>
       </CardContent>
     </Card>
@@ -567,14 +549,7 @@ const toolTypeOptions = [
                 <StatusBadge v-else status="disabled" />
               </td>
               <td class="px-4 py-3">
-                <div v-if="s.visibility === 'shared'">
-                  <Badge variant="secondary" :class="SHARED_RESOURCE_BADGE_CLASS">共享</Badge>
-                  <div v-if="serviceReadOnly(s)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
-                </div>
-                <div v-else>
-                  <Badge variant="outline">组内</Badge>
-                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ s.owner_group_key }}</div>
-                </div>
+                <ResourceScopeBadge :resource="s" :read-only="serviceReadOnly(s)" />
               </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ toolCounts[serviceCountKey(s)] ?? '...' }}</td>
               <td class="px-4 py-3 text-xs text-muted-foreground">{{ timeAgo(lastSyncAt(s)) }}</td>

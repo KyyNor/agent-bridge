@@ -115,6 +115,7 @@ import type {
   AccessUser,
   AdminAccessStatus,
   AccessGroup,
+  AccessGroupName,
   UserGroupMembership,
   ResourceVisibility,
 } from './types'
@@ -379,6 +380,8 @@ export const api = {
   listAccessUsers: () => get<AccessUser[]>('/access/users'),
   createAccessUser: (userId: string) => post<AccessUser>('/access/users', { user_id: userId }),
   listAccessGroups: () => get<AccessGroup[]>('/access/groups'),
+  // 登录即可读的组目录 key → 中文名映射，供资源页展示归属组
+  listAccessGroupNames: () => get<AccessGroupName[]>('/access/group-names'),
   upsertAccessGroup: (group: Pick<AccessGroup, 'group_key' | 'name' | 'description'>) =>
     post<AccessGroup>('/access/groups', group),
   deleteAccessGroup: (groupKey: string) => del<{ deleted: boolean }>(`/access/groups/${encodeURIComponent(groupKey)}`),
@@ -921,6 +924,8 @@ export const api = {
     post<KnowledgeBase>('/kbs', data),
   updateKbDefaults: (kbSlug: string, data: { default_backend_slug?: string | null; default_agent_id?: string | null; expected_edit_token?: string | null }) =>
     put<KnowledgeBase>(`/kbs/${kbSlug}/defaults`, data),
+  updateKbVisibility: (kbSlug: string, data: { visibility: ResourceVisibility; expected_edit_token?: string | null }) =>
+    put<KnowledgeBaseSummary>(`/kbs/${kbSlug}/visibility`, data),
   updateKbSyncPolicy: (kbSlug: string, data: { sync_on_upload?: boolean; backend_sync_on_upload?: Record<string, boolean>; expected_edit_token?: string | null }) =>
     put<KnowledgeBaseSummary>(`/kbs/${kbSlug}/sync-policy`, data),
   listKbRepoSources: (kbSlug: string) =>

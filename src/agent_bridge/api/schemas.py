@@ -66,6 +66,11 @@ class CreateKbRequest(BaseModel):
     sync_on_upload: bool = False
 
 
+class UpdateKbVisibilityRequest(BaseModel):
+    visibility: Literal["group", "shared"]
+    expected_edit_token: str | None = None
+
+
 class CreateFolderRequest(BaseModel):
     parent_folder_id: int | None = Field(default=None, ge=1)
     name: str = Field(min_length=1, max_length=255)

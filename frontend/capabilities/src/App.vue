@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppShell from './components/AppShell.vue'
 import AdminAccessControl from './components/AdminAccessControl.vue'
+import SidebarAccount from './components/SidebarAccount.vue'
 import type { NavGroup } from './components/AppShell.vue'
 import AppErrorBoundary from './components/AppErrorBoundary.vue'
 import PageHeader from './components/PageHeader.vue'
@@ -99,6 +100,12 @@ function returnToParent() {
       <div class="space-y-2">
         <SidebarTourButton />
         <AdminAccessControl />
+        <SidebarAccount
+          v-if="actorContext"
+          :name="actorContext.user_name || actorContext.user_id"
+          :user-id="actorContext.user_id"
+          :group-name="actorContext.group_name"
+        />
       </div>
     </template>
     <div class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll">

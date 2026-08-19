@@ -12,12 +12,14 @@ import { Input } from '../../components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../../components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import PaginationBar from '../../components/PaginationBar.vue'
+import ResourceScopeBadge from '../../components/ResourceScopeBadge.vue'
+import ResourceVisibilitySelect from '../../components/ResourceVisibilitySelect.vue'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
 import { confirm, alert } from '../../composables/useConfirm'
 import CodeRepoDetailView from './CodeRepoDetailView.vue'
 const router = useRouter()
 import { queryClient, queryKeys } from '../../lib/query'
-import { isSharedResourceReadOnly, SHARED_RESOURCE_BADGE_CLASS, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
+import { isSharedResourceReadOnly, SHARED_RESOURCE_READ_ONLY_HINT } from '../../lib/resourceAccess'
 
 const props = defineProps<{ routeKey: string }>()
 const mode = computed<'list' | 'detail'>(() => (props.routeKey ? 'detail' : 'list'))
@@ -355,14 +357,7 @@ function categoryName(key: string) {
                 <Badge v-else variant="secondary">{{ r.status }}</Badge>
               </td>
               <td class="px-4 py-3">
-                <div v-if="r.visibility === 'shared'">
-                  <Badge variant="secondary" :class="SHARED_RESOURCE_BADGE_CLASS">共享</Badge>
-                  <div v-if="repoReadOnly(r)" class="mt-1 text-[10px] text-muted-foreground">{{ SHARED_RESOURCE_READ_ONLY_HINT }}</div>
-                </div>
-                <div v-else>
-                  <Badge variant="outline">组内</Badge>
-                  <div class="mt-1 font-mono text-[10px] text-muted-foreground">{{ r.owner_group_key }}</div>
-                </div>
+                <ResourceScopeBadge :resource="r" :read-only="repoReadOnly(r)" />
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{{ formatLocalDatetime(r.last_synced_at) }}</td>
               <td class="px-4 py-3">
@@ -476,17 +471,7 @@ function categoryName(key: string) {
             <label class="text-sm font-medium">描述</label>
             <Input v-model="repoForm.description" placeholder="项目代码仓库" />
           </div>
-          <div class="space-y-2">
-            <label class="text-sm font-medium">数据可见范围</label>
-            <Select v-model="repoForm.visibility">
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="group">仅本小组</SelectItem>
-                <SelectItem value="shared">共享给所有小组</SelectItem>
-              </SelectContent>
-            </Select>
-            <p class="text-xs text-muted-foreground">共享后所有用户都可使用，维护仍只允许归属小组。</p>
-          </div>
+          <ResourceVisibilitySelect v-model="repoForm.visibility" />
           <div class="flex items-center gap-2">
             <input type="checkbox" v-model="repoForm.auto_understand" class="size-4 rounded-sm border-border" id="repo-auto-understand" />
             <label for="repo-auto-understand" class="text-sm">自动理解（定时运行 Understand Anything 分析）</label>

@@ -1452,6 +1452,17 @@ class KnowledgeRepository:
                 (default_backend_slug, default_agent_id, kb_id),
             )
 
+    def update_kb_visibility(self, kb_id: int, visibility: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE knowledge_bases
+                SET visibility = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (visibility, kb_id),
+            )
+
     def update_kb_sync_policy(self, kb_id: int, sync_on_upload: bool) -> None:
         with self._connect() as conn:
             conn.execute(

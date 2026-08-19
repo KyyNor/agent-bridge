@@ -7,6 +7,7 @@ export interface ResourceScopeFields {
 
 export interface AccessActorContext {
   user_id: string
+  user_name: string
   group_key: string | null
   group_name: string | null
   is_maintenance_admin: boolean
@@ -28,6 +29,11 @@ export interface AccessGroup {
   created_by: string
   created_at: string
   updated_at: string
+}
+
+export interface AccessGroupName {
+  group_key: string
+  name: string
 }
 
 export interface AccessUser {
@@ -186,6 +192,7 @@ export interface ProjectProfile {
   status: string
   allow_count: number
   deny_count: number
+  owner_group_key: string
   edit_token?: string
   rules_edit_token?: string
   resources_edit_token?: string
@@ -200,6 +207,7 @@ export interface MemoryBlock {
   status: string
   data_dir: string
   worker_base_url: string | null
+  owner_group_key: string
   last_health?: Record<string, unknown>
   bound_profile_count?: number
   created_by: string

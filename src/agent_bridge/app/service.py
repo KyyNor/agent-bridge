@@ -455,7 +455,11 @@ class AgentBridgeService:
         visibility: str = "group",
         sync_on_upload: bool = False,
     ) -> dict[str, Any]:
-        scope = self.access.new_resource_scope(actor=actor, visibility=visibility or "group")
+        scope = self.access.new_resource_scope(
+            actor=actor,
+            visibility=visibility or "group",
+            resource_type=ScopedResourceType.knowledge_base,
+        )
         kb = self.store.create_kb(
             slug=slug,
             name=name,
@@ -1604,6 +1608,35 @@ class AgentBridgeService:
             actor=actor,
         )
         self.store.update_kb_defaults(kb["id"], default_backend_slug, default_agent_id)
+        saved = self.store.get_kb_by_slug(kb_slug)
+        return attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
+
+    def update_kb_visibility(self, actor: str, kb_slug: str, *,
+                             visibility: str,
+                             expected_edit_token: str | None = None) -> dict[str, Any]:
+        """更新文档知识库的可见范围；归属组保持不变，仅归属组或管理员可改。"""
+        kb = self.access.require_resource_write(
+            actor=actor,
+            resource_type=ScopedResourceType.knowledge_base,
+            resource_key=kb_slug,
+        )
+        resolved = self.access.validate_visibility(
+            visibility, resource_type=ScopedResourceType.knowledge_base
+        )
+        current = str(kb.get("visibility") or "group")
+        if resolved.value != current:
+            require_edit_token(
+                expected_edit_token,
+                self._kb_defaults_edit_snapshot(kb),
+                resource_type="文档知识库可见范围",
+                resource_key=kb_slug,
+                actor=actor,
+            )
+            self.store.update_kb_visibility(kb["id"], resolved.value)
+            logger.info(
+                "文档知识库可见范围已更新 kb=%s actor=%s visibility=%s->%s",
+                kb_slug, actor, current, resolved.value,
+            )
         saved = self.store.get_kb_by_slug(kb_slug)
         return attach_edit_token(self._serialize_kb(saved), self._kb_defaults_edit_snapshot(saved))
 
