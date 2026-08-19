@@ -76,6 +76,33 @@ def test_only_shareable_resource_types_accept_shared_visibility(wm_paths) -> Non
         )
 
 
+def test_validate_visibility_keeps_owner_group_untouched(wm_paths) -> None:
+    import pytest
+
+    from agent_bridge.access_control.resources import ScopedResourceType
+    from agent_bridge.core.domain import ValidationError
+
+    _, access = _access_service(wm_paths)
+    # 更新既有资源范围：允许白名单资源共享，拒绝非白名单资源与非法取值，
+    # 且不要求操作者重新具备小组归属（归属组由资源自身保持）。
+    resolved = access.validate_visibility(
+        "shared", resource_type=ScopedResourceType.knowledge_base
+    )
+    assert resolved is ResourceVisibility.shared
+    assert (
+        access.validate_visibility(
+            "group", resource_type=ScopedResourceType.workflow_definition
+        )
+        is ResourceVisibility.group
+    )
+    with pytest.raises(ValidationError, match="不允许共享"):
+        access.validate_visibility(
+            "shared", resource_type=ScopedResourceType.workflow_definition
+        )
+    with pytest.raises(ValidationError, match="group 或 shared"):
+        access.validate_visibility("public", resource_type=ScopedResourceType.knowledge_base)
+
+
 def test_access_schema_keeps_unassigned_legacy_resources_private(wm_paths) -> None:
     store = SQLiteStore(wm_paths.db_path)
     store.init_schema()
@@ -120,12 +147,27 @@ def test_access_group_management_api(wm_paths) -> None:
     assert me_response.status_code == 200
     assert me_response.json() == {
         "user_id": "alice",
+        "user_name": "alice",
         "group_key": "data-team",
         "group_name": "数据组",
         "is_maintenance_admin": False,
     }
     denied = client.get("/api/v1/access/groups", headers={"X-Agent-Bridge-User": "alice"})
     assert denied.status_code == 403
+
+
+def test_group_names_readable_by_regular_users(wm_paths) -> None:
+    client = TestClient(create_app(wm_paths, admins={"root"}))
+    root = {"X-Agent-Bridge-User": "root"}
+    client.post(
+        "/api/v1/access/groups",
+        headers=root,
+        json={"group_key": "data-team", "name": "数据组"},
+    )
+    names = client.get("/api/v1/access/group-names", headers={"X-Agent-Bridge-User": "alice"})
+    assert names.status_code == 200
+    directory = {item["group_key"]: item["name"] for item in names.json()}
+    assert directory == {"system-maintainers": "系统维护组", "data-team": "数据组"}
 
 
 def test_user_directory_keeps_user_when_membership_is_cleared(wm_paths) -> None:

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import StatusBadge from '../../components/StatusBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import ResourceScopeBadge from '../../components/ResourceScopeBadge.vue'
 import ProfileDetailView from './ProfileDetailView.vue'
 import { confirm } from '../../composables/useConfirm'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
@@ -194,6 +195,7 @@ async function handleDetailSaved() {
             <tr class="border-b border-border">
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">能力平面</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">归属组</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">Allow</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">操作</th>
             </tr>
@@ -207,6 +209,10 @@ async function handleDetailSaved() {
               <td class="px-4 py-3">
                 <StatusBadge v-if="profile.status === 'active'" status="enabled" />
                 <StatusBadge v-else status="disabled" />
+              </td>
+              <td class="px-4 py-3">
+                <!-- 能力平面当前仅支持组内，展示归属小组中文名。 -->
+                <ResourceScopeBadge :resource="{ owner_group_key: profile.owner_group_key, visibility: 'group' }" />
               </td>
               <td class="px-4 py-3 tabular-nums font-semibold">{{ profile.allow_count || 0 }}</td>
               <td class="px-4 py-3">

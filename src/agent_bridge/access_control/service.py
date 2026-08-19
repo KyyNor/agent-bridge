@@ -115,6 +115,13 @@ class AccessControlService:
         require_admin_user(actor, self.admins)
         return self.repository.list_groups()
 
+    def list_group_names(self) -> list[dict[str, Any]]:
+        """组目录的 key → 中文名映射；资源页展示归属组需要，登录即可读。"""
+        return [
+            {"group_key": group["group_key"], "name": group["name"]}
+            for group in self.repository.list_groups()
+        ]
+
     def create_user(self, *, actor: str, user_id: str) -> dict[str, Any]:
         require_admin_user(actor, self.admins)
         normalized_user = user_id.strip()
@@ -158,10 +165,11 @@ class AccessControlService:
         require_admin_user(actor, self.admins)
         return self.repository.list_memberships()
 
-    def actor_context(self, actor: str) -> dict[str, Any]:
+    def actor_context(self, actor: str, *, user_name: str = "") -> dict[str, Any]:
         membership = self.repository.get_membership(actor)
         return {
             "user_id": actor,
+            "user_name": user_name or "",
             "group_key": membership["group_key"] if membership else None,
             "group_name": membership["group_name"] if membership else None,
             "is_maintenance_admin": actor in self.admins,
@@ -192,16 +200,7 @@ class AccessControlService:
         visibility: ResourceVisibility | str,
         resource_type: ScopedResourceType | str | None = None,
     ) -> ResourceScope:
-        try:
-            resolved_visibility = ResourceVisibility(visibility)
-        except ValueError as exc:
-            raise ValidationError("资源可见范围必须是 group 或 shared") from exc
-        if (
-            resolved_visibility is ResourceVisibility.shared
-            and resource_type is not None
-            and not self.resources.is_shareable(resource_type)
-        ):
-            raise ValidationError("该类数据不允许共享")
+        resolved_visibility = self.validate_visibility(visibility, resource_type=resource_type)
         membership = self.repository.get_membership(actor)
         if membership is None:
             raise AccessDenied("当前用户尚未分配小组，不能新建资源")
@@ -209,6 +208,29 @@ class AccessControlService:
             owner_group_key=str(membership["group_key"]),
             visibility=resolved_visibility,
         )
+
+    def validate_visibility(
+        self,
+        visibility: ResourceVisibility | str,
+        *,
+        resource_type: ScopedResourceType | str | None = None,
+    ) -> ResourceVisibility:
+        """校验可见范围取值与共享白名单；更新既有资源范围时复用，归属组保持不变。
+
+        ``resource_type=None`` 仅校验取值合法，供历史调用入口兼容；
+        显式传入资源类型后，非白名单资源拒绝共享。
+        """
+        try:
+            resolved = ResourceVisibility(visibility)
+        except ValueError as exc:
+            raise ValidationError("资源可见范围必须是 group 或 shared") from exc
+        if (
+            resolved is ResourceVisibility.shared
+            and resource_type is not None
+            and not self.resources.is_shareable(resource_type)
+        ):
+            raise ValidationError("该类数据不允许共享")
+        return resolved
 
     def actor_group_key(self, actor: str, *, required: bool = False) -> str | None:
         runtime_group_key = self._runtime_group_key(actor)

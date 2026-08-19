@@ -13,16 +13,24 @@ from agent_bridge.api.schemas import (
 )
 
 
-def create_access_control_routes(service, actor):
+def create_access_control_routes(service, actor, identity):
     router = APIRouter(prefix="/access", tags=["access-control"])
 
     @router.get("/me")
-    def get_actor_context(current_actor: str = Depends(actor)) -> dict[str, Any]:
-        return service.access.actor_context(current_actor)
+    def get_actor_context(
+        current_identity=Depends(identity),
+    ) -> dict[str, Any]:
+        return service.access.actor_context(
+            current_identity.user_id, user_name=current_identity.user_name
+        )
 
     @router.get("/groups")
     def list_groups(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
         return service.access.list_groups(current_actor)
+
+    @router.get("/group-names")
+    def list_group_names(current_actor: str = Depends(actor)) -> list[dict[str, Any]]:
+        return service.access.list_group_names()
 
     @router.delete("/groups/{group_key}")
     def delete_group(

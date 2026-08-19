@@ -18,6 +18,7 @@ from agent_bridge.api.schemas import (
     UpdateFolderRequest,
     UpdateKbDefaultsRequest,
     UpdateKbSyncPolicyRequest,
+    UpdateKbVisibilityRequest,
     UpsertBackendRequest,
     UpdateBackendRequest,
 )
@@ -303,6 +304,19 @@ def create_knowledge_routes(service, actor, save_upload, upload_filename):
             kb_slug,
             default_backend_slug=payload.default_backend_slug,
             default_agent_id=payload.default_agent_id,
+            expected_edit_token=payload.expected_edit_token,
+        )
+
+    @router.put("/kbs/{kb_slug}/visibility")
+    def update_kb_visibility(
+        kb_slug: str,
+        payload: UpdateKbVisibilityRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.update_kb_visibility(
+            current_actor,
+            kb_slug,
+            visibility=payload.visibility,
             expected_edit_token=payload.expected_edit_token,
         )
 

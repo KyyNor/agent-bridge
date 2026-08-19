@@ -12,6 +12,7 @@ import { Input } from '../../components/ui/input'
 import StatusBadge from '../../components/StatusBadge.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import ResourceScopeBadge from '../../components/ResourceScopeBadge.vue'
 import { confirm, alert } from '../../composables/useConfirm'
 import { formatLocalDatetime } from '../../lib/time'
 import { DEFAULT_PAGE_SIZE_OPTIONS, paginate } from '../../lib/pagination'
@@ -305,6 +306,7 @@ function errorMessage(e: unknown) {
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">名称</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">标识</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">状态</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">归属组</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground">绑定 Profile</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground"></th>
             </tr>
@@ -318,6 +320,10 @@ function errorMessage(e: unknown) {
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ block.block_key }}</td>
               <td class="px-4 py-3">
                 <StatusBadge :status="memoryBadgeStatus(block.status)" />
+              </td>
+              <td class="px-4 py-3">
+                <!-- 记忆区块保持组内，展示归属小组中文名。 -->
+                <ResourceScopeBadge :resource="{ owner_group_key: block.owner_group_key, visibility: 'group' }" />
               </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ block.bound_profile_count || 0 }}</td>
               <td class="px-4 py-3">
