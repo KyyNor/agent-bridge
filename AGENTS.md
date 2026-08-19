@@ -31,6 +31,7 @@
 - `profile use` 安装 Claude Code `SessionEnd` 配置同步 Hook；同步对实际生成的 Agent Bridge MCP、托管 Hook 和说明块计算 hash，仅在结果变化时更新，不引入 schema/version 文件，并保留用户自有配置。
 - `profile unuse` 必须同时扫描当前项目和 user scope，交互选择卸载目标；卸载只删除对应范围的 Agent Bridge MCP、托管 Hook 和说明块，必须保留用户自有配置。
 - 工作流服务启动必须回收上一进程遗留的 `running` 运行、节点和任务租约，并恢复当前调度窗口的持久化自动运行计数；手动/批量运行终态后必须刷新工作流概览聚合，前端批量队列不承诺服务重启后续跑。
+- `workflow_runs` 的任务维度索引 `idx_workflow_runs_task` 与 `tool_call_logs` 的时间窗聚合覆盖索引 `idx_tool_call_logs_stats` 是任务队列和概览聚合的查询护栏：两表行内均内嵌大 JSON 字段，缺索引的任务维度关联或时间窗聚合会退化为逐行回表并随数据量线性放大。修改这些查询必须同步评估索引，不得随意删除；护栏测试见 `tests/test_storage_query_indexes.py`。
 
 ## 时间处理规范
 

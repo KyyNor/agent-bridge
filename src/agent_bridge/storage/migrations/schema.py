@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import time
 from typing import Any
 
 from agent_bridge.storage.schema import CODEGRAPH_SCHEMA, SCHEMA, WORKFLOW_SCHEMA
@@ -13,6 +15,57 @@ from agent_bridge.storage.migrations.workflows import (
     rebuild_workflow_artifacts_if_needed,
     rebuild_workflow_tasks_if_needed,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def ensure_query_index(conn: sqlite3.Connection, name: str, ddl: str) -> None:
+    """幂等创建查询索引；大库首次构建可能耗时数分钟，必须记录索引名与耗时。"""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?", (name,)
+    ).fetchone()
+    if exists is not None:
+        return
+    started = time.monotonic()
+    conn.execute(ddl)
+    logger.info(
+        "查询索引构建完成：索引=%s 耗时=%.1f秒（大库首次升级仅执行一次）",
+        name,
+        time.monotonic() - started,
+    )
+
+
+def ensure_workflow_runs_task_index(conn: sqlite3.Connection) -> None:
+    """任务队列视图与增量基线按任务维度关联 workflow_runs 的必备索引。
+
+    workflow_runs 行内嵌 definition_snapshot_json 等大 JSON 字段；缺此索引时
+    每行任务都要回表扫描该工作流的全部 runs，复杂度随任务数 × 运行数放大。
+    """
+    ensure_query_index(
+        conn,
+        "idx_workflow_runs_task",
+        """
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_task
+        ON workflow_runs(workflow_key, task_key, task_version, status, finished_at DESC, id DESC)
+        """,
+    )
+
+
+def ensure_tool_call_logs_stats_index(conn: sqlite3.Connection) -> None:
+    """概览页与调用统计对时间窗内 tool_call_logs 分组聚合的覆盖索引。
+
+    tool_call_logs 行内嵌完整 request/response JSON，任何需要非索引列的聚合
+    都会退化为逐行回表；此索引让时间窗内的状态统计与维度聚合免回表完成。
+    """
+    ensure_query_index(
+        conn,
+        "idx_tool_call_logs_stats",
+        """
+        CREATE INDEX IF NOT EXISTS idx_tool_call_logs_stats
+        ON tool_call_logs(created_at, owner_group_key, status, resource_type,
+                          source_type, source_key, tool_name, profile_key, duration_ms)
+        """,
+    )
 
 
 def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
@@ -155,6 +208,7 @@ def apply_initial_schema(store: Any, conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_workflow_tasks_version_status "
         "ON workflow_tasks(workflow_key, task_version, status)"
     )
+    ensure_workflow_runs_task_index(conn)
     # task_version 演进模型：回填存量多 version 排队任务为 superseded（幂等）。
     backfill_workflow_tasks_superseded(conn)
     # 成功任务不应在任务列表中继续展示历史失败原因（幂等）。
@@ -611,6 +665,7 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_tool_call_logs_resource "
         "ON tool_call_logs(resource_type, resource_key)"
     )
+    ensure_tool_call_logs_stats_index(conn)
     conn.executescript(CODEGRAPH_SCHEMA)
     conn.executescript(WORKFLOW_SCHEMA)
     conn.execute(
