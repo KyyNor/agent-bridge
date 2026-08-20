@@ -304,6 +304,8 @@ export interface WorkflowDefinition {
   status: string
   workflow_type: WorkflowType
   created_by: string
+  owner_group_key: string
+  visibility: ResourceVisibility
   created_at: string
   updated_at: string
   edit_version: number

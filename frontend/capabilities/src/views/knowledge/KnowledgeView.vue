@@ -9,6 +9,7 @@ import { Card, CardContent } from '../../components/ui/card'
 import { Badge } from '../../components/ui/badge'
 import StatusBadge from '../../components/StatusBadge.vue'
 import ResourceVisibilitySelect from '../../components/ResourceVisibilitySelect.vue'
+import ResourceScopeBadge from '../../components/ResourceScopeBadge.vue'
 import KbVisibilityCell from '../../components/knowledge/KbVisibilityCell.vue'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
@@ -794,12 +795,7 @@ function syncBadgeLabel(status?: string | null) {
               </td>
               <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ k.slug }}</td>
               <td class="px-4 py-3">
-                <KbVisibilityCell
-                  :kb="k"
-                  :read-only="kbReadOnly(k)"
-                  :can-modify="canModifyResource(actorContext, k)"
-                  @changed="loadKbs({ fresh: true })"
-                />
+                <ResourceScopeBadge :resource="k" :read-only="kbReadOnly(k)" />
               </td>
               <td class="px-4 py-3 tabular-nums text-sm">{{ k.document_count }}</td>
               <td class="px-4 py-3 tabular-nums text-sm">
@@ -810,6 +806,7 @@ function syncBadgeLabel(status?: string | null) {
                 <div class="flex gap-2">
                   <Button variant="outline" size="sm" @click="openDetail(k)" class="h-8 text-xs">详情</Button>
                   <Button variant="outline" size="sm" @click="openPlaneDialog(k)" :disabled="kbReadOnly(k)" :title="kbReadOnly(k) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined" class="h-8 text-xs">能力平面</Button>
+                  <KbVisibilityCell v-if="canModifyResource(actorContext, k)" :kb="k" @changed="loadKbs({ fresh: true })" />
                   <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" @click="deleteKb(k)" :disabled="kbReadOnly(k)" :title="kbReadOnly(k) ? SHARED_RESOURCE_READ_ONLY_HINT : undefined">
                     <Trash2 :size="12" />
                     删除

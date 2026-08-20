@@ -37,6 +37,7 @@ import WorkflowRunDetailPanel from '../../components/WorkflowRunDetailPanel.vue'
 import JsonViewer from '../../components/JsonViewer.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
+import GroupBadge from '../../components/GroupBadge.vue'
 import SegmentedTabs from '../../components/SegmentedTabs.vue'
 import StatCard from '../../components/StatCard.vue'
 import RevisionHistoryPanel from '../../components/version/RevisionHistoryPanel.vue'
@@ -1151,6 +1152,7 @@ async function confirmClearWorkflow() {
                 <StatusBadge v-if="item.status === 'active'" status="enabled" />
                 <StatusBadge v-else status="disabled" />
                 <Badge v-if="runningRunFor(item.workflow_key)" class="bg-info-soft text-info-soft-fg">运行中</Badge>
+                <GroupBadge :group-key="item.owner_group_key" />
               </div>
               <div class="mt-1 truncate font-mono text-xs text-muted-foreground">{{ item.workflow_key }}</div>
               <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{{ item.description || '无描述' }}</p>
