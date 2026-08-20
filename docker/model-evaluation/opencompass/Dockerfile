@@ -2,14 +2,24 @@
 # 构建上下文应为 docker/model-evaluation/opencompass；数据在构建前由脚本放入 datasets/。
 FROM python:3.11-slim
 
+# HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE：API 模型初始化会先探测 HuggingFace tokenizer，
+# 无外网的部署环境必须秒失败回退，不能挂等网络超时；回退目标 gpt-4 的 tiktoken
+# cl100k 编码文件由构建期预热到 TIKTOKEN_CACHE_DIR，运行时零外网依赖。
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     COMPASS_DATA_CACHE=/opt/opencompass-data \
-    AGENT_BRIDGE_CODE_DATA_ROOT=/opt/agent-bridge-data/code
+    AGENT_BRIDGE_CODE_DATA_ROOT=/opt/agent-bridge-data/code \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 
 RUN useradd --create-home --uid 10001 evaluator \
     && pip install --no-cache-dir "opencompass[api]==0.5.3" \
     && mkdir -p /opt/opencompass-data /opt/agent-bridge-data/code
+
+# 构建机需能访问 openaipublic.blob.core.windows.net 以下载 cl100k 编码。
+RUN python -c "import tiktoken; tiktoken.encoding_for_model('gpt-4')" \
+    && chmod -R a+rX /opt/tiktoken-cache
 
 # 该目录必须包含固定版本的 C-Eval、MMLU-Pro、GSM8K、IFEval、HumanEval、MBPP 数据与 manifest。
 COPY datasets/opencompass/ /opt/opencompass-data/

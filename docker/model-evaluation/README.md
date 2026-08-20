@@ -7,6 +7,8 @@ Agent Bridge 维护两份镜像：
 
 不在运行时下载数据。OpenCompass、HumanEval 和 MBPP 数据应在构建前放入对应 Dockerfile 旁的 `datasets/` 目录，Dockerfile 会在构建期校验，缺少数据时直接失败。SWE-bench manifest 不随 `agent-worker` 构建，而是在运行时以只读 bind mount 提供。
 
+`opencompass-runner` 也不在运行时下载模型 tokenizer：API 模型初始化会先探测 HuggingFace tokenizer 再回退 gpt-4 的 tiktoken 编码，镜像以 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1` 运行使探测在无外网环境直接回退，gpt-4 的 cl100k 编码文件在构建期预热到 `TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache`。构建机需能访问 `openaipublic.blob.core.windows.net`，其余运行时依赖均为内网自足。
+
 ```text
 opencompass/datasets/
 ├─ opencompass/
