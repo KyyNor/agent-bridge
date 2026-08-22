@@ -11,6 +11,7 @@ import type {
   ModelEvaluationRuntimeStatus,
   ModelEvaluationModel,
   ModelEvaluationRun,
+  DashboardOverview,
   CodeGraphStatus,
   CodeGraphNode,
   CodeGraphExploreResult,
@@ -712,6 +713,17 @@ export const api = {
   stats: (params: Record<string, string> = {}, options?: ApiRequestOptions) => {
     const qs = new URLSearchParams(params)
     return get<ToolCallStats>(`/tool-call-stats?${qs}`, options)
+  },
+  getDashboardOverview: (
+    params: { created_from: string; created_to: string; refresh?: boolean },
+    options?: ApiRequestOptions,
+  ) => {
+    const qs = new URLSearchParams({
+      created_from: params.created_from,
+      created_to: params.created_to,
+    })
+    if (params.refresh) qs.set('refresh', 'true')
+    return get<DashboardOverview>(`/dashboard/overview?${qs}`, options)
   },
 
   // Agent runs

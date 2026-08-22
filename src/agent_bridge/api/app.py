@@ -342,6 +342,9 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
     from agent_bridge.api.routes.business_ledgers import create_business_ledger_routes
     app.include_router(create_business_ledger_routes(service, actor), prefix="/api/v1")
 
+    from agent_bridge.api.routes.dashboard import create_dashboard_routes
+    app.include_router(create_dashboard_routes(service, actor), prefix="/api/v1")
+
     from agent_bridge.api.routes.retrieval_probe import create_retrieval_probe_routes
     app.include_router(create_retrieval_probe_routes(service, actor), prefix="/api/v1")
 

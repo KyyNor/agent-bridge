@@ -15,6 +15,7 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 通过结构化 DAG 编排 Agent、脚本、任务领取和 Markdown/HTML 产物。
 - 工作流产物的标题、摘要、路径和正文使用 jieba 预分词与 SQLite FTS5 检索；长度至少 3 的 ASCII 标识符支持前缀匹配，结构化权限与版本过滤仍由 SQLite 普通条件处理。
 - `artifacts_search` 使用 DiskCache 缓存检索结果，默认保留 8 小时；缓存时长可在「系统管理」页面修改，保存后立即按新配置生效。当前版本不主动因新产物写入而清理缓存。
+- 「平台概览」使用 DiskCache 缓存聚合结果，默认保留 4 小时；缓存按用户、所属小组、可见资源范围和日期区间隔离，页面上的“刷新”会强制重建当前缓存。
 - 管理服务端 Python 脚本、Skill、同步调度和插件更新。
 - 在 `/agent-bridge/` 提供管理后台，在 `/api/v1/` 提供第一方 HTTP API，在 `/mcp` 提供 MetaMCP 入口。
 

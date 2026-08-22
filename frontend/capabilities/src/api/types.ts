@@ -835,6 +835,19 @@ export interface ToolCallStats {
   items: Record<string, unknown>[]
 }
 
+export interface DashboardRecentToolActivity {
+  log: Pick<ToolCallLog, 'tool_name' | 'status' | 'created_at'> | null
+  calls: number
+}
+
+export interface DashboardOverview {
+  asset_totals: Record<'documents' | 'code' | 'memory' | 'ledger' | 'capability', number>
+  workflow_days: Array<{ key: string; success: number; failed: number }>
+  tool_calls_by_day: Record<'documents' | 'code' | 'memory' | 'ledger' | 'capability', number[]>
+  recent_tool_activity: Record<'documents' | 'code' | 'memory' | 'ledger' | 'capability', DashboardRecentToolActivity>
+  generated_at: string
+}
+
 export interface ToolCallLogCounts {
   all: number
   success: number

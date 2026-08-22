@@ -13,7 +13,7 @@ import {
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api/client'
-import type { ToolCallLog, WorkflowRun } from '../../api/types'
+import type { DashboardRecentToolActivity } from '../../api/types'
 import { timeAgo } from '../../lib/time'
 import { Button } from '../../components/ui/button'
 
@@ -27,10 +27,7 @@ interface DailyWorkflowMetric {
   failed: number
 }
 
-interface RecentToolActivity {
-  log: ToolCallLog | null
-  calls: number
-}
+type RecentToolActivity = DashboardRecentToolActivity
 
 const router = useRouter()
 const loading = ref(true)
@@ -141,33 +138,6 @@ function emptyRecentActivity(): Record<ToolCategoryKey, RecentToolActivity> {
   }
 }
 
-function utcQueryTimestamp(date: Date) {
-  return date.toISOString().slice(0, 19).replace('T', ' ')
-}
-
-function categoryForValues(resourceType: unknown, sourceType: unknown, sourceKey: unknown): ToolCategoryKey | null {
-  const resource = String(resourceType || '').toLowerCase()
-  const source = String(sourceType || '').toLowerCase()
-  const key = String(sourceKey || '').toLowerCase()
-
-  if (resource === 'knowledge_base' || resource === 'wiki_kb' || key.includes('wiki') || key.includes('knowledge')) return 'documents'
-  if (resource === 'code_repository' || resource === 'code_repo' || key.includes('codegraph') || key.includes('code')) return 'code'
-  if (resource === 'memory_block' || key.includes('memory') || key.includes('claude-mem')) return 'memory'
-  if (resource === 'business_ledger' || key.includes('ledger')) return 'ledger'
-  if (resource === 'mcp_service' || resource === 'openapi_service' || source === 'mcp_service' || source === 'openapi_service') return 'capability'
-  return null
-}
-
-function categoryForLog(log: ToolCallLog): ToolCategoryKey | null {
-  return categoryForValues(log.resource_type, log.source_type, log.source_key)
-}
-
-function dateKeyFromValue(value: unknown): string | null {
-  if (!value) return null
-  const date = new Date(String(value))
-  return Number.isNaN(date.getTime()) ? null : localDateKey(date)
-}
-
 function workflowBarHeight(value: number) {
   if (!value) return '0%'
   return `${Math.max(6, (value / workflowMax.value) * 100)}%`
@@ -197,17 +167,17 @@ function toolDash(index: number) {
   return ['', '7 4', '2 4', '10 4 2 4', '3 5'][index]
 }
 
-function logStatusLabel(log: ToolCallLog | null) {
+function logStatusLabel(log: RecentToolActivity['log']) {
   if (!log) return '暂无调用'
   return log.status === 'success' ? '成功' : log.status === 'error' ? '失败' : log.status
 }
 
-function logStatusClass(log: ToolCallLog | null) {
+function logStatusClass(log: RecentToolActivity['log']) {
   if (!log) return 'text-muted-foreground'
   return log.status === 'success' ? 'text-success' : log.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
 }
 
-async function loadDashboard() {
+async function loadDashboard(forceRefresh = false) {
   const dashboardStart = new Date()
   dashboardStart.setHours(0, 0, 0, 0)
   dashboardStart.setDate(dashboardStart.getDate() - 6)
@@ -215,99 +185,23 @@ async function loadDashboard() {
   dashboardEnd.setHours(0, 0, 0, 0)
   dashboardEnd.setDate(dashboardEnd.getDate() + 1)
 
-  const [knowledgeResult, codeReposResult, memoryBlocksResult, ledgersResult, mcpServicesResult, openApiServicesResult, workflowsResult, logsPageResult, toolStatsResult] = await Promise.allSettled([
-    api.listWikiKbs(),
-    api.listCodeRepos(),
-    api.listMemoryBlocks(),
-    api.listBusinessLedgers(),
-    api.listServices(true),
-    api.listOpenApiServices(true),
-    api.listWorkflows(),
-    api.listLogsPage({ limit: 200, created_from: utcQueryTimestamp(dashboardStart), created_to: utcQueryTimestamp(dashboardEnd) }),
-    api.stats({
-      dimensions: 'resource_type,source_type,status',
-      created_from: utcQueryTimestamp(dashboardStart),
-      created_to: utcQueryTimestamp(dashboardEnd),
-      bucket: 'day',
-    }),
-  ])
-
-  const initialResults = [
-    knowledgeResult,
-    codeReposResult,
-    memoryBlocksResult,
-    ledgersResult,
-    mcpServicesResult,
-    openApiServicesResult,
-    workflowsResult,
-    logsPageResult,
-    toolStatsResult,
-  ]
-  if (initialResults.some(result => result.status === 'rejected')) {
-    loadError.value = '部分概览数据暂不可用，已展示可访问的数据。'
-  }
-
-  const knowledge = knowledgeResult.status === 'fulfilled' ? knowledgeResult.value : []
-  const codeRepos = codeReposResult.status === 'fulfilled' ? codeReposResult.value : []
-  const memoryBlocks = memoryBlocksResult.status === 'fulfilled' ? memoryBlocksResult.value : []
-  const ledgers = ledgersResult.status === 'fulfilled' ? ledgersResult.value : []
-  const mcpServices = mcpServicesResult.status === 'fulfilled' ? mcpServicesResult.value : []
-  const openApiServices = openApiServicesResult.status === 'fulfilled' ? openApiServicesResult.value : []
-  const workflows = workflowsResult.status === 'fulfilled' ? workflowsResult.value : []
-  const logsPage = logsPageResult.status === 'fulfilled' ? logsPageResult.value : { items: [] as ToolCallLog[] }
-  const statsItems = toolStatsResult.status === 'fulfilled'
-    ? toolStatsResult.value.items as Array<Record<string, unknown>>
-    : []
-
-  assetTotals.value = {
-    documents: knowledge.reduce((total, kb) => total + Number(kb.document_count || 0), 0),
-    code: codeRepos.length,
-    memory: memoryBlocks.length,
-    ledger: ledgers.length,
-    capability: mcpServices.length + openApiServices.length,
-  }
-
-  const days = buildDailyWorkflowMetrics()
-  const dayIndex = new Map(days.map((day, index) => [day.key, index]))
-  const runResults = await Promise.allSettled(workflows.map(workflow => api.listWorkflowRuns(workflow.workflow_key)))
-  for (const result of runResults) {
-    if (result.status !== 'fulfilled') continue
-    for (const run of result.value as WorkflowRun[]) {
-      const key = dateKeyFromValue(run.finished_at || run.started_at)
-      const index = key ? dayIndex.get(key) : undefined
-      if (index == null) continue
-      if (run.status === 'completed') days[index].success += 1
-      if (run.status === 'failed') days[index].failed += 1
-    }
-  }
-  workflowDays.value = days
-
-  const trend = emptyToolTrend()
-  const recent = emptyRecentActivity()
-  for (const item of statsItems) {
-    const category = categoryForValues(item.resource_type, item.source_type, null)
-    const key = String(item.bucket || '')
-    const index = dayIndex.get(key)
-    if (category && index != null) trend[category][index] += Number(item.calls || 0)
-  }
-  for (const log of logsPage.items) {
-    const category = categoryForLog(log)
-    if (!category) continue
-    if (!recent[category].log) recent[category].log = log
-  }
-  for (const category of toolCategories) {
-    recent[category.key].calls = trend[category.key].reduce((total, value) => total + value, 0)
-  }
-  toolCallsByDay.value = trend
-  recentToolActivity.value = recent
-  refreshedAt.value = new Date()
+  const overview = await api.getDashboardOverview({
+    created_from: dashboardStart.toISOString().slice(0, 19).replace('T', ' '),
+    created_to: dashboardEnd.toISOString().slice(0, 19).replace('T', ' '),
+    refresh: forceRefresh,
+  })
+  assetTotals.value = overview.asset_totals
+  workflowDays.value = overview.workflow_days.map(day => ({ ...day, label: dayLabel(day.key) }))
+  toolCallsByDay.value = overview.tool_calls_by_day
+  recentToolActivity.value = overview.recent_tool_activity
+  refreshedAt.value = new Date(overview.generated_at)
 }
 
-async function refresh() {
+async function refresh(forceRefresh = false) {
   refreshing.value = true
   loadError.value = ''
   try {
-    await loadDashboard()
+    await loadDashboard(forceRefresh)
   } catch {
     loadError.value = '部分概览数据加载失败，请稍后重试。'
   } finally {
@@ -321,7 +215,7 @@ onMounted(() => { void refresh() })
 
 <template>
   <Teleport to="#ph-actions" defer>
-    <Button variant="outline" size="lg" :disabled="refreshing" @click="refresh">
+    <Button variant="outline" size="lg" :disabled="refreshing" @click="refresh(true)">
       <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
       {{ refreshing ? '刷新中...' : '刷新' }}
     </Button>

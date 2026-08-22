@@ -68,6 +68,7 @@ from agent_bridge.automation.workflows.handlers import WorkflowNodeHandlers
 from agent_bridge.automation.workflows.output_handler import OutputHandler
 from agent_bridge.automation.workflows.executor import WorkflowDagExecutor
 from agent_bridge.business_ledger.service import BusinessLedgerService
+from agent_bridge.dashboard.service import DashboardOverviewService
 
 
 ALLOWED_EXTENSIONS = {
@@ -306,6 +307,21 @@ class AgentBridgeService:
             admins=admins,
             governance_service=self.governance,
             access=self.access,
+        )
+        self.dashboard = DashboardOverviewService(
+            cache_dir=paths.dashboard_overview_cache_dir,
+            admins=admins,
+            actor_group_key=lambda actor: self.access.actor_group_key(actor),
+            list_kbs=self.list_kbs,
+            list_repositories=self.codegraph.list_repositories,
+            list_memory_blocks=self.memory.list_blocks,
+            list_ledgers=self.business_ledgers.list_ledgers,
+            list_mcp_services=self.capabilities.list_service_summaries,
+            list_openapi_services=self.capabilities.list_openapi_service_summaries,
+            list_workflows=self.workflows.list_definitions,
+            list_workflow_runs=lambda actor, workflow_key: self.workflows.list_runs(actor, workflow_key, limit=200),
+            list_logs=self.governance.list_logs,
+            tool_stats=self.governance.stats,
         )
         from agent_bridge.knowledge_management.retrieval_probe.adapters import (
             ArtifactProbeAdapter,
