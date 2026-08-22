@@ -51,6 +51,7 @@ export const queryKeys = {
   modelEvaluationDatasets: () => ['model-evaluations', 'datasets'] as const,
   modelEvaluationRuntime: () => ['model-evaluations', 'runtime'] as const,
   modelEvaluationRuns: () => ['model-evaluations', 'runs'] as const,
+  modelEvaluationRun: (runId: string) => ['model-evaluations', 'detail', runId] as const,
   knowledgeBases: () => ['knowledge-bases'] as const,
   knowledgeBackends: () => ['knowledge-backends'] as const,
   mcpServices: () => ['capability-services', 'mcp'] as const,

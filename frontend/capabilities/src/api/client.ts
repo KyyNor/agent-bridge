@@ -519,6 +519,8 @@ export const api = {
   listEvaluationModels: (connection: { base_url?: string; api_key?: string }) =>
     post<ModelEvaluationModel[]>('/model-evaluations/models', connection),
   listModelEvaluationRuns: (options?: ApiRequestOptions) => get<ModelEvaluationRun[]>('/model-evaluations', options),
+  getModelEvaluationRun: (runId: string, options?: ApiRequestOptions) =>
+    get<ModelEvaluationRun>(`/model-evaluations/${encodeURIComponent(runId)}`, options),
   startModelEvaluationRun: (payload: { model_name: string; datasets: string[]; max_samples: number; sampling_mode: 'head' | 'random'; sample_seed: number; base_url?: string; api_key?: string }) =>
     post<ModelEvaluationRun>('/model-evaluations', payload),
 

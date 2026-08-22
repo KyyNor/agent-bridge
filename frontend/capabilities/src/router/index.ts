@@ -74,7 +74,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/stats', name: 'stats', component: StatsView, meta: { navKey: 'stats', title: '调用统计' } },
   { path: '/system-config', name: 'system-config', component: KnowledgeProcessingConfigView, meta: { navKey: 'system-config', title: '系统管理' } },
   { path: '/access-control/:routeKey(.*)*', name: 'access-control', component: AccessControlView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'access-control', title: '小组权限', hideHeaderOnSubRoute: true } },
-  { path: '/model-evaluations', name: 'model-evaluations', component: ModelEvaluationView, meta: { navKey: 'model-evaluations', title: '模型评估' } },
+  { path: '/model-evaluations/:routeKey(.*)*', name: 'model-evaluations', component: ModelEvaluationView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'model-evaluations', title: '模型评估', hideHeaderOnSubRoute: true } },
   { path: '/skills', name: 'skills', component: SkillManagementView, meta: { navKey: 'skills', title: 'Skill 管理' } },
   { path: '/scripts/:routeKey(.*)*', name: 'scripts', component: ScriptsView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'scripts', title: '脚本管理', hideHeaderOnSubRoute: true } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { title: '页面不存在' } },

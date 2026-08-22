@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
+import { ArrowLeft } from '@lucide/vue'
 import { api } from '../../api/client'
 import type { ModelEvaluationDataset, ModelEvaluationModel, ModelEvaluationRun } from '../../api/types'
 import { queryClient, queryKeys } from '../../lib/query'
@@ -8,18 +10,18 @@ import { formatLocalDatetime } from '../../lib/time'
 import { Button } from '../../components/ui/button'
 import { Card, CardContent } from '../../components/ui/card'
 import { Input } from '../../components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import StatusBadge from '../../components/StatusBadge.vue'
 import EvaluationRadarChart from '../../components/EvaluationRadarChart.vue'
 import { modelEvaluationRadarScores } from '../../lib/modelEvaluationRadar'
 
+const props = defineProps<{ routeKey: string }>()
+
+const router = useRouter()
 const models = ref<ModelEvaluationModel[]>([])
 const form = ref({
   base_url: '', api_key: '', model_name: '', datasets: ['gsm8k_chat_gen'] as string[], max_samples: 64,
   sampling_mode: 'head' as 'head' | 'random', sample_seed: 42,
 })
-const selectedRunId = ref('')
-const showRunDetail = ref(false)
 const loadingModels = ref(false)
 const starting = ref(false)
 const actionError = ref('')
@@ -43,11 +45,19 @@ const runsQuery = useQuery({
   refetchInterval: query => query.state.data?.some(run => run.status === 'queued' || run.status === 'running') ? 4_000 : false,
 })
 
+const activeRunId = computed(() => props.routeKey.split('/')[0]?.split('?')[0] || '')
+const runDetailQuery = useQuery({
+  queryKey: computed(() => queryKeys.modelEvaluationRun(activeRunId.value)),
+  queryFn: ({ signal }) => api.getModelEvaluationRun(activeRunId.value, { signal }),
+  enabled: computed(() => Boolean(activeRunId.value)),
+  refetchInterval: query => query.state.data?.status === 'queued' || query.state.data?.status === 'running' ? 4_000 : false,
+})
+
 const datasets = computed(() => datasetsQuery.data.value || [])
 const runs = computed(() => runsQuery.data.value || [])
-const selectedRun = computed(() => runs.value.find(run => run.run_id === selectedRunId.value) || null)
+const detailRun = computed(() => runDetailQuery.data.value || runs.value.find(run => run.run_id === activeRunId.value) || null)
 const runtime = computed(() => runtimeQuery.data.value || null)
-const selectedRadarScores = computed(() => selectedRun.value ? modelEvaluationRadarScores(selectedRun.value, datasets.value) : [])
+const selectedRadarScores = computed(() => detailRun.value ? modelEvaluationRadarScores(detailRun.value, datasets.value) : [])
 const loading = computed(() => datasetsQuery.isLoading.value || runtimeQuery.isLoading.value || runsQuery.isLoading.value)
 const error = computed(() => {
   if (actionError.value) return actionError.value
@@ -118,13 +128,82 @@ function scoreForRow(row: Record<string, string>) {
 }
 
 function openRunDetail(run: ModelEvaluationRun) {
-  selectedRunId.value = run.run_id
-  showRunDetail.value = true
+  void router.push(`/model-evaluations/${encodeURIComponent(run.run_id)}`)
+}
+
+function backToList() {
+  void router.replace('/model-evaluations')
 }
 </script>
 
 <template>
-  <div v-if="loading" class="py-16 text-center text-sm text-muted-foreground">正在加载模型评估…</div>
+  <div v-if="activeRunId" class="mx-auto max-w-6xl space-y-4">
+    <div class="flex items-start gap-3">
+      <Button variant="ghost" size="sm" class="-ml-2 mt-0.5" @click="backToList">
+        <ArrowLeft :size="16" />
+        返回模型评估
+      </Button>
+      <div class="min-w-0 border-l border-border pl-3">
+        <h2 class="truncate text-lg font-semibold">模型评估详情</h2>
+        <p class="truncate font-mono text-xs text-muted-foreground">{{ activeRunId }}</p>
+      </div>
+    </div>
+
+    <div v-if="runDetailQuery.isLoading.value && !detailRun" class="py-8 text-center text-sm text-muted-foreground">正在加载评估详情…</div>
+    <div v-else-if="runDetailQuery.error.value" class="rounded-lg border border-destructive/30 bg-destructive-soft p-4 text-sm text-destructive">
+      {{ errorMessage(runDetailQuery.error.value, '加载评估详情失败') }}
+    </div>
+    <div v-else-if="detailRun" class="space-y-5">
+      <Card>
+        <CardContent class="p-5">
+          <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div class="min-w-0"><dt class="text-xs text-muted-foreground">模型</dt><dd class="mt-1 break-all font-mono text-xs">{{ detailRun.model_name }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">状态</dt><dd class="mt-1"><StatusBadge :status="statusTone(detailRun.status)" :label="statusLabel(detailRun.status)" /></dd></div>
+            <div><dt class="text-xs text-muted-foreground">数据集</dt><dd class="mt-1">{{ detailRun.datasets.join('、') }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">每个数据集题数</dt><dd class="mt-1">{{ detailRun.max_samples }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">抽样方式</dt><dd class="mt-1">{{ samplingModeLabel(detailRun.sampling_mode) }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">随机种子</dt><dd class="mt-1">{{ detailRun.sampling_mode === 'random' ? detailRun.sample_seed : '—' }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">开始时间</dt><dd class="mt-1">{{ detailRun.started_at ? formatLocalDatetime(detailRun.started_at) : '—' }}</dd></div>
+            <div><dt class="text-xs text-muted-foreground">结束时间</dt><dd class="mt-1">{{ detailRun.finished_at ? formatLocalDatetime(detailRun.finished_at) : '—' }}</dd></div>
+          </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent class="space-y-5 p-5">
+          <div>
+            <div class="mb-2 font-medium">评估结果</div>
+            <div v-if="detailRun.result.rows?.length" class="overflow-x-auto rounded-md border border-border"><table class="w-full min-w-[560px] text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">数据集</th><th class="px-3 py-2">指标</th><th class="px-3 py-2">分数</th></tr></thead><tbody><tr v-for="row in detailRun.result.rows" :key="`${row.dataset}-${row.metric}`" class="border-b border-border/70 last:border-0"><td class="px-3 py-2">{{ row.dataset }}</td><td class="px-3 py-2">{{ row.metric || '—' }}</td><td class="px-3 py-2 font-medium">{{ scoreForRow(row) }}</td></tr></tbody></table></div>
+            <p v-else-if="detailRun.error" class="whitespace-pre-line break-words text-destructive">{{ detailRun.error }}</p>
+            <p v-else class="text-muted-foreground">{{ detailRun.status === 'completed' ? '未找到汇总结果。' : detailRun.progress_message }}</p>
+          </div>
+          <EvaluationRadarChart v-if="detailRun.result.rows?.length" :scores="selectedRadarScores" />
+        </CardContent>
+      </Card>
+
+      <Card v-if="detailRun.executions.length || detailRun.result.sample_manifests?.length">
+        <CardContent class="space-y-5 p-5">
+          <div v-if="detailRun.executions.length">
+            <div class="mb-2 font-medium">子执行</div>
+            <div class="space-y-2">
+              <div v-for="execution in detailRun.executions" :key="execution.execution_id" class="rounded-md border border-border p-3 text-xs">
+                <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ execution.datasets.join('、') }}</span><StatusBadge :status="execution.status === 'completed' ? 'enabled' : execution.status === 'failed' ? 'error' : execution.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(execution.status)" /></div>
+                <div class="mt-1 text-muted-foreground">runner：{{ execution.runner_key }} · 镜像：<span class="font-mono">{{ execution.image }}</span></div>
+                <div v-if="execution.container_id" class="mt-1 break-all font-mono text-muted-foreground">container：{{ execution.container_id }}</div>
+                <div v-if="execution.error" class="mt-1 whitespace-pre-line break-words font-mono text-destructive">{{ execution.error }}</div>
+                <div v-else-if="execution.status !== 'completed'" class="mt-1 text-muted-foreground">{{ execution.progress_message }}</div>
+              </div>
+            </div>
+          </div>
+          <details v-if="detailRun.result.sample_manifests?.length" class="rounded-md border border-border p-3 text-xs">
+            <summary class="cursor-pointer font-medium">查看实际抽样题目索引</summary>
+            <div v-for="manifest in detailRun.result.sample_manifests" :key="manifest.dataset" class="mt-3"><span class="font-medium">{{ manifest.dataset }}</span><span class="ml-2 text-muted-foreground">{{ manifest.mode === 'random' ? `seed ${manifest.seed}` : '固定顺序' }}</span><p class="mt-1 break-all text-muted-foreground">{{ manifest.source_indices.join(', ') }}</p></div>
+          </details>
+        </CardContent>
+      </Card>
+    </div>
+  </div>
+  <div v-else-if="loading" class="py-16 text-center text-sm text-muted-foreground">正在加载模型评估…</div>
   <div v-else class="mx-auto max-w-6xl space-y-5">
     <Card v-if="runtime && !runtime.configured" class="border-warning/40 bg-warning-soft/30">
       <CardContent class="space-y-2 p-5 text-sm">
@@ -213,45 +292,5 @@ function openRunDetail(run: ModelEvaluationRun) {
       </CardContent>
     </Card>
 
-    <Dialog v-model:open="showRunDetail">
-      <DialogContent class="w-[min(720px,calc(100vw-2rem))] sm:max-w-[720px]">
-        <DialogHeader><DialogTitle>模型评估详情</DialogTitle></DialogHeader>
-        <div v-if="selectedRun" class="space-y-5 text-sm">
-          <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-            <div><dt class="text-xs text-muted-foreground">模型</dt><dd class="mt-1 font-mono text-xs">{{ selectedRun.model_name }}</dd></div>
-            <div><dt class="text-xs text-muted-foreground">状态</dt><dd class="mt-1"><StatusBadge :status="statusTone(selectedRun.status)" :label="statusLabel(selectedRun.status)" /></dd></div>
-            <div><dt class="text-xs text-muted-foreground">数据集</dt><dd class="mt-1">{{ selectedRun.datasets.join('、') }}</dd></div>
-            <div><dt class="text-xs text-muted-foreground">每个数据集题数</dt><dd class="mt-1">{{ selectedRun.max_samples }}</dd></div>
-            <div><dt class="text-xs text-muted-foreground">抽样方式</dt><dd class="mt-1">{{ samplingModeLabel(selectedRun.sampling_mode) }}</dd></div>
-            <div><dt class="text-xs text-muted-foreground">随机种子</dt><dd class="mt-1">{{ selectedRun.sampling_mode === 'random' ? selectedRun.sample_seed : '—' }}</dd></div>
-            <div><dt class="text-xs text-muted-foreground">开始时间</dt><dd class="mt-1">{{ selectedRun.started_at ? formatLocalDatetime(selectedRun.started_at) : '—' }}</dd></div>
-            <div><dt class="text-xs text-muted-foreground">结束时间</dt><dd class="mt-1">{{ selectedRun.finished_at ? formatLocalDatetime(selectedRun.finished_at) : '—' }}</dd></div>
-          </dl>
-          <div>
-            <div class="mb-2 font-medium">评估结果</div>
-            <div v-if="selectedRun.result.rows?.length" class="overflow-x-auto rounded-md border border-border"><table class="w-full text-sm"><thead><tr class="border-b border-border text-left text-xs text-muted-foreground"><th class="px-3 py-2">数据集</th><th class="px-3 py-2">指标</th><th class="px-3 py-2">分数</th></tr></thead><tbody><tr v-for="row in selectedRun.result.rows" :key="`${row.dataset}-${row.metric}`" class="border-b border-border/70 last:border-0"><td class="px-3 py-2">{{ row.dataset }}</td><td class="px-3 py-2">{{ row.metric || '—' }}</td><td class="px-3 py-2 font-medium">{{ scoreForRow(row) }}</td></tr></tbody></table></div>
-            <p v-else-if="selectedRun.error" class="whitespace-pre-line break-words text-destructive">{{ selectedRun.error }}</p>
-            <p v-else class="text-muted-foreground">{{ selectedRun.status === 'completed' ? '未找到汇总结果。' : selectedRun.progress_message }}</p>
-          </div>
-          <EvaluationRadarChart v-if="selectedRun.result.rows?.length" :scores="selectedRadarScores" />
-          <div v-if="selectedRun.executions.length">
-            <div class="mb-2 font-medium">子执行</div>
-            <div class="space-y-2">
-              <div v-for="execution in selectedRun.executions" :key="execution.execution_id" class="rounded-md border border-border p-3 text-xs">
-                <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ execution.datasets.join('、') }}</span><StatusBadge :status="execution.status === 'completed' ? 'enabled' : execution.status === 'failed' ? 'error' : execution.status === 'abandoned' ? 'disabled' : 'running'" :label="statusLabel(execution.status)" /></div>
-                <div class="mt-1 text-muted-foreground">runner：{{ execution.runner_key }} · 镜像：<span class="font-mono">{{ execution.image }}</span></div>
-                <div v-if="execution.container_id" class="mt-1 break-all font-mono text-muted-foreground">container：{{ execution.container_id }}</div>
-                <div v-if="execution.error" class="mt-1 whitespace-pre-line break-words font-mono text-destructive">{{ execution.error }}</div>
-                <div v-else-if="execution.status !== 'completed'" class="mt-1 text-muted-foreground">{{ execution.progress_message }}</div>
-              </div>
-            </div>
-          </div>
-          <details v-if="selectedRun.result.sample_manifests?.length" class="rounded-md border border-border p-3 text-xs">
-            <summary class="cursor-pointer font-medium">查看实际抽样题目索引</summary>
-            <div v-for="manifest in selectedRun.result.sample_manifests" :key="manifest.dataset" class="mt-3"><span class="font-medium">{{ manifest.dataset }}</span><span class="ml-2 text-muted-foreground">{{ manifest.mode === 'random' ? `seed ${manifest.seed}` : '固定顺序' }}</span><p class="mt-1 break-all text-muted-foreground">{{ manifest.source_indices.join(', ') }}</p></div>
-          </details>
-        </div>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>

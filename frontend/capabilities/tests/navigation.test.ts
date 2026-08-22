@@ -14,6 +14,7 @@ test('uses Vue Router History mode and has explicit deep-link routes', () => {
   assert.match(router, /path: '\/services\/:routeKey\(\.\*\)\*'/)
   assert.match(router, /path: '\/workflow\/:routeKey\(\.\*\)\*'/)
   assert.match(router, /path: '\/agent-runs\/:routeKey\(\.\*\)\*'/)
+  assert.match(router, /path: '\/model-evaluations\/:routeKey\(\.\*\)\*'/)
   assert.match(router, /path: '\/:pathMatch\(\.\*\)\*'/)
   assert.match(viteConfig, /agent-bridge-dev-history-fallback/)
   assert.match(viteConfig, /startsWith\('\/agent-bridge\/'\)/)
