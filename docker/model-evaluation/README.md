@@ -43,7 +43,7 @@ AGENT_BRIDGE_ROOT/data/model-evaluation/
 
 SWE-bench 的 task metadata 默认从 `AGENT_BRIDGE_ROOT/data/model-evaluation/swebench-manifest.json` 读取，服务会在启动 `agent-worker` 时把该文件以只读方式挂入容器。可设置 `AGENT_BRIDGE_EVAL_SWEBENCH_MANIFEST=/srv/agent-bridge/swebench-manifest.json` 覆盖默认位置。更新 manifest 不需要重编 `agent-worker` 镜像，但只影响后续新发起的评测。每个任务的 testbed 镜像应提前 `docker load` 到部署机。Agent worker 通过 JSONL 向主服务请求启动 testbed、执行命令和最终测试，镜像本身不持有 Docker Socket。
 
-当前 SWE Agent 单次模型请求上限为 6 分钟、最多 40 轮；主服务对每条 Agent 命令限制 3 分钟，对最终验收限制 15 分钟。没有单题总时长上限。修改 `agent-worker/scripts/swe-agent` 后需要重建 `agent-bridge-agent-worker` 镜像。
+当前 SWE Agent 单次模型请求上限为 6 分钟、最多 40 轮；主服务对每条 Agent 命令限制 3 分钟，对最终验收限制 15 分钟。没有单题总时长上限。HumanEval / MBPP 的代码生成阶段单次模型补全请求超时为 300 秒（`MODEL_TIMEOUT_SECONDS`）；单题生成失败（超时、网络或接口错误）只把该题补全置空并在结果中记录 `generation_error`，沙箱按失败计分后继续执行剩余题目，不会中止整批评估。修改 `agent-bridge-code-generate` 或 `code-sandbox` 后需要重建 `agent-bridge-opencompass-runner` / `agent-bridge-agent-worker` 镜像。
 
 ```bash
 docker build -t agent-bridge-opencompass-runner:latest docker/model-evaluation/opencompass

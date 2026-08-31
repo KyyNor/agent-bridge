@@ -39,6 +39,9 @@ def main() -> int:
         result: dict[str, Any] = {"dataset": case["dataset"], "source_index": case["source_index"], "case_id": case["case_id"], "passed": passed, "stdout": process.stdout[-8000:], "stderr": process.stderr[-8000:]}
     except subprocess.TimeoutExpired as exc:
         result = {"dataset": case["dataset"], "source_index": case["source_index"], "case_id": case["case_id"], "passed": False, "stdout": (exc.stdout or "")[-8000:], "stderr": "执行超时"}
+    if case.get("generation_error"):
+        # 生成阶段失败（超时/接口错误）的原因随沙箱结果回传，保留在最终评估结果中可追溯。
+        result["generation_error"] = str(case["generation_error"])
     Path(sys.argv[2]).write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     return 0
 

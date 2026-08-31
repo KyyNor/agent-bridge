@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any
 
 
+# 单次模型补全请求的 socket 超时；超过即放弃该题，不中止整批评估。
+MODEL_TIMEOUT_SECONDS = 300
+
+
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -30,7 +34,7 @@ def model_completion(prompt: str, model: str, base_url: str, api_key: str) -> st
         headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {api_key}"} if api_key else {})},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=180) as response:  # noqa: S310 - endpoint is admin configured
+    with urllib.request.urlopen(request, timeout=MODEL_TIMEOUT_SECONDS) as response:  # noqa: S310 - endpoint is admin configured
         payload = json.loads(response.read().decode())
     return str(payload["choices"][0]["message"]["content"])
 
@@ -58,13 +62,24 @@ def main() -> int:
             mode=request["sampling_mode"],
             seed=int(request["sample_seed"]),
         ):
-            completion = model_completion(prompt_for(dataset, item), request["model_name"], base_url, api_key)
+            completion = ""
+            generation_error = ""
+            try:
+                completion = model_completion(prompt_for(dataset, item), request["model_name"], base_url, api_key)
+            except Exception as exc:  # noqa: BLE001 - 单题生成失败（超时/网络/接口错误）记录后继续，避免终止整批评估
+                generation_error = f"{type(exc).__name__}: {exc}"
+                print(
+                    f"[warn] 代码生成失败 dataset={dataset} source_index={source_index} case_id={item.get('task_id', source_index)} error={generation_error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
             cases.append({
                 "dataset": dataset,
                 "source_index": source_index,
                 "case_id": item.get("task_id", source_index),
                 "prompt": item.get("prompt", ""),
                 "completion": completion,
+                "generation_error": generation_error,
                 "test": item.get("test", ""),
                 "entry_point": item.get("entry_point", ""),
                 "test_list": item.get("test_list", []),
