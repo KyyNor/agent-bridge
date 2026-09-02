@@ -120,7 +120,9 @@ function samplingModeLabel(mode: ModelEvaluationRun['sampling_mode']) {
 function scoreSummary(run: ModelEvaluationRun) {
   const rows = run.result.rows
   if (!rows?.length) return run.status === 'completed' ? '未找到汇总 CSV' : '—'
-  return rows.map(row => `${row.dataset || '数据集'}: ${scoreForRow(row)}`).join(' · ')
+  const visibleScores = rows.slice(0, 3).map(row => scoreForRow(row))
+  const remainingCount = rows.length - visibleScores.length
+  return `共 ${rows.length} 项：${visibleScores.join(' · ')}${remainingCount > 0 ? ` 等 ${remainingCount} 项` : ''}`
 }
 
 function scoreForRow(row: Record<string, string>) {
