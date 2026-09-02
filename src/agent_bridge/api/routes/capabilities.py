@@ -3,7 +3,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from agent_bridge.api.runtime_context import profile_from_headers, workflow_context_from_headers
+from agent_bridge.api.runtime_context import (
+    profile_from_headers,
+    resolve_workflow_runtime_identity,
+    workflow_context_from_headers,
+)
 from agent_bridge.api.schemas import (
     ExecuteCapabilityRequest,
     ImportOpenApiOperationsRequest,
@@ -13,6 +17,7 @@ from agent_bridge.api.schemas import (
     UpdateMcpToolTypeRequest,
     UpsertOpenApiToolRequest,
 )
+from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
 
 
 
@@ -167,14 +172,23 @@ def create_capability_routes(service, actor, catalog_sources):
         profile_key = profile_from_headers(request)
         if profile_key is None:
             profile_key = payload.profile_key
-        return await service.capabilities.execute(
-            actor=current_actor,
-            service=payload.service,
-            tool_name=payload.tool_name,
-            params=payload.params,
+        workflow_context = workflow_context_from_headers(request)
+        runtime_actor, runtime_profile_key, runtime_scope = resolve_workflow_runtime_identity(
+            service.workflows,
+            capability_token=request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip(),
+            workflow_context=workflow_context,
             profile_key=profile_key,
-            workflow_context=workflow_context_from_headers(request),
+            fallback_actor=current_actor,
         )
+        with runtime_scope:
+            return await service.capabilities.execute(
+                actor=runtime_actor,
+                service=payload.service,
+                tool_name=payload.tool_name,
+                params=payload.params,
+                profile_key=runtime_profile_key,
+                workflow_context=workflow_context,
+            )
 
     @router.get("/capability-tools")
     def list_capability_tools(

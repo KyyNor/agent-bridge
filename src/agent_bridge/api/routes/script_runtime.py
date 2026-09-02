@@ -1,12 +1,15 @@
 """Internal script runtime helper endpoints."""
 from __future__ import annotations
 
-from contextlib import nullcontext
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from agent_bridge.api.runtime_context import profile_from_headers, workflow_context_from_headers
+from agent_bridge.api.runtime_context import (
+    profile_from_headers,
+    resolve_workflow_runtime_identity,
+    workflow_context_from_headers,
+)
 from agent_bridge.api.schemas import RuntimeWorkflowRunLogRequest, RuntimeWorkflowSetTaskRequest
 from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
 
@@ -26,21 +29,14 @@ def create_script_runtime_routes(service, actor):
             "workflow_key": str(workflow_context["workflow_key"]),
             "run_id": str(workflow_context["run_id"]),
         }
-        capability_token = request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip()
-        if not capability_token:
-            return profile_key, current, current_actor, nullcontext()
-        capability = service.workflows.require_runtime_capability(
-            capability_token,
-            workflow_key=current["workflow_key"],
-            run_id=current["run_id"],
+        runtime_actor, runtime_profile_key, runtime_scope = resolve_workflow_runtime_identity(
+            service.workflows,
+            capability_token=request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip(),
+            workflow_context=workflow_context,
             profile_key=profile_key,
+            fallback_actor=current_actor,
         )
-        return (
-            capability.profile_key,
-            current,
-            capability.actor,
-            service.workflows.bind_runtime_capability(capability),
-        )
+        return runtime_profile_key, current, runtime_actor, runtime_scope
 
     @router.post("/runtime/workflow/get-task")
     def runtime_workflow_get_task(request: Request, current_actor: str = Depends(actor)) -> dict[str, Any]:

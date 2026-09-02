@@ -314,6 +314,118 @@ def test_runtime_workflow_route_rejects_forged_group_and_accepts_capability(wm_p
     assert logs[0]["owner_group_key"] == "team-a"
 
 
+def test_capability_execute_route_accepts_workflow_capability_for_owner_group(wm_paths):
+    class _FakeMcpClient:
+        async def call_tool(self, endpoint_url, headers, tool_name, arguments, timeout=150.0):
+            return {"is_error": False, "content": [], "structured": {"ok": True}}
+
+    client = _create_client(wm_paths)
+    svc = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    svc.access.bootstrap_admin_memberships()
+    svc.access.upsert_group(actor="root", group_key="team-a", name="A 组")
+    svc.access.upsert_group(actor="root", group_key="team-b", name="B 组")
+    svc.access.set_user_group(actor="root", user_id="alice", group_key="team-a")
+    svc.access.set_user_group(actor="root", user_id="bob", group_key="team-b")
+    svc.capabilities.mcp_client = _FakeMcpClient()
+    svc.capabilities.register_service(
+        "alice",
+        "team-a-mcp",
+        "A 组 MCP",
+        "https://mcp.example.test/mcp",
+        {},
+        "",
+        [],
+        visibility="group",
+    )
+    svc.store.upsert_mcp_tool(
+        service_key="team-a-mcp",
+        tool_name="search",
+        display_name="search",
+        description="",
+        input_schema={"type": "object"},
+        tool_type="search",
+        tags=[],
+        examples=[],
+    )
+    svc.governance.upsert_profile(
+        actor="alice",
+        profile_key="team-a-profile",
+        name="A 组能力平面",
+        description="",
+        status="active",
+    )
+    svc.store.replace_profile_source_rules(
+        "team-a-profile",
+        [{"source_type": "mcp_service", "source_key": "team-a-mcp", "effect": "allow"}],
+    )
+    svc.workflows.upsert_definition(
+        actor="alice",
+        workflow_key="team-a-workflow",
+        name="A 组工作流",
+        description="",
+        profile_key="team-a-profile",
+        definition={"nodes": [], "edges": []},
+        status="active",
+    )
+    run = svc.store.create_workflow_run(
+        run_id="team-a-run",
+        workflow_key="team-a-workflow",
+        profile_key="team-a-profile",
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/team-a-run",
+    )
+    context_headers = {
+        "X-Agent-Bridge-MetaMCP-Profile": "team-a-profile",
+        "X-Agent-Bridge-Workflow": "true",
+        "X-Agent-Bridge-Workflow-Key": "team-a-workflow",
+        "X-Agent-Bridge-Workflow-Run-Id": "team-a-run",
+    }
+    execute_payload = {"service": "team-a-mcp", "tool_name": "search", "params": {}}
+
+    denied = client.post(
+        "/api/v1/capabilities/execute",
+        headers={**context_headers, "X-Agent-Bridge-User": "bob"},
+        json=execute_payload,
+    )
+
+    assert denied.status_code == 403
+    assert "无权使用其他小组的能力资源" in denied.text
+
+    capability = svc.workflows.issue_runtime_capability(run=run, initiated_by="root")
+    trusted = client.post(
+        "/api/v1/capabilities/execute",
+        headers={
+            **context_headers,
+            "X-Agent-Bridge-User": "bob",
+            WORKFLOW_CAPABILITY_HEADER: capability.token,
+        },
+        json=execute_payload,
+    )
+
+    assert trusted.status_code == 200
+    assert trusted.json()["success"] is True
+
+    forged_token = client.post(
+        "/api/v1/capabilities/execute",
+        headers={
+            **context_headers,
+            "X-Agent-Bridge-User": "bob",
+            WORKFLOW_CAPABILITY_HEADER: capability.token,
+            "X-Agent-Bridge-Workflow-Run-Id": "forged-run",
+        },
+        json=execute_payload,
+    )
+
+    assert forged_token.status_code == 403
+
+    logs = svc.governance.list_logs(actor="root", source_key="team-a-mcp")
+    assert [item["status"] for item in logs] == ["success", "blocked"]
+    assert logs[0]["owner_group_key"] == "team-a"
+    assert logs[1]["owner_group_key"] == "team-b"
+
+
 def test_script_test_route_accepts_legacy_script_params_body(wm_paths):
     client = _create_client(wm_paths)
     _register_script(client)
