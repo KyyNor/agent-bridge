@@ -26,6 +26,7 @@ from agent_bridge.agent_runtime.types import (
 @dataclass
 class _ClaudeRun:
     request: CodingAgentRequest
+    effort: str | None = None
 
     async def updates(self) -> AsyncIterator[CodingAgentUpdate]:
         tool_names: dict[str, str] = {}
@@ -54,6 +55,7 @@ class _ClaudeRun:
             model=self.request.model,
             max_turns=self.request.max_turns,
             max_budget_usd=self.request.max_budget_usd,
+            effort=self.effort,
         )
         async for message in claude_query(prompt=self.request.prompt, options=options):
             if self.request.on_native_message is not None:
@@ -90,6 +92,8 @@ def _final_from_message(message: Any) -> CodingAgentFinal | None:
 
 class ClaudeCodingAgent:
     source = "claude_agent_sdk"
+    # SDK EffortLevel：low/medium/high/xhigh/max（xhigh/max 仅部分模型支持）。
+    supported_efforts = frozenset({"low", "medium", "high", "xhigh", "max"})
     capabilities = CodingAgentCapabilities(
         supports_mcp=True,
         supports_native_json_schema=True,
@@ -101,12 +105,19 @@ class ClaudeCodingAgent:
         supports_partial_messages=True,
     )
 
-    def __init__(self, *, backend_key: str = "claude", model: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        backend_key: str = "claude",
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> None:
         self.backend_key = backend_key
         self.display_name = "Claude"
         self.model = model
+        self.effort = effort
 
     def start(self, request: CodingAgentRequest) -> CodingAgentRun:
         if self.model is None or request.model is not None:
-            return _ClaudeRun(request)
-        return _ClaudeRun(request.with_model(self.model))
+            return _ClaudeRun(request, effort=self.effort)
+        return _ClaudeRun(request.with_model(self.model), effort=self.effort)

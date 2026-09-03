@@ -36,6 +36,7 @@ class _CodexRun:
     request: CodingAgentRequest
     command: str
     model: str | None = None
+    effort: str | None = None
     bypass_approvals_and_sandbox: bool = True
     _cli: JsonlCliProcess | None = field(default=None, init=False)
 
@@ -47,6 +48,7 @@ class _CodexRun:
             cwd=str(self.request.cwd),
             model=self.request.model or self.model,
             schema_path=schema_path,
+            effort=self.effort,
             bypass_approvals_and_sandbox=self.bypass_approvals_and_sandbox,
         )
         cli = JsonlCliProcess(
@@ -203,11 +205,15 @@ def _build_command(
     cwd: str,
     model: str | None,
     schema_path: str | None,
+    effort: str | None = None,
     bypass_approvals_and_sandbox: bool = True,
 ) -> list[str]:
     args = [command, "exec", "--json", "--cd", cwd, "--skip-git-repo-check"]
     if model:
         args.extend(["--model", model])
+    if effort:
+        # -c 覆盖只作用于本次运行，不改动用户 ~/.codex/config.toml。
+        args.extend(["-c", f"model_reasoning_effort={effort}"])
     if bypass_approvals_and_sandbox:
         args.append("--dangerously-bypass-approvals-and-sandbox")
     if schema_path:
@@ -326,6 +332,8 @@ def _tool_name(row: dict[str, Any]) -> str:
 
 class CodexCodingAgent:
     source = "codex_cli"
+    # codex config model_reasoning_effort 的合法取值。
+    supported_efforts = frozenset({"minimal", "low", "medium", "high", "xhigh"})
     capabilities = CodingAgentCapabilities(
         supports_mcp=False,
         supports_native_json_schema=True,
@@ -343,12 +351,14 @@ class CodexCodingAgent:
         backend_key: str = "codex",
         command: str = "codex",
         model: str | None = None,
+        effort: str | None = None,
         bypass_approvals_and_sandbox: bool = True,
     ) -> None:
         self.backend_key = backend_key
         self.display_name = "Codex"
         self.command = command
         self.model = model
+        self.effort = effort
         self.bypass_approvals_and_sandbox = bypass_approvals_and_sandbox
 
     def start(self, request: CodingAgentRequest) -> CodingAgentRun:
@@ -356,5 +366,6 @@ class CodexCodingAgent:
             request=request,
             command=self.command,
             model=self.model,
+            effort=self.effort,
             bypass_approvals_and_sandbox=self.bypass_approvals_and_sandbox,
         )

@@ -8,6 +8,10 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 通过 Profile 管理来源级与资源级访问策略，并将常用工具提升为 pinned tools。
 - 管理文档知识库、CodeGraph 代码知识和 claude-mem 记忆。
 - 支持 Claude、Codex、OpenCode、Pi 等 Coding Agent 后端。
+- Coding Agent 可按后端配置思考力度（`server.toml` `[agents.<slug>]` 的 `effort`，或「系统管理 →
+  知识处理配置 → Coding Agent 运行配置」编辑）：Claude 支持 low/medium/high/xhigh/max、Codex 支持
+  minimal~xhigh、Pi 支持 off~xhigh，OpenCode 透传 provider 相关的 variant 名。留空使用各 CLI 默认值；
+  例如部署模型不接受默认的 `high` 时，可把 Claude 后端设为 `xhigh` 或 `medium` 规避 litellm 报错。
 - OpenCode 由 Agent Bridge 按 run 启动并回收本机 server，通过 HTTP API 执行会话；当前使用
   `prompt_async` + `/event` SSE 实时接收文本、阶段和工具事件，OpenCode V1 事件映射与 server
   生命周期分开，便于未来替换 V2 client；运行时间轴会合并工具调用/结果和文本增量，同时保留

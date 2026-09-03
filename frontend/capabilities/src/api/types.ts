@@ -1358,12 +1358,15 @@ export interface AgentBackendConfig {
   type: string
   command: string | null
   model: string | null
+  effort: string | null
 }
 
 export interface AvailableAgentBackend {
   slug: string
   display_name: string
   source: string
+  // 该后端支持的思考力度取值；null 表示取值由外部系统决定（如 OpenCode 的 provider variant）
+  supported_efforts: string[] | null
   capabilities: Partial<{
     supports_mcp: boolean
     supports_native_json_schema: boolean

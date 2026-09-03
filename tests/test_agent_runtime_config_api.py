@@ -24,6 +24,7 @@ def test_agent_runtime_config_api_updates_registry(wm_paths) -> None:
                 "type": "opencode",
                 "command": "opencode",
                 "model": "anthropic/claude-sonnet-4",
+                "effort": None,
             }
         ],
     }
@@ -81,9 +82,9 @@ def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -
     payload = {
         "default_backend": "codex",
         "backends": [
-            {"slug": "claude", "type": "claude", "command": None, "model": None},
-            {"slug": "opencode", "type": "opencode", "command": "opencode", "model": None},
-            {"slug": "codex", "type": "codex", "command": "codex", "model": "gpt-5"},
+            {"slug": "claude", "type": "claude", "command": None, "model": None, "effort": None},
+            {"slug": "opencode", "type": "opencode", "command": "opencode", "model": None, "effort": None},
+            {"slug": "codex", "type": "codex", "command": "codex", "model": "gpt-5", "effort": None},
         ],
     }
     saved = client.post(
@@ -98,3 +99,46 @@ def test_agent_runtime_config_api_accepts_fixed_three_agent_backends(wm_paths) -
     service = app.state.agent_bridge_service
     assert service.agents.coding_agents.default_backend == "codex"
     assert service.agents.coding_agents.keys() == ["claude", "codex", "opencode"]
+
+
+def test_agent_runtime_config_api_persists_effort(wm_paths) -> None:
+    from agent_bridge.api.app import create_app
+
+    app = create_app(wm_paths, {"root"})
+    client = TestClient(app)
+
+    saved = client.post(
+        "/api/v1/agent-runtime/config",
+        json={
+            "default_backend": "claude",
+            "backends": [{"slug": "claude", "type": "claude", "effort": "xhigh"}],
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["backends"][0]["effort"] == "xhigh"
+    service = app.state.agent_bridge_service
+    assert service.agents.coding_agents.get("claude").effort == "xhigh"
+    assert 'effort = "xhigh"' in wm_paths.server_config_path.read_text(encoding="utf-8")
+
+
+def test_agent_runtime_config_api_rejects_unsupported_effort_without_persisting(wm_paths) -> None:
+    from agent_bridge.api.app import create_app
+
+    app = create_app(wm_paths, {"root"})
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/agent-runtime/config",
+        json={
+            "default_backend": "claude",
+            "backends": [{"slug": "claude", "type": "claude", "effort": "bogus"}],
+        },
+        headers={"X-Agent-Bridge-User": "root"},
+    )
+
+    assert response.status_code == 400
+    assert "不支持 effort 取值" in str(response.json())
+    # 非法取值必须在校验阶段被拒绝，不能落进 server.toml 导致服务重启失败。
+    assert "effort" not in wm_paths.server_config_path.read_text(encoding="utf-8")

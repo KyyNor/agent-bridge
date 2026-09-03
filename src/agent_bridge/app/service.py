@@ -37,6 +37,7 @@ from agent_bridge.core.config import (
     load_agent_runtime_config,
     migrate_legacy_database_filename,
     migrate_toml_backends_to_db,
+    normalize_agent_runtime_config,
     save_agent_runtime_config,
 )
 from agent_bridge.capability_hub.models import ProfileResourceType
@@ -88,6 +89,7 @@ def _agent_runtime_config_payload(config: AgentRuntimeConfig, registry: Any = No
                 "type": backend.agent_type,
                 "command": backend.command,
                 "model": backend.model,
+                "effort": backend.effort,
             }
             for backend in config.backends
         ],
@@ -99,6 +101,11 @@ def _agent_runtime_config_payload(config: AgentRuntimeConfig, registry: Any = No
                 "display_name": registry.get(backend_key).display_name,
                 "source": registry.get(backend_key).source,
                 "capabilities": asdict(registry.get(backend_key).capabilities),
+                "supported_efforts": (
+                    sorted(registry.get(backend_key).supported_efforts)
+                    if registry.get(backend_key).supported_efforts is not None
+                    else None
+                ),
             }
             for backend_key in registry.keys()
         ]
@@ -1413,6 +1420,7 @@ class AgentBridgeService:
                 agent_type=str(item.get("type") or item.get("agent_type") or ""),
                 command=item.get("command") or None,
                 model=item.get("model") or None,
+                effort=item.get("effort") or None,
             )
             for item in payload.get("backends", [])
             if isinstance(item, dict)
@@ -1422,8 +1430,10 @@ class AgentBridgeService:
             backends=tuple(backends),
         )
         try:
+            # 先用候选配置构建 registry 完成 effort 枚举校验，全部通过后才落盘，
+            # 避免非法取值写入 server.toml 导致服务重启失败。
+            registry = create_coding_agent_registry(normalize_agent_runtime_config(config))
             saved = save_agent_runtime_config(self.paths, config)
-            registry = create_coding_agent_registry(saved)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
         self.agents.coding_agents = registry

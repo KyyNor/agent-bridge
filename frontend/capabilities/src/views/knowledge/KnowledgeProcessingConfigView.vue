@@ -62,9 +62,9 @@ const agentRuntimeSaving = ref(false)
 const agentRuntimeError = ref('')
 const agentRuntimeMessage = ref('')
 const fixedAgentBackendDefs = [
-  { slug: 'claude', type: 'claude', command: null as string | null, model: null as string | null },
-  { slug: 'opencode', type: 'opencode', command: 'opencode', model: null as string | null },
-  { slug: 'codex', type: 'codex', command: 'codex', model: null as string | null },
+  { slug: 'claude', type: 'claude', command: null as string | null, model: null as string | null, effort: null as string | null },
+  { slug: 'opencode', type: 'opencode', command: 'opencode', model: null as string | null, effort: null as string | null },
+  { slug: 'codex', type: 'codex', command: 'codex', model: null as string | null, effort: null as string | null },
 ]
 
 // Categories
@@ -401,14 +401,22 @@ function normalizeFixedAgentRuntimeConfig(config: AgentRuntimeConfig): AgentRunt
       type: def.type,
       command: current?.command ?? def.command,
       model: current?.model ?? def.model,
+      effort: current?.effort ?? null,
     }
   })
   const allowed = new Set(fixedAgentBackendDefs.map(item => item.slug))
   return {
     default_backend: allowed.has(config.default_backend) ? config.default_backend : 'claude',
     backends,
+    available_backends: config.available_backends,
     edit_token: config.edit_token,
   }
+}
+
+// 思考力度候选值来自后端 available_backends；null 表示不做枚举限制（自由输入 variant 名）
+function supportedEffortsFor(slug: string): string[] | null {
+  const found = agentRuntimeConfig.value.available_backends?.find(item => item.slug === slug)
+  return found?.supported_efforts ?? null
 }
 
 async function saveAgentRuntimeConfig() {
@@ -425,6 +433,7 @@ async function saveAgentRuntimeConfig() {
         type: item.type,
         command: item.command?.trim() || null,
         model: item.model?.trim() || null,
+        effort: item.effort?.trim() || null,
       })),
     })
     agentRuntimeConfig.value = normalizeFixedAgentRuntimeConfig(saved)
@@ -902,6 +911,7 @@ async function deleteBackend(slug: string) {
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">类型</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">命令</th>
                 <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">模型</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-muted-foreground">思考力度</th>
               </tr>
             </thead>
             <tbody>
@@ -920,6 +930,23 @@ async function deleteBackend(slug: string) {
                 </td>
                 <td class="px-3 py-2">
                   <Input :model-value="backend.model || ''" placeholder="默认模型" class="h-8 font-mono text-xs" @update:model-value="backend.model = String($event || '')" />
+                </td>
+                <td class="px-3 py-2">
+                  <select
+                    v-if="supportedEffortsFor(backend.slug)"
+                    v-model="backend.effort"
+                    class="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  >
+                    <option value="">默认</option>
+                    <option v-for="item in supportedEffortsFor(backend.slug)" :key="item" :value="item">{{ item }}</option>
+                  </select>
+                  <Input
+                    v-else
+                    :model-value="backend.effort || ''"
+                    placeholder="variant 名，如 high"
+                    class="h-8 font-mono text-xs"
+                    @update:model-value="backend.effort = String($event || '')"
+                  />
                 </td>
               </tr>
             </tbody>

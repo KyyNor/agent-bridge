@@ -16,6 +16,7 @@
 - 文档知识后端实现 `BackendAdapter`；可选能力通过独立 runtime-checkable Protocol 表达。
 - 能力来源实现 `CapabilitySourceAdapter` 并注册到来源 registry。
 - Coding Agent 的配置暂时要求 `slug == type`。在支持实例级差异配置之前，不创建同一 type 的多个无差异 slug。
+- Coding Agent 后端可选 `effort` 思考力度字段，留空表示不传参、保持各 CLI 默认。各实现通过类属性 `supported_efforts` 声明自己的取值集合（Claude：low/medium/high/xhigh/max；Codex：minimal~xhigh；Pi：off~xhigh），由 `create_coding_agent_registry` 统一校验；OpenCode 的 variant 名由 provider 决定，`supported_efforts` 为 `None` 时不做枚举校验。保存接口必须先构建 registry 校验再写 `server.toml`，禁止把非法取值落盘导致服务重启失败。
 - OpenCode 使用由 Agent Bridge 按 run 管理的 server HTTP 模式；server 启动、就绪探测、SSE framing、请求和回收集中在 `opencode_server.py`，adapter 只负责 OpenCode V1 API 事件与统一事件模型的映射，便于未来替换 V2 client。
 - Mock 后端只能由显式 `type = "mock"` 使用，不得作为未知或缺失配置的静默回退。
 - CodeGraph CLI/MCP 是同一正式后端的两种调用通道，统一通过 `CodeGraphBackend` 使用。

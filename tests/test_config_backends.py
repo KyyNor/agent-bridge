@@ -299,3 +299,51 @@ def test_agent_runtime_config_accepts_codex_backend(tmp_path: Path):
     assert loaded.backends[0].agent_type == "codex"
     assert loaded.backends[0].command == "codex"
     assert loaded.backends[0].model == "gpt-5"
+
+
+def test_load_agent_runtime_config_reads_effort(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+    _write_config(
+        paths.config_dir,
+        (
+            '[agents]\n'
+            'default = "claude"\n\n'
+            '[agents.claude]\n'
+            'type = "claude"\n'
+            'effort = "xhigh"\n'
+        ),
+    )
+
+    config = load_agent_runtime_config(paths)
+
+    assert config.backends[0].slug == "claude"
+    assert config.backends[0].effort == "xhigh"
+
+
+def test_agent_runtime_config_roundtrips_effort(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+
+    save_agent_runtime_config(
+        paths,
+        AgentRuntimeConfig(
+            default_backend="claude",
+            backends=(AgentBackendConfig(slug="claude", agent_type="claude", effort="medium"),),
+        ),
+    )
+
+    text = paths.server_config_path.read_text(encoding="utf-8")
+    assert 'effort = "medium"' in text
+    assert load_agent_runtime_config(paths).backends[0].effort == "medium"
+
+
+def test_agent_runtime_config_rejects_invalid_effort_characters(tmp_path: Path):
+    paths = AgentBridgePaths.from_root(tmp_path)
+
+    with pytest.raises(ValueError, match="effort 取值不合法"):
+        save_agent_runtime_config(
+            paths,
+            AgentRuntimeConfig(
+                default_backend="claude",
+                backends=(AgentBackendConfig(slug="claude", agent_type="claude", effort="high;rm"),),
+            ),
+        )

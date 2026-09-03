@@ -84,5 +84,7 @@ class CodingAgent(Protocol):
     display_name: str
     source: str
     capabilities: CodingAgentCapabilities
+    # 该实现接受的思考力度取值；None 表示取值由外部系统决定、不做枚举校验。
+    supported_efforts: frozenset[str] | None
 
     def start(self, request: CodingAgentRequest) -> CodingAgentRun: ...

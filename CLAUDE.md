@@ -122,6 +122,8 @@ Hook 审计（审计保留原始 prompt）。`profile use` 会自动、幂等安
 
 `CodingAgent` / `CodingAgentRun` 是统一契约，Claude、Codex、OpenCode、Pi 在 `agent_runtime/adapters/` 实现。`AgentService` 负责工作目录、Profile/MCP 配置、运行记录和事件持久化。
 
+思考力度按后端配置（`server.toml` `[agents.<slug>]` 的 `effort`，管理后台 Coding Agent 配置区可编辑），各实现声明 `supported_efforts` 并由 registry 落盘前统一校验：Claude 走 SDK `effort`（low/medium/high/xhigh/max）、Codex 走 `-c model_reasoning_effort`（minimal~xhigh）、Pi 走 `--thinking`（off~xhigh）、OpenCode 走 message payload 的 `variant`（取值由 provider 决定，不做枚举校验）。留空时完全不传参，保持各 CLI 默认行为。
+
 Agent 运行观测也走统一规范化事件流：工具事件包含 `input`/`output`（短内容内联，超过阈值落到运行目录 `payloads/` 并返回安全相对引用），工具结果包含 `started_at`、`finished_at` 和 `duration_ms`；运行准备、后端执行、收尾和总耗时以 `stage` 事件记录。SQLite 保存可查询的摘要和完整事件列表，JSONL 负责运行中的实时追加和原始消息留档。
 
 前端时间轴对长 payload 只展示预览，点击“查看”后在弹窗中按 Markdown 渲染，JSON 先格式化再展示，或使用只读 CodeMirror 对 JSON、HTML、Python、JavaScript 做语法高亮；工具输入、输出和模型详情即使是短内容也提供查看入口，完整内容加载后仍不直接塞回时间轴，避免大文本撑开页面。

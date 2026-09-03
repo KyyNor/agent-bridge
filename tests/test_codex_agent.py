@@ -43,6 +43,32 @@ def test_codex_build_command_uses_exec_json_cd_model_and_schema() -> None:
     ]
 
 
+def test_codex_build_command_emits_reasoning_effort_override() -> None:
+    args = _build_command(
+        command="codex",
+        prompt="hello",
+        cwd="/tmp/project",
+        model="gpt-5",
+        schema_path=None,
+        effort="xhigh",
+    )
+
+    assert args == [
+        "codex",
+        "exec",
+        "--json",
+        "--cd",
+        "/tmp/project",
+        "--skip-git-repo-check",
+        "--model",
+        "gpt-5",
+        "-c",
+        "model_reasoning_effort=xhigh",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "hello",
+    ]
+
+
 def test_codex_agent_message_event_maps_from_json_row() -> None:
     events, text, final = _events_from_codex_row(
         {"type": "agent_message", "message": "hello", "session_id": "s1"}

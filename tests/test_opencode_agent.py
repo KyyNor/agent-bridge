@@ -38,6 +38,20 @@ def test_opencode_message_payload_uses_server_api_and_native_schema(tmp_path) ->
     assert _model_payload("invalid-model") is None
 
 
+def test_opencode_message_payload_includes_reasoning_variant(tmp_path) -> None:
+    request = CodingAgentRequest(
+        prompt="make json",
+        cwd=tmp_path,
+        mcp_servers={},
+        setting_sources=[],
+    )
+
+    payload = _message_payload(request, "anthropic/claude-sonnet-4", "high")
+
+    assert payload["variant"] == "high"
+    assert _message_payload(request, "anthropic/claude-sonnet-4").get("variant") is None
+
+
 def test_opencode_supports_mcp_and_native_json_schema() -> None:
     agent = OpenCodeCodingAgent()
 

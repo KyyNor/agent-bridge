@@ -29,6 +29,7 @@ class _OpenCodeRun:
     request: CodingAgentRequest
     command: str
     model: str | None = None
+    variant: str | None = None
     auto_approve: bool = True
     _server: OpenCodeServerProcess | None = field(default=None, init=False)
 
@@ -64,7 +65,7 @@ class _OpenCodeRun:
                 "POST",
                 f"/session/{session_id}/prompt_async",
                 params={"directory": directory},
-                payload=_message_payload(self.request, self.model),
+                payload=_message_payload(self.request, self.model, self.variant),
             )
 
             mapper = _OpenCodeEventMapper(session_id=session_id)
@@ -129,13 +130,20 @@ async def _pump_opencode_events(
         await queue.put(None)
 
 
-def _message_payload(request: CodingAgentRequest, configured_model: str | None) -> dict[str, Any]:
+def _message_payload(
+    request: CodingAgentRequest,
+    configured_model: str | None,
+    variant: str | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "parts": [{"type": "text", "text": _effective_prompt(request)}],
     }
     model = _model_payload(request.model or configured_model)
     if model is not None:
         payload["model"] = model
+    if variant:
+        # OpenCode 的思考力度以模型 variant 名表达，合法取值随 provider 不同。
+        payload["variant"] = variant
     if request.output_schema:
         payload["format"] = {
             "type": "json_schema",
@@ -163,6 +171,9 @@ def _session_id(response: Any) -> str | None:
 
 class OpenCodeCodingAgent:
     source = "opencode_server"
+    # variant 名由各 provider 自行定义（openai 系 none~xhigh、anthropic 系 high/max 等），
+    # 无法给出统一枚举，配置值原样透传、不做校验。
+    supported_efforts = None
     capabilities = CodingAgentCapabilities(
         supports_mcp=True,
         supports_native_json_schema=True,
@@ -180,12 +191,14 @@ class OpenCodeCodingAgent:
         backend_key: str = "opencode",
         command: str = "opencode",
         model: str | None = None,
+        variant: str | None = None,
         auto_approve: bool = True,
     ) -> None:
         self.backend_key = backend_key
         self.display_name = "OpenCode"
         self.command = command
         self.model = model
+        self.variant = variant
         self.auto_approve = auto_approve
 
     def start(self, request: CodingAgentRequest) -> CodingAgentRun:
@@ -193,5 +206,6 @@ class OpenCodeCodingAgent:
             request=request,
             command=self.command,
             model=self.model,
+            variant=self.variant,
             auto_approve=self.auto_approve,
         )

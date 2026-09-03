@@ -149,6 +149,9 @@ class AgentBackendConfig:
     agent_type: str
     model: str | None = None
     command: str | None = None
+    # 思考力度按后端透传给具体 Coding Agent（claude --effort / opencode variant /
+    # codex model_reasoning_effort / pi --thinking）；留空表示完全使用各 CLI 默认。
+    effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -357,6 +360,7 @@ def load_agent_runtime_config(paths: AgentBridgePaths) -> AgentRuntimeConfig:
                 agent_type=str(section["type"]),
                 model=section.get("model"),
                 command=section.get("command"),
+                effort=section.get("effort"),
             )
         )
     return normalize_agent_runtime_config(
@@ -404,12 +408,19 @@ def normalize_agent_runtime_config(config: AgentRuntimeConfig) -> AgentRuntimeCo
         if slug in seen:
             raise ValueError(f"Agent 后端 slug 重复：{slug}")
         seen.add(slug)
+        effort = str(backend.effort or "").strip() or None
+        if effort is not None and not _AGENT_BACKEND_SLUG_RE.fullmatch(effort):
+            raise ValueError(
+                f"Agent 后端 '{slug}' 的 effort 取值不合法：{effort!r}，"
+                f"仅允许字母、数字、下划线和连字符"
+            )
         backends.append(
             AgentBackendConfig(
                 slug=slug,
                 agent_type=agent_type,
                 model=str(backend.model).strip() if backend.model else None,
                 command=str(backend.command).strip() if backend.command else None,
+                effort=effort,
             )
         )
     if default_backend != "claude" and default_backend not in seen:
@@ -446,6 +457,8 @@ def _render_agent_runtime_config(config: AgentRuntimeConfig) -> str:
             lines.append(f"command = {json.dumps(backend.command)}")
         if backend.model:
             lines.append(f"model = {json.dumps(backend.model)}")
+        if backend.effort:
+            lines.append(f"effort = {json.dumps(backend.effort)}")
     return "\n".join(lines)
 
 

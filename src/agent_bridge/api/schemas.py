@@ -450,6 +450,8 @@ class AgentBackendConfigRequest(BaseModel):
     type: str
     command: str | None = None
     model: str | None = None
+    # 思考力度；合法取值由各 Coding Agent 实现声明，服务层在落盘前校验。
+    effort: str | None = None
 
 
 class AgentRuntimeConfigRequest(BaseModel):

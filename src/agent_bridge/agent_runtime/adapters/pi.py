@@ -411,6 +411,8 @@ def _text_from_row(row: dict[str, Any]) -> str:
 
 class PiCodingAgent:
     source = "pi_cli"
+    # pi --thinking 的合法取值（off 表示关闭思考）。
+    supported_efforts = frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
     capabilities = CodingAgentCapabilities(
         supports_mcp=False,
         supports_native_json_schema=False,
