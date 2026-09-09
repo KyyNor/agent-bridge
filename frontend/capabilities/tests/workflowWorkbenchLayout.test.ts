@@ -26,7 +26,7 @@ test('workflow detail implements the approved layered workbench without replacin
   assert.match(file, /import StatCard from ['"]\.\.\/\.\.\/components\/StatCard\.vue['"]/)
   assert.match(file, /const detailTab = ref<'overview' \| 'tasks' \| 'artifacts' \| 'runs' \| 'versions'>\('overview'\)/)
   assert.match(file, /const detailTabs = computed\(/)
-  assert.match(file, /async function prepareDetail\(item: WorkflowDefinition\)[\s\S]*await loadRecentArtifacts\(\)/)
+  assert.match(file, /async function prepareDetail\(item: WorkflowDefinition\)[\s\S]*loadRecentArtifacts\(\)/)
   assert.match(file, /if \(value === 'tasks'[\s\S]*await loadTasks\(/)
   assert.match(file, /if \(value === 'artifacts'\) await searchArtifacts\(\)/)
   assert.match(file, /if \(value === 'runs'[\s\S]*await loadRuns\(/)

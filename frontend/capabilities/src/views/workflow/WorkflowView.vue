@@ -359,13 +359,14 @@ const backendKeys = computed(() => deriveWorkflowBackendKeys(agentRuntimeConfig.
 const selectedProfileName = computed(() => profileName(selectedWorkflow.value?.profile_key || ''))
 const runs = computed(() => workflowRuns.value[selectedWorkflow.value?.workflow_key || ''] || [])
 const latestRun = computed(() => runs.value[0] || null)
-// workflow 整体状态：优先取 task 代表版本聚合状态，旧后端缺失时回退到最近 run 状态。
+// 最近运行类展示必须取 run 自身状态（与 run_id/耗时取自 latestRun 一致）；
+// task 代表版本聚合状态仅在缺失 run 记录时兜底。
 const workflowStatus = computed(() => {
   const key = selectedWorkflow.value?.workflow_key || ''
-  return workflowTaskStatus.value[key]?.status || latestRun.value?.status || ''
+  return latestRun.value?.status || workflowTaskStatus.value[key]?.status || ''
 })
 const latestRunTone = computed<'neutral' | 'ok' | 'err' | 'info'>(() => {
-  const status = workflowStatus.value || latestRun.value?.status
+  const status = workflowStatus.value
   if (status === 'completed') return 'ok'
   if (status === 'failed' || status === 'stopped') return 'err'
   if (status === 'running') return 'info'
