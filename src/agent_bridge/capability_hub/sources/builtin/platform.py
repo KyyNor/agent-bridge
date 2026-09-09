@@ -5,6 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from agent_bridge.automation.workflows.validation import WORKFLOW_VALIDATION_INPUT_SCHEMA
+from agent_bridge.capability_hub.gateway.request_context import current_capability_token
 from agent_bridge.capability_hub.sources.builtin.base import BuiltinResourceRef, BuiltinTool
 from agent_bridge.capability_hub.models import ToolType
 from agent_bridge.core.domain import NotFound, ValidationError
@@ -98,12 +99,14 @@ class PlatformBuiltinProvider:
             script_params = arguments.get("script_params") or {}
             if not isinstance(script_params, dict):
                 raise ValidationError("script_params must be an object")
+            capability_token = current_capability_token()
             logger.info(
-                "平台 run_script 开始 actor=%s profile=%s script=%s timeout=%s",
+                "平台 run_script 开始 actor=%s profile=%s script=%s timeout=%s capability=%s",
                 actor,
                 profile_key,
                 script_key,
                 arguments.get("timeout_seconds"),
+                "有" if capability_token else "无",
             )
             return await asyncio.to_thread(
                 self.service.scripts.run_script,
@@ -113,6 +116,7 @@ class PlatformBuiltinProvider:
                 timeout_seconds=arguments.get("timeout_seconds"),
                 profile_key=profile_key,
                 workflow_context=workflow_context,
+                workflow_capability_token=capability_token,
                 run_type="mcp",
             )
         if tool == "validate_workflow":

@@ -18,6 +18,10 @@ from agent_bridge.api.schemas import (
     UpsertOpenApiToolRequest,
 )
 from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
+from agent_bridge.capability_hub.gateway.request_context import (
+    reset_request_capability_token,
+    set_request_capability_token,
+)
 
 
 
@@ -173,22 +177,29 @@ def create_capability_routes(service, actor, catalog_sources):
         if profile_key is None:
             profile_key = payload.profile_key
         workflow_context = workflow_context_from_headers(request)
+        capability_token = request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip()
         runtime_actor, runtime_profile_key, runtime_scope = resolve_workflow_runtime_identity(
             service.workflows,
-            capability_token=request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip(),
+            capability_token=capability_token,
             workflow_context=workflow_context,
             profile_key=profile_key,
             fallback_actor=current_actor,
         )
         with runtime_scope:
-            return await service.capabilities.execute(
-                actor=runtime_actor,
-                service=payload.service,
-                tool_name=payload.tool_name,
-                params=payload.params,
-                profile_key=runtime_profile_key,
-                workflow_context=workflow_context,
-            )
+            # 请求内再派生的子进程（如脚本嵌套调用 run_script）需要原始
+            # token 继续下传，否则子进程回调会丢失运行时归属组作用域。
+            capability_ctx_token = set_request_capability_token(capability_token or None)
+            try:
+                return await service.capabilities.execute(
+                    actor=runtime_actor,
+                    service=payload.service,
+                    tool_name=payload.tool_name,
+                    params=payload.params,
+                    profile_key=runtime_profile_key,
+                    workflow_context=workflow_context,
+                )
+            finally:
+                reset_request_capability_token(capability_ctx_token)
 
     @router.get("/capability-tools")
     def list_capability_tools(

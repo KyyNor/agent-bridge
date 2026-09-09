@@ -22,6 +22,10 @@ from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABI
 from agent_bridge.core.config import default_user
 from agent_bridge.core.domain import AccessDenied
 from agent_bridge.app.service import AgentBridgeService
+from agent_bridge.capability_hub.gateway.request_context import (
+    reset_request_capability_token,
+    set_request_capability_token,
+)
 from agent_bridge.capability_hub.gateway.top_level_tools import top_level_mcp_tools
 
 logger = logging.getLogger("agent_bridge.mcp")
@@ -579,6 +583,7 @@ def setup_mcp_route(
             actor_token = _request_actor.set(actor)
             token = _request_profile.set(profile)
             workflow_token = _request_workflow_context.set(workflow_context)
+            capability_ctx_token = set_request_capability_token(capability_token or None)
             try:
                 mcp = create_mcp_server(service, profile_key=profile, workflow_context=workflow_context)
                 response = await _dispatch_mcp(mcp, request)
@@ -588,6 +593,7 @@ def setup_mcp_route(
                 logger.error("MCP 错误 profile=%s 错误=%s", profile, exc)
                 raise
             finally:
+                reset_request_capability_token(capability_ctx_token)
                 _request_workflow_context.reset(workflow_token)
                 _request_profile.reset(token)
                 _request_actor.reset(actor_token)

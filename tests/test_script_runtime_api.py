@@ -476,3 +476,84 @@ def test_script_reset_route_restores_builtin_default(wm_paths):
     payload = response.json()
     assert payload["script_key"] == "system.validate_workflow"
     assert payload["source"] == "default"
+
+
+ENV_ECHO_SCRIPT = """
+import os
+
+
+def main(envelope):
+    return {
+        "capability": os.environ.get("AGENT_BRIDGE_WORKFLOW_CAPABILITY", ""),
+        "actor": os.environ.get("AGENT_BRIDGE_USER", ""),
+    }
+"""
+
+
+def test_capability_execute_route_passes_token_to_nested_run_script(wm_paths):
+    client = _create_client(wm_paths)
+    svc = client.app.state.agent_bridge_service
+    svc.store.init_schema()
+    svc.access.bootstrap_admin_memberships()
+    svc.access.upsert_group(actor="root", group_key="team-a", name="A 组")
+    svc.access.set_user_group(actor="root", user_id="alice", group_key="team-a")
+    svc.governance.upsert_profile(
+        actor="alice",
+        profile_key="team-a-profile",
+        name="A 组能力平面",
+        description="",
+        status="active",
+    )
+    svc.workflows.upsert_definition(
+        actor="alice",
+        workflow_key="team-a-workflow",
+        name="A 组工作流",
+        description="",
+        profile_key="team-a-profile",
+        definition={"nodes": [], "edges": []},
+        status="active",
+    )
+    run = svc.store.create_workflow_run(
+        run_id="team-a-run",
+        workflow_key="team-a-workflow",
+        profile_key="team-a-profile",
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/team-a-run",
+    )
+    svc.scripts.upsert_script(
+        actor="alice",
+        script_key="system.env_echo",
+        name="Env Echo",
+        description="",
+        language="python",
+        code=ENV_ECHO_SCRIPT,
+        input_schema={"type": "object", "properties": {}, "additionalProperties": True},
+        status="active",
+        owner_type="system",
+        owner_key="",
+    )
+    capability = svc.workflows.issue_runtime_capability(run=run, initiated_by="root")
+
+    response = client.post(
+        "/api/v1/capabilities/execute",
+        headers={
+            "X-Agent-Bridge-MetaMCP-Profile": "team-a-profile",
+            "X-Agent-Bridge-Workflow": "true",
+            "X-Agent-Bridge-Workflow-Key": "team-a-workflow",
+            "X-Agent-Bridge-Workflow-Run-Id": "team-a-run",
+            "X-Agent-Bridge-User": capability.actor,
+            WORKFLOW_CAPABILITY_HEADER: capability.token,
+        },
+        json={
+            "service": "built-in",
+            "tool_name": "run_script",
+            "params": {"script_key": "system.env_echo", "script_params": {}},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["result"]["result"]["capability"] == capability.token
+    assert payload["result"]["result"]["actor"] == capability.actor

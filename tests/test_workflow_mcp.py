@@ -370,3 +370,113 @@ def test_mcp_route_rejects_forged_cross_group_workflow_context(wm_paths):
     assert response.status_code == 200
     assert response.json()["result"]["isError"] is True
     assert svc.store.get_workflow_task("page-report", "forged") is None
+
+
+CAPABILITY_ECHO_SCRIPT = """
+import os
+
+
+def main(envelope):
+    return {
+        "capability": os.environ.get("AGENT_BRIDGE_WORKFLOW_CAPABILITY", ""),
+        "actor": os.environ.get("AGENT_BRIDGE_USER", ""),
+    }
+"""
+
+
+def test_mcp_execute_run_script_passes_capability_token_to_subprocess(wm_paths):
+    from agent_bridge.access_control.identity import IdentityConfig, RequestIdentityResolver
+    from agent_bridge.app.service import AgentBridgeService
+    from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
+    from agent_bridge.capability_hub.gateway.metamcp import setup_mcp_route
+
+    svc = AgentBridgeService.create(wm_paths, {"root"})
+    svc.store.init_schema()
+    svc.access.bootstrap_admin_memberships()
+    svc.access.upsert_group(actor="root", group_key="team-a", name="A 组")
+    svc.access.set_user_group(actor="root", user_id="alice", group_key="team-a")
+    svc.governance.upsert_profile(
+        actor="alice",
+        profile_key="team-a-profile",
+        name="A 组能力平面",
+        description="",
+        status="active",
+    )
+    svc.workflows.upsert_definition(
+        actor="alice",
+        workflow_key="team-a-workflow",
+        name="A 组工作流",
+        description="",
+        profile_key="team-a-profile",
+        definition={"nodes": [], "edges": []},
+        status="active",
+    )
+    run = svc.store.create_workflow_run(
+        run_id="team-a-run",
+        workflow_key="team-a-workflow",
+        profile_key="team-a-profile",
+        task_key=None,
+        status="running",
+        temp_dir="/tmp/team-a-run",
+    )
+    svc.scripts.upsert_script(
+        actor="alice",
+        script_key="system.env_echo",
+        name="Env Echo",
+        description="",
+        language="python",
+        code=CAPABILITY_ECHO_SCRIPT,
+        input_schema={"type": "object", "properties": {}, "additionalProperties": True},
+        status="active",
+        owner_type="system",
+        owner_key="",
+    )
+    capability = svc.workflows.issue_runtime_capability(run=run, initiated_by="root")
+
+    app = FastAPI()
+    setup_mcp_route(app, svc, RequestIdentityResolver(IdentityConfig()))
+    client = TestClient(app)
+    context_headers = {
+        "X-Agent-Bridge-MetaMCP-Profile": "team-a-profile",
+        "X-Agent-Bridge-Workflow": "true",
+        "X-Agent-Bridge-Workflow-Key": "team-a-workflow",
+        "X-Agent-Bridge-Workflow-Run-Id": "team-a-run",
+        "Accept": "application/json, text/event-stream",
+    }
+
+    def run_script_over_mcp(headers):
+        response = client.post(
+            "/mcp",
+            headers=headers,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "execute",
+                    "arguments": {
+                        "service": "built-in",
+                        "tool_name": "run_script",
+                        "params": {"script_key": "system.env_echo", "script_params": {}},
+                    },
+                },
+            },
+        )
+        assert response.status_code == 200
+        result = response.json()["result"]
+        assert result.get("isError") is not True
+        structured = result.get("structuredContent")
+        if structured is None:
+            structured = json.loads(result["content"][0]["text"])
+        return structured
+
+    trusted = run_script_over_mcp({**context_headers, WORKFLOW_CAPABILITY_HEADER: capability.token})
+    assert trusted["success"] is True
+    script_output = trusted["result"]["result"]
+    assert script_output["capability"] == capability.token
+    assert script_output["actor"] == capability.actor
+
+    # 后续无 capability 的请求必须读不到上一次的 token（请求级隔离）。
+    plain = run_script_over_mcp({**context_headers, "X-Agent-Bridge-User": "alice"})
+    assert plain["success"] is True
+    assert plain["result"]["result"]["capability"] == ""
