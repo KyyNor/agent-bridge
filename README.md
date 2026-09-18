@@ -90,6 +90,9 @@ Linux uid，但各自的 DSH 配置目录互相独立：
 - **组级配置**：`linux_user`（小组映射的 Linux 用户，默认取小组标识）、
   `default_model`（必须取自全局可用模型列表）与敏感的 `api_key`（只写不回显）。
 
+从按组保存 Base URL/模型的早期版本升级时，迁移会把各组已保存的值回填到全局
+公共接入（只填全局为空的字段，不覆盖新值）再删除旧列，避免升级静默丢配置。
+
 启动时 Agent Bridge 把公共接入与组级默认模型合并写入该用户 DSH 配置目录的
 `settings.yaml`（`llm-pi-ai.providers.agent-bridge` 声明 Base URL、模型目录与
 承载密钥的环境变量名，`agent-default-model` 指定默认模型），API Key 只经

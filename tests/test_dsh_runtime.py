@@ -763,3 +763,94 @@ def test_dsh_runtime_config_api_roundtrip(service) -> None:
         },
     )
     assert conflict.status_code == 409
+
+
+# -- 公共模型接入迁移 --
+
+_LEGACY_GROUP_LLM_COLUMNS = {
+    "base_url": "TEXT NOT NULL DEFAULT ''",
+    "available_models_json": "TEXT NOT NULL DEFAULT '[]'",
+}
+
+
+def _legacy_dsh_store(tmp_path, *, group_rows: list[tuple], runtime_row: tuple | None):
+    """构造升级前的库：base_url/可用模型还挂在组配置上。"""
+    from agent_bridge.storage.sqlite import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "legacy.db")
+    store.init_schema()
+    with store.connect() as conn:
+        for column, definition in _LEGACY_GROUP_LLM_COLUMNS.items():
+            conn.execute(f"ALTER TABLE dsh_group_configs ADD COLUMN {column} {definition}")
+        for group_key, base_url, models_json in group_rows:
+            conn.execute(
+                "INSERT INTO dsh_group_configs"
+                " (group_key, linux_user, default_model, base_url, available_models_json)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (group_key, group_key, "gpt-x", base_url, models_json),
+            )
+        if runtime_row is not None:
+            conn.execute(
+                "INSERT INTO dsh_runtime_config (id, web_command, idle_timeout_minutes, base_url, available_models_json)"
+                " VALUES (1, ?, ?, ?, ?)",
+                runtime_row,
+            )
+    return store
+
+
+def _dsh_public_config(store) -> tuple[str, list[str]]:
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT base_url, available_models_json FROM dsh_runtime_config WHERE id = 1"
+        ).fetchone()
+    return (row[0], json.loads(row[1])) if row else ("", [])
+
+
+def test_dsh_public_llm_config_backfilled_from_legacy_group_columns(tmp_path: Path) -> None:
+    """升级不得静默丢弃已保存的 Base URL / 可用模型（否则 DSH 退回内置供应商）。"""
+    store = _legacy_dsh_store(
+        tmp_path,
+        group_rows=[
+            ("groupa", "https://gateway.internal/v1", '["gpt-x"]'),
+            ("groupb", "", '["gpt-y"]'),
+            ("groupc", "", "not-json"),
+        ],
+        runtime_row=("dsh web {port}", 120, "", "[]"),
+    )
+
+    store.migrate_phase2()
+
+    assert _dsh_public_config(store) == ("https://gateway.internal/v1", ["gpt-x", "gpt-y"])
+    with store.connect() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(dsh_group_configs)")}
+    assert "base_url" not in columns
+    assert "available_models_json" not in columns
+
+    # 幂等：重复迁移不再改动
+    store.migrate_phase2()
+    assert _dsh_public_config(store) == ("https://gateway.internal/v1", ["gpt-x", "gpt-y"])
+
+
+def test_dsh_public_llm_config_backfill_keeps_newer_global_values(tmp_path: Path) -> None:
+    store = _legacy_dsh_store(
+        tmp_path,
+        group_rows=[("groupa", "https://legacy.internal/v1", '["legacy-model"]')],
+        runtime_row=("dsh web {port}", 120, "https://current.internal/v1", '["current-model"]'),
+    )
+
+    store.migrate_phase2()
+
+    assert _dsh_public_config(store) == ("https://current.internal/v1", ["current-model"])
+
+
+def test_dsh_public_llm_config_backfill_without_legacy_values(tmp_path: Path) -> None:
+    """旧组也没有配置时不建全局行，保持“未配置”的语义与告警。"""
+    store = _legacy_dsh_store(
+        tmp_path,
+        group_rows=[("groupa", "", "[]")],
+        runtime_row=None,
+    )
+
+    store.migrate_phase2()
+
+    assert _dsh_public_config(store) == ("", [])

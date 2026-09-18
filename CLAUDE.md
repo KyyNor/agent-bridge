@@ -184,6 +184,9 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   `DSH_HOME/settings.yaml` 的 `llm-pi-ai.providers.agent-bridge` 与
   `agent-default-model`；API Key 只经 `AGENT_BRIDGE_DSH_API_KEY` 环境变量传递，
   不落盘。合并写入保留用户其他 settings，内容未变化时不触盘。
+- `dsh_group_configs`/`dsh_runtime_config` 分层迁移必须先回填再删列：早期版本的
+  组级 `base_url`/`available_models_json` 由 `_backfill_dsh_public_llm_config`
+  合并进全局行（只填全局为空的字段），否则升级会静默丢失已保存的模型接入。
 - 启动命令模板支持 `{port}` 与 `{patch}` 两个占位符（后者由 Workspace 能力平面注入
   `--patch <配置文件>`），默认模板带 `--no-open` 关闭 DSH 自启浏览器。
 - 启动就绪后从日志横幅 `dsh web: http://…/?token=…` 捕获鉴权入口（`auth_path`/

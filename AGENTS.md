@@ -34,7 +34,7 @@
 - `profile unuse` 必须同时扫描当前项目和 user scope，交互选择卸载目标；卸载只删除对应范围的 Agent Bridge MCP、托管 Hook 和说明块，必须保留用户自有配置。
 - 工作流服务启动必须回收上一进程遗留的 `running` 运行、节点和任务租约，并恢复当前调度窗口的持久化自动运行计数；手动/批量运行终态后必须刷新工作流概览聚合，前端批量队列不承诺服务重启后续跑。
 - DSH Web Runtime 按 `agent_bridge.dsh` 领域包演进：进程生命周期沿用 claude-mem worker 的状态文件与 SIGTERM→SIGKILL 升级语义，uid/gid 切换只允许经 `dsh/launcher.py`（`Popen(user=, group=)`，禁止 `preexec_fn`）。用户级 DSH 配置目录固定为 Linux 用户 home 下 `.config/dsh/<business-user>/`，不得迁入 `AGENT_BRIDGE_ROOT/data`；组级 `api_key` 按敏感配置模式保存与脱敏（只返回 `api_key_set`）。每个业务用户至多一个实例，动态端口不通过用户态接口暴露。
-- DSH 的模型接入必须走其原生配置而非自定义环境变量：公共 Base URL（留空回落系统「公共模型配置」）与可用模型、组级默认模型合并写入用户 `DSH_HOME/settings.yaml`（`llm-pi-ai.providers.agent-bridge` + `agent-default-model`），API Key 只经环境变量传递、不落盘；写入必须保留用户其余 settings 且内容未变化时不触盘。启动命令模板只支持 `{port}` 与 `{patch}` 占位符，默认带 `--no-open`；就绪后必须从 `dsh web: …?token=…` 横幅捕获鉴权入口，供 Workspace 代理完成首次 token→Cookie 换取。
+- DSH 的模型接入必须走其原生配置而非自定义环境变量：公共 Base URL（留空回落系统「公共模型配置」）与可用模型、组级默认模型合并写入用户 `DSH_HOME/settings.yaml`（`llm-pi-ai.providers.agent-bridge` + `agent-default-model`），API Key 只经环境变量传递、不落盘；写入必须保留用户其余 settings 且内容未变化时不触盘。启动命令模板只支持 `{port}` 与 `{patch}` 占位符，默认带 `--no-open`；就绪后必须从 `dsh web: …?token=…` 横幅捕获鉴权入口，供 Workspace 代理完成首次 token→Cookie 换取。`dsh_group_configs`/`dsh_runtime_config` 的分层迁移必须先回填再删列：旧组级 `base_url`/`available_models_json` 合并进全局行（只填全局为空的字段），不得静默丢弃用户已保存的接入配置。
 - `workflow_runs` 的任务维度索引 `idx_workflow_runs_task` 与 `tool_call_logs` 的时间窗聚合覆盖索引 `idx_tool_call_logs_stats` 是任务队列和概览聚合的查询护栏：两表行内均内嵌大 JSON 字段，缺索引的任务维度关联或时间窗聚合会退化为逐行回表并随数据量线性放大。修改这些查询必须同步评估索引，不得随意删除；护栏测试见 `tests/test_storage_query_indexes.py`。
 
 ## 时间处理规范
