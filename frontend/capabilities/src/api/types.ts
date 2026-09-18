@@ -1427,6 +1427,46 @@ export interface RetrievalProbeLlmConfigUpdate {
   expected_edit_token?: string | null
 }
 
+export interface DshGroupConfig {
+  group_key: string
+  linux_user: string
+  base_url: string
+  default_model: string
+  available_models: string[]
+  api_key_set: boolean
+  updated_by: string
+  updated_at: string
+  edit_token: string
+}
+
+export interface DshGroupConfigUpdate {
+  linux_user?: string
+  base_url?: string
+  default_model?: string
+  available_models?: string[]
+  api_key?: string | null
+  clear_api_key?: boolean
+  expected_edit_token?: string | null
+}
+
+export interface DshRuntimeConfig {
+  web_command: string
+  idle_timeout_minutes: number
+  updated_at: string | null
+  edit_token: string
+}
+
+export interface DshRuntimeStatus {
+  user_id: string
+  group_key: string | null
+  linux_user: string
+  config_dir: string
+  status: 'running' | 'starting' | 'unhealthy' | 'stopped' | 'unassigned' | 'unconfigured'
+  started_at: string | null
+  last_access_at: string | null
+  idle_minutes: number | null
+}
+
 export interface ModelEvaluationDataset {
   key: string
   label: string

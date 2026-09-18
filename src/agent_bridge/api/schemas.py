@@ -30,6 +30,22 @@ class AdminLoginRequest(BaseModel):
     password: str = Field(min_length=8, max_length=256)
 
 
+class DshGroupConfigUpdateRequest(BaseModel):
+    linux_user: str = Field(default="", max_length=64)
+    base_url: str = Field(default="", max_length=2048)
+    default_model: str = Field(default="", max_length=256)
+    available_models: list[str] = Field(default_factory=list, max_length=100)
+    api_key: str | None = Field(default=None, max_length=4096)
+    clear_api_key: bool = False
+    expected_edit_token: str | None = None
+
+
+class DshRuntimeConfigUpdateRequest(BaseModel):
+    web_command: str = Field(default="", max_length=1024)
+    idle_timeout_minutes: int = Field(ge=1, le=43200)
+    expected_edit_token: str | None = None
+
+
 class ChangeAdminPasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=8, max_length=256)

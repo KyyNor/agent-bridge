@@ -165,6 +165,25 @@ server runtime 为单 uvicorn worker，进程内 hub 只适用于此模型；多
 
 Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没有实例级差异配置，不能提供真实价值；未来引入实例化配置后再扩展一对多模型。
 
+## DSH Web Runtime
+
+`dsh/` 是用户级 DSH Web 工作台的领域包：`DshConfigService` 负责组级/全局配置的
+校验、脱敏与 edit_token 并发保护，`DshRuntimeService` 负责进程生命周期，uid/gid
+切换集中在 `launcher.py`（root 下用 `Popen(user=, group=)`，不用 `preexec_fn`）。
+
+- 进程语义与 claude-mem worker 一致：`run/dsh-runtimes/<user>.json` 状态文件记录
+  pid/port/访问时间，SIGTERM→SIGKILL 升级回收并按进程组发信号；内存保留 Popen
+  句柄用于 wait 回收，避免僵尸进程被误判升级 SIGKILL。
+- 每个业务用户至多一个实例；启动注入组级模型配置（`DSH_*` 环境变量）与
+  `DSH_HOME`（`/home/<linux-user>/.config/dsh/<business-user>/`，取 passwd 的
+  home），不进入 `AGENT_BRIDGE_ROOT/data`。停止实例不删除用户配置。
+- `dsh_group_configs`/`dsh_runtime_config` 两张表经 `DshConfigRepository` 持久化；
+  `api_key` 沿用“只返回 api_key_set + clear_api_key”的敏感配置模式。
+- 空闲回收是服务内守护线程（默认 120 分钟阈值，随全局配置读取）；app lifespan
+  启动 `dsh.start()`，装配期 `recover()` 识别遗留实例，停止期 `stop_all()`。
+- 管理接口（组配置、全局配置、实例列表）仅 admins；用户态接口只暴露状态，不
+  暴露动态端口与 pid。
+
 ## 工作流
 
 工作流是受 Pydantic 校验的结构化 DAG，不再执行 `workflow.js`：

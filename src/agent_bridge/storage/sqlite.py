@@ -40,6 +40,7 @@ class SQLiteStore(SQLiteStoreFacade):
         from agent_bridge.storage.repositories.model_evaluations import ModelEvaluationRepository
         from agent_bridge.storage.repositories.onboarding import OnboardingRepository
         from agent_bridge.storage.repositories.workflows import WorkflowsRepository
+        from agent_bridge.storage.repositories.dsh import DshConfigRepository
 
         self.access_control = AccessControlRepository(db_path, self.connect)
         self.folders = FolderRepository(db_path, self.connect)
@@ -56,6 +57,7 @@ class SQLiteStore(SQLiteStoreFacade):
         self.workflows = WorkflowsRepository(db_path, self.connect)
         self.scripts = ScriptsRepository(db_path, self.connect)
         self.retrieval_probe_config = RetrievalProbeConfigRepository(db_path, self.connect)
+        self.dsh_config = DshConfigRepository(db_path, self.connect)
         self.model_evaluations = ModelEvaluationRepository(db_path, self.connect)
         self.onboarding = OnboardingRepository(db_path, self.connect)
         self.agent_runs = AgentRunsRepository(self.log_db_path, self.log_connect, prune_callback=self.maybe_prune_runtime_logs)

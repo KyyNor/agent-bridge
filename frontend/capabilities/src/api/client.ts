@@ -119,6 +119,9 @@ import type {
   AccessGroupName,
   UserGroupMembership,
   ResourceVisibility,
+  DshGroupConfig,
+  DshGroupConfigUpdate,
+  DshRuntimeConfig,
 } from './types'
 import { reportAuthenticationRequired } from '../lib/accessFeedback'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
@@ -515,6 +518,13 @@ export const api = {
   getRetrievalProbeLlmConfig: () => get<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config'),
   saveRetrievalProbeLlmConfig: (config: RetrievalProbeLlmConfigUpdate) =>
     put<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config', config),
+  getDshRuntimeConfig: () => get<DshRuntimeConfig>('/dsh/runtime-config'),
+  saveDshRuntimeConfig: (config: { web_command: string; idle_timeout_minutes: number; expected_edit_token?: string | null }) =>
+    put<DshRuntimeConfig>('/dsh/runtime-config', config),
+  listDshGroupConfigs: () =>
+    get<{ configs: DshGroupConfig[] }>('/dsh/group-configs').then(payload => payload.configs),
+  saveDshGroupConfig: (groupKey: string, config: DshGroupConfigUpdate) =>
+    put<DshGroupConfig>(`/dsh/group-configs/${encodeURIComponent(groupKey)}`, config),
   listModelEvaluationDatasets: (options?: ApiRequestOptions) => get<ModelEvaluationDataset[]>('/model-evaluations/datasets', options),
   getModelEvaluationRuntime: (options?: ApiRequestOptions) => get<ModelEvaluationRuntimeStatus>('/model-evaluations/runtime', options),
   listEvaluationModels: (connection: { base_url?: string; api_key?: string }) =>

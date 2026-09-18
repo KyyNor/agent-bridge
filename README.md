@@ -17,6 +17,9 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
   生命周期分开，便于未来替换 V2 client；运行时间轴会合并工具调用/结果和文本增量，同时保留
   原始事件用于诊断。
 - 通过结构化 DAG 编排 Agent、脚本、任务领取和 Markdown/HTML 产物。
+- 托管用户级 DSH Web Runtime：按业务用户隔离的交互式工作台进程，动态监听
+  `127.0.0.1` 端口、以所属小组映射的 Linux 用户身份运行、长期空闲自动回收；
+  组级模型配置（Base URL / 模型 / API Key）在每次启动时注入运行环境。
 - 工作流产物的标题、摘要、路径和正文使用 jieba 预分词与 SQLite FTS5 检索；长度至少 3 的 ASCII 标识符支持前缀匹配，结构化权限与版本过滤仍由 SQLite 普通条件处理。
 - `artifacts_search` 使用 DiskCache 缓存检索结果，默认保留 8 小时；缓存时长可在「系统管理」页面修改，保存后立即按新配置生效。当前版本不主动因新产物写入而清理缓存。
 - 「平台概览」使用 DiskCache 缓存聚合结果，默认保留 4 小时；缓存按用户、所属小组、可见资源范围和日期区间隔离，页面上的“刷新”会强制重建当前缓存。
@@ -61,6 +64,34 @@ uv run agent-bridge server stop
 ```
 
 短命令 `agb` 与 `agent-bridge` 等价。当前 CLI 根命令只有 `server`、`profile`、`memory`；知识库、工作流、Agent 和系统管理通过管理后台或 HTTP API 管理。
+
+## DSH Web Runtime
+
+Agent Bridge 可为每个业务用户托管一个 DSH Web 实例（内网交互式 Coding Agent 工作台，
+试用/评估阶段）。实例按需启动、只在 `127.0.0.1` 上监听动态端口、以该用户所属小组
+映射出的 Linux 用户身份运行；同一小组的多个业务用户共享 Linux uid，但各自的 DSH
+配置目录互相独立：
+
+```text
+/home/<linux-user>/.config/dsh/<business-user>/
+```
+
+配置目录由 Agent Bridge 在首次启动时创建并归属该 Linux 用户，不进入
+`AGENT_BRIDGE_ROOT/data`；停止或回收实例不会删除其中的 DSH 配置与 session 数据。
+
+管理员在「系统管理 → DSH Web Runtime」维护：
+
+- 组级配置：`base_url`、`available_models[]`、`default_model`（必须属于可用模型）
+  与敏感的 `api_key`（只写不回显）。每个业务小组配置一次，启动时通过
+  `DSH_BASE_URL` / `DSH_DEFAULT_MODEL` / `DSH_AVAILABLE_MODELS` / `DSH_API_KEY`
+  注入进程环境；`linux_user` 指定小组映射的 Linux 用户（默认取小组标识）。
+- 全局运行配置：启动命令模板（默认 `dsh web --host 127.0.0.1 --port {port}`，
+  以实际 DSH CLI 为准）与空闲回收阈值（分钟，默认 120）。
+
+生命周期语义：`POST /api/v1/dsh/runtime/ensure` 按需启动或复用实例（每个业务用户
+仅一个）；`GET /api/v1/dsh/runtime` 查询状态；`POST /api/v1/dsh/runtime/stop`
+显式停止。调度线程周期性停止超过空闲阈值的实例；服务重启时自动识别上一进程
+遗留的存活实例并清理失效状态。启动失败的错误信息会附带日志尾部内容。
 
 ## 模型评估运行时
 
