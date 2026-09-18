@@ -167,16 +167,28 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
 
 ## DSH Web Runtime
 
-`dsh/` 是用户级 DSH Web 工作台的领域包：`DshConfigService` 负责组级/全局配置的
-校验、脱敏与 edit_token 并发保护，`DshRuntimeService` 负责进程生命周期，uid/gid
-切换集中在 `launcher.py`（root 下用 `Popen(user=, group=)`，不用 `preexec_fn`）。
+`dsh/` 是用户级 DSH Web（DeepSeek Harness）工作台的领域包：`DshConfigService`
+负责全局运行配置（启动命令模板、空闲阈值、公共 Base URL 与可用模型）与组级配置
+（`linux_user` / `default_model` / `api_key`）的校验、脱敏与 edit_token 并发保护；
+`DshRuntimeService` 负责进程生命周期；uid/gid 切换集中在 `launcher.py`
+（root 下用 `Popen(user=, group=)`，不用 `preexec_fn`）；`injection.py` 负责把模型
+接入写进 DSH 原生配置。
 
 - 进程语义与 claude-mem worker 一致：`run/dsh-runtimes/<user>.json` 状态文件记录
-  pid/port/访问时间，SIGTERM→SIGKILL 升级回收并按进程组发信号；内存保留 Popen
-  句柄用于 wait 回收，避免僵尸进程被误判升级 SIGKILL。
-- 每个业务用户至多一个实例；启动注入组级模型配置（`DSH_*` 环境变量）与
-  `DSH_HOME`（`/home/<linux-user>/.config/dsh/<business-user>/`，取 passwd 的
-  home），不进入 `AGENT_BRIDGE_ROOT/data`。停止实例不删除用户配置。
+  pid/port/访问时间/鉴权入口，SIGTERM→SIGKILL 升级回收并按进程组发信号；内存保留
+  Popen 句柄用于 wait 回收，避免僵尸进程被误判升级 SIGKILL。
+- 每个业务用户至多一个实例；`DSH_HOME` 指向 `<linux home>/.config/dsh/<business-user>/`
+  （取 passwd 的 home），不进入 `AGENT_BRIDGE_ROOT/data`。停止实例不删除用户配置。
+- **模型接入走 DSH 原生 settings.yaml**：公共 `base_url`（留空回落系统「公共模型配置」
+  的 Base URL）与 `available_models`、组级 `default_model` 合并写入该用户
+  `DSH_HOME/settings.yaml` 的 `llm-pi-ai.providers.agent-bridge` 与
+  `agent-default-model`；API Key 只经 `AGENT_BRIDGE_DSH_API_KEY` 环境变量传递，
+  不落盘。合并写入保留用户其他 settings，内容未变化时不触盘。
+- 启动命令模板支持 `{port}` 与 `{patch}` 两个占位符（后者由 Workspace 能力平面注入
+  `--patch <配置文件>`），默认模板带 `--no-open` 关闭 DSH 自启浏览器。
+- 启动就绪后从日志横幅 `dsh web: http://…/?token=…` 捕获鉴权入口（`auth_path`/
+  `auth_query`）到状态文件：DSH 首次访问必须携带该 token 换取会话 Cookie，代理层
+  用它完成首次导航（见 Workspace 代理）。
 - `dsh_group_configs`/`dsh_runtime_config` 两张表经 `DshConfigRepository` 持久化；
   `api_key` 沿用“只返回 api_key_set + clear_api_key”的敏感配置模式。
 - 空闲回收是服务内守护线程（默认 120 分钟阈值，随全局配置读取）；app lifespan

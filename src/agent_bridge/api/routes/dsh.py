@@ -42,9 +42,7 @@ def create_dsh_routes(service, actor) -> APIRouter:
             current_actor,
             group_key=group_key,
             linux_user=payload.linux_user,
-            base_url=payload.base_url,
             default_model=payload.default_model,
-            available_models=payload.available_models,
             api_key=payload.api_key,
             clear_api_key=payload.clear_api_key,
             expected_edit_token=payload.expected_edit_token,
@@ -63,6 +61,8 @@ def create_dsh_routes(service, actor) -> APIRouter:
             current_actor,
             web_command=payload.web_command,
             idle_timeout_minutes=payload.idle_timeout_minutes,
+            base_url=payload.base_url,
+            available_models=payload.available_models,
             expected_edit_token=payload.expected_edit_token,
         )
 

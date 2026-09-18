@@ -122,6 +122,7 @@ import type {
   DshGroupConfig,
   DshGroupConfigUpdate,
   DshRuntimeConfig,
+  DshRuntimeConfigUpdate,
 } from './types'
 import { reportAuthenticationRequired } from '../lib/accessFeedback'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
@@ -519,7 +520,7 @@ export const api = {
   saveRetrievalProbeLlmConfig: (config: RetrievalProbeLlmConfigUpdate) =>
     put<RetrievalProbeLlmConfig>('/retrieval-probe/llm-config', config),
   getDshRuntimeConfig: () => get<DshRuntimeConfig>('/dsh/runtime-config'),
-  saveDshRuntimeConfig: (config: { web_command: string; idle_timeout_minutes: number; expected_edit_token?: string | null }) =>
+  saveDshRuntimeConfig: (config: DshRuntimeConfigUpdate) =>
     put<DshRuntimeConfig>('/dsh/runtime-config', config),
   listDshGroupConfigs: () =>
     get<{ configs: DshGroupConfig[] }>('/dsh/group-configs').then(payload => payload.configs),

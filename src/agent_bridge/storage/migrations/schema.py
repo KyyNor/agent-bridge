@@ -439,9 +439,7 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS dsh_group_configs (
           group_key TEXT PRIMARY KEY,
           linux_user TEXT NOT NULL DEFAULT '',
-          base_url TEXT NOT NULL DEFAULT '',
           default_model TEXT NOT NULL DEFAULT '',
-          available_models_json TEXT NOT NULL DEFAULT '[]',
           api_key TEXT NOT NULL DEFAULT '',
           updated_by TEXT NOT NULL DEFAULT '',
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -454,10 +452,24 @@ def apply_followup_schema(store: Any, conn: sqlite3.Connection) -> None:
           id INTEGER PRIMARY KEY CHECK (id = 1),
           web_command TEXT NOT NULL DEFAULT '',
           idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+          base_url TEXT NOT NULL DEFAULT '',
+          available_models_json TEXT NOT NULL DEFAULT '[]',
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    # Base URL 与可用模型是全局公共配置；早期版本曾按组保存，幂等迁移到全局表。
+    store._ensure_columns(
+        conn,
+        "dsh_runtime_config",
+        {
+            "base_url": "TEXT NOT NULL DEFAULT ''",
+            "available_models_json": "TEXT NOT NULL DEFAULT '[]'",
+        },
+    )
+    store._ensure_columns(conn, "dsh_group_configs", {"default_model": "TEXT NOT NULL DEFAULT ''"})
+    store._drop_column(conn, "dsh_group_configs", "base_url")
+    store._drop_column(conn, "dsh_group_configs", "available_models_json")
     store._ensure_columns(
         conn,
         "model_evaluation_runs",

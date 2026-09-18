@@ -41,16 +41,16 @@ def dsh_service(wm_paths, tmp_path):
 
     svc.dsh_configs.save_runtime_config(
         "root",
-        web_command=f'"{sys.executable}" -m http.server {{port}} --bind 127.0.0.1',
+        web_command=f'"{sys.executable}" -m http.server {{patch}} {{port}} --bind 127.0.0.1',
         idle_timeout_minutes=120,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x", "gpt-y"],
     )
     svc.dsh_configs.save_group_config(
         "root",
         group_key="groupa",
         linux_user=current_user,
-        base_url="http://model.internal/v1",
         default_model="gpt-x",
-        available_models=["gpt-x", "gpt-y"],
         api_key="sk-secret",
     )
     yield svc
@@ -87,8 +87,14 @@ def test_real_process_lifecycle(dsh_service, tmp_path) -> None:
     assert config_dir.is_dir()
     assert not (service.paths.data_dir / "dsh").exists()
 
-    # 环境注入写进启动日志可被进程观测：通过 http.server 无法直接读取 env，
-    # 这里验证 state 与配置一致即可；env 注入由单元测试覆盖。
+    # DSH 原生 settings.yaml 已按公共接入 + 组级默认模型写入
+    settings_text = (config_dir / "settings.yaml").read_text(encoding="utf-8")
+    assert "agent-bridge" in settings_text
+    assert "http://model.internal/v1" in settings_text
+    assert "AGENT_BRIDGE_DSH_API_KEY" in settings_text
+    # 替身进程未打印 `dsh web:` 横幅，鉴权入口缺失应被容忍（真实 DSH 由 #3 的 smoke 覆盖）
+    assert service.dsh.workspace_auth("user1") is None
+
     import httpx
 
     response = httpx.get(f"http://127.0.0.1:{port}/", timeout=2.0)
@@ -132,6 +138,8 @@ def test_real_process_failure_reports_log_tail(dsh_service) -> None:
         "root",
         web_command=f'"{sys.executable}" -m http.server --definitely-invalid-flag {{port}}',
         idle_timeout_minutes=120,
+        base_url="",
+        available_models=[],
     )
     with pytest.raises(Exception) as exc_info:
         service.dsh.ensure_running("user1")

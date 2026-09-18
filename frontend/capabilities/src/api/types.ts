@@ -1430,9 +1430,7 @@ export interface RetrievalProbeLlmConfigUpdate {
 export interface DshGroupConfig {
   group_key: string
   linux_user: string
-  base_url: string
   default_model: string
-  available_models: string[]
   api_key_set: boolean
   updated_by: string
   updated_at: string
@@ -1441,9 +1439,7 @@ export interface DshGroupConfig {
 
 export interface DshGroupConfigUpdate {
   linux_user?: string
-  base_url?: string
   default_model?: string
-  available_models?: string[]
   api_key?: string | null
   clear_api_key?: boolean
   expected_edit_token?: string | null
@@ -1452,8 +1448,20 @@ export interface DshGroupConfigUpdate {
 export interface DshRuntimeConfig {
   web_command: string
   idle_timeout_minutes: number
+  base_url: string
+  resolved_base_url: string
+  base_url_source: 'global' | 'public_model_config' | ''
+  available_models: string[]
   updated_at: string | null
   edit_token: string
+}
+
+export interface DshRuntimeConfigUpdate {
+  web_command: string
+  idle_timeout_minutes: number
+  base_url: string
+  available_models: string[]
+  expected_edit_token?: string | null
 }
 
 export interface DshRuntimeStatus {

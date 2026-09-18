@@ -23,11 +23,13 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import httpx
 
 from agent_bridge.core.domain import ValidationError, require_admin_user
 from agent_bridge.core.timeutil import utc_iso
+from agent_bridge.dsh import injection
 from agent_bridge.dsh.launcher import (
     DshProcessLauncher,
     LinuxIdentity,
@@ -48,6 +50,8 @@ STATE_DIR_NAME = "dsh-runtimes"
 LOG_DIR_NAME = "dsh-runtimes"
 
 _USER_ID_PATTERN = re.compile(r"^[^/\\\s]+$")
+# DSH 启动横幅：``dsh web: http://127.0.0.1:<port>/?token=<launch-token>``（可能附带 LAN 地址）
+_DSH_WEB_URL_RE = re.compile(r"dsh web:\s*(?P<url>https?://[^\s()]+)")
 
 
 def _safe_key(value: str) -> str:
@@ -176,6 +180,29 @@ class DshRuntimeService:
             self._touch_state(normalized_user)
             return self._base_url_for_port(port)
 
+    def workspace_auth(self, user_id: str) -> tuple[str, str] | None:
+        """返回 DSH 启动时打印的鉴权入口路径与查询串，例如 ``("/", "token=…")``。
+
+        DSH Web 只接受带启动 token 的首次导航：``GET /?token=…`` 校验后写入
+        会话 Cookie 并 303 回 ``/``，后续请求凭 Cookie 通过。代理层用该入口
+        完成首次导航，浏览器无需感知 token。非 DSH 实现或日志缺失时返回 None。
+        """
+        normalized_user = self._require_user_id(user_id)
+        with self._lock:
+            state = self._read_state(normalized_user)
+            if not state:
+                return None
+            auth_path = str(state.get("auth_path") or "")
+            auth_query = str(state.get("auth_query") or "")
+            if auth_path and auth_query:
+                return auth_path, auth_query
+            captured = self._capture_auth_entry(state)
+            if captured is None:
+                return None
+            state.update(captured)
+            self._write_state(normalized_user, state)
+            return str(captured["auth_path"]), str(captured["auth_query"])
+
     # -- 启动与回收 --
 
     def _start_runtime(
@@ -186,8 +213,10 @@ class DshRuntimeService:
         config_dir = self._ensure_config_dir(identity, user_id)
         port = self._available_port()
         runtime_config = self._configs.runtime_config_for_runtime()
+        model_binding = self._configs.model_binding_for(group_key)
+        self._inject_settings(config_dir, identity, model_binding)
         command = self._build_command(str(runtime_config.get("web_command") or ""), port)
-        env = self._build_env(identity, config_dir, config, port)
+        env = self._build_env(identity, config_dir, model_binding)
         log_path = self._log_path(user_id)
         logger.info(
             "DSH Runtime 开始启动 user=%s group=%s linux_user=%s port=%s config_dir=%s",
@@ -242,6 +271,16 @@ class DshRuntimeService:
             raise ValidationError(
                 f"DSH Web 在 {DSH_STARTUP_TIMEOUT_SECONDS:.0f} 秒内未就绪（127.0.0.1:{port}），日志尾部：{tail}"
             )
+        captured = self._capture_auth_entry(state)
+        if captured is None:
+            logger.warning(
+                "DSH Runtime 未在启动日志中找到鉴权入口 user=%s log=%s（工作台将无法自动完成首次鉴权）",
+                user_id,
+                log_path,
+            )
+        else:
+            state.update(captured)
+            self._write_state(user_id, state)
         logger.info(
             "DSH Runtime 就绪 user=%s pid=%s port=%s 耗时=%.1fs",
             user_id,
@@ -307,45 +346,79 @@ class DshRuntimeService:
             "请先停止不再使用的实例或联系管理员扩大端口池"
         )
 
-    def _build_command(self, template: str, port: int) -> list[str]:
+    def _build_command(self, template: str, port: int, *, patch_path: Path | None = None) -> list[str]:
+        """渲染启动命令；``{patch}`` 在注入配置文件时展开为 ``--patch <路径>``。"""
+        patch_arg = f'--patch "{patch_path}"' if patch_path is not None else ""
         try:
-            rendered = template.format(port=port)
+            rendered = template.format(port=port, patch=patch_arg)
         except (KeyError, IndexError, ValueError) as exc:
             raise ValidationError(
-                f"DSH 启动命令模板不合法：{template!r}（仅支持 {{port}} 占位符）"
+                f"DSH 启动命令模板不合法：{template!r}（仅支持 {{port}} 与 {{patch}} 占位符）"
             ) from exc
         command = shlex.split(rendered)
         if not command:
             raise ValidationError(f"DSH 启动命令模板不合法：{template!r}")
         return command
 
+    def _inject_settings(
+        self,
+        config_dir: Path,
+        identity: LinuxIdentity,
+        binding: dict[str, Any],
+    ) -> Path | None:
+        """把公共接入（Base URL / 模型）与组级默认模型写入 DSH settings.yaml。"""
+        written = injection.write_settings(
+            config_dir,
+            base_url=str(binding.get("base_url") or ""),
+            models=list(binding.get("available_models") or []),
+            default_model=str(binding.get("default_model") or ""),
+        )
+        # DSH 会热写该文件保存用户偏好，必须归属目标 Linux 用户（root 运行时）。
+        settings_file = injection.settings_path(config_dir)
+        if settings_file.exists():
+            injection.ensure_owner(settings_file, uid=identity.uid, gid=identity.gid)
+        if written is None and not binding.get("base_url"):
+            logger.warning(
+                "DSH 模型接入未配置 Base URL（全局与公共模型配置均为空）config_dir=%s，DSH 将使用自身默认供应商",
+                config_dir,
+            )
+        return written
+
     def _build_env(
         self,
         identity: LinuxIdentity,
         config_dir: Path,
-        config: dict[str, Any],
-        port: int,
+        binding: dict[str, Any],
     ) -> dict[str, str]:
+        """构造 DSH 进程环境：DSH 只从 settings.yaml 读模型配置，密钥走环境变量。"""
         env = os.environ.copy()
         env["HOME"] = str(identity.home)
         env["USER"] = identity.user
         env["LOGNAME"] = identity.user
         env["DSH_HOME"] = str(config_dir)
-        env["DSH_HOST"] = DSH_HOST
-        env["DSH_PORT"] = str(port)
-        base_url = str(config.get("base_url") or "").strip()
-        default_model = str(config.get("default_model") or "").strip()
-        models = [str(item).strip() for item in (config.get("available_models") or []) if str(item).strip()]
-        api_key = str(config.get("api_key") or "").strip()
-        if base_url:
-            env["DSH_BASE_URL"] = base_url
-        if default_model:
-            env["DSH_DEFAULT_MODEL"] = default_model
-        if models:
-            env["DSH_AVAILABLE_MODELS"] = ",".join(models)
-        if api_key:
-            env["DSH_API_KEY"] = api_key
+        env.update(injection.managed_api_key_env_value(str(binding.get("api_key") or "")))
         return env
+
+    @staticmethod
+    def _capture_auth_entry(state: dict[str, Any]) -> dict[str, str] | None:
+        """从 DSH 启动日志解析 ``dsh web: http://…/?token=…`` 鉴权入口。"""
+        log_path = Path(str(state.get("log_path") or ""))
+        if not log_path or not log_path.exists():
+            return None
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return None
+        captured: dict[str, str] | None = None
+        for match in _DSH_WEB_URL_RE.finditer(text):
+            parsed = urlparse(match.group("url"))
+            if not parsed.query:
+                continue
+            captured = {
+                "auth_path": parsed.path or "/",
+                "auth_query": parsed.query,
+            }
+        return captured
 
     def _ensure_config_dir(self, identity: LinuxIdentity, user_id: str) -> Path:
         """创建 ``<linux home>/.config/dsh/<business-user>/`` 并归属目标用户。

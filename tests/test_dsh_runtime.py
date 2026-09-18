@@ -9,6 +9,7 @@ import types
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 class FakeProcess:
@@ -28,6 +29,12 @@ class FakeLauncher:
     def start(self, *, command, env, cwd, log_path, identity):
         process = FakeProcess(self.next_pid)
         self.next_pid += 1
+        port = 0
+        if "--port" in command:
+            try:
+                port = int(command[command.index("--port") + 1])
+            except (IndexError, ValueError):
+                port = 0
         self.starts.append(
             {
                 "pid": process.pid,
@@ -36,6 +43,7 @@ class FakeLauncher:
                 "cwd": str(cwd),
                 "log_path": str(log_path),
                 "identity": identity,
+                "port": port,
             }
         )
         return process
@@ -70,16 +78,22 @@ def passwd_lookup(home):
 
 
 def configure_runtime(service, **overrides) -> None:
-    payload = {
-        "group_key": "groupa",
-        "linux_user": "groupa",
+    """配置全局公共接入（Base URL + 可用模型）与 groupa 的组级配置。"""
+    global_payload = {
+        "web_command": "dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+        "idle_timeout_minutes": 120,
         "base_url": "http://model.internal/v1",
-        "default_model": "gpt-x",
         "available_models": ["gpt-x", "gpt-y"],
-        "api_key": "sk-secret",
     }
-    payload.update(overrides)
-    service.dsh_configs.save_group_config("root", **payload)
+    global_payload.update(overrides)
+    service.dsh_configs.save_runtime_config("root", **global_payload)
+    service.dsh_configs.save_group_config(
+        "root",
+        group_key="groupa",
+        linux_user="groupa",
+        default_model="gpt-x",
+        api_key="sk-secret",
+    )
 
 
 def patch_lifecycle(service, monkeypatch, *, alive_pids: set[int] | None = None, healthy_ports: set[int] | None = None, launcher: FakeLauncher | None = None):
@@ -97,7 +111,7 @@ def patch_lifecycle(service, monkeypatch, *, alive_pids: set[int] | None = None,
         return pid in alive
 
     def fake_probe(port: int) -> bool:
-        if launcher is not None and any(int(start["env"]["DSH_PORT"]) == port for start in launcher.starts):
+        if launcher is not None and any(int(start["port"]) == port for start in launcher.starts):
             return True
         return port in healthy
 
@@ -123,58 +137,96 @@ def install_fake_launcher(service, home, passwd_lookup) -> FakeLauncher:
 # -- 配置服务 --
 
 
-def test_group_config_validation_and_masking(service) -> None:
+def test_public_model_config_is_global_and_group_config_validation(service) -> None:
+    # 默认模型必须来自全局可用模型列表
+    service.dsh_configs.save_runtime_config(
+        "root",
+        web_command="dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+        idle_timeout_minutes=60,
+        base_url="http://model.internal/v1",
+        available_models=["gpt-x", "gpt-y"],
+    )
     with pytest.raises(Exception) as exc_info:
         service.dsh_configs.save_group_config(
-            "root", group_key="groupa", default_model="gpt-x", available_models=["gpt-y"]
+            "root", group_key="groupa", default_model="not-listed"
         )
-    assert "default_model" in str(exc_info.value)
-
-    with pytest.raises(Exception):
-        service.dsh_configs.save_group_config(
-            "root", group_key="groupa", base_url="not-a-url"
-        )
+    assert "可用模型" in str(exc_info.value)
 
     with pytest.raises(Exception):
         service.dsh_configs.save_group_config("root", group_key="missing-group")
 
+    with pytest.raises(Exception):
+        service.dsh_configs.save_runtime_config(
+            "root",
+            web_command="dsh web --port {port}",
+            idle_timeout_minutes=60,
+            base_url="not-a-url",
+            available_models=[],
+        )
+
     saved = service.dsh_configs.save_group_config(
-        "root",
-        group_key="groupa",
-        base_url="http://model.internal/v1",
-        default_model="gpt-x",
-        available_models=["gpt-x", "gpt-y", "gpt-x"],
-        api_key="sk-secret",
+        "root", group_key="groupa", default_model="gpt-x", api_key="sk-secret"
     )
     assert saved["api_key_set"] is True
     assert "api_key" not in saved
-    assert saved["available_models"] == ["gpt-x", "gpt-y"]
+    assert saved["default_model"] == "gpt-x"
+    # 组配置不再承载公共接入字段
+    assert "base_url" not in saved and "available_models" not in saved
     # runtime 读取入口能拿到原值
     raw = service.dsh_configs.group_config_for_runtime("groupa")
     assert raw["api_key"] == "sk-secret"
 
     with pytest.raises(Exception) as conflict:
         service.dsh_configs.save_group_config(
-            "root",
-            group_key="groupa",
-            base_url="http://model.internal/v1",
-            default_model="gpt-x",
-            available_models=["gpt-x"],
-            api_key=None,
-            expected_edit_token="stale-token",
+            "root", group_key="groupa", default_model="gpt-x", expected_edit_token="stale-token"
         )
     assert "更新" in str(conflict.value) or "409" in str(conflict.value)
 
 
-def test_group_config_api_key_clear_semantics(service) -> None:
-    service.dsh_configs.save_group_config(
-        "root", group_key="groupa", base_url="", available_models=["m1"], default_model="m1", api_key="sk-1"
+def test_group_base_url_falls_back_to_public_model_config(service) -> None:
+    service.store.save_retrieval_probe_llm_config(
+        base_url="http://public-model.internal/v1",
+        model="small-model",
+        api_key=None,
+        clear_api_key=True,
     )
+    # 全局 Base URL 留空 → 继承「公共模型配置」
+    service.dsh_configs.save_runtime_config(
+        "root",
+        web_command="dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+        idle_timeout_minutes=60,
+        base_url="",
+        available_models=["gpt-x"],
+    )
+    resolved = service.dsh_configs.runtime_config_for_runtime()
+    assert resolved["base_url"] == "http://public-model.internal/v1"
+    assert resolved["base_url_source"] == "public_model_config"
+    binding = service.dsh_configs.model_binding_for("groupa")
+    assert binding["base_url"] == "http://public-model.internal/v1"
+
+    # 显式配置优先
+    service.dsh_configs.save_runtime_config(
+        "root",
+        web_command="dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+        idle_timeout_minutes=60,
+        base_url="http://dsh-model.internal/v1",
+        available_models=["gpt-x"],
+    )
+    assert service.dsh_configs.runtime_config_for_runtime()["base_url"] == "http://dsh-model.internal/v1"
+
+
+def test_group_config_api_key_clear_semantics(service) -> None:
+    service.dsh_configs.save_runtime_config(
+        "root",
+        web_command="dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+        idle_timeout_minutes=60,
+        base_url="",
+        available_models=["m1"],
+    )
+    service.dsh_configs.save_group_config("root", group_key="groupa", default_model="m1", api_key="sk-1")
     cleared = service.dsh_configs.save_group_config(
         "root",
         group_key="groupa",
-        base_url="",
-        available_models=["m1"],
         default_model="m1",
         clear_api_key=True,
         expected_edit_token=service.dsh_configs.get_group_config("root", "groupa")["edit_token"],
@@ -187,19 +239,38 @@ def test_runtime_config_roundtrip_and_defaults(service) -> None:
     default_config = service.dsh_configs.get_runtime_config("root")
     assert default_config["web_command"]
     assert default_config["idle_timeout_minutes"] > 0
+    assert "{patch}" in default_config["web_command"]
 
     saved = service.dsh_configs.save_runtime_config(
         "root",
         web_command="dsh-server run --port {port}",
         idle_timeout_minutes=30,
+        base_url="http://model.internal/v1",
+        available_models=["m1", "m1", "m2"],
         expected_edit_token=default_config["edit_token"],
     )
     assert saved["web_command"] == "dsh-server run --port {port}"
+    assert saved["available_models"] == ["m1", "m2"]
     assert service.dsh_configs.runtime_config_for_runtime()["idle_timeout_minutes"] == 30
 
     with pytest.raises(Exception):
         service.dsh_configs.save_runtime_config(
-            "root", web_command="", idle_timeout_minutes=0, expected_edit_token=saved["edit_token"]
+            "root",
+            web_command="",
+            idle_timeout_minutes=0,
+            base_url="",
+            available_models=[],
+            expected_edit_token=saved["edit_token"],
+        )
+    # 未知占位符必须被拒绝，避免启动时才炸
+    with pytest.raises(Exception):
+        service.dsh_configs.save_runtime_config(
+            "root",
+            web_command="dsh web --port {port} --unknown {x}",
+            idle_timeout_minutes=30,
+            base_url="",
+            available_models=[],
+            expected_edit_token=saved["edit_token"],
         )
 
 
@@ -215,7 +286,7 @@ def test_config_endpoints_require_admin(service) -> None:
 # -- Runtime 生命周期 --
 
 
-def test_ensure_running_starts_reuses_and_injects_env(service, home, passwd_lookup, monkeypatch) -> None:
+def test_ensure_running_starts_reuses_and_injects_settings(service, home, passwd_lookup, monkeypatch) -> None:
     configure_runtime(service)
     launcher = install_fake_launcher(service, home, passwd_lookup)
     patch_lifecycle(service, monkeypatch, launcher=launcher)
@@ -227,17 +298,29 @@ def test_ensure_running_starts_reuses_and_injects_env(service, home, passwd_look
 
     assert len(launcher.starts) == 1
     start = launcher.starts[0]
-    assert start["env"]["DSH_HOME"] == str(home / "groupa" / ".config" / "dsh" / "user1")
-    assert start["env"]["DSH_BASE_URL"] == "http://model.internal/v1"
-    assert start["env"]["DSH_API_KEY"] == "sk-secret"
-    assert start["env"]["DSH_DEFAULT_MODEL"] == "gpt-x"
-    assert start["env"]["DSH_AVAILABLE_MODELS"] == "gpt-x,gpt-y"
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    assert start["env"]["DSH_HOME"] == str(config_dir)
+    assert start["env"]["HOME"] == str(home / "groupa")
+    # API Key 只通过环境变量传递；Base URL/模型走 DSH 原生 settings.yaml
+    assert start["env"]["AGENT_BRIDGE_DSH_API_KEY"] == "sk-secret"
+    for legacy_key in ("DSH_BASE_URL", "DSH_API_KEY", "DSH_DEFAULT_MODEL", "DSH_AVAILABLE_MODELS"):
+        assert legacy_key not in start["env"]
     assert start["cwd"] == str(home / "groupa")
-    assert "{port}" not in " ".join(start["command"])
-    assert str(home / "groupa" / ".config" / "dsh" / "user1") == start["env"]["DSH_HOME"]
+    assert "{port}" not in " ".join(start["command"]) and "{patch}" not in " ".join(start["command"])
+    assert "--no-open" in start["command"]
+
     # 配置目录确实创建在 Linux 用户 home 下，而不是 Agent Bridge data 目录
-    assert (home / "groupa" / ".config" / "dsh" / "user1").is_dir()
+    assert config_dir.is_dir()
     assert not (service.paths.data_dir / "dsh").exists()
+
+    # DSH 原生 settings.yaml 收到公共 Base URL、模型目录与组级默认模型
+    settings = yaml.safe_load((config_dir / "settings.yaml").read_text(encoding="utf-8"))
+    provider = settings["llm-pi-ai"]["providers"]["agent-bridge"]
+    assert provider["baseURL"] == "http://model.internal/v1"
+    assert provider["api"] == "openai-completions"
+    assert provider["apiKeyEnv"] == "AGENT_BRIDGE_DSH_API_KEY"
+    assert [model["id"] for model in provider["models"]] == ["gpt-x", "gpt-y"]
+    assert settings["agent-default-model"] == {"provider": "agent-bridge", "model": "gpt-x"}
 
     # 第二次进入复用同一个实例
     second = service.dsh.ensure_running("user1")
@@ -249,6 +332,68 @@ def test_ensure_running_starts_reuses_and_injects_env(service, home, passwd_look
     assert third["status"] == "running"
     assert len(launcher.starts) == 2
     assert launcher.starts[1]["env"]["DSH_HOME"] == str(home / "groupa" / ".config" / "dsh" / "user2")
+
+
+def test_injected_settings_preserve_unmanaged_user_configuration(service, home) -> None:
+    configure_runtime(service)
+    config_dir = home / "groupa" / ".config" / "dsh" / "user1"
+    config_dir.mkdir(parents=True)
+    (config_dir / "settings.yaml").write_text(
+        "ui-theme:\n  preference: dark\ndsh-desktop:\n  openBrowser: false\n",
+        encoding="utf-8",
+    )
+
+    service.dsh._inject_settings(
+        config_dir,
+        types.SimpleNamespace(uid=os.getuid(), gid=os.getgid()),
+        service.dsh_configs.model_binding_for("groupa"),
+    )
+    settings = yaml.safe_load((config_dir / "settings.yaml").read_text(encoding="utf-8"))
+    assert settings["ui-theme"] == {"preference": "dark"}
+    assert settings["dsh-desktop"] == {"openBrowser": False}
+    assert settings["llm-pi-ai"]["providers"]["agent-bridge"]["baseURL"] == "http://model.internal/v1"
+
+
+def test_command_template_renders_patch_placeholder(service) -> None:
+    command = service.dsh._build_command(
+        "dsh web {patch} --host 127.0.0.1 --port {port} --no-open", 48500
+    )
+    assert command == ["dsh", "web", "--host", "127.0.0.1", "--port", "48500", "--no-open"]
+    with_patch = service.dsh._build_command(
+        "dsh web {patch} --port {port}",
+        48500,
+        patch_path=Path("/run/agent-bridge/dsh-workspaces/user1.patch.yml"),
+    )
+    assert with_patch[:3] == ["dsh", "web", "--patch"]
+    assert with_patch[3] == "/run/agent-bridge/dsh-workspaces/user1.patch.yml"
+    assert with_patch[-1] == "48500"
+
+
+def test_auth_entry_is_captured_from_start_log(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_runtime(service)
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+
+    log_path = service.paths.logs_dir / "dsh-runtimes" / "user1.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        "dsh web: http://127.0.0.1:48500/?token=launch-token-abc (LAN: http://10.0.0.2:48500/?token=launch-token-abc)\n",
+        encoding="utf-8",
+    )
+    service.dsh.ensure_running("user1")
+    state = service.dsh._read_state("user1")
+    assert state["auth_path"] == "/"
+    assert state["auth_query"] == "token=launch-token-abc"
+    assert service.dsh.workspace_auth("user1") == ("/", "token=launch-token-abc")
+
+
+def test_auth_entry_missing_is_tolerated(service, home, passwd_lookup, monkeypatch) -> None:
+    configure_runtime(service)
+    launcher = install_fake_launcher(service, home, passwd_lookup)
+    patch_lifecycle(service, monkeypatch, launcher=launcher)
+    result = service.dsh.ensure_running("user1")
+    assert result["status"] == "running"
+    assert service.dsh.workspace_auth("user1") is None
 
 
 def test_ensure_running_rejects_unassigned_or_unconfigured(service) -> None:
@@ -343,13 +488,7 @@ def test_group_change_restarts_runtime(service, home, passwd_lookup, monkeypatch
     configure_runtime(service)
     launcher = install_fake_launcher(service, home, passwd_lookup)
     service.access.upsert_group(actor="root", group_key="groupb", name="B 组")
-    service.dsh_configs.save_group_config(
-        "root",
-        group_key="groupb",
-        base_url="http://model.internal/v1",
-        default_model="gpt-x",
-        available_models=["gpt-x"],
-    )
+    service.dsh_configs.save_group_config("root", group_key="groupb", default_model="gpt-x")
 
     old_pid = 410100
     terminated = patch_lifecycle(
@@ -494,12 +633,6 @@ def test_port_pool_skips_occupied(service, monkeypatch) -> None:
     assert service.dsh._available_port() == 48402
 
 
-def test_command_template_validation(service) -> None:
-    with pytest.raises(Exception):
-        service.dsh._build_command("dsh {unknown} --port {port}", 100)
-    assert service.dsh._build_command("dsh web --port {port}", 48500) == ["dsh", "web", "--port", "48500"]
-
-
 def test_require_runtime_target_reads_registered_state_only(service, monkeypatch) -> None:
     patch_lifecycle(service, monkeypatch, alive_pids={410700}, healthy_ports={48410})
     service.dsh._write_state(
@@ -542,21 +675,36 @@ def test_dsh_runtime_api_flow(service, home, passwd_lookup, monkeypatch) -> None
     status = client.get("/api/v1/dsh/runtime", headers=headers_user).json()
     assert status["status"] == "stopped"
 
-    # 先保存一份合法配置（经 API 落库）
+    # 先经 API 保存全局运行配置与组级配置
+    runtime_saved = client.put(
+        "/api/v1/dsh/runtime-config",
+        headers=headers_root,
+        json={
+            "web_command": "dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
+            "idle_timeout_minutes": 120,
+            "base_url": "http://model.internal/v1",
+            "available_models": ["gpt-x", "gpt-y"],
+            "expected_edit_token": client.get("/api/v1/dsh/runtime-config", headers=headers_root).json()["edit_token"],
+        },
+    )
+    assert runtime_saved.status_code == 200, runtime_saved.text
+    assert runtime_saved.json()["available_models"] == ["gpt-x", "gpt-y"]
+
     saved = client.put(
         "/api/v1/dsh/group-configs/groupa",
         headers=headers_root,
-        json={
-            "linux_user": "groupa",
-            "base_url": "http://model.internal/v1",
-            "default_model": "gpt-x",
-            "available_models": ["gpt-x", "gpt-y"],
-            "api_key": "sk-secret",
-        },
+        json={"linux_user": "groupa", "default_model": "gpt-x", "api_key": "sk-secret"},
     )
     assert saved.status_code == 200
     assert saved.json()["api_key_set"] is True
     assert "api_key" not in saved.json()
+    # API 也拒绝不在全局列表中的默认模型
+    rejected = client.put(
+        "/api/v1/dsh/group-configs/groupa",
+        headers=headers_root,
+        json={"default_model": "nope", "expected_edit_token": saved.json()["edit_token"]},
+    )
+    assert rejected.status_code == 400
 
     launcher = app_service.dsh._launcher
     patch_lifecycle(app_service, monkeypatch, launcher=launcher)
@@ -593,8 +741,10 @@ def test_dsh_runtime_config_api_roundtrip(service) -> None:
         "/api/v1/dsh/runtime-config",
         headers=headers_root,
         json={
-            "web_command": "dsh web --host 127.0.0.1 --port {port}",
+            "web_command": "dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
             "idle_timeout_minutes": 90,
+            "base_url": "http://model.internal/v1",
+            "available_models": ["m1"],
             "expected_edit_token": current.json()["edit_token"],
         },
     )
@@ -605,8 +755,10 @@ def test_dsh_runtime_config_api_roundtrip(service) -> None:
         "/api/v1/dsh/runtime-config",
         headers=headers_root,
         json={
-            "web_command": "dsh web --host 127.0.0.1 --port {port}",
+            "web_command": "dsh web {patch} --host 127.0.0.1 --port {port} --no-open",
             "idle_timeout_minutes": 90,
+            "base_url": "http://model.internal/v1",
+            "available_models": ["m1"],
             "expected_edit_token": "stale",
         },
     )

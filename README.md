@@ -19,7 +19,7 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 通过结构化 DAG 编排 Agent、脚本、任务领取和 Markdown/HTML 产物。
 - 托管用户级 DSH Web Runtime：按业务用户隔离的交互式工作台进程，动态监听
   `127.0.0.1` 端口、以所属小组映射的 Linux 用户身份运行、长期空闲自动回收；
-  组级模型配置（Base URL / 模型 / API Key）在每次启动时注入运行环境。
+  公共 Base URL/模型与组级默认模型、API Key 在每次启动时注入 DSH 原生配置。
 - 工作流产物的标题、摘要、路径和正文使用 jieba 预分词与 SQLite FTS5 检索；长度至少 3 的 ASCII 标识符支持前缀匹配，结构化权限与版本过滤仍由 SQLite 普通条件处理。
 - `artifacts_search` 使用 DiskCache 缓存检索结果，默认保留 8 小时；缓存时长可在「系统管理」页面修改，保存后立即按新配置生效。当前版本不主动因新产物写入而清理缓存。
 - 「平台概览」使用 DiskCache 缓存聚合结果，默认保留 4 小时；缓存按用户、所属小组、可见资源范围和日期区间隔离，页面上的“刷新”会强制重建当前缓存。
@@ -67,31 +67,40 @@ uv run agent-bridge server stop
 
 ## DSH Web Runtime
 
-Agent Bridge 可为每个业务用户托管一个 DSH Web 实例（内网交互式 Coding Agent 工作台，
-试用/评估阶段）。实例按需启动、只在 `127.0.0.1` 上监听动态端口、以该用户所属小组
-映射出的 Linux 用户身份运行；同一小组的多个业务用户共享 Linux uid，但各自的 DSH
-配置目录互相独立：
+Agent Bridge 可为每个业务用户托管一个 DSH Web 实例（DeepSeek Harness 浏览器
+工作台，试用/评估阶段）。实例按需启动、只在 `127.0.0.1` 上监听动态端口、
+以该用户所属小组映射出的 Linux 用户身份运行；同一小组的多个业务用户共享
+Linux uid，但各自的 DSH 配置目录互相独立：
 
 ```text
 /home/<linux-user>/.config/dsh/<business-user>/
 ```
 
-配置目录由 Agent Bridge 在首次启动时创建并归属该 Linux 用户，不进入
-`AGENT_BRIDGE_ROOT/data`；停止或回收实例不会删除其中的 DSH 配置与 session 数据。
+该目录同时是 DSH 的 `DSH_HOME`：DSH 自身在其中创建 `profiles/`、`storages/`
+与 `.credentials.yaml`。目录由 Agent Bridge 在首次启动时创建并归属该 Linux
+用户，不进入 `AGENT_BRIDGE_ROOT/data`；停止或回收实例不会删除其中的 DSH 配置
+与 session 数据。
 
-管理员在「系统管理 → DSH Web Runtime」维护：
+管理员在「系统管理 → DSH Web Runtime」维护两层配置：
 
-- 组级配置：`base_url`、`available_models[]`、`default_model`（必须属于可用模型）
-  与敏感的 `api_key`（只写不回显）。每个业务小组配置一次，启动时通过
-  `DSH_BASE_URL` / `DSH_DEFAULT_MODEL` / `DSH_AVAILABLE_MODELS` / `DSH_API_KEY`
-  注入进程环境；`linux_user` 指定小组映射的 Linux 用户（默认取小组标识）。
-- 全局运行配置：启动命令模板（默认 `dsh web --host 127.0.0.1 --port {port}`，
-  以实际 DSH CLI 为准）与空闲回收阈值（分钟，默认 120）。
+- **公共接入（全局）**：`base_url`、`available_models[]`，以及启动命令模板
+  （默认 `dsh web {patch} --host 127.0.0.1 --port {port} --no-open`）与空闲
+  回收阈值（分钟，默认 120）。`base_url` 留空时回落为系统「公共模型配置」的
+  Base URL；`--no-open` 关闭 DSH 的浏览器自启（工作台经站内反向代理访问）。
+- **组级配置**：`linux_user`（小组映射的 Linux 用户，默认取小组标识）、
+  `default_model`（必须取自全局可用模型列表）与敏感的 `api_key`（只写不回显）。
+
+启动时 Agent Bridge 把公共接入与组级默认模型合并写入该用户 DSH 配置目录的
+`settings.yaml`（`llm-pi-ai.providers.agent-bridge` 声明 Base URL、模型目录与
+承载密钥的环境变量名，`agent-default-model` 指定默认模型），API Key 只经
+`AGENT_BRIDGE_DSH_API_KEY` 环境变量传给 DSH 进程，不写入文件；用户自身的其他
+settings（主题、onboarding 等）原样保留。
 
 生命周期语义：`POST /api/v1/dsh/runtime/ensure` 按需启动或复用实例（每个业务用户
 仅一个）；`GET /api/v1/dsh/runtime` 查询状态；`POST /api/v1/dsh/runtime/stop`
 显式停止。调度线程周期性停止超过空闲阈值的实例；服务重启时自动识别上一进程
-遗留的存活实例并清理失效状态。启动失败的错误信息会附带日志尾部内容。
+遗留的存活实例并清理失效状态。启动失败的错误信息会附带日志尾部内容；启动成功
+后会从 DSH 打印的横幅中捕获带 token 的鉴权入口，供站内工作台代理完成首次鉴权。
 
 ## 模型评估运行时
 
