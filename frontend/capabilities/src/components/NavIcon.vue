@@ -19,6 +19,7 @@ import {
   TableProperties,
   ChartNoAxesCombined,
   Users,
+  AppWindow,
 } from '@lucide/vue'
 
 const props = defineProps<{ name: string }>()
@@ -43,6 +44,7 @@ const icon = computed(() => {
     memory: Brain,
     'business-ledgers': TableProperties,
     'model-evaluations': ChartNoAxesCombined,
+    workspace: AppWindow,
   }
   return map[props.name] ?? null
 })

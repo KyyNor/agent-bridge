@@ -260,6 +260,9 @@ async def _proxy_stream_response(
     location_prefix: str,
     location_key: str,
     error_label: str,
+    location_rewriter: Callable[[str], str] | None = None,
+    response_header_builder: Callable[[httpx.Headers], list[tuple[bytes, bytes]]] | None = None,
+    query_override: str | None = None,
 ) -> None:
     """Forward a request to a dashboard upstream, streaming the response back.
 
@@ -267,10 +270,15 @@ async def _proxy_stream_response(
     endpoint) are forwarded chunk-by-chunk as they arrive. Buffering the whole
     body (``client.request`` + ``response.content``) hangs on a never-ending
     stream until the read timeout, then surfaces as a 502.
+
+    ``location_rewriter`` / ``response_header_builder`` 允许其他前缀代理复用
+    同一转发骨架并自带 Location/Cookie 等响应头改写策略；缺省沿用既有
+    prefix/key 改写逻辑。``query_override`` 供需要服务端补参数（如 DSH 的首访
+    token）的代理覆盖上游查询串。
     """
     body = await _read_body(receive)
     target_parts = urlsplit(target)
-    query = scope.get("query_string", b"").decode("latin-1")
+    query = query_override if query_override is not None else scope.get("query_string", b"").decode("latin-1")
     upstream_url = urlunsplit((
         target_parts.scheme,
         target_parts.netloc,
@@ -288,12 +296,19 @@ async def _proxy_stream_response(
     try:
         async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
             async with client.stream(method, upstream_url, content=body, headers=headers) as response:
-                response_headers = _response_headers_for_prefix(
-                    response.headers,
-                    prefix=location_prefix,
-                    key=location_key,
-                    target=target,
-                )
+                if response_header_builder is not None:
+                    response_headers = response_header_builder(response.headers)
+                elif location_rewriter is not None:
+                    response_headers = _response_headers_for_rewrite(
+                        response.headers, location_rewriter=location_rewriter
+                    )
+                else:
+                    response_headers = _response_headers_for_prefix(
+                        response.headers,
+                        prefix=location_prefix,
+                        key=location_key,
+                        target=target,
+                    )
                 await send({
                     "type": "http.response.start",
                     "status": response.status_code,
@@ -369,6 +384,23 @@ def _response_headers_for_prefix(
             continue
         if name.lower() == "location":
             value = _rewrite_prefixed_location(value, prefix=prefix, key=key, target=target)
+        rewritten.append((name.encode("latin-1"), value.encode("latin-1")))
+    return rewritten
+
+
+def _response_headers_for_rewrite(
+    headers: httpx.Headers,
+    *,
+    location_rewriter: Callable[[str], str],
+) -> list[tuple[bytes, bytes]]:
+    """用调用方提供的 Location 改写策略重建响应头（drop hop-by-hop 不变）。"""
+    rewritten: list[tuple[bytes, bytes]] = []
+    for name, value in headers.multi_items():
+        lower = name.lower().encode("latin-1")
+        if lower in RESPONSE_HEADERS_TO_DROP:
+            continue
+        if name.lower() == "location":
+            value = location_rewriter(value)
         rewritten.append((name.encode("latin-1"), value.encode("latin-1")))
     return rewritten
 

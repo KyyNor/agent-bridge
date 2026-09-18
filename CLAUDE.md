@@ -198,6 +198,22 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   启动 `dsh.start()`，装配期 `recover()` 识别遗留实例，停止期 `stop_all()`。
 - 管理接口（组配置、全局配置、实例列表）仅 admins；用户态接口只暴露状态，不
   暴露动态端口与 pid。
+- Workspace 反向代理位于 `api/workspace_proxy.py`：`/agent-workspace/**` 复用
+  dashboard 代理的 `_proxy_stream_response` 骨架（`response_header_builder` /
+  `query_override` hook 承载 Location/Cookie 改写与首访 token），WebSocket 用
+  `websockets` client 桥接并剥离下游握手头。目标只能来自 `require_runtime_target`
+  （按当前登录用户解析，命中即刷新空闲时间），未运行时线程化兜底 `ensure_running`。
+- DSH 首访鉴权在代理层完成：仅当浏览器未持有该 runtime 的会话 Cookie
+  （`dsh-auth-<sha256(authority) base64url>`，authority 即上游 Host）且请求路径为
+  根导航时，把捕获的 `?token=` 补到上游；否则会与 DSH 的 303 形成重定向循环。
+- 能力平面接入位于 `dsh/workspace.py`：`DshWorkspaceCapabilityRegistry` 按用户唯一
+  签发 24 小时 capability（绑定 user/profile/group）；`WorkspaceSelection` 表达
+  “本次进入选定的平面”，`profile_key=None` 表示不注入 MCP（会清除覆盖文件）。
+  `/mcp` 的 `X-Agent-Bridge-DSH-Capability` 头经 `require_workspace_capability`
+  校验后以业务用户身份 + `bind_actor_group` 进入既有权限体系，不与工作流
+  capability 同时使用。MCP 注入是 DSH 的 loader patch 覆盖文件
+  （`<DSH_HOME>/agent-bridge-mcp.patch.yml`，0600），经启动命令 `{patch}` →
+  `--patch` 生效；同平面重进只重写覆盖文件刷新 capability，切换平面回收重启。
 
 ## 工作流
 

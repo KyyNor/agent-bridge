@@ -46,6 +46,12 @@ class DshRuntimeConfigUpdateRequest(BaseModel):
     expected_edit_token: str | None = None
 
 
+class DshWorkspaceAuthorizeRequest(BaseModel):
+    """选择能力平面；留空表示进入不带任何 MCP 的工作台。"""
+
+    profile_key: str | None = Field(default=None, max_length=255)
+
+
 class ChangeAdminPasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=8, max_length=256)
