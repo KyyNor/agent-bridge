@@ -263,6 +263,8 @@ async def _proxy_stream_response(
     location_rewriter: Callable[[str], str] | None = None,
     response_header_builder: Callable[[httpx.Headers], list[tuple[bytes, bytes]]] | None = None,
     query_override: str | None = None,
+    request_header_overrides: dict[str, str] | None = None,
+    extra_response_headers: list[tuple[bytes, bytes]] | None = None,
 ) -> None:
     """Forward a request to a dashboard upstream, streaming the response back.
 
@@ -274,7 +276,9 @@ async def _proxy_stream_response(
     ``location_rewriter`` / ``response_header_builder`` 允许其他前缀代理复用
     同一转发骨架并自带 Location/Cookie 等响应头改写策略；缺省沿用既有
     prefix/key 改写逻辑。``query_override`` 供需要服务端补参数（如 DSH 的首访
-    token）的代理覆盖上游查询串。
+    token）的代理覆盖上游查询串；``request_header_overrides`` 覆盖转发头（如
+    服务端换取 Cookie 后改写 Cookie/Origin），``extra_response_headers`` 追加
+    调用方在骨架之外自行生成的响应头（如换取到的新会话 Cookie）。
     """
     body = await _read_body(receive)
     target_parts = urlsplit(target)
@@ -287,6 +291,8 @@ async def _proxy_stream_response(
         "",
     ))
     headers = _forward_headers(scope.get("headers", []), target_parts.netloc)
+    if request_header_overrides:
+        headers.update(request_header_overrides)
     method = str(scope.get("method", "GET"))
     # ``read=None`` keeps idle SSE connections alive; connect/write/pool stay
     # bounded so a misbehaving upstream still fails fast.
@@ -309,6 +315,8 @@ async def _proxy_stream_response(
                         key=location_key,
                         target=target,
                     )
+                if extra_response_headers:
+                    response_headers = [*response_headers, *extra_response_headers]
                 await send({
                     "type": "http.response.start",
                     "status": response.status_code,

@@ -18,9 +18,11 @@ from fastapi.testclient import TestClient
 from agent_bridge.access_control.identity import IdentityConfig, RequestIdentityResolver
 from agent_bridge.api.workspace_proxy import (
     AgentWorkspaceProxyMiddleware,
+    dsh_session_cookie_name,
+    is_reserved_path,
     match_workspace_path,
     rewrite_workspace_location,
-    rewrite_workspace_set_cookie,
+    workspace_escape_path,
 )
 from agent_bridge.dsh.workspace import (
     DSH_CAPABILITY_HEADER,
@@ -375,19 +377,54 @@ def test_rewrite_workspace_location() -> None:
     assert rewrite_workspace_location("/agent-workspace/keep", target=target) == "/agent-workspace/keep"
 
 
-def test_rewrite_workspace_set_cookie_path() -> None:
-    assert (
-        rewrite_workspace_set_cookie("session=abc; Path=/; HttpOnly")
-        == "session=abc; Path=/agent-workspace/; HttpOnly"
+def test_session_cookie_is_forwarded_without_path_rewrite() -> None:
+    """会话 Cookie 必须覆盖整站：DSH 前端的 /api/** 等根绝对路径也要带 Cookie。"""
+    from agent_bridge.api.workspace_proxy import _session_cookie_headers
+
+    authority = "127.0.0.1:48400"
+    name = dsh_session_cookie_name(authority)
+    headers = httpx.Headers(
+        {
+            "set-cookie": f"{name}=v1.abc; Path=/; HttpOnly; SameSite=Strict",
+        }
     )
-    assert (
-        rewrite_workspace_set_cookie("session=abc; path=/dsh; Secure")
-        == "session=abc; path=/agent-workspace/dsh; Secure"
-    )
-    assert (
-        rewrite_workspace_set_cookie("session=abc; Path=/agent-workspace/sub")
-        == "session=abc; Path=/agent-workspace/sub"
-    )
+    forwarded = _session_cookie_headers(headers, authority)
+    assert forwarded == [
+        (b"set-cookie", f"{name}=v1.abc; Path=/; HttpOnly; SameSite=Strict".encode("utf-8"))
+    ]
+    # 其他 Cookie（非 DSH 会话）不转发给浏览器
+    other = httpx.Headers({"set-cookie": "session=abc; Path=/"})
+    assert _session_cookie_headers(other, authority) == []
+
+
+def test_workspace_escape_path_routing_rules() -> None:
+    """DSH 前端的根绝对路径请求按 Referer / 同源 WS 归属工作台。"""
+
+    def http_scope(path: str, referer: str | None) -> dict:
+        headers = [(b"host", b"bridge.internal:8080")]
+        if referer:
+            headers.append((b"referer", referer.encode("utf-8")))
+        return {"type": "http", "method": "GET", "path": path, "headers": headers}
+
+    prefix_referer = "http://bridge.internal:8080/agent-workspace/"
+    # 工作台页面的根绝对资源、插件模块与 API 请求
+    for path in ("/assets/index.js", "/plugins/", "/api/session/list", "/manifest.webmanifest"):
+        assert workspace_escape_path(http_scope(path, prefix_referer)) == path
+    # 无 Referer（地址栏直达、非工作台页面）或 Referer 不在前缀下：不进代理
+    assert workspace_escape_path(http_scope("/assets/index.js", None)) is None
+    assert workspace_escape_path(http_scope("/assets/index.js", "http://bridge.internal:8080/agent-bridge/")) is None
+    # 保留路径即便是工作台 Referer 也让给 Agent Bridge 自己
+    assert workspace_escape_path(http_scope("/api/v1/dsh/runtime", prefix_referer)) is None
+    assert workspace_escape_path(http_scope("/agent-bridge/assets/index.js", prefix_referer)) is None
+    assert is_reserved_path("/api/v1/workflows")
+    assert is_reserved_path("/health")
+    assert not is_reserved_path("/api/session/list")
+
+    # WebSocket 无 Referer：只认同源握手（Origin 与 Host 同 authority）
+    ws_path = {"type": "websocket", "path": "/api/remote.mux", "headers": [(b"host", b"bridge.internal:8080")]}
+    assert workspace_escape_path({**ws_path, "headers": [*ws_path["headers"], (b"origin", b"http://bridge.internal:8080")]}) == "/api/remote.mux"
+    assert workspace_escape_path(ws_path) is None
+    assert workspace_escape_path({**ws_path, "headers": [(b"origin", b"https://evil.example")]}) is None
 
 
 # -- 反向代理：HTTP（直接驱动 middleware + respx） --
@@ -420,10 +457,12 @@ class _FakeBridgeService:
         self.dsh = dsh
 
 
-def _http_scope(path: str, user: str | None = "user1", query: str = "") -> dict:
+def _http_scope(path: str, user: str | None = "user1", query: str = "", **extra: str) -> dict:
     headers = []
     if user is not None:
         headers.append((b"x-agent-bridge-user", user.encode("utf-8")))
+    for name, value in extra.items():
+        headers.append((name.replace("_", "-").encode("latin-1"), value.encode("utf-8")))
     return {
         "type": "http",
         "method": "GET",
@@ -482,43 +521,102 @@ def test_workspace_proxy_triggers_ensure_when_not_running() -> None:
     assert dsh.ensure_calls == ["user1"]
 
 
-def test_workspace_proxy_injects_dsh_first_visit_token(respx_mock) -> None:
-    """首访必须带上 DSH 启动 token：服务端完成 token→Cookie 换取。"""
-    dsh = _FakeDshService("http://127.0.0.1:48400", auth=("/", "token=launch-token"))
-    route = respx_mock.get("http://127.0.0.1:48400/?token=launch-token").mock(
-        return_value=httpx.Response(303, headers={"location": "/"})
+def test_workspace_proxy_exchanges_token_on_every_root_navigation(respx_mock) -> None:
+    """根导航始终由服务端换取 token→Cookie，旧 Cookie 不得让工作台卡在 401。
+
+    DSH 会话 Cookie 由进程内密钥签名，runtime 重启（同端口）后浏览器手里的
+    旧 Cookie 必然失效；据此跳过换取会永久 401。
+    """
+    target = "http://127.0.0.1:48400"
+    authority = "127.0.0.1:48400"
+    name = dsh_session_cookie_name(authority)
+    dsh = _FakeDshService(target, auth=("/", "token=launch-token"))
+    exchange = respx_mock.get(f"{target}/?token=launch-token").mock(
+        return_value=httpx.Response(
+            303,
+            headers={
+                "location": "/",
+                "set-cookie": f"{name}=fresh; Path=/; HttpOnly; SameSite=Strict",
+            },
+        )
     )
-    status, headers, _ = _drive(_middleware(dsh), _http_scope("/agent-workspace/"))
-    assert route.called
-    assert status == 303
-    assert headers["location"] == "/agent-workspace/"
+    follow = respx_mock.get(f"{target}/").mock(return_value=httpx.Response(200, text="<html>app"))
+
+    scope = _http_scope("/agent-workspace/", cookie=f"{name}=stale", origin="http://bridge.internal:8080")
+    status, headers, body = _drive(_middleware(dsh), scope)
+
+    assert exchange.called and follow.called
+    # 浏览器只看到最终页面与新鲜 Cookie，不再经历 303 重定向
+    assert status == 200
+    assert body == b"<html>app"
+    assert headers["set-cookie"] == f"{name}=fresh; Path=/; HttpOnly; SameSite=Strict"
+    # 上游后续请求用新鲜 Cookie 覆盖旧值，并把 Origin 改写为目标源
+    forwarded = follow.calls[-1].request.headers
+    assert forwarded["cookie"] == f"{name}=fresh"
+    assert forwarded["origin"] == target
     assert dsh.auth_calls == ["user1"]
 
     # 浏览器已带 token 或非根路径时不覆盖查询串
-    dsh2 = _FakeDshService("http://127.0.0.1:48400", auth=("/", "token=launch-token"))
-    forwarded = respx_mock.get("http://127.0.0.1:48400/app").mock(
+    dsh2 = _FakeDshService(target, auth=("/", "token=launch-token"))
+    forwarded_route = respx_mock.get(f"{target}/app").mock(
         return_value=httpx.Response(200, text="ok")
     )
     _drive(_middleware(dsh2), _http_scope("/agent-workspace/app"))
-    assert forwarded.called
+    assert forwarded_route.called
     assert dsh2.auth_calls == []
 
 
-def test_workspace_proxy_skips_token_when_session_cookie_present(respx_mock) -> None:
-    """已持有 DSH 会话 Cookie 时不再注入 token，避免 303 重定向循环。"""
-    from agent_bridge.api.workspace_proxy import _dsh_session_cookie_name
-
+def test_workspace_proxy_relays_upstream_when_token_exchange_fails(respx_mock) -> None:
+    """换取失败（token 过期等）时如实回放 DSH 响应，不伪造成功。"""
     target = "http://127.0.0.1:48400"
-    cookie = f"{_dsh_session_cookie_name('127.0.0.1:48400')}=v1.abc.def"
-    dsh = _FakeDshService(target, auth=("/", "token=launch-token"))
-    route = respx_mock.get("http://127.0.0.1:48400/").mock(return_value=httpx.Response(200, text="ok"))
-    scope = _http_scope("/agent-workspace/")
-    scope["headers"].append((b"cookie", cookie.encode("utf-8")))
+    dsh = _FakeDshService(target, auth=("/", "token=expired"))
+    respx_mock.get(f"{target}/?token=expired").mock(
+        return_value=httpx.Response(401, text="dsh web authentication required")
+    )
+    status, _, body = _drive(_middleware(dsh), _http_scope("/agent-workspace/"))
+    assert status == 401
+    assert b"authentication required" in body
+
+
+def test_workspace_proxy_routes_escaped_root_requests(respx_mock) -> None:
+    """DSH 前端以根绝对路径请求资源与 /api/**，按 Referer 归属工作台。"""
+    target = "http://127.0.0.1:48400"
+    dsh = _FakeDshService(target)
+    asset = respx_mock.get(f"{target}/assets/index-BKQ.js").mock(
+        return_value=httpx.Response(200, text="console.log(1)")
+    )
+    api = respx_mock.post(f"{target}/api/session/list").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+    referer = "http://bridge.internal:8080/agent-workspace/"
+
+    status, _, _ = _drive(
+        _middleware(dsh), _http_scope("/assets/index-BKQ.js", referer=referer)
+    )
+    assert status == 200 and asset.called
+
+    scope = _http_scope("/api/session/list", referer=referer)
+    scope["method"] = "POST"
     status, _, body = _drive(_middleware(dsh), scope)
-    assert route.called
-    assert status == 200
-    assert body == b"ok"
-    assert dsh.auth_calls == []
+    assert status == 200 and api.called and json.loads(body) == {"ok": True}
+
+
+def test_workspace_proxy_leaves_agent_bridge_paths_alone() -> None:
+    """保留路径（平台接口/静态资源）不得被逃逸路由抢走。"""
+
+    async def passthrough_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = AgentWorkspaceProxyMiddleware(
+        app=passthrough_app,
+        service=_FakeBridgeService(_FakeDshService("http://127.0.0.1:48400")),
+        identity_resolver=_identity_resolver(),
+    )
+    referer = "http://bridge.internal:8080/agent-workspace/"
+    assert _drive(middleware, _http_scope("/api/v1/dsh/runtime", referer=referer))[0] == 204
+    assert _drive(middleware, _http_scope("/agent-bridge/assets/index.js", referer=referer))[0] == 204
+    assert _drive(middleware, _http_scope("/assets/index.js"))[0] == 204
 
 
 def test_workspace_proxy_forwards_and_rewrites_headers(respx_mock) -> None:
@@ -535,7 +633,8 @@ def test_workspace_proxy_forwards_and_rewrites_headers(respx_mock) -> None:
     status, headers, _ = _drive(_middleware(dsh), _http_scope("/agent-workspace/app"))
     assert status == 302
     assert headers["location"] == "/agent-workspace/login"
-    assert "Path=/agent-workspace/" in headers["set-cookie"]
+    # 非会话 Cookie 原样透传（Path 不再改写，避免根绝对路径请求丢失会话）
+    assert headers["set-cookie"] == "session=abc; Path=/; HttpOnly"
     assert dsh.touch_calls == ["user1"]
 
 

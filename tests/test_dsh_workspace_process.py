@@ -97,13 +97,23 @@ def test_workspace_full_flow_with_real_process(client) -> None:
     assert mcp_config["headers"]["X-Agent-Bridge-MetaMCP-Profile"] == "safe"
     assert mcp_config["headers"]["X-Agent-Bridge-DSH-Capability"]
 
-    # 首访：代理用服务端捕获的 token 完成 303 + Cookie，浏览器地址保持前缀
+    # 首访：代理在服务端完成 token→Cookie 换取，浏览器直接拿到页面与新 Cookie
     first_visit = client.get("/agent-workspace/", headers=headers_user, follow_redirects=False)
-    assert first_visit.status_code == 303
-    assert first_visit.headers["location"] == "/agent-workspace/"
+    assert first_visit.status_code == 200
+    assert first_visit.text == "dsh-standin"
     cookie = first_visit.headers.get("set-cookie", "")
-    assert "Path=/agent-workspace/" in cookie
+    # 会话 Cookie 必须覆盖整站：DSH 前端以根绝对路径请求 /api/**、/plugins/**
+    assert "Path=/" in cookie
     session_cookie = cookie.split(";", 1)[0]
+
+    # 携带无效/过期会话 Cookie 时仍能重新换取（runtime 重启后旧 Cookie 必然失效）
+    stale = client.get(
+        "/agent-workspace/",
+        headers={**headers_user, "Cookie": "dsh-auth-stale=garbage"},
+    )
+    assert stale.status_code == 200
+    assert stale.text == "dsh-standin"
+    assert stale.headers.get("set-cookie", "").startswith("dsh-auth-")
 
     # 携带会话 Cookie 后正常渲染（Cookie 由浏览器管理，测试显式透传）
     page = client.get(
@@ -113,6 +123,14 @@ def test_workspace_full_flow_with_real_process(client) -> None:
     assert page.status_code == 200
     assert page.text == "dsh-standin"
 
+    # DSH 前端的根绝对路径请求（不带前缀）按 Referer 回流工作台
+    escaped = client.get(
+        "/assets/index.js",
+        headers={**headers_user, "Cookie": session_cookie, "Referer": "http://testserver/agent-workspace/"},
+    )
+    assert escaped.status_code == 200
+    assert escaped.text == "dsh-standin"
+
     # 子进程确实收到 --patch 覆盖文件（能力平面注入生效）
     patched = client.get(
         "/agent-workspace/patch", headers={**headers_user, "Cookie": session_cookie}
@@ -120,7 +138,7 @@ def test_workspace_full_flow_with_real_process(client) -> None:
     assert patched.status_code == 200
     assert patched.text == str(overlay_path)
 
-    # Location 与 Set-Cookie 改写
+    # Location 改写；Set-Cookie 保持上游 Path（不再收窄到前缀）
     redirected = client.get(
         "/agent-workspace/redirect", headers={**headers_user, "Cookie": session_cookie}, follow_redirects=False
     )
@@ -128,14 +146,23 @@ def test_workspace_full_flow_with_real_process(client) -> None:
     cookie_response = client.get(
         "/agent-workspace/set-cookie", headers={**headers_user, "Cookie": session_cookie}
     )
-    assert "Path=/agent-workspace/" in cookie_response.headers.get("set-cookie", "")
+    assert "Path=/" in cookie_response.headers.get("set-cookie", "")
+    assert "Path=/agent-workspace/" not in cookie_response.headers.get("set-cookie", "")
 
-    # WebSocket 代理：echo 往返
+    # WebSocket 代理：echo 往返（前缀路径）
     with client.websocket_connect(
         "/agent-workspace/ws", headers={**headers_user, "Cookie": session_cookie}
     ) as websocket:
         websocket.send_text("hello-dsh")
         assert websocket.receive_text() == "hello-dsh"
+
+    # WebSocket 代理：DSH 的根绝对通道（无 Referer，同源握手）同样回流工作台
+    with client.websocket_connect(
+        "/api/remote.mux",
+        headers={**headers_user, "Cookie": session_cookie, "Origin": "http://testserver"},
+    ) as websocket:
+        websocket.send_text("hello-mux")
+        assert websocket.receive_text() == "hello-mux"
 
     # 代理命中刷新空闲时间
     status = client.get("/api/v1/dsh/runtime", headers=headers_user).json()

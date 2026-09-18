@@ -116,15 +116,21 @@ settings（主题、onboarding 等）原样保留。
 伪全屏工作台 `/workspace/live`；浏览器地址始终是 Agent Bridge，不暴露 DSH 端口。
 
 反向代理 `/agent-workspace/**` 复用 dashboard 代理的流式转发骨架，支持 HTTP、
-WebSocket 与 SSE 长连接；Host/Origin 指向目标，`Location` 与 `Set-Cookie Path`
-重写回前缀，Cookie 透传给 DSH。代理目标只能来自当前登录业务用户已登记的
-runtime，不接受 URL 指定端口；代理命中即刷新空闲时间，未运行时自动按需启动。
+WebSocket 与 SSE 长连接；Host/Origin 指向目标，`Location` 重写回前缀。代理目标
+只能来自当前登录业务用户已登记的 runtime，不接受 URL 指定端口；代理命中即刷新
+空闲时间，未运行时自动按需启动。
+
+DSH 前端以 `<base href="/">` 用根绝对路径请求资源、插件模块、`/api/**` 与实时
+通道（`/api/remote.mux`），这些请求不在 `/agent-workspace` 前缀下：代理按 Referer
+（HTTP）与同源 Origin（WebSocket）把它们认领给工作台，`/api/v1/**`、
+`/agent-bridge/**` 等平台自身路径不受影响；上游 `Origin` 改写为目标 origin，
+会话 Cookie 保持 `Path=/`，使前缀外的请求与 WS 握手同样携带会话。
 
 DSH 的首次访问必须携带启动 token（``GET /?token=…`` 换取会话 Cookie，否则返回
-"authentication required"）：代理在服务端完成这次换取——仅当浏览器尚未持有
-该 runtime 的会话 Cookie（按 DSH 的 authority 绑定命名判断）时，把捕获的 token
-补到首次导航上，因此 token 不出现在浏览器地址栏，也不会与 DSH 的 303 形成重定向
-循环。
+"authentication required"）：代理在服务端完成这次换取——每次根导航都用捕获的
+token 换取新鲜会话 Cookie（DSH 的 303 在服务端消化），浏览器直接拿到页面与
+Cookie，token 不出现在地址栏。DSH 会话 Cookie 由 DSH 进程内密钥签名，runtime
+重启后旧 Cookie 必然失效，因此代理不依据“浏览器已带 Cookie”跳过换取。
 
 能力平面（Agent Bridge Profile）是 Workspace/会话级选择，**可以跳过**（此时不
 注入任何 MCP）：授权时服务端校验该 Profile 对当前用户的可见性，签发绑定
