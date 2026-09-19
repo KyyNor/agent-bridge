@@ -212,13 +212,18 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   `/memory-dashboard`、`/health`）永不参与逃逸路由。
 - 上游 `Origin` 必须改写为目标 origin（DSH 的 `/api/**` 浏览器信任栅栏要求 Host
   为回环且 Origin 与之匹配）；会话 Cookie 原样透传（`Path=/`），不得收窄到
-  `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。
+  `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。发往 DSH 的
+  Cookie（HTTP 转发、follow、WS 握手）一律收敛为 DSH 自己的范围——当前
+  authority 的 `dsh-auth-*` 会话与其余 `dsh-` 前缀应用 Cookie；`agent_bridge_admin`、
+  PostHog 等平台/统计 Cookie 不透传给上游，收敛后无剩余时删除 Cookie 头。
 - DSH 首访鉴权在代理层完成：根导航（`GET`/`HEAD` `/`）且 URL 未带 `token=` 时，
   代理先在服务端用捕获的 `?token=` 换取会话 Cookie（DSH 的 303 在服务端吞掉，
-  浏览器只看到 200 与新鲜 Cookie），再携带该 Cookie 转发最终页面；换取不到
-  Cookie 时如实回放上游响应。DSH 会话 Cookie 由进程内密钥签名，runtime 重启后
-  旧 Cookie 必然失效，因此**不能**依据“浏览器已带 Cookie”跳过换取，否则会永久
-  卡在 `dsh web authentication required`。
+  浏览器只看到 200 与新鲜 Cookie），再携带该 Cookie 转发最终页面；换取请求
+  不带任何浏览器 Cookie——真实 DSH 在命中旧会话 Cookie 时可能只回 303 而不再
+  下发 Set-Cookie，带旧 Cookie 换取会让浏览器在 `/agent-workspace/` 上无限
+  重定向。换取不到 Cookie 时如实回放上游响应。DSH 会话 Cookie 由进程内密钥
+  签名，runtime 重启后旧 Cookie 必然失效，因此**不能**依据“浏览器已带 Cookie”
+  跳过换取，否则会永久卡在 `dsh web authentication required`。
 - 能力平面接入位于 `dsh/workspace.py`：`DshWorkspaceCapabilityRegistry` 按用户唯一
   签发 24 小时 capability（绑定 user/profile/group）；`WorkspaceSelection` 表达
   “本次进入选定的平面”，`profile_key=None` 表示不注入 MCP（会清除覆盖文件）。

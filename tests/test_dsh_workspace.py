@@ -397,6 +397,20 @@ def test_session_cookie_is_forwarded_without_path_rewrite() -> None:
     assert _session_cookie_headers(other, authority) == []
 
 
+def test_dsh_request_cookies_narrows_to_dsh_scope() -> None:
+    """发往 DSH 的 Cookie 只保留当前 authority 会话与 dsh- 前缀应用 Cookie。"""
+    from agent_bridge.api.workspace_proxy import _dsh_request_cookies
+
+    authority = "127.0.0.1:48400"
+    name = dsh_session_cookie_name(authority)
+    other_port = dsh_session_cookie_name("127.0.0.1:48399")
+    header = f"{name}=v1; agent_bridge_admin=root; {other_port}=v2; ph_phc_x=1; dsh-theme=dark"
+    assert _dsh_request_cookies(header, authority=authority) == f"{name}=v1; dsh-theme=dark"
+    assert _dsh_request_cookies("agent_bridge_admin=root; ph_x=1", authority=authority) is None
+    assert _dsh_request_cookies(None, authority=authority) is None
+    assert _dsh_request_cookies("", authority=authority) is None
+
+
 def test_workspace_escape_path_routing_rules() -> None:
     """DSH 前端的根绝对路径请求按 Referer / 同源 WS 归属工作台。"""
 
@@ -564,6 +578,84 @@ def test_workspace_proxy_exchanges_token_on_every_root_navigation(respx_mock) ->
     _drive(_middleware(dsh2), _http_scope("/agent-workspace/app"))
     assert forwarded_route.called
     assert dsh2.auth_calls == []
+
+
+def test_workspace_proxy_exchange_ignores_stale_dsh_session_cookies(respx_mock) -> None:
+    """回归：真实 DSH 在 token 交换命中旧会话 Cookie 时只回 303、不下发 Set-Cookie。
+
+    旧实现把浏览器 Cookie 原样带给交换请求，检测不到新 Cookie 后又把 303 转回
+    浏览器，根导航便在 /agent-workspace/ 上无限重定向。交换请求必须不带任何
+    浏览器 Cookie，浏览器最终直接拿到 200。
+    """
+    target = "http://127.0.0.1:48400"
+    authority = "127.0.0.1:48400"
+    name = dsh_session_cookie_name(authority)
+    other_port = dsh_session_cookie_name("127.0.0.1:48399")
+    dsh = _FakeDshService(target, auth=("/", "token=launch-token"))
+
+    def exchange_behaviour(request: httpx.Request) -> httpx.Response:
+        if "dsh-auth" in request.headers.get("cookie", ""):
+            # 真实 DSH：命中旧会话 Cookie 时只回 303，不重新下发 Set-Cookie
+            return httpx.Response(303, headers={"location": "/"})
+        return httpx.Response(
+            303,
+            headers={
+                "location": "/",
+                "set-cookie": f"{name}=fresh; Path=/; HttpOnly; SameSite=Strict",
+            },
+        )
+
+    exchange = respx_mock.get(f"{target}/?token=launch-token").mock(side_effect=exchange_behaviour)
+    follow = respx_mock.get(f"{target}/").mock(return_value=httpx.Response(200, text="<html>app"))
+
+    browser_cookies = "; ".join(
+        [
+            f"{name}=stale",
+            f"{other_port}=older-port",
+            "agent_bridge_admin=root-secret",
+            "ph_phc_stats=1",
+        ]
+    )
+    scope = _http_scope("/agent-workspace/", cookie=browser_cookies, origin="http://bridge.internal:8080")
+    status, headers, body = _drive(_middleware(dsh), scope)
+
+    assert exchange.called and follow.called
+    # 交换请求不带任何浏览器 Cookie：旧 dsh-auth 会话与平台/统计 Cookie 都不进上游
+    assert "cookie" not in exchange.calls[-1].request.headers
+    # 浏览器直接拿到 200 与新鲜会话 Cookie，不再经历 303 重定向
+    assert status == 200
+    assert body == b"<html>app"
+    assert headers["set-cookie"] == f"{name}=fresh; Path=/; HttpOnly; SameSite=Strict"
+    # follow 请求只带 DSH 自己的 Cookie，会话替换为新鲜值
+    forwarded = follow.calls[-1].request.headers
+    assert forwarded["cookie"] == f"{name}=fresh"
+
+
+def test_workspace_proxy_narrows_forwarded_cookies(respx_mock) -> None:
+    """常规转发（含逃逸路径）只把 DSH 自己的 Cookie 发往上游。"""
+    target = "http://127.0.0.1:48400"
+    authority = "127.0.0.1:48400"
+    name = dsh_session_cookie_name(authority)
+    dsh = _FakeDshService(target)
+    page = respx_mock.get(f"{target}/app").mock(return_value=httpx.Response(200, text="ok"))
+    bare = respx_mock.get(f"{target}/app2").mock(return_value=httpx.Response(200, text="ok"))
+
+    scope = _http_scope(
+        "/agent-workspace/app",
+        cookie=f"agent_bridge_admin=root-secret; {name}=sess; ph_phc_stats=1",
+    )
+    status, _, _ = _drive(_middleware(dsh), scope)
+    assert status == 200 and page.called
+    forwarded = page.calls[-1].request.headers
+    assert forwarded["cookie"] == f"{name}=sess"
+    assert "agent_bridge_admin" not in forwarded.get("cookie", "")
+
+    # 收敛后没有可转发 Cookie 时应删除 Cookie 头，而不是发送空值
+    status, _, _ = _drive(
+        _middleware(dsh), _http_scope("/agent-workspace/app2", cookie="agent_bridge_admin=root-secret")
+    )
+    assert status == 200 and bare.called
+    assert "cookie" not in bare.calls[-1].request.headers
 
 
 def test_workspace_proxy_relays_upstream_when_token_exchange_fails(respx_mock) -> None:
