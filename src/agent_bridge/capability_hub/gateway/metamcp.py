@@ -21,6 +21,7 @@ from agent_bridge.access_control.identity import RequestIdentityResolver
 from agent_bridge.automation.workflows.runtime_capability import WORKFLOW_CAPABILITY_HEADER
 from agent_bridge.core.config import default_user
 from agent_bridge.core.domain import AccessDenied
+from agent_bridge.dsh.workspace import DSH_CAPABILITY_HEADER
 from agent_bridge.app.service import AgentBridgeService
 from agent_bridge.capability_hub.gateway.request_context import (
     reset_request_capability_token,
@@ -557,7 +558,21 @@ def setup_mcp_route(
             else None
         )
         capability_token = request.headers.get(WORKFLOW_CAPABILITY_HEADER, "").strip()
-        if capability_token:
+        dsh_capability_token = request.headers.get(DSH_CAPABILITY_HEADER, "").strip()
+        if dsh_capability_token:
+            if capability_token:
+                raise AccessDenied("不能同时携带工作流与 DSH Workspace capability")
+            workspace_capability = service.dsh.require_workspace_capability(
+                dsh_capability_token,
+                profile_key=profile,
+            )
+            profile = workspace_capability.profile_key
+            actor = workspace_capability.user_id
+            runtime_scope = service.access.bind_actor_group(
+                actor=workspace_capability.user_id,
+                owner_group_key=workspace_capability.owner_group_key,
+            )
+        elif capability_token:
             if workflow_context is None:
                 raise AccessDenied("工作流 capability 缺少运行上下文")
             runtime_capability = service.workflows.require_runtime_capability(

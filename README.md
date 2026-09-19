@@ -20,6 +20,10 @@ Agent Bridge 是面向内部可信环境的 Agent 能力与知识管理平台。
 - 托管用户级 DSH Web Runtime：按业务用户隔离的交互式工作台进程，动态监听
   `127.0.0.1` 端口、以所属小组映射的 Linux 用户身份运行、长期空闲自动回收；
   公共 Base URL/模型与组级默认模型、API Key 在每次启动时注入 DSH 原生配置。
+- 「DSH 工作台」页面按需在新标签页打开站内伪全屏工作台：`/agent-workspace/**`
+  由后端反代到当前登录用户自己的 runtime（HTTP/WebSocket/SSE，服务端完成 DSH
+  首次鉴权，浏览器不接触动态端口与 token），进入前可选择能力平面（也可以不选），
+  所选 Profile 以短期 capability + DSH 原生 `--patch` 覆盖层注入 MCP。
 - 工作流产物的标题、摘要、路径和正文使用 jieba 预分词与 SQLite FTS5 检索；长度至少 3 的 ASCII 标识符支持前缀匹配，结构化权限与版本过滤仍由 SQLite 普通条件处理。
 - `artifacts_search` 使用 DiskCache 缓存检索结果，默认保留 8 小时；缓存时长可在「系统管理」页面修改，保存后立即按新配置生效。当前版本不主动因新产物写入而清理缓存。
 - 「平台概览」使用 DiskCache 缓存聚合结果，默认保留 4 小时；缓存按用户、所属小组、可见资源范围和日期区间隔离，页面上的“刷新”会强制重建当前缓存。
@@ -104,6 +108,38 @@ settings（主题、onboarding 等）原样保留。
 显式停止。调度线程周期性停止超过空闲阈值的实例；服务重启时自动识别上一进程
 遗留的存活实例并清理失效状态。启动失败的错误信息会附带日志尾部内容；启动成功
 后会从 DSH 打印的横幅中捕获带 token 的鉴权入口，供站内工作台代理完成首次鉴权。
+
+### DSH Workspace 与能力平面
+
+「DSH 工作台」页面列出当前工作台状态（运行中/未运行、Linux 用户、当前能力平面、
+空闲时长，可一键停止），选择能力平面后点「进入工作台」，会在**新标签页**打开
+伪全屏工作台 `/workspace/live`；浏览器地址始终是 Agent Bridge，不暴露 DSH 端口。
+
+反向代理 `/agent-workspace/**` 复用 dashboard 代理的流式转发骨架，支持 HTTP、
+WebSocket 与 SSE 长连接；Host/Origin 指向目标，`Location` 重写回前缀。代理目标
+只能来自当前登录业务用户已登记的 runtime，不接受 URL 指定端口；代理命中即刷新
+空闲时间，未运行时自动按需启动。
+
+DSH 前端以 `<base href="/">` 用根绝对路径请求资源、插件模块、`/api/**` 与实时
+通道（`/api/remote.mux`），这些请求不在 `/agent-workspace` 前缀下：代理按 Referer
+（HTTP）与同源 Origin（WebSocket）把它们认领给工作台，`/api/v1/**`、
+`/agent-bridge/**` 等平台自身路径不受影响；上游 `Origin` 改写为目标 origin，
+会话 Cookie 保持 `Path=/`，使前缀外的请求与 WS 握手同样携带会话。
+
+DSH 的首次访问必须携带启动 token（``GET /?token=…`` 换取会话 Cookie，否则返回
+"authentication required"）：代理在服务端完成这次换取——每次根导航都用捕获的
+token 换取新鲜会话 Cookie（DSH 的 303 在服务端消化），浏览器直接拿到页面与
+Cookie，token 不出现在地址栏。DSH 会话 Cookie 由 DSH 进程内密钥签名，runtime
+重启后旧 Cookie 必然失效，因此代理不依据“浏览器已带 Cookie”跳过换取。
+
+能力平面（Agent Bridge Profile）是 Workspace/会话级选择，**可以跳过**（此时不
+注入任何 MCP）：授权时服务端校验该 Profile 对当前用户的可见性，签发绑定
+(用户, Profile, 归属组) 的 24 小时短期 capability，并生成 DSH 的 loader patch
+覆盖文件（`<DSH_HOME>/agent-bridge-mcp.patch.yml`，插入 `dsh-mcp-client`
+streamable-http 实例并携带 Profile 与 capability 头），通过启动命令的
+`{patch}` 占位符以 `--patch` 注入。DSH 作为 MCP client 携带 capability 请求
+`/mcp`，服务端按既有 Profile 权限体系过滤工具并归属业务用户审计；切换（含退出）
+能力平面会回收重启实例，重复进入同一平面只刷新 capability。
 
 ## 模型评估运行时
 

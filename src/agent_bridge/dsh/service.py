@@ -27,6 +27,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from agent_bridge.agent_runtime.service import DEFAULT_MCP_URL
+from agent_bridge.access_control.resources import ScopedResourceType
 from agent_bridge.core.domain import ValidationError, require_admin_user
 from agent_bridge.core.timeutil import utc_iso
 from agent_bridge.dsh import injection
@@ -35,6 +37,16 @@ from agent_bridge.dsh.launcher import (
     LinuxIdentity,
     PopenDshLauncher,
     resolve_linux_identity,
+)
+from agent_bridge.dsh.workspace import (
+    DshWorkspaceCapability,
+    DshWorkspaceCapabilityRegistry,
+    WorkspaceSelection,
+    build_mcp_overlay,
+    ensure_owner as ensure_overlay_owner,
+    mcp_overlay_path as workspace_overlay_path,
+    remove_mcp_overlay,
+    write_mcp_overlay,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,13 +88,16 @@ class DshRuntimeService:
         admins: set[str],
         launcher: DshProcessLauncher | None = None,
         passwd_lookup: Callable[[str], Any] | None = None,
+        mcp_url: str | None = None,
     ) -> None:
         self.paths = paths
         self.admins = admins
+        self.mcp_url = mcp_url or DEFAULT_MCP_URL
         self._configs = configs
         self._access = access
         self._launcher = launcher or PopenDshLauncher()
         self._passwd_lookup = passwd_lookup
+        self.capabilities = DshWorkspaceCapabilityRegistry()
         self._lock = threading.RLock()
         self._reaper_stop = threading.Event()
         self._reaper_thread: threading.Thread | None = None
@@ -93,8 +108,15 @@ class DshRuntimeService:
 
     # -- 对外生命周期入口 --
 
-    def ensure_running(self, user_id: str) -> dict[str, Any]:
-        """确保业务用户的 DSH Web 存活：健康则复用，缺失/异常则（重）启动。"""
+    def ensure_running(
+        self, user_id: str, *, workspace: WorkspaceSelection | None = None
+    ) -> dict[str, Any]:
+        """确保业务用户的 DSH Web 存活：健康则复用，缺失/异常则（重）启动。
+
+        传入 ``workspace`` 时按所选能力平面注入 MCP；``profile_key`` 为空表示
+        不注入任何能力（等价于清空既有注入）。已在运行但能力平面不同（含
+        “从有到无”）的实例会被回收重启，选择相同则复用并刷新注入配置。
+        """
         normalized_user = self._require_user_id(user_id)
         group_key = self._access.actor_group_key(normalized_user, required=True)
         config = self._configs.group_config_for_runtime(group_key)
@@ -105,10 +127,16 @@ class DshRuntimeService:
             state = self._read_state(normalized_user)
             if state:
                 group_changed = str(state.get("group_key") or "") != group_key
+                profile_changed = (
+                    workspace is not None
+                    and (state.get("profile_key") or None) != workspace.profile_key
+                )
                 alive = self._pid_alive(int(state.get("pid") or 0))
                 healthy = alive and self._probe_port(int(state.get("port") or 0))
-                if not group_changed and healthy:
+                if not group_changed and not profile_changed and healthy:
                     self._touch_state(normalized_user)
+                    if workspace is not None:
+                        self._refresh_workspace_injection(normalized_user, group_key, config, workspace)
                     logger.info(
                         "DSH Runtime 复用存量实例 user=%s pid=%s port=%s",
                         normalized_user,
@@ -118,24 +146,72 @@ class DshRuntimeService:
                     return self._public_status(self._compute_status(normalized_user, group_key))
                 wedged = (
                     not group_changed
+                    and not profile_changed
                     and alive
                     and not healthy
                     and (time.time() - float(state.get("started_at") or 0)) < DSH_STARTUP_TIMEOUT_SECONDS
                 )
                 if wedged:
                     return self._public_status(self._compute_status(normalized_user, group_key))
-                # 进程退出、启动超时仍不健康或用户已换组：回收后重启。
+                # 进程退出、启动超时仍不健康、用户换组或切换能力平面：回收后重启。
                 if alive:
                     logger.warning(
                         "DSH Runtime 回收后重启 user=%s pid=%s 原因=%s",
                         normalized_user,
                         state.get("pid"),
-                        "换组" if group_changed else "启动超时或进程退出",
+                        "切换能力平面" if profile_changed else ("换组" if group_changed else "启动超时或进程退出"),
                     )
                     self._stop_state(state, normalized_user)
 
-            state = self._start_runtime(normalized_user, group_key, config)
+            state = self._start_runtime(normalized_user, group_key, config, workspace=workspace)
             return self._public_status(self._compute_status(normalized_user, group_key))
+
+    def authorize_workspace(self, user_id: str, *, profile_key: str | None) -> dict[str, Any]:
+        """选定能力平面（可不选）并确保工作台可用。
+
+        选择 Profile 时先按既有资源读取规则校验权限，再签发用户唯一的短期
+        capability 并注入 MCP；不选 Profile 时清空注入，工作台不带任何 MCP。
+        """
+        normalized_user = self._require_user_id(user_id)
+        cleaned_profile = str(profile_key or "").strip()
+        if not cleaned_profile:
+            self.capabilities.revoke_for_user(normalized_user)
+            status = self.ensure_running(
+                normalized_user, workspace=WorkspaceSelection(profile_key=None)
+            )
+            logger.info("DSH Workspace 进入（不注入能力平面）user=%s", normalized_user)
+            return {**status, "profile_key": None, "workspace_url": "/agent-workspace/"}
+
+        group_key = self._access.actor_group_key(normalized_user, required=True)
+        # 切换到无权限 Profile 会被拒绝：沿既有资源读取规则校验能力平面。
+        self._access.require_resource_read(
+            actor=normalized_user,
+            resource_type=ScopedResourceType.capability_profile,
+            resource_key=cleaned_profile,
+        )
+        capability = self.capabilities.issue(
+            user_id=normalized_user,
+            profile_key=cleaned_profile,
+            owner_group_key=group_key,
+        )
+        status = self.ensure_running(
+            normalized_user,
+            workspace=WorkspaceSelection(profile_key=cleaned_profile, capability=capability),
+        )
+        logger.info(
+            "DSH Workspace 授权完成 user=%s profile=%s group=%s runtime_status=%s",
+            normalized_user,
+            cleaned_profile,
+            group_key,
+            status.get("status"),
+        )
+        return {**status, "profile_key": cleaned_profile, "workspace_url": "/agent-workspace/"}
+
+    def require_workspace_capability(
+        self, token: str, *, profile_key: str | None = None
+    ) -> DshWorkspaceCapability:
+        """MetaMCP 入口校验 DSH capability 并返回绑定的授权上下文。"""
+        return self.capabilities.require(token, profile_key=profile_key)
 
     def runtime_status(self, user_id: str) -> dict[str, Any]:
         """查询业务用户 runtime 状态；不包含 pid/端口等内部细节。"""
@@ -149,6 +225,7 @@ class DshRuntimeService:
         with self._lock:
             state = self._read_state(normalized_user)
             stopped = self._stop_state(state, normalized_user) if state else False
+            self.capabilities.revoke_for_user(normalized_user)
         return {"user_id": normalized_user, "stopped": bool(stopped)}
 
     def touch_runtime(self, user_id: str) -> None:
@@ -206,7 +283,12 @@ class DshRuntimeService:
     # -- 启动与回收 --
 
     def _start_runtime(
-        self, user_id: str, group_key: str, config: dict[str, Any]
+        self,
+        user_id: str,
+        group_key: str,
+        config: dict[str, Any],
+        *,
+        workspace: WorkspaceSelection | None = None,
     ) -> dict[str, Any]:
         linux_user = str(config.get("linux_user") or group_key)
         identity = resolve_linux_identity(linux_user, self._passwd_lookup)
@@ -215,7 +297,10 @@ class DshRuntimeService:
         runtime_config = self._configs.runtime_config_for_runtime()
         model_binding = self._configs.model_binding_for(group_key)
         self._inject_settings(config_dir, identity, model_binding)
-        command = self._build_command(str(runtime_config.get("web_command") or ""), port)
+        overlay_path = self._write_workspace_overlay(config_dir, identity, user_id, workspace)
+        command = self._build_command(
+            str(runtime_config.get("web_command") or ""), port, patch_path=overlay_path
+        )
         env = self._build_env(identity, config_dir, model_binding)
         log_path = self._log_path(user_id)
         logger.info(
@@ -253,6 +338,7 @@ class DshRuntimeService:
             "port": port,
             "config_dir": str(config_dir),
             "log_path": str(log_path),
+            "profile_key": workspace.profile_key if workspace is not None else None,
             "started_at": now,
             "last_access_at": now,
         }
@@ -345,6 +431,58 @@ class DshRuntimeService:
             f"（{DSH_PORT_BASE}-{DSH_PORT_BASE + DSH_MAX_INSTANCES - 1}），"
             "请先停止不再使用的实例或联系管理员扩大端口池"
         )
+
+    def _write_workspace_overlay(
+        self,
+        config_dir: Path,
+        identity: LinuxIdentity,
+        user_id: str,
+        workspace: WorkspaceSelection | None,
+    ) -> Path | None:
+        """按能力平面写入/清除 DSH ``--patch`` 覆盖文件，返回需注入的路径。"""
+        overlay_path = workspace_overlay_path(config_dir)
+        if workspace is None:
+            # 未指定选择：沿用已存在的注入（例如仅调用 /runtime/ensure 保活）。
+            return overlay_path if overlay_path.exists() else None
+        capability = workspace.capability
+        if not workspace.profile_key or capability is None:
+            if overlay_path.exists():
+                remove_mcp_overlay(overlay_path)
+                logger.info("DSH Workspace 已清除能力平面注入 user=%s", user_id)
+            return None
+        write_mcp_overlay(
+            overlay_path,
+            build_mcp_overlay(
+                mcp_url=self.mcp_url,
+                profile_key=workspace.profile_key,
+                capability_token=capability.token,
+            ),
+        )
+        ensure_overlay_owner(overlay_path, uid=identity.uid, gid=identity.gid)
+        logger.info(
+            "DSH Workspace MCP 覆盖文件已写入 user=%s profile=%s path=%s",
+            user_id,
+            workspace.profile_key,
+            overlay_path,
+        )
+        return overlay_path
+
+    def _refresh_workspace_injection(
+        self,
+        user_id: str,
+        group_key: str,
+        config: dict[str, Any],
+        workspace: WorkspaceSelection,
+    ) -> None:
+        """复用实例时重写覆盖文件，使新签发的 capability 立即生效。"""
+        state = self._read_state(user_id) or {}
+        config_dir = Path(str(state.get("config_dir") or ""))
+        if not config_dir or not config_dir.is_dir():
+            logger.warning("DSH Workspace 覆盖文件刷新跳过（配置目录缺失）user=%s", user_id)
+            return
+        linux_user = str(config.get("linux_user") or group_key)
+        identity = resolve_linux_identity(linux_user, self._passwd_lookup)
+        self._write_workspace_overlay(config_dir, identity, user_id, workspace)
 
     def _build_command(self, template: str, port: int, *, patch_path: Path | None = None) -> list[str]:
         """渲染启动命令；``{patch}`` 在注入配置文件时展开为 ``--patch <路径>``。"""
@@ -481,6 +619,7 @@ class DshRuntimeService:
             "linux_user": str(state.get("linux_user") or ""),
             "config_dir": str(state.get("config_dir") or ""),
             "status": status,
+            "profile_key": state.get("profile_key"),
             "started_at": _epoch_to_iso(started_at),
             "last_access_at": _epoch_to_iso(last_access_at),
             "idle_minutes": round(max(0.0, time.time() - last_access_at) / 60.0, 1),
@@ -500,6 +639,7 @@ class DshRuntimeService:
             "linux_user": "",
             "config_dir": "",
             "status": "stopped",
+            "profile_key": None,
             "started_at": None,
             "last_access_at": None,
             "idle_minutes": None,
@@ -523,6 +663,7 @@ class DshRuntimeService:
             "linux_user",
             "config_dir",
             "status",
+            "profile_key",
             "started_at",
             "last_access_at",
             "idle_minutes",
@@ -617,6 +758,7 @@ class DshRuntimeService:
                 user_id = str(state.get("user_id") or "")
                 if self._stop_state(state, user_id):
                     stopped += 1
+                self.capabilities.revoke_for_user(user_id)
         logger.info("DSH Runtime 全部回收完成 stopped=%d", stopped)
         return {"stopped": stopped}
 

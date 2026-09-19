@@ -1470,9 +1470,23 @@ export interface DshRuntimeStatus {
   linux_user: string
   config_dir: string
   status: 'running' | 'starting' | 'unhealthy' | 'stopped' | 'unassigned' | 'unconfigured'
+  profile_key: string | null
   started_at: string | null
   last_access_at: string | null
   idle_minutes: number | null
+}
+
+export interface DshWorkspaceAuthorization {
+  user_id: string
+  group_key: string | null
+  linux_user: string
+  config_dir: string
+  status: DshRuntimeStatus['status']
+  profile_key: string | null
+  started_at: string | null
+  last_access_at: string | null
+  idle_minutes: number | null
+  workspace_url: string
 }
 
 export interface ModelEvaluationDataset {

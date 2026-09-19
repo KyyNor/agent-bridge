@@ -36,6 +36,8 @@ const ScriptsView = asyncView(() => import('@/views/system/ScriptsView.vue'))
 const LogsView = asyncView(() => import('@/views/monitoring/LogsView.vue'))
 const StatsView = asyncView(() => import('@/views/monitoring/StatsView.vue'))
 const AgentRunsView = asyncView(() => import('@/views/monitoring/AgentRunsView.vue'))
+const WorkspaceView = asyncView(() => import('@/views/workspace/WorkspaceView.vue'))
+const WorkspaceLiveView = asyncView(() => import('@/views/workspace/WorkspaceLiveView.vue'))
 const NotFoundView = asyncView(() => import('@/views/NotFoundView.vue'))
 
 export interface NavigationMeta {
@@ -77,6 +79,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/model-evaluations/:routeKey(.*)*', name: 'model-evaluations', component: ModelEvaluationView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'model-evaluations', title: '模型评估', hideHeaderOnSubRoute: true } },
   { path: '/skills', name: 'skills', component: SkillManagementView, meta: { navKey: 'skills', title: 'Skill 管理' } },
   { path: '/scripts/:routeKey(.*)*', name: 'scripts', component: ScriptsView, props: route => ({ routeKey: subRoute(route) }), meta: { navKey: 'scripts', title: '脚本管理', hideHeaderOnSubRoute: true } },
+  { path: '/workspace', name: 'workspace', component: WorkspaceView, meta: { navKey: 'workspace', title: 'DSH 工作台' } },
+  { path: '/workspace/live', name: 'workspace-live', component: WorkspaceLiveView, meta: { navKey: 'workspace', title: 'DSH 工作台' } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { title: '页面不存在' } },
 ]
 

@@ -198,6 +198,35 @@ Agent runtime 配置暂时强制 `slug == type`。现阶段同 type 多 slug 没
   启动 `dsh.start()`，装配期 `recover()` 识别遗留实例，停止期 `stop_all()`。
 - 管理接口（组配置、全局配置、实例列表）仅 admins；用户态接口只暴露状态，不
   暴露动态端口与 pid。
+- Workspace 反向代理位于 `api/workspace_proxy.py`：`/agent-workspace/**` 复用
+  dashboard 代理的 `_proxy_stream_response` 骨架（`response_header_builder` /
+  `query_override` / `request_header_overrides` / `extra_response_headers` hook
+  承载 Location 改写、首访 token、Cookie 与 Origin 覆盖），WebSocket 用
+  `websockets` client 桥接并剥离下游握手头。目标只能来自 `require_runtime_target`
+  （按当前登录用户解析，命中即刷新空闲时间），未运行时线程化兜底 `ensure_running`。
+- DSH 前端按 `<base href="/">` 以根绝对路径请求资源、插件模块与 `/api/**`
+  （`/api/remote.mux` 是 WS 通道），因此 `workspace_escape_path` 会在前缀之外认领
+  这些请求：HTTP 依据 `Referer: …/agent-workspace/…`，WebSocket 依据与请求 Host
+  同 authority 的 `Origin`（Agent Bridge 自身没有 WS 端点）。`RESERVED_PATH_PREFIXES`
+  （`/api/v1`、`/agent-bridge`、`/static/capabilities`、`/dashboard`、
+  `/memory-dashboard`、`/health`）永不参与逃逸路由。
+- 上游 `Origin` 必须改写为目标 origin（DSH 的 `/api/**` 浏览器信任栅栏要求 Host
+  为回环且 Origin 与之匹配）；会话 Cookie 原样透传（`Path=/`），不得收窄到
+  `/agent-workspace`，否则根绝对路径请求与 WS 握手都拿不到会话。
+- DSH 首访鉴权在代理层完成：根导航（`GET`/`HEAD` `/`）且 URL 未带 `token=` 时，
+  代理先在服务端用捕获的 `?token=` 换取会话 Cookie（DSH 的 303 在服务端吞掉，
+  浏览器只看到 200 与新鲜 Cookie），再携带该 Cookie 转发最终页面；换取不到
+  Cookie 时如实回放上游响应。DSH 会话 Cookie 由进程内密钥签名，runtime 重启后
+  旧 Cookie 必然失效，因此**不能**依据“浏览器已带 Cookie”跳过换取，否则会永久
+  卡在 `dsh web authentication required`。
+- 能力平面接入位于 `dsh/workspace.py`：`DshWorkspaceCapabilityRegistry` 按用户唯一
+  签发 24 小时 capability（绑定 user/profile/group）；`WorkspaceSelection` 表达
+  “本次进入选定的平面”，`profile_key=None` 表示不注入 MCP（会清除覆盖文件）。
+  `/mcp` 的 `X-Agent-Bridge-DSH-Capability` 头经 `require_workspace_capability`
+  校验后以业务用户身份 + `bind_actor_group` 进入既有权限体系，不与工作流
+  capability 同时使用。MCP 注入是 DSH 的 loader patch 覆盖文件
+  （`<DSH_HOME>/agent-bridge-mcp.patch.yml`，0600），经启动命令 `{patch}` →
+  `--patch` 生效；同平面重进只重写覆盖文件刷新 capability，切换平面回收重启。
 
 ## 工作流
 

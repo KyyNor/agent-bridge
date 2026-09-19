@@ -123,6 +123,8 @@ import type {
   DshGroupConfigUpdate,
   DshRuntimeConfig,
   DshRuntimeConfigUpdate,
+  DshRuntimeStatus,
+  DshWorkspaceAuthorization,
 } from './types'
 import { reportAuthenticationRequired } from '../lib/accessFeedback'
 import { scriptResetPath } from '../lib/scriptManagement.ts'
@@ -526,6 +528,10 @@ export const api = {
     get<{ configs: DshGroupConfig[] }>('/dsh/group-configs').then(payload => payload.configs),
   saveDshGroupConfig: (groupKey: string, config: DshGroupConfigUpdate) =>
     put<DshGroupConfig>(`/dsh/group-configs/${encodeURIComponent(groupKey)}`, config),
+  getDshRuntimeStatus: () => get<DshRuntimeStatus>('/dsh/runtime'),
+  stopDshRuntime: () => post<{ user_id: string; stopped: boolean }>('/dsh/runtime/stop', {}),
+  authorizeDshWorkspace: (profileKey: string | null) =>
+    post<DshWorkspaceAuthorization>('/dsh/workspace/authorize', { profile_key: profileKey || null }),
   listModelEvaluationDatasets: (options?: ApiRequestOptions) => get<ModelEvaluationDataset[]>('/model-evaluations/datasets', options),
   getModelEvaluationRuntime: (options?: ApiRequestOptions) => get<ModelEvaluationRuntimeStatus>('/model-evaluations/runtime', options),
   listEvaluationModels: (connection: { base_url?: string; api_key?: string }) =>

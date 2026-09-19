@@ -6,7 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from agent_bridge.api.schemas import DshGroupConfigUpdateRequest, DshRuntimeConfigUpdateRequest
+from agent_bridge.api.schemas import (
+    DshGroupConfigUpdateRequest,
+    DshRuntimeConfigUpdateRequest,
+    DshWorkspaceAuthorizeRequest,
+)
 
 
 def create_dsh_routes(service, actor) -> APIRouter:
@@ -15,6 +19,13 @@ def create_dsh_routes(service, actor) -> APIRouter:
     @router.get("/runtime")
     def get_runtime(current_actor: str = Depends(actor)) -> dict[str, Any]:
         return service.dsh.runtime_status(current_actor)
+
+    @router.post("/workspace/authorize")
+    def authorize_workspace(
+        payload: DshWorkspaceAuthorizeRequest,
+        current_actor: str = Depends(actor),
+    ) -> dict[str, Any]:
+        return service.dsh.authorize_workspace(current_actor, profile_key=payload.profile_key)
 
     @router.post("/runtime/ensure")
     def ensure_runtime(current_actor: str = Depends(actor)) -> dict[str, Any]:

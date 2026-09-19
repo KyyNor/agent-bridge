@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent_bridge.api.dashboard_proxy import DashboardProxyMiddleware, MemoryDashboardProxyMiddleware
+from agent_bridge.api.workspace_proxy import AgentWorkspaceProxyMiddleware
 from agent_bridge.access_control.identity import RequestIdentityResolver
 from agent_bridge.access_control.admin_access import AdminAccessService
 from agent_bridge.api.schemas import AdminLoginRequest, ChangeAdminPasswordRequest
@@ -141,6 +142,11 @@ def create_app(paths: AgentBridgePaths | None = None, admins: set[str] | None = 
         MemoryDashboardProxyMiddleware,
         target_resolver=service.memory.dashboard_proxy_target,
         access_checker=require_memory_dashboard,
+    )
+    app.add_middleware(
+        AgentWorkspaceProxyMiddleware,
+        service=service,
+        identity_resolver=identity_resolver,
     )
     static_dir = Path(__file__).parent.parent / "static" / "capabilities"
     app.mount("/static/capabilities", StaticFiles(directory=static_dir, check_dir=False), name="capabilities-static")
