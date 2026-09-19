@@ -11,7 +11,9 @@
 - DSH 前端以 ``<base href="/">`` 用根绝对路径请求资源、插件与 ``/api/**``，
   这些请求虽不在前缀下但属于工作台，按 ``workspace_escape_path`` 归属；
 - 根导航由代理在服务端完成 DSH 的 token→Cookie 换取，token 既不出现在浏览器
-  地址栏，也不会因 runtime 重启后的旧 Cookie 而卡死在 401；
+  地址栏，也不会因 runtime 重启后的旧 Cookie 而卡死在 401；换取请求不带任何
+  浏览器 Cookie（旧会话会让真实 DSH 只回 303 而不下发新 Cookie，形成无限
+  重定向），其余发往 DSH 的 Cookie 也收敛为 DSH 自己的（``dsh-`` 前缀）；
 - 代理命中即刷新 runtime ``last_access_at``，供空闲回收使用。
 """
 
@@ -134,8 +136,25 @@ def _origin_override(scope: Scope, target: str) -> dict[str, str]:
     return {"origin": f"{parts.scheme}://{parts.netloc}"}
 
 
+def _request_overrides(scope: Scope, target: str) -> dict[str, str | None]:
+    """通用请求头覆盖：Origin 改写 + Cookie 收敛到 DSH 自己的范围。"""
+    return {
+        **_origin_override(scope, target),
+        "cookie": _dsh_request_cookies(
+            _header_value(scope, "cookie"), authority=urlsplit(target).netloc
+        ),
+    }
+
+
 def _forward_headers_for_exchange(scope: Scope, target: str) -> dict[str, str]:
+    """构造 token→Cookie 交换请求头：不带任何浏览器 Cookie。
+
+    交换必须从干净会话开始：真实 DSH 在命中旧会话 Cookie 时可能只回 303 而
+    不重新下发 Set-Cookie，代理因此检测不到新 Cookie、把 303 原样转回浏览器，
+    形成根导航的无限重定向。平台会话、统计等无关 Cookie 同样不进上游。
+    """
     headers = _forward_headers(scope.get("headers", []), urlsplit(target).netloc)
+    headers.pop("cookie", None)
     headers.update(_origin_override(scope, target))
     return headers
 
@@ -221,6 +240,33 @@ def _merge_session_cookie(cookie_header: str | None, *, authority: str, pair: st
     return "; ".join(kept)
 
 
+def _dsh_request_cookies(cookie_header: str | None, *, authority: str) -> str | None:
+    """收敛发往 DSH 的 Cookie：只保留 DSH 自己需要的部分。
+
+    浏览器会把 Agent Bridge 域下的全部 Cookie 送来（``agent_bridge_admin``、
+    PostHog 等），它们与 DSH 无关，不透传给上游。保留的范围：
+
+    - 当前 authority 的 ``dsh-auth-<hash>`` 会话 Cookie——其他端口的旧会话
+      Cookie 名称不同，对本目标永远无效；
+    - 其余 ``dsh-`` 前缀的应用 Cookie。
+
+    返回 ``None`` 表示没有可转发内容，调用方应删除 Cookie 头而非发送空值。
+    """
+    session = dsh_session_cookie_name(authority)
+    kept: list[str] = []
+    for segment in (cookie_header or "").split(";"):
+        segment = segment.strip()
+        if not segment:
+            continue
+        cookie_name = segment.partition("=")[0].strip()
+        if not cookie_name.startswith("dsh-"):
+            continue
+        if cookie_name.startswith("dsh-auth-") and cookie_name != session:
+            continue
+        kept.append(segment)
+    return "; ".join(kept) if kept else None
+
+
 def _redirect_target(location: str, *, target: str) -> tuple[str, str]:
     """把上游 Location 解析成上游路径与查询串；外部地址退化为根路径。"""
     parts = urlsplit(location)
@@ -244,13 +290,25 @@ _WS_HANDSHAKE_HEADERS = {
 
 
 def _forward_ws_headers(scope: Scope, target: str) -> list[tuple[str, str]]:
-    """构造上游 WS 握手头：Host/Origin 指向目标，剥离握手与 hop-by-hop 头。"""
+    """构造上游 WS 握手头：Host/Origin 指向目标，剥离握手与 hop-by-hop 头。
+
+    Cookie 收敛到 DSH 自己的范围（``_dsh_request_cookies``）：会话 Cookie 必须
+    透传给 DSH，但平台会话、统计等无关 Cookie 不进上游。
+    """
     target_parts = urlsplit(target)
     target_origin = f"{target_parts.scheme}://{target_parts.netloc}"
     forwarded: list[tuple[str, str]] = [("host", target_parts.netloc)]
     for name, value in scope.get("headers", []):
         lower = bytes(name).lower()
         if lower in HOP_BY_HOP_HEADERS or lower in _WS_HANDSHAKE_HEADERS:
+            continue
+        if lower == b"cookie":
+            cookies = _dsh_request_cookies(
+                bytes(value).decode("latin-1"), authority=target_parts.netloc
+            )
+            if cookies is None:
+                continue
+            forwarded.append(("cookie", cookies))
             continue
         forwarded.append((bytes(name).decode("latin-1"), bytes(value).decode("latin-1")))
     forwarded.append(("origin", target_origin))
@@ -317,7 +375,7 @@ class AgentWorkspaceProxyMiddleware:
             response_header_builder=lambda headers: _workspace_response_headers(
                 headers, target=target
             ),
-            request_header_overrides=_origin_override(scope, target),
+            request_header_overrides=_request_overrides(scope, target),
         )
 
     def _workspace_auth(
@@ -350,8 +408,10 @@ class AgentWorkspaceProxyMiddleware:
         DSH 的会话 Cookie 由进程内密钥签名，runtime 重启（同一端口）后浏览器
         手里的旧 Cookie 必然失效，此时若跳过 token 换取就会永久 401；因此每次
         ``GET /`` 导航都重新换取，并在服务端吞掉 DSH 的 303，浏览器不会在
-        ``/agent-workspace/`` 与它之间来回重定向。换取失败（如 token 过期）时
-        按原样转发上游响应，让失败原因如实暴露。
+        ``/agent-workspace/`` 与它之间来回重定向。换取请求不带任何浏览器
+        Cookie（见 ``_forward_headers_for_exchange``），避免旧会话让 DSH 只回
+        303 而不下发新 Cookie。换取失败（如 token 过期）时按原样转发上游
+        响应，让失败原因如实暴露。
         """
         target_parts = urlsplit(target)
         authority = target_parts.netloc
@@ -392,7 +452,7 @@ class AgentWorkspaceProxyMiddleware:
                     headers, target=target
                 ),
                 query_override=auth_query,
-                request_header_overrides=_origin_override(scope, target),
+                request_header_overrides=_request_overrides(scope, target),
             )
             return
 
@@ -422,7 +482,9 @@ class AgentWorkspaceProxyMiddleware:
             query_override=follow_query,
             request_header_overrides={
                 "cookie": _merge_session_cookie(
-                    _header_value(scope, "cookie"), authority=authority, pair=pair
+                    _dsh_request_cookies(_header_value(scope, "cookie"), authority=authority),
+                    authority=authority,
+                    pair=pair,
                 ),
                 **_origin_override(scope, target),
             },
